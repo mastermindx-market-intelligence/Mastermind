@@ -42,6 +42,14 @@ STATUS_SCHEMA = "mastermind.portfolio_forward_evaluation.status.v1"
 START_SCHEMA = "mastermind.portfolio_forward_evaluation.start.v1"
 ACTIVE_BOOKS = ("autonomous", "china", "hk")
 PROPHET_MIN_GROUP_SAMPLE = 30
+_NAV_DATE_BASIS_SCHEMA = "mastermind.portfolio_forward_evaluation.nav_date_basis.v1"
+_MAX_NAV_DATE_LABELS = 4096
+_NAV_DATE_BASIS_FIELDS = frozenset({
+    "schema", "book", "evaluation_start", "asof", "deployment_sha",
+    "selection_rule", "fingerprint_method", "selected_row_count",
+    "forward_duplicate_date_rows", "date_labels", "marker_fingerprint",
+    "selected_rows_fingerprint", "fingerprint", "status", "missing_reason",
+})
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SHA_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -1003,6 +1011,65 @@ def _count_with_reporting(decisions: list[dict[str, Any]], kind: str,
                    f"{kind}_count_unreported_for_some_decisions" if partial else None)
 
 
+def _observational_fingerprint(value: Any) -> str | None:
+    """Best-effort metadata only; failure cannot change original cohort accounting."""
+    try:
+        return _digest(value)
+    except Exception:
+        return None
+
+
+def _capture_nav_date_basis(book: str, begin: str, end: str,
+                            marker: dict[str, Any], rows: list[dict[str, Any]],
+                            source_status: str, duplicate_rows: int) -> dict[str, Any]:
+    """Freeze the selected NAV date basis while the original inputs are in memory.
+
+    The fingerprints identify content; they do not authenticate a source or
+    establish when prices became available. Original cohort selection is upstream.
+    """
+    basis = {
+        "schema": _NAV_DATE_BASIS_SCHEMA,
+        "book": book,
+        "evaluation_start": begin,
+        "asof": end,
+        "deployment_sha": marker.get("deployment_sha"),
+        "selection_rule": "baseline_exclusion_then_last_row_per_date",
+        "fingerprint_method": "forward_evaluation._digest.v1",
+        "selected_row_count": len(rows),
+        "forward_duplicate_date_rows": duplicate_rows,
+        "date_labels": None,
+        "marker_fingerprint": None,
+        "selected_rows_fingerprint": None,
+        "fingerprint": None,
+        "status": "unavailable",
+        "missing_reason": None,
+    }
+    if source_status not in {"available", "partial"}:
+        return {**basis, "missing_reason": "nav_artifact_unavailable"}
+    if len(rows) > _MAX_NAV_DATE_LABELS:
+        return {**basis, "missing_reason": "date_label_limit_exceeded"}
+    dates = [_day(row.get("date")) for row in rows]
+    if (any(day is None or not begin <= day <= end for day in dates)
+            or dates != sorted(set(dates))):
+        return {**basis, "missing_reason": "selected_date_basis_invalid"}
+    try:
+        captured = {
+            **basis,
+            "date_labels": dates,
+            "marker_fingerprint": _digest(marker),
+            "selected_rows_fingerprint": _digest(rows),
+            "status": source_status,
+            "missing_reason": "partial_nav_artifact" if source_status == "partial" else None,
+        }
+        captured["fingerprint"] = _digest(
+            {key: value for key, value in captured.items() if key != "fingerprint"})
+        return captured
+    except Exception:
+        # Additional observation metadata must not turn a usable legacy snapshot
+        # into a failed evaluation. No exception or input contents are projected.
+        return {**basis, "missing_reason": "source_fingerprint_unavailable"}
+
+
 def build_snapshot(book: str, asof: str | date,
                    *, start: dict[str, Any] | None = None) -> dict[str, Any]:
     """Purely assemble one forward snapshot from local artifacts; perform no writes."""
@@ -1434,6 +1501,8 @@ def build_snapshot(book: str, asof: str | date,
             "last_forward_mark": last_mark,
         },
         "benchmark": benchmark,
+        "nav_date_basis": _capture_nav_date_basis(
+            b, begin, end, marker, nav_rows, statuses["nav"], forward_nav_duplicates),
         "sample_counts": sample_counts,
         "prophet_context": {
             "authority": "context_only_non_causal",
@@ -1657,11 +1726,88 @@ def _book_status(book: str, asof: str | date | None = None) -> dict[str, Any]:
         "evaluation_start": marker["evaluation_start"],
         "deployment_sha": marker["deployment_sha"],
         "latest_asof": snapshot.get("asof"),
+        "evaluation_marker_fingerprint": _observational_fingerprint(marker),
         "sample_counts": snapshot.get("sample_counts") or _zero_sample_counts(),
         "metric_status_counts": snapshot.get("metric_status_counts") or {},
         "evaluation_run": evaluation_run,
         "snapshot": snapshot,
     }
+
+
+def _saved_nav_date_basis(book_status: dict[str, Any], snapshot: Any,
+                          count: int | None, count_status: str | None) -> dict[str, Any]:
+    """Validate only the captured snapshot basis; never reconstruct a live journal."""
+    def unavailable(reason: str) -> dict[str, Any]:
+        return {
+            "schema": _NAV_DATE_BASIS_SCHEMA,
+            "status": "unavailable",
+            "missing_reason": reason,
+            "date_labels": None,
+            "fingerprint": None,
+        }
+
+    if not isinstance(snapshot, dict):
+        return unavailable("stored_snapshot_unavailable")
+    basis = snapshot.get("nav_date_basis")
+    if basis is None:
+        return unavailable("not_recorded_with_snapshot")
+    if (not isinstance(basis, dict) or set(basis) != _NAV_DATE_BASIS_FIELDS
+            or basis.get("schema") != _NAV_DATE_BASIS_SCHEMA
+            or basis.get("book") != book_status.get("book")
+            or snapshot.get("book") != book_status.get("book")):
+        return unavailable("stored_date_basis_invalid")
+    if type(count) is not int or count < 0:
+        return unavailable("snapshot_count_or_identity_unverified")
+    if basis.get("status") == "unavailable":
+        reason = basis.get("missing_reason")
+        return unavailable(reason if type(reason) is str and reason in {
+            "nav_artifact_unavailable", "date_label_limit_exceeded",
+            "selected_date_basis_invalid", "source_fingerprint_unavailable",
+        } else "stored_date_basis_invalid")
+    cohort = snapshot.get("cohort")
+    if not isinstance(cohort, dict):
+        return unavailable("stored_date_basis_cohort_unverified")
+    begin, end = basis.get("evaluation_start"), basis.get("asof")
+    deployment = basis.get("deployment_sha")
+    dates = basis.get("date_labels")
+    duplicates = basis.get("forward_duplicate_date_rows")
+    valid = (
+        type(begin) is str and _day(begin) == begin
+        and type(end) is str and _day(end) == end and begin <= end
+        and begin == cohort.get("evaluation_start") == book_status.get("evaluation_start")
+        and end == snapshot.get("asof") == book_status.get("latest_asof")
+        and type(deployment) is str and _SHA_RE.fullmatch(deployment) is not None
+        and deployment == cohort.get("deployment_sha") == book_status.get("deployment_sha")
+        and basis.get("selection_rule") == "baseline_exclusion_then_last_row_per_date"
+        and basis.get("fingerprint_method") == "forward_evaluation._digest.v1"
+        and type(basis.get("selected_row_count")) is int
+        and basis["selected_row_count"] == count
+        and type(duplicates) is int and 0 <= duplicates <= 2**53 - 1
+        and type(dates) is list and len(dates) == count <= _MAX_NAV_DATE_LABELS
+        and all(type(day) is str and _day(day) == day and begin <= day <= end for day in dates)
+        and dates == sorted(set(dates))
+        and type(basis.get("status")) is str
+        and basis["status"] in {"available", "partial"}
+        and basis["status"] == count_status
+        and basis.get("missing_reason") == (
+            "partial_nav_artifact" if basis["status"] == "partial" else None)
+    )
+    if not valid:
+        return unavailable("stored_date_basis_invalid")
+    for field in ("marker_fingerprint", "selected_rows_fingerprint", "fingerprint"):
+        value = basis.get(field)
+        if type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            return unavailable("stored_date_basis_invalid")
+    if basis["marker_fingerprint"] != book_status.get("evaluation_marker_fingerprint"):
+        return unavailable("stored_date_basis_cohort_unverified")
+    try:
+        fingerprint = _digest({key: value for key, value in basis.items() if key != "fingerprint"})
+    except Exception:
+        return unavailable("stored_date_basis_invalid")
+    if fingerprint != basis["fingerprint"]:
+        return unavailable("stored_date_basis_fingerprint_mismatch")
+    # Rebuild the only mutable child to avoid aliasing the saved snapshot.
+    return {**basis, "date_labels": list(dates)}
 
 
 def _qualify_mark_observations(book_status: dict[str, Any]) -> dict[str, Any]:
@@ -1704,6 +1850,9 @@ def _qualify_mark_observations(book_status: dict[str, Any]) -> dict[str, Any]:
             "reported_mark_count_status": source_status if usable else "unavailable",
             "reported_mark_count_missing_reason": reason,
             "count_unit": "recorded_nav_date_labels",
+            "date_basis": _saved_nav_date_basis(
+                book_status, snapshot, value if usable else None,
+                source_status if usable else None),
             "calendar_session_count": None,
             "calendar_status": "not_checked",
             "price_qualified_session_count": None,

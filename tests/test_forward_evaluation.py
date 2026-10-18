@@ -839,3 +839,224 @@ def test_status_withholds_mark_count_from_wrong_book_snapshot(
     assert q["reported_mark_count"] is None
     assert q["reported_mark_count_missing_reason"] == "stored_snapshot_identity_unverified"
     assert q["eligible_for_session_gate"] is False
+
+
+# 06A frozen NAV-date basis: saved evidence must not be rebuilt from a later journal.
+def _seed_nav_date_basis(root: Path) -> tuple[Path, dict]:
+    from portfolio import forward_evaluation as fe
+
+    book_dir = fe._portfolio_data_dir("autonomous")
+    _seed_legacy(book_dir)
+    _activate_start()
+    _seed_forward(root, book_dir)
+    return book_dir, fe.evaluate("autonomous", "2026-08-13")
+
+
+def test_nav_date_basis_is_captured_in_the_actual_saved_snapshot(isolated_root):
+    from portfolio import forward_evaluation as fe
+
+    book_dir, saved = _seed_nav_date_basis(isolated_root)
+    basis = saved["nav_date_basis"]
+    assert basis["status"] == "available"
+    assert basis["date_labels"] == ["2026-08-12", "2026-08-13"]
+    assert basis["selected_row_count"] == 2
+    assert basis["book"] == "autonomous"
+    assert basis["evaluation_start"] == "2026-08-11"
+    assert basis["asof"] == "2026-08-13"
+    assert basis["deployment_sha"] == SHA_A
+    assert basis["marker_fingerprint"] == fe._digest(fe.load_start())
+    rows = [json.loads(line) for line in (book_dir / "nav_history.jsonl").read_text().splitlines()]
+    assert basis["selected_rows_fingerprint"] == fe._digest(rows[1:])
+    assert json.loads((fe._book_output_dir("autonomous") / "latest.json").read_text()) == saved
+    assert fe.status("autonomous")["observation_qualification"]["date_basis"]["date_labels"] == basis["date_labels"]
+
+
+def test_nav_date_basis_saved_api_survives_later_journal_changes_without_reading_it(
+    isolated_root, monkeypatch,
+):
+    from portfolio import forward_evaluation as fe
+    from app import web
+
+    book_dir, saved = _seed_nav_date_basis(isolated_root)
+    (book_dir / "nav_history.jsonl").unlink()
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("read-only status must serve captured evidence, not reconstruct it")
+
+    for name in ("_read_inputs", "_read_jsonl", "build_snapshot", "evaluate"):
+        monkeypatch.setattr(fe, name, forbidden)
+    before = {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()}
+    for _ in range(2):
+        response = json.loads(web.api_forward_evaluation(portfolio="autonomous").body)
+        assert response["snapshot"] == saved
+        q = response["observation_qualification"]
+        assert q["date_basis"]["date_labels"] == ["2026-08-12", "2026-08-13"]
+        assert q["date_basis"]["selected_rows_fingerprint"] == saved["nav_date_basis"]["selected_rows_fingerprint"]
+        assert q["calendar_session_count"] is None
+        assert q["price_qualified_session_count"] is None
+        assert q["eligible_for_session_gate"] is False
+    assert {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()} == before
+
+
+def test_nav_date_basis_legacy_snapshot_is_not_backfilled_from_current_data(isolated_root, monkeypatch):
+    from portfolio import forward_evaluation as fe
+
+    _, saved = _seed_nav_date_basis(isolated_root)
+    saved.pop("nav_date_basis", None)
+    _write_json(fe._book_output_dir("autonomous") / "latest.json", saved)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("legacy snapshot cannot acquire a reconstructed date basis")
+
+    monkeypatch.setattr(fe, "_read_inputs", forbidden)
+    monkeypatch.setattr(fe, "_read_jsonl", forbidden)
+    result = fe.status("autonomous")
+    assert result["snapshot"] == saved
+    q = result["observation_qualification"]
+    assert q["reported_mark_count"] == 2
+    assert q["date_basis"]["status"] == "unavailable"
+    assert q["date_basis"]["missing_reason"] == "not_recorded_with_snapshot"
+    assert q["date_basis"]["date_labels"] is None
+
+
+@pytest.mark.parametrize("field,value", [("date", "2026-08-14"), ("nav", 1_234_567.0)])
+def test_nav_date_basis_fingerprint_changes_when_same_count_evidence_changes(
+    isolated_root, field, value,
+):
+    from portfolio import forward_evaluation as fe
+
+    book_dir, _ = _seed_nav_date_basis(isolated_root)
+    before = fe.build_snapshot("autonomous", "2026-08-15")
+    rows = [json.loads(line) for line in (book_dir / "nav_history.jsonl").read_text().splitlines()]
+    rows[-1][field] = value
+    _write_jsonl(book_dir / "nav_history.jsonl", rows)
+    after = fe.build_snapshot("autonomous", "2026-08-15")
+    assert before["metrics"]["marked_session_count"] == after["metrics"]["marked_session_count"]
+    assert before["nav_date_basis"]["selected_row_count"] == after["nav_date_basis"]["selected_row_count"] == 2
+    assert before["nav_date_basis"]["selected_rows_fingerprint"] != after["nav_date_basis"]["selected_rows_fingerprint"]
+    assert before["nav_date_basis"]["fingerprint"] != after["nav_date_basis"]["fingerprint"]
+
+
+def test_nav_date_basis_retains_real_zero_without_certifying_price_or_calendar(isolated_root):
+    from portfolio import forward_evaluation as fe
+
+    book_dir = fe._portfolio_data_dir("autonomous")
+    _write_jsonl(book_dir / "nav_history.jsonl", [])
+    _activate_start()
+    saved = fe.evaluate("autonomous", "2026-08-13")
+    assert saved["nav_date_basis"]["status"] == "available"
+    assert saved["nav_date_basis"]["date_labels"] == []
+    assert saved["nav_date_basis"]["selected_rows_fingerprint"] == fe._digest([])
+    q = fe.status("autonomous")["observation_qualification"]
+    assert q["reported_mark_count"] == 0
+    assert q["date_basis"]["selected_row_count"] == 0
+    assert q["eligible_for_session_gate"] is False
+
+
+@pytest.mark.parametrize("damage", ["invalid_line", "duplicate_date"])
+def test_nav_date_basis_carries_partial_source_and_original_deduplication(
+    isolated_root, damage,
+):
+    from portfolio import forward_evaluation as fe
+
+    book_dir, _ = _seed_nav_date_basis(isolated_root)
+    path = book_dir / "nav_history.jsonl"
+    if damage == "invalid_line":
+        with path.open("a") as stream:
+            stream.write("malformed-record\n")
+    else:
+        rows = [json.loads(line) for line in path.read_text().splitlines()]
+        rows.append({**rows[-1], "nav": 1_111_111.0})
+        _write_jsonl(path, rows)
+    saved = fe.evaluate("autonomous", "2026-08-13")
+    basis = saved["nav_date_basis"]
+    assert basis["status"] == "partial"
+    assert basis["missing_reason"] == "partial_nav_artifact"
+    assert basis["date_labels"] == ["2026-08-12", "2026-08-13"]
+    assert basis["selected_row_count"] == saved["metrics"]["marked_session_count"]["value"] == 2
+    assert basis["forward_duplicate_date_rows"] == (1 if damage == "duplicate_date" else 0)
+    assert fe.status("autonomous")["observation_qualification"]["date_basis"]["status"] == "partial"
+
+
+def test_nav_date_basis_limit_withholds_labels_without_changing_original_count(isolated_root, monkeypatch):
+    from portfolio import forward_evaluation as fe
+
+    _seed_nav_date_basis(isolated_root)
+    monkeypatch.setattr(fe, "_MAX_NAV_DATE_LABELS", 1)
+    saved = fe.evaluate("autonomous", "2026-08-13")
+    assert saved["sample_counts"]["marked_sessions"] == 2
+    assert saved["metrics"]["marked_session_count"]["value"] == 2
+    assert saved["nav_date_basis"]["status"] == "unavailable"
+    assert saved["nav_date_basis"]["missing_reason"] == "date_label_limit_exceeded"
+    assert saved["nav_date_basis"]["date_labels"] is None
+    assert fe.status("autonomous")["observation_qualification"]["date_basis"]["status"] == "unavailable"
+
+
+@pytest.mark.parametrize("field,value", [
+    ("schema", "unsupported"),
+    ("book", "china"),
+    ("evaluation_start", "2026-08-10"),
+    ("asof", "2026-08-14"),
+    ("deployment_sha", SHA_B),
+    ("selected_row_count", True),
+    ("date_labels", ["2026-08-12", "2026-08-12"]),
+    ("date_labels", ["2026-08-13", "2026-08-12"]),
+    ("date_labels", ["2026-08-10", "2026-08-12"]),
+    ("date_labels", ["2026-08-12", "2026-08-13T00:00:00Z"]),
+    ("marker_fingerprint", "bad"),
+    ("selected_rows_fingerprint", "bad"),
+    ("forward_duplicate_date_rows", -1),
+])
+def test_nav_date_basis_rejects_rehashed_but_inconsistent_saved_basis(
+    isolated_root, field, value,
+):
+    from portfolio import forward_evaluation as fe
+
+    _, saved = _seed_nav_date_basis(isolated_root)
+    basis = saved["nav_date_basis"]
+    basis[field] = value
+    # A matching checksum alone must not override book/window/type validation.
+    basis["fingerprint"] = fe._digest({k: v for k, v in basis.items() if k != "fingerprint"})
+    _write_json(fe._book_output_dir("autonomous") / "latest.json", saved)
+    result = fe.status("autonomous")
+    assert result["snapshot"] == saved
+    q = result["observation_qualification"]
+    assert q["reported_mark_count"] == 2
+    assert q["date_basis"]["status"] == "unavailable"
+    assert q["date_basis"]["date_labels"] is None
+    assert q["eligible_for_session_gate"] is False
+
+
+def test_nav_date_basis_rejects_changed_labels_with_original_checksum(isolated_root):
+    from portfolio import forward_evaluation as fe
+
+    _, saved = _seed_nav_date_basis(isolated_root)
+    saved["nav_date_basis"]["date_labels"] = ["2026-08-11", "2026-08-13"]
+    _write_json(fe._book_output_dir("autonomous") / "latest.json", saved)
+    q = fe.status("autonomous")["observation_qualification"]
+    assert q["date_basis"]["status"] == "unavailable"
+    assert q["date_basis"]["date_labels"] is None
+
+
+def test_nav_date_basis_fingerprint_failure_preserves_snapshot_and_status(isolated_root):
+    from portfolio import forward_evaluation as fe
+    from app import web
+
+    _, saved = _seed_nav_date_basis(isolated_root)
+    marker = fe.load_start()
+    marker["unusable_legacy_note"] = "\ud800"
+    # Metadata serialization failure must not change the original metric result.
+    calculated = fe.build_snapshot("autonomous", "2026-08-13", start=marker)
+    assert calculated["metrics"] == saved["metrics"]
+    assert calculated["nav_date_basis"]["status"] == "unavailable"
+    assert calculated["nav_date_basis"]["missing_reason"] == "source_fingerprint_unavailable"
+    # The loaded marker remains valid JSON but cannot be UTF-8 fingerprinted.
+    fe._start_path().write_text(json.dumps(marker, ensure_ascii=True), encoding="utf-8")
+    before = {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()}
+    response = json.loads(web.api_forward_evaluation(portfolio="autonomous").body)
+    assert response["snapshot"] == saved
+    q = response["observation_qualification"]
+    assert q["reported_mark_count"] == 2
+    assert q["date_basis"]["status"] == "unavailable"
+    assert q["date_basis"]["missing_reason"] == "stored_date_basis_cohort_unverified"
+    assert {str(p): p.read_bytes() for p in isolated_root.rglob("*") if p.is_file()} == before
