@@ -213,3 +213,36 @@ This remains a source-only proof of a model/subject eligibility observation.
 The incumbent Executive worker source config/OS principal and launch path
 remain NOT_READY; exact START-bound account/host/model enrollment and a real
 parent-accepted worker result are outstanding.
+
+
+## October 18: subscriber-collision guard after real six-seat native identity read
+
+A live read-only same-private-App-Server metadata pass on all six authenticated
+M2 homes confirmed four native Personal Pro plan responses (C1/C2/C3/C4),
+two native Business plan responses (B1/B2), Astra and Sol 6.1 visible on all,
+quota AVAILABLE_OBSERVED on all and process cleanup proved for all. The
+sanitized relationship test (no account IDs or credentials emitted) showed:
+B1/B2 use the SAME Business workspace but DIFFERENT member identities;
+C2 Personal/B2 Business are the SAME user with DIFFERENT workspace IDs.
+Those observations are not signed Premium seat-type entitlements, root OS
+principal enrollments, leases, or proof of authorized model turns.
+
+A security gap surfaced in the source-only ranker: Personal Pro aliases
+carrying the same underlying subscription workspace could be independently
+ranked when a missing/different user ID or entitlement_class prevented the
+old workspace+user+tier collision test from joining them. The existing pure
+selector now uses a Personal workspace-level collision key, and a Business
+workspace+member key. Untrusted category strings never split one included
+subscription into multiple quota balances. A shared workspace with two real
+Business members remains two candidates only after each member's independent
+Premium entitlement and exact broker admission are proven.
+
+RED-first four candidate tests failed on original source; GREEN 88/88
+combined native account/projection/six-alias/collision tests. Byte-exact
+installed-source patch, manifest, source + test digests and regression guard
+must pass at committed head; hosted CI/review remain independent gates.
+
+DO_NOT_REDO: original #1585 native observer and #1615 inert C4 worker and
+#1618 bounded-worker message isolation remain separate accepted candidate
+work. No change to installed Macro Fabric broker, profiles, processes,
+credentials, root-controlled home or application/OS version.

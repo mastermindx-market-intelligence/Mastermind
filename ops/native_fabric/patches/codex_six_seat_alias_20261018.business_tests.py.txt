@@ -260,3 +260,46 @@ def test_native_model_mismatch_remains_ineligible_even_when_quota_available():
     assert row.remaining_pct == 95
     assert pick([row],model=ASTRA) is None
     assert pick([row],model=SOL).alias=="B1"
+
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+def test_two_personal_aliases_cannot_represent_same_workspace_even_if_member_or_tier_differs(strategy):
+    # A duplicate Personal subscription with different supplied entitlements
+    # cannot be treated as two independently metered seats. Business requires
+    # member identity, whereas a Personal subscription is unique per workspace.
+    rows=[
+        row("C1",99,workspace="c"*64,user="1"*64,
+            entitlement="personal_pro"),
+        row("C2",97,workspace="c"*64,user="2"*64,
+            entitlement=None),
+        row("C4",75,workspace="d"*64,user="4"*64,
+            entitlement="personal_pro"),
+    ]
+    selected=pick(rows,strategy=strategy,sticky="C2")
+    assert selected is not None and selected.alias=="C4"
+
+
+def test_same_personal_subscription_without_other_realms_fails_closed():
+    c1=row("C1",95,workspace="c"*64,user=None,entitlement="personal_pro")
+    c2=row("C2",92,workspace="c"*64,user="2"*64,entitlement=None)
+    assert pick([c1,c2]) is None
+
+
+def test_personal_and_business_same_member_distinct_workspace_remain_independent():
+    rows=[
+        row("C2",83,workspace="c"*64,user="2"*64,entitlement=None),
+        row("B2",99,workspace="a"*64,user="2"*64,
+            entitlement="business_premium_included"),
+    ]
+    assert pick(rows).alias=="B2"
+
+
+def test_personal_same_user_two_distinct_subscription_workspaces_are_not_collapsed():
+    rows=[
+        row("C1",88,workspace="a"*64,user="1"*64,entitlement=None),
+        row("C3",92,workspace="c"*64,user="1"*64,entitlement=None),
+    ]
+    assert pick(rows).alias=="C3"

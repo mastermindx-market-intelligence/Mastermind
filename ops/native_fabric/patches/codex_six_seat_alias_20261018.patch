@@ -22,23 +22,25 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +    user_id_sha256: Optional[str] = None
 +    entitlement_class: Optional[str] = None
 +    qualified_models: Optional[frozenset[str]] = None
-@@ -44,0 +60,39 @@
+@@ -44,0 +60,41 @@
 +
 +
 +def _subject_key(row: AccountObservation) -> tuple[str, str, str] | None:
-+    """Business quota key: workspace + individual user + included quota class.
++    """Conservative per-subscription collision key, never admission authority.
 +
-+    Never treat two users of one Business workspace as the same included seat.
-+    This is a pure selector identity, not authentication or reservation proof.
++    Personal Pro aliases naming the same account/workspace are ONE included
++    allowance even if an untrusted projection changes member or class metadata.
++    Two Business members in one workspace have distinct included seat quotas.
++    Tier strings do not split a subscription into another allowance.
 +    """
-+    workspace, member, category = (
-+        row.account_id_sha256, row.user_id_sha256, row.entitlement_class
-+    )
-+    if (type(workspace) is not str or _SHA256.fullmatch(workspace) is None
-+            or type(member) is not str or _SHA256.fullmatch(member) is None
-+            or type(category) is not str):
++    workspace, member = row.account_id_sha256, row.user_id_sha256
++    if type(workspace) is not str or _SHA256.fullmatch(workspace) is None:
 +        return None
-+    return workspace, member, category
++    if row.alias in BUSINESS_ALIASES:
++        if type(member) is not str or _SHA256.fullmatch(member) is None:
++            return None
++        return "business", workspace, member
++    return "personal", workspace, ""
 +
 +
 +def _model_and_realm_qualified(
@@ -62,14 +64,14 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        return False
 +    # A Business quota with no live reset horizon is not evidence of room.
 +    return row.reset_at is not None and _utc(row.reset_at) > now
-@@ -88,0 +143 @@
+@@ -88,0 +145 @@
 +    requested_model: Optional[str] = None,
-@@ -99,0 +155,4 @@
+@@ -99,0 +157,4 @@
 +    if requested_model is not None and (
 +        type(requested_model) is not str or _MODEL.fullmatch(requested_model) is None
 +    ):
 +        raise ValueError("codex_requested_model_invalid")
-@@ -104 +163,16 @@
+@@ -104 +165,16 @@
 -    eligible = [r for r in rows if _fresh_and_eligible(r, now)]
 +    eligible = [
 +        r for r in rows if _fresh_and_eligible(r, now)
@@ -87,7 +89,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        r for r in eligible
 +        if (key := _subject_key(r)) is None or seen[key] == 1
 +    ]
-@@ -174,0 +249,124 @@
+@@ -174,0 +251,124 @@
 +
 +
 +
