@@ -258,10 +258,10 @@
       "source": "source/host_pull_backend.py"
     },
     "ext/host_pull_probe.template": {
-      "bytes": 10823,
+      "bytes": 10919,
       "installed_preimage_sha256": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
-      "sha256": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
-      "source": "source/host_pull_probe.template"
+      "sha256": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
+      "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
       "bytes": 86194,

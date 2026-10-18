@@ -38,7 +38,7 @@
   "ext/host_pick.py": "e5a398a0a2178abd9a79c9f9693b2528cf3a6d8b21d5829541e01158f952a092",
   "ext/host_pull.sh": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
   "ext/host_pull_backend.py": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-  "ext/host_pull_probe.template": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
+  "ext/host_pull_probe.template": "025c5abf7ce7c2a5c083e91745c24c539fddefc78be3b8d8cc0ef1ad787dd3e7",
   "ext/lane_runtime.py": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
   "ext/lease_broker.py": "c248b7b89dd301037a7778009dc46c933fa546aa25dbe67ee658d9072fc98192",
   "ext/mac_policy_return.py": "407ab7d80d1ffc1064eada25aa1a5d447e11a41ee4873d8980f9e68ebb4dfa0a",
