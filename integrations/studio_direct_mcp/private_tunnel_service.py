@@ -35,6 +35,8 @@ PINNED_TUNNEL_CLIENT = (
 TRANSPORT_TTL = "5h"
 STARTUP_WAIT = "30s"
 MAX_CONCURRENT_REQUESTS = 4
+# Verified historical C2 Business tunnel is sealed at 8; new installs retain 4.
+LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS = 8
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 # A historical successful poll is not evidence of a connected transport.
 # Allow two 30-second polls plus scheduling slack; never extend this on reads.
@@ -229,6 +231,8 @@ def _expected_argv(
     tunnel_client: Path,
     profile: Path,
     health_port: int,
+    *,
+    max_concurrent_requests: int = MAX_CONCURRENT_REQUESTS,
 ) -> list[str]:
     return [
         str(tunnel_client),
@@ -238,7 +242,7 @@ def _expected_argv(
         "--mcp.connection-max-ttl",
         TRANSPORT_TTL,
         "--mcp.max-concurrent-requests",
-        str(MAX_CONCURRENT_REQUESTS),
+        str(max_concurrent_requests),
         "--mcp.startup-wait-timeout",
         STARTUP_WAIT,
         "--health.listen-addr",
@@ -422,7 +426,12 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     if data.get("transportTTL") != TRANSPORT_TTL:
         return False
-    if data.get("maxConcurrentRequests") != MAX_CONCURRENT_REQUESTS:
+    concurrency = data.get("maxConcurrentRequests")
+    if concurrency != MAX_CONCURRENT_REQUESTS and not (
+        account == "chatgpt2-business"
+        and data.get("version") == 1
+        and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+    ):
         return False
     if data.get("tunnelClient") != PINNED_TUNNEL_CLIENT:
         return False
@@ -578,7 +587,8 @@ def _verify_staged_install(account: str, label: str, roots: dict) -> dict:
     if plist is None or plist.get("Label") != label:
         raise SystemExit("plist is not our exact install")
     expected = _expected_argv(
-        tunnel_client, roots["profile"], int(manifest["healthPort"])
+        tunnel_client, roots["profile"], int(manifest["healthPort"]),
+        max_concurrent_requests=manifest["maxConcurrentRequests"],
     )
     if list(plist.get("ProgramArguments") or []) != expected:
         raise SystemExit("plist is not our exact install")
