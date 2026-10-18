@@ -37,6 +37,10 @@ STARTUP_WAIT = "30s"
 MAX_CONCURRENT_REQUESTS = 4
 # Verified historical C2 Business tunnel is sealed at 8; new installs retain 4.
 LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS = 8
+# Exact original on-host sealed v1 tunnel manifest, not a new 8-request grant.
+C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256 = (
+    "b6f511fc7d9c263914af0490ea0912c127979c85a0a3740e4834e12f716ee8fc"
+)
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 # A historical successful poll is not evidence of a connected transport.
 # Allow two 30-second polls plus scheduling slack; never extend this on reads.
@@ -466,6 +470,9 @@ def _read_manifest(
     except (OSError, json.JSONDecodeError):
         raise SystemExit("corrupt tunnel manifest")
     if not _valid_manifest(data, account, label):
+        raise SystemExit("corrupt tunnel manifest")
+    if (data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
+            and _sha256_file(manifest_path) != C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256):
         raise SystemExit("corrupt tunnel manifest")
     return data
 

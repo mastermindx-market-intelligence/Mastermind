@@ -1135,6 +1135,14 @@ class TestC2HistoricalEightRequestTunnel(unittest.TestCase):
         self.assertFalse(svc._valid_manifest(
             d, d["account"], d["label"]))
 
+    def test_historical_exception_refuses_rewritten_manifest_bytes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "tunnel-manifest.json"
+            data = self._manifest()
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                svc._read_manifest(path, data["account"], data["label"])
+
     def test_legacy_argv_verification_uses_sealed_limit_without_changing_default(self):
         from pathlib import Path
         client = Path(svc.PINNED_TUNNEL_CLIENT)
