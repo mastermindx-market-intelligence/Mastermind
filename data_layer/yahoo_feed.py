@@ -37,6 +37,7 @@ _OPEN_CACHE: dict[str, tuple[float, datetime]] = {}  # SYMBOL -> (Open, source d
 _TS: dict[str, float] = {}         # SYMBOL -> monotonic ts of its last fetch (drives the intraday TTL)
 _ASOF: dict[str, str] = {}         # SYMBOL -> wall-clock UTC fetch start (legacy provenance)
 _CLOSE_EVIDENCE: dict[str, dict] = {}  # Bound label/download clocks for the selected Close
+_OPEN_EVIDENCE: dict[str, dict] = {}  # Exact Open tuple and its own download clocks
 _HISTORY_CACHE: dict[tuple[str, str], object] = {}  # (SYMBOL, period) -> native-currency close Series
 _HISTORY_TS: dict[tuple[str, str], float] = {}
 _FETCHED_DAY: str | None = None    # the calendar day the cache was populated for (cleared when it rolls)
@@ -74,11 +75,12 @@ def _today() -> str:
 
 def _reset_if_stale() -> None:
     """Drop the cache when the calendar day rolls so a long-lived server re-fetches each day."""
-    global _FETCHED_DAY, _CACHE, _OPEN_CACHE, _TS, _ASOF, _HISTORY_CACHE, _HISTORY_TS, _CLOSE_EVIDENCE
+    global _FETCHED_DAY, _CACHE, _OPEN_CACHE, _TS, _ASOF, _HISTORY_CACHE, _HISTORY_TS, _CLOSE_EVIDENCE, _OPEN_EVIDENCE
     d = _today()
     if _FETCHED_DAY != d:
         _CACHE, _OPEN_CACHE, _TS, _ASOF, _HISTORY_CACHE, _HISTORY_TS = {}, {}, {}, {}, {}, {}
         _CLOSE_EVIDENCE = {}
+        _OPEN_EVIDENCE = {}
         _FETCHED_DAY = d
 
 
@@ -242,6 +244,102 @@ def _close_price_evidence(sym, price, now, fetched_mono, fetched_at, cached) -> 
     return out
 
 
+
+def _remember_open_evidence(sym, quote, fetched_mono, fetched_at, returned_at) -> None:
+    """Retain the exact Open tuple and its own download clocks, separately from Close."""
+    try:
+        label = quote[1]
+        if not isinstance(label, date):
+            raise ValueError("daily bar label is not a date")
+        label = label.isoformat()
+        if not isinstance(label, str) or len(label) > 64:
+            raise ValueError("daily bar label is not bounded")
+        datetime.fromisoformat(label)
+    except Exception:
+        label = None
+    try:
+        _OPEN_EVIDENCE[sym] = {
+            "quote": quote,
+            "fetched_mono": fetched_mono,
+            "fetch_started_at": fetched_at,
+            "download_returned_at": returned_at,
+            "source_bar_label": label,
+        }
+    except Exception:
+        pass
+
+
+def _open_evidence_generation(sym):
+    """Pin the Open metadata before reading the selected tuple."""
+    try:
+        return _OPEN_EVIDENCE.get(sym)
+    except Exception:
+        return None
+
+
+def _open_price_evidence(sym, price, quote, now, cached, selection_reason) -> dict:
+    """Observe the Open's generation; shared Close freshness is not an Open clock."""
+    out = {
+        "schema": "mastermind.yahoo_daily_bar_evidence.v2",
+        "ticker": sym,
+        "field": "Open",
+        "status": "unavailable",
+        "reason": selection_reason or "price_unavailable",
+        "price_local": None,
+        "source_bar_label": None,
+        "source_bar_label_kind": "daily_bar_label",
+        "fetch_started_at": None,
+        "download_returned_at": None,
+        "fetch_age_seconds": None,
+        "within_cache_ttl": None,
+        "cache_refresh_basis": "shared_close_cache",
+        "market_observed_at": None,
+        "execution_qualification": "not_checked",
+    }
+    try:
+        if price is not None:
+            out["reason"] = "price_invalid"
+            if (
+                isinstance(price, bool) or not isinstance(price, (int, float))
+                or not math.isfinite(price) or price <= 0
+            ):
+                return out
+            out["price_local"] = float(price)
+        if quote is None:
+            return out
+        out["reason"] = "cache_binding_unavailable"
+        if (
+            not isinstance(cached, dict)
+            or _OPEN_EVIDENCE.get(sym) is not cached
+            or cached.get("quote") is not quote
+        ):
+            return out
+        # The Open may survive a Close-only refresh, or refresh when Close does not.
+        # Its own capture record is the only clock used for this observation.
+        age = now - cached["fetched_mono"]
+        out["reason"] = "cache_clock_invalid"
+        if not math.isfinite(age) or age < 0:
+            return out
+        ttl = _ttl()
+        out.update({
+            "status": "available" if price is not None else "unavailable",
+            "reason": None if price is not None else selection_reason or "price_unavailable",
+            "source_bar_label": cached.get("source_bar_label"),
+            "fetch_started_at": cached.get("fetch_started_at"),
+            "download_returned_at": cached.get("download_returned_at"),
+            "fetch_age_seconds": round(age, 1),
+            "within_cache_ttl": ttl <= 0 or age <= ttl,
+        })
+        if price is not None:
+            if out["source_bar_label"] is None:
+                out.update(status="partial", reason="source_bar_label_unavailable")
+            elif out["download_returned_at"] is None:
+                out.update(status="partial", reason="download_return_time_unavailable")
+    except Exception:
+        out.update(status="unavailable", reason="evidence_read_failed")
+    return out
+
+
 def _fetch_and_cache(want) -> None:
     """The actual batched yfinance download + cache populate (Close for marks, Open for settle)."""
     now = time.monotonic()
@@ -283,7 +381,12 @@ def _fetch_and_cache(want) -> None:
                         k = str(sym).upper().strip()
                         v = float(s.iloc[-1])
                         if v > 0:
-                            _OPEN_CACHE[k] = (v, s.index[-1])
+                            quote = (v, s.index[-1])
+                            _OPEN_CACHE[k] = quote
+                            try:
+                                _remember_open_evidence(k, quote, now, fetched_at, returned_at)
+                            except Exception:
+                                pass  # An observation failure must not skip another symbol.
         else:                                     # single ticker → a bare Series
             s = close.dropna()
             if len(s) and len(want) == 1:
@@ -295,7 +398,12 @@ def _fetch_and_cache(want) -> None:
                 if len(so) and len(want) == 1:
                     v = float(so.iloc[-1])
                     if v > 0:
-                        _OPEN_CACHE[want[0]] = (v, so.index[-1])
+                        quote = (v, so.index[-1])
+                        _OPEN_CACHE[want[0]] = quote
+                        try:
+                            _remember_open_evidence(want[0], quote, now, fetched_at, returned_at)
+                        except Exception:
+                            pass
     except Exception as e:  # noqa: BLE001
         log.debug("yahoo_feed parse failed (%s)", e)
 
@@ -399,38 +507,53 @@ def quote_cached(ticker: str) -> dict | None:
     }
 
 
-def open_price_local(ticker: str) -> float | None:
-    """Today's session OPEN price for `ticker` in its LOCAL currency, or None.
+def open_price_local(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Today's exchange-date Open in local currency, or None.
 
-    Populated as a side-effect of ``warm()`` from the ``Open`` column of the same
-    yfinance 7d daily download — so a prior ``warm([ticker])`` call makes this free.
-    Used by ``bot.settle._open_price_usd`` to fill overnight-queued Brain orders at the
-    true session open rather than the mid-session last print. The bar must belong to
-    today's exchange-local date; a fresh download can still contain only yesterday's bar.
-    Returns None pre-open, when the feed is unavailable, or when yfinance is not installed.
+    The existing shared Close cache still determines when warm() downloads. A retained
+    Open can therefore have different retrieval clocks from Close. The optional sink
+    observes the exact Open tuple and its own clocks without selecting another price.
+    Date agreement alone does not establish an individual security's opening event
+    or whether an order could have participated in it.
     """
     t = (ticker or "").upper().strip()
     if not t:
+        if _evidence is not None:
+            try:
+                _evidence.update(_open_price_evidence(t, None, None, 0.0, None, "empty_ticker"))
+            except Exception:
+                pass
         return None
-    warm([t])                                     # ensure the daily bar has been fetched
+    warm([t])                                     # original shared Close-cache refresh policy
+    cached = _open_evidence_generation(t) if _evidence is not None else None
     quote = _OPEN_CACHE.get(t)
-    if quote is None:
-        return None
-    try:
-        zone = ZoneInfo(
-            "Asia/Hong_Kong" if t.endswith(".HK") or t == "^HSI"
-            else "Asia/Shanghai" if t.endswith((".SS", ".SZ"))
-            else "America/New_York"
-        )
-        value, bar_at = quote
-        # Daily downloads normally strip timezone without changing the session label.
-        # If a source retains it, compare the timestamp in the ticker's exchange zone.
-        bar_day = bar_at.astimezone(zone).date() if bar_at.tzinfo else bar_at.date()
-        if bar_day == datetime.now(zone).date():
-            return value
-    except Exception:
-        pass
-    return None                                 # existing Close / snapshot fallback remains
+    selected = None
+    reason = "open_unavailable"
+    if quote is not None:
+        try:
+            zone = ZoneInfo(
+                "Asia/Hong_Kong" if t.endswith(".HK") or t == "^HSI"
+                else "Asia/Shanghai" if t.endswith((".SS", ".SZ"))
+                else "America/New_York"
+            )
+            value, bar_at = quote
+            # Preserve the original exchange-date check and scalar return.
+            bar_day = bar_at.astimezone(zone).date() if bar_at.tzinfo else bar_at.date()
+            if bar_day == datetime.now(zone).date():
+                selected = value
+                reason = None
+            else:
+                reason = "exchange_date_mismatch"
+        except Exception:
+            reason = "exchange_date_unavailable"
+    if _evidence is not None:
+        try:
+            _evidence.update(_open_price_evidence(
+                t, selected, quote, time.monotonic(), cached, reason
+            ))
+        except Exception:
+            pass                                  # observation cannot control numeric selection
+    return selected                               # original Close / snapshot fallback remains
 
 
 _HEALTH_PROBE = "0700.HK"          # Tencent — about as liquid as Hong Kong gets; if Yahoo can't
@@ -453,7 +576,8 @@ def feed_healthy(probe: str | None = None) -> bool | None:
 
 def clear_cache() -> None:
     """Drop the per-process price memo (tests / a forced refresh)."""
-    global _CACHE, _OPEN_CACHE, _TS, _ASOF, _HISTORY_CACHE, _HISTORY_TS, _FETCHED_DAY, _CLOSE_EVIDENCE
+    global _CACHE, _OPEN_CACHE, _TS, _ASOF, _HISTORY_CACHE, _HISTORY_TS, _FETCHED_DAY, _CLOSE_EVIDENCE, _OPEN_EVIDENCE
     _CACHE, _OPEN_CACHE, _TS, _ASOF, _HISTORY_CACHE, _HISTORY_TS = {}, {}, {}, {}, {}, {}
     _CLOSE_EVIDENCE = {}
+    _OPEN_EVIDENCE = {}
     _FETCHED_DAY = None
