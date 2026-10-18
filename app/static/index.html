@@ -6577,7 +6577,12 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
       while (current) {
         if (!object(current) || nodes.length > 6 || current.ticker !== symbol ||
             current.execution_qualification !== 'not_checked' || current.market_observed_at !== null ||
-            ['mastermind.price_read.v1', 'mastermind.yahoo_daily_bar_evidence.v1'].indexOf(current.schema) === -1) return null;
+            ['mastermind.price_read.v1', 'mastermind.yahoo_daily_bar_evidence.v1', 'mastermind.yahoo_daily_bar_evidence.v2'].indexOf(current.schema) === -1) return null;
+        if (current.schema === 'mastermind.yahoo_daily_bar_evidence.v1' && current.field !== 'Close') return null;
+        if (current.schema === 'mastermind.yahoo_daily_bar_evidence.v2' &&
+            (current.field !== 'Open' || current.cache_refresh_basis !== 'shared_close_cache')) return null;
+        if (current.schema !== 'mastermind.price_read.v1' &&
+            ['available', 'partial', 'unavailable'].indexOf(current.status) === -1) return null;
         nodes.push(current);
         current = current.upstream || null;
       }
@@ -6591,8 +6596,15 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
       var contextValid = nodes !== null;
       if (contextValid) {
         nodes.slice().reverse().forEach(function(item) {
-          if (item.schema === 'mastermind.yahoo_daily_bar_evidence.v1') {
-            path.push(say('Yahoo Close', 'Yahoo 收盘价'));
+          if (item.schema === 'mastermind.yahoo_daily_bar_evidence.v1' || item.schema === 'mastermind.yahoo_daily_bar_evidence.v2') {
+            var isOpen = item.schema === 'mastermind.yahoo_daily_bar_evidence.v2';
+            path.push(isOpen ? say('Yahoo Open', 'Yahoo 开盘价') : say('Yahoo Close', 'Yahoo 收盘价'));
+            if (isOpen) clocks.push(say('Open retrieval is tracked separately from Close', '开盘价与收盘价的获取时间分别记录'));
+            if (item.status === 'partial' || item.status === 'unavailable') {
+              clocks.push((item.status === 'partial' ? say('Source timing partial', '来源时间证据不完整')
+                : say('Source timing unavailable', '来源时间不可用')) + (item.reason
+                  ? say(' · recorded gap: ', ' · 记录的缺口：') + sourceName(item.reason) : ''));
+            }
             if (item.within_cache_ttl === false) clocks.push(say('Outside cache TTL at capture', '捕获时已超过缓存有效期'));
             else if (item.within_cache_ttl === true) clocks.push(say('Within cache TTL at capture', '捕获时处于缓存有效期内'));
             if (item.download_returned_at) clocks.push(say('Download returned: ', '下载返回时间：') + captureTime(item.download_returned_at));
@@ -6634,12 +6646,15 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
         '</td><td data-label="' + say('Source and conversion path', '来源与换算路径') + '">' + pathHtml +
         '</td><td data-label="' + say('Source time at capture', '捕获时的来源时间') + '">' + clockHtml + '</td></tr>';
     }
-    var expiredCount = 0, missingContextCount = 0;
+    var expiredCount = 0, missingContextCount = 0, limitedSourceCount = 0;
     symbols.forEach(function(symbol) {
       var nodes = contextNodes(symbol, capture.quotes[symbol]);
       if (!nodes) missingContextCount++;
-      else if (nodes.some(function(item) {
-        return item.schema === 'mastermind.yahoo_daily_bar_evidence.v1' && item.within_cache_ttl === false;
+      if (nodes && nodes.some(function(item) {
+        return item.schema !== 'mastermind.price_read.v1' && item.status !== 'available';
+      })) limitedSourceCount++;
+      if (nodes && nodes.some(function(item) {
+        return (item.schema === 'mastermind.yahoo_daily_bar_evidence.v1' || item.schema === 'mastermind.yahoo_daily_bar_evidence.v2') && item.within_cache_ttl === false;
       })) expiredCount++;
     });
     if (expiredCount) body += '<div class="mm-da-alert"><strong>' + expiredCount + say(
@@ -6650,6 +6665,10 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
       missingContextCount === 1 ? ' selected quote has no retained source context.'
         : ' selected quotes have no retained source context.',
       ' 个所选报价缺少留存的来源背景证据。') + '</strong></div>';
+    if (limitedSourceCount) body += '<div class="mm-da-alert"><strong>' + limitedSourceCount + say(
+      limitedSourceCount === 1 ? ' selected quote has limited source timing evidence.'
+        : ' selected quotes have limited source timing evidence.',
+      ' 个所选报价的来源时间证据不完整或不可用。') + '</strong></div>';
     var shown = symbols.slice(0, 12);
     body += '<div class="mm-da-foot">' + text(say('Showing ', '显示 ')) + shown.length + say(' of ', ' / ') +
       symbols.length + say(' captured quotes', ' 个已捕获报价') +

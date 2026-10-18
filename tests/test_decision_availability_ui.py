@@ -376,3 +376,83 @@ def test_expired_cache_and_missing_context_are_visible_before_detailed_quote_row
     warning = "1 selected quote has no retained source context."
     assert warning in html
     assert html.index(warning) < html.index('<div class="mm-da-evidence-table">')
+
+
+def open_receipt_payload():
+    data = receipt_payload()
+    quote = data["settlement_price_inspection"]["price_context"]["quotes"]["AAPL"]
+    quote["source"] = "yahoo_open"
+    selected = quote["observation"]
+    selected.update(source="yahoo_open", stage="settlement_selection", attempts=[])
+    reader = selected["upstream"]
+    reader.update(source="yahoo_open", stage="us_open_selection",
+                  attempts=[{"source": "polygon_open", "outcome": "no_positive_price"},
+                            {"source": "yahoo_open", "outcome": "selected"}])
+    source = reader["upstream"]
+    source.update(schema="mastermind.yahoo_daily_bar_evidence.v2", field="Open",
+                  cache_refresh_basis="shared_close_cache", status="available", reason=None)
+    return data, source
+
+
+@pytest.mark.parametrize("zh", [False, True])
+def test_open_price_evidence_uses_its_own_label_and_cache_warning(zh):
+    data, source = open_receipt_payload()
+    source["source_bar_label"] = "2026-08-12T00:00:00"
+    html = render_receipt(data, zh=zh)
+    assert ("Yahoo 开盘价" if zh else "Yahoo Open") in html
+    assert ("Yahoo 收盘价" if zh else "Yahoo Close") not in html
+    assert ("开盘价与收盘价的获取时间分别记录" if zh else "Open retrieval is tracked separately from Close") in html
+    assert "2026-08-12T00:00:00" in html
+    assert "2026-08-12 00:00:00 UTC" not in html
+    assert ("捕获时已超过来源缓存有效期" if zh else "selected quote exceeded the source cache TTL at capture") in html
+    assert ("尚未核验执行价格质量与成交账簿" if zh else "Execution price quality and the fill ledger have not been checked.") in html
+
+
+@pytest.mark.parametrize("schema,field,basis", [
+    ("mastermind.yahoo_daily_bar_evidence.v1", "Open", None),
+    ("mastermind.yahoo_daily_bar_evidence.v2", "Close", "shared_close_cache"),
+    ("mastermind.yahoo_daily_bar_evidence.v2", "Open", "independent_open_cache"),
+    ("mastermind.yahoo_daily_bar_evidence.v3", "Open", "shared_close_cache"),
+])
+def test_open_context_does_not_cross_schema_or_field_boundaries(schema, field, basis):
+    data, source = open_receipt_payload()
+    source.update(schema=schema, field=field)
+    if basis is None:
+        source.pop("cache_refresh_basis", None)
+    else:
+        source["cache_refresh_basis"] = basis
+    html = render_receipt(data)
+    assert "Source context unavailable" in html
+    assert "Yahoo Open" not in html
+    assert "Yahoo Close" not in html
+    assert "$100.00" in html
+    assert "08:30:00" not in html
+
+
+@pytest.mark.parametrize("state,reason", [
+    ("partial", "download_return_time_unavailable"),
+    ("unavailable", "cache_binding_unavailable"),
+])
+@pytest.mark.parametrize("zh", [False, True])
+@pytest.mark.parametrize("source_field", ["Open", "Close"])
+def test_source_timing_limits_are_explicit_before_price_details(state, reason, zh, source_field):
+    if source_field == "Open":
+        data, source = open_receipt_payload()
+    else:
+        data = receipt_payload()
+        source = data["settlement_price_inspection"]["price_context"]["quotes"]["AAPL"]["observation"]["upstream"]["upstream"]
+    source.update(status=state, reason=reason, download_returned_at=None)
+    if state == "unavailable":
+        source.update(source_bar_label=None, fetch_started_at=None, fetch_age_seconds=None, within_cache_ttl=None)
+    html = render_receipt(data, zh=zh)
+    assert "$100.00" in html
+    expected = {"Open": "Yahoo 开盘价" if zh else "Yahoo Open", "Close": "Yahoo 收盘价" if zh else "Yahoo Close"}[source_field]
+    assert expected in html
+    warning = "个所选报价的来源时间证据不完整或不可用" if zh else "selected quote has limited source timing evidence"
+    assert warning in html
+    assert html.index(warning) < html.index('<div class="mm-da-evidence-table">')
+    if state == "unavailable":
+        assert ("来源时间不可用" if zh else "Source timing unavailable") in html
+    else:
+        assert ("来源时间证据不完整" if zh else "Source timing partial") in html
+    assert ("记录的缺口" if zh else "recorded gap") in html
