@@ -806,15 +806,32 @@ class OsSessionTransportApp:
                     or len(data["references"]) > validated.get("page_size", 16)
                     or type(data["high_water"]) is not int
                     or data["high_water"] < 0
-                    or (data["status"] == "PARTIAL") != (data["next_cursor"] is not None)):
+                    or (data["status"] == "PARTIAL") != (data["next_cursor"] is not None)
+                    or (data["next_cursor"] is not None and (
+                        type(data["next_cursor"]) is not str
+                        or len(data["next_cursor"]) > 2048
+                        or re.fullmatch(r"[A-Za-z0-9_=-]+", data["next_cursor"]) is None))):
                 raise ValueError("invalid reference response")
             for row in data["references"]:
-                if (type(row) is not dict or row.get("reference_only") is not True
-                        or row.get("work_ref") != validated["work_ref"]
+                expected = {"read_ref", "operation_key", "request_ref",
+                            "request_event_id", "request_revision", "requested_at",
+                            "work_ref", "root_job_id", "target_ref", "reference_only"}
+                if (type(row) is not dict or set(row) != expected
+                        or row["reference_only"] is not True
+                        or row["work_ref"] != validated["work_ref"]
                         or ("root_job_id" in validated
-                            and row.get("root_job_id") != validated["root_job_id"])
-                        or type(row.get("request_event_id")) is not int
-                        or not 1 <= row["request_event_id"] <= data["high_water"]):
+                            and row["root_job_id"] != validated["root_job_id"])
+                        or type(row["request_event_id"]) is not int
+                        or not 1 <= row["request_event_id"] <= data["high_water"]
+                        or any(type(row[key]) is not str or not row[key]
+                               or len(row[key]) > 256
+                               for key in expected - {"reference_only", "request_event_id"})
+                        or _CONTINUE_KEY_RE.fullmatch(row["operation_key"]) is None
+                        or re.fullmatch(r"session-reply-[0-9a-f]{64}", row["read_ref"]) is None
+                        or _SHA256_RE.fullmatch(row["request_revision"]) is None
+                        or _WORK_REF_RE.fullmatch(row["work_ref"]) is None
+                        or _ROOT_JOB_RE.fullmatch(row["root_job_id"]) is None
+                        or _FABRIC_REF_RE.fullmatch(row["target_ref"]) is None):
                     raise ValueError("foreign reference")
         except Exception:
             return _failure_response("references", "session_unavailable", effect="NONE")

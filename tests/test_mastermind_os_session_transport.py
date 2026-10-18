@@ -702,3 +702,21 @@ def test_original_references_foreign_projection_is_withheld(rsa_key):
     assert status == 503 and result["effect"] == "NONE"
     assert result["data"] is None
     assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_reply_references"
+
+
+@pytest.mark.parametrize("change", [
+    lambda data: data["references"][0].update(private_backend_payload="LEAK"),
+    lambda data: data["references"][0].update(request_revision="not-a-hash"),
+    lambda data: data["references"][0].update(target_ref="codex:unbound"),
+    lambda data: data.update(next_cursor="foreign\nraw"),
+    lambda data: data.update(high_water=True),
+])
+def test_original_reference_http_cannot_echo_malformed_private_rows(rsa_key, change):
+    app, peer, _, _ = make_app(rsa_key)
+    change(peer.references_result)
+    status, result = request(
+        app, auth_fixture._read_token(rsa_key), "references",
+        {"arguments": {"work_ref": WORK}})
+    assert status == 503 and result["effect"] == "NONE"
+    assert result["data"] is None
+    assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_reply_references"
