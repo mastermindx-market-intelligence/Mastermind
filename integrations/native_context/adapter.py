@@ -254,6 +254,11 @@ def render_hook(raw_event: bytes, *, provider: str,
         # Without a typed upstream settlement receipt, never flatten that uncertainty
         # into a generic invitation to repeat the read. Pre-dispatch pin/CLI mismatch
         # remains ordinary unavailability; no child reader was started on those paths.
+        if type(result) is ReaderResult and result.reason == "canonical_read_settled_failure":
+            return _envelope(text + "State: READER_SETTLED_FAILURE. "
+                             "The existing reader settled but context was unavailable. "
+                             "No partial payload emitted and no automatic retry. "
+                             "Diagnose the cause before another read.\n")
         if (type(result) is ReaderResult and result.reason in {
                 "canonical_read_failed", "canonical_reader_unavailable_reconcile"}):
             return _envelope(text + "State: READER_RECONCILIATION_REQUIRED. "

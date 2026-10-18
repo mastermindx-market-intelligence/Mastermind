@@ -154,3 +154,54 @@ These new source repairs and the separate read-only test do not resolve, replay 
 replace either operation. Source publication, hosted checks, independent current-delta
 review, accepted installation, effective hook trust, real task retrieval, and original
 parent consumption remain separate proof obligations.
+
+
+## Call-local settlement and protected Skill rollout (2026-10-17)
+
+The existing CLI now exposes `main_with_outcome` without changing ordinary CLI
+stdout, stderr or exit status. Its immutable result belongs to that one call:
+`NOT_STARTED` only before reader dispatch; `UNKNOWN` once the runner is invoked and
+on any caught runner exception; `SETTLED` only after the existing process owner
+returns normally. A malformed payload or changed source pin remains a failed read,
+but cannot make a successfully reaped process become unknown. No global result slot,
+second runner, error-text parser, automatic retry, or new binding ceremony is added.
+
+The bridge uses the optional typed path when installed in the same source generation.
+Settled nonzero results produce `READER_SETTLED_FAILURE`; unknown or malformed results
+retain `READER_RECONCILIATION_REQUIRED`. Legacy untyped failures stay conservative.
+Boolean exit codes are rejected rather than accepted as integers. The exact-workstream,
+source-before/after, complete-payload, and output-bound guards remain intact.
+Sixteen new regressions failed before implementation; the combined owning suite now
+passes 262 tests, including an actual short-timeout child settled by the existing owner.
+Two returned worker drafts were not accepted as implementations because review found
+state leakage, unchanged user-visible failure, removed diagnostics and/or false
+process-uncertainty classification. The parent applied the corrected minimal boundary
+and tested it; do not call those worker drafts approved or silently adopt their tests.
+
+Separately from these unmerged hook repairs, the already-protected `mastermind-sol`
+0.2.1 skills-only package was installed using the native Codex plugin manager in the
+current user profiles on M2 Studio, M1 Studio and MacBook Pro. All 18 installed files
+match protected Mastermind `e77631490e5bddca7d40c8cf039ae7763ce17b99`.
+Canonical ordered path-to-SHA256-map digest:
+`284447e00874b8a9f4d8bdaeaa52ca9c98a6a3b249264917448bcecf6f444eca`.
+The package provides 12 existing Mastermind Skills, with no MCP, hook, or app bundle.
+Only native `plugins` and `marketplaces` configuration sections changed; previous
+entries, execution rules, sandbox, model, hooks and credentials were preserved.
+No credentials were copied. The approved source package is independent of the held
+#1307/#1273 hook drafts and does not release or install their code.
+
+A real fresh M2 session listed all 12 methods and successfully read the installed
+bootstrap Skill plus its boundary reference through native read-only file tools.
+The provider first exposed a relative catalog alias; the actual reads resolved to
+the installed cache, so catalog aliases must not be falsely rejected merely because
+they are not absolute cache paths. A fresh MacBook session also recognized all 12
+Skills. M1 installation and complete file identity are verified, but its native
+inference test failed with revoked refresh-token / workspace-routing 401 errors.
+The normal user sign-in on that machine is the exact missing action; do not replay
+that test, use another account, or copy another machine's credentials.
+
+The paired context-ablation test used the same read-only questions without the
+injected context. It correctly returned unknown exact workstream/source/digest/handoff.
+The context-supplied session returned the four exact references and all nine checked
+facts/authority boundaries. This is one controlled initial-context example, not a
+statistical equivalence claim or the eight-family Context Fabric release benchmark.

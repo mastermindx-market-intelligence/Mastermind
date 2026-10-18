@@ -27,6 +27,7 @@ import math
 import os
 import re
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +50,16 @@ from control_plane.session_truth_contract import valid_source_records_digest  # 
 _CONTEXT_MAX_BYTES = 256 * 1024
 
 
+@dataclass(frozen=True)
+class WorkstreamOutcome:
+    """Settlement observation for one reader call; never shared between calls."""
+    state: str
+
+    def __post_init__(self) -> None:
+        if type(self.state) is not str or self.state not in {"NOT_STARTED", "SETTLED", "UNKNOWN"}:
+            raise ValueError("invalid workstream reader outcome")
+
+
 def _unique_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result = {}
     for key, value in pairs:
@@ -62,9 +73,16 @@ def _invalid_constant(value: str) -> Any:
     raise ValueError("non-JSON context constant")
 
 
-def _workstream_context(args: argparse.Namespace) -> int:
-    """Forward one exact Agent OS context read through existing process ownership."""
+def _workstream_context(args: argparse.Namespace, *, _outcome_sink=None) -> int:
+    """Forward one exact read; optionally report its call-local final outcome."""
+    state = "NOT_STARTED"
+
+    def report() -> None:
+        if _outcome_sink is not None:
+            _outcome_sink(WorkstreamOutcome(state))
+
     def unavailable(reason: str) -> int:
+        report()
         sys.stderr.write(f"Agent OS context unavailable: {reason}. No generic brief fallback.\n")
         return 1
 
@@ -82,6 +100,8 @@ def _workstream_context(args: argparse.Namespace) -> int:
             "--json", "--budget", str(args.context_budget or 4000)]
     if args.now is not None:
         argv += ["--now", args.now]
+    # Exceptions can occur after Popen, regardless of their Python class.
+    state = "UNKNOWN"
     try:
         observed = bounded_subprocess_runner(
             argv, cwd=root, timeout=args.timeout, max_bytes=_CONTEXT_MAX_BYTES,
@@ -89,6 +109,9 @@ def _workstream_context(args: argparse.Namespace) -> int:
     except (OSError, RuntimeError, ValueError):
         # Never expose a raw process error, retry, or claim the reader settled.
         return unavailable("reader failed; reconcile the existing reader before another attempt")
+    # This owner returns only after reap + process-group settlement.
+    # Payload/source validity below does not change that process observation.
+    state = "SETTLED"
     if observed["timed_out"]:
         return unavailable("reader timed out")
     if observed["limit_exceeded"]:
@@ -130,6 +153,7 @@ def _workstream_context(args: argparse.Namespace) -> int:
     sys.stdout.write(raw)
     if not raw.endswith("\n"):
         sys.stdout.write("\n")
+    report()
     return 0
 
 
@@ -174,7 +198,7 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
-def main(argv: list[str] | None = None) -> int:
+def main(argv: list[str] | None = None, *, _outcome_sink=None) -> int:
     parser = _parser()
     args = parser.parse_args(argv)
     if args.workstream is not None:
@@ -194,7 +218,7 @@ def main(argv: list[str] | None = None) -> int:
             parser.error("--context-budget must be positive")
         if not math.isfinite(args.timeout) or args.timeout <= 0:
             parser.error("--timeout must be finite and positive for workstream context")
-        return _workstream_context(args)
+        return _workstream_context(args, _outcome_sink=_outcome_sink)
     if args.context_budget is not None or args.expected_macro_sha is not None:
         parser.error("--context-budget and --expected-macro-sha require --workstream")
 
@@ -213,6 +237,16 @@ def main(argv: list[str] | None = None) -> int:
 
     # Fail open by contract: a degraded packet is still a delivered packet.
     return 0
+
+
+def main_with_outcome(argv: list[str] | None = None) -> tuple[int, WorkstreamOutcome]:
+    """Preserve CLI output/exit status and capture only this invocation's result."""
+    captured: list[WorkstreamOutcome] = []
+    code = main(argv, _outcome_sink=captured.append)
+    # A legacy company brief has no reader-settlement contract. Absence of an
+    # outcome cannot prove that no process was started on that path.
+    outcome = captured[0] if len(captured) == 1 else WorkstreamOutcome("UNKNOWN")
+    return code, outcome
 
 
 if __name__ == "__main__":
