@@ -1,0 +1,100 @@
+--- a/host_pull_backend.py
++++ b/host_pull_backend.py
+@@ -168,6 +168,70 @@
+                     and nvme_count.isascii() and nvme_count.isdigit()
+                     and len(nvme_count) <= 3 else None),
+             }
++            # One existing per-host snapshot carries a bounded cooldown. This
++            # is evidence for the existing host picker, never a new scheduler,
++            # daemon, termination policy or authority. Expired evidence drops.
++            prior_tctl = None
++            prior_until = 0
++            prior_ts = 0
++            old_path = os.path.join(state_dir, host + ".json")
++            old_fd = None
++            try:
++                old_fd = os.open(old_path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
++                info = os.fstat(old_fd)
++                if not stat.S_ISREG(info.st_mode) or info.st_size > 65536:
++                    raise ValueError("old snapshot not bounded regular file")
++                with os.fdopen(old_fd, encoding="utf-8") as old_fh:
++                    old_fd = None
++                    previous = json.load(old_fh)
++                previous_therm = previous.get("thermal", {}) if type(previous) is dict else {}
++                previous_ts = previous.get("ts") if type(previous) is dict else None
++                if (
++                    type(previous_ts) is int and 0 <= doc["ts"] - previous_ts <= 900
++                    and previous.get("host") == host
++                    and previous.get("reachable") is True
++                    and type(previous_therm) is dict
++                    and previous_therm.get("schema") == "mastermind.fabric_host_thermal.v1"
++                    and previous_therm.get("source") == "linux_hwmon"
++                    and previous_therm.get("admission_authoritative") is False
++                    and previous_therm.get("observed_at") == previous_ts
++                ):
++                    maybe_tctl = previous_therm.get("cpu_tctl_c")
++                    if type(maybe_tctl) in (float,int) and math.isfinite(maybe_tctl) and 10 <= maybe_tctl <= 120:
++                        prior_tctl, prior_ts = maybe_tctl, previous_ts
++                        maybe_until = previous_therm.get("cooldown_until")
++                        if (type(maybe_until) is int
++                            and previous_ts <= maybe_until <= previous_ts + 600
++                            and maybe_until > doc["ts"]):
++                            prior_until = maybe_until
++            except (OSError, ValueError, TypeError, json.JSONDecodeError):
++                pass
++            finally:
++                if old_fd is not None:
++                    os.close(old_fd)
++            current_ts = doc["ts"]
++            hold_until = max(prior_until, doc["ts"])
++            risk = "UNKNOWN"
++            rise_c_per_min = None
++            if cpu_tctl is not None:
++                risk = "NORMAL"
++                if prior_tctl is not None and 0 < current_ts-prior_ts <= 900:
++                    rise_c_per_min = round((cpu_tctl-prior_tctl) * 60.0/(current_ts-prior_ts), 2)
++                if cpu_tctl >= 92:
++                    hold_until = max(hold_until, current_ts + 600)
++                    risk = "CRITICAL"
++                elif cpu_tctl >= 85:
++                    hold_until = max(hold_until, current_ts + 240)
++                    risk = "HOT"
++                elif (cpu_tctl >= 75 and rise_c_per_min is not None
++                      and rise_c_per_min >= 10):
++                    hold_until = max(hold_until, current_ts + 180)
++                    risk = "RISING_FAST"
++                elif hold_until > current_ts:
++                    risk = "RECOVERING"
++            doc["thermal"]["cooldown_until"] = int(hold_until)
++            doc["thermal"]["risk"] = risk
++            doc["thermal"]["rise_c_per_min"] = rise_c_per_min
+         # Procfs detail supplements existing host load/memory readings; it is
+         # never a second permission, routing or admission authority.
+         if kv.get("therm_reader") == "hwmon_v1":
+--- a/host_pick.py
++++ b/host_pick.py
+@@ -380,6 +380,24 @@
+             else:
+                 gate_ok, detail = True, f"cpu_tctl={cpu:g}<{limit:g}C,nvme_margin={nvme:g}>={nvme_floor:g}C"
+             gates.append(_gate(name, gate_ok, "thermal", detail))
++            # Cooldown is derived by the incumbent collector from the prior
++            # observed snapshot, not from a new worker or health-control plane.
++            # An absent legacy field preserves the old admission behavior.
++            if thermal_required is True and "cooldown_until" in therm:
++                until = therm.get("cooldown_until")
++                valid_until = (
++                    type(until) is int and therm_ts is not None
++                    and therm_ts <= until <= therm_ts + 600
++                    and until <= now.timestamp() + 600
++                )
++                remaining = max(0, int(math.ceil(until - now.timestamp()))) if valid_until else 0
++                gates.append(_gate(
++                    name,
++                    valid_until and remaining == 0,
++                    "thermal-recovery",
++                    ("wait=%ss" % remaining if valid_until and remaining
++                     else "recovered" if valid_until else "invalid-cooldown"),
++                ))
+ 
+         # Optional procfs pressure guard for specifically enrolled hosts only.
+         # Existing workers continue; this is admission of new auto placements.
