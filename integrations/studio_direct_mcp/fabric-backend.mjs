@@ -104,9 +104,17 @@ function completedOutput(text) {
   if (!match) return null;
   return {stdout:text.slice(start,finish),exit_code:Number(match[1])};
 }
-function statusJSON(result, runId) {
+function statusJSON(result, runId, follow=false) {
   if (result.exit_code!==0) fail('ADAPTER_OBSERVATION_UNAVAILABLE',{adapter_exit_code:result.exit_code});
   let s; try{s=JSON.parse(result.stdout);}catch{fail('ADAPTER_STATUS_INVALID');}
+  if(follow && s?.schema==='mastermind.fabric_continuation.v1') {
+    if(s.requested_run_id!==runId || typeof s.effective_run_id!=='string' || !ID_RE.test(s.effective_run_id)
+       || !Array.isArray(s.prior_attempts) || s.prior_attempts.length>2
+       || !['NOT_APPLICABLE','UNCONFIRMED','RECORDED'].includes(s.controller_return)) fail('ADAPTER_CONTINUATION_INVALID');
+    const effective=statusJSON({exit_code:0,stdout:JSON.stringify(s.effective_status)},s.effective_run_id);
+    return {...effective,continuation:{requested_run_id:runId,effective_run_id:s.effective_run_id,
+      prior_attempts:s.prior_attempts,controller_return:s.controller_return}};
+  }
   if (!s || s.schema!=='mastermind.fabric_task_status.v1' || s.run_id!==runId || typeof s.state!=='string' || typeof s.result_available!=='boolean') fail('ADAPTER_STATUS_INVALID');
   return s;
 }
@@ -123,7 +131,7 @@ function resultReady(s,args) {
 }
 
 export function createFabricFacade(engine, options={}) {
-  const cfg={adapterPath:DEFAULT_ADAPTER,python:'python3',workerCwd:'~',...options};
+  const cfg={adapterPath:DEFAULT_ADAPTER,python:'python3',workerCwd:'~',quotaFallback:false,...options};
   if(!isAbsolute(cfg.adapterPath) || cfg.adapterPath.includes('\0') || typeof cfg.python!=='string' || !cfg.python || cfg.python.includes('\0') || typeof cfg.workerCwd!=='string' || !cfg.workerCwd || cfg.workerCwd.includes('\0')) throw new TypeError('invalid operator configuration');
   // This index only fences returned incumbent process handles. It has no run state,
   // admission, scheduling or retry authority and is never persisted or reconstructed.
@@ -149,10 +157,14 @@ export function createFabricFacade(engine, options={}) {
     if(!parsed) fail('OBSERVATION_INCOMPLETE',{controller_pid:pid});
     return parsed;
   }
-  async function status(args) {const s=statusJSON(await runShort(['status',args.run_id]),args.run_id);checkRoot(s,args);return s;}
+  async function status(args,follow=cfg.quotaFallback) {
+    const s=statusJSON(await runShort(['status',args.run_id,...(follow?['--follow']:[])]),args.run_id,follow);
+    checkRoot(s,args);return s;
+  }
   async function retained(args,s) {
+    if(s.continuation?.controller_return==='UNCONFIRMED') fail('CONTROLLER_RETURN_UNCONFIRMED',{effective_run_id:s.run_id});
     resultReady(s,args);
-    const r=await runShort(['result',args.run_id,'--max-bytes',String(args.max_bytes??8192)],10000,true);
+    const r=await runShort(['result',s.run_id,'--max-bytes',String(args.max_bytes??8192)],10000,true);
     if(r.exit_code!==0) fail('RESULT_UNAVAILABLE',{adapter_exit_code:r.exit_code});
     let captured; try{captured=JSON.parse(r.stdout);}catch{fail('RESULT_TRANSFER_INVALID');}
     if(captured.capture_error) fail('RESULT_RESPONSE_TOO_LARGE');
@@ -183,9 +195,10 @@ export function createFabricFacade(engine, options={}) {
         const requestKey=args.run_id;
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
         if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
-        const s=await status(args);
+        const s=await status(args,false);
         if(s.state!=='NOT_FOUND') fail(s.state==='EFFECT_UNKNOWN'?'EFFECT_UNKNOWN':'RUN_EXISTS');
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
+        if(cfg.quotaFallback) argv.push('--quota-fallback');
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
         if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
@@ -202,16 +215,17 @@ export function createFabricFacade(engine, options={}) {
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }
       const s=await status(args);
-      if(name==='fabric_status') return response({action:name,run_id:args.run_id,expected_root_id:args.root_id,status:s,root_verified:s.root_id===args.root_id,execution_absence_proven:false});
+      if(name==='fabric_status') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,expected_root_id:args.root_id,status:s,root_verified:s.root_id===args.root_id,execution_absence_proven:false});
       if(name==='fabric_wait') {
         const seconds=args.timeout_seconds??5;
-        const waited=statusJSON(await runShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2'],Math.min(12000,(seconds+2)*1000)),args.run_id);
+        const waited=statusJSON(await runShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2',...(cfg.quotaFallback?['--follow']:[])],Math.min(12000,(seconds+2)*1000)),args.run_id,cfg.quotaFallback);
         checkRoot(waited,args);
-        return response({action:name,run_id:args.run_id,status:waited,root_verified:waited.root_id===args.root_id,execution_absence_proven:false});
+        return response({action:name,run_id:args.run_id,effective_run_id:waited.run_id,status:waited,root_verified:waited.root_id===args.root_id,execution_absence_proven:false});
       }
       if(name==='fabric_accept' && s.accepted===true) fail('ALREADY_ACCEPTED');
+      if(name==='fabric_accept' && s.run_id!==args.run_id) fail('ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED',{effective_run_id:s.run_id});
       const data=await retained(args,s);
-      if(name==='fabric_result') return response({action:name,run_id:args.run_id,root_id:args.root_id,...data,accepted:s.accepted===true,
+      if(name==='fabric_result') return response({action:name,run_id:args.run_id,effective_run_id:s.run_id,accept_run_id:s.run_id,root_id:args.root_id,...data,accepted:s.accepted===true,
         digest_scope:'exact complete adapter CLI response; not a cryptographic artifact attestation'});
       if(data.response_sha256!==args.expected_response_sha256) fail('RESULT_CHANGED',{current_response_sha256:data.response_sha256});
       effectStarted=true;
@@ -244,7 +258,7 @@ async function main() {
   if(!isAbsolute(engineEntry)) throw new Error('ENGINE_ENTRY_MUST_BE_ABSOLUTE');
   const engine=new Client({name:'mastermind-fabric-process-transport',version:VERSION},{capabilities:{}});
   await engine.connect(new StdioClientTransport({command:process.execPath,args:[engineEntry],cwd:homedir(),env:{...process.env},stderr:'inherit'}));
-  const facade=createFabricFacade(engine,{adapterPath:process.env.MMX_FABRIC_ADAPTER_PATH??DEFAULT_ADAPTER,python:process.env.MMX_FABRIC_PYTHON??'python3',workerCwd:process.env.MMX_FABRIC_WORKER_CWD??'~'});
+  const facade=createFabricFacade(engine,{adapterPath:process.env.MMX_FABRIC_ADAPTER_PATH??DEFAULT_ADAPTER,python:process.env.MMX_FABRIC_PYTHON??'python3',workerCwd:process.env.MMX_FABRIC_WORKER_CWD??'~',quotaFallback:true});
   const server=new Server({name:'mastermind-subagent-fabric',version:VERSION},{capabilities:{tools:{}}});
   server.setRequestHandler(ListToolsRequestSchema,async()=>({tools:FABRIC_TOOLS}));
   server.setRequestHandler(CallToolRequestSchema,async req=>facade.call(req.params.name,req.params.arguments??{}));
