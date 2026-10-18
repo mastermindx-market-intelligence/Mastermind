@@ -9,8 +9,18 @@ from __future__ import annotations
 import asyncio
 from control_plane.workspace_owned_task import await_owned
 import math
+import secrets
 import threading
 import time
+
+
+def _workspace_instance_locked(owner):
+    """Reuse the actual ServerConfig identity; caller holds its state_lock."""
+    instance = getattr(owner, "_workspace_read_instance", None)
+    if instance is None:
+        instance = secrets.token_hex(32)
+        setattr(owner, "_workspace_read_instance", instance)
+    return instance
 
 
 class ControlRoomDrainUnavailable(RuntimeError):
