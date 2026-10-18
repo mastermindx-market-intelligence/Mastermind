@@ -199,7 +199,10 @@ def unbegun(tmp_path,monkeypatch):
 
 @pytest.fixture
 def v5(tmp_path,monkeypatch):
-    """The actual production schema: no M2 tables are active."""
+    """Frozen historical v5 fixture, separate from the production v6 schema."""
+    monkeypatch.setattr(rt, '_MIGRATIONS', rt._MIGRATIONS[:5])
+    monkeypatch.setattr(rt, 'SCHEMA_VERSION', 5)
+    monkeypatch.setattr(rt, '_NORMALIZED_V6_SCHEMA_DIGEST', rt._NORMALIZED_V5_SCHEMA_DIGEST)
     yield from _build(tmp_path,monkeypatch,schema=False,physical=False)
 
 def claim(s,prepared=True):

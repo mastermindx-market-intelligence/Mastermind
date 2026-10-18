@@ -104,7 +104,7 @@ from control_plane.operator_harness_contract import (
 )
 from scripts.ohf.redaction import redact_evidence, redact_evidence_text
 
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 
 WORK_DEPENDENCY_MANIFEST_SCHEMA = "mastermind.work_dependency_manifest/v1"
 _COO_PLAN_ADMISSION_SCHEMA_V1 = "mastermind.coo_plan_admission/v1"
@@ -304,12 +304,15 @@ _MAX_JOB_DEPTH = 64
 _SCHEMA_UPGRADE_BARRIER = "executive-schema-upgrade.in-progress.json"
 # Historical exact-v4 fingerprint: frozen verbatim so prior-version recognition
 # and the reviewed v4->v5 transition can still prove an exact v4 source.  The
-# current store verification below uses the separate v5 fingerprint.
+# current store verification below uses the separate v6 fingerprint.
 _NORMALIZED_V4_SCHEMA_DIGEST = (
     "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
 )
 _NORMALIZED_V5_SCHEMA_DIGEST = (
     "b2fe4455306b2bdcf4f698d958e420e4f885e941dc1f0b8db602cbb39edcedbd"
+)
+_NORMALIZED_V6_SCHEMA_DIGEST = (
+    "2618959767e49acc70db044ee1e86441feb2bd39ed413afe0c86e455ea0b21b4"
 )
 _V2_ROOT_CREATION_CAPABILITY = object()
 _COO_CYCLE_PLANNER_CREATION_CAPABILITY = object()
@@ -3047,17 +3050,9 @@ _MIGRATION_5: tuple[str, ...] = (
     """,
 )
 
-_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
-    (1, "executive_runtime_core", _MIGRATION_1),
-    (2, "durable_parent_child_review_contract", _MIGRATION_2),
-    (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
-    (4, "executive_phase1fc_orchestration_contract", _MIGRATION_4),
-    (5, "executive_finite_drive_arm_contract", _MIGRATION_5),
-)
-
-
-# Inactive candidate only: deliberately NOT a member of _MIGRATIONS. A separately
-# reviewed offline successor is required before any production installation.
+# Reviewed physical-resource DDL, promoted unchanged as migration 6. Existing
+# databases require the explicit offline v5-to-v6 owner; normal startup never
+# applies this transition. The historical candidate name remains an internal alias.
 _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
     """
     CREATE TABLE physical_resource_commitments (
@@ -3244,6 +3239,16 @@ _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE: tuple[str, ...] = (
     BEGIN SELECT RAISE(ABORT, 'physical resource revision requires a new bound Event'); END
     """,
 
+)
+
+
+_MIGRATIONS: tuple[tuple[int, str, tuple[str, ...]], ...] = (
+    (1, "executive_runtime_core", _MIGRATION_1),
+    (2, "durable_parent_child_review_contract", _MIGRATION_2),
+    (3, "ohf_session_epochs_and_process_generations", _MIGRATION_3),
+    (4, "executive_phase1fc_orchestration_contract", _MIGRATION_4),
+    (5, "executive_finite_drive_arm_contract", _MIGRATION_5),
+    (6, "executive_physical_resource_contract", _PHYSICAL_RESOURCE_SCHEMA_CANDIDATE),
 )
 
 
@@ -3900,9 +3905,9 @@ class RuntimeStore:
         """Mutation-free preflight for every normal writable existing-store open.
 
         This runs before chmod, WAL selection, directory creation, or a writable
-        SQLite connection.  Exact v1-v4 stores are therefore routed only to the
+        SQLite connection.  Exact v1-v5 stores are therefore routed only to the
         separately explicit offline upgrade API; ordinary startup cannot append
-        migration 5 or create a sidecar as a by-product of discovering staleness.
+        migration 6 or create a sidecar as a by-product of discovering staleness.
         """
 
         connection: sqlite3.Connection | None = None
@@ -3949,6 +3954,7 @@ class RuntimeStore:
         current = versions[-1]
         if current < SCHEMA_VERSION:
             required_upgrade = (
+                "upgrade_v5_to_v6" if current == 5 else
                 "upgrade_v4_to_v5" if current == 4 else "upgrade_v3_to_v4"
             )
             raise ExecutiveSchemaUpgradeRequired(
@@ -3959,9 +3965,9 @@ class RuntimeStore:
             raise PersistenceError(
                 f"executive runtime schema v{current} is unsupported by v{SCHEMA_VERSION} code"
             )
-        if schema_digest != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if schema_digest != _NORMALIZED_V6_SCHEMA_DIGEST:
             raise PersistenceError(
-                "existing Executive schema v5 does not match the exact reviewed DDL"
+                "existing Executive schema v6 does not match the exact reviewed DDL"
             )
         if self._upgrade_barrier_present():
             raise PersistenceError(
@@ -4136,9 +4142,9 @@ class RuntimeStore:
                 raise PersistenceError(
                     f"migration {version} checksum/name does not match code"
                 )
-        if _normalized_schema_digest(connection) != _NORMALIZED_V5_SCHEMA_DIGEST:
+        if _normalized_schema_digest(connection) != _NORMALIZED_V6_SCHEMA_DIGEST:
             raise PersistenceError(
-                "executive runtime schema v5 does not match the exact reviewed DDL"
+                "executive runtime schema v6 does not match the exact reviewed DDL"
             )
 
     def _open_existing_writable(self) -> sqlite3.Connection:
@@ -4265,7 +4271,7 @@ class RuntimeStore:
     def _migrate(self, connection: sqlite3.Connection) -> None:
         if not self._database_was_absent:
             raise PersistenceError(
-                "generic migration is fresh-database-only under schema v5"
+                "generic migration is fresh-database-only under schema v6"
             )
         try:
             connection.execute("BEGIN EXCLUSIVE")
@@ -4287,7 +4293,7 @@ class RuntimeStore:
             }
             if existing:
                 raise ExecutiveSchemaUpgradeRequired(
-                    "generic migration refuses a pre-existing migration vector under schema v5"
+                    "generic migration refuses a pre-existing migration vector under schema v6"
                 )
             known_versions = {version for version, _, _ in _MIGRATIONS}
             unknown = sorted(set(existing) - known_versions)
