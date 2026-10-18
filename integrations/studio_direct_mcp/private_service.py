@@ -1760,6 +1760,9 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
             or type(getattr(args, "os_commission_config_sha256", None)) is str):
         raise SystemExit("C2 compatibility requires original Business owner, sealed manifest CAS and no new repository grants")
     personal = account == C2_PAPER_ACCOUNT
+    if ((getattr(args, "c2_business_fleet_compat", False) is True)
+            == (getattr(args, "c2_personal_closed_publisher", False) is True)):
+        raise SystemExit("C2 compatibility: select one original owner operation")
     if personal != (getattr(args, "c2_personal_closed_publisher", False) is True):
         raise SystemExit("C2 compatibility: operation/account mismatch")
     target_patch = C2_PERSONAL_TARGET_PATCH_SHA256 if personal else C2_BUSINESS_TARGET_PATCH_SHA256
