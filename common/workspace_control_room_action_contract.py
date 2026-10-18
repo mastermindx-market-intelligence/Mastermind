@@ -135,3 +135,64 @@ def refused_result(operation, *, code, status):
     return action_result(operation, {
         "ok": False, "error": {"code": code, "message": "Control Room action is unavailable."},
     }, status=status, disposition="NOT_DISPATCHED")
+
+
+def _unique_object(pairs):
+    """Reject repeated decoded names at every object depth."""
+    value = {}
+    for key, item in pairs:
+        if key in value:
+            raise ValueError("invalid_json")
+        value[key] = item
+    return value
+
+
+def _reject_constant(_value):
+    raise ValueError("invalid_json")
+
+
+def _strict_json(raw, *, limit, code):
+    """Decode original bounded JSON octets, never a reserialized mapping."""
+    try:
+        if type(raw) is not bytes or not raw or len(raw) > limit:
+            raise ValueError(code)
+        return json.loads(
+            raw.decode("utf-8", errors="strict"),
+            object_pairs_hook=_unique_object,
+            parse_constant=_reject_constant,
+        )
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise ValueError(code) from None
+
+
+def decode_frame(raw):
+    """Decode the raw action request retained by the existing App peer."""
+    return validate_frame(_strict_json(
+        raw, limit=MAX_REQUEST_BYTES, code="invalid_input",
+    ))
+
+
+def decode_payload(raw, *, operation):
+    """Decode an HTTP body for an operation fixed by the route."""
+    try:
+        if type(operation) is not str or operation not in OPERATIONS:
+            raise ValueError("invalid_input")
+        value = _strict_json(raw, limit=MAX_REQUEST_BYTES, code="invalid_input")
+        _payload(operation, value)
+        encoded = canonical(value)
+        if len(encoded) + 1 > MAX_REQUEST_BYTES:
+            raise ValueError("invalid_input")
+        return json.loads(encoded)
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise ValueError("invalid_input") from None
+
+
+def decode_result_envelope(raw, *, operation):
+    """Decode the complete private response for the originally sent action."""
+    try:
+        value = _strict_json(raw, limit=MAX_RESPONSE_BYTES, code="source_unavailable")
+        if type(value) is not dict or set(value) != {"ok", "result"} or value["ok"] is not True:
+            raise ValueError("source_unavailable")
+        return {"ok": True, "result": validate_result(value["result"], operation=operation)}
+    except (TypeError, ValueError, OverflowError, RecursionError):
+        raise ValueError("source_unavailable") from None

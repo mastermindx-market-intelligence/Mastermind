@@ -5083,9 +5083,9 @@ class ExecutiveControlService:
 
         Kernel identity selects the exact C1 or optional App capability before
         any body read. Neither uses the generic Operator allowlist. The App's
-        closed read frames project existing canonical state; all admission
-        remains with ``executive_ceo_ingress.handle_frame`` and its existing
-        validators. Exactly one bounded frame and response use each connection.
+        closed Workspace frames use existing canonical read/action owners.
+        CEO submission admission remains with ``executive_ceo_ingress.handle_frame``
+        and its existing validators. Exactly one bounded frame and response use each connection.
         """
 
         task = asyncio.current_task()
@@ -5296,6 +5296,73 @@ class ExecutiveControlService:
             from common.workspace_control_room_read_contract import (
                 FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
             )
+            from common import workspace_control_room_action_contract as action_wire
+            if type(parsed) is dict and parsed.get("schema") == action_wire.FRAME_SCHEMA:
+                if not app_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied", "Control Room actions require the installed App peer",
+                    )
+                    return
+                try:
+                    # Reparse original bytes; schema discrimination must not
+                    # discard duplicate fields before action admission.
+                    action_request = action_wire.decode_frame(raw)
+                except (TypeError, ValueError):
+                    operation = parsed.get("operation")
+                    result = ({"ok": True, "result": action_wire.refused_result(
+                        operation, code="invalid_input", status=400,
+                    )} if type(operation) is str and operation in action_wire.OPERATIONS
+                              else workspace_error("invalid_input", 400))
+                    await self._send_ceo_ingress_response(
+                        writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
+                    )
+                    return
+                operation = action_request["operation"]
+                factory = app_binding.workspace_read_provider_factory
+
+                def action_host_ready():
+                    return (
+                        app_binding is self._ceo_ingress_app_binding
+                        and app_binding.workspace_read_provider_factory is factory
+                        and callable(factory)
+                        and not self._closing and self._ceo_ingress_ready
+                        and self._service_state in {"READY", "AWAITING_CANARY"}
+                    )
+
+                delegated = False
+                try:
+                    if not action_host_ready():
+                        result = {"ok": True, "result": action_wire.refused_result(
+                            operation, code="source_unavailable", status=503,
+                        )}
+                    else:
+                        from control_plane.workspace_read_service import WorkspaceReadService
+                        provider = factory(self._require_runtime())
+                        if type(provider) is not WorkspaceReadService or not action_host_ready():
+                            result = {"ok": True, "result": action_wire.refused_result(
+                                operation, code="source_unavailable", status=503,
+                            )}
+                        else:
+                            delegated = True
+                            result = await provider.handle_frame(
+                                action_request, action_host_ready=action_host_ready,
+                            )
+                    if type(result) is not dict or set(result) != {"ok", "result"} or result["ok"] is not True:
+                        raise ValueError("source_unavailable")
+                    result = {"ok": True, "result": action_wire.validate_result(
+                        result["result"], operation=operation,
+                    )}
+                except Exception:
+                    result = {"ok": True, "result": (
+                        action_wire.unknown_result(operation) if delegated
+                        else action_wire.refused_result(operation, code="source_unavailable", status=503)
+                    )}
+                # The existing handler task retains custody through action
+                # completion and response cleanup, without READ result rewriting.
+                await self._send_ceo_ingress_response(
+                    writer, result, response_ceiling=action_wire.MAX_RESPONSE_BYTES,
+                )
+                return
             if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {
                     FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA,
                     CCR_READ_FRAME_SCHEMA}:
