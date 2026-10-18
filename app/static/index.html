@@ -6513,6 +6513,17 @@ function _decisionAvailabilityHtml(d, portfolio, isZh) {
   var pendingText = pending.status === 'queued' ? say('Queued target present', '存在排队目标')
     : pending.status === 'none' ? say('No pending target file observed', '未发现待执行目标文件')
     : say('Pending target ', '待执行目标：') + String(pending.status || 'unavailable').replace(/_/g, ' ');
+  var accountLabels = {
+    available: say('Account data available', '账户数据可用'),
+    partial: say('Account data incomplete', '账户数据不完整'),
+    missing: say('Account data missing', '账户数据缺失'),
+    invalid: say('Account data invalid', '账户数据无效'),
+    read_error: say('Account data could not be read', '无法读取账户数据'),
+    too_large: say('Account data exceeds the read limit', '账户数据超出读取范围'),
+    unavailable: say('Account data unavailable', '账户数据不可用')
+  };
+  var accountLabel = Object.prototype.hasOwnProperty.call(accountLabels, account.status)
+    ? accountLabels[account.status] : say('Account status unverified', '账户状态尚未核验');
   var accountBody = detail(say('Cash', '现金'), money(account.cash)) +
     detail(say('Positions', '持仓数'), account.position_count) +
     detail(say('Value at recorded prices', '按记录价格估值'), money(valuation.nav)) +
@@ -6543,7 +6554,7 @@ function _decisionAvailabilityHtml(d, portfolio, isZh) {
         detail(say('Queue decision binding', '排队目标决策绑定'), pending.lineage_status) : '') +
       (target.settled_asof ? detail(say('Settled date', '结算日期'), target.settled_asof) +
         detail(say('Evidence checked', '已核对的证据'), say('Stored decision receipt/fill identity', '决策记录中的凭证与成交身份')) : '')) +
-    card(say('Persisted account', '已保存账户'), String(account.status || 'unavailable').replace(/_/g, ' '), accountBody);
+    card(say('Persisted account', '已保存账户'), accountLabel, accountBody);
   var sources = Object.keys(d.sources || {}).sort().map(function(key) {
     var s = d.sources[key] || {};
     return '<div>' + text(s.file || key) + ' · ' + text(s.status) +
@@ -6555,7 +6566,8 @@ function _decisionAvailabilityHtml(d, portfolio, isZh) {
       'Attempt history is partial: the daily journal may omit failed reruns. Scheduled opportunity status is unverified. Prices and page refreshes do not refresh the original decision.',
       '尝试历史不完整：每日日志可能未保留失败的重复尝试。计划决策机会尚未验证。价格与页面刷新不会更新原始决策日期。') + '</div>' +
     '<details class="mm-da-foot"><summary>' + say('Source coverage and identities', '来源覆盖与身份') + '</summary>' +
-    sources + detail(say('Read consistency', '读取一致性'), coherence) +
+    sources + detail(say('Recorded account status', '账户状态原始记录'), account.status) +
+    detail(say('Read consistency', '读取一致性'), coherence) +
     detail(say('Qualifications', '限定说明'), (d.issues || []).join(', ') || '—') + '</details>';
 }
 function renderDecisionAvailability() {
