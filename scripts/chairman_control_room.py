@@ -618,6 +618,10 @@ class ServerConfig:
     #: A supplied live snapshot is a detached keyword input for that attempt;
     #: omission preserves the one-argument installed callback contract.
     compose_inputs: Callable[..., dict[str, Any]] | None = None
+    #: Serializes binding read/modify/save transactions sharing this owner.
+    #: Separate from publication; never held across provider work or responses.
+    #: This is not a cross-process lock for independent file writers.
+    bindings_lock: threading.Lock = field(default_factory=threading.Lock)
 
 
 # ---------------------------------------------------------------------------
@@ -1326,7 +1330,15 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
                                 codex_sessions_dir=config.codex_sessions_dir,
                                 mlx_profiles_root=config.mlx_profiles_root,
                                 gologin_profiles_root=config.gologin_profiles_root)
-        doc, problems = sb.load_bindings(config.bindings_path)
+        with config.bindings_lock:
+            bindings_path = config.bindings_path
+            doc, problems = sb.load_bindings(bindings_path)
+            binding = next(
+                (row for row in (doc or {}).get("bindings", [])
+                 if isinstance(row, dict) and row.get("binding_id") == binding_id),
+                None,
+            )
+            binding_preimage = copy.deepcopy(binding)
         if doc is None:
             if owed_route:
                 return self._owed_open_refused()
@@ -1340,18 +1352,14 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
                 )
             return self._send_json(200, outcome, no_store=True)
 
-        binding = next(
-            (row for row in doc.get("bindings", []) if isinstance(row, dict) and row.get("binding_id") == binding_id),
-            None,
-        )
         if binding is None:
             if owed_route:
                 return self._owed_open_refused()
             outcome = contract.refused("unknown", binding_id, "not_found", "no binding with this id exists")
             return self._send_json(200, outcome, no_store=True)
 
+        binding = _freeze_target(binding)
         if owed_route:
-            binding = _freeze_target(binding)
             if not _owed_handoff_current(config, data["owed_context"], binding, doc["bindings"]):
                 return self._owed_open_refused()
         outcome = open_fn(binding, provider_runner, **provider_options)
@@ -1363,11 +1371,27 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
         # surface) stays BOUND_UNVERIFIED and leaves the bindings file
         # byte-unchanged.
         if not owed_route and outcome.get("ok") and outcome.get("verified"):
-            now = config.now_fn()
-            for row in doc["bindings"]:
-                if isinstance(row, dict) and row.get("binding_id") == binding_id:
-                    row["last_verified_at"] = now
-            sb.save_bindings(doc, config.bindings_path)
+            try:
+                with config.bindings_lock:
+                    if config.bindings_path == bindings_path:
+                        current_doc, _problems = sb.load_bindings(bindings_path)
+                        if current_doc is not None:
+                            matches = [
+                                row for row in current_doc["bindings"]
+                                if isinstance(row, dict) and row.get("binding_id") == binding_id
+                            ]
+                            # A changed/removed/restamped row receives no evidence
+                            # for the old target. Preserve all concurrent siblings.
+                            if len(matches) == 1 and matches[0] == binding_preimage:
+                                matches[0]["last_verified_at"] = config.now_fn()
+                                sb.save_bindings(current_doc, bindings_path)
+            except Exception:
+                # Navigation already returned success. Metadata failure must not
+                # conceal that effect, leak a locator or invite a second Open.
+                outcome = dict(outcome, detail=(
+                    "Open completed; the verification timestamp update could not be confirmed. "
+                    "Do not repeat Open solely to update this timestamp."
+                ))
         self._send_json(200, outcome, no_store=True)
 
     def _owed_open_refused(self) -> None:
@@ -1411,22 +1435,25 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             locator=locator, observed_at=config.now_fn(), seat_ref=seat_ref,
         )
 
-        existing_doc, load_problems = sb.load_bindings(config.bindings_path)
-        if existing_doc is None and load_problems:
-            return self._send_json(200, {"ok": False, "problems": load_problems}, no_store=True)
-        if existing_doc is None:
-            existing_doc = {"schema": sb.SCHEMA, "bindings": []}
-
-        new_doc = {
-            "schema": existing_doc.get("schema", sb.SCHEMA),
-            "bindings": list(existing_doc.get("bindings", [])) + [binding],
-        }
-        problems = sb.validate_bindings_document(new_doc)
-        if problems:
-            return self._send_json(200, {"ok": False, "problems": problems}, no_store=True)
-
-        sb.save_bindings(new_doc, config.bindings_path)
-        self._send_json(200, {"ok": True, "binding_id": binding["binding_id"]}, no_store=True)
+        with config.bindings_lock:
+            bindings_path = config.bindings_path
+            existing_doc, load_problems = sb.load_bindings(bindings_path)
+            if existing_doc is None and load_problems:
+                outcome = {"ok": False, "problems": load_problems}
+            else:
+                if existing_doc is None:
+                    existing_doc = {"schema": sb.SCHEMA, "bindings": []}
+                new_doc = {
+                    "schema": existing_doc.get("schema", sb.SCHEMA),
+                    "bindings": list(existing_doc.get("bindings", [])) + [binding],
+                }
+                problems = sb.validate_bindings_document(new_doc)
+                if problems:
+                    outcome = {"ok": False, "problems": problems}
+                else:
+                    sb.save_bindings(new_doc, bindings_path)
+                    outcome = {"ok": True, "binding_id": binding["binding_id"]}
+        self._send_json(200, outcome, no_store=True)
 
     def _handle_unbind(self) -> None:
         data, err = self._read_json_body()
@@ -1440,18 +1467,21 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
             return self._bad_request("binding_id: required (non-empty string)")
 
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
-        doc, _problems = sb.load_bindings(config.bindings_path)
-        if doc is None:
-            return self._send_json(200, {"ok": False}, no_store=True)
-
-        rows = doc.get("bindings", [])
-        remaining = [r for r in rows if not (isinstance(r, dict) and r.get("binding_id") == binding_id)]
-        if len(remaining) == len(rows):
-            return self._send_json(200, {"ok": False}, no_store=True)
-
-        new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
-        sb.save_bindings(new_doc, config.bindings_path)
-        self._send_json(200, {"ok": True}, no_store=True)
+        with config.bindings_lock:
+            bindings_path = config.bindings_path
+            doc, _problems = sb.load_bindings(bindings_path)
+            outcome = {"ok": False}
+            if doc is not None:
+                rows = doc.get("bindings", [])
+                remaining = [
+                    row for row in rows
+                    if not (isinstance(row, dict) and row.get("binding_id") == binding_id)
+                ]
+                if len(remaining) != len(rows):
+                    new_doc = {"schema": doc.get("schema", sb.SCHEMA), "bindings": remaining}
+                    sb.save_bindings(new_doc, bindings_path)
+                    outcome = {"ok": True}
+        self._send_json(200, outcome, no_store=True)
 
     def _handle_refresh_builds(self) -> None:
         data, err = self._read_json_body()
