@@ -112,7 +112,12 @@ def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
 
 
 def load_physical_resource_policy(path: Path | str = DEFAULT_POLICY_PATH, *, claimed_context: object | None = None) -> dict[str, Any]:
-    """Read the single production policy; source defaults never arm admission."""
+    """Read the single production policy for unarmed enrollment/reference use.
+
+    Armed policy always refuses here. Finite production admission reads the
+    same file only through ``executive_physical_admission.load_admitted_policy``,
+    whose sealed composer also binds schema, canonical Runtime, host and boot.
+    """
     if claimed_context is not None:
         _refuse("CLAIMED_CONTEXT_REFUSED", "caller-claimed verification is never authority")
     try:

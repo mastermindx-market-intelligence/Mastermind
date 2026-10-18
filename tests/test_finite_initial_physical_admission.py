@@ -10,6 +10,7 @@ import dataclasses
 import json
 import threading
 import time
+from types import SimpleNamespace
 import pytest
 from control_plane import executive_runtime as rt
 from control_plane import executive_physical_admission as adm
@@ -94,9 +95,34 @@ def test_foreign_host_and_boot_refuse_at_compose(unbegun):
 
 
 def test_policy_for_another_boot_generation_refuses(unbegun):
-    s=unbegun;before=snap(s);s.world.write(boot=FOREIGN_BOOT)
-    with pytest.raises(PhysicalResourceRefusal):_compose(s)
+    s=unbegun;before=snap(s)
+    # Runtime identity still names this boot; only the host qualification moved.
+    s.world.write(boot=FOREIGN_BOOT,runtime={'boot_id':BOOT})
+    _refused('HOST_QUALIFICATION_GENERATION_MISMATCH',_compose,s)
     assert snap(s)==before
+
+
+# --- canonical Runtime -------------------------------------------------------
+
+@pytest.mark.parametrize('field,value',[
+    ('host_id','host-'+'f'*64),('boot_id',FOREIGN_BOOT),
+    ('database_identity','sqlite-file-sha256:'+'0'*64),('schema_identity','executive-schema-sha256:'+'0'*64),
+])
+def test_policy_naming_another_runtime_refuses(unbegun,field,value):
+    s=unbegun;before=snap(s);s.world.write(runtime={field:value})
+    _refused('RUNTIME_MISMATCH',_compose,s)
+    assert s.world.hp0==[] and snap(s)==before
+
+
+def test_second_store_under_same_policy_refuses(unbegun,tmp_path):
+    s=unbegun;other=rt.Runtime.at(tmp_path/'second')
+    with other.store.read() as c:theirs=adm.runtime_identity(other.store,c)
+    with s.runtime.store.read() as c:ours=adm.runtime_identity(s.runtime.store,c)
+    # The second file is distinct even where its migrated schema is identical.
+    assert theirs['database_identity']!=ours['database_identity']
+    _refused('RUNTIME_MISMATCH',adm.compose,other.store,s.operation,None,job_id=s.job.job_id,
+        root_job_id=s.job.root_job_id,parent_job_id=s.job.parent_job_id,dispatch_command_id=s.command,
+        provider_row=s.provider_row,monotonic_deadline=time.monotonic()+15)
 
 
 def test_boot_or_process_change_after_compose_refuses_reserve(unbegun):
@@ -225,12 +251,114 @@ def test_insufficient_capacity_refuses_without_attempt(dispatcher):
     assert _job_attempts(s)==0 and _commitments(s)==[]
 
 
+# --- pre-BEGIN release ---------------------------------------------------------
+
+def _abandon(s,ctx,reservation,refs,evidence=None,command=None,action='settle'):
+    request={'reservation':dict(reservation,command_id=command or ctx.abandon_command_id),'commitments':refs,
+             'evidence':dict(adm.ABANDON_EVIDENCE) if evidence is None else evidence}
+    return getattr(s.runtime.broker,action+'_physical')(request,caller_context=ctx)
+
+
+def _reserved(s):
+    ctx,reservation=_compose(s)
+    out=_reserve(s,ctx,reservation);assert out['code']=='RESERVED',out
+    refs=[{'commitment_id':c['commitment_id'],'allocation_generation':c['allocation_generation'],
+           'expected_revision':c['revision']} for c in out['receipt']['commitments']]
+    return ctx,reservation,refs
+
+
+def _demand_charges(s):
+    with s.runtime.store.read() as c:
+        return [r[0] for r in c.execute('SELECT remaining_charge FROM physical_resource_demands')]
+
+
+@pytest.mark.parametrize('failure',['refused','raised'])
+def test_begin_failure_releases_reservation_without_effect(dispatcher,monkeypatch,failure):
+    s=dispatcher;original=s.runtime.broker.begin_physical
+    def begin(request,*,caller_context):
+        if failure=='raised':raise RuntimeError('writer lost before BEGIN commit')
+        s.world.write(disk_reserve=11*GiB)
+        return original(request,caller_context=caller_context)
+    with monkeypatch.context() as m:
+        m.setattr(s.runtime.broker,'begin_physical',begin)
+        with pytest.raises(PhysicalResourceRefusal if failure=='refused' else RuntimeError) as exc:s.dispatch()
+    if failure=='refused':assert exc.value.code=='POLICY_MOVED'
+    rows=_commitments(s)
+    assert rows and {r['state'] for r in rows}=={'ABANDONED_NO_EFFECT'}
+    assert all(r['begin_event_id'] is None and r['settlement_event_id'] for r in rows)
+    assert set(_demand_charges(s))=={0} and _job_attempts(s)==0
+    before=snap(s)
+    _refused('PHYSICAL_ADMISSION_ABANDONED',s.dispatch)
+    assert snap(s)==before and _job_attempts(s)==0
+
+
+def test_abandon_skips_deadline_but_keeps_caller_binding(unbegun,monkeypatch):
+    s=unbegun;ctx,reservation,refs=_reserved(s)
+    with monkeypatch.context() as m:
+        m.setattr(adm,'time',SimpleNamespace(monotonic=lambda:ctx.monotonic_deadline+1,time=time.time))
+        begun=s.runtime.broker.begin_physical({'reservation':dict(reservation,command_id=ctx.begin_command_id),
+            'commitments':refs},caller_context=ctx)
+        assert begun['code']=='DECISION_DEADLINE_EXPIRED'
+        with monkeypatch.context() as n:
+            n.setattr(adm.os,'getpid',lambda:ctx.pid+1)
+            assert _abandon(s,ctx,reservation,refs)['code']=='CALLER_BINDING_UNAVAILABLE'
+        assert {r['state'] for r in _commitments(s)}=={'RESERVED'}
+        out=_abandon(s,ctx,reservation,refs)
+    assert out['code']=='SETTLEMENT_RECORDED',out
+    assert {r['state'] for r in _commitments(s)}=={'ABANDONED_NO_EFFECT'} and set(_demand_charges(s))=={0}
+
+
+def test_abandon_after_begin_is_refused(unbegun):
+    s=unbegun;ctx,begun,event=physical_begin(s)
+    refs=[{'commitment_id':c['commitment_id'],'allocation_generation':c['allocation_generation'],
+           'expected_revision':c['revision']} for c in begun['receipt']['commitments']]
+    before=snap(s)
+    assert _abandon(s,ctx,ctx.reservation,refs)['code']=='PHYSICAL_OUTCOME_AMBIGUOUS'
+    assert snap(s)==before and {r['state'] for r in _commitments(s)}=={'EFFECT_MAY_HAVE_BEGUN'}
+
+
+@pytest.mark.parametrize('kw,code',[
+    (dict(evidence={'terminal_effect_state':'TERMINAL','pools':{},'process_terminal':True,'descendants_terminal':True}),
+     'CALLER_BINDING_UNAVAILABLE'),
+    (dict(evidence={'terminal_effect_state':'NO_EFFECT','pools':{},'positive_no_effect':1}),'CALLER_BINDING_UNAVAILABLE'),
+    (dict(evidence=dict(adm.ABANDON_EVIDENCE,process_terminal=True)),'CALLER_BINDING_UNAVAILABLE'),
+    (dict(command='begin'),'CALLER_BINDING_UNAVAILABLE'),
+    (dict(command='reserve'),'CALLER_BINDING_UNAVAILABLE'),
+    (dict(action='observe'),'OBSERVATION_INVALID'),
+])
+def test_forged_release_evidence_or_command_refuses(unbegun,kw,code):
+    s=unbegun;ctx,reservation,refs=_reserved(s);before=snap(s)
+    if 'command' in kw:kw['command']=getattr(ctx,kw['command']+'_command_id')
+    assert _abandon(s,ctx,reservation,refs,**kw)['code']==code
+    assert snap(s)==before and {r['state'] for r in _commitments(s)}=={'RESERVED'}
+
+
 # --- replay / ambiguity / concurrency ----------------------------------------
 
 def test_prior_physical_outcome_is_never_replayed(dispatcher):
     s=dispatcher;physical_begin(s);before=snap(s)
     _refused('PHYSICAL_OUTCOME_AMBIGUOUS',s.dispatch)
     assert snap(s)==before and _job_attempts(s)==0
+
+
+def test_crash_left_reservation_is_not_auto_abandoned(dispatcher):
+    s=dispatcher;_reserved(s);before=snap(s)
+    _refused('PHYSICAL_OUTCOME_AMBIGUOUS',s.dispatch)
+    assert snap(s)==before and {r['state'] for r in _commitments(s)}=={'RESERVED'}
+
+
+def test_claim_requires_exact_begin_command_aggregate_and_row(unbegun):
+    s=unbegun;ctx,_,event=physical_begin(s)
+    physical={'host_ref':ctx.host_ref,'request_fingerprint':ctx.fingerprint,'begin_event_id':event.event_id}
+    with s.runtime.store.read() as c:
+        initial._require_physical_begin(c,s.job.job_id,s.command,physical)
+        for job_id,command,changed in [
+                (s.job.job_id,s.command+':other',{}),
+                (s.job.job_id,s.command,{'host_ref':'host-'+'f'*64}),
+                (s.job.job_id,s.command,{'begin_event_id':event.event_id-1}),
+                ('JOB-other',s.command,{})]:
+            with pytest.raises(rt.StateConflict):
+                initial._require_physical_begin(c,job_id,command,dict(physical,**changed))
 
 
 def test_claimed_dispatch_cannot_reserve_again(dispatcher):
@@ -254,6 +382,8 @@ def test_failure_after_begin_leaves_effect_ambiguous(dispatcher,monkeypatch):
 
 
 def test_concurrent_dispatch_has_one_winner(unbegun,composed,monkeypatch):
+    # Threads share one process; cross-process exclusion is the same SQLite
+    # writer lock plus the unique (host, operation, phase) commitment row.
     s=unbegun;source,_=composed;barrier=threading.Barrier(2,timeout=30)
     async def acquire(_self):
         barrier.wait();return s.snapshot

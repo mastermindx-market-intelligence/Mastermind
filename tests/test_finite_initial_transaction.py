@@ -40,7 +40,7 @@ def _finite_demands(boot,*,io=False):
     return demands
 
 
-def finite_policy(*,host=HOST,boot=BOOT,armed=True,qualification='QUALIFIED',callers=None,disk_reserve=10*GiB,io=False):
+def finite_policy(*,host=HOST,boot=BOOT,armed=True,qualification='QUALIFIED',callers=None,disk_reserve=10*GiB,io=False,runtime=None):
     """A QUALIFIED armed v2 shape for tests only; never written to config/."""
     if not armed:
         return {'schema':'mastermind.physical_resource_policy.v2','production_armed':False,'qualification':'UNQUALIFIED',
@@ -53,7 +53,7 @@ def finite_policy(*,host=HOST,boot=BOOT,armed=True,qualification='QUALIFIED',cal
     return {'schema':'mastermind.physical_resource_policy.v2','production_armed':True,'qualification':qualification,
         'policy_revision':'finite-policy-1','authority_receipt':'test-authority','qualification_evidence':['test-qualification'],
         'canonical_runtime':{'runtime_id':'runtime-test','host_id':host,'boot_id':boot,'endpoint':'test://runtime',
-            'database_identity':'db-test','schema_identity':'schema-test'},
+            'database_identity':'db-test','schema_identity':'schema-test',**(runtime or {})},
         'allowed_callers':[{'owner_id':SUBJECT,'carrier_id':'minimax-finite-01','session_id':CLIENT}] if callers is None else callers,
         'host_qualifications':[{'host_id':host,'boot_id':boot,'capacity_pool_ref':POOL_REF,
             'qualification_revision':'host-qualification-1','qualification_evidence':['test-host-evidence'],
@@ -73,13 +73,21 @@ def finite_policy(*,host=HOST,boot=BOOT,armed=True,qualification='QUALIFIED',cal
         'recovery':{'reservation_horizon_ms':120_000,'reconciliation_interval_ms':1000}}
 
 
-def physical_world(monkeypatch,tmp_path,clock,**policy):
-    """Replace only the owner probe seams; the broker/composer stay real."""
+def physical_world(monkeypatch,tmp_path,clock,store=None,**policy):
+    """Replace only the owner probe seams; the broker/composer stay real.
+
+    The policy's canonical Runtime identity is derived from the real store.
+    """
     from tests.test_executive_physical_resources import _fp1b_capacity_snapshot,_host_pressure_snapshot
     root=tmp_path/'physical';(root/'git').mkdir(parents=True);(root/'runs').mkdir()
     w=SimpleNamespace(host=HOST,boot=BOOT,start='start-1',pool_free=300*GiB,age=0,
         policy_path=root/'policy.json',probe_error=None,hp0=[])
-    def write(**kw):w.policy_path.write_text(json.dumps(finite_policy(**{**policy,**kw}),sort_keys=True))
+    def write(**kw):
+        merged={**policy,**kw}
+        if store is not None:
+            with store.read() as c:identity=adm.runtime_identity(store,c)
+            merged['runtime']={**identity,**merged.get('runtime',{})}
+        w.policy_path.write_text(json.dumps(finite_policy(**merged),sort_keys=True))
     w.write=write;write()
     def pressure(host,boot):
         if w.probe_error:raise w.probe_error
@@ -160,7 +168,7 @@ def _build(tmp_path,monkeypatch,*,schema=True,physical=True):
         scopes=tuple(fg._SCOPES),subject_digest=SUBJECT,client_ref=CLIENT)
     operation._root_event_sha256=fg._digest(runtime.store.find_event_by_command_id(operation._command))
     operation._host_current=lambda:None
-    world=physical_world(monkeypatch,tmp_path,clock)
+    world=physical_world(monkeypatch,tmp_path,clock,store=runtime.store)
     s=SimpleNamespace(runtime=runtime,job=job,command=command,p=None,clock=clock,operation=operation,
         world=world,snapshot=snapshot,join=join,epoch=epoch,
         provider_row={'host_ref':join['host_ref'],'boot_ref':snapshot['slots'][0]['boot_ref']})

@@ -8,7 +8,15 @@ the existing owners once, in one process, for one canonical Job/command:
 * the kernel boot epoch and the existing HP0/FP1A Darwin probes;
 * the protected Control/worker definition (host, source, git store, run root);
 * the single production policy file, admitted only when armed, QUALIFIED, v2;
-* the active Runtime schema, admitted only when the M2 tables are migrated.
+* the active Runtime schema, admitted only when the M2 tables are migrated;
+* the policy's ``canonical_runtime``: this Runtime store file, its exact schema
+  and this host/boot. ``runtime_id`` and ``endpoint`` have no incumbent
+  producer and stay descriptive labels, never admission authority.
+
+The only release this composer issues is a positive pre-BEGIN NO_EFFECT
+abandonment of its own reservation. After BEGIN the debit stays until an
+incumbent terminal-evidence owner settles it (none exists yet); the one-shot
+finite capacity bounds that exposure and later admission fails closed.
 
 Every missing or changed input refuses with a ``PhysicalResourceRefusal`` code.
 Nothing here arms policy, migrates schema, invents a host/boot reference or
@@ -41,6 +49,8 @@ PHASE_KEY = 'attempt-1'
 POLICY_PATH = DEFAULT_POLICY_PATH
 BINDING_SCHEMA = 'mastermind.finite_initial_physical_binding/v1'
 _INT64_MAX = (1 << 63) - 1
+# Closed positive no-effect evidence: only for a reservation without BEGIN.
+ABANDON_EVIDENCE = {'terminal_effect_state': 'NO_EFFECT', 'pools': {}, 'positive_no_effect': True}
 _MINT = object()
 _ISSUED: 'weakref.WeakSet[PhysicalCallerContext]' = weakref.WeakSet()
 
@@ -111,6 +121,31 @@ def require_physical_schema(connection):
         _refuse('RESOURCE_SCHEMA_UNADMITTED', 'no admitted M2 physical resource schema is active')
 
 
+def runtime_identity(store, connection):
+    """Derived identity of this Runtime's database file and exact schema."""
+    from control_plane import executive_runtime as rt
+    try:
+        store._assert_owned_snapshot_connection(connection)
+        file_identity = store._database_file_identity
+        if file_identity is None:
+            raise ValueError('database file identity unavailable')
+        schema = rt._normalized_schema_digest(connection)
+    except Exception:
+        _refuse('RUNTIME_MISMATCH', 'Runtime database identity is unavailable')
+    return {'database_identity': 'sqlite-file-sha256:' + _sha256({
+                'realpath': os.path.realpath(store.path), 'device': file_identity[0], 'inode': file_identity[1]}),
+            'schema_identity': 'executive-schema-sha256:' + schema}
+
+
+def _require_canonical_runtime(policy, identity, host_ref, boot_ref):
+    """The admitted policy must name this exact local Runtime on this boot."""
+    runtime = policy['canonical_runtime']
+    if (runtime['host_id'] != host_ref or runtime['boot_id'] != boot_ref
+            or runtime['database_identity'] != identity['database_identity']
+            or runtime['schema_identity'] != identity['schema_identity']):
+        _refuse('RUNTIME_MISMATCH', 'policy canonical Runtime is not this Runtime')
+
+
 def load_admitted_policy():
     """One read of the production policy; only an armed QUALIFIED v2 admits."""
     path = Path(POLICY_PATH)
@@ -176,6 +211,7 @@ class PhysicalCallerContext:
     dispatch_command_id: str
     reserve_command_id: str
     begin_command_id: str
+    abandon_command_id: str
     host_ref: str
     boot_ref: str
     pid: int
@@ -250,6 +286,8 @@ def compose(store, operation, source, *, job_id, root_job_id, parent_job_id, dis
         _refuse('HOST_MISMATCH', 'provider capacity belongs to another host')
     if boot_ref != provider_row['boot_ref']:
         _refuse('BOOT_MISMATCH', 'provider capacity belongs to another boot')
+    with store.read() as connection:
+        _require_canonical_runtime(policy, runtime_identity(store, connection), host_ref, boot_ref)
     host, _ = _select_host_qualification({'host_id': host_ref, 'boot_id': boot_ref}, policy)
     profiles = [p for p in host['profiles'] if p['profile'] == FINITE_PROFILE]
     if len(profiles) != 1:
@@ -304,6 +342,7 @@ def compose(store, operation, source, *, job_id, root_job_id, parent_job_id, dis
     reservation = validate_physical_request(request)
     context = PhysicalCallerContext(store, operation, job_id, root_job_id, parent_job_id,
         dispatch_command_id, reserve_command, f'physical:{dispatch_command_id}:begin',
+        f'physical:{dispatch_command_id}:abandon',
         host_ref, boot_ref, pid, start_id, policy_path, policy_sha256, _canonical(policy),
         _canonical(observations), _canonical(reservation), physical_request_fingerprint(reservation),
         monotonic_deadline, _MINT)
@@ -311,18 +350,44 @@ def compose(store, operation, source, *, job_id, root_job_id, parent_job_id, dis
     return context, reservation
 
 
+def _abandonment(request, ctx):
+    """True only for the closed pre-BEGIN NO_EFFECT settle of this reservation."""
+    if type(request) is not dict or 'reservation' not in request:
+        return False
+    reservation = request['reservation']
+    if type(reservation) is not dict or reservation.get('command_id') != ctx.abandon_command_id:
+        if 'evidence' in request:
+            _refuse('CALLER_BINDING_UNAVAILABLE', 'finite admission composes reserve/begin/abandon only')
+        return False
+    try:
+        closed = set(request) == {'reservation', 'commitments', 'evidence'} and \
+            _canonical(request['evidence']) == _canonical(ABANDON_EVIDENCE)
+    except (TypeError, ValueError):
+        closed = False
+    if not closed:
+        _refuse('CALLER_BINDING_UNAVAILABLE', 'finite abandonment carries only positive no-effect evidence')
+    return True
+
+
 def admit(broker, request, ctx, *, connection=None, stage='entry'):
-    """Re-verify the sealed caller at every broker admission stage."""
+    """Re-verify the sealed caller at every broker admission stage.
+
+    Reserve/BEGIN must meet the decision deadline and unchanged policy. The
+    pre-BEGIN abandonment only releases this caller's own debit, so it skips
+    those two freshness gates but keeps every caller/process/Runtime/Job bind.
+    """
     if type(ctx) is not PhysicalCallerContext or ctx not in _ISSUED or getattr(ctx, '_seal', None) is not _MINT:
         _refuse('CALLER_BINDING_UNAVAILABLE', 'physical caller context was not issued here')
     if ctx.store is not broker.store:
         _refuse('CALLER_BINDING_UNAVAILABLE', 'physical caller context belongs to another Runtime')
+    abandon = _abandonment(request, ctx)
     _require_operation(ctx.operation, full=connection is None)
     if os.getpid() != ctx.pid:
         _refuse('CALLER_BINDING_UNAVAILABLE', 'physical caller process changed')
-    if time.monotonic() >= ctx.monotonic_deadline:
+    if not abandon and time.monotonic() >= ctx.monotonic_deadline:
         _refuse('DECISION_DEADLINE_EXPIRED', 'physical admission deadline expired')
-    if stage in {'entry', 'locked', 'before_commit'} and _policy_digest(ctx.policy_path) != ctx.policy_sha256:
+    if (not abandon and stage in {'entry', 'locked', 'before_commit'}
+            and _policy_digest(ctx.policy_path) != ctx.policy_sha256):
         _refuse('POLICY_MOVED', 'physical resource policy changed')
     if stage == 'entry':
         try:
@@ -333,26 +398,27 @@ def admit(broker, request, ctx, *, connection=None, stage='entry'):
             _refuse('BOOT_MISMATCH', 'kernel boot changed')
         if start != ctx.start_id:
             _refuse('CALLER_BINDING_UNAVAILABLE', 'physical caller process identity changed')
-    if type(request) is dict and 'reservation' in request:
-        if 'evidence' in request:
-            _refuse('CALLER_BINDING_UNAVAILABLE', 'finite admission composes reserve/begin only')
-        reservation = request['reservation']
-    else:
-        reservation = request
+    reservation = request['reservation'] if type(request) is dict and 'reservation' in request else request
     try:
         fingerprint = physical_request_fingerprint(reservation)
     except PhysicalResourceRefusal:
         _refuse('REQUEST_BINDING_MISMATCH', 'request is not the composed reservation')
-    if fingerprint != ctx.fingerprint or reservation.get('command_id') not in {ctx.reserve_command_id, ctx.begin_command_id}:
+    commands = {ctx.abandon_command_id} if abandon else {ctx.reserve_command_id, ctx.begin_command_id}
+    if fingerprint != ctx.fingerprint or reservation.get('command_id') not in commands:
         _refuse('REQUEST_BINDING_MISMATCH', 'request is not the composed reservation')
+    policy = json.loads(ctx.policy_json)
     if connection is not None:
         require_physical_schema(connection)
+        if stage in {'locked', 'before_commit'}:
+            _require_canonical_runtime(policy, runtime_identity(ctx.store, connection), ctx.host_ref, ctx.boot_ref)
         job = connection.execute('SELECT * FROM jobs WHERE job_id=?', (ctx.job_id,)).fetchone()
         if (job is None or job['root_job_id'] != ctx.root_job_id or job['parent_job_id'] != ctx.parent_job_id
                 or job['status'] != 'QUEUED' or job['current_attempt_id'] is not None or job['attempt_count'] != 0):
             _refuse('JOB_BINDING_MISMATCH', 'Job, root or parent no longer matches the composed caller')
         if connection.execute('SELECT 1 FROM events WHERE command_id=?', (ctx.dispatch_command_id,)).fetchone():
             _refuse('COMMAND_REPLAYED', 'dispatch command already has a durable outcome')
-    return copy.deepcopy({'policy': json.loads(ctx.policy_json),
+        if abandon and connection.execute('SELECT 1 FROM events WHERE command_id=?', (ctx.begin_command_id,)).fetchone():
+            _refuse('PHYSICAL_OUTCOME_AMBIGUOUS', 'BEGIN is durable; no-effect abandonment is unproven')
+    return copy.deepcopy({'policy': policy,
                           'observations': json.loads(ctx.observations_json),
                           'binding': ctx.binding()})

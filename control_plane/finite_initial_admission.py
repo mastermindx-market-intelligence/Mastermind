@@ -9,6 +9,7 @@ unmigrated or the production policy is unarmed/unqualified.
 """
 from __future__ import annotations
 import dataclasses
+import hashlib
 import json
 import time
 from control_plane.native_capacity_v2 import canonical, digest, known_admissible, validate_join
@@ -131,20 +132,32 @@ class FiniteInitialAdmission:
         # A prior physical outcome for this dispatch is never replayed here;
         # the existing broker owners reconcile it (EFFECT_MAY_HAVE_BEGUN stays).
         prior=store.get_event_by_command_id(context.reserve_command_id)
-        if store.get_event_by_command_id(context.begin_command_id) is None and prior is not None \
-                and prior.event_type=='PHYSICAL_RESOURCE_RESERVE_REFUSED':
+        begin=store.get_event_by_command_id(context.begin_command_id)
+        if begin is None and prior is not None and prior.event_type=='PHYSICAL_RESOURCE_RESERVE_REFUSED':
             # The broker's original no-debit decision is binding for this command.
             raise PhysicalResourceRefusal(prior.payload['receipt']['refusal_code'],'original physical refusal remains binding')
-        if prior is not None or store.get_event_by_command_id(context.begin_command_id) is not None:
+        if begin is None and prior is not None and _abandoned(store,context):
+            # Definite pre-BEGIN no-effect release; this one-shot is not retried.
+            raise PhysicalResourceRefusal('PHYSICAL_ADMISSION_ABANDONED','finite physical admission was released without effect')
+        if prior is not None or begin is not None:
+            # A crash may leave RESERVED rows; only the reconciliation owner
+            # may release them. Never auto-abandon from a later dispatch.
             raise PhysicalResourceRefusal('PHYSICAL_OUTCOME_AMBIGUOUS','finite physical admission already has an outcome')
         reserved=runtime.broker.reserve_physical(reservation,caller_context=context)
         if reserved.get('code')!='RESERVED' or reserved.get('admitted') is not True:
             raise PhysicalResourceRefusal(reserved.get('code') or 'RESERVATION_REFUSED','finite physical reservation refused')
         refs=[{'commitment_id':c['commitment_id'],'allocation_generation':c['allocation_generation'],
                'expected_revision':c['revision']} for c in reserved['receipt']['commitments']]
-        begun=runtime.broker.begin_physical({'reservation':dict(reservation,command_id=context.begin_command_id),
-            'commitments':refs},caller_context=context)
+        # BEGIN reuses this context's single sample; the evaluator still bounds
+        # it by sample_max_age_ms and refuses STALE_OBSERVATION when aged.
+        try:
+            begun=runtime.broker.begin_physical({'reservation':dict(reservation,command_id=context.begin_command_id),
+                'commitments':refs},caller_context=context)
+        except Exception:
+            _abandon_unbegun(runtime,context,reservation,refs)
+            raise
         if begun.get('code')!='BEGUN' or begun.get('fresh_begin') is not True:
+            _abandon_unbegun(runtime,context,reservation,refs)
             raise PhysicalResourceRefusal(begun.get('code') or 'BEGIN_REFUSED','finite physical BEGIN refused')
         event=store.get_event_by_command_id(context.begin_command_id)
         if event is None or event.event_type!='PHYSICAL_RESOURCE_BEGIN':
@@ -238,7 +251,7 @@ def _activate(prepared, store, connection, job_id, command_id, worker_id, quota_
     if (physical['host_ref']!=row['host_ref'] or physical['boot_ref']!=row['boot_ref']
             or physical['deadline_ms']<=now):
         _refuse('finite initial physical identity expired')
-    _require_physical_begin(connection,job_id,physical)
+    _require_physical_begin(connection,job_id,command_id,physical)
     from control_plane.executive_runtime import _finite_fresh_effect
     _finite_fresh_effect(store,connection,job_id)
     if connection.execute("UPDATE workers SET identity_status='ONLINE',version=version+1 WHERE worker_id=? AND identity_status='OFFLINE' AND version=?",(WORKER,epoch['worker']['version'])).rowcount!=1:
@@ -247,17 +260,53 @@ def _activate(prepared, store, connection, job_id, command_id, worker_id, quota_
         _refuse('finite initial quota CAS refused')
 
 
-def _require_physical_begin(connection, job_id, physical):
+def _abandoned(store, context):
+    """All of this operation's rows are a durable pre-BEGIN no-effect release."""
+    abandon=store.get_event_by_command_id(context.abandon_command_id)
+    if abandon is None or abandon.event_type!='PHYSICAL_RESOURCE_SETTLE':
+        return False
+    with store.read() as c:
+        rows=c.execute('SELECT state,begin_event_id,settlement_event_id FROM physical_resource_commitments '
+            'WHERE operation_key=?',(f'finite-initial:{context.job_id}',)).fetchall()
+    return bool(rows) and all(r['state']=='ABANDONED_NO_EFFECT' and r['begin_event_id'] is None
+        and r['settlement_event_id']==abandon.event_id for r in rows)
+
+
+def _abandon_unbegun(runtime, context, reservation, refs):
+    """Release this caller's own debit when BEGIN never became durable.
+
+    The broker refuses NO_EFFECT once any BEGIN exists, inside its writer, so
+    this is race-safe. A refused or failed release leaves RESERVED rows for
+    the reconciliation owner; the original BEGIN refusal is still raised.
+    """
+    from control_plane.executive_physical_admission import ABANDON_EVIDENCE
+    if runtime.store.get_event_by_command_id(context.begin_command_id) is not None:
+        return None
+    try:
+        return runtime.broker.settle_physical({'reservation':dict(reservation,command_id=context.abandon_command_id),
+            'commitments':refs,'evidence':dict(ABANDON_EVIDENCE)},caller_context=context)
+    except Exception:
+        return None
+
+
+def _require_physical_begin(connection, job_id, command_id, physical):
     """The same writer must see this Job's durable M2 BEGIN for this host."""
     if connection.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name='physical_resource_commitments'").fetchone() is None:
         _refuse('finite initial physical schema absent')
-    rows=connection.execute('SELECT host_id,request_fingerprint,state,begin_event_id '
-        'FROM physical_resource_commitments WHERE operation_key=?',(f'finite-initial:{job_id}',)).fetchall()
-    if not rows or any(r['host_id']!=physical['host_ref'] or r['request_fingerprint']!=physical['request_fingerprint']
+    operation_key=f'finite-initial:{job_id}'
+    rows=connection.execute('SELECT host_id,phase_key,request_fingerprint,state,begin_event_id '
+        'FROM physical_resource_commitments WHERE operation_key=?',(operation_key,)).fetchall()
+    if len(rows)!=1 or any(r['host_id']!=physical['host_ref'] or r['phase_key']!='attempt-1'
+            or r['request_fingerprint']!=physical['request_fingerprint']
             or r['state']!='EFFECT_MAY_HAVE_BEGUN' or r['begin_event_id']!=physical['begin_event_id'] for r in rows):
         _refuse('finite initial physical BEGIN absent or changed')
-    begin=connection.execute('SELECT event_type FROM events WHERE event_id=?',(physical['begin_event_id'],)).fetchone()
-    if begin is None or begin['event_type']!='PHYSICAL_RESOURCE_BEGIN':
+    from control_plane.executive_runtime import _json_dumps
+    aggregate=hashlib.sha256(_json_dumps([physical['host_ref'],operation_key]).encode()).hexdigest()
+    begin=connection.execute('SELECT event_type,command_id,aggregate_type,aggregate_id FROM events WHERE event_id=?',
+        (physical['begin_event_id'],)).fetchone()
+    if (begin is None or begin['event_type']!='PHYSICAL_RESOURCE_BEGIN'
+            or begin['command_id']!=f'physical:{command_id}:begin'
+            or begin['aggregate_type']!='physical_resource_operation' or begin['aggregate_id']!=aggregate):
         _refuse('finite initial physical BEGIN event absent')
 
 
