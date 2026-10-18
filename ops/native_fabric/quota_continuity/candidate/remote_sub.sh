@@ -207,6 +207,12 @@ if [[ "$REMOTE_CWD" == "~"* && "$REMOTE_CWD" != "~" && "$REMOTE_CWD" != "~/"* ]]
 fi
 
 release_lease() {
+  # Command substitutions run in a subshell. Retain an unproven local process
+  # cleanup in the original log so EXIT cannot lose that custody decision.
+  if [ "${COMMISSION_ACTIVE:-0}" = 1 ] && [ -n "${REMOTE_SUB_LOG_READY:-}" ] &&
+     LC_ALL=C grep -q ' CONTROLLER_PROCESS_UNPROVEN ' "$LOG_FILE" 2>/dev/null; then
+    PRESERVE_LEASE=1
+  fi
   if [ "$PRESERVE_LEASE" = "1" ]; then
     log "LEASE_PRESERVED effect_unknown=1 lease=$LEASE_ID"
     return 0
@@ -268,7 +274,64 @@ run() {
     show_args "$@"
     return 0
   fi
-  "$@"
+  commission_run setup "$@"
+}
+
+# The origin's clock is local to this controller. Anchor legacy duration-only
+# callers once at entry; never reset this deadline on selection, lease wait or
+# admission retry. No monotonic timestamp crosses the host transport.
+COMMISSION_ACTIVE=0
+if [ "${POOL_COMMISSION_DEADLINE_NS+x}" = x ] ||
+   [ "${POOL_COMMISSION_REMAINING_SECONDS+x}" = x ]; then
+  POOL_COMMISSION_DEADLINE_NS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-init) || {
+    RC=$?; log "COMMISSION_TIME_INVALID before_lease=1"; exit "$RC";
+  }
+  export POOL_COMMISSION_DEADLINE_NS
+  COMMISSION_ACTIVE=1
+fi
+
+commission_command() {
+  local stage input_file command_rc
+  stage="$1"; input_file="$2"; shift 2
+  if [ "$COMMISSION_ACTIVE" -ne 1 ]; then
+    if [ "$input_file" = - ]; then "$@"; else "$@" < "$input_file"; fi
+    return $?
+  fi
+  command_rc=0
+  "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-command \
+    "$stage" "$input_file" "$@" || command_rc=$?
+  if [ "$command_rc" -eq 76 ] || [ "$command_rc" -ge 128 ]; then
+    PRESERVE_LEASE=1
+    log "CONTROLLER_PROCESS_UNPROVEN stage=$stage rc=$command_rc"
+  elif [ "$command_rc" -eq 75 ] || [ "$command_rc" -eq 124 ]; then
+    log "COMMISSION_COMMAND_STOP stage=$stage rc=$command_rc"
+  fi
+  return "$command_rc"
+}
+
+commission_run() {
+  local stage
+  stage="$1"; shift
+  commission_command "$stage" - "$@"
+}
+
+commission_refresh_runtime() {
+  local stage seconds
+  stage="$1"
+  if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
+    seconds=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || {
+      RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC";
+    }
+    if [ "$seconds" -lt 1 ]; then
+      RC=75; log "COMMISSION_TIME_EXHAUSTED stage=$stage"; return "$RC"
+    fi
+    MAX_SECS="$seconds"
+  fi
+  if [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
+  else
+    CHILD_TIMEOUT=$MAX_SECS
+  fi
 }
 
 AUTO_REQUESTED=0
@@ -290,7 +353,7 @@ if [ "$HOST_ARG" = auto ]; then
   # Host selection is a read-only policy decision and must execute even in
   # --dry-run mode. Using run() here caused dry-run to capture the printed
   # argv (python3 ... host_pick.py ...) as HOST_ARG instead of a host name.
-  HOST_ARG=$(HOST_PICK_SELECTION_KEY="$ID" "$REMOTE_SUB_PYTHON" "$HERE/host_pick.py" "${PICK_ARGS[@]}") || {
+  HOST_ARG=$(HOST_PICK_SELECTION_KEY="$ID" commission_run host-pick "$REMOTE_SUB_PYTHON" "$HERE/host_pick.py" "${PICK_ARGS[@]}") || {
     RC=$?
     log "NO_HOST rc=$RC"
     exit "$RC"
@@ -367,6 +430,10 @@ PY_RESERVE
   fi
   chmod 600 "$LOG_FILE" 2>/dev/null || true
   REMOTE_SUB_LOG_READY=1
+  if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
+    REMOTE_SUB_DEADLINE_PROCESS_RECEIPT="$LOG_DIR/${ID}.controller-process.jsonl"
+    export REMOTE_SUB_DEADLINE_PROCESS_RECEIPT
+  fi
   log "RUN_RESERVED explicit=$([ -n "$RUN_ID_ARG" ] && echo 1 || echo 0)"
   SCRATCH_PATHS=("$POLL_FILE")
   # Keep the original acquire response in the existing private run directory
@@ -381,6 +448,11 @@ PY_RESERVE
 fi
 
 if [ "$HOST_ARG" = m2 ]; then
+  if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
+    # The local slot/provider owner does not consume this commission clock.
+    # Refuse before it can acquire or spawn; never outer-kill that owner.
+    RC=78; log "COMMISSION_LOCAL_TRANSPORT_REFUSED rc=78 reason=deadline_unsupported before_lease=1 before_launch=1"; exit "$RC";
+  fi
   if [ "$OPERATOR_CHILD_BUDGET" != "0" ] || [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
     RC=78; log "OPERATOR_REQUIRES_ADMITTED_REMOTE_PATH"; exit "$RC";
   fi
@@ -404,7 +476,7 @@ fi
 # The same canonical registry constraints apply to initial and CWD-aware
 # reselected candidates. Do not duplicate or weaken these policy checks.
 load_host_registry() {
-  REGISTRY=$("$REMOTE_SUB_PYTHON" -c '
+  REGISTRY=$(commission_run host-registry "$REMOTE_SUB_PYTHON" -c '
 import json, sys
 with open(sys.argv[1], encoding="utf-8") as fh: doc=json.load(fh)
 entry=doc.get(sys.argv[2])
@@ -469,7 +541,7 @@ if [ "$DRY_RUN" -ne 1 ]; then
   case "$MODE" in
     glm|glm-codex|grok|cursor|go|go-codex|qwen|bailian|codex-native|claude-native|oc-free)
       POLICY_SOURCE="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
-      if ! ECONOMIC_DECISION=$("$REMOTE_SUB_PYTHON" "$POLICY_SOURCE/pick.py" launch-policy \
+      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$POLICY_SOURCE/pick.py" launch-policy \
           --mode "$MODE" --class "${POOL_TASK_CLASS:-}" --model "$MODEL" \
           --task-complexity "${POOL_TASK_COMPLEXITY:-}" \
           --escalation-reason "${POOL_ESCALATION_REASON:-}"); then
@@ -621,11 +693,7 @@ RETRYABLE_ADMISSION_MODE=0
 case "$MODE" in
   glm|glm-codex|minimax|minimax-codex|qwen) RETRYABLE_ADMISSION_MODE=1 ;;
 esac
-if [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
-  CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
-else
-  CHILD_TIMEOUT=$MAX_SECS
-fi
+commission_refresh_runtime prelease || exit "$RC"
 if [ "$MODE" = go-codex ] && { [ "$CHILD_TIMEOUT" -lt 1 ] || [ "$CHILD_TIMEOUT" -gt 240 ]; }; then
   RC=2; log "GO_CHILD_TIMEOUT_REFUSED"; exit "$RC"
 fi
@@ -659,7 +727,7 @@ case "$REMOTE_CWD" in
           log "NO_HOST_WITH_PROJECT_CWD probe_limit=32"
           exit "$RC"
         fi
-        if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS" \
+        if commission_run cwd-preflight "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS" \
             "$REMOTE_PROJECT_CWD_PROBE"; then
           log "REMOTE_PROJECT_CWD_PREFLIGHT_OK"
           break
@@ -681,7 +749,7 @@ case "$REMOTE_CWD" in
         # The canonical picker and eligibility gates apply on every retry.
         log "AUTO_PROJECT_CWD_SKIP host=$HOST_ARG"
         PICK_ARGS+=(--exclude "$HOST_ARG")
-        NEXT_HOST=$(HOST_PICK_SELECTION_KEY="$ID" "$REMOTE_SUB_PYTHON" "$HERE/host_pick.py" "${PICK_ARGS[@]}") || {
+        NEXT_HOST=$(HOST_PICK_SELECTION_KEY="$ID" commission_run host-reselect "$REMOTE_SUB_PYTHON" "$HERE/host_pick.py" "${PICK_ARGS[@]}") || {
           RC=78
           log "NO_HOST_WITH_PROJECT_CWD"
           exit "$RC"
@@ -707,25 +775,57 @@ case "$REMOTE_CWD" in
 esac
 
 OPERATOR_CHILD_ARGS=()
+BROKER_DEADLINE_ARGS=()
+PRELEASE_HANDOFF_ARGS=()
+LEASE_WAIT_SECS="${REMOTE_SUB_LEASE_WAIT:-3600}"
+if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
+  LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS") || {
+    RC=$?; log "COMMISSION_TIME_EXHAUSTED stage=broker_acquire"; exit "$RC";
+  }
+  BROKER_DEADLINE_ARGS=(--deadline-ns "$POOL_COMMISSION_DEADLINE_NS")
+fi
 if [ -n "${FABRIC_OPERATOR_CHILD_ID:-}" ]; then
   [ "$FABRIC_OPERATOR_CHILD_ID" = "$ID" ] || { RC=78; log "OPERATOR_CHILD_ID_REFUSED"; exit "$RC"; }
   OPERATOR_CHILD_ARGS=(--operator-child-id "$ID")
 fi
+if [ "${POOL_PRELEASE_HANDOFF:-}" = 1 ]; then
+  # The foreground adapter owns the frozen request and the eventual one-shot
+  # controller return. Only a broker refusal before ANY grant can use this
+  # handoff; it cannot authorize an operator/historical continuation.
+  [ "${POOL_CAPACITY_PREFLIGHT:-}" = 1 ] &&
+  [ "$OPERATOR_CHILD_BUDGET" = 0 ] &&
+  [ -z "${FABRIC_OPERATOR_CHILD_ID:-}" ] &&
+  [ -z "${FABRIC_OPERATOR_PRELEASE_CONTINUATION:-}" ] &&
+  [ -z "${FABRIC_OPERATOR_POST_SUPPORT_CONTINUATION:-}" ] &&
+  [ -n "${POOL_ORCHESTRATOR_ID:-}" ] &&
+  [ -n "${POOL_PARENT_RUN_ID:-}" ] &&
+  [[ "${POOL_REQUEST_SHA256:-}" =~ ^[a-f0-9]{64}$ ]] &&
+  [[ "${POOL_REQUEST_LAUNCH_SHA256:-}" =~ ^[a-f0-9]{64}$ ]] || {
+    RC=78; log "PRELEASE_HANDOFF_BINDING_REFUSED"; exit "$RC";
+  }
+  ACTUAL_CONTROLLER_SHA=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" controller-source-sha "$SCRIPT_SOURCE") || {
+    RC=78; log "PRELEASE_HANDOFF_SOURCE_REFUSED"; exit "$RC";
+  }
+  PRELEASE_HANDOFF_ARGS=(--prelease-receipt "$LOG_DIR/${ID}.prelease-quota.json"
+    --run-id "$ID" --parent-run-id "$POOL_PARENT_RUN_ID"
+    --request-sha256 "$POOL_REQUEST_SHA256" --launch-sha256 "$POOL_REQUEST_LAUNCH_SHA256"
+    --controller-sha256 "$ACTUAL_CONTROLLER_SHA")
+fi
 if [ -n "$ACQUIRE_POOL" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
-    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}"
-    log "LEASE_WAIT pool=$ACQUIRE_POOL wait=${REMOTE_SUB_LEASE_WAIT:-3600}"
+    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"}
+    log "LEASE_WAIT pool=$ACQUIRE_POOL wait=$LEASE_WAIT_SECS"
   else
-    log "LEASE_WAIT pool=$ACQUIRE_POOL wait=${REMOTE_SUB_LEASE_WAIT:-3600}"
+    log "LEASE_WAIT pool=$ACQUIRE_POOL wait=$LEASE_WAIT_SECS"
     ORCH_ID="${POOL_ORCHESTRATOR_ID:-${CLAUDE_SESSION_ID:-remote-sub-$ID}}"
     if [ "$NATIVE_MODE" -eq 1 ]; then
-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
         RC=$?
         log "LEASE_REFUSED rc=$RC"
         exit "$RC"
       }
     else
-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "${REMOTE_SUB_LEASE_WAIT:-3600}" > "$LEASE_OUTPUT_FILE" || {
+      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
         RC=$?
         log "LEASE_REFUSED rc=$RC"
         exit "$RC"
@@ -740,6 +840,7 @@ if [ -n "$ACQUIRE_POOL" ]; then
       exit "$RC"
     fi
     log "LEASE_OK pool=$ACQUIRE_POOL"
+    commission_refresh_runtime after_lease || exit "$RC"
     if [ "${FABRIC_OPERATOR_POST_SUPPORT_CONTINUATION:-}" = "$ID" ] && [ "$POOL_ACCOUNT" != chairman-max ]; then
       RC=78; log "ORIGINAL_ACCOUNT_CONTINUATION_REFUSED rc=$RC"; exit "$RC";
     fi
@@ -755,7 +856,7 @@ run "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
   'mkdir -p ~/lanes/tmp ~/lanes/ext/active ~/lanes/ext/lanes ~/lanes/orch/fabric' || { RC=$?; log "REMOTE_SETUP_FAILED rc=$RC"; exit "$RC"; }
 
 SUPPORT_FILES=(
-  provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py native_runtime_bindings.py
+  provider_outcome.py quota_circuit.py recovery_artifacts.py capacity_preflight.py native_runtime_bindings.py commission_deadline.py
   pools.yaml fabric_policy_snapshot.py remote_sub_exec.py fabric_cpu_scope.py native_remote.py fabric_operator_client.py fabric_operator_stop.py fabric_operator_diagnostics.py artifact_production.py artifact_reader.py lane_runtime.py sub.sh slot.py pick.py glm_bound_claude.py model_tier.py yes
   codex_usage.py go_remote_codex.py go_remote_capsule.py
   mm_codex_exec.sh glm_codex_exec.sh go_codex_exec.sh qwen_exec.sh
@@ -768,7 +869,7 @@ REMOTE_SUPPORT_SOURCE="~/lanes/tmp/${ID}.support-src"
 SUPPORT_DIGEST="<verified-code-digest>"
 POLICY_SHA="<verified-policy-digest>"
 if [ "$DRY_RUN" -eq 0 ]; then
-  SUPPORT_META=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" support-meta "$HERE" "$SUPPORT_MANIFEST" "${SUPPORT_FILES[@]}"
+  SUPPORT_META=$(commission_run support-meta "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" support-meta "$HERE" "$SUPPORT_MANIFEST" "${SUPPORT_FILES[@]}"
   ) || { RC=3; log "SUPPORT_HASH_FAILED"; exit "$RC"; }
   read -r SUPPORT_DIGEST POLICY_SHA <<< "$SUPPORT_META"
   if [[ ! "$SUPPORT_DIGEST" =~ ^[a-f0-9]{64}$ || ! "$POLICY_SHA" =~ ^[a-f0-9]{64}$ ]]; then
@@ -783,19 +884,19 @@ run_scp() {
     show_args "<support-publication>" "same shared ext/active and ext/orch state; code=$SUPPORT_DIGEST; immutable advisory snapshot; shared admission recheck"
     return 0
   fi
-  "$SCP_CMD" -q "$PACKET" "$SSH_ALIAS:$REMOTE_PACKET" || return $?
+  commission_run packet-upload "$SCP_CMD" -q "$PACKET" "$SSH_ALIAS:$REMOTE_PACKET" || return $?
   # Per-run upload directory is new; existing published code is never overwritten.
-  "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+  commission_run support-mkdir "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
     "mkdir -p \"\$HOME/lanes/support-releases\" && mkdir \"\$HOME/lanes/tmp/${ID}.support-src\"" || return $?
   _src=()
   for _f in "${SUPPORT_FILES[@]}"; do [ "$_f" = pools.yaml ] || _src+=("$HERE/$_f"); done
-  "$SCP_CMD" -q "${_src[@]}" "$HERE/support_bundle.py" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
-  "$SCP_CMD" -q "$SUPPORT_MANIFEST" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/manifest.json" || return $?
-  "$SCP_CMD" -q "$HERE/../orch/fabric/pools.yaml" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/pools.yaml" || return $?
+  commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$HERE/support_bundle.py" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
+  commission_run manifest-upload "$SCP_CMD" -q "$SUPPORT_MANIFEST" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/manifest.json" || return $?
+  commission_run policy-upload "$SCP_CMD" -q "$HERE/../orch/fabric/pools.yaml" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/pools.yaml" || return $?
   # New generation carries hash-bound advisory policy. Publication checks
   # exact semantic compatibility without replacing policy under active workers.
   # Physical admission rechecks under the original lock before marker creation.
-  "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+  commission_run support-publish "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
     "$RPATH; python3 \"\$HOME/lanes/tmp/${ID}.support-src/support_bundle.py\" \"\$HOME/lanes/tmp/${ID}.support-src\" \"\$HOME/lanes/ext\" \"\$HOME/lanes/tmp/${ID}.support-src/manifest.json\" && test -f \"\$HOME/lanes/support-releases/${SUPPORT_DIGEST}/ext/remote_sub_exec.py\"" \
     || { log "SUPPORT_PUBLICATION_REFUSED"; return 75; }
   log "SUPPORT_VERSION_READY digest=$SUPPORT_DIGEST policy=$POLICY_SHA"
@@ -861,6 +962,7 @@ else
 fi
 
 if [ "$MODE" = go-codex ] && [ "$DRY_RUN" -eq 0 ]; then
+  commission_refresh_runtime go_launch || exit "$RC"
   GO_RUN_RECEIPT="$LOG_DIR/${ID}.go-run.json"
   # Default to preserving the existing lease before any possible worker effect.
   PRESERVE_LEASE=1
@@ -899,7 +1001,7 @@ if [ "$MODE" = "glm" ]; then
   }
   GLM_ACCOUNT_READY=""
   GLM_ACCOUNT_READ_RC=0
-  GLM_ACCOUNT_READY=$("$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+  GLM_ACCOUNT_READY=$(commission_run account-ready "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
     "$RPATH; $HOST_ENV; python3 \"\$HOME/lanes/support-releases/$SUPPORT_DIGEST/ext/glm_keys.py\" account-ready $GLM_ACCOUNT_QUOTED" \
     2>/dev/null) || GLM_ACCOUNT_READ_RC=$?
   if [ "$GLM_ACCOUNT_READ_RC" -ne 0 ] || [ "$GLM_ACCOUNT_READY" != "1" ]; then
@@ -913,7 +1015,7 @@ fi
 # A host-local native GLM installation remains a compatibility fallback (M1).
 # Provider API keys are never copied by this path.
 if [ "$MODE" = "glm-codex" ]; then
-  if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health | python3 -c '"'"'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("worker_capabilities")=="lease-v1" else 1)'"'"''       >/dev/null 2>&1; then
+  if commission_run capability-ready "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health | python3 -c '"'"'import json,sys; v=json.load(sys.stdin); raise SystemExit(0 if v.get("worker_capabilities")=="lease-v1" else 1)'"'"''       >/dev/null 2>&1; then
     CAP_TTL=$((CHILD_TIMEOUT + 300))
     [ "$CAP_TTL" -gt 7500 ] && CAP_TTL=7500
     [ "$CAP_TTL" -lt 60 ] && CAP_TTL=60
@@ -924,15 +1026,15 @@ if [ "$MODE" = "glm-codex" ]; then
     chmod 600 "$GLM_CAP_LOCAL" || {
       RC=78; log "GLM_CAPABILITY_LOCAL_MODE_FAILED"; exit "$RC";
     }
-    "$REMOTE_SUB_PYTHON" "$HERE/glm_remote_capability.py"       --lease-id "$LEASE_ID" --root "$ORCH_ID" --account "$POOL_ACCOUNT"       --model "$MODEL" --run-id "$ID" --host "$HOST_ARG" --ttl "$CAP_TTL"       --out "$GLM_CAP_LOCAL" >/dev/null || {
+    commission_run capability-issue "$REMOTE_SUB_PYTHON" "$HERE/glm_remote_capability.py"       --lease-id "$LEASE_ID" --root "$ORCH_ID" --account "$POOL_ACCOUNT"       --model "$MODEL" --run-id "$ID" --host "$HOST_ARG" --ttl "$CAP_TTL"       --out "$GLM_CAP_LOCAL" >/dev/null || {
         RC=78; log "GLM_CAPABILITY_ISSUE_REFUSED"; exit "$RC";
       }
     GLM_CAP_REMOTE="lanes/tmp/${ID}.glm-cap.json"
-    GLM_CAP_SHA=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" glm-cap-sha "$GLM_CAP_LOCAL"
+    GLM_CAP_SHA=$(commission_run capability-hash "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" glm-cap-sha "$GLM_CAP_LOCAL"
     ) || { RC=78; log "GLM_CAPABILITY_HASH_FAILED"; exit "$RC"; }
     GLM_CAP_TRANSFER_RC=0
-    "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS"       "set -eu; d=\"\$HOME/lanes/tmp\"; t=\"\$d/${ID}.glm-cap.json\"; [ -d \"\$d\" ] && [ ! -L \"\$d\" ]; [ ! -e \"\$t\" ] && [ ! -L \"\$t\" ]; umask 077; x=\$(mktemp \"\$d/${ID}.glm-cap.tmp.XXXXXX\"); trap 'rm -f \"\$x\"' EXIT HUP INT TERM; cat > \"\$x\"; chmod 600 \"\$x\"; n=\$(wc -c < \"\$x\" | tr -d ' '); [ \"\$n\" -ge 1 ] && [ \"\$n\" -le 16384 ]; mv \"\$x\" \"\$t\"; trap - EXIT HUP INT TERM"       < "$GLM_CAP_LOCAL" || GLM_CAP_TRANSFER_RC=$?
-    GLM_CAP_REMOTE_META=$("$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       "python3 - \"\$HOME/lanes/tmp/${ID}.glm-cap.json\" <<'PY_GLM_REMOTE_META'
+    commission_command capability-upload "$GLM_CAP_LOCAL" "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS"       "set -eu; d=\"\$HOME/lanes/tmp\"; t=\"\$d/${ID}.glm-cap.json\"; [ -d \"\$d\" ] && [ ! -L \"\$d\" ]; [ ! -e \"\$t\" ] && [ ! -L \"\$t\" ]; umask 077; x=\$(mktemp \"\$d/${ID}.glm-cap.tmp.XXXXXX\"); trap 'rm -f \"\$x\"' EXIT HUP INT TERM; cat > \"\$x\"; chmod 600 \"\$x\"; n=\$(wc -c < \"\$x\" | tr -d ' '); [ \"\$n\" -ge 1 ] && [ \"\$n\" -le 16384 ]; mv \"\$x\" \"\$t\"; trap - EXIT HUP INT TERM" || GLM_CAP_TRANSFER_RC=$?
+    GLM_CAP_REMOTE_META=$(commission_run capability-readback "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       "python3 - \"\$HOME/lanes/tmp/${ID}.glm-cap.json\" <<'PY_GLM_REMOTE_META'
 import hashlib, os, stat, sys
 p=sys.argv[1]
 s=os.lstat(p)
@@ -948,7 +1050,7 @@ PY_GLM_REMOTE_META
       exit "$RC"
     fi
     log "GLM_CAPABILITY_READY lease=$LEASE_ID ttl=$CAP_TTL transport=ssh-stdin"
-  elif "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health >/dev/null && { { test -s "$HOME/.glm/config.json" && test -s "$HOME/lanes/ext/glm_shim/.token"; } || test -s "$HOME/lanes/ext/.host_glm_token.sh"; }'       >/dev/null 2>&1; then
+  elif commission_run credential-ready "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       'curl -fsS --max-time 3 http://127.0.0.1:4141/health >/dev/null && { { test -s "$HOME/.glm/config.json" && test -s "$HOME/lanes/ext/glm_shim/.token"; } || test -s "$HOME/lanes/ext/.host_glm_token.sh"; }'       >/dev/null 2>&1; then
     log "GLM_LEGACY_LOCAL_CREDENTIAL host=$HOST_ARG"
   else
     RC=78
@@ -995,11 +1097,12 @@ ACCOUNT_ARG=${POOL_ACCOUNT:-}
 # Preserve the exact broker-acquired root even if it was local shell state.
 # The remote child must not substitute an unset inherited environment value.
 ROUTING_ROOT="${ORCH_ID:-${POOL_ORCHESTRATOR_ID:-${CLAUDE_SESSION_ID:-remote-sub-$ID}}}"
-ROUTING_ENV=$(POOL_ORCHESTRATOR_ID="$ROUTING_ROOT" "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" routing-env
+ROUTING_ENV=$(POOL_ORCHESTRATOR_ID="$ROUTING_ROOT" commission_run routing-env "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" routing-env
 ) || { log "ROUTING_METADATA_ENCODING_FAILED"; RC=78; exit "$RC"; }
 NATIVE_LEASE_ISSUED=""
 NATIVE_LEASE_DEADLINE=""
 if [ "$NATIVE_MODE" -eq 1 ]; then
+  commission_refresh_runtime native_window || exit "$RC"
   NATIVE_WINDOW=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" native-window "$HERE" "$LEASE_ID" "$ORCH_ID" "$POOL_ACCOUNT" "$HOST_ARG" "$CHILD_TIMEOUT" "$ACQUIRE_POOL"
   ) || { RC=78; log "NATIVE_LEASE_WINDOW_REFUSED"; exit "$RC"; }
   read -r NATIVE_LEASE_ISSUED NATIVE_LEASE_DEADLINE <<< "$NATIVE_WINDOW"
@@ -1024,7 +1127,7 @@ fi
 if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
    { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
    [ -n "${POOL_PARENT_RUN_ID:-}" ]; then
-  "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" launch-binding \
+  commission_run launch-binding "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" launch-binding \
     "$LOG_FILE" "$PACKET" "$LEASE_OUTPUT_FILE" "$ID" "$ROUTING_ROOT" \
     "$POOL_PARENT_RUN_ID" "$HOST_ARG" "$MODE" "$MODEL" "$SUPPORT_DIGEST" \
     "$LEASE_ID" "$ACCOUNT_ARG" >&2 || {
@@ -1040,22 +1143,38 @@ if [ -n "$NEW_MACRO_COMMIT" ]; then
   fi
   log "FABRIC_NEW_MACRO_WORKTREE run=$ID commit=$NEW_MACRO_COMMIT root=$POOL_ORCHESTRATOR_ID parent=$POOL_PARENT_RUN_ID"
 fi
-log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
-LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' FABRIC_CPU_SCOPE_QUOTA_PCT='$CPU_SCOPE_QUOTA' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
 ADMISSION_FILE="$HERE/lanes/${ID}.admission"
 if [ "$DRY_RUN" -ne 1 ]; then SCRATCH_PATHS+=("$ADMISSION_FILE"); fi
 ADMISSION_WAIT_STARTED_SECONDS=""
 launch_attempt=0
 
 while true; do
+  if ! commission_refresh_runtime launch; then
+    # A terminal admission refusal remains settled when its retry budget ends.
+    # Continue its original collection path instead of inventing a new effect.
+    if [ "$RC_OBSERVED" -eq 1 ]; then RC=75; break; fi
+    exit "$RC"
+  fi
+  COMMISSION_REMOTE_ENV=""
+  if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
+    case "$MODE" in
+      glm|glm-codex|minimax|minimax-codex|qwen)
+        COMMISSION_REMOTE_ENV="REMOTE_SUB_COMMISSION_BUDGET_SECONDS='$CHILD_TIMEOUT'" ;;
+    esac
+  fi
+  # Rebuild at every actual attempt. The receiving process anchors this
+  # duration to its own monotonic clock before its preparation/admission.
+  LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd ~/lanes/ext || exit; rm -f \"$REMOTE_STDOUT\" \"$REMOTE_RC\" || exit; KEY='$ID' MODE='$MODE' PACKET=\"\$HOME/lanes/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"\$HOME/lanes/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV $COMMISSION_REMOTE_ENV SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' FABRIC_CPU_SCOPE_QUOTA_PCT='$CPU_SCOPE_QUOTA' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' bash -c '$REMOTE_INNER' </dev/null > \"$REMOTE_STDOUT\" 2>&1 &"
+  log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
   launch_attempt=$((launch_attempt + 1))
   log "LAUNCH_ATTEMPT attempt=$launch_attempt"
   # From this point the remote launch may have taken effect even if the SSH reply is lost.
   # Keep provider custody until the exact run reaches a reconciled terminal observation.
   PRESERVE_LEASE=1
+  RC_OBSERVED=0
   LAUNCH_RC=0
   if [ "$NATIVE_MODE" -eq 1 ]; then log "NATIVE_SSH_ENTER epoch_s=$(date -u +%s)"; fi
-  "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "$LAUNCH_REMOTE" || LAUNCH_RC=$?
+  commission_run launch "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "$LAUNCH_REMOTE" || LAUNCH_RC=$?
   if [ "$NATIVE_MODE" -eq 1 ]; then log "NATIVE_SSH_RETURN epoch_s=$(date -u +%s) rc=$LAUNCH_RC"; fi
   if [ "$LAUNCH_RC" -ne 0 ]; then
     RC=$LAUNCH_RC
@@ -1067,6 +1186,10 @@ while true; do
   RC=""
   poll_count=0
   while [ $((SECONDS - WAIT_STARTED_SECONDS)) -lt "$MAX_SECS" ]; do
+    if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
+      commission_poll_remaining=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$MAX_SECS") || break
+      [ "$commission_poll_remaining" -gt 0 ] || break
+    fi
     if [ -n "$LEASE_ID" ]; then
       broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true
     fi
@@ -1074,7 +1197,7 @@ while true; do
     elapsed=$((SECONDS - WAIT_STARTED_SECONDS))
     log "POLL $poll_count/$MAX_SECS elapsed=$elapsed file=~/lanes/ext/$REMOTE_RC"
     poll_rc=0
-    "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+    commission_run poll "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
           "if [ -f \"\$HOME/lanes/ext/$REMOTE_RC\" ]; then cat \"\$HOME/lanes/ext/$REMOTE_RC\"; else printf '%s\n' '__REMOTE_SUB_PENDING__'; fi" > "$POLL_FILE" || poll_rc=$?
     if [ "$poll_rc" -eq 0 ]; then
       POLL_VALUE="$(cat "$POLL_FILE" 2>/dev/null || true)"
@@ -1095,7 +1218,7 @@ while true; do
     [ "$remaining" -gt 0 ] || break
     sleep_for="$POLL_SECS"
     [ "$sleep_for" -le "$remaining" ] || sleep_for="$remaining"
-    sleep "$sleep_for"
+    commission_run poll-sleep sleep "$sleep_for" || break
   done
 
   if [ -z "$RC" ]; then
@@ -1109,7 +1232,7 @@ while true; do
   log "REMOTE_DONE rc=$RC"
   if [ "$RETRYABLE_ADMISSION_MODE" -eq 1 ] && [ "$RC" -eq 75 ] && [ "$ADMISSION_WAIT_SECS" -gt 0 ]; then
     admission_read_rc=0
-    "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+    commission_run admission-read "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
       "if grep -Fq 'REMOTE_SUB_ADMISSION_REFUSED ' \"\$HOME/lanes/ext/$REMOTE_STDOUT\" 2>/dev/null && grep -Fq 'active_lane_limit_reached' \"\$HOME/lanes/ext/$REMOTE_STDOUT\" 2>/dev/null; then tail -c 4096 \"\$HOME/lanes/ext/$REMOTE_STDOUT\"; else exit 1; fi" \
       > "$ADMISSION_FILE" || admission_read_rc=$?
     if [ "$admission_read_rc" -eq 0 ] && grep -Fq "active_lane_limit_reached" "$ADMISSION_FILE" 2>/dev/null; then
@@ -1121,8 +1244,7 @@ while true; do
         if [ -n "$LEASE_ID" ]; then broker heartbeat "$LEASE_ID" >/dev/null 2>&1 || true; fi
         admission_sleep="$ADMISSION_RETRY_SECS"
         [ "$admission_sleep" -le "$admission_remaining" ] || admission_sleep="$admission_remaining"
-        sleep "$admission_sleep"
-        RC_OBSERVED=0
+        commission_run admission-sleep sleep "$admission_sleep" || break
         log "ADMISSION_RETRY same_run=1 same_host=1 next_attempt=$((launch_attempt + 1))"
         continue
       fi

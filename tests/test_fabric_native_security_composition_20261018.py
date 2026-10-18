@@ -22,9 +22,12 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
-COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f77591ebc4eb66c43d"
+COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
+PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f77591ebc4eb66c43d"
+DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
+DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-NATIVE_MANIFEST_SHA = "58b8bb063324ec67b1720c15488ac06e1091e8383c661cb0a6005f0f8f21907f"
+NATIVE_MANIFEST_SHA = "0b6dfec330404b12120ae764da065cd1e7c054e9838fdc8dccc0a7cc17d6bc58"
 
 
 def _sha(raw):
@@ -46,11 +49,20 @@ def _composition(directory):
     assert before.count(line) == 1
     quota = before.replace(line, line + outcome)
     assert _sha(quota) == QUOTA_SHA
+    # Preserve the exact independently reviewed security-prefix/quota-tail
+    # composition before applying the one reviewed deadline transformation.
+    boundary = b"def _execute("
+    prior = security[:security.index(boundary)] + quota[quota.index(boundary):]
+    assert _sha(prior) == PRE_DEADLINE_COMPOSED_SHA
+    assert prior[:prior.index(boundary)] == security[:security.index(boundary)]
+    assert prior[prior.index(boundary):] == quota[quota.index(boundary):]
+    target.write_bytes(prior)
+    assert _sha(DEADLINE_PATCH.read_bytes()) == DEADLINE_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(DEADLINE_PATCH))
+    donor_contract._git(directory, "apply", str(DEADLINE_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == COMPOSED_SHA
-    boundary = b"def _execute("
-    assert composed[:composed.index(boundary)] == security[:security.index(boundary)]
-    assert composed[composed.index(boundary):] == quota[quota.index(boundary):]
+    assert target.read_bytes() == composed
     return composed
 
 
@@ -99,7 +111,7 @@ def native_stage(tmp_path_factory):
     assert (output / "native-source-inventory.json").read_bytes() == (
         NATIVE / "rollout/native-source-inventory.json").read_bytes()
     manifest = json.loads(expected)
-    assert len(manifest) == 81
+    assert len(manifest) == 82
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
     assert manifest["ext/remote_sub_exec.py"] == COMPOSED_SHA
@@ -128,7 +140,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == 81 and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert len(files) == 82 and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
@@ -141,7 +153,7 @@ def _seam(stage, base):
     names = support.SOURCE_FILES
     shell_names = set(re.search(r"SUPPORT_FILES=\(\n(.*?)\n\)",
                                (native_here / "remote_sub.sh").read_text(), re.S).group(1).split())
-    assert names == shell_names and len(names) == 36
+    assert names == shell_names and len(names) == 37
     manifest_path = base / "run.support-manifest.json"
     metadata = subprocess.run(
         [sys.executable, "-B", str(native_here / "remote_sub_helpers.py"),
@@ -289,8 +301,8 @@ print("benign fixture workspace ready")
         assert lease.exited and lease.holds == ["worker_cleanup_unproven"]
         assert (fixture.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
         assert os.environ.get("HOME") == initial_home
-    return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": 81,
-            "support_files": 36, "executor_sha256": COMPOSED_SHA,
+    return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": 82,
+            "support_files": 37, "executor_sha256": COMPOSED_SHA,
             "fixture_native_digest": generation.name, "fixture_support_digest": support_digest,
             "mint_receipt_sha256": _sha(receipt.read_bytes()), "provider_started": False,
             "production_macro_helper_tested": False, "physical_lease_acquired": False}
@@ -304,7 +316,7 @@ def test_selected_native_support_executor_preserves_mint_and_outcome_binding(nat
     proof = json.loads(result.stdout)
     assert proof["status"] == "OFFLINE_COMPOSITION_SEAM_PASS"
     assert proof["executor_sha256"] == COMPOSED_SHA
-    assert proof["native_files"] == 81 and proof["support_files"] == 36
+    assert proof["native_files"] == 82 and proof["support_files"] == 37
     assert proof["provider_started"] is False
     assert proof["physical_lease_acquired"] is False
     assert proof["production_macro_helper_tested"] is False

@@ -16,6 +16,7 @@ CLI:
 from __future__ import annotations
 
 import argparse
+from contextvars import ContextVar
 import fcntl
 import json
 import os
@@ -28,6 +29,45 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+from commission_deadline import (CommissionDeadlineExpired, require_remaining,
+                                 validate_deadline_ns)
+
+# Only acquire sets this context. Independent threads/controllers and existing
+# heartbeat/release/settlement operations never inherit another acquire's fuse.
+_ACQUIRE_DEADLINE_NS = ContextVar("fabric_acquire_deadline_ns", default=None)
+
+
+class _DeadlineConnection(sqlite3.Connection):
+    """The incumbent SQLite owner, with waits narrowed before every statement."""
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.deadline_ns = _ACQUIRE_DEADLINE_NS.get()
+        if self.deadline_ns is not None:
+            self.set_progress_handler(
+                lambda: int(time.monotonic_ns() >= self.deadline_ns), 1000)
+
+    def _before_statement(self):
+        if self.deadline_ns is not None:
+            remaining = require_remaining(self.deadline_ns)
+            # Recompute before each statement; successive SQLite lock waits
+            # cannot each spend the same original remaining-time snapshot.
+            super().execute("PRAGMA busy_timeout=" + str(min(30000, int(remaining * 1000))))
+
+    def execute(self, *args, **kwargs):
+        self._before_statement()
+        return super().execute(*args, **kwargs)
+
+    def commit(self):
+        self._before_statement()
+        return super().commit()
+
+
+def _connect(path):
+    deadline = _ACQUIRE_DEADLINE_NS.get()
+    timeout = 30 if deadline is None else min(30, require_remaining(deadline))
+    return sqlite3.connect(path, timeout=timeout,
+                           factory=sqlite3.Connection if deadline is None else _DeadlineConnection)
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 KIT = os.path.abspath(os.path.join(HERE, ".."))
@@ -114,6 +154,7 @@ class AcquireResult:
     reason: str = ""
     orchestrator_id: str = ""
     pool: str = ""
+    quota_blockade: Optional[Dict[str, Any]] = None
 
     def line(self) -> str:
         if self.ok:
@@ -182,7 +223,7 @@ class Broker:
         self._init_db()
 
     def _init_db(self) -> None:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = _connect(self.db_path)
         try:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute(
@@ -224,11 +265,25 @@ class Broker:
 
     def _lock(self):
         fh = open(self.lock_path, "a+")
-        fcntl.flock(fh, fcntl.LOCK_EX)
-        return fh
+        deadline = _ACQUIRE_DEADLINE_NS.get()
+        try:
+            if deadline is None:
+                fcntl.flock(fh, fcntl.LOCK_EX)
+            else:
+                while True:
+                    remaining = require_remaining(deadline)
+                    try:
+                        fcntl.flock(fh, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                        break
+                    except BlockingIOError:
+                        time.sleep(min(0.05, remaining))
+            return fh
+        except BaseException:
+            fh.close()
+            raise
 
     def _conn(self) -> sqlite3.Connection:
-        conn = sqlite3.connect(self.db_path, timeout=30)
+        conn = _connect(self.db_path)
         conn.row_factory = sqlite3.Row
         return conn
 
@@ -634,7 +689,30 @@ class Broker:
         poll: float = 1.0,
         model: str = "",
         operator_child_id: Optional[str] = None,
+        capacity_handoff: bool = False,
+        deadline_ns: Optional[int] = None,
     ) -> AcquireResult:
+        if deadline_ns is not None:
+            deadline_ns = validate_deadline_ns(deadline_ns)
+        token = _ACQUIRE_DEADLINE_NS.set(deadline_ns)
+        try:
+            return self._acquire(orchestrator_id, pool, account, task_class, host,
+                pid, ttl, wait, poll, model, operator_child_id, capacity_handoff)
+        except CommissionDeadlineExpired:
+            return AcquireResult(ok=False, reason="commission_time_exhausted",
+                orchestrator_id=orchestrator_id, pool=self.provider_name(pool))
+        except sqlite3.OperationalError:
+            # A refused/unknown database operation is never quota handoff proof.
+            # In particular an interrupted grant cannot be declared lease-free.
+            if deadline_ns is not None and time.monotonic_ns() >= deadline_ns:
+                return AcquireResult(ok=False, reason="commission_time_exhausted",
+                    orchestrator_id=orchestrator_id, pool=self.provider_name(pool))
+            raise
+        finally:
+            _ACQUIRE_DEADLINE_NS.reset(token)
+
+    def _acquire(self, orchestrator_id, pool, account, task_class, host,
+                 pid, ttl, wait, poll, model, operator_child_id, capacity_handoff):
         pool = self.provider_name(pool)
         model = str(model or "").strip()
         host = host or self.this_host
@@ -664,15 +742,20 @@ class Broker:
                     waiter_id,
                     model,
                     operator_child_id,
+                    capacity_handoff,
                 )
-                if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable"):
+                if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
                     return result
             finally:
                 fcntl.flock(lock, fcntl.LOCK_UN)
                 lock.close()
             if self.now() >= deadline:
                 break
-            time.sleep(max(0.05, float(poll)))
+            pause = min(max(0.05, float(poll)), max(0.0, deadline - self.now()))
+            original = _ACQUIRE_DEADLINE_NS.get()
+            if original is not None:
+                pause = min(pause, require_remaining(original))
+            time.sleep(pause)
         return AcquireResult(
             ok=False,
             reason=last_reason,
@@ -862,6 +945,7 @@ class Broker:
         waiter_id: Optional[str],
         model: str = "",
         operator_child_id: Optional[str] = None,
+        capacity_handoff: bool = False,
     ) -> Tuple[AcquireResult, Optional[str], str]:
         spec = self.provider(pool)
         if spec.get("enabled") is False:
@@ -876,6 +960,19 @@ class Broker:
                 waiter_id,
                 "grok_exhausted",
             )
+        if capacity_handoff and operator_child_id is None:
+            import quota_circuit
+            conn = self._conn()
+            try:
+                blockade = quota_circuit.capacity_blockade(self, conn, pool, account)
+                if blockade is not None:
+                    if waiter_id is not None:
+                        conn.execute("DELETE FROM waiters WHERE id=?", (waiter_id,))
+                        conn.commit()
+                    return (AcquireResult(ok=False, reason="quota_cooldown", pool=pool,
+                        orchestrator_id=orch, quota_blockade=blockade), waiter_id, "quota_cooldown")
+            finally:
+                conn.close()
         compatible_accounts = None
         if (pool == "glm" and task_class == "remote-glm") or (
                 self.provider_name(pool) == "bailian" and task_class == "remote-qwen"):
@@ -970,6 +1067,9 @@ class Broker:
             use_ttl = int(ttl if ttl is not None else (RENT_TTL if state == "rented" else DEFAULT_TTL))
             lid = uuid.uuid4().hex[:12]
             now = self.now()
+            original_deadline = _ACQUIRE_DEADLINE_NS.get()
+            if original_deadline is not None:
+                require_remaining(original_deadline)
             if operator_child_id is not None:
                 try:
                     from fabric_operator_owner import validate_child_admission
@@ -1471,6 +1571,13 @@ def main(argv: Optional[List[str]] = None) -> int:
     pa.add_argument("--ttl", type=int, default=None)
     pa.add_argument("--wait", type=float, default=0)
     pa.add_argument("--poll", type=float, default=1.0)
+    pa.add_argument("--deadline-ns", type=int, default=None)
+    pa.add_argument("--prelease-receipt", default=None)
+    pa.add_argument("--run-id", default=None)
+    pa.add_argument("--parent-run-id", default=None)
+    pa.add_argument("--request-sha256", default=None)
+    pa.add_argument("--launch-sha256", default=None)
+    pa.add_argument("--controller-sha256", default=None)
 
     ph = sub.add_parser("heartbeat")
     ph.add_argument("lease_id")
@@ -1493,7 +1600,19 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_parser("gc")
 
     args = p.parse_args(argv)
-    br = default_broker()
+    deadline = None
+    if args.cmd == "acquire" and args.deadline_ns is not None:
+        deadline = validate_deadline_ns(args.deadline_ns)
+    token = _ACQUIRE_DEADLINE_NS.set(deadline)
+    try:
+        br = default_broker()
+    except (CommissionDeadlineExpired, sqlite3.OperationalError):
+        if deadline is not None and time.monotonic_ns() >= deadline:
+            print("WAIT reason=commission_time_exhausted")
+            return 75
+        raise
+    finally:
+        _ACQUIRE_DEADLINE_NS.reset(token)
 
     if args.cmd == "observe-provider":
         import quota_circuit
@@ -1513,6 +1632,17 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     if args.cmd == "acquire":
         oid = resolve_orchestrator_id(args.orchestrator_id)
+        handoff_fields = (args.prelease_receipt, args.run_id, args.parent_run_id,
+            args.request_sha256, args.launch_sha256, args.controller_sha256)
+        if any(value is not None for value in handoff_fields):
+            import re
+            if (not all(isinstance(value, str) and value for value in handoff_fields)
+                    or args.operator_child_id is not None
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", args.run_id)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}", args.parent_run_id)
+                    or any(re.fullmatch(r"[0-9a-f]{64}", value) is None for value in handoff_fields[3:])
+                    or args.pid <= 0):
+                p.error("invalid prelease handoff binding")
         res = br.acquire(
             orchestrator_id=oid,
             pool=args.pool,
@@ -1525,7 +1655,17 @@ def main(argv: Optional[List[str]] = None) -> int:
             wait=args.wait,
             poll=args.poll,
             operator_child_id=args.operator_child_id,
+            capacity_handoff=args.prelease_receipt is not None,
+            deadline_ns=deadline,
         )
+        if (res.reason == "quota_cooldown" and res.quota_blockade is not None
+                and not res.ok and not res.lease_id and args.prelease_receipt):
+            import quota_circuit
+            quota_circuit.write_prelease_refusal(args.prelease_receipt,
+                run_id=args.run_id, root_id=oid, parent_run_id=args.parent_run_id,
+                pool=res.pool, host=args.host, model=args.model, pid=args.pid,
+                request_sha256=args.request_sha256, launch_sha256=args.launch_sha256,
+                controller_sha256=args.controller_sha256, blockade=res.quota_blockade)
         print(res.line())
         return 0 if res.ok else 75
 

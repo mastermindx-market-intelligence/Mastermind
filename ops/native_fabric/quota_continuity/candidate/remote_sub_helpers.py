@@ -6,6 +6,102 @@ They do not create a new broker, admission or credential surface.
 """
 import sys
 
+
+def deadline_init():
+    """Carry an absolute origin unchanged; anchor a legacy duration only once."""
+    import os
+    import re
+    from commission_deadline import read_deadline_ns, narrow_deadline_ns
+    deadline = read_deadline_ns()
+    raw = os.environ.get('POOL_COMMISSION_REMAINING_SECONDS')
+    if raw is not None:
+        if not re.fullmatch(r'[1-9][0-9]{0,3}', raw) or int(raw) > 7200:
+            raise ValueError('commission_duration_invalid')
+        if deadline is None:
+            deadline = narrow_deadline_ns(None, int(raw))
+    print('' if deadline is None else deadline)
+
+
+def deadline_seconds():
+    import math
+    from commission_deadline import read_deadline_ns, require_remaining
+    cap = float(sys.argv[1])
+    if not math.isfinite(cap) or cap < 0:
+        raise ValueError('commission_duration_invalid')
+    deadline = read_deadline_ns()
+    if deadline is None:
+        raise ValueError('commission_deadline_missing')
+    # Whole seconds are conservative on the Bash/broker/worker wire. The
+    # process owner below retains fractional time for the actual local fuse.
+    print(min(int(cap), int(require_remaining(deadline))))
+
+
+def deadline_command():
+    """Bound one controller command with the incumbent owned-process runtime.
+
+    Only fixed local preparation/transport calls use this helper. It never
+    authorizes a worker replay, releases a lease or limits terminal settlement.
+    """
+    import os
+    import re
+    import stat
+    from commission_deadline import (CommissionDeadlineExpired, read_deadline_ns,
+                                     require_remaining)
+    from lane_runtime import (OwnedProcessStartError, install_signal_cleanup,
+                              run_owned_process)
+
+    stage, input_path, *command = sys.argv[1:]
+    if not re.fullmatch(r'[a-z][a-z0-9_-]{0,63}', stage) or not command:
+        raise ValueError('commission_command_invalid')
+    deadline = read_deadline_ns()
+    if deadline is None:
+        raise ValueError('commission_deadline_missing')
+    require_remaining(deadline)
+    input_text = None
+    if input_path != '-':
+        fd = os.open(input_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode) or not 0 <= info.st_size <= 2 * 1024 * 1024:
+                raise ValueError('commission_input_invalid')
+            with os.fdopen(fd, 'rb', closefd=False) as stream:
+                raw = stream.read(2 * 1024 * 1024 + 1)
+            if len(raw) != info.st_size:
+                raise ValueError('commission_input_changed')
+            input_text = raw.decode('utf-8')
+        finally:
+            os.close(fd)
+    install_signal_cleanup()
+    try:
+        result = run_owned_process(
+            command, timeout=require_remaining(deadline), input_text=input_text,
+            env=os.environ, label='commission-' + stage,
+            receipt_path=os.environ.get('REMOTE_SUB_DEADLINE_PROCESS_RECEIPT'),
+            timeout_returncode=124 if stage in ('launch', 'poll') else 75,
+        )
+    except CommissionDeadlineExpired:
+        raise
+    except OwnedProcessStartError:
+        print('COMMISSION_COMMAND_NOT_STARTED stage=' + stage, file=sys.stderr)
+        raise SystemExit(78)
+    except Exception:
+        # The existing process owner attempted cleanup, but a controller may
+        # not infer absence of effects from an exception after Popen.
+        print('COMMISSION_PROCESS_UNPROVEN stage=' + stage, file=sys.stderr)
+        raise SystemExit(76)
+    sys.stdout.write(result.stdout)
+    sys.stderr.write(result.stderr)
+    if not result.cleanup_proven:
+        print('COMMISSION_PROCESS_UNPROVEN stage=' + stage, file=sys.stderr)
+        raise SystemExit(76)
+    if result.stdout_truncated or result.stderr_truncated:
+        print('COMMISSION_CAPTURE_INCOMPLETE stage=' + stage, file=sys.stderr)
+        raise SystemExit(76)
+    if result.timed_out:
+        print('COMMISSION_TIME_EXHAUSTED stage=' + stage, file=sys.stderr)
+    raise SystemExit(result.returncode if result.returncode >= 0 else 128 - result.returncode)
+
+
 def support_meta():
     import hashlib, json, pathlib, sys
     root, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
@@ -23,6 +119,14 @@ def support_meta():
     import provider_outcome
     provider_outcome.write_new(target,files)
     print(code_digest, hashlib.sha256(policy.read_bytes()).hexdigest())
+
+
+def controller_source_sha():
+    """Bind a no-lease refusal to this exact immutable controller source."""
+    from pathlib import Path
+    import provider_outcome
+    print(provider_outcome.digest(provider_outcome.regular_bytes(
+        Path(sys.argv[1]), 256 * 1024)))
 
 
 def go_settled():
@@ -291,6 +395,10 @@ def main():
         raise SystemExit(2)
     command = sys.argv.pop(1)
     handlers = {
+        'deadline-init': deadline_init,
+        'deadline-seconds': deadline_seconds,
+        'deadline-command': deadline_command,
+        'controller-source-sha': controller_source_sha,
         'support-meta': support_meta,
         'launch-binding': launch_binding,
         'go-settled': go_settled,
@@ -302,7 +410,18 @@ def main():
     }
     if command not in handlers:
         raise SystemExit(2)
-    handlers[command]()
+    if command.startswith('deadline-'):
+        from commission_deadline import CommissionDeadlineExpired
+        try:
+            handlers[command]()
+        except CommissionDeadlineExpired:
+            print('COMMISSION_TIME_EXHAUSTED', file=sys.stderr)
+            raise SystemExit(75)
+        except (ValueError, TypeError, OSError):
+            print('COMMISSION_TIME_INVALID', file=sys.stderr)
+            raise SystemExit(2)
+    else:
+        handlers[command]()
 
 
 if __name__ == "__main__":

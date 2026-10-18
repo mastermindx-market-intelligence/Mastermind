@@ -404,6 +404,43 @@ def inspect_run(run_id: str) -> dict[str, Any]:
             "result_bytes": None,
         }
 
+    prelease = HERE / "state" / "remote_sub" / f"{rid}.prelease-quota.json"
+    if prelease.exists() or prelease.is_symlink():
+        import quota_circuit
+        # Preserve the incumbent sticky uncertainty rule before any new
+        # capacity projection, even when a contradictory log is hash-bound.
+        if any(marker in text for marker in quota_circuit.PRELEASE_UNCERTAINTY_MARKERS):
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "EFFECT_UNKNOWN", "rc": None, "signal": None,
+                "result_available": False, "result_bytes": None,
+                **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE")}
+        # The broker may have published its refusal while the exact native
+        # controller is still returning. Only the adapter's retained subprocess
+        # return completes this no-task-start observation.
+        returned = prelease.with_name(rid + ".request-return.json")
+        if not (returned.exists() or returned.is_symlink()):
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "SETTLING", "rc": None, "signal": None,
+                "result_available": False, "result_bytes": None,
+                **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE")}
+        try:
+            request = json.loads(_bounded_regular(prelease.with_name(rid + ".request.json"), 32768))
+            root, parent = request.get("root_id"), request.get("parent_run_id")
+            quota_circuit.validate_prelease_refusal(HERE, rid, root, parent,
+                                                   packet_limit=MAX_RESULT_BYTES)
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                **_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"),
+                "state": "TERMINAL_FAILURE", "rc": 75, "signal": "quota",
+                "reason": "prelease_quota_cooldown", "root_id": root, "parent_run_id": parent,
+                "result_available": False, "result_bytes": None,
+                "execution_absence_proven": True, "request_retained": True,
+                "same_run_replay_allowed": False}
+        except (OSError, ValueError, TypeError, AttributeError, FabricTaskError):
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
+                "result_available": False, "result_bytes": None,
+                **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+
     rc = None
     signal = None
     state = "ACTIVE_OR_WAITING"
@@ -546,6 +583,35 @@ def _parse_route(line: str) -> dict[str, str]:
     return fields
 
 
+def _route_with_deadline(task_class, options, deadline_ns, env, state_dir, run_id):
+    """Bound the incumbent picker, including its existing quota lookups.
+
+    This process receives routing metadata only. It cannot launch the task and
+    never receives the task packet. The existing local process owner captures
+    its return and proves cleanup; no new router or retry plane is introduced.
+    """
+    from commission_deadline import CommissionDeadlineExpired, require_remaining
+    from lane_runtime import run_owned_process
+    program = ("import json,sys; sys.path.insert(0,sys.argv[1]); import pick; "
+               "value=json.load(sys.stdin); task=value.pop('task_class'); "
+               "print(pick.format_pick(task,**value))")
+    result = run_owned_process(
+        [sys.executable, "-c", program, str(Path(pick.__file__).resolve().parent)],
+        input_text=json.dumps({"task_class": task_class, **options}),
+        timeout=require_remaining(deadline_ns), env=env,
+        label=run_id[:100] + ".routing", capture_limit_bytes=65536,
+        timeout_returncode=75,
+        receipt_path=state_dir / (run_id + ".routing-process.jsonl"))
+    if not result.cleanup_proven:
+        raise FabricTaskError("REQUEST_ROUTING_CLEANUP_UNPROVEN")
+    if result.timed_out:
+        raise CommissionDeadlineExpired("commission deadline expired during routing")
+    require_remaining(deadline_ns)
+    if (result.returncode != 0 or result.stdout_truncated or result.stderr_truncated):
+        raise FabricTaskError("REQUEST_ROUTING_RETURN_UNQUALIFIED")
+    return result.stdout.strip()
+
+
 def request(
     run_id: str,
     task_class: str,
@@ -568,18 +634,36 @@ def request(
     cpu_scope_percent: int | None = None,
     request_remaining_seconds: int | None = None,
     request_capacity_preflight: bool = False,
+    request_deadline_ns: int | None = None,
 ) -> int:
     rid = validate_run_id(run_id)
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
     env = os.environ.copy()
     env.pop("POOL_CAPACITY_PREFLIGHT",None)
+    env.pop("POOL_COMMISSION_DEADLINE_NS", None)
+    env.pop("POOL_PRELEASE_HANDOFF", None)
+    env.pop("POOL_REQUEST_SHA256", None)
+    env.pop("POOL_REQUEST_LAUNCH_SHA256", None)
     if request_capacity_preflight is True:
         env["POOL_CAPACITY_PREFLIGHT"]="1"
     if request_remaining_seconds is not None:
         if type(request_remaining_seconds) is not int or not 1 <= request_remaining_seconds <= 7200:
             raise FabricTaskError("REQUEST_REMAINING_TIME_INVALID")
         env["POOL_COMMISSION_REMAINING_SECONDS"] = str(request_remaining_seconds)
+    if request_deadline_ns is not None:
+        from commission_deadline import (DEADLINE_ENV, CommissionDeadlineExpired,
+                                         require_remaining, validate_deadline_ns)
+        request_deadline_ns = validate_deadline_ns(request_deadline_ns)
+        if request_deadline_ns > time.monotonic_ns() + 7200 * 1_000_000_000:
+            raise FabricTaskError("REQUEST_DEADLINE_INVALID")
+        env[DEADLINE_ENV] = str(request_deadline_ns)
+    def check_deadline():
+        if request_deadline_ns is not None:
+            remaining = int(require_remaining(request_deadline_ns, minimum_seconds=1))
+            if request_remaining_seconds is not None:
+                remaining = min(remaining, request_remaining_seconds)
+            env["POOL_COMMISSION_REMAINING_SECONDS"] = str(remaining)
     observed_root = resolve_request_root(root_id, env)
     # Freeze the input before route selection. Exhausted capacity or an ended
     # caller must not destroy the only copy of an unfinished commission. These
@@ -610,6 +694,7 @@ def request(
     })
     packet, stdin_bytes = retained_packet, None
     try:
+        check_deadline()
         # An explicit NEW worktree request is not permission to adopt an existing
         # session, mutate an incumbent checkout, or mint before a host lease.
         if new_macro_worktree is not None:
@@ -641,15 +726,19 @@ def request(
                 root=observed_root, parent=parent_run_id,
             ))
         else:
-            route = _parse_route(pick.format_pick(
-                task_class, prefer=prefer, host="auto", pool=pool,
+            route_options = dict(prefer=prefer, host="auto", pool=pool,
+                **({"excluded_hosts": ["m2"]} if request_deadline_ns is not None else {}),
                 **({"subject_pool": subject_pool} if subject_pool is not None else {}),
                 task_complexity=complexity, escalation_reason=reason,
                 requested_model=requested_model, route_key=rid,
                 **({"required_modes": sorted(artifact_production.MODES),
                     "required_platforms": ["linux"]} if artifact_names else
                    {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
-            ))
+            )
+            route = _parse_route(
+                _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
+                if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
+        check_deadline()
         guard = pick.launch_policy(
             route["MODE"], task_class, route["MODEL"],
             escalation_reason=reason, task_complexity=complexity,
@@ -738,13 +827,44 @@ def request(
                 argv.extend(["--new-macro-worktree", new_macro_worktree])
             if cpu_scope_percent is not None:
                 argv.extend(["--cpu-scope-quota", str(cpu_scope_percent)])
-            provider_outcome.write_new(state_dir / f"{rid}.request-launch.json", {
+            check_deadline()
+            request_sha = provider_outcome.digest(provider_outcome.regular_bytes(request_file, 32768))
+            launch_row = {
                 "schema": "mastermind.fabric_request_launch.v1", "run_id": rid,
                 "root_id": observed_root, "parent_run_id": parent_run_id,
                 "packet_sha256": hashlib.sha256(source).hexdigest(),
                 "state": "LAUNCH_ATTEMPT_RESERVED", "created_at": time.time(),
-            })
+                "request_sha256": request_sha,
+            }
+            if request_capacity_preflight is True:
+                import quota_circuit
+                code = Path(__file__).resolve().parent
+                launch_row.update(capacity_handoff=True, route=route,
+                    native_sources={name: provider_outcome.digest(provider_outcome.regular_bytes(
+                        code / name, 256 * 1024)) for name in quota_circuit.PRELEASE_SOURCES})
+                env["POOL_PRELEASE_HANDOFF"] = "1"
+                env["POOL_REQUEST_SHA256"] = request_sha
+            launch_file = state_dir / f"{rid}.request-launch.json"
+            provider_outcome.write_new(launch_file, launch_row)
+            if request_capacity_preflight is True:
+                env["POOL_REQUEST_LAUNCH_SHA256"] = provider_outcome.digest(
+                    provider_outcome.regular_bytes(launch_file, 32768))
+            check_deadline()
             proc = subprocess.run(argv, env=env)
+            if request_capacity_preflight is True:
+                refusal = state_dir / f"{rid}.prelease-quota.json"
+                log = state_dir / f"{rid}.log"
+                provider_outcome.write_new(state_dir / f"{rid}.request-return.json", {
+                    "schema": "mastermind.fabric_request_return.v1", "run_id": rid,
+                    "root_id": observed_root, "parent_run_id": parent_run_id,
+                    "state": "NATIVE_CONTROLLER_RETURNED", "controller_rc": int(proc.returncode),
+                    "request_sha256": request_sha,
+                    "launch_sha256": env["POOL_REQUEST_LAUNCH_SHA256"],
+                    "prelease_sha256": provider_outcome.digest(provider_outcome.regular_bytes(refusal, 32768))
+                        if refusal.exists() or refusal.is_symlink() else None,
+                    "log_sha256": provider_outcome.digest(provider_outcome.regular_bytes(log, MAX_LOG_BYTES))
+                        if log.exists() or log.is_symlink() else None,
+                })
             return int(proc.returncode)
         finally:
             if temp_path is not None:
