@@ -1,0 +1,15 @@
+diff --git a/codex_pool_policy.py b/codex_pool_policy.py
+--- a/codex_pool_policy.py
++++ b/codex_pool_policy.py
+@@ -15 +15,4 @@
+-CODEX_ACCOUNT_ALIASES = frozenset({"C1", "C2", "C3", "C4"})
++# B1/B2 are candidate Business realms, not automatically entitled or admitted.
++# The existing per-seat native identity, plan, quota, relay, and atomic broker
++# gates still apply. This set alone creates no worker or subscription right.
++CODEX_ACCOUNT_ALIASES = frozenset({"C1", "C2", "C3", "C4", "B1", "B2"})
+diff --git a/tests/test_codex_native_profile.py b/tests/test_codex_native_profile.py
+--- a/tests/test_codex_native_profile.py
++++ b/tests/test_codex_native_profile.py
+@@ -17 +17 @@
+-    assert sorted(x.name for x in p.iterdir())==['C1','C2','C3','C4']
++    assert sorted(x.name for x in p.iterdir())==['B1','B2','C1','C2','C3','C4']
