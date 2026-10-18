@@ -562,3 +562,87 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 2. When all three lanes are accepted, open ONE integration PR under the integration law above. Then review, merge, baseline and land-check it.
 3. Run the R2 retention / PIT-depth probe before ~2026-10-21.
 4. Write the WP32 P4–P6 proof design within C19 scope. P2–P3 stay human-only.
+
+#### r11 cycle 2026-10-18T03:3xZ (seat 7ab343c8) — wave 10: r10 landed, WP31 evaluator integrated (Macro #9577 in CI), prereg §10 A1–A4, EDGAR clock finding, R2 PIT probe, WP32 P4–P7 design + P6 anonymous probe
+
+**FACTS**
+- Ledger r10 = Mastermind #1588. It merged through the master merge queue at 2026-10-18T02:50:07Z (merge commit `d65414e89ad3`). The master ledger blob became `87464541347f`, and this r11 branch was cut from master after that merge.
+- All three WP31 build lanes delivered and were ACCEPTED by artifact. Each was judged on its bundle diff, its own test run, and the absence of any outcome read.
+
+  | lane | run id | accepted commit | verdict |
+  |---|---|---|---|
+  | GATES | `c19-w5s-wp31-gates-build-bailian-20261017` | `74a402cd5bb1` | ACCEPT |
+  | STATS | `c19-w5s-wp31-stats-build-bailian-20261017` | `4988b2ff21df` | ACCEPT; deviations D1 (`_FixedBudget`), D3, D4 recorded |
+  | SOURCES | `c19-w5s-wp31-sources-build-bailian-20261017` | `e24c3756a1e7` | ACCEPT with seat fixes (strict Form 8-K; rights vocabulary) |
+
+- Integration PR **Macro #9577**, branch `claude/c19-wp31-integration-7ab343c8`, head `c7675c61872e`, was cut from `a1fe765f08fc`. It has six commits: the three lanes cherry-picked with `-x`, the seat integration fixes, CI registration, and the prereg §10 A1–A4 repairs.
+  - Each new test file has its own `legacy-jobs.yml` job (`scope: exclusive`) and a `CURATED_EXCLUSIVE` entry.
+  - `run_ci_pack.curated_exclusive_closure_findings()` returns `{}`.
+  - Local `tests/test_ci_pack.py` + `tests/test_c19_wp31_gates.py` gave 225 passed, 2 skipped. The two skips are the register tests' `full_tree` fixture skipping in a sparse tree, which is expected. Exit 0.
+  - CI is running under ONE watcher.
+- An independent Opus READ_ONLY review of the integrated evaluator returned findings 1–6, all repaired on #9577:
+  1. The rights vocabulary was case-mismatched with the engine. It failed open on blocked labels.
+  2. The K reader checked rights on one row only.
+  3. The `acceptanceDateTime` clock was wrong (below).
+  4. A dropped earlier release filing could shift an episode to a later filing.
+  5. The +0.10 compare used floats: 24/40 − 20/40 → 0.0999….
+  6. The sources lane admitted `8-K/A`.
+- **EDGAR clock (receipted, non-universe issuers only).**
+  - The submissions-JSON `acceptanceDateTime` J is NOT UTC. It is true UTC + |America/New_York offset|; the SGML header carries ET local time. Receipts:
+    - MSFT `0001193125-26-323632`: JSON `2026-07-30T00:04:53Z` vs header `20260729160453`
+    - MSFT `0001193125-26-191457`: JSON `2026-04-30T00:03:31Z` vs header `20260429160331`
+    - JPM `0001628280-26-065582`: JSON `2026-10-13T14:30:38Z` vs header `20261013063038`
+    - JPM `0001628280-26-048078`: JSON `2026-07-14T14:30:38Z` vs header `20260714063038`
+  - Uncorrected, a release made during the regular session lands after that session's close, which leaks the label.
+- **R2 event-workspace manifest chain probe** (metadata only: schema, generated_at, source_clock, counts, link integrity; no values read):
+  - The chain walk covered 214 generations with 0 link mismatches and 0 missing links. It runs from the newest, 2026-10-17T04:29:37Z (the current pointer, v3, gen `c0a93d64b430`), back to the oldest, 2026-07-30T20:30:28Z (v1).
+  - Hops 0–17 are v3 and carry a `source_clock`. Hop 18 onward (196 generations) are v2/v1 with `source_clock = None`.
+  - The chain links hop 17 (generated 2026-10-03T05:23:48Z) directly to hop 18 (generated 2026-07-31T00:30:28Z). It carries no generation between those dates.
+  - **source_clock regression.** Hops 2–3 (generated 2026-10-15T04:44:02Z) carry `source_clock 2026-10-13T05:47:02Z` with 10 events. The newer hops 1 and 0, including the current pointer, carry the older `2026-09-22T16:15:45Z` with 5 events.
+- **WP32 P4–P7 proof design** is written, seat-side:
+  - P4 natural source update.
+  - P5 correction: a tests-only CI lane on a synthetic non-universe ticker, G1→G2.
+  - P6 denial isolation, latency, cache and availability.
+  - P7 rollback: observables only, owned by WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.
+  - Exposure rule: any universe-issuer record made after an eligible release is headers, status and timing only.
+- **WP32 P6 anonymous probe**, 2026-10-18T02:41:49–02:42:02Z:
+  - Three anonymous `GET /api/integrated-answer/v1/AAPL` each returned `401`, 33 bytes, `cache-control: private, no-store`, `vary: Authorization`, `eo-cache-status: MISS`, with t_total 0.29–0.73 s.
+  - `/api/health` returned `200` with `private, no-store`.
+  - Denial isolation and no-cache for the anonymous path are observed. The authenticated path was not exercised.
+
+**DECIDED — prereg §10 amendments A1–A4, adopted before any eligible release and with no label read**
+- **A1 (rights):** `NONBLOCKING_RIGHTS = {"UNKNOWN"}` is an allow-list; every other label blocks. Both consumed K rows (`average`, `year_ago`) are normalized, and a disagreement becomes `MIXED:a,b`, which blocks.
+- **A2 (clock):** `U = J + utcoffset_ET(J)`, with a round-trip check. A DST-ambiguous or nonexistent instant is unresolvable and mints no episode. A0 history stays uncorrected, which is conservative.
+- **A3 (first filing):** the first release filing or nothing. An episode whose earlier Item 2.02 filing was dropped becomes `NOT_EVALUABLE(earlier_release_filing_dropped)`.
+- **A4 (exact effect):** the useful-effect test compares the exact `Fraction` against 1/10. The float is for display only, and every read prints `d/n`.
+- Strict `form == "8-K"` per prereg §2 (finding 6; no amendment needed).
+- The G-1 frozen-prefix hash `44c9df659288…` is unchanged: the amendments sit below the `## §10 Amendments (append-only` marker, and `check_doc_hash` passes on the #9577 head.
+- `register()` runs only after #9577 has landed, from a NON-sparse tree with an explicit `TrialLedger`, and before DHI's eligible release (~2026-10-20). It is never run from a sparse worktree.
+
+**OPEN** (owner → next action)
+- Upstream clock gap: `collectors/edgar_earnings_8k.py:12` stores the submissions-JSON `acceptanceDateTime` labelled as UTC.
+  - Owner: the collector's incumbent owner.
+  - A collector fix must remove the evaluator's A2 correction in the same change, or the shift is applied twice.
+  - Any `prior_filings` source must supply UTC or the raw JSON, never header ET.
+- WP31 wave 2:
+  - EX-99.1 enrichment.
+  - The S reader as-of (owner-bound, with the company-intelligence owner; `s_from_workspace` still raises `NotImplementedError`).
+  - The runner.
+  - A `prior_filings` UTC source.
+- R2 source_clock regression and the Jul 31 → Oct 3 chain gap. Owner: the event-workspace owner. The S reader's as-of design must not assume monotone `source_clock` or continuous generation history.
+- WP32 P5/P6 tests-only lane (owned files `tests/test_c19_wp32_correction.py` + `tests/fixtures/c19_wp32/`, with CI registration). It is commissioned after #9577 lands.
+- Carried unchanged from r10:
+  - G9 / WP32 P2–P3: Chairman, human-only.
+  - G10, G11, WP32 P7: WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT.
+  - G3: WS:FUNDAMENTAL-FORENSICS.
+  - G1, G8, WP28: WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2.
+  - WP26, WP27: WS-MARKET-OS.
+  - WP01: NOT_LOCATED.
+  - The `trial-budgets` lint is disabled at BASE (incumbent owner).
+  - The forensics no-bound gap (composer owner).
+
+**NEXT**
+1. When #9577's checks conclude green (reds read by name, with the spurious Workers Builds and merge-queue-pilot excluded): hand-merge `--squash --match-head-commit`, then ONE covering ci.yml main baseline (preflight: nothing in flight), then an API land check.
+2. Run `register()` from a non-sparse tree before ~2026-10-20, and record the trial-ledger row in r12.
+3. Commission the WP32 P5/P6 tests-only fabric lane.
+4. Run WP31 wave 2: EX-99.1 enrichment, the runner, and a `prior_filings` UTC source. Hold the S reader as-of design with its owner.
