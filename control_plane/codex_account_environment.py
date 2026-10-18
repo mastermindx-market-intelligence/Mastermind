@@ -112,7 +112,7 @@ def _local_user_claim_sha256(tokens: Mapping[str, Any]) -> str | None:
     workspace = auth.get("chatgpt_account_id")
     user = auth.get("chatgpt_user_id")
     if (not isinstance(workspace, str) or workspace != tokens.get("account_id")
-            or not isinstance(user, str) or not 1 <= len(user) <= 512):
+            or not isinstance(user, str) or not 1 <= len(user) <= 256):
         return None
     return hashlib.sha256(user.encode()).hexdigest()
 

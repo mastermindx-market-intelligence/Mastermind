@@ -601,3 +601,28 @@ def test_native_account_mismatched_claimed_business_workspace_is_not_accepted(
     with native_codex_account_scope(home) as environment:
         projected = environment.auth_metadata()
     assert "user_id_sha256" not in projected
+
+
+@pytest.mark.parametrize("member_length,admitted", [(256, True), (257, False)])
+def test_native_business_member_claim_has_bounded_length(home, member_length, admitted):
+    import base64
+    import hashlib
+
+    member = "m" * member_length
+    claims = {"https://api.openai.com/auth": {
+        "chatgpt_account_id": "business-workspace", "chatgpt_user_id": member,
+    }}
+    payload = base64.urlsafe_b64encode(json.dumps(claims).encode()).decode().rstrip("=")
+    doc = auth()
+    doc["tokens"]["account_id"] = "business-workspace"
+    doc["tokens"]["id_token"] = "e30." + payload + ".fixture"
+    private(home / "auth.json", doc)
+    with native_codex_account_scope(home) as environment:
+        data = environment.auth_metadata()
+    assert ("user_id_sha256" in data) is admitted
+    if admitted:
+        assert data["user_id_sha256"] == hashlib.sha256(member.encode()).hexdigest()
+    else:
+        assert data["account_id_sha256"] == hashlib.sha256(
+            b"business-workspace"
+        ).hexdigest()

@@ -219,3 +219,23 @@ printing identifying values. Independent source review, exact successor
 head hosted CI, eligible-seat owner attestation, and real broker/relay
 claim-result-original-parent acceptance remain pending. Keep Draft/HOLD;
 do not install or increase native Codex broker capacity from this evidence.
+
+
+## October 18 hosted D8 identity-literal guard repair on same original PR
+
+Exact-head hosted run 39111278985 on 0f15dbc79587d49f95867587c57916f108e4af0c
+failed ONLY in pytest shard 1 under the repo-wide
+test_d8_template_topology_and_protected_defaults guard. Its diff identity
+scanner returned ['512'] from the new user-claim parser bound
+len(user) <= 512. All other hosted shard tests passed, and no
+identity/topology config was modified.
+
+The legitimate bounded user-identifier parser is now stricter:
+maximum 256 characters, not 512. New provider-free regression proves that
+exactly 256 characters are accepted and 257 refused; no raw identity is
+exported. Before this successor commit, M2 reproduced the D8 failure
+using the predecessor HEAD, which the D8 guard scans via git merge-base
+and git show HEAD. D8 test must be re-run only after the successor source
+commit exists; passing uncommitted tests alone cannot make a claim about
+the protected committed diff. Full current-head hosted CI and independent
+review are still required; no broker or provider mutation authorized.
