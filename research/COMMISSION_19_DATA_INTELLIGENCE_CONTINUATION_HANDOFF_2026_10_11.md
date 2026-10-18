@@ -510,3 +510,55 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 1. #9559 baseline: when main run 39041669978 concludes, preflight (nothing queued or in progress), dispatch ONE ci.yml main baseline, and put one watcher on it. Its SUCCESS clears #9559's CI-authority freeze; never re-dispatch after that.
 2. WP31 evaluator census: fabric lane `c19-w5s-wp31-evaluator-census-glm-20261017` (ubuntu1, glm, read-only, no outcome/price/return values) is RUNNING. Judge its packet by artifact, checking the BASE sha against the ubuntu1 fetch defect. Then the seat writes the WP31 evaluator build packet.
 3. WP32 proof design for P4–P6 within C19 scope.
+
+#### r10 cycle 2026-10-18T01:5xZ (seat 7ab343c8) — wave 9: r9 landed, #9559 baselined, WP31 evaluator census accepted, WP31 evaluator BUILD lanes running
+
+**FACTS**
+- Ledger r9 = Mastermind #1583, merged through the master merge queue at 2026-10-17T16:35:52Z (merge commit `083096e1e4c2`). Its master ledger blob `74dc22199851` is byte-identical to the r9 file the seat wrote, so r9 landed intact. This r10 branch was cut from master after that merge.
+- The #9559 CI-authority freeze is CLEARED. ci.yml main baseline run 39045439693 concluded SUCCESS at 2026-10-17T16:21:52Z on main `227e192393a6`, which descends from the #9559 squash `216b9bff199c`. Never re-dispatch it.
+- WP31 evaluator census = fabric lane `c19-w5s-wp31-evaluator-census-glm-20261017`.
+  - Sentinel: `C19-W5S-WP31-EV: PASS bb9e4a74a5b9`. Packet: 180 lines, sha256 `119dc47d2044…`. BASE `bb9e4a74a5b9` was fetched fresh and the tree stayed clean.
+  - Q1–Q10 were answered with line citations. The census read no price, return, label or outcome value.
+  - Findings the build is held to:
+    - `engine/entry_radar/replay/gates.py` is importable as a pure library, and its `frozen_prefix` / `check_budget_row` are the patterns to mirror.
+    - `engine/trial_ledger.register_trials(family, budget=, reason=, basis=, ledger=)` is the registration API.
+    - `engine/validation.deflated_sharpe(…, ledger=, family=, t_eff=)` takes a duck-typed ledger.
+    - `collectors/edgar_earnings_8k.py` stores sub-day `acceptance_datetime`. `collectors/edgar_eps.py` stores the `filed` DATE only.
+    - The event-workspace current-state reader (`engine/neuralweb/company_intelligence_reader.py:753-858`) has NO as-of parameter: it always resolves the newest `T/YYYYQn` alias.
+    - `info_cutoff` is a stamp on trial-ledger rows with no audit consumer.
+    - The `trial-budgets` CI job is `if: ${{ false }}` at BASE (`legacy-jobs.yml:2953`).
+- WP31 frozen build spec: `WP31_BUILD_SPEC.md`, seat-written, 11,928 bytes, staged sha-verified on each lane host. Its constants:
+  - `PREREG_COMMIT = 8e1950932b29f89a89da94c50ccef4ef5f2d8d1c` (Macro #9540), with `PREREG_COMMIT_TIME = 2026-10-17T12:01:44Z`.
+  - `PREREG_DOC_SHA256 = 44c9df659288c64987758f8408c2b7eced41488e57251c4390ddd466bf1f7a43`. This is the frozen prefix through the `## §10 Amendments (append-only` marker line.
+  - `FAMILY = c19_wp31_incremental_information`, `BUDGET = 6`, basis itemized over 6 items (`primary_delta`, `hr_a1_minus_hr_a0`, `a2_minus_s_vs_a2_minus_k`, `economic_translation_a2`, `split_aapl`, `split_homebuilders`).
+  - Universe: AAPL, plus DHI/PHM/KBH/TOL as one HOMEBUILDERS cluster.
+  - Arms: A0, A1, K-backed, S-backed, A2, A2[−K], A2[−S].
+  - Δ = HR(A2) − HR(A2[−K]) on common support.
+  - Three modules (`scripts/c19_wp31_{stats,gates,sources}.py`), each with one test. The modules import nothing from each other; their only interface is a shared episode dict.
+- WP31 BUILD lanes. All three are RUNNING since 2026-10-18T01:41Z; packets are under `lanes3/`. Each delivers a git bundle and never pushes.
+
+  | lane | run id | host | branch | sentinel |
+  |---|---|---|---|---|
+  | STATS | `c19-w5s-wp31-stats-build-bailian-20261017` | ubuntu0 | `lane/c19-wp31-stats-20261017` | `C19-W5S-WP31-STATS` |
+  | GATES | `c19-w5s-wp31-gates-build-bailian-20261017` | ubuntu2 | `lane/c19-wp31-gates-20261017` | `C19-W5S-WP31-GATES` |
+  | SOURCES | `c19-w5s-wp31-sources-build-bailian-20261017` | ubuntu0 | `lane/c19-wp31-sources-20261017` | `C19-W5S-WP31-SOURCES` |
+
+**DECIDED — WP31 evaluator census ACCEPT; the build is three module lanes; the seat integrates**
+- Accepted by artifact. The census covers every question the build spec needs, its gaps are bounded by the commands it ran, and it carries no exposure.
+- **D1 (DEVIATION, recorded):** STATS calls `deflated_sharpe` with a duck-typed `_FixedBudget` whose `effective_n(family)` returns 6, never the live ledger. The evaluator must not read or write the shared trial ledger outside `register()`.
+- **The S reader is owner-bound.** Because the current-state reader has no as-of, reading an issuer's current event workspace after an eligible release would expose that quarter's label. SOURCES therefore ships `s_from_workspace` as a stub that raises `NotImplementedError("S reader: owner-bound; seat wave 2")`. The as-of S reader is a seat wave-2 decision taken with the company-intelligence owner. C19 does not edit the frozen company-intelligence files.
+- **Integration law:** ONE Macro PR on a fresh `claude/` branch cherry-picks the three lane commits with `-x`. The seat adds ONE `legacy-jobs.yml` job that covers the three new tests, plus the `tests/test_ci_pack.py` lines. Then: one Opus READ_ONLY review, hand-merge `--match-head-commit` on concluded green, ONE covering ci.yml main baseline (preflight: nothing in flight), and an API land check.
+- **Registration timing (unchanged):** `register()` runs before any label read, never from a sparse worktree, and only after the integration PR has landed.
+
+**OPEN** (owner → next action)
+- WP31 S reader as-of (seat wave 2, with the company-intelligence owner). C19 neither builds a second reader nor edits frozen files.
+- The `trial-budgets` CI lint is disabled at BASE. That job belongs to its incumbent owner; C19 does not re-enable it. The evaluator's own G-3 check is the WP31 gate.
+- R2 retention and PIT depth for the event-workspace generations: a read-only metadata probe (object listing and generation dates, never values) is due before the first post-prereg eligible release (PHM, ~2026-10-21).
+- Forensics no-bound gap at `app/forensics.py:873-893`: routed to the composer owner. That file is no-lane for C19.
+- Carried unchanged from r9: G9 / WP32 P2–P3 (Chairman, human-only); G10, G11, WP32 P7 (WS:MARKET-INTELLIGENCE-INSTITUTIONAL-BUILDOUT); G3 (WS:FUNDAMENTAL-FORENSICS); G1, G8, WP28 (WS:CAPITAL-STRUCTURE-INTELLIGENCE-V2); WP26, WP27 (WS-MARKET-OS); WP01 NOT_LOCATED; WP32 P4–P6 not observed.
+
+**NEXT**
+1. On each WP31 lane's watcher event, judge the delivered bundle by artifact: exactly two files per lane, the spec's interface, tests run, and no outcome reads. Then ACCEPT, REQUEST_REPAIR, or REJECT.
+2. When all three lanes are accepted, open ONE integration PR under the integration law above. Then review, merge, baseline and land-check it.
+3. Run the R2 retention / PIT-depth probe before ~2026-10-21.
+4. Write the WP32 P4–P6 proof design within C19 scope. P2–P3 stay human-only.
