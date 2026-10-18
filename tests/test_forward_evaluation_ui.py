@@ -85,6 +85,7 @@ def test_partial_and_failed_latest_run_keep_saved_record_qualifications():
     assert ">49</div>" in html
     assert "Latest evaluation failed" in html
     assert "Partial source" in html
+    assert '<span class="mm-eval-badge">Partial record</span>' in html
     assert "Recorded through 2026-10-16" in html
     assert "session checks remain unverified" in html
 

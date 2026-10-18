@@ -6646,7 +6646,8 @@ function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
     q.reported_mark_count_status === 'partial') && metric.value === q.reported_mark_count &&
     metric.status === q.reported_mark_count_status ? q.reported_mark_count : null;
   var partial = count !== null && q.reported_mark_count_status === 'partial';
-  var badge = count !== null ? say('Not yet qualified', '尚未验证') : say('Unavailable', '不可用');
+  var badge = partial ? say('Partial record', '记录不完整')
+    : count !== null ? say('Not yet qualified', '尚未验证') : say('Unavailable', '不可用');
   var note = count !== null
     ? say('Recorded dates do not establish a verified market-session sample.',
           '记录日期数量不等于已验证的市场交易日样本。')
