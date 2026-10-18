@@ -1,9 +1,11 @@
 diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 --- a/codex_pool_policy.py
 +++ b/codex_pool_policy.py
-@@ -12,0 +13 @@
+@@ -9,0 +10 @@
++from collections.abc import Mapping
+@@ -12,0 +14 @@
 +import re
-@@ -15 +16,7 @@
+@@ -15 +17,7 @@
 -CODEX_ACCOUNT_ALIASES = frozenset({"C1", "C2", "C3", "C4"})
 +# B1/B2 are candidate Business realms, not automatically entitled or admitted.
 +# The existing per-seat native identity, plan, quota, relay, and atomic broker
@@ -12,7 +14,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +BUSINESS_ALIASES = frozenset({"B1", "B2"})
 +_SHA256 = re.compile(r"[0-9a-f]{64}")
 +_MODEL = re.compile(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}")
-@@ -31,0 +39,7 @@
+@@ -31,0 +40,7 @@
 +    # Advisory identity only; no authority is minted by populating these.
 +    # Business users may share a workspace while holding separate included
 +    # seat allowances. A shared workspace credit pool is never per-member.
@@ -20,7 +22,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +    user_id_sha256: Optional[str] = None
 +    entitlement_class: Optional[str] = None
 +    qualified_models: Optional[frozenset[str]] = None
-@@ -44,0 +59,39 @@
+@@ -44,0 +60,39 @@
 +
 +
 +def _subject_key(row: AccountObservation) -> tuple[str, str, str] | None:
@@ -60,14 +62,14 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        return False
 +    # A Business quota with no live reset horizon is not evidence of room.
 +    return row.reset_at is not None and _utc(row.reset_at) > now
-@@ -88,0 +142 @@
+@@ -88,0 +143 @@
 +    requested_model: Optional[str] = None,
-@@ -99,0 +154,4 @@
+@@ -99,0 +155,4 @@
 +    if requested_model is not None and (
 +        type(requested_model) is not str or _MODEL.fullmatch(requested_model) is None
 +    ):
 +        raise ValueError("codex_requested_model_invalid")
-@@ -104 +162,16 @@
+@@ -104 +163,16 @@
 -    eligible = [r for r in rows if _fresh_and_eligible(r, now)]
 +    eligible = [
 +        r for r in rows if _fresh_and_eligible(r, now)
@@ -85,6 +87,108 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        r for r in eligible
 +        if (key := _subject_key(r)) is None or seen[key] == 1
 +    ]
+@@ -174,0 +249,101 @@
++
++
++
++def project_native_account_observation(
++    alias: str,
++    sample: Mapping[str, object],
++    *,
++    now: datetime,
++    binding_verified: bool,
++    entitlement_class: Optional[str],
++    qualified_models: Optional[frozenset[str]],
++    active_leases: int,
++    lease_cap: int,
++) -> AccountObservation:
++    """Bridge the incumbent sanitized native account probe to its ranker.
++
++    This does NOT authorize an account, verify a JWT signature, establish an
++    included Business Premium seat, attest the independent model-list read,
++    reserve tokens, mint a broker lease, or start a worker. Those facts come
++    from the existing trusted owner and are checked AGAIN at atomic claim.
++    Reject unknown/multiple quota horizons rather than collapsing constraints.
++    """
++    refusal = ValueError("codex_native_observation_invalid")
++    now = _utc(now)
++    if (type(alias) is not str or alias not in CODEX_ACCOUNT_ALIASES
++            or type(binding_verified) is not bool
++            or type(active_leases) is not int or active_leases < 0
++            or type(lease_cap) is not int or lease_cap < 0
++            or not isinstance(sample, Mapping)
++            or sample.get("state") != "NATIVE_READS_COMPLETED"
++            or sample.get("api_fallback") is not False):
++        raise refusal
++    stop, home, account = (
++        sample.get("stop"), sample.get("home_identity"), sample.get("account")
++    )
++    if (not isinstance(stop, Mapping) or stop.get("private_group_empty") is not True
++            or not isinstance(home, Mapping) or not isinstance(account, Mapping)
++            or account.get("auth_state") != "MANAGED_CHATGPT_OBSERVED"
++            or account.get("capacity_state") != "AVAILABLE_OBSERVED"
++            or account.get("limit_id") != "codex"):
++        raise refusal
++    workspace, member = home.get("account_id_sha256"), home.get("user_id_sha256")
++    if type(workspace) is not str or _SHA256.fullmatch(workspace) is None:
++        raise refusal
++    if member is not None and (
++        type(member) is not str or _SHA256.fullmatch(member) is None
++    ):
++        raise refusal
++    if alias in BUSINESS_ALIASES:
++        if account.get("plan_type") != "self_serve_business_prolite" or member is None:
++            raise refusal
++    elif account.get("plan_type") != "pro":
++        raise refusal
++    observed_ts = account.get("observed_at_unix")
++    if (type(observed_ts) not in (int, float)
++            or not isfinite(observed_ts) or observed_ts <= 0):
++        raise refusal
++    try:
++        seen = datetime.fromtimestamp(observed_ts, tz=timezone.utc)
++    except (ValueError, OverflowError, OSError):
++        raise refusal from None
++    if not -timedelta(seconds=30) <= now-seen <= MAX_OBSERVATION_AGE:
++        raise refusal
++    windows = account.get("windows")
++    states = account.get("window_states")
++    if (not isinstance(windows, Mapping) or not isinstance(states, Mapping)
++            or set(states) != {"primary", "secondary"}):
++        raise refusal
++    observed = [key for key in ("primary", "secondary")
++                if states[key] == "OBSERVED"]
++    if (len(observed) != 1 or any(states[key] != "NOT_APPLICABLE"
++                                  for key in ("primary", "secondary")
++                                  if key not in observed)
++            or set(windows) != set(observed)):
++        raise refusal
++    quota = windows[observed[0]]
++    if not isinstance(quota, Mapping):
++        raise refusal
++    remaining, used = quota.get("remaining_percent"), quota.get("used_percent")
++    reset_epoch, minutes = quota.get("resets_at"), quota.get("window_minutes")
++    if (type(remaining) not in (int, float) or type(used) not in (int, float)
++            or not isfinite(remaining) or not isfinite(used)
++            or not 0 <= remaining <= 100 or not 0 <= used <= 100
++            or abs(remaining + used - 100) > 0.001
++            or type(reset_epoch) is not int or type(minutes) is not int
++            or minutes <= 0 or reset_epoch <= observed_ts):
++        raise refusal
++    try:
++        reset_at = datetime.fromtimestamp(reset_epoch, tz=timezone.utc)
++    except (ValueError, OverflowError, OSError):
++        raise refusal from None
++    if reset_at <= now:
++        raise refusal
++    return AccountObservation(
++        alias=alias, remaining_pct=float(remaining),
++        observed_at=seen, reset_at=reset_at, reset_credits=None,
++        active_leases=active_leases, lease_cap=lease_cap,
++        auth_ready=True, binding_verified=binding_verified,
++        account_id_sha256=workspace, user_id_sha256=member,
++        entitlement_class=entitlement_class, qualified_models=qualified_models,
++    )
 diff --git a/tests/test_codex_native_profile.py b/tests/test_codex_native_profile.py
 --- a/tests/test_codex_native_profile.py
 +++ b/tests/test_codex_native_profile.py

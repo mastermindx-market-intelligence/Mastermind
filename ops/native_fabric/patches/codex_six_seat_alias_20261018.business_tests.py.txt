@@ -119,3 +119,103 @@ def test_account_decision_still_never_mints_a_lease_or_grant():
     assert result.alias=="B1"
     assert not hasattr(result,"lease") and not hasattr(result,"provider_home")
     assert not hasattr(result,"admission_granted")
+
+
+def native_sample(*, workspace="a"*64, user="b"*64,
+                  plan="self_serve_business_prolite", pct=95, age=0):
+    seen=NOW-timedelta(minutes=age)
+    return {
+        "state":"NATIVE_READS_COMPLETED",
+        "api_fallback":False,
+        "stop":{"private_group_empty":True},
+        "home_identity":{
+            "account_id_sha256":workspace,
+            "user_id_sha256":user,
+        },
+        "account":{
+            "observed_at_unix":seen.timestamp(),
+            "auth_state":"MANAGED_CHATGPT_OBSERVED",
+            "capacity_state":"AVAILABLE_OBSERVED",
+            "limit_id":"codex",
+            "plan_type":plan,
+            "window_states":{"primary":"OBSERVED","secondary":"NOT_APPLICABLE"},
+            "windows":{"primary":{
+                "remaining_percent":pct,"used_percent":100-pct,
+                "window_minutes":10080,
+                "resets_at":int((NOW+timedelta(days=7)).timestamp()),
+            }},
+        },
+    }
+
+
+def project(alias, sample, *, entitled=True, binding=True, models=MODELS, cap=1):
+    from codex_pool_policy import project_native_account_observation
+    return project_native_account_observation(
+        alias, sample, now=NOW, binding_verified=binding,
+        entitlement_class=("business_premium_included" if entitled else None)
+            if alias.startswith("B") else "personal_pro",
+        qualified_models=models, active_leases=0, lease_cap=cap,
+    )
+
+
+def test_native_probe_to_selector_separates_two_business_users_same_workspace():
+    b1=project("B1",native_sample(user="1"*64,pct=82))
+    b2=project("B2",native_sample(user="2"*64,pct=93))
+    assert pick([b1,b2]).alias=="B2"
+
+
+def test_native_probe_to_selector_distinct_personal_and_business_realms():
+    c2=project("C2",native_sample(workspace="c"*64,user="2"*64,plan="pro",pct=72))
+    b2=project("B2",native_sample(workspace="a"*64,user="2"*64,pct=96))
+    assert pick([c2,b2]).alias=="B2"
+
+
+@pytest.mark.parametrize("bad", [
+    "bad_cleanup", "fallback", "no_user", "unknown_sibling",
+    "multiple_windows", "plan_wrong", "expired", "identity_invalid",
+    "quota_state_unknown",
+])
+def test_native_probe_projection_fails_closed_for_untrusted_evidence(bad):
+    sample=native_sample()
+    if bad=="bad_cleanup":sample["stop"]["private_group_empty"]=False
+    elif bad=="fallback":sample["api_fallback"]=True
+    elif bad=="no_user":sample["home_identity"].pop("user_id_sha256")
+    elif bad=="unknown_sibling":sample["account"]["window_states"]["secondary"]="UNKNOWN"
+    elif bad=="multiple_windows":
+        sample["account"]["window_states"]["secondary"]="OBSERVED"
+        sample["account"]["windows"]["secondary"]=dict(sample["account"]["windows"]["primary"])
+    elif bad=="plan_wrong":sample["account"]["plan_type"]="pro"
+    elif bad=="expired":sample["account"]["windows"]["primary"]["resets_at"]=int((NOW-timedelta(minutes=1)).timestamp())
+    elif bad=="identity_invalid":sample["home_identity"]["account_id_sha256"]="ZZZ"
+    elif bad=="quota_state_unknown":sample["account"]["capacity_state"]="UNKNOWN"
+    with pytest.raises(ValueError,match="native_observation"):
+        project("B1",sample)
+
+
+def test_native_projection_has_no_lease_or_reset_credit_authority():
+    raw=native_sample()
+    raw["account"]["reset_credits"]={"state":"COUNT_OBSERVED","available_count":7}
+    result=project("B1",raw,cap=0)
+    assert result.reset_credits is None
+    assert result.lease_cap==0
+    assert pick([result]) is None
+
+
+def test_native_projection_requires_verified_business_premium_seat_type():
+    result=project("B1",native_sample(),entitled=False)
+    assert pick([result]) is None
+
+
+def test_native_projection_requires_explicit_model_at_selection():
+    result=project("B1",native_sample(),models=frozenset({SOL}))
+    assert pick([result],model=ASTRA) is None
+    assert pick([result],model=SOL).alias=="B1"
+
+
+def test_native_personal_projection_maintains_backwards_account_shape():
+    raw=native_sample(workspace="c"*64,user="2"*64,plan="pro",pct=60)
+    raw["home_identity"].pop("user_id_sha256")
+    result=project("C2",raw)
+    assert result.account_id_sha256=="c"*64
+    assert result.user_id_sha256 is None
+    assert pick([result]).alias=="C2"

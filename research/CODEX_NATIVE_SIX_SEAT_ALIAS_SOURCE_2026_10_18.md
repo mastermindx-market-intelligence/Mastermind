@@ -133,3 +133,49 @@ defines only codex-pro-01/02/03 plus the distinct company slot; it is not
 six installed subscription processes. A future source owner must reconcile
 the actual runtime's reviewed OS UIDs, model entitlement, issuer quota scope,
 release/merge readiness, and the previously accepted platform gate.
+
+
+## October 18 bounded native observation to selector bridge
+
+The incumbent installed Fabric kit previously had only a pure ranking function
+with hypothetical AccountObservation rows; the separate accepted #1585 native
+Codex observer returned sanitized quota/account metadata in a different shape,
+and there was no direct consumer projection. The same original source candidate
+now adds project_native_account_observation as a PURE translation helper inside
+codex_pool_policy (not a new state, identity, quota or scheduling owner).
+
+Source contract:
+- Takes only a sanitized successful native observer result, a qualified
+  account-binding boolean and model list, owner-qualified entitlement class,
+  and current existing broker active-leases/cap. No credential reads or model
+  queries are performed in this module.
+- Requires NATIVE_READS_COMPLETED, api_fallback=false, a proven empty private
+  App Server process group, native managed ChatGPT, available capacity, exact
+  codex limit identifier, proper account ID (and Business member ID), expected
+  personal or Business plan, <=10-minute observation age, coherent used and
+  remaining percentages, and future reset horizon.
+- Explicitly requires exactly ONE observed quota window and its sibling
+  explicitly NOT_APPLICABLE. It refuses missing/unknown/contradictory or
+  multiple windows rather than silently discarding a binding rate limit.
+- Passes reset_credits=None regardless of observed credit inventory. No
+  paid provider reset or promotional refill is requested, inferred or minted.
+- Business included-seat premium validation and model-list issuer binding
+  MUST be produced by the authorized existing owner. A field supplied to
+  a pure function is not an administrative entitlement or runtime proof.
+- No account is ever granted without the incumbent broker's actual atomic
+  provider+seat+model+host claim and the separate START/return acceptance path.
+
+RED-first: 14 cases failed while this translator was absent; GREEN after
+source change: 73/73 combined old selector, six-seat aliases, business
+identity safeguards and new native-result projection cases. The digest-sealed
+offline verifier copies the exact installed preimages, applies the patch
+only in a disposable directory, verifies postimage/test digests, executes
+all tests, and proves the installed M2 kit remains byte-for-byte unchanged.
+
+The upstream source status is only DRAFT/SOURCE_CANDIDATE. Legacy M2 broker
+still uses codex-native/default cap 1 and its Ubuntu lane launcher remains
+ineligible for M2 account homes. The actual Executive worker slot catalog
+has codex-01 and three personal Pro definitions; its read-only status
+reported every reviewed slot NOT_READY with missing provider homes, and
+the Executive reader replied backend_unavailable. A valid model list and
+this pure bridge do not cure those host/realm/acceptance gates.
