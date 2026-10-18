@@ -232,6 +232,26 @@ C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256 = "504c22af839e154bb1a5314134240b9eb7
 C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256 = "ed2dc2b9f7f812406c7ef7e9297b3ad5b54c8c15c11903463e61a1d628b0fdf0"
 C2_PAPER_BUSINESS_RUNTIME_IDENTITY = {**C2_PAPER_RUNTIME_IDENTITY, "port": 45028}
 
+# Independently verified C4 installation, observed 2026-10-18. Its eleven module
+# bytes equal C2_PAPER_FILES_SHA256, but its account, manifests, configuration and
+# dependency seal are distinct. This admits only its original and planned Paper
+# configuration; it does not enroll a new workspace or change installed grants.
+C4_PAPER_ACCOUNT = "chatgpt4"
+C4_PAPER_ORIGINAL_MANIFEST_SHA256 = "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071"
+C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
+    "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
+    "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+))
+C4_PAPER_NON_PAPER_CONFIG_SHA256 = "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894"
+C4_PAPER_RUNTIME_IDENTITY = {
+    "host": "127.0.0.1",
+    "port": 45024,
+    "nodeHash": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+    "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
+    "dependencyTreeHash": "639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211",
+}
+PAPER_RUNTIME_UPGRADE_ACCOUNTS = C2_PAPER_UPGRADE_ACCOUNTS | frozenset((C4_PAPER_ACCOUNT,))
+
 
 KNOWN_MANIFEST_FILESETS = frozenset(
     (
@@ -587,13 +607,13 @@ def _build_runtime_roots(account: str) -> dict:
 
 @contextmanager
 def _c2_lifecycle_mutex(account: str):
-    """Serialize C2 installer mutations on one persistent, private lock inode.
+    """Serialize qualified Paper installer mutations on one persistent, private lock inode.
 
     Never unlink this file: replacement would let another invocation lock a new
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in C2_PAPER_UPGRADE_ACCOUNTS:
+    if account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS:
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
     _assert_dest_safe(lock_path)
@@ -641,7 +661,7 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account not in C2_PAPER_UPGRADE_ACCOUNTS
+            if (args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
@@ -897,13 +917,19 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         and all(data.get(key) == value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())
         and _canonical_json_sha256(data) in C2_PAPER_MANIFEST_CANONICAL_SHA256
     )
+    c4_paper_cohort = (
+        version == MANIFEST_VERSION and account == C4_PAPER_ACCOUNT
+        and files == C2_PAPER_FILES_SHA256
+        and all(data.get(key) == value for key, value in C4_PAPER_RUNTIME_IDENTITY.items())
+        and _canonical_json_sha256(data) in C4_PAPER_MANIFEST_CANONICAL_SHA256
+    )
     if (fileset not in KNOWN_MANIFEST_FILESETS
             and not (version == MANIFEST_VERSION and (
                 fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
                 or (account == "chatgpt2-business"
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
-            and not c2_paper_predecessor):
+            and not c2_paper_predecessor and not c4_paper_cohort):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -1000,12 +1026,12 @@ def _launchd_inspect(label: str) -> dict | None:
 
 def _lifecycle_inspect(account: str, label: str, roots: dict, *,
                        require_positive: bool = False) -> dict | None:
-    """C2 Paper upgrades require positive service identity or exact absence.
+    """Qualified Paper upgrades require positive service identity or exact absence.
 
     Preserve generic C2 Business lifecycle inspection semantics; only the
     dedicated Paper cutover opts into stricter absence proof.
     """
-    if account != C2_PAPER_ACCOUNT and not require_positive:
+    if account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT) and not require_positive:
         return _launchd_inspect(label)
     target = _launchd_target(label)
     absent = (f'Bad request.\nCould not find service "{label}" '
@@ -1958,6 +1984,14 @@ def cmd_upgrade(args) -> int:
 
     roots = _build_runtime_roots(account)
     if getattr(args, "c2_business_fleet_compat", False) is True:
+        # This sibling writer shares config/manifest state with the Paper
+        # transaction. Keep validation, writes and recovery under the same inode.
+        # Genuine read-only preflight and existing eligibility refusals are unchanged.
+        if (account == C2_PAPER_BUSINESS_ACCOUNT
+                and getattr(args, "publisher_preflight_only", False) is False):
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_c2_business_original_fleet_mastermind_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots)
         return _upgrade_c2_business_original_fleet_mastermind_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
     if getattr(args, "publisher_only_fleet_v10", False) is True:
@@ -2020,7 +2054,7 @@ def cmd_upgrade(args) -> int:
 
 @_c2_lifecycle_serialized(readonly_preflight=True)
 def cmd_paper_runtime_upgrade(args) -> int:
-    """Select reviewed Paper v12 on the exact sealed C2 fleet without restaging it.
+    """Select reviewed Paper v12 on an exact qualified fleet without restaging it.
 
     This dedicated transaction grants no new account, file cohort or capability.
     It cannot stop/start a service, copy gateway source or select an arbitrary bridge.
@@ -2038,8 +2072,12 @@ def cmd_paper_runtime_upgrade(args) -> int:
         original_manifest = C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256
         non_paper_pin = C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256
         runtime_identity = C2_PAPER_BUSINESS_RUNTIME_IDENTITY
+    elif account == C4_PAPER_ACCOUNT:
+        original_manifest = C4_PAPER_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C4_PAPER_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C4_PAPER_RUNTIME_IDENTITY
     else:
-        raise SystemExit("paper runtime compatibility requires the exact enrolled C2 account")
+        raise SystemExit("paper runtime compatibility requires the exact enrolled Paper account")
     if type(preview) is not bool:
         raise SystemExit("paper runtime compatibility preflight flag invalid")
     if not _sha256_hex(expected):
@@ -2303,8 +2341,8 @@ def cmd_stop(args) -> int:
                 return 1
             time.sleep(0.2)
     except SystemExit as exc:
-        if account == C2_PAPER_ACCOUNT:
-            raise SystemExit("C2 stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
+        if account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT):
+            raise SystemExit("Paper stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
         raise
 
     print(json.dumps({"stopped": True, "account": account}))
@@ -2318,7 +2356,7 @@ def build_parser() -> argparse.ArgumentParser:
     paper = sub.add_parser("paper-runtime-upgrade")
     paper.add_argument("--account", required=True)
     paper.add_argument("--expected-manifest-sha256", required=True,
-                       help="CAS pin for the exact reviewed sealed C2 predecessor")
+                       help="CAS pin for the exact reviewed sealed Paper predecessor")
     paper.add_argument("--preflight-only", action="store_true",
                        help="read-only Paper selection plan; no service or installation changes")
     paper.set_defaults(func=cmd_paper_runtime_upgrade)

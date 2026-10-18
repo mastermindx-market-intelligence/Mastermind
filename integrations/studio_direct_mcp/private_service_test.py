@@ -2223,7 +2223,7 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
             (home / "Library" / "LaunchAgents").mkdir(parents=True)
             with mock.patch.dict(os.environ, {"HOME": str(home)}):
                 account = account or svc.C2_PAPER_ACCOUNT
-                port = 45028 if account == svc.C2_PAPER_BUSINESS_ACCOUNT else 45026
+                port = {svc.C2_PAPER_BUSINESS_ACCOUNT: 45028, svc.C4_PAPER_ACCOUNT: 45024}.get(account, 45026)
                 _do_stage(tmp, home, account=account, port=port)
                 roots = svc._build_runtime_roots(account)
                 _seed_node_modules(roots)
@@ -2289,6 +2289,10 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
                     C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256=original_sha,
                     C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256=non_paper_sha,
                     C2_PAPER_BUSINESS_RUNTIME_IDENTITY=identity,
+                    C4_PAPER_ORIGINAL_MANIFEST_SHA256=original_sha,
+                    C4_PAPER_NON_PAPER_CONFIG_SHA256=non_paper_sha,
+                    C4_PAPER_RUNTIME_IDENTITY=identity,
+                    C4_PAPER_MANIFEST_CANONICAL_SHA256=canonical_pins,
                     PAPER_BRIDGE_SHA256=PAPER_BRIDGE_FIXTURE_SHA,
                 ):
                     with svc._c2_lifecycle_mutex(account):
@@ -2312,7 +2316,7 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
 
     def _assert_no_writes(self, args, roots, message):
         before = self._snapshot(roots)
-        recorder = self._unloaded_recorder()
+        recorder = self._unloaded_recorder(account=args.account)
         with mock.patch.object(svc, "_atomic_write_bytes") as write, \
              mock.patch.object(svc, "_run", recorder):
             with self.assertRaisesRegex(SystemExit, message):
@@ -2374,7 +2378,7 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
             self._assert_no_writes(args, roots, "reviewed predecessor")
             args.expected_manifest_sha256 = original
             args.account = "chatgpt3"
-            self._assert_no_writes(args, roots, "exact enrolled C2")
+            self._assert_no_writes(args, roots, "exact enrolled Paper")
             args.account = svc.C2_PAPER_BUSINESS_ACCOUNT
             running = CmdRecorder(default=FakeResult(0, _print_running(
                 str(roots["plist"]), _label_for(args.account))))
@@ -2494,7 +2498,7 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
     def test_other_account_and_unreviewed_cas_cannot_enroll(self):
         with self._installed_c2_fixture() as (args, roots, _):
             args.account = "chatgpt1"
-            self._assert_no_writes(args, roots, "exact enrolled C2")
+            self._assert_no_writes(args, roots, "exact enrolled Paper")
             args.account = svc.C2_PAPER_ACCOUNT
             for value in ("", "garbage", "b" * 64):
                 with self.subTest(value=value):
@@ -3028,6 +3032,215 @@ class TestC2PaperRuntimeCompatibility(unittest.TestCase):
             self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
 
 
+    def test_c4_preflight_has_no_effect_while_live_or_contended(self):
+        for contended in (False, True):
+            with self.subTest(contended=contended), self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+                args.preflight_only = True
+                lock = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+                if not contended:
+                    lock.unlink()  # Fixture-only: preflight must not create the lock.
+                before = self._snapshot(roots)
+                live = CmdRecorder(default=FakeResult(0, _print_running(
+                    str(roots["plist"]), _label_for(args.account))))
+                with mock.patch.object(svc, "_run", live), \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    if contended:
+                        with svc._c2_lifecycle_mutex(args.account):
+                            rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                    else:
+                        rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+                    write.assert_not_called()
+                receipt = json.loads(output)
+                self.assertEqual((rc, receipt["account"], receipt["effect"], receipt["preflight"]),
+                                 (0, svc.C4_PAPER_ACCOUNT, "NOT_APPLIED", True))
+                self.assertEqual(live.calls, [])
+                self.assertEqual(before, self._snapshot(roots))
+
+    def test_c4_exact_original_and_target_preserve_the_installed_profile(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, cfg):
+            before = self._snapshot(roots)
+            prior = json.loads(roots["manifest"].read_text())
+            roots["manifest"].write_text(json.dumps(prior, separators=(",", ":")))
+            self.assertEqual(svc._verify_staged_install(
+                args.account, _label_for(args.account), roots), prior)
+            roots["manifest"].write_bytes(before["manifest.json"])
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)):
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(args))
+            receipt = json.loads(output)
+            self.assertEqual((rc, receipt["account"], receipt["effect"]),
+                             (0, svc.C4_PAPER_ACCOUNT, "APPLIED"))
+            self.assertEqual(receipt["preservedGatewayFiles"], 11)
+            self.assertFalse(receipt["serviceStarted"])
+            after = self._snapshot(roots)
+            self.assertEqual(set(before), set(after))
+            self.assertEqual({name for name in before if before[name] != after[name]},
+                             {"config.json", "manifest.json"})
+            current = json.loads(roots["config"].read_text())
+            self.assertEqual({k: v for k, v in current.items() if k != "paperDesign"},
+                             {k: v for k, v in cfg.items() if k != "paperDesign"})
+            self.assertEqual({k for k in cfg["paperDesign"]
+                              if cfg["paperDesign"][k] != current["paperDesign"][k]},
+                             {"pythonPath", "bridgePath", "bridgeSha256"})
+            target = svc._verify_staged_install(args.account, _label_for(args.account), roots)
+            self.assertEqual(target, args._fixture_target_manifest)
+            self.assertEqual({k: v for k, v in target.items() if k != "configHash"},
+                             {k: v for k, v in prior.items() if k != "configHash"})
+            recorder = self._unloaded_recorder(account=args.account, handler=lambda cmd:
+                FakeResult(0) if cmd[:2] == ["launchctl", "bootstrap"] else None)
+            with mock.patch.object(svc, "_run", recorder):
+                start_rc, started = _capture_stdout(lambda: svc.cmd_start(args))
+            self.assertEqual((start_rc, json.loads(started)["started"]), (0, True))
+            self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootstrap"])
+            self._assert_no_writes(args, roots, "installed manifest CAS mismatch")
+
+    def test_c4_cohort_refuses_foreign_identity_and_unreviewed_manifest_changes(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            prior = json.loads(roots["manifest"].read_text())
+            label = _label_for(args.account)
+            self.assertTrue(svc._valid_manifest(prior, args.account, label))
+            self.assertTrue(svc._valid_manifest(args._fixture_target_manifest, args.account, label))
+            variants = {
+                "module bytes": {**prior, "files": {**prior["files"], "gateway.mjs": "0" * 64}},
+                "config": {**prior, "configHash": "0" * 64},
+                "source": {**prior, "source": prior["source"] + "-different"},
+                "unsealed": {**prior, "dependencyTreeHash": None},
+                "extra module": {**prior, "files": {**prior["files"], "foreign.mjs": "0" * 64}},
+                "version": {k: v for k, v in {**prior, "version": 1}.items()
+                            if k not in ("nodeHash", "backendHash", "dependencyTreeHash")},
+            }
+            for key in svc.C4_PAPER_RUNTIME_IDENTITY:
+                variants[key] = {**prior, key: 45026 if key == "port" else "0" * 64}
+            for name, candidate in variants.items():
+                with self.subTest(name=name):
+                    self.assertFalse(svc._valid_manifest(candidate, args.account, label))
+            original = args.expected_manifest_sha256
+            args.expected_manifest_sha256 = "a" * 64
+            self._assert_no_writes(args, roots, "reviewed predecessor")
+            args.expected_manifest_sha256 = original
+            args.account = "chatgpt4-business"
+            self._assert_no_writes(args, roots, "exact enrolled Paper")
+            self.assertEqual(svc.C2_PAPER_UPGRADE_ACCOUNTS,
+                             frozenset((svc.C2_PAPER_ACCOUNT, svc.C2_PAPER_BUSINESS_ACCOUNT)))
+
+    def test_c4_actual_module_drift_refuses_before_lifecycle_or_write(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            module = roots["base"] / "gateway.mjs"
+            module.write_bytes(module.read_bytes() + b"// unexpected drift\n")
+            before = self._snapshot(roots)
+            with mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "hash mismatch|integrity"):
+                    svc.cmd_paper_runtime_upgrade(args)
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_c4_mutex_excludes_all_four_mutators(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            before = self._snapshot(roots)
+            lock = roots["state"] / svc.C2_LIFECYCLE_LOCK_NAME
+            inode = lock.stat().st_ino
+            with svc._c2_lifecycle_mutex(args.account), \
+                 mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                for operation in (svc.cmd_paper_runtime_upgrade, svc.cmd_start,
+                                  svc.cmd_stop, svc.cmd_seal_runtime):
+                    with self.subTest(operation=operation.__name__):
+                        with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                            operation(args)
+                run.assert_not_called()
+                write.assert_not_called()
+            self.assertEqual(lock.stat().st_ino, inode)
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_c4_ambiguous_absence_blocks_every_mutating_command(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            for operation in (svc.cmd_paper_runtime_upgrade, svc.cmd_start,
+                              svc.cmd_stop, svc.cmd_seal_runtime):
+                with self.subTest(operation=operation.__name__):
+                    before = self._snapshot(roots)
+                    recorder = CmdRecorder(default=FakeResult(113, "", "unexpected diagnostic"))
+                    with mock.patch.object(svc, "_run", recorder), \
+                         mock.patch.object(svc, "_atomic_write_bytes") as write:
+                        with self.assertRaisesRegex(SystemExit, "state is indeterminate"):
+                            operation(args)
+                        write.assert_not_called()
+                    self.assertTrue(all(cmd[:2] == ["launchctl", "print"] for cmd in recorder.calls))
+                    self.assertEqual(before, self._snapshot(roots))
+
+    def test_c4_unknown_service_after_config_write_does_not_restore(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            before = self._snapshot(roots)
+            writes = []
+            real_write = svc._atomic_write_bytes
+            def write(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                real_write(path, data, mode)
+                raise OSError("fixture post-replace failure")
+            def handle(cmd):
+                return FakeResult(1, "", "unavailable") if writes else None
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(handle, args.account)), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN during rollback"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json"])
+            self.assertEqual(roots["manifest"].read_bytes(), before["manifest.json"])
+            self.assertNotEqual(roots["config"].read_bytes(), before["config.json"])
+
+    def test_c4_unknown_service_after_manifest_commit_does_not_roll_back_or_replay(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            before = self._snapshot(roots)
+            writes = []
+            real_write = svc._atomic_write_bytes
+            def write(path, data, mode=svc.FILE_MODE):
+                writes.append(Path(path).name)
+                return real_write(path, data, mode)
+            def handle(cmd):
+                return FakeResult(1, "", "unavailable") if "manifest.json" in writes else None
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(handle, args.account)), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after manifest commit"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json", "manifest.json"])
+            self.assertNotEqual(roots["manifest"].read_bytes(), before["manifest.json"])
+            self._assert_no_writes(args, roots, "installed manifest CAS mismatch")
+
+    def test_c4_safe_rollback_retains_mutex_until_original_bytes_are_restored(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            before = self._snapshot(roots)
+            writes = []
+            real_write = svc._atomic_write_bytes
+            def write(path, data, mode=svc.FILE_MODE):
+                if Path(path) == roots["manifest"]:
+                    raise OSError("fixture manifest failure")
+                with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                    svc.cmd_start(args)
+                writes.append(Path(path).name)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", self._unloaded_recorder(account=args.account)), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED; original state restored"):
+                    svc.cmd_paper_runtime_upgrade(args)
+            self.assertEqual(writes, ["config.json", "config.json"])
+            self.assertEqual(before, self._snapshot(roots))
+
+    def test_c4_unknown_state_after_bootout_retains_effect_unknown(self):
+        with self._installed_c2_fixture(svc.C4_PAPER_ACCOUNT) as (args, roots, _):
+            stopped = []
+            def handle(cmd):
+                if cmd[:2] == ["launchctl", "bootout"]:
+                    stopped.append(1)
+                    return FakeResult(0)
+                if stopped:
+                    return FakeResult(113, "", "unexpected diagnostic")
+                return FakeResult(0, _print_running(str(roots["plist"]), _label_for(args.account)))
+            recorder = CmdRecorder(handler=handle)
+            with mock.patch.object(svc, "_run", recorder):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after bootout"):
+                    svc.cmd_stop(args)
+            self.assertEqual([cmd[1] for cmd in recorder.calls], ["print", "bootout", "print"])
+
+
 class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
     """No new repository enrollment; exact 11-file original C2 only."""
 
@@ -3119,6 +3332,152 @@ class TestC2BusinessHistoricalCompatibility(unittest.TestCase):
                     svc, "_run", CmdRecorder()
                 ):
                     yield args, roots, cfg, prior
+
+
+    @contextmanager
+    def _both_upgrade_intents(self):
+        """Both public commands pass real preflight on the same sealed fixture."""
+        with self._installed_c2() as (old_args, roots, cfg, prior):
+            old_runtime = svc._user_root() / ".local/share/mastermind-paper/runtime/v10"
+            cfg["paperDesign"] = {
+                **svc._paper_design_config(svc._user_root()),
+                "pythonPath": str(old_runtime / "venv/bin/python"),
+                "bridgePath": str(old_runtime / "source/bridge.py"),
+                "bridgeSha256": svc.C2_PAPER_ORIGINAL_BRIDGE_SHA256,
+            }
+            roots["config"].write_text(json.dumps(cfg, indent=2, sort_keys=True))
+            prior["configHash"] = svc._sha256_file(roots["config"])
+            roots["manifest"].write_text(json.dumps(prior, indent=2, sort_keys=True))
+            original_sha = svc._sha256_file(roots["manifest"])
+            non_paper_sha = svc._canonical_json_sha256(
+                {k: v for k, v in cfg.items() if k != "paperDesign"})
+            compat = svc.build_parser().parse_args([
+                "upgrade", "--account", old_args.account, "--port", str(prior["port"]),
+                "--source", old_args.source, "--node", old_args.node, "--backend", old_args.backend,
+                "--c2-business-fleet-compat", "--publisher-expected-manifest-sha256", original_sha,
+            ])
+            paper = svc.build_parser().parse_args([
+                "paper-runtime-upgrade", "--account", old_args.account,
+                "--expected-manifest-sha256", original_sha,
+            ])
+            with mock.patch.multiple(
+                svc, C2_PAPER_FILES_SHA256=prior["files"],
+                C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256=original_sha,
+                C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256=non_paper_sha,
+                C2_PAPER_BUSINESS_RUNTIME_IDENTITY={
+                    key: prior[key] for key in svc.C2_PAPER_BUSINESS_RUNTIME_IDENTITY},
+                PAPER_BRIDGE_SHA256=PAPER_BRIDGE_FIXTURE_SHA,
+            ):
+                # Prove each inner intent is eligible; unrelated argument or
+                # fixture failure must not stand in for a contention refusal.
+                before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+                compat.publisher_preflight_only = True
+                paper.preflight_only = True
+                with mock.patch.object(svc, "_run") as run, \
+                     mock.patch.object(svc, "_atomic_write_bytes") as write:
+                    for command, args in ((svc.cmd_upgrade, compat),
+                                          (svc.cmd_paper_runtime_upgrade, paper)):
+                        rc, output = _capture_stdout(lambda: command(args))
+                        self.assertEqual((rc, json.loads(output)["effect"]), (0, "NOT_APPLIED"))
+                    run.assert_not_called()
+                    write.assert_not_called()
+                self.assertEqual(before, TestC2PaperRuntimeCompatibility._snapshot(roots))
+                compat.publisher_preflight_only = False
+                paper.preflight_only = False
+                yield compat, paper, roots, cfg, prior
+
+    def test_paper_config_write_excludes_valid_business_compatibility_apply(self):
+        with self._both_upgrade_intents() as (compat, paper, roots, cfg, _):
+            before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            real_write = svc._atomic_write_bytes
+            checkpoints = []
+            recorder = CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result(paper.account))
+            def write(path, data, mode=svc.FILE_MODE):
+                if Path(path) == roots["config"] and not checkpoints:
+                    checkpoints.append("config write")
+                    calls = len(recorder.calls)
+                    with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                        svc.cmd_upgrade(compat)
+                    self.assertEqual(len(recorder.calls), calls)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                rc, output = _capture_stdout(lambda: svc.cmd_paper_runtime_upgrade(paper))
+            self.assertEqual((rc, json.loads(output)["effect"]), (0, "APPLIED"))
+            self.assertEqual(checkpoints, ["config write"])
+            after = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            self.assertEqual(set(before), set(after))
+            self.assertEqual({name for name in before if before[name] != after[name]},
+                             {"config.json", "manifest.json"})
+            current = json.loads(roots["config"].read_text())
+            self.assertEqual({k: v for k, v in current.items() if k != "paperDesign"},
+                             {k: v for k, v in cfg.items() if k != "paperDesign"})
+
+    def test_business_compatibility_module_write_excludes_valid_paper_apply(self):
+        with self._both_upgrade_intents() as (compat, paper, roots, _, prior):
+            before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            real_write = svc._atomic_write_bytes
+            checkpoints = []
+            recorder = CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result(paper.account))
+            def write(path, data, mode=svc.FILE_MODE):
+                if Path(path).name in svc.C2_BUSINESS_TARGET_PATCH_SHA256 and not checkpoints:
+                    checkpoints.append("module write")
+                    calls = len(recorder.calls)
+                    with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                        svc.cmd_paper_runtime_upgrade(paper)
+                    self.assertEqual(len(recorder.calls), calls)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                rc, output = _capture_stdout(lambda: svc.cmd_upgrade(compat))
+            receipt = json.loads(output)
+            self.assertEqual((rc, receipt["effect"], receipt["noNewRepositoryGrants"]),
+                             (0, "APPLIED", True))
+            self.assertEqual(checkpoints, ["module write"])
+            after = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            self.assertEqual(set(after) - set(before), {"workspace-access.mjs"})
+            self.assertEqual({name for name in before if before[name] != after[name]},
+                             {"gateway.mjs", "git-publish.mjs", "manifest.json"})
+            current = svc._verify_staged_install(compat.account, _label_for(compat.account), roots)
+            self.assertEqual(current["configHash"], prior["configHash"])
+
+    def test_business_compatibility_preflight_stays_readonly_under_paper_mutex(self):
+        with self._both_upgrade_intents() as (compat, _, roots, _, _):
+            compat.publisher_preflight_only = True
+            before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            with svc._c2_lifecycle_mutex(compat.account), \
+                 mock.patch.object(svc, "_run") as run, \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                rc, output = _capture_stdout(lambda: svc.cmd_upgrade(compat))
+                run.assert_not_called()
+                write.assert_not_called()
+            receipt = json.loads(output)
+            self.assertEqual((rc, receipt["preflight"], receipt["effect"]), (0, True, "NOT_APPLIED"))
+            self.assertEqual(before, TestC2PaperRuntimeCompatibility._snapshot(roots))
+
+    def test_business_compatibility_recovery_excludes_paper_until_restored(self):
+        with self._both_upgrade_intents() as (compat, paper, roots, _, _):
+            before = TestC2PaperRuntimeCompatibility._snapshot(roots)
+            real_write = svc._atomic_write_bytes
+            checkpoints = []
+            recorder = CmdRecorder(default=TestC2PaperRuntimeCompatibility._absent_result(paper.account))
+            def write(path, data, mode=svc.FILE_MODE):
+                name = Path(path).name
+                if Path(path) == roots["manifest"]:
+                    raise OSError("fixture manifest failure")
+                if name in ("gateway.mjs", "git-publish.mjs") and data == before[name]:
+                    calls = len(recorder.calls)
+                    with self.assertRaisesRegex(SystemExit, "lifecycle mutation already in progress"):
+                        svc.cmd_paper_runtime_upgrade(paper)
+                    self.assertEqual(len(recorder.calls), calls)
+                    checkpoints.append(name)
+                return real_write(path, data, mode)
+            with mock.patch.object(svc, "_run", recorder), \
+                 mock.patch.object(svc, "_atomic_write_bytes", write):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
+                    svc.cmd_upgrade(compat)
+            self.assertEqual(set(checkpoints), {"gateway.mjs", "git-publish.mjs"})
+            self.assertEqual(before, TestC2PaperRuntimeCompatibility._snapshot(roots))
 
     def test_generic_upgrade_from_c2_11file_refuses_downgrade_before_effect(self):
         with self._installed_c2() as (args, roots, cfg, prior):
