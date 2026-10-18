@@ -668,6 +668,26 @@ def _path(value: Any, name: str) -> Path:
     return Path(value).resolve(strict=False)
 
 
+def _workspace_control_room_topology(value: Any) -> tuple[bool, int, Path | None]:
+    """Parse one explicit existing topology without selecting a fallback store."""
+    if type(value) is not dict:
+        raise ServiceError("workspace Control Room topology refused")
+    if set(value) == {"port"}:
+        port = value["port"]
+        if type(port) is int and 1 <= port <= 65535:
+            return False, port, None
+    elif set(value) == {"mode", "bindings_path"} and value["mode"] == "cache_only":
+        selected = value["bindings_path"]
+        if selected is None:
+            return True, 0, None
+        if (type(selected) is str and 0 < len(selected) <= 4096
+                and "\x00" not in selected and Path(selected).is_absolute()):
+            # Retain the operator's explicit path; no HOME expansion,
+            # alias resolution, store probing or path provisioning here.
+            return True, 0, Path(selected)
+    raise ServiceError("workspace Control Room topology refused")
+
+
 def _sealed_root_executable(value: Any, name: str) -> Path:
     """Require one root-owned executable behind no symlink/writable ancestor."""
     if not isinstance(value, str) or not Path(value).is_absolute():
@@ -1050,10 +1070,7 @@ def load_control_config(
     if keys & workspace_keys:
         if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
             raise ServiceError("workspace acquisition requires its policy and installed App peer")
-        topology = config["workspace_control_room"]
-        if (type(topology) is not dict or set(topology) != {"port"}
-                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
-            raise ServiceError("workspace Control Room topology refused")
+        _workspace_control_room_topology(config["workspace_control_room"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
         try:
@@ -1726,6 +1743,16 @@ def _service_from_config(
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
 ) -> ExecutiveControlService:
+    workspace_cache_only, workspace_port = False, 0
+    selected_workspace_bindings_path = workspace_bindings_path
+    if "workspace_acquisition" in raw:
+        workspace_cache_only, workspace_port, configured_bindings = (
+            _workspace_control_room_topology(raw.get("workspace_control_room")))
+        if workspace_cache_only:
+            if (workspace_bindings_path is not None
+                    and workspace_bindings_path != configured_bindings):
+                raise ServiceError("workspace Control Room bindings selection conflicts")
+            selected_workspace_bindings_path = configured_bindings
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
         dialogue_canary_profile = DialogueWakeCanaryProfile(None)
@@ -2247,7 +2274,10 @@ def _service_from_config(
         workspace_factories = {}
         if "workspace_acquisition" in raw:
             from integrations.business_mcp_auth.contracts import load_resource_policy
-            from integrations.mastermind_workspace_app.contract import workspace_authorizers
+            from integrations.mastermind_workspace_app.contract import (
+                workspace_authorizers, workspace_control_room_authorizers,
+            )
+            from common.workspace_control_room_action_contract import OPERATIONS
             from control_plane.workspace_control_room_lifecycle import HostedControlRoom
             from control_plane.workspace_read_service import workspace_provider_factory
             from scripts.chairman_control_room import ServerConfig
@@ -2257,6 +2287,13 @@ def _service_from_config(
                 raise ServiceError("sealed current workspace acquisition loader is required")
             policy = load_resource_policy(raw["workspace_resource_policy"])
             _, authorize = workspace_authorizers(policy=policy, load_bindings=workspace_acquisition_loader)
+            _, authorize_discovery = workspace_control_room_authorizers(
+                policy=policy, load_bindings=workspace_acquisition_loader, action="discover")
+            authorize_actions = {
+                operation: workspace_control_room_authorizers(
+                    policy=policy, load_bindings=workspace_acquisition_loader, action=operation)[1]
+                for operation in OPERATIONS
+            }
             # Installed source join: the trusted parent builds the composer from
             # the same sealed roots the readers use, never from the public App.
             # The collector is the existing installed one, constructed directly
@@ -2285,16 +2322,17 @@ def _service_from_config(
                 macro_root=Path(raw["ceo_ingress_app_macro_root"]),
                 bounded_runtime=lambda: service._namespace_custody.bound_runtime(
                     service._require_runtime()),
-                bindings_path=workspace_bindings_path,
+                bindings_path=selected_workspace_bindings_path,
             )
-            # Existing source paths and existing controller permissions only.
-            # Bind the installation-selected incumbent topology before publishing.
-            port = raw["workspace_control_room"]["port"]
+            # Both READ and action owners select this one explicit store and
+            # the existing cache. The legacy port shape remains unchanged.
             workspace_control_room = HostedControlRoom(ServerConfig(
                 repo_root=Path(raw["proof_source_repository"]),
-                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
-                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
-                compose_inputs=compose_inputs))
+                macro_root=str(raw["ceo_ingress_app_macro_root"]),
+                bindings_path=selected_workspace_bindings_path,
+                token=secrets.token_urlsafe(32),
+                origin=f"http://127.0.0.1:{workspace_port}", port=workspace_port,
+                compose_inputs=compose_inputs), cache_only=workspace_cache_only)
             from integrations.product_acceptance_read import read_acceptance
             from integrations.product_acceptance_selector import read_original_acceptance_observation
             from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
@@ -2310,6 +2348,7 @@ def _service_from_config(
                             raise ServiceError("installed acceptance target changed")
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
+                authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
                 runtime_identity={"root": None, "db_present": True, "identity": None},
                 # The factory is inert until the actual service has started.

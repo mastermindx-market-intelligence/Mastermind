@@ -37,9 +37,9 @@ class HostedControlRoom:
                 or type(cache_only) is not bool):
             raise ValueError("control room hosting configuration refused")
         self.config = config
-        # Source-only prerequisite for separating the existing canonical cache
-        # from its user-facing HTTP presentation. The privileged Control caller
-        # is NOT switched to this mode by this candidate.
+        # Trusted Control configuration explicitly selects the existing cache
+        # mode. The default retains the legacy topology; source selection is
+        # separate from installation and running-host acceptance.
         self.cache_only = cache_only
         self._cache_active = False
         self.shutdown_timeout = shutdown_timeout
