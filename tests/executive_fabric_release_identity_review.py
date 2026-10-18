@@ -201,3 +201,49 @@ REVIEWED_FILES['ops/executive_os/finite_reference_assignment.py'] = {'sha256': '
 # Native Root scoped review EC-1 closed: exact fixed directory/HOME permission
 # sites only, not principal identity; every changed byte invalidates this pin.
 REVIEWED_FILES['ops/executive_os/finite_enrollment_completion.py'] = {'sha256': 'c49496b13380aa2b1d61cd12454ea21a89fc7b34a8de5c16b9ecb25da9afa3b4', 'sites': ((174, 111, 116, 'int', '0o755'), (228, 95, 100, 'int', '0o700'), (289, 26, 31, 'int', '0o700'))}
+
+# --- Native-fabric-quota-continuity release review, 2026-10-18 ---------------
+# Exact source bytes and token sites only. Every site is a permission mode, an
+# HTTPS .ts.net validator port, an HTTP-status sentinel in a non-importable
+# preimage docstring, a grant-lifetime seconds bound, or the existing ten-
+# minute observation age already reviewed at the historical research path.
+# No process identity literal is exposed; any changed byte or token restores
+# the generic D8 scanner to every site below.
+# ---------------------------------------------------------------------------
+
+# R2-retained private-directory permission checks. Ownership remains os.getuid();
+# the two stat.S_IMODE comparisons against 0o700 are not native UIDs.
+# Same bytes/sites already reviewed at the R2 retained path above.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/source/artifact_production.py'] = {
+    "sha256": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "sites": ((149, 77, 82, "int", "0o700"), (170, 85, 90, "int", "0o700")),
+}
+
+# Non-importable preimage suffix; the line-oriented scanner still reads the
+# docstring's exact standalone 429. Drift re-exposes the standalone token.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/source/bailian_keys.py.preimage'] = {
+    "sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+    "sites": ((540, 66, 69, "int", "429"),),
+}
+
+# Studio fabric HTTPS .ts.net validator: only the absent-or-443 explicit
+# port is admitted; the canonicalizer preserves an already accepted
+# explicit :443 suffix. No credential, query, fragment, or path deviation.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/source/fabric_client_projection.py'] = {
+    "sha256": "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6",
+    "sites": ((72, 30, 33, "int", "443"), (83, 15, 18, "int", "443")),
+}
+
+# Remaining grant lifetime / start-window seconds bound (660s); not a process
+# identity literal.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/source/fabric_operator_owner.py'] = {
+    "sha256": "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
+    "sites": ((242, 81, 84, "int", "660"), (389, 85, 88, "int", "660")),
+}
+
+# Existing ten-minute telemetry observation age. Same bytes/sites already
+# reviewed at the historical research path below.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readiness.py'] = {
+    "sha256": "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
+    "sites": ((31, 18, 21, "int", "600"),),
+}

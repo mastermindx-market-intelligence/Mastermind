@@ -67,14 +67,35 @@ print(json.dumps({{'type':'result','subtype':'success','is_error':False,'result'
 
     def env(self):
         self.serial+=1
-        value=dict(os.environ,PATH=str(self.bin)+os.pathsep+os.environ['PATH'],
+        # Strip the ambient host-floor overrides the host may have exported.
+        # The production admission code reads these four env vars on every
+        # lane_runtime call; an inherited host setting turns this fixture's
+        # commissioned lane into a designed host_*_unknown refusal regardless
+        # of provider reply. The four are forced to neutral defaults below so
+        # the fixture child environment is independent of the host.
+        ambient_floors = (
+            'LANE_MIN_FREE_DISK_GB',
+            'LANE_MIN_FREE_MEM_GB',
+            'LANE_MAX_CPU_TCTL_C',
+            'LANE_NICE',
+        )
+        base = {key: value for key, value in os.environ.items()
+                if key not in ambient_floors}
+        value=dict(base,PATH=str(self.bin)+os.pathsep+os.environ['PATH'],
             POOL_CAPACITY_PREFLIGHT='1',REMOTE_SUB_RUN_ID='fixture-'+str(self.serial),
             POOL_OUTCOME_FILE=str(self.root/('fixture-'+str(self.serial)+'.provider.json')),
             POOL_ORCHESTRATOR_ID='root',POOL_PARENT_RUN_ID='parent',POOL_LEASE_ID='lease',
             POOL_ACCOUNT='account',LANE_REMOTE_HOST='fixture',LANE_LEASED='1',
             POOL_TASK_CLASS='mechanical',SUPPORT_DIGEST='a'*64,
             ANTHROPIC_BASE_URL=self.url,ANTHROPIC_AUTH_TOKEN='inert-fixture-key',
-            FIXTURE_ENDPOINT=self.url,FIXTURE_CLI_STARTED=str(self.root/'cli-started'))
+            FIXTURE_ENDPOINT=self.url,FIXTURE_CLI_STARTED=str(self.root/'cli-started'),
+            # Neutral admission floors so an ambient LANE_* host floor can
+            # never cause host_disk_unknown / host_memory_below_floor /
+            # host_temperature_at_or_above_limit inside this fixture.
+            LANE_MIN_FREE_DISK_GB='0',
+            LANE_MIN_FREE_MEM_GB='0',
+            LANE_MAX_CPU_TCTL_C='0',
+            LANE_NICE='10')
         return value
 
     def launch(self,provider):
