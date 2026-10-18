@@ -164,6 +164,11 @@ def _project(envelope: dict, *, run_id: str, portfolio_id: str) -> tuple[dict | 
         "tool_result_blocks_observed", "contradictory_terminals_observed",
     )}
     terminal_count = _integer(terminals.get("count"), issues)
+    omitted_middle_count = _integer(terminals.get("omitted_middle_count"), issues)
+    if omitted_middle_count is None:
+        issues.add("terminal_omission_count_unavailable")
+    elif terminal_count is not None and omitted_middle_count != max(0, terminal_count - 2):
+        return None, "diagnostic_terminal_counts_conflict"
     if terminal_count != counts["terminal_messages_observed"]:
         return None, "diagnostic_terminal_counts_conflict"
     if (terminal_count is not None and counts["sdk_messages_observed"] is not None
@@ -174,6 +179,8 @@ def _project(envelope: dict, *, run_id: str, portfolio_id: str) -> tuple[dict | 
         return None, "diagnostic_terminal_counts_conflict"
     first = _terminal(terminals.get("first"), issues)
     last = _terminal(terminals.get("last"), issues)
+    if terminal_count is not None and terminal_count > 0 and (first is None or last is None):
+        issues.add("terminal_snapshots_unavailable")
     if terminal_count == 0 and (first is not None or last is not None):
         return None, "diagnostic_terminal_counts_conflict"
     if terminal_count == 1 and first != last:
@@ -198,7 +205,7 @@ def _project(envelope: dict, *, run_id: str, portfolio_id: str) -> tuple[dict | 
         "observation": {**counts, "query_entered_observed":
                         _boolean(observation.get("query_entered_observed"), issues)},
         "terminals": {"count": terminal_count, "first": first, "last": last,
-                      "omitted_middle_count": _integer(terminals.get("omitted_middle_count"), issues)},
+                      "omitted_middle_count": omitted_middle_count},
         "exception": {"observed": exception_observed, "class": exception_class,
                       "fields": exception_summary},
         "exit": {"end_state": end_state, "exit_code":
@@ -210,7 +217,8 @@ def _project(envelope: dict, *, run_id: str, portfolio_id: str) -> tuple[dict | 
         },
     }
     if completeness == "complete_limited_to_observed_sdk_messages":
-        if end_state != "exhausted" or terminal_count in (None, 0):
+        if (end_state != "exhausted" or terminal_count in (None, 0)
+                or result["observation"]["query_entered_observed"] is not True):
             issues.add("contradictory_completeness_fields")
     result["issues"] = sorted(issues)
     result["status"] = "available" if not issues and completeness == "complete_limited_to_observed_sdk_messages" else "partial"
