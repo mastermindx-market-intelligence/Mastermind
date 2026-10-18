@@ -1,39 +1,23 @@
-"""integrations.mastermind_workspace_app.app — the fixed authenticated read edge.
+"""Fixed authenticated Workspace reads and explicit Control Room actions.
 
-Two Starlette sibling routes only:
+Existing READ routes retain their bounded projection and release-time
+authorization checks. The four fixed Control Room POST routes additionally
+require the selected operator grant, derive their private principal/expiry
+from the existing A1 JWT owner, and preserve the original action's disposition.
 
-* ``GET /workspace/programs/current`` — the current-programs observation.
-* ``GET /workspace/mission/current?work_ref=WS:...&root_job_id=JOB-...`` —
-  the current mission observation for one named worktree + root job.
-
-Both routes share an identical envelope:
-
-* Authenticate via :data:`integrations.mastermind_executive_app.app._authenticate`,
-  which is the existing A1 ``JwtAuthenticator`` wiring for resource-policy
-  RS256/JWKS bearer verification (the very same code path that
-  ``/v1/tools/executive_state`` uses).
-* Reject any non-empty request body by refusing the first non-empty chunk
-  before the client is ever consulted.
-* Reject unknown or duplicate query parameters, plus all raw-path alias
-  spellings (encoded separators, duplicate slashes), and trailing-slash
-  variants: the same defense profile BSC-E1 applies on its own routes.
-* Verify the principal is the one the installed owner client permits.
-* Send exactly one closed frame to the host-installed client
-  (``config.client.request(frame)``) and translate its closed envelope back
-  to a typed HTTP status without ever leaking internal exception text.
-
-The module holds NO durable state, NO in-memory cache, NO token store, and
-NO Runtime import — the canonical workspace read primitives live behind the
-host-installed client; this file is a closed transport framing only.
+All routes use the same installed client and exact-path fences. This module
+owns transport framing only: no Runtime, durable state, cache or token store.
 """
 from __future__ import annotations
 
+import asyncio
 import dataclasses
 import inspect
 import json
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
+from types import MappingProxyType
 from urllib.parse import unquote
 
 from starlette.applications import Starlette
@@ -45,6 +29,8 @@ from integrations.business_mcp_auth.contracts import VerifiedPrincipal
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.mastermind_executive_app.app import _authenticate
 from integrations.mastermind_workspace_app import contract
+from common import workspace_control_room_action_contract as ccr_action
+from control_plane.workspace_owned_task import await_owned
 
 __all__ = ["WorkspaceAppConfig", "create_workspace_app"]
 
@@ -66,6 +52,10 @@ _RESULT_ROUTE = "/workspace/result/current"
 _PLAN_ROUTE = "/workspace/plan/current"
 _CCR_STATE_ROUTE = "/workspace/control-room/state/current"
 _CCR_DISCOVER_ROUTE = "/workspace/control-room/discover/current"
+_CCR_ACTION_ROUTES = MappingProxyType({
+    operation: "/workspace/control-room/" + operation
+    for operation in ("open", "bind", "unbind", "refresh-builds")
+})
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 _RESULT_QUERY_KEYS = frozenset(
     {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
@@ -349,7 +339,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
 
 @dataclasses.dataclass(frozen=True)
 class WorkspaceAppConfig:
-    """One host-closed configuration bundle for the workspace read app.
+    """One host-closed configuration bundle for the existing Workspace App.
 
     Every field is operator-supplied; none is read from a request.  The
     constructor rigidly enforces the closed binding between the
@@ -362,8 +352,18 @@ class WorkspaceAppConfig:
     now: Callable[[], int] = dataclasses.field(default=lambda: int(time.time()))
     authorize_principal: Callable[[VerifiedPrincipal], bool] | None = None
     client: Any = None
+    authorize_discovery: Callable[[VerifiedPrincipal], bool] | None = None
+    authorize_actions: Mapping[str, Callable[[VerifiedPrincipal], bool]] | None = None
 
     def __post_init__(self) -> None:
+        if self.authorize_discovery is not None and not callable(self.authorize_discovery):
+            raise ValueError("authorize_discovery must be callable or absent")
+        if self.authorize_actions is not None:
+            if (type(self.authorize_actions) is not dict
+                    or set(self.authorize_actions) != ccr_action.OPERATIONS
+                    or any(not callable(value) for value in self.authorize_actions.values())):
+                raise ValueError("authorize_actions must select exactly four callable owners")
+            object.__setattr__(self, "authorize_actions", MappingProxyType(dict(self.authorize_actions)))
         if not isinstance(self.authenticator, JwtAuthenticator):
             raise ValueError("authenticator must be a JwtAuthenticator")
         if self.now is None or not callable(self.now):
@@ -656,14 +656,7 @@ async def mission_current(
 async def control_room_current(
     request: Request, *, config: WorkspaceAppConfig, operation: str,
 ) -> JSONResponse:
-    """Authenticated incumbent CCR READ; never an operator-action endpoint.
-
-    Identical A1 JWT/installed-member/fresh-epoch barriers to Programs, with
-    one new fixed read frame on the existing private App socket. GET-only;
-    no path/query/body selector, no new cache, and no surface-binding write.
-    Candidate discovery is separately gated again by the original Control
-    owner, where its operator grant remains uninstalled by default.
-    """
+    """Authenticated incumbent CCR READ with a separate Discovery grant."""
     from common.workspace_control_room_read_contract import (
         FRAME_SCHEMA as CCR_READ_FRAME_SCHEMA, validate_frame as validate_ccr_read_frame,
     )
@@ -680,38 +673,156 @@ async def control_room_current(
         return refused
     if request.scope.get("query_string"):
         return _refuse_json(400, "invalid_input")
-    refused = _check_authorize(config.authorize_principal, principal)
-    if refused is not None:
-        return refused
+    authorizers = ((config.authorize_principal, config.authorize_discovery)
+                   if operation == "discover" else (config.authorize_principal,))
     try:
-        stamp = contract.permission_stamp(config.authorize_principal, principal)
-        if stamp is None:
-            return _refuse_json(403, "access_denied")
+        stamps = _control_room_permissions(authorizers, principal)
         frame = validate_ccr_read_frame({
             "schema": CCR_READ_FRAME_SCHEMA, "operation": operation,
             "principal": contract.principal_frame(principal),
         })
-    except (TypeError, ValueError):
+    except Exception:
         return _refuse_json(403, "access_denied")
     try:
         envelope = await config.client.request(frame)
     except Exception:
         return _refuse_json(503, "internal_error")
     try:
+        if _control_room_permissions(authorizers, principal) != stamps:
+            raise ValueError("access_denied")
+        if (config.authorize_principal is not authorizers[0]
+                or (operation == "discover" and config.authorize_discovery is not authorizers[1])):
+            raise ValueError("access_denied")
+        # Permission loaders may block. Expiry is sampled after both gates,
+        # immediately before READ release, never used to rewrite an action.
         current = config.now()
-        if type(current) is not int or current >= principal.expires_at:
-            return _refuse_json(403, "access_denied")
-    except Exception:
-        return _refuse_json(503, "internal_error")
-    refused = _check_authorize(config.authorize_principal, principal)
-    if refused is not None:
-        return refused
-    try:
-        if contract.permission_stamp(config.authorize_principal, principal) != stamp:
-            return _refuse_json(403, "access_denied")
+        if type(current) is not int or not 0 <= current < principal.expires_at:
+            raise ValueError("access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
     return _envelope_response(envelope)
+
+
+def _control_room_permissions(authorizers, principal):
+    """Current selected grants on the existing sealed membership owner."""
+    stamps = []
+    for authorize in authorizers:
+        if not callable(authorize) or authorize(principal) is not True:
+            raise ValueError("access_denied")
+        stamp = contract.permission_stamp(authorize, principal)
+        if stamp is None:
+            raise ValueError("access_denied")
+        stamps.append(stamp)
+    return tuple(stamps)
+
+
+def _action_http_response(result):
+    """Expose the qualified action result itself, retaining its disposition."""
+    return Response(
+        ccr_action.canonical(result), status_code=result["status"],
+        media_type="application/json", headers={"Cache-Control": "no-store"},
+    )
+
+
+def _action_refusal(operation, *, code, status):
+    return _action_http_response(ccr_action.refused_result(
+        operation, code=code, status=status,
+    ))
+
+
+async def control_room_action(request: Request, *, config: WorkspaceAppConfig,
+                              operation: str) -> Response:
+    """One fixed action on the existing authenticated App transport.
+
+    Authentication is admission authority. Once the client is invoked, this
+    edge preserves its original effect outcome rather than applying the
+    READ release-time withholding rule to a potentially modifying operation.
+    """
+    if operation not in ccr_action.OPERATIONS:
+        return _refuse_json(400, "invalid_input")
+    principal_or_response = await _authenticate(
+        request, config.authenticator, clock=config.now,
+    )
+    if isinstance(principal_or_response, JSONResponse):
+        return _with_no_store(principal_or_response)
+    principal = principal_or_response
+    if request.scope.get("query_string"):
+        return _action_refusal(operation, code="invalid_input", status=400)
+
+    # Capture both permission and transport selections before streaming.
+    try:
+        client = config.client
+        request_owner = client.request
+        selected = (config.authorize_actions.get(operation)
+                    if config.authorize_actions is not None else None)
+        authorizers = (config.authorize_principal, selected)
+        initial_permission = _control_room_permissions(authorizers, principal)
+    except Exception:
+        return _action_refusal(operation, code="access_denied", status=403)
+
+    content_types = [
+        value for name, value in request.scope.get("headers", ())
+        if name.lower() == b"content-type"
+    ]
+    if (len(content_types) != 1
+            or content_types[0].split(b";", 1)[0].strip().lower() != b"application/json"):
+        return _action_refusal(operation, code="invalid_input", status=400)
+
+    body = bytearray()
+    try:
+        async for chunk in request.stream():
+            if len(body) + len(chunk) > ccr_action.MAX_REQUEST_BYTES:
+                return _action_refusal(operation, code="invalid_input", status=400)
+            body.extend(chunk)
+        payload = ccr_action.decode_payload(bytes(body), operation=operation)
+        frame = ccr_action.validate_frame({
+            "schema": ccr_action.FRAME_SCHEMA, "operation": operation,
+            "principal": contract.principal_frame(principal),
+            "admission_expires_at": principal.expires_at, "payload": payload,
+        })
+    except Exception:
+        return _action_refusal(operation, code="invalid_input", status=400)
+
+    try:
+        if _control_room_permissions(authorizers, principal) != initial_permission:
+            raise ValueError("access_denied")
+        if (config.authorize_principal is not authorizers[0]
+                or config.authorize_actions is None
+                or config.authorize_actions.get(operation) is not authorizers[1]):
+            raise ValueError("access_denied")
+    except Exception:
+        return _action_refusal(operation, code="access_denied", status=403)
+    try:
+        if config.client is not client or client.request != request_owner:
+            raise ValueError("source_unavailable")
+    except Exception:
+        return _action_refusal(operation, code="source_unavailable", status=503)
+    try:
+        instant = config.now()
+        if type(instant) is not int or not 0 <= instant < principal.expires_at:
+            raise ValueError("access_denied")
+    except Exception:
+        return _action_refusal(operation, code="access_denied", status=403)
+
+    # Invocation starts here. No exception after this boundary proves that
+    # the original operation was not dispatched, and there is no retry.
+    try:
+        owned = asyncio.create_task(request_owner(frame))
+        try:
+            envelope = await await_owned(owned)
+        except asyncio.CancelledError:
+            # await_owned retains the same child until terminal. A qualified
+            # completed response survives remembered parent cancellation.
+            if not owned.done() or owned.cancelled():
+                raise
+            envelope = owned.result()
+        if (type(envelope) is not dict or set(envelope) != {"ok", "result"}
+                or envelope["ok"] is not True):
+            raise ValueError("source_unavailable")
+        result = ccr_action.validate_result(envelope["result"], operation=operation)
+    except (Exception, asyncio.CancelledError):
+        result = ccr_action.unknown_result(operation)
+    return _action_http_response(result)
 
 
 def _with_no_store(response: JSONResponse) -> JSONResponse:
@@ -963,16 +1074,10 @@ async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONR
 
 
 class _RawPathFence:
-    """ASGI wrapper refusing any HTTP request whose raw path bytes contain an
-    encoded/alternate separator or whose method is not GET, before routing
-    or authentication ever runs.  Mirrors BSC-E1's profile exactly.
-    """
+    """Refuse path aliases and methods outside each fixed route before auth."""
 
-    #: Starlette auto-binds HEAD alongside GET; we explicitly refuse it so
-    #: a non-GET method never reaches authentication, validating the
-    #: closed-method surface the workspace contract requires.
-    _ALLOWED_METHODS = frozenset({"GET"})
-    _KNOWN_ROUTES = (
+    #: Starlette also binds HEAD for GET routes; the exact map refuses it.
+    _READ_ROUTES = (
         _PROGRAMS_ROUTE,
         _WORK_ROUTE,
         _MISSION_ROUTE,
@@ -983,6 +1088,10 @@ class _RawPathFence:
         _CCR_STATE_ROUTE,
         _CCR_DISCOVER_ROUTE,
     )
+    _ROUTE_METHODS = {
+        **{path: "GET" for path in _READ_ROUTES},
+        **{path: "POST" for path in _CCR_ACTION_ROUTES.values()},
+    }
 
     def __init__(self, app: Any) -> None:
         self._app = app
@@ -1003,13 +1112,14 @@ class _RawPathFence:
                 return
             method = str(scope.get("method") or "").upper()
             path = scope.get("path") or ""
-            if method not in self._ALLOWED_METHODS and path in self._KNOWN_ROUTES:
+            allowed = self._ROUTE_METHODS.get(path)
+            if allowed is not None and method != allowed:
                 response = JSONResponse(
                     {"ok": False, "status": 405,
                      "error": {"code": "not_found",
                                "message": "method not allowed"}},
                     status_code=405,
-                    headers={"Cache-Control": "no-store", "Content-Type": "application/json", "Allow": "GET"},
+                    headers={"Cache-Control": "no-store", "Content-Type": "application/json", "Allow": allowed},
                 )
                 await response(scope, receive, send)
                 return
@@ -1017,7 +1127,7 @@ class _RawPathFence:
 
 
 def create_workspace_app(config: WorkspaceAppConfig) -> Any:
-    """Build the closed, fixed authenticated workspace read app."""
+    """Build the fixed authenticated reads and explicitly granted CCR actions."""
 
     async def programs_endpoint(request: Request) -> JSONResponse:
         return await programs_current(request, config=config)
@@ -1057,6 +1167,10 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_CCR_STATE_ROUTE, ccr_state_endpoint, methods=["GET"]),
         Route(_CCR_DISCOVER_ROUTE, ccr_discover_endpoint, methods=["GET"]),
     ]
+    for operation, path in _CCR_ACTION_ROUTES.items():
+        async def action_endpoint(request: Request, *, operation=operation) -> Response:
+            return await control_room_action(request, config=config, operation=operation)
+        routes.append(Route(path, action_endpoint, methods=["POST"]))
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:
     # an encoded/trailing-slash/raw-path ambiguity must refuse as a plain

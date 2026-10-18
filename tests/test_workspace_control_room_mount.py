@@ -58,6 +58,7 @@ def _mounted(settings, rsa_key, profile, *, envelope=None, authorize=None, sink=
     leaf, _ = workspace._make_app(
         rsa_key, client=backend,
         authorize=permitted() if authorize is None else authorize,
+        authorize_discovery=permitted(),
     )
     sink = sink or executive.Sink()
     policy = workspace._workspace_policy()

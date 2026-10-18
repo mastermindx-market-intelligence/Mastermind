@@ -34,7 +34,8 @@ def test_valid_signed_workspace_principal_reaches_only_exact_read_frame(rsa_key,
     payload = {"control_room": {"schema": "mastermind.chairman_control_room.v1"},
                "composed_at": "2026-10-17T00:00:00Z"}
     client, backend = _make_app(rsa_key, client=_FakeWorkspaceClient(
-        envelope={"ok": True, "result": payload}), authorize=permitted())
+        envelope={"ok": True, "result": payload}), authorize=permitted(),
+        authorize_discovery=permitted() if operation == "discover" else None)
     response = get(client, f"/workspace/control-room/{operation}/current", headers={
         "Authorization": "Bearer " + _workspace_token(rsa_key),
     })
