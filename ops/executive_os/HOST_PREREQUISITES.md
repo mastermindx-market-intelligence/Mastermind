@@ -1057,9 +1057,10 @@ receipt, identity and canary must bind the exact reviewed predecessor binary,
 whose retained root-owned install attestation must still validate. The current
 binary must be the reviewed successor; the new identity probe must pass.
 Passing receipts, reservations, missing/ambiguous results, timeouts, signal
-exits, other failures, changed credentials and same-generation attempts refuse
-before a canary. Without this explicit option, existing refusal behavior stays
-unchanged.
+exits, other failures and changed credentials refuse before a canary.
+Same-generation attempts refuse under this option; they are admitted only by
+the dedicated option in the next subsection. Without this explicit option,
+existing refusal behavior stays unchanged.
 
 A specialized `paired_filesystem_device_renumbering` comparison is confined to
 this explicit new qualification and its NOT_APPLIED reconciliation. Historical
@@ -1087,6 +1088,36 @@ old final bytes predate the request, the prior/current binary transition and
 credential identity still validate, and no readiness lock/process remains.
 Any changed receipt or reservation keeps the effect unknown. Reconciliation
 preserves the original marker and never replays the request.
+
+### Same-generation terminal requalification on the current pin (reviewed 2026-10-18)
+
+A closed terminal failure recorded on the **current** reviewed pin with the
+**same** credential has one direct root-operator path only:
+`provision-worker-auth.sh --verify-ready … --requalify-same-generation-terminal-sha256 SHA256`,
+with the company device-auth kind and binding attested as above and no slot
+selector. The `executive.worker_auth.verify_ready` broker action and `mmx-admin` do not
+accept this option; they refuse the unknown key by design. The digest is the
+full SHA256 of the exact root-owned live readiness receipt bytes, a concurrency
+fence, not authority. The deadline must be Chairman-approved and more than 30
+and at most 60 minutes ahead.
+
+Admission requires a finalized v2 `provider_turn_failed` receipt observed at
+least 24 hours earlier whose `codex_binary` equals the live pinned binary lstat
+exactly and whose `credential_lstat` equals the live credential lstat exactly;
+there is no device-renumbering tolerance. Identity policy must be unchanged.
+The canary must have the exact closed terminal shape: exit 1, no timeout,
+matching terminal event/refusal and a non-null sanitized canary. Passing
+receipts, reservations, timeouts, signal exits, changed credentials, changed
+binaries and failures younger than 24 hours refuse before a canary.
+
+The fresh identity probe must pass within the clock-skew bound and carry the
+same identity stability tuple as the live credential. One reservation then
+saves the old bytes as the digest-named `.superseded-<sha16>.json` sibling and
+atomically replaces the live receipt. Exactly one canary runs, followed by the
+existing finalization. A failing canary writes a new adverse receipt that this
+option cannot requalify for 24 hours; a second failure is a provider fact for
+the Chairman, not a reason for a second canary. This option does not touch
+current-pin recovery, its producer table or its grant.
 
 ### Bounded current-pin recovery is implemented but closed on the current pin
 
@@ -1164,7 +1195,9 @@ be within its actual current window; there is no caller-selectable expiry bypass
 failure is recoverable today.** This section documents a capability whose
 admission is closed, not an available procedure. Enabling it requires a new
 source review that adds a qualified producer to the table plus an
-authority-installed grant; both are out of scope for this runbook.
+authority-installed grant; both are out of scope for this runbook. The explicit
+same-generation terminal requalification above is a distinct admission; it uses
+neither the producer table nor a grant.
 
 ### Source-authorized exact incident exception is distinct from ordinary recovery
 

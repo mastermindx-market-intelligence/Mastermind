@@ -31,6 +31,7 @@ EXPECTED_CREDENTIAL_KIND=""
 WORKSPACE_BINDING_CLASS=""
 CREDENTIAL_EXPIRES_AT=""
 REQUALIFY_TERMINAL_ADVERSE_SHA256=""
+REQUALIFY_SAME_GENERATION_TERMINAL_SHA256=""
 RENEW_DEVICE_REVALIDATION_SHA256=""
 REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256=""
 RECOVER_CURRENT_PIN_GRANT_SHA256=""
@@ -94,7 +95,7 @@ trap 'preserve_readiness_lock_on_signal 131' QUIT
 trap 'preserve_readiness_lock_on_signal 143' TERM
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256 | --requalify-company-device-drift-sha256 SHA256 | --recover-current-pin-grant-sha256 SHA256 --successor-request-id ID] [options]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --requalify-same-generation-terminal-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256 | --requalify-company-device-drift-sha256 SHA256 | --recover-current-pin-grant-sha256 SHA256 --successor-request-id ID] [options]" >&2
   /bin/echo "modes: --verify-only | --verify-ready | --enroll-service-account | --enroll-personal-access-token | --reauthorize-device | --recover-readiness-transaction" >&2
   exit 64
 }
@@ -113,6 +114,7 @@ while [ "$#" -gt 0 ]; do
     --workspace-binding-class) WORKSPACE_BINDING_CLASS="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --credential-expires-at) CREDENTIAL_EXPIRES_AT="${2:-}"; shift 2 ;;
     --requalify-terminal-adverse-sha256) REQUALIFY_TERMINAL_ADVERSE_SHA256="${2:-}"; shift 2 ;;
+    --requalify-same-generation-terminal-sha256) REQUALIFY_SAME_GENERATION_TERMINAL_SHA256="${2:-}"; shift 2 ;;
     --renew-device-revalidation-sha256) RENEW_DEVICE_REVALIDATION_SHA256="${2:-}"; shift 2 ;;
     --requalify-company-device-drift-sha256) REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256="${2:-}"; shift 2 ;;
     --recover-current-pin-grant-sha256) RECOVER_CURRENT_PIN_GRANT_SHA256="${2:-}"; shift 2 ;;
@@ -164,6 +166,7 @@ resolve_selected_slot
 
 explicit_count=0
 [ -z "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ] || explicit_count=$((explicit_count + 1))
 [ -z "$RENEW_DEVICE_REVALIDATION_SHA256" ] || explicit_count=$((explicit_count + 1))
 [ -z "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ] || explicit_count=$((explicit_count + 1))
 [ -z "$RECOVER_CURRENT_PIN_GRANT_SHA256" ] || explicit_count=$((explicit_count + 1))
@@ -173,7 +176,7 @@ explicit_count=0
 if [ -n "$RECOVERY_REQUEST_ID" ]; then
   [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ] || usage
 fi
-EXPLICIT_PREDECESSOR_SHA256="${RECOVER_CURRENT_PIN_GRANT_SHA256:-${REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256:-${REQUALIFY_TERMINAL_ADVERSE_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}}}"
+EXPLICIT_PREDECESSOR_SHA256="${RECOVER_CURRENT_PIN_GRANT_SHA256:-${REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256:-${REQUALIFY_TERMINAL_ADVERSE_SHA256:-${REQUALIFY_SAME_GENERATION_TERMINAL_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}}}}"
 if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
   [ "$VERIFY_READY" = "true" ] && [ "$SLOT_SELECTED" = "false" ] \
     && [ "$LOW_LEVEL_SLOT_OVERRIDE" = "false" ] \
@@ -743,6 +746,8 @@ if [ "$VERIFY_READY" = "true" ]; then
                           --successor-request-id "$RECOVERY_REQUEST_ID")
   elif [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
     requalification_args=(--requalify-company-device-drift-sha256 "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256")
+  elif [ -n "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ]; then
+    requalification_args=(--requalify-same-generation-terminal-sha256 "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256")
   elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
     requalification_args=(--requalify-terminal-adverse-sha256 "$REQUALIFY_TERMINAL_ADVERSE_SHA256")
   elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
@@ -778,6 +783,13 @@ if [ "$VERIFY_READY" = "true" ]; then
   elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
     [ "$reuse_status" -eq 6 ] || {
       /bin/echo "explicit device-auth revalidation is not due or eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ]; then
+    # Status 9 admits only a >=24h-old closed terminal failure recorded on the
+    # exact current pin with the exact unchanged credential lstat.
+    [ "$reuse_status" -eq 9 ] || {
+      /bin/echo "explicit same-generation terminal requalification is not eligible; no canary spent" >&2
       exit 65
     }
   elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
