@@ -25,8 +25,9 @@ const facade = createFabricFacade({ async callTool(request) {
     result_available: false, fixture_effects: effects, fixture_pid: process.pid });
   if (command.includes("'request' '--id' 'fixture-timeout'")) {
     effects++;
-    await new Promise(resolve => setTimeout(resolve, 700));
-    return { content: [{ type: 'text', text: 'Process started with PID 456 (shell: /bin/zsh)\nInitial output:\n' }] };
+    // Keep this disposable effect pending until its stdio owner is closed.
+    // The real gateway timeout or HTTP abort must occur before any completion.
+    await new Promise(() => {});
   }
   throw new Error('Unexpected fixture engine call');
 } });
