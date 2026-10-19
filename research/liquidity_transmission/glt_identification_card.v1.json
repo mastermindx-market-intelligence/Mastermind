@@ -1,0 +1,155 @@
+{
+  "card_version": "glt_identification_card.v1",
+  "task_id": "T17",
+  "frozen_at": "2026-10-19T13:11:19Z",
+  "frozen_at_rule": "UTC wall time at which ORCH-K wrote this card, before any fixture fit and with no outcome read; every threshold below comes from the protocol, the estimand card and the instrument census",
+  "validated": false,
+  "evidence_tier": "research_measurement_only",
+  "relation_id": "glt_rel_monetary_impulse_to_broad_targets.v1",
+  "estimand_card_ref": {
+    "path": "research/liquidity_transmission/glt_estimand_card.v1.json",
+    "card_hash": "44a78d4a7b615b9b5941d613b05cb0af1ae949e8232fa34dcd87ada54a518ff1",
+    "hash_rule": "sha256 of the estimand card file bytes on Mastermind master 0c8cb6b4686e66c0f8a22767c44951ba8005e06d"
+  },
+  "preregistration_card_ref": {
+    "path": "research/liquidity_transmission/glt_preregistration_card.v1.json",
+    "card_hash": "da060bf47e8eafc7e94d0cadbb4135c9207a069aad9eef3539ea9d62911d6aee",
+    "hash_rule": "the preregistration card's own card_hash (brain.liquidity_lab.preregistration.card_hash), the identity WindowGuard.from_card binds",
+    "file_sha256": "9519241fe3105f226a4aaeff2c8f84b7a7ee847e61a6dff4fc93d79c262402d2"
+  },
+  "event_definition_id": "evdef_f559621219beafdebd254b21458f06f97cc98b3566ae6e13a8bc0d5a8cb2eb66",
+  "shock_class": "policy_announcement_surprise",
+  "instrument_candidates": [],
+  "instrument_candidate_rule": "an entry needs instrument_id, source_ref{repo, path, sha}, rights_state RIGHTS_PROVEN, clock_rule first_system_known and announcement_type; the T17 census found no rights-proven point-in-time surprise source in either repository and programme law forbids a new collector",
+  "relevance_rule": {
+    "statistic": "first_stage_F",
+    "min_value": 23.1,
+    "estimator": "ols_hac",
+    "hac_lags": 4,
+    "min_thinned_events": 20,
+    "definition": "F = t^2 of the HAC (Newey-West, Bartlett kernel, 4 lags) sandwich t of the OLS slope of the treatment on the instrument over thinned announcement events, with residuals taken at the fitted slope; with one instrument this is the robust (effective) first-stage F. A null-score form is not used: its variance carries the signal itself, so for a Gaussian instrument t^2 cannot exceed about n/2 and the gate would test sample size, not relevance",
+    "threshold_basis": "Montiel Olea and Pflueger (2013) effective-F critical value for one instrument, 5 percent test, worst-case bias tau = 10 percent: 23.1; robust to heteroskedasticity and serial correlation, unlike the iid Staiger-Stock rule of thumb of 10 (S31: no automatic shock identification, so relevance is a declared gate, never inferred from a regression on shock size)"
+  },
+  "anticipation_rule": {
+    "window_sessions_before": 5,
+    "max_abs_t": 1.96,
+    "test": "slope_t",
+    "definition": "HAC sandwich t of the OLS slope of the target log return over the 5 sessions ending the session before the announcement on the instrument (falsifier anticipation)"
+  },
+  "pre_trend_rule": {
+    "sessions": 20,
+    "test": "slope_t",
+    "max_abs_t": 1.96,
+    "definition": "HAC sandwich t of the OLS slope of the target log return over the 20 sessions ending where the anticipation window starts on the instrument (falsifier placebo_leads)"
+  },
+  "reverse_response_rule": {
+    "lookback_sessions": 25,
+    "test": "slope_t",
+    "max_abs_t": 1.96,
+    "definition": "HAC sandwich t of the OLS slope of the instrument on the target log return over the 25 sessions ending the session before the announcement (falsifier reverse_policy_reaction: the surprise must not be predictable from lagged target returns); it spans the whole reaction lookback, so it binds even when the anticipation and pre-trend windows each pass"
+  },
+  "placebo_design": {
+    "n_placebo_dates": 200,
+    "draw_rule": "uniform_non_event_train_dev_sessions",
+    "seed": 20261017,
+    "family_treatment": "bh_fdr",
+    "level": 0.1,
+    "pool_window": {
+      "start": "2008-01-04",
+      "end": "2021-12-31"
+    },
+    "min_weekdays_from_event": 5,
+    "definition": "200 placebo replications; each relocates every thinned announcement event to a distinct session drawn uniformly without replacement from admitted train/dev sessions at least 5 weekdays from every instrument event, keeps the instrument values, and recomputes the reduced-form slope; placebo p = (1 + count(|placebo slope| >= |actual slope|)) / (1 + 200); the horizon family is then adjusted by Benjamini-Hochberg at level 0.10"
+  },
+  "inference_rule": {
+    "interval_kind": "pointwise",
+    "interval_level": 0.95,
+    "reduced_form": "OLS slope of the target log return on the instrument over thinned events with a HAC sandwich standard error from the injected or Macro newey_west_tstat judge",
+    "iv_ratio": "reduced-form slope divided by the first-stage slope; interval by Anderson-Rubin inversion with the same HAC judge, reported unbounded when the accepted set reaches the grid edge",
+    "joint": "horizon-family BH at the placebo level; a path or region claim needs a simultaneous band, which this card does not declare (S32)"
+  },
+  "confounding_news_exclusions": [
+    {
+      "class": "central_bank_information_release",
+      "definition": "a Federal Reserve publication revealing its economic outlook (Summary of Economic Projections, Monetary Policy Report, minutes, Beige Book) on the instrument event's session, including one bundled with the instrument's own announcement unless the candidate's announcement_type ends with _information_purged (the central-bank information effect of protocol section 5)",
+      "weekdays_before": 0,
+      "weekdays_after": 0,
+      "same_event_rule": "counts_unless_information_purged"
+    },
+    {
+      "class": "other_fomc_communication",
+      "definition": "an FOMC statement, unscheduled action or chair press conference within one weekday of the instrument event that is not part of the instrument's own announcement",
+      "weekdays_before": 1,
+      "weekdays_after": 1,
+      "same_event_rule": "never_counts"
+    },
+    {
+      "class": "treasury_quarterly_refunding_announcement",
+      "definition": "the US Treasury quarterly refunding announcement within one weekday of the instrument event",
+      "weekdays_before": 1,
+      "weekdays_after": 1,
+      "same_event_rule": "never_counts"
+    },
+    {
+      "class": "scheduled_cpi_or_payrolls_release",
+      "definition": "a scheduled BLS Consumer Price Index or Employment Situation release within one weekday of the instrument event",
+      "weekdays_before": 1,
+      "weekdays_after": 1,
+      "same_event_rule": "never_counts"
+    },
+    {
+      "class": "foreign_central_bank_policy_decision",
+      "definition": "an ECB or Bank of Japan monetary-policy decision within one weekday of the instrument event (both balance sheets sit inside the treatment)",
+      "weekdays_before": 1,
+      "weekdays_after": 1,
+      "same_event_rule": "never_counts"
+    }
+  ],
+  "confounding_rule": "classes are applied to the announcement calendar only, never to outcomes; an event matching a class is excluded upstream with its reasons reported, and any matching event still present at qualification fails it as CONFOUNDING_NEWS",
+  "forbidden_controls": [
+    {"id": "contemporaneous_broad_dollar", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "contemporaneous_real_yield_10y", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "contemporaneous_high_yield_oas", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "usd_funding_impulse_composite", "kind": "mediator", "applies_to": ["causal"]},
+    {"id": "post_treatment_market_stress_response", "kind": "collider", "applies_to": ["predictive", "causal"]},
+    {"id": "post_treatment_funding_stress_realized", "kind": "collider", "applies_to": ["predictive", "causal"]},
+    {"id": "outcome_conditioned_episode_selection", "kind": "collider", "applies_to": ["predictive", "causal"]},
+    {"id": "contemporaneous_or_future_target_returns", "kind": "post_treatment_outcome", "applies_to": ["predictive", "causal"]},
+    {"id": "contemporaneous_global_common_risk_factor", "kind": "post_treatment_common_factor", "applies_to": ["causal"]}
+  ],
+  "admissible_specifications": [
+    {
+      "spec_id": "rf_no_controls",
+      "controls": [],
+      "lag_rule": "none",
+      "definition": "reduced form on the instrument alone; exclusion carries the identification"
+    },
+    {
+      "spec_id": "rf_lagged_market_state",
+      "controls": [
+        "lagged_target_returns_and_volatility",
+        "lagged_financial_stress",
+        "lagged_broad_dollar_level"
+      ],
+      "lag_rule": "each control measured at the close of the session before the anticipation window",
+      "definition": "adds the pre-treatment market-state confounders of the estimand card"
+    },
+    {
+      "spec_id": "rf_lagged_macro_state",
+      "controls": [
+        "lagged_growth_news",
+        "lagged_inflation_and_policy_rate_path",
+        "lagged_treasury_plumbing",
+        "lagged_global_common_risk_factor"
+      ],
+      "lag_rule": "each control measured at the close of the session before the anticipation window",
+      "definition": "adds the pre-treatment macro and plumbing confounders of the estimand card"
+    }
+  ],
+  "outcome_firewall": {
+    "reserved_start": "2022-01-03",
+    "rule": "no outcome read before receipt",
+    "definition": "qualification reads only pre-announcement windows; any post-announcement outcome row offered before a receipt exists is OUTCOME_FIREWALL_BREACH, and no row may reach reserved_start"
+  },
+  "definition_hash": "a55f05e1e0e389e548840dc1c70da93278d9f935d4dbb623a8cb9895f5aaa81b"
+}
