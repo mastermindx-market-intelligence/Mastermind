@@ -17,14 +17,17 @@ SUPPORT = "8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c"
 
 
 @pytest.fixture(scope="module")
-def staged_ext(tmp_path_factory):
-    stage = tmp_path_factory.mktemp("l0-original-read")
-    subprocess.run(
-        [sys.executable, str(ROOT / "ops/native_fabric/quota_continuity/rollout/build_review_stage.py"),
-         "--output", str(stage)],
-        check=True, capture_output=True, text=True, timeout=30,
-    )
-    return stage / "native-code-stage/ext"
+def staged_ext():
+    # The real reader intentionally rejects a world-writable ancestor. Linux
+    # pytest's /tmp violates that contract; use a private test-owned directory.
+    with tempfile.TemporaryDirectory(prefix="l0-original-read-", dir=Path.home()) as directory:
+        stage = Path(directory)
+        subprocess.run(
+            [sys.executable, str(ROOT / "ops/native_fabric/quota_continuity/rollout/build_review_stage.py"),
+             "--output", str(stage)],
+            check=True, capture_output=True, text=True, timeout=30,
+        )
+        yield stage / "native-code-stage/ext"
 
 
 def test_generated_reader_requires_exact_original_scope_before_any_io(staged_ext):
@@ -134,7 +137,13 @@ manifest = {{name: collector.sha((generation/'ext'/name).read_bytes())
             for name in ('artifact_production.py', 'artifact_reader.py')}}
 if mode == 'qwen':
     # The original Qwen run used an older producer. Exercise the real fixed
-    # historical validator, without copying any live run or support files.
+    # historical validator from its exact source fixture, not a live host path.
+    historical = base/'original-producer.py'
+    raw = Path({str(ROOT / 'tests/fixtures/native_fabric/artifact_production_c0f17c3e.py.fixture')!r}).read_bytes()
+    assert collector.sha(raw) == collector.delivery._ORIGINAL_PRODUCER_SHA256
+    historical.write_bytes(raw)
+    historical.chmod(0o600)
+    collector.delivery._ORIGINAL_PRODUCER_PATH = historical
     manifest['artifact_production.py'] = collector.delivery._ORIGINAL_PRODUCER_SHA256
 support = state/(rid+'.support.json')
 support.write_bytes(collector.canonical(manifest))
