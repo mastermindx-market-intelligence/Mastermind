@@ -1,0 +1,20 @@
+{
+  "schema": "mastermind_identity_scope_acceptance_v1",
+  "verified_at": "2026-10-09T00:57:49.323178+00:00",
+  "source_snapshot_commit": "24ae789308bf5b9c417b1f8bd5c7e74938b11a7e",
+  "native_tests": {
+    "auction": 26,
+    "static_boundary": 3,
+    "protected_identity_gate": 1
+  },
+  "renderer_passed": true,
+  "browser_passed": 48,
+  "browser_cases": 48,
+  "moved_files": 45,
+  "moved_original_bytes_preserved": true,
+  "historical_manifest": "verification/identity_scope/SOURCE_MANIFEST_55198.json",
+  "source_manifest_sha256": "6fb820e091aaebf2486b6cbeb60a364fa7aa52fafe78e8016c2e798ed5af3511",
+  "guard_or_registry_changed": false,
+  "ci_gate_cleared": false,
+  "production_deployed": false
+}

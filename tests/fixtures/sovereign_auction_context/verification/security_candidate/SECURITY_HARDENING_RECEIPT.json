@@ -1,0 +1,119 @@
+{
+  "task": "Bounded Mastermind CodeQL hardening for check 113599048562",
+  "recorded_at": "2026-10-09T00:04:27.345480+00:00",
+  "status": "candidate_frozen_local_checks_passed_independent_review_passed_root_native_browser_and_codeql_pending",
+  "annotation_source": {
+    "path": "final_ci_audit/MASTERMIND_CODEQL_ANNOTATIONS_113599048562.json",
+    "source_head": "42476573407fcb882c65a9388f98ed038801fc50",
+    "check_run_id": 113599048562
+  },
+  "authorization": "Scratch-only candidate changes; root separately authorized the encountered live inherited statusPill escaping repair after exact source evidence was reported. No remote writes, commits, settings changes, suppressions, provider jobs or production actions performed.",
+  "changed_files": [
+    {
+      "path": "mastermind_patch/tests/test_sovereign_auction_renderer.cjs",
+      "preimage_sha256": "864008961197abac4eb7b1d37e14b86db8f9bda52913052e63e8542374fc82cf",
+      "sha256": "55d35cae4cc1d8b1c46d375b4f71e0895b9225f6f3115bcbf4bdfdec59183d3d",
+      "bytes": 8588
+    },
+    {
+      "path": "ui_verification/mastermind_loopback_harness.py",
+      "preimage_sha256": "ac06f0f9b62c0639a140164cf0e441ef2a086a92635e0d9891c50a2f853d1f89",
+      "sha256": "43833e3da426f7d15e6ac66da5058a4d25799cbd5df864d31a8ccbc8e07f3974",
+      "bytes": 17455
+    },
+    {
+      "path": "mastermind_patch/app/static/market_view.html",
+      "preimage_sha256": "c42e251ff86b1ee53cea017dc358b7e403fe8c82b46e6f3d8e0d06423754c911",
+      "sha256": "dd002ea1b1afce03e00cf2bf566c841ed327f9f3e8cf4a68fb6eb7a9fd2e9f34",
+      "bytes": 35438
+    },
+    {
+      "path": "ui_verification/test_mastermind_static_assets.py",
+      "preimage_sha256": null,
+      "sha256": "f7115ff3c56fbda56390332160a30044d06c3d964d4f3f3a809aca99bf0fa270",
+      "bytes": 3470
+    }
+  ],
+  "unchanged_files": [
+    {
+      "path": "ui_verification/verify_mastermind_ui.cjs",
+      "sha256": "d162597a3f6780b4f30e1fd8595a9db9da5f184e5f9c90be9bedf5d182514a7a"
+    },
+    {
+      "path": "mastermind_patch/brain/sovereign_auction_context.py",
+      "sha256": "7e9930bc77c1aafed2d8a3406e57af3558822c29cdb60c49d327c5685c6aac8e"
+    },
+    {
+      "path": "mastermind_patch/tests/test_sovereign_auction_context.py",
+      "sha256": "8feccdf4875d27804a94fb7d078610de6c2c767d2cc000bbb14e9a02a4b23d58"
+    }
+  ],
+  "findings_and_remedies": [
+    {
+      "finding": "Renderer unit-test HTML script regexp extraction",
+      "remedy": "Replace generic HTML regexp matching with unique exact owned-source start/end/fetch boundaries. Reject missing, duplicate or out-of-order markers and any earlier case-insensitive closing-script sequence in the full script body. Select only the actual renderer prefix before the exact network call. This is strict source binding, not an HTML sanitizer or general parser."
+    },
+    {
+      "finding": "Request-derived filesystem path in diagnostic static fallback",
+      "remedy": "Before accepting requests, enumerate trusted local static assets; retain resolved-root containment, real-file check and exact suffix allowlist; snapshot approved bytes and explicit media types in an immutable lookup. Request handlers only select an existing key and return bytes; no request-derived Path construction, resolution, stat, file read or FileResponse remains."
+    },
+    {
+      "finding": "Inherited statusPill double-quoted class sink persists in live HTML",
+      "remedy": "Extend the existing esc helper to encode both quotes after ampersand and angle brackets. All esc call sites were reviewed: statusPill has the only dynamic attribute use; the others build HTML text fragments. Quote entities preserve visible labels, ordinary status/class-token values, and existing auctionEsc behavior while keeping hostile quotes within the attribute."
+    }
+  ],
+  "esc_usage_review": [
+    "fmtNum fallback, direction-pill label and freshness cells: HTML text only.",
+    "statusPill: encoded status is used in the quoted class attribute and visible text; both now safe, absent/stale behavior preserved.",
+    "renderBanner label/consensus/dissent values and titles: HTML text fragments.",
+    "renderTilt labels and contributors, renderPlanes names/readings/contracts/notes, renderBrief labels/body, renderPairs notes/lead/lag: HTML text fragments.",
+    "auctionEsc composition: added quote replacements become idempotent for already-encoded quotes; existing hostile auction tests remain unchanged and pass.",
+    "Unavailable and load-error messages: HTML text fragments. No esc output is used as a script, CSS expression or URL encoder."
+  ],
+  "validation": [
+    {
+      "command": "node tests/test_sovereign_auction_renderer.cjs",
+      "cwd": "mastermind_patch",
+      "stage": "Before HTML escaping repair, after adding hostile-status regression",
+      "exit_code": 1,
+      "result": "Expected regression failure: actual statusPill output contained a new raw onmouseover attribute because the status double quote terminated class."
+    },
+    {
+      "command": "node tests/test_sovereign_auction_renderer.cjs",
+      "cwd": "mastermind_patch",
+      "stage": "Final frozen candidate",
+      "exit_code": 0,
+      "result": "All existing auction assertions plus strict-boundary controls and hostile/normal/absent status regressions passed."
+    },
+    {
+      "command": "python3 ui_verification/test_mastermind_static_assets.py -v",
+      "cwd": ".",
+      "exit_code": 0,
+      "tests": 3,
+      "result": "Approved suffix/media types and immutable mapping; inside/outside/broken/disguised symlinks; traversal/encoded/absolute/backslash/NUL/directory/disallowed/new-file lookup rejection; snapshot survives later source changes with filesystem methods disabled during lookup."
+    },
+    {
+      "command": "In-memory Python compile() of mastermind_loopback_harness.py and test_mastermind_static_assets.py",
+      "exit_code": 0,
+      "result": "Syntax passed without writing compiled source artifacts."
+    }
+  ],
+  "independent_review": {
+    "reviewer": "/root/terminal_consumer_verification",
+    "mode": "Read-only local source review; no edits, tests or remote tools",
+    "result": "PASS / no remaining scoped finding at final hashes",
+    "additional_issue_found_and_fixed": "A closing script tag in a JavaScript comment could terminate the browser script while VM extraction continued. Final selector rejects an early close anywhere in the full body, including after the fetch cut-point. Added lowercase, mixed-case and whitespace close controls."
+  },
+  "preserved_controls": [
+    "Loopback socket binding, external Python network deny guard, three exact actual GET routes, explicit fixture cases and reader cutoff unchanged.",
+    "API handler invariance preflight, stored bytes, source clocks and data model behavior unchanged.",
+    "All renderer presentation/unknown/escaping/grouping assertions retained; actual 48-case browser runner byte-identical.",
+    "No archived preimage bytes, previous patches or existing browser receipts changed; root owns immutable-Git archival references and active-tree retirement."
+  ],
+  "remaining_verification": "No native FastAPI/browser run or CodeQL analysis was run by this subagent for these final bytes. Root must install the four changed/new files, run native tests and the unchanged 48-case actual-browser matrix in a new proof directory, and assess the new exact-head CodeQL result. This receipt does not clear CI or claim production publication.",
+  "dependencies": "No new dependency. New static-boundary test uses the Python standard library; root uses its existing native FastAPI/uvicorn and Playwright/Chromium environments.",
+  "patch": {
+    "path": "ui_verification/security_hardening/SECURITY_HARDENING.patch",
+    "sha256": "5ab4fa08aad3b93af37f28e65860bd8b7547f05b8b5dd006585a68aa67a740ab"
+  }
+}

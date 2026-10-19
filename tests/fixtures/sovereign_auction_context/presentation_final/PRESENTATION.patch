@@ -1,0 +1,332 @@
+--- a/mastermind_patch/app/static/market_view.html
++++ b/mastermind_patch/app/static/market_view.html
+@@ -101,6 +101,9 @@
+ .auction-context summary { cursor: pointer; color: var(--muted); }
+ .auction-context h3 { font-size: 13px; margin: 16px 0 8px; }
+ body.page-mv .auction-context .brief-row > details { grid-column: 1 / -1; }
++body.page-mv .auction-context .auction-row-summary .metric { color: var(--text); font-family: var(--font-sans); }
++.auction-context .auction-amount { font-weight: 700; }
++.auction-context .auction-source-details summary { min-height: 32px; padding-block: 4px; }
+ 
+ /* ── rotation pairs ──────────────────────────────────────────────────────── */
+ .pairs { display: grid; gap: 8px; grid-template-columns: 1fr; }
+@@ -538,41 +541,80 @@
+         auctionEsc(auctionText('Official source', '官方来源')) + '</a>';
+     } catch (e) { return ''; }
+   }
++  function auctionDollars(value) {
++    var raw = String(value);
++    var parts = raw.match(/^([+-]?)(\d+)(\.\d*)?$/);
++    // Group the source's decimal characters; never round through Number.
++    return (parts ? parts[1] + parts[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (parts[3] || '') : raw) + ' USD';
++  }
++  function auctionTitle(row) {
++    var names = { Bill: ['Treasury bill', '短期国债'], CMB: ['Cash management bill', '现金管理国库券'],
++      Note: ['Treasury note', '中期国债'], Bond: ['Treasury bond', '长期国债'],
++      TIPS: ['Inflation-protected Treasury (TIPS)', '通胀保值国债（TIPS）'], FRN: ['Floating-rate Treasury (FRN)', '浮动利率国债（FRN）'] };
++    var match = String(row.label).match(/^(.*?) (?:Bill|CMB|Note|Bond|TIPS|FRN) auction$/);
++    if (!match || !names[row.normalized_class]) return row.label;
++    var units = { Year: ['year', '年'], Month: ['month', '个月'], Week: ['week', '周'], Day: ['day', '天'] };
++    var term = match[1].replace(/(\d+)-(Year|Month|Week|Day)/g, function (_all, count, unit) {
++      return auctionText(count + '-' + units[unit][0], count + units[unit][1]);
++    });
++    return term + ' ' + auctionText(names[row.normalized_class][0], names[row.normalized_class][1]);
++  }
++  function auctionDeadline(value) {
++    return String(value).replace('T', ' ').replace(/(?:Z|\+00:00)$/, ' UTC');
++  }
+   function renderAuctionRow(row) {
+     var unknown = auctionText('Unknown', '未知');
+-    var out = '<div class="pair"><div class="lead">' + auctionEsc(row.label) + '</div>';
+-    out += '<div class="metric">' + auctionEsc(row.episode_id) + ' · ' + auctionEsc(row.normalized_class) +
+-      ' · ' + auctionEsc(row.physical_state) + '</div>';
++    var states = { ANNOUNCED: ['Auction announced', '拍卖已公告'], TENTATIVE: ['Tentative schedule', '暂定日程'],
++      AWAITING_RESULT: ['Awaiting observed results', '等待观测结果'], RESULT_OBSERVED: ['Results observed', '已观测到结果'] };
++    var status = states[row.physical_state] || ['Unknown', '未知'];
++    var out = '<div class="pair" data-auction-episode="' + auctionEsc(row.episode_id) + '"><div class="auction-row-summary">';
++    out += '<div class="lead">' + auctionEsc(auctionTitle(row)) + '</div><div class="metric">' +
++      auctionEsc(auctionText(status[0], status[1])) + '</div>';
++    out += '<div class="metric">' + auctionEsc(auctionText('Offering amount', '发行金额')) + ': <span class="auction-amount">' +
++      auctionEsc(row.offering_amount_usd == null ? unknown : auctionDollars(row.offering_amount_usd)) + '</span></div>';
+     var lines = [
+       [auctionText('Auction date', '拍卖日期'), row.auction_date],
+       [auctionText('Issue date', '发行日期'), row.issue_date],
+-      [auctionText('Competitive deadline (UTC)', '竞标截止时间（UTC）'), row.competitive_deadline_utc],
+-      [auctionText('Scheduled time (ET)', '计划时间（美东）'), row.time_et],
+-      [auctionText('Offering amount (USD)', '发行金额（美元）'), row.offering_amount_usd],
+-      [auctionText('Known at', '获知时间'), row.known_at],
+-      [auctionText('Source state', '来源状态'), row.source_state],
+-      [auctionText('Issue calendar state', '发行日历状态'), row.issue_calendar_state]
++      [auctionText('Competitive deadline', '竞争性投标截止时间'), row.competitive_deadline_utc == null ? null : auctionDeadline(row.competitive_deadline_utc)],
++      [auctionText('Scheduled time (ET)', '计划时间（美东）'), row.time_et]
+     ];
+     lines.forEach(function (line) {
+       out += '<div class="metric">' + auctionEsc(line[0]) + ': ' +
+         auctionEsc(line[1] == null ? unknown : line[1]) + '</div>';
+     });
+-    out += '<div class="metric">' + auctionEsc(auctionText('Importance: Not scored', '重要性：未评分')) + ' · ' +
+-      auctionEsc(row.result == null ? auctionText('Results not observed', '尚未观察到结果') :
+-        auctionText('Result evidence observed', '已观察到结果证据')) + '</div>';
++    if (row.result == null) out += '<div class="metric">' + auctionEsc(auctionText('Results not observed', '尚未观察到结果')) + '</div>';
++    out += '<div class="metric">' + auctionEsc(row.issue_calendar_state === 'ISSUE_DATE_PASSED' ?
++      auctionText('Issue date has passed; settlement not observed', '发行日期已过；尚未观测到结算') :
++      auctionText('Issue date has not passed; settlement not observed', '发行日期尚未过；尚未观测到结算')) + '</div></div>';
++    out += '<details class="auction-source-details"><summary>' + auctionEsc(auctionText('Source details', '来源详情')) + '</summary>';
++    var audit = [
++      [auctionText('Event identifier', '事件标识'), row.episode_id],
++      [auctionText('Source label', '来源名称'), row.label],
++      [auctionText('Instrument class', '品种类别'), row.normalized_class],
++      [auctionText('Exact source amount (USD)', '来源精确金额（美元）'), row.offering_amount_usd],
++      [auctionText('Competitive deadline (UTC)', '竞标截止时间（UTC）'), row.competitive_deadline_utc],
++      [auctionText('Known at', '获知时间'), row.known_at],
++      [auctionText('First observed at', '首次观测时间'), row.first_observed_at],
++      [auctionText('Source state', '来源状态'), row.source_state],
++      [auctionText('Auction state', '拍卖状态'), row.physical_state],
++      [auctionText('Issue calendar state', '发行日历状态'), row.issue_calendar_state]
++    ];
++    audit.forEach(function (line) {
++      out += '<div class="metric">' + auctionEsc(line[0]) + ': ' + auctionEsc(line[1] == null ? unknown : line[1]) + '</div>';
++    });
+     if (row.result != null) {
+-      out += '<details><summary>' + auctionEsc(auctionText('Observed result fields', '已观察的结果字段')) + '</summary>';
++      out += '<div class="metric"><strong>' + auctionEsc(auctionText('Observed result fields', '已观察的结果字段')) + '</strong></div>';
+       Object.keys(row.result).forEach(function (key) {
+         out += '<div class="metric">' + auctionEsc(key) + ': ' +
+           auctionEsc(row.result[key] == null ? unknown : row.result[key]) + '</div>';
+       });
+-      out += '</details>';
+     }
+     if (row.null_reasons && row.null_reasons.length) {
+       out += '<div class="metric">' + auctionEsc(auctionText('Unknown reasons', '未知原因')) + ': ' +
+         auctionEsc(row.null_reasons.join('; ')) + '</div>';
+     }
+-    out += '<div class="metric">' + auctionLink(row.source_url) + '</div></div>';
++    out += '<div class="metric">' + auctionEsc(auctionText('Importance: Not scored', '重要性：未评分')) + '</div>';
++    out += '<div class="metric">' + auctionLink(row.source_url) + '</div></details></div>';
+     return out;
+   }
+   function renderAuctions(view) {
+@@ -590,6 +632,7 @@
+       out += '<div class="msg">' + auctionEsc(auctionText('Unavailable', '不可用')) + ': ' +
+         auctionEsc(context.note || context.status || auctionText('Unknown', '未知')) + '</div>';
+     } else {
++      if (context.status === 'degraded') out += '<div class="metric" role="status">' + auctionEsc(auctionText('Source coverage degraded', '来源覆盖降级')) + '</div>';
+       var events = Array.isArray(context.events) ? context.events : [];
+       var groups = [
+         [auctionText('Scheduled auctions', '计划拍卖'), events.filter(function (r) { return r.physical_state === 'ANNOUNCED'; })],
+@@ -607,7 +650,7 @@
+         rows.slice(0, initial).forEach(function (row) { out += renderAuctionRow(row); });
+         out += '</div>';
+         if (rows.length > initial) {
+-          out += '<details><summary>' + auctionEsc(auctionText('Show remaining', '显示其余')) + ' ' +
++          out += '<details class="auction-group-expander"><summary>' + auctionEsc(auctionText('Show remaining', '显示其余')) + ' ' +
+             auctionEsc(rows.length - initial) + '</summary><div class="pairs">';
+           rows.slice(initial).forEach(function (row) { out += renderAuctionRow(row); });
+           out += '</div></details>';
+@@ -616,6 +659,9 @@
+       });
+       if (!events.length) out += '<div class="msg">' + auctionEsc(auctionText('No episodes in observed coverage; future unannounced auctions remain unknown', '观察范围内无事件；未来未公告拍卖仍未知')) + '</div>';
+     }
++    var failures = (context.quarantine || []).concat(context.conflicts || []);
++    if ((context.source_health || []).length || failures.length) out += '<details class="auction-context-sources"><summary>' +
++      auctionEsc(auctionText('Source observations', '来源观测')) + '</summary>';
+     (context.source_health || []).forEach(function (source) {
+       out += '<div class="footnote">' + auctionLink(source.source_url) + ' · ' + auctionEsc(source.source_kind) + ' · ' +
+         auctionEsc(auctionText('Latest attempt', '最近尝试')) + ': ' + auctionEsc(source.latest_attempt_at) + ' (' +
+@@ -623,14 +669,16 @@
+         auctionEsc(source.last_valid_observation_at || auctionText('Unknown', '未知')) + ' · ' +
+         auctionEsc(auctionText('Age at cutoff (seconds)', '截止时年龄（秒）')) + ': ' +
+         auctionEsc(source.last_valid_observation_age_seconds == null ? auctionText('Unknown', '未知') : source.last_valid_observation_age_seconds) +
++        ' · ' + auctionEsc(auctionText('Body received at', '响应接收时间')) + ': ' +
++        auctionEsc(source.last_successful_body_receipt_at || auctionText('Unknown', '未知')) +
+         ' · ' + auctionEsc(auctionText('Freshness unassessed', '新鲜度未评估')) +
+         (source.latest_failure_at ? ' · ' + auctionEsc(auctionText('Last failed attempt', '最近失败尝试')) + ': ' +
+           auctionEsc(source.latest_failure_at) + ' · ' + auctionEsc((source.latest_failure_reasons || []).join('; ')) : '') + '</div>';
+     });
+-    var failures = (context.quarantine || []).concat(context.conflicts || []);
+     if (failures.length) out += '<details><summary>' + auctionEsc(auctionText('Producer exclusions/conflicts', '生产方排除／冲突')) +
+       ' (' + auctionEsc(failures.length) + ')</summary><div class="footnote">' +
+       failures.map(function (r) { return auctionEsc(r.reason); }).join('<br>') + '</div></details>';
++    if ((context.source_health || []).length || failures.length) out += '</details>';
+     return out + '</div>';
+   }
+ 
+--- a/mastermind_patch/tests/test_sovereign_auction_renderer.cjs
++++ b/mastermind_patch/tests/test_sovereign_auction_renderer.cjs
+@@ -11,7 +11,7 @@
+ const sandbox = { URL, document: { getElementById: () => ({}), documentElement: { getAttribute: () => lang } } };
+ vm.createContext(sandbox);
+ const prefix = script.slice(0, script.indexOf('  fetch("/api/market_view"'));
+-vm.runInContext(prefix + '\nglobalThis.renderAuctions = renderAuctions;\n})();', sandbox);
++vm.runInContext(prefix + '\nglobalThis.renderAuctions = renderAuctions; globalThis.renderAuctionRow = renderAuctionRow; globalThis.auctionDollars = auctionDollars;\n})();', sandbox);
+ const wrapper = JSON.parse(fs.readFileSync(path.join(__dirname, 'fixtures/sovereign_auction_context/event_calendar.json'), 'utf8'));
+ const original = wrapper.sovereign_auction_context;
+ const context = { ...structuredClone(original), available: true };
+@@ -25,6 +25,20 @@
+   assert.ok(html.includes(row.episode_id));
+   assert.ok(html.includes(row.offering_amount_usd));
+   assert.ok(html.includes(row.competitive_deadline_utc));
++  const rendered = sandbox.renderAuctionRow(row);
++  const summary = rendered.match(/<div class="auction-row-summary">([\s\S]*?)<\/div><details class="auction-source-details">/)[1];
++  assert.ok(summary.includes(sandbox.auctionDollars(row.offering_amount_usd)));
++  assert.ok(!summary.includes(row.episode_id));
++  assert.ok(!summary.includes(row.known_at));
++  assert.ok(!summary.includes('ANNOUNCED'));
++  assert.ok(rendered.includes('<summary>Source details</summary>'));
++  assert.ok(rendered.includes('Known at: ' + row.known_at));
++}
++assert.ok(html.includes('6-week Treasury bill'));
++assert.ok(html.includes('95,000,000,000 USD'));
++for (const [raw, expected] of [['0', '0 USD'], ['95000000000.1250000000000001', '95,000,000,000.1250000000000001 USD'],
++  ['9007199254740993.0100', '9,007,199,254,740,993.0100 USD'], ['-1234.0050', '-1,234.0050 USD']]) {
++  assert.equal(sandbox.auctionDollars(raw), expected);
+ }
+ // More than forty prior rows must never bury the three actual upcoming auctions.
+ const oldRows = Array.from({length: 43}, (_, i) => ({...structuredClone(context.events[0]),
+@@ -40,7 +54,9 @@
+ const unknown = sandbox.renderAuctions({sovereign_auction_context: {...context, events: [awaiting]}});
+ assert.ok(unknown.includes('Awaiting results (1)'));
+ assert.ok(unknown.includes('Competitive deadline (UTC): Unknown'));
+-assert.ok(unknown.includes('Offering amount (USD): Unknown'));
++assert.ok(unknown.includes('Offering amount: <span class="auction-amount">Unknown'));
++assert.ok(unknown.includes('Competitive deadline: Unknown'));
++assert.ok(unknown.includes('Awaiting observed results'));
+ const hostile = {...structuredClone(original.events[0]), label: '<img src=x onerror="alert(1)">',
+   episode_id: '<script>bad</script>', null_reasons: ['<svg onload="bad()">'],
+   source_url: 'https://www.treasurydirect.gov/path?q=" onclick="alert(2)'};
+@@ -58,9 +74,11 @@
+ assert.ok(chinese.includes('新鲜度未评估'));
+ assert.ok(chinese.includes('尚未观察到结果'));
+ assert.ok(chinese.includes('重要性：未评分'));
++assert.ok(chinese.includes('6周 短期国债'));
++assert.ok(chinese.includes('<summary>来源详情</summary>'));
+ assert.ok(sandbox.renderAuctions({}).includes('不可用：生产方背景未发布'));
+ lang = 'en';
+ assert.ok(sandbox.renderAuctions({sovereign_auction_context: {available: false, note: '<bad>'}}).includes('Unavailable: &lt;bad&gt;'));
+ assert.ok(page.includes('var(--panel)'));
+ assert.ok(page.includes('overflow-wrap: anywhere'));
+-console.log('Actual renderer unit assertions passed: real clocks/amounts, EN/ZH, 43 past + 3 scheduled grouping/count/expand, awaiting/null, escaped upstream text and source href, unavailable.');
++console.log('Actual renderer assertions passed: exact grouped decimals, readable EN/ZH lifecycle, raw evidence under Source details, 43 past + 3 scheduled grouping/expand, unknowns, safe escaping/links and unavailable.');
+--- a/ui_verification/verify_mastermind_ui.cjs
++++ b/ui_verification/verify_mastermind_ui.cjs
+@@ -27,13 +27,18 @@
+ const labels = {
+   en: {title: 'Sovereign auctions — observed context', fresh: 'Freshness unassessed',
+     groups: {ANNOUNCED: 'Scheduled auctions', AWAITING_RESULT: 'Awaiting results', TENTATIVE: 'Tentative calendar', RESULT_OBSERVED: 'Observed results'},
+-    unknownAmount: 'Offering amount (USD): Unknown', unknownDeadline: 'Competitive deadline (UTC): Unknown',
+-    noResult: 'Results not observed', unavailable: 'Unavailable'},
++    unknownAmount: 'Offering amount: Unknown', unknownDeadline: 'Competitive deadline: Unknown',
++    noResult: 'Results not observed', unavailable: 'Unavailable', sourceDetails: 'Source details', degraded: 'Source coverage degraded'},
+   zh: {title: '国债拍卖 — 已观察背景', fresh: '新鲜度未评估',
+     groups: {ANNOUNCED: '计划拍卖', AWAITING_RESULT: '等待结果', TENTATIVE: '暂定日历', RESULT_OBSERVED: '已观察结果'},
+-    unknownAmount: '发行金额（美元）: 未知', unknownDeadline: '竞标截止时间（UTC）: 未知',
+-    noResult: '尚未观察到结果', unavailable: '不可用'},
++    unknownAmount: '发行金额: 未知', unknownDeadline: '竞争性投标截止时间: 未知',
++    noResult: '尚未观察到结果', unavailable: '不可用', sourceDetails: '来源详情', degraded: '来源覆盖降级'},
+ };
++function expectedDollars(value) {
++  const parts = String(value).match(/^([+-]?)(\d+)(\.\d*)?$/);
++  return (parts ? parts[1] + parts[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (parts[3] || '') : String(value)) + ' USD';
++}
++const expectedDeadline = value => String(value).replace('T', ' ').replace(/(?:Z|\+00:00)$/, ' UTC');
+ 
+ async function startHarness(args, outDir, receipt) {
+   const script = path.join(__dirname, 'mastermind_loopback_harness.py');
+@@ -170,6 +175,10 @@
+     const copy = labels[cfg.lang];
+     assert.ok(text.includes(copy.title));
+     assert.ok(text.includes(copy.fresh));
++    if (expected.available) {
++      assert.ok(text.includes(expected.source_observed_at), 'Source observation clock remains visible above the cards');
++      assert.ok(text.includes(expected.decision_cutoff_utc), 'Producer cutoff remains visible above the cards');
++    }
+     assert.equal(body.sovereign_auction_context.available, expected.available);
+     const headings = await panel.locator('h3').allTextContents();
+     const expectedHeadings = ['ANNOUNCED', 'AWAITING_RESULT', 'TENTATIVE', 'RESULT_OBSERVED']
+@@ -180,10 +189,10 @@
+       const card = panel.locator('.pair').filter({hasText: row.episode_id});
+       assert.equal(await card.count(), 1);
+       assert.ok(await card.isVisible(), 'Each known upcoming auction must be visible before expansion');
+-      const cardText = await card.innerText();
+-      for (const value of [row.episode_id, row.offering_amount_usd, row.competitive_deadline_utc, row.known_at]) {
+-        assert.ok(cardText.includes(value), `Exact clock/amount missing: ${value}`);
+-      }
++      const cardText = await card.locator(':scope > .auction-row-summary').innerText();
++      assert.ok(cardText.includes(expectedDollars(row.offering_amount_usd)), 'Grouped exact offering amount is visible');
++      assert.ok(cardText.includes(expectedDeadline(row.competitive_deadline_utc)), 'Readable exact deadline is visible');
++      assert.ok(!cardText.includes(row.episode_id) && !cardText.includes(row.known_at), 'Raw row identifiers and evidence clocks belong in Source details');
+     }
+     if (cfg.case === 'unavailable') {
+       assert.ok(text.includes(copy.unavailable));
+@@ -192,22 +201,59 @@
+     }
+     if (cfg.case === 'source_failure') {
+       assert.equal(body.sovereign_auction_context.status, 'degraded');
+-      assert.ok(text.includes('UI_HARNESS_SYNTHETIC_TIMEOUT'));
++      assert.ok(text.includes(copy.degraded));
+       assert.equal(body.sovereign_auction_context.source_observed_at, manifest.cases.observed.source_observed_at);
+     }
+     if (cfg.case === 'awaiting_unknown') {
+       assert.ok(text.includes(copy.unknownAmount));
+       assert.ok(text.includes(copy.unknownDeadline));
+       assert.ok(text.includes(copy.noResult));
+-      assert.ok(!text.includes('Offering amount (USD): 0'));
++      assert.ok(!text.includes('Offering amount: 0'));
++    }
++    result.sourceDetailChecks = [];
++    const events = body.sovereign_auction_context.events || [];
++    const auditRows = [...new Map([
++      ...events.filter(row => expected.scheduled_rows.some(scheduled => scheduled.episode_id === row.episode_id)),
++      ...['ANNOUNCED', 'AWAITING_RESULT', 'TENTATIVE', 'RESULT_OBSERVED'].map(state => events.find(row => row.physical_state === state)).filter(Boolean),
++    ].map(row => [row.episode_id, row])).values()];
++    for (const row of auditRows) {
++      const card = panel.locator('.pair').filter({hasText: row.episode_id});
++      const source = card.locator(':scope > details.auction-source-details');
++      assert.equal(await source.getAttribute('open'), null, 'Row audit disclosure is closed by default');
++      assert.equal(await source.locator(':scope > summary').innerText(), copy.sourceDetails);
++      const summaryText = await card.locator(':scope > .auction-row-summary').innerText();
++      for (const raw of [row.episode_id, row.known_at, row.source_state, row.physical_state, ...(row.null_reasons || [])]) {
++        assert.ok(!summaryText.includes(raw), `Raw source field leaked into card summary: ${raw}`);
++      }
++      await source.locator(':scope > summary').click();
++      const auditText = await source.innerText();
++      const exactValues = [row.episode_id, row.label, row.normalized_class, row.known_at, row.source_state, row.physical_state, row.issue_calendar_state,
++        ...(row.offering_amount_usd == null ? [] : [String(row.offering_amount_usd)]),
++        ...(row.competitive_deadline_utc == null ? [] : [row.competitive_deadline_utc]), ...(row.null_reasons || [])];
++      for (const value of exactValues) assert.ok(auditText.includes(value), `Source details lost exact evidence: ${value}`);
++      for (const [name, value] of Object.entries(row.result || {})) {
++        assert.ok(auditText.includes(name));
++        if (value != null) assert.ok(auditText.includes(String(value)), `Source result value lost: ${name}`);
++      }
++      assert.equal(await source.locator('a').getAttribute('href'), row.source_url);
++      const sourceGeometry = await geometry(page);
++      assertGeometry(sourceGeometry);
++      result.sourceDetailChecks.push({episode_id: row.episode_id, source_state: row.source_state, geometry: sourceGeometry});
++      if (cfg.case === 'observed' && result.sourceDetailChecks.length === 1) await screenshot(page, source, `${key}-source-details`, outDir, result);
++      await source.locator(':scope > summary').click();
+     }
+     result.initialGeometry = await geometry(page);
+     // Capture before asserting geometry so real failures remain inspectable.
+-    if (cfg.case === 'observed') await screenshot(page, null, `${key}-page`, outDir, result);
++    if (cfg.case === 'observed') {await page.evaluate(() => window.scrollTo(0, 0));await screenshot(page, null, `${key}-page`, outDir, result);}
+     await screenshot(page, panel, `${key}-auction`, outDir, result);
+     assertGeometry(result.initialGeometry);
+     if (cfg.case === 'source_failure') {
++      const sources = panel.locator(':scope > details.auction-context-sources');
++      await sources.locator(':scope > summary').click();
++      assert.ok((await sources.innerText()).includes('UI_HARNESS_SYNTHETIC_TIMEOUT'));
++      assertGeometry(await geometry(page));
+       await screenshot(page, panel.locator('.footnote').filter({hasText: 'UI_HARNESS_SYNTHETIC_TIMEOUT'}), `${key}-failure`, outDir, result);
++      await sources.locator(':scope > summary').click();
+     }
+     if (cfg.case === 'observed') {
+       result.expandedGroups = [];
+@@ -215,7 +261,7 @@
+       for (let i = 0; i < await groupHeadings.count(); i++) {
+         const heading = groupHeadings.nth(i);
+         const group = heading.locator('..');
+-        const summary = group.locator(':scope > details > summary');
++        const summary = group.locator(':scope > details.auction-group-expander > summary');
+         if (!await summary.count()) continue;
+         const initialWidths = await group.locator(':scope > .pairs > .pair').evaluateAll(nodes => nodes.map(node => node.getBoundingClientRect().width));
+         await summary.click();

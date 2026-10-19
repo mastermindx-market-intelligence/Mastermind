@@ -1770,6 +1770,20 @@ def _enrich_rotation_pairs(view: dict) -> None:
         pass
 
 
+def _enrich_sovereign_auction_context(view: dict) -> None:
+    """Attach only a served sibling; no stored plane or decision input is changed."""
+    try:
+        from brain.sovereign_auction_context import read_context
+        view["sovereign_auction_context"] = read_context(
+            _PROJECT_ROOT / "vendor/macro/site/feeds/event_calendar.json")
+    except Exception:  # noqa: BLE001 — display failure must not break Market View
+        view["sovereign_auction_context"] = {
+            "available": False, "schema_version": "sovereign_auction_context_v1",
+            "is_context_only": True, "forecast_authority": "RESEARCH_ONLY",
+            "probabilities": None, "importance": "NOT_SCORED",
+            "freshness_label": "Freshness unassessed", "note": "auction_display_unavailable"}
+
+
 @router.get("/api/market_view")
 def api_market_view() -> JSONResponse:
     """The perception artifact (W-E.1 task E1.2) — the one deterministic, freshness+confidence
@@ -1791,6 +1805,7 @@ def api_market_view() -> JSONResponse:
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
         _enrich_rotation_pairs(view)
+        _enrich_sovereign_auction_context(view)
         return JSONResponse(view, headers=_NOCACHE)
     except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
         return JSONResponse(

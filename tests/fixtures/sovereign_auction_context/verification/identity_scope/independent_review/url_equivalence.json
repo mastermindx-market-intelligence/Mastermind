@@ -1,0 +1,146 @@
+{
+  "HTTPS_PORT": 443,
+  "all_equal": true,
+  "cases": 23,
+  "network_requests": 0,
+  "truth_table": [
+    {
+      "accepted": true,
+      "input": "https://fiscaldata.treasury.gov/resource",
+      "reason": null,
+      "same": true
+    },
+    {
+      "accepted": true,
+      "input": "https://fiscaldata.treasury.gov:443/resource",
+      "reason": null,
+      "same": true
+    },
+    {
+      "accepted": true,
+      "input": "https://fiscaldata.treasury.gov:0443/resource",
+      "reason": null,
+      "same": true
+    },
+    {
+      "accepted": true,
+      "input": "HTTPS://fiscaldata.treasury.gov/resource",
+      "reason": null,
+      "same": true
+    },
+    {
+      "accepted": true,
+      "input": "https://FISCALDATA.TREASURY.GOV/resource",
+      "reason": null,
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov:80/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov:444/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "http://fiscaldata.treasury.gov/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov:0/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov:65536/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov:bad/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://user@fiscaldata.treasury.gov/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://user:pass@fiscaldata.treasury.gov/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov.invalid/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://example.invalid/resource",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov/white space",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov/newline\n",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov/control\u0001",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://fiscaldata.treasury.gov/delete\u007f",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "https://[broken/",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": "",
+      "reason": "unofficial_source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": null,
+      "reason": "invalid_text:source_url",
+      "same": true
+    },
+    {
+      "accepted": false,
+      "input": 42,
+      "reason": "invalid_text:source_url",
+      "same": true
+    }
+  ]
+}

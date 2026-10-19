@@ -253,7 +253,8 @@ artifacts:
     tier: infrastructure
     allowed_effect: display-only
     degradation_class: ADVISORY
-    consumer_modules: []
+    consumer_modules:
+      - brain.sovereign_auction_context
     declared_by: synapse
 
 # ============================================================
