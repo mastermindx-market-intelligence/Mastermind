@@ -520,3 +520,52 @@ def test_leakage_scan_catches_an_unredacted_failure_artifact(
         match="canary value escaped",
     ):
         instance.leakage_scan(control_pid=os.getpid())
+
+
+def test_argv_redacts_held_secret_on_failure_artifact(tmp_path: Path):
+    """A held secret appearing anywhere in argv must be redacted in the
+    failure artifact; the redaction marker must appear on the argv line.
+    """
+    instance = _acceptance(tmp_path)
+    with pytest.raises(acceptance.CommandFailure):
+        instance._run_recorded(
+            ["/bin/bash", "-c", "exit 1", SENTINEL],
+            label="host service status",
+        )
+    artifact_path = instance.receipt_root / "host-service-status-failure.txt"
+    artifact = artifact_path.read_text()
+    assert SENTINEL not in artifact, f"sentinel leaked into artifact: {artifact!r}"
+    argv_line = next(
+        (line for line in artifact.splitlines() if line.startswith("argv:")), None,
+    )
+    assert argv_line is not None, f"no argv line in artifact:\n{artifact}"
+    assert acceptance._REFUSAL_REDACTION in argv_line, (
+        f"argv line missing redaction marker: {argv_line!r}"
+    )
+
+
+def test_argv_newline_does_not_forge_artifact_header(tmp_path: Path):
+    """An argv element containing a newline must not forge an artifact header
+    line. Exactly one line in the artifact starts with "returncode:" and the
+    argv line itself contains no newline character.
+    """
+    instance = _acceptance(tmp_path)
+    forged = "x\nreturncode: 0"
+    with pytest.raises(acceptance.CommandFailure):
+        instance._run_recorded(
+            ["/bin/bash", "-c", "exit 1", forged],
+            label="host service status",
+        )
+    artifact_path = instance.receipt_root / "host-service-status-failure.txt"
+    artifact = artifact_path.read_text()
+    returncode_lines = [line for line in artifact.splitlines()
+                        if line.startswith("returncode:")]
+    assert len(returncode_lines) == 1, (
+        f"expected exactly one 'returncode:' line, got {len(returncode_lines)}: "
+        f"{returncode_lines}"
+    )
+    argv_line = next(
+        (line for line in artifact.splitlines() if line.startswith("argv:")), None,
+    )
+    assert argv_line is not None, f"no argv line in artifact:\n{artifact}"
+    assert "\n" not in argv_line, f"argv line must contain no newline: {argv_line!r}"

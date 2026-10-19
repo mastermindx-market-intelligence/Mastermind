@@ -57,7 +57,12 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': 'bfcf238e7116e76fc4a40ec2c451a6d5a8d9788d12247763b2962a9840ec6c9b',
+ 'ops/executive_os/acceptance.py': {'sha256': '94e56d5bd1bc7aeda0c43f31235b4815878112235104c16ff9fbd103507f2648',
+                                    # Re-pinned for argv redaction + newline flattening in the
+                                    # failure artifact: _redact_failure_text extracted from
+                                    # _redact_failure_stream, argv_text now redacted and
+                                    # newline-flattened; the same 21 reviewed principal/UID
+                                    # literals stay at their exact line/column positions; no new literal added.
                                     # Re-pinned 2026-10-19 for the byte-bounded, line-preserving
                                     # failure-artifact repair (A1 byte bound on
                                     # _redact_failure_stream, A2 control chars + line prefix,

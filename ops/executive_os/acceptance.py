@@ -1322,7 +1322,17 @@ class Acceptance:
         in UTF-8 even for invalid input).
         """
 
-        text = payload.decode("utf-8", errors="replace")
+        text = self._redact_failure_text(payload.decode("utf-8", errors="replace"))
+        if text:
+            text = "| " + text.replace("\n", "\n| ")
+        encoded = text.encode("utf-8")
+        if len(encoded) > _FAILURE_STREAM_LIMIT:
+            encoded = encoded[:_FAILURE_STREAM_LIMIT]
+            text = encoded.decode("utf-8", errors="ignore") + _REFUSAL_TRUNCATION_MARKER
+        return text
+
+    def _redact_failure_text(self, text: str) -> str:
+        """Apply the held-secret + sentinel + hex + token redaction to one fragment."""
         secrets_to_redact: list[str] = []
         held = self._refusal_redactions()
         secrets_to_redact.extend(secret for secret in held if isinstance(secret, str))
@@ -1343,12 +1353,6 @@ class Acceptance:
         text = _FAILURE_CONTROL_CHARS_RE.sub(" ", text)
         text = _REFUSAL_HEX_SECRET_RE.sub(_redact_secret_shaped, text)
         text = _REFUSAL_TOKEN_SECRET_RE.sub(_redact_secret_shaped, text)
-        if text:
-            text = "| " + text.replace("\n", "\n| ")
-        encoded = text.encode("utf-8")
-        if len(encoded) > _FAILURE_STREAM_LIMIT:
-            encoded = encoded[:_FAILURE_STREAM_LIMIT]
-            text = encoded.decode("utf-8", errors="ignore") + _REFUSAL_TRUNCATION_MARKER
         return text
 
     def _build_failure_payload(
@@ -1365,7 +1369,7 @@ class Acceptance:
             returncode_repr = f"timeout after {timeout}s"
         else:
             returncode_repr = str(returncode)
-        argv_text = " ".join(argv)
+        argv_text = self._redact_failure_text(" ".join(argv)).replace("\n", " ")
         if len(argv_text) > _FAILURE_ARGV_LIMIT:
             argv_text = argv_text[:_FAILURE_ARGV_LIMIT] + _REFUSAL_TRUNCATION_MARKER
         stdout_text = self._redact_failure_stream(stdout or b"")
