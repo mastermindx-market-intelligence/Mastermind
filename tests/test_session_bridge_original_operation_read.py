@@ -356,9 +356,16 @@ def test_reference_projection_is_canonical_read_only_and_cursor_bound(setup):
     with pytest.raises(BridgeError):
         s.owner.session_reply_references(principal=s.projection,
             work_ref="WS:OTHER", cursor=page["next_cursor"])
-    with pytest.raises(BridgeError):
-        s.owner.session_reply_references(principal=s.projection,
-            work_ref=work_ref, cursor=page["next_cursor"] + "Z")
+    for malformed in (
+        page["next_cursor"] + "Z",
+        page["next_cursor"] + "%",
+        page["next_cursor"] + "\n",
+        page["next_cursor"] + "===",
+        "Z" + page["next_cursor"][1:],
+    ):
+        with pytest.raises(BridgeError):
+            s.owner.session_reply_references(principal=s.projection,
+                work_ref=work_ref, cursor=malformed)
     stranger = dataclasses.replace(s.projection, subject_digest="f" * 64)
     assert s.owner.session_reply_references(
         principal=stranger, work_ref=work_ref)["references"] == []

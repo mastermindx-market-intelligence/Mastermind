@@ -583,6 +583,11 @@ class RuntimeSessionReturn:
                 if type(cursor) is not str or len(cursor) > 2048:
                     raise ValueError("invalid cursor")
                 raw = base64.urlsafe_b64decode(cursor.encode("ascii"))
+                # Python's permissive decoder can ignore or normalize trailing
+                # material. Require the single canonical encoding before HMAC
+                # verification: every byte of the supplied cursor is bound.
+                if base64.urlsafe_b64encode(raw).decode("ascii") != cursor:
+                    raise ValueError("noncanonical cursor")
                 if len(raw) > 384 or len(raw) < 33:
                     raise ValueError("invalid cursor size")
                 body, mac = raw[:-32], raw[-32:]

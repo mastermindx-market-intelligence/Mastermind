@@ -280,7 +280,13 @@ def test_launcher_selects_one_existing_listener_and_preserves_optional_mounts(
         assert isinstance(kwargs.pop('mdm_reader'), MosyleInventoryClient)
     if profile in {'web_ceo_v3', 'web_ceo_sessions_v1'}:
         from integrations.session_bridge.return_tools import NativeReplyReadTool
-        assert type(kwargs.pop('session_reply_read_tool')) is NativeReplyReadTool
+        from integrations.session_bridge.reference_tools import NativeReplyReferencesTool
+        reply_tool = kwargs.pop('session_reply_read_tool')
+        references_tool = kwargs.pop('session_reply_references_tool')
+        assert type(reply_tool) is NativeReplyReadTool
+        assert type(references_tool) is NativeReplyReferencesTool
+        # One installed client for both READ paths; no extra transport owner.
+        assert references_tool._client is reply_tool._reader.__self__
         assert callable(kwargs.pop('session_target_projector'))
         assert callable(kwargs.pop('session_reply_handler'))
         assert callable(kwargs.pop('session_summon_handler'))
