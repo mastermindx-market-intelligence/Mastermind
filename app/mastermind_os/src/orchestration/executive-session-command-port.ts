@@ -238,6 +238,34 @@ async function continueMessageKeyBound(
   }
 }
 
+/** Original Runtime request key is SHA-256 over _canonical({_SCHEMA, operation_key}),
+ * not the dialogue message-key hash. This independently validates both
+ * references before exposing any historical native answer. No new key,
+ * identifier, request, side effect or client-side authority is created. */
+async function originalRequestRefsBound(
+  operationKey: string, readRef: unknown, requestRef: unknown,
+): Promise<boolean> {
+  if (!OPERATION_KEY_RE.test(operationKey) ||
+      typeof readRef !== "string" || typeof requestRef !== "string" ||
+      !/^session-reply-[0-9a-f]{64}$/.test(readRef) ||
+      !/^session-bridge-continue:[0-9a-f]{64}$/.test(requestRef)) return false;
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle) return false;
+  try {
+    // Explicit ASCII/sorted-key canonicalization, equal to
+    // control_plane.native_continuation._request_key for this closed key grammar.
+    const material = '{"operation_key":"' + operationKey +
+      '","schema":"mastermind.session_bridge.continue_request.v1"}';
+    const digest = await subtle.digest("SHA-256", new TextEncoder().encode(material));
+    const hex = [...new Uint8Array(digest)]
+      .map(b => b.toString(16).padStart(2, "0")).join("");
+    return readRef === "session-reply-" + hex &&
+      requestRef === "session-bridge-continue:" + hex;
+  } catch {
+    return false;
+  }
+}
+
 // ── Validated projections ─────────────────────────────────────────────────────
 
 /** Exact seven-field canonical fabric_attempt target row. */
@@ -872,7 +900,8 @@ export class ExecutiveSessionCommandPort implements FiniteCommandPort {
       return this._receipt(pointer, "unknown", "MALFORMED_RECEIPT");
     }
     if (!(await continueMessageKeyBound(pointer.operationKey, data.in_reply_to)) ||
-        !(await continueMessageKeyBound(pointer.operationKey, data.message_key, true))) {
+        !(await continueMessageKeyBound(pointer.operationKey, data.message_key, true)) ||
+        !(await originalRequestRefsBound(pointer.operationKey, data.read_ref, data.request_ref))) {
       return this._receipt(pointer, "unknown", "RECEIPT_MISMATCH");
     }
     return this._receipt(pointer, "accepted", "ACCEPTED");

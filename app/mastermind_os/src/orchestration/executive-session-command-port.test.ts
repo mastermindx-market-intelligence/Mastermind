@@ -28,6 +28,10 @@ const REF = `fabric_attempt:${"a".repeat(64)}`;
 const GEN = "a".repeat(24);
 const CONT = "b".repeat(64);
 const OPKEY = `session-continue-${CONT}`;
+// Verified against control_plane.native_continuation._request_key(OPKEY).
+const REQUEST_DIGEST = "1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e";
+const READ_REF = "session-reply-" + REQUEST_DIGEST;
+const REQUEST_REF = "session-bridge-continue:" + REQUEST_DIGEST;
 const FP = "f".repeat(64);
 const TS = "1728620000.000001";
 const SCOPE = "c".repeat(64);
@@ -117,8 +121,8 @@ const sendEnvelope = (patch: Record<string, unknown> = {}) =>
 
 const replyData = (patch: Record<string, unknown> = {}) => ({
   schema: "mastermind.native_reply_read.v1",
-  read_ref: "read-ref-1",
-  request_ref: "request-ref-1",
+  read_ref: READ_REF,
+  request_ref: REQUEST_REF,
   in_reply_to: continueKey(OPKEY),
   message_key: nativeReplyKey,
   fingerprint: FP,
@@ -909,11 +913,28 @@ describe("qualified native answer exposure from original operation", () => {
     expect(observed.receipt.disposition).toBe("accepted");
     expect(observed.answer).toEqual({
       text: "slice accepted", nextStep: "none",
-      readRef: "read-ref-1", parentConsumed: false,
+      readRef: READ_REF, parentConsumed: false,
     });
     expect(f.calls.reply).toBe(1);
     expect(f.calls.send).toBe(0);
     expect(f.replyArgs).toEqual([{ operation_key: OPKEY }]);
+  });
+
+  it.each([
+    {read_ref:"session-reply-"+"0".repeat(64)},
+    {request_ref:"session-bridge-continue:"+"f".repeat(64)},
+    {read_ref: "read-ref-1"},
+    {request_ref: "request-ref-1"},
+  ])("refuses a native reply whose original-request identity is mismatched: %j",async patch=>{
+    const f = fixture();
+    f.setReply(async()=>replyEnvelope({data:replyData(patch)}));
+    const h=mount(f); await h.ready;
+    const read=await (h.binding.port as ExecutiveSessionCommandPort)
+      .readQualifiedAnswer(POINTER,new AbortController().signal);
+    expect(read.receipt.disposition).toBe("unknown");
+    expect(read.answer).toBeNull();
+    expect(f.calls.reply).toBe(1);
+    expect(f.calls.send).toBe(0);
   });
 
   it("never surfaces a foreign or malformed native answer", async () => {
@@ -966,7 +987,7 @@ describe("qualified native answer exposure from original operation", () => {
     expect(f.calls.send).toBe(1);
     expect(f.calls.reply).toBe(1);
     expect(accepted).toEqual([{ text: "slice accepted", nextStep: "none",
-      readRef: "read-ref-1", parentConsumed: false }]);
+      readRef: READ_REF, parentConsumed: false }]);
   });
 });
 
