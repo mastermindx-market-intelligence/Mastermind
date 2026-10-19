@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import type { MissionSelection } from "../mission";
 import type { OperationPointer } from "../orchestration/operation-controller";
 import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
@@ -68,6 +68,22 @@ export function HistoricalOriginalAnswers({
   selectionSeq: number;
   activeReadRef?: string | null;
 }) {
+  // A historical answer is source-backed but also owner-bound. An auth/mission
+  // transition must withhold the PREVIOUS render's answer synchronously,
+  // before a passive effect could clear stale React state.
+  const [qualifiedEpoch, setQualifiedEpoch] = useState<{
+    binding: MountedExecutiveSessionBinding;
+    scope: string; generation: string; authRevision: number;
+    selectionSeq: number; workRef: string; rootJobId: string;
+  } | null>(null);
+  const renderIsQualified = !!qualifiedEpoch && !!selection && !!binding &&
+    qualifiedEpoch.binding === binding &&
+    qualifiedEpoch.scope === principalScope &&
+    qualifiedEpoch.generation === generation &&
+    qualifiedEpoch.authRevision === authRevision &&
+    qualifiedEpoch.selectionSeq === selectionSeq &&
+    qualifiedEpoch.workRef === selection.workRef &&
+    qualifiedEpoch.rootJobId === selection.rootJobId;
   const [rows, setRows] = useState<Row[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [selected, setSelected] = useState<{ row: Row; answer: QualifiedSessionAnswer } | null>(null);
@@ -77,12 +93,15 @@ export function HistoricalOriginalAnswers({
   const reading = binding?.port.readOriginalReferences;
   const qualified = binding?.port.readQualifiedAnswer;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     epoch.current++;
     controller.current?.abort();
     controller.current = null;
+    setQualifiedEpoch(null);
     setRows([]); setCursor(null); setSelected(null); setState("idle");
     if (!binding || !selection || !principalScope || !generation || !reading || !qualified) return;
+    setQualifiedEpoch({binding,scope:principalScope,generation,authRevision,
+      selectionSeq,workRef:selection.workRef,rootJobId:selection.rootJobId});
     const e = epoch.current;
     const c = new AbortController(); controller.current = c;
     setState("loading");
@@ -96,7 +115,7 @@ export function HistoricalOriginalAnswers({
   }, [binding, selection?.workRef, selection?.rootJobId, principalScope, generation, authRevision, selectionSeq, reading, qualified]);
 
   const loadMore = () => {
-    if (!selection || !reading || !cursor || state !== "idle") return;
+    if (!renderIsQualified || !selection || !reading || !cursor || state !== "idle") return;
     const e = epoch.current;
     const c = new AbortController(); controller.current?.abort(); controller.current = c;
     setState("loading");
@@ -115,10 +134,10 @@ export function HistoricalOriginalAnswers({
   };
 
   const open = (row: Row) => {
-    if (!qualified || state === "loading") return;
+    if (!renderIsQualified || !qualified || state === "loading") return;
     const e = epoch.current;
     const c = new AbortController(); controller.current?.abort(); controller.current = c;
-    setSelected(null);
+    setSelected(null); setState("loading");
     const pointer: OperationPointer = {
       operationKey: row.operation_key, targetKey: row.target_ref, kind: "message",
     };
@@ -132,14 +151,14 @@ export function HistoricalOriginalAnswers({
     }).catch(() => { if (!c.signal.aborted && epoch.current === e) setState("unavailable"); });
   };
 
-  if (!binding || !selection || !principalScope || !generation || !reading || !qualified) return null;
+  if (!renderIsQualified || !binding || !selection || !principalScope || !generation || !reading || !qualified) return null;
   return <section className="conversation-result" aria-label="Original answer references">
     <h3>Original answer history · READ only</h3>
     <p>Canonical request references only. An answer appears after a separate qualified read; original-parent consumption is not established.</p>
     {rows.map(row => <button key={row.read_ref} type="button"
       disabled={state === "loading" || row.read_ref === activeReadRef}
       onClick={() => open(row)}>Open original request · {row.requested_at}</button>)}
-    {selected && <div aria-label="Historical original answer">
+    {selected && selected.row.read_ref !== activeReadRef && <div aria-label="Historical original answer">
       <p>{selected.answer.text}</p>
       <p>Next step: {selected.answer.nextStep}</p>
       <code>{selected.answer.readRef}</code>
