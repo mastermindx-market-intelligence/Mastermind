@@ -6,7 +6,8 @@ import hashlib
 import json
 import math
 import sys
-from datetime import date
+from contextlib import contextmanager
+from datetime import date, datetime
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -610,3 +611,299 @@ def test_real_fx_queued_ack_retry_preserves_original_receipt_without_new_rates(
     assert journal.read_bytes() == before_journal
     assert real_fx_books["fx"]["calls"] == before_calls
     assert real_fx_books["quote_calls"] == before_quotes
+
+
+# Captured-input characterization; no source policy or freshness admission is implied.
+_SC_OLD_CNH = 6.781000137329102
+_SC_CNY_COMPARISON = 6.6753997802734375
+_SC_SNAPSHOT_CNH = 6.659
+_SC_REGIONAL_HKD = 7.847799777984619
+_SC_ALTERNATE_HKD_SYMBOL = 7.847899913787842
+_SC_CACHE_CONTROL = 6.9  # Synthetic changed primary quote; not an installed observation.
+_SC_BOARD_ASOF = "2026-10-17T00:00:00+00:00"
+_SC_CNY_CALLS = [
+    ["yahoo", "CNH=X"], ["yahoo", "CNY=X"], ["snapshot", "USDCNH"],
+]
+_SC_HKD_CALLS = [
+    ["yahoo", "HKD=X"], ["snapshot", "USDHKD"], ["snapshot", "HKDUSD"],
+]
+_SC_FIELDS = frozenset({
+    "schema", "currency", "rate", "consumed_as", "source", "symbol", "source_path",
+    "source_bar_label", "source_bar_label_kind", "source_text_sha256",
+    "source_text_digest_basis", "source_read_started_at", "source_read_returned_at",
+    "cache_population_day", "cache_day_basis", "cache_state", "cache_observed_at",
+    "status", "reason", "source_convention_qualification", "market_observed_at",
+    "execution_qualification",
+})
+
+
+def _sc_rows(value, label):
+    return pd.DataFrame({"close": [value]}, index=pd.to_datetime([label]))
+
+
+def _sc_time(state, day, clock):
+    """Change only the existing test fixture's clock/date seam."""
+    state["day"] = date.fromisoformat(day)
+    state["clock"] = clock
+
+
+def _sc_snapshot(state, pairs, board_asof=_SC_BOARD_ASOF):
+    """Prepare only the fixture's temporary snapshot, before the reader runs."""
+    path, _ = put_snapshot(state, pairs)
+    payload = json.loads(path.read_text())
+    payload["asof"] = board_asof
+    path.write_text(json.dumps(payload, indent=2) + "\n")
+    return path
+
+
+def _sc_source_bytes(state):
+    return {
+        path.relative_to(state["root"]).as_posix(): path.read_bytes()
+        for path in state["root"].rglob("*") if path.is_file()
+    }
+
+
+@contextmanager
+def _sc_unchanged_inputs(state, *, extra_frames=None):
+    """Check each real read against its immediate synthetic source inputs."""
+    source_maps = [state["rows"]]
+    if extra_frames is not None:
+        source_maps.append(extra_frames)
+    saved_maps = [
+        (frames, {key: (frame, frame.copy(deep=True)) for key, frame in frames.items()})
+        for frames in source_maps
+    ]
+    source_bytes = _sc_source_bytes(state)
+    try:
+        yield
+    finally:
+        # Detect persistent additions/deletions/rewrites inside the fixture root,
+        # including an unexpected mirror file, not just the selected snapshot.
+        assert _sc_source_bytes(state) == source_bytes
+        for frames, saved in saved_maps:
+            assert set(frames) == set(saved)
+            for key, (frame, original) in saved.items():
+                assert frames[key] is frame
+                pd.testing.assert_frame_equal(frame, original, check_exact=True)
+
+
+def _sc_contract(context, *, currency, rate):
+    # Pin the existing wire contract; these cases add no age/eligibility field.
+    assert set(context) == _SC_FIELDS
+    assert context["schema"] == "mastermind.fx_rate_evidence.v1"
+    assert context["currency"] == currency
+    assert context["rate"] == rate
+    assert context["consumed_as"] == "foreign_units_per_USD"
+    assert context["source_convention_qualification"] == "not_established"
+    assert context["market_observed_at"] is None
+    assert context["execution_qualification"] == "not_checked"
+
+
+def _sc_both_cold_reads(state, currency, *, extra_frames=None):
+    """Compare ordinary and evidence-requesting calls in the isolated fixture."""
+    from portfolio import fx, price_evidence as pe
+
+    results = []
+    for capture in (False, True):
+        fx.clear_cache()  # fx_inputs replaced both caches with test-owned dictionaries.
+        state["calls"].clear()
+        state["store_calls"].clear()
+        if "namespace_calls" in state:
+            state["namespace_calls"].clear()
+        with _sc_unchanged_inputs(state, extra_frames=extra_frames):
+            if capture:
+                value, context = pe.read_with_evidence(fx.rate_per_usd, currency)
+            else:
+                value, context = fx.rate_per_usd(currency), None
+        results.append({
+            "value": value,
+            "calls": copy.deepcopy(state["calls"]),
+            "store_calls": list(state["store_calls"]),
+            "namespace_calls": list(state.get("namespace_calls", [])),
+            "cache": copy.deepcopy(fx._RATE_CACHE),
+            "context": context,
+        })
+    for key in ("value", "calls", "store_calls", "namespace_calls", "cache"):
+        assert results[0][key] == results[1][key], key
+    _sc_contract(results[1]["context"], currency=currency, rate=results[1]["value"])
+    return results[1]
+
+
+def test_source_contract_old_positive_cnh_wins_over_newer_available_fallbacks(fx_inputs):
+    state = fx_inputs
+    _sc_time(state, "2026-10-19", "2026-10-19T01:00:00+00:00")
+    state["rows"]["CNH=X"] = _sc_rows(_SC_OLD_CNH, "2026-07-10")
+    # Deliberate counterfactual: this fresher CNY row is reachable at the selector's
+    # requested Yahoo key. The installed regional china/CNY_X file is NOT evidence
+    # of such Yahoo-key availability; the namespace case below has its own seam.
+    state["rows"]["CNY=X"] = _sc_rows(_SC_CNY_COMPARISON, "2026-10-16")
+    _sc_snapshot(state, {"USDCNH": {"quote": _SC_SNAPSHOT_CNH}})
+
+    observed = _sc_both_cold_reads(state, "CNY")
+    context = observed["context"]
+    assert observed["value"] == _SC_OLD_CNH
+    assert observed["calls"] == [["yahoo", "CNH=X"]]
+    assert observed["store_calls"] == ["CNH=X"]
+    assert observed["cache"] == {"CNY": (_SC_OLD_CNH, "2026-10-19")}
+    assert context["source"] == "yahoo_store" and context["symbol"] == "CNH=X"
+    assert context["source_bar_label"] == "2026-07-10T00:00:00"
+    assert context["source_bar_label_kind"] == "selected_close_index"
+    assert (state["day"] - datetime.fromisoformat(context["source_bar_label"]).date()).days == 101
+    assert context["cache_population_day"] == "2026-10-19"
+    assert context["source_read_returned_at"] == state["clock"]
+    # Available capture metadata is not an age-admission or market-freshness verdict.
+    assert context["status"] == "available" and context["reason"] is None
+
+
+@pytest.mark.parametrize("exact_requested_key_present", [False, True], ids=["namespace_miss", "exact_key_control"])
+def test_source_contract_hkd_requests_exact_group_and_symbol(
+    fx_inputs, monkeypatch, exact_requested_key_present,
+):
+    state = fx_inputs
+    _sc_time(state, "2026-10-19", "2026-10-19T01:00:00+00:00")
+    frames = {
+        ("hk", "HKD=X"): _sc_rows(_SC_REGIONAL_HKD, "2026-10-16"),
+        ("yahoo", "USDHKD=X"): _sc_rows(_SC_ALTERNATE_HKD_SYMBOL, "2026-10-17"),
+    }
+    if exact_requested_key_present:
+        frames[("yahoo", "HKD=X")] = _sc_rows(_SC_REGIONAL_HKD, "2026-10-16")
+    state["namespace_calls"] = []
+
+    def exact_store_read(group, symbol):
+        # Same existing lib.store.read seam; no Macro path builder or alias policy
+        # is recreated. This witnesses what the actual FX selector requests.
+        state["namespace_calls"].append((group, symbol))
+        state["store_calls"].append(symbol)
+        return frames.get((group, symbol))
+
+    monkeypatch.setattr(sys.modules["lib"].store, "read", exact_store_read)
+    _sc_snapshot(state, {"USDCNH": {"quote": _SC_SNAPSHOT_CNH}})
+
+    observed = _sc_both_cold_reads(state, "HKD", extra_frames=frames)
+    context = observed["context"]
+    assert observed["namespace_calls"] == [("yahoo", "HKD=X")]
+    assert observed["value"] == (_SC_REGIONAL_HKD if exact_requested_key_present else 7.8)
+    if exact_requested_key_present:
+        assert observed["calls"] == [["yahoo", "HKD=X"]]
+        assert context["source"] == "yahoo_store" and context["symbol"] == "HKD=X"
+        assert context["source_bar_label"] == "2026-10-16T00:00:00"
+    else:
+        assert observed["calls"] == _SC_HKD_CALLS
+        assert context["source"] == "static_fallback" and context["symbol"] is None
+        assert context["source_path"] is None and context["source_bar_label"] is None
+        assert context["source_bar_label_kind"] == "not_provided"
+        assert context["source_read_started_at"] is None
+        assert context["source_read_returned_at"] is None
+
+
+@pytest.mark.parametrize("pair_clock", ["missing", "present_older", "malformed"])
+def test_source_contract_snapshot_board_label_cannot_be_borrowed_as_a_pair_clock(fx_inputs, pair_clock):
+    state = fx_inputs
+    _sc_time(state, "2026-10-19", "2026-10-19T01:00:00+00:00")
+    pair = {"quote": _SC_SNAPSHOT_CNH}
+    if pair_clock == "present_older":
+        pair["asof"] = "2026-10-16T00:00:00+00:00"
+    elif pair_clock == "malformed":
+        pair["asof"] = "not-a-source-label"
+    path = _sc_snapshot(state, {"USDCNH": pair})
+    source_digest = hashlib.sha256(path.read_text().encode("utf-8")).hexdigest()
+
+    observed = _sc_both_cold_reads(state, "CNY")
+    context = observed["context"]
+    assert observed["value"] == _SC_SNAPSHOT_CNH
+    assert observed["calls"] == _SC_CNY_CALLS
+    assert context["source"] == "forex_snapshot" and context["symbol"] == "USDCNH"
+    assert context["source_path"] == "data/forex/latest.json"
+    assert context["source_text_sha256"] == source_digest
+    assert context["source_text_digest_basis"] == "decoded_text_utf8"
+    assert context["source_read_started_at"] == state["clock"]
+    assert context["source_read_returned_at"] == state["clock"]
+    if pair_clock == "missing":
+        assert context["source_bar_label"] == _SC_BOARD_ASOF
+        assert context["source_bar_label_kind"] == "snapshot_asof"
+        assert context["status"] == "available" and context["reason"] is None
+    elif pair_clock == "present_older":
+        assert context["source_bar_label"] == pair["asof"]
+        assert context["source_bar_label_kind"] == "pair_asof"
+        assert context["status"] == "available" and context["reason"] is None
+    else:
+        # A malformed pair label does not borrow the board's valid, newer label.
+        assert context["source_bar_label"] is None
+        assert context["source_bar_label_kind"] == "not_provided"
+        assert context["status"] == "partial"
+        assert context["reason"] == "source_label_unavailable"
+
+
+@pytest.mark.parametrize("capture_first", [False, True], ids=["ordinary_population", "observed_population"])
+@pytest.mark.parametrize("source_at_rollover", ["unchanged", "updated"])
+def test_source_contract_process_day_refresh_does_not_rejuvenate_selected_bar(
+    fx_inputs, capture_first, source_at_rollover,
+):
+    from portfolio import fx, price_evidence as pe
+
+    state = fx_inputs
+    first_clock = "2026-10-19T01:00:00+00:00"
+    _sc_time(state, "2026-10-19", first_clock)
+    stale_frame = _sc_rows(_SC_OLD_CNH, "2026-07-10")
+    state["rows"]["CNH=X"] = stale_frame
+    state["rows"]["CNY=X"] = _sc_rows(_SC_CNY_COMPARISON, "2026-10-16")
+    with _sc_unchanged_inputs(state):
+        if capture_first:
+            first, initial_context = pe.read_with_evidence(fx.rate_per_usd, "CNY")
+            _sc_contract(initial_context, currency="CNY", rate=first)
+            assert initial_context["cache_state"] == "population"
+        else:
+            first = fx.rate_per_usd("CNY")
+    assert first == _SC_OLD_CNH
+    assert state["calls"] == [["yahoo", "CNH=X"]]
+    assert state["store_calls"] == ["CNH=X"]
+
+    # Deliberate fixture substitution BETWEEN calls. A cache bypass would now
+    # return a different scalar/label, not accidentally agree with the cached row.
+    state["rows"]["CNH=X"] = _sc_rows(_SC_CACHE_CONTROL, "2026-10-16")
+    state["clock"] = "2026-10-19T02:00:00+00:00"
+    with _sc_unchanged_inputs(state):
+        hit_value, hit = pe.read_with_evidence(fx.rate_per_usd, "CNY")
+    _sc_contract(hit, currency="CNY", rate=hit_value)
+    assert hit_value == first
+    assert state["calls"] == [["yahoo", "CNH=X"]]
+    assert state["store_calls"] == ["CNH=X"]
+    assert fx._RATE_CACHE == {"CNY": (_SC_OLD_CNH, "2026-10-19")}
+    assert hit["source"] == "yahoo_store" and hit["symbol"] == "CNH=X"
+    assert hit["cache_state"] == "hit"
+    assert hit["cache_population_day"] == "2026-10-19"
+    assert hit["source_bar_label"] == "2026-07-10T00:00:00"
+    assert hit["source_read_started_at"] == first_clock
+    assert hit["source_read_returned_at"] == first_clock
+    assert hit["cache_observed_at"] == state["clock"]
+
+    if source_at_rollover == "unchanged":
+        # Restore the original input before advancing the isolated process day.
+        # This arm asks whether a new cache day falsely rejuvenates the old bar.
+        state["rows"]["CNH=X"] = stale_frame
+    # The updated arm leaves the changed SAME requested key in place. A dummy
+    # reread followed by returning the old cached value must fail that arm.
+    # A process-local day can differ from the UTC read date. Exercise the two
+    # existing fixture seams independently; this does not assert a host timezone.
+    _sc_time(state, "2026-10-20", "2026-10-19T18:00:00+00:00")
+    with _sc_unchanged_inputs(state):
+        next_value, next_context = pe.read_with_evidence(fx.rate_per_usd, "CNY")
+    _sc_contract(next_context, currency="CNY", rate=next_value)
+    expected_value = _SC_OLD_CNH if source_at_rollover == "unchanged" else _SC_CACHE_CONTROL
+    expected_label = "2026-07-10T00:00:00" if source_at_rollover == "unchanged" else "2026-10-16T00:00:00"
+    expected_age = 102 if source_at_rollover == "unchanged" else 4
+    assert next_value == expected_value
+    assert state["calls"] == [["yahoo", "CNH=X"], ["yahoo", "CNH=X"]]
+    assert state["store_calls"] == ["CNH=X", "CNH=X"]
+    assert next_context["source"] == "yahoo_store" and next_context["symbol"] == "CNH=X"
+    assert next_context["cache_state"] == "population"
+    assert next_context["cache_population_day"] == "2026-10-20"
+    assert next_context["cache_day_basis"] == "process_local_date"
+    assert next_context["source_read_started_at"] == state["clock"]
+    assert next_context["source_read_returned_at"] == state["clock"]
+    assert next_context["cache_observed_at"] == state["clock"]
+    assert next_context["source_bar_label"] == expected_label
+    assert next_context["source_bar_label_kind"] == "selected_close_index"
+    assert (state["day"] - datetime.fromisoformat(next_context["source_bar_label"]).date()).days == expected_age
+    assert next_context["status"] == "available" and next_context["reason"] is None
+    assert fx._RATE_CACHE == {"CNY": (expected_value, "2026-10-20")}
