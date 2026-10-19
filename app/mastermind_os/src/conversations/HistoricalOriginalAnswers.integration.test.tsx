@@ -13,12 +13,16 @@ const WS = "WS:ALPHA", ROOT = "JOB-1", SCOPE = "c".repeat(64);
 const TARGET = "fabric_attempt:"+"a".repeat(64);
 const OP_A = "session-continue-"+"b".repeat(64);
 const OP_B = "session-continue-"+"e".repeat(64);
-const READ_A = "session-reply-"+"f".repeat(64);
+// Exact Runtime _request_key: SHA-256 of canonical
+// {"operation_key": OP_A, "schema":"mastermind.session_bridge.continue_request.v1"}.
+const REQUEST_KEY_A = "1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e";
+const READ_A = "session-reply-"+REQUEST_KEY_A;
+const REQUEST_REF_A = "session-bridge-continue:"+REQUEST_KEY_A;
 const DOT_A = "asd-dot-continue-c81bfcc7ccadd7372a1b0d05bb610f9d147b43b9";
 const NATIVE_A = "asd-native-reply-4310b611582e4d2fa8f7053ea19490441b3e3db1";
 const selection = {workRef:WS,rootJobId:ROOT};
 const row = {
-  read_ref: READ_A, operation_key: OP_A, request_ref:"request-ref-a",
+  read_ref: READ_A, operation_key: OP_A, request_ref:REQUEST_REF_A,
   request_event_id:5, request_revision:"d".repeat(64),
   requested_at:"2026-10-18T00:00:00Z",work_ref:WS,root_job_id:ROOT,
   target_ref:TARGET,reference_only:true,
@@ -30,7 +34,7 @@ const envelope = (operation:string, data:unknown, effect="NONE")=>({
 });
 const nativeData = {
   schema:"mastermind.native_reply_read.v1",
-  read_ref:READ_A,request_ref:"request-ref-a",in_reply_to:DOT_A,
+  read_ref:READ_A,request_ref:REQUEST_REF_A,in_reply_to:DOT_A,
   message_key:NATIVE_A,fingerprint:"f".repeat(64),text:"Historical A is committed.",
   next_step:"B remains pending.",primary_ts:"1728620000.000001",
   reply_committed:true,parent_consumed:false,operation_key:OP_A,
