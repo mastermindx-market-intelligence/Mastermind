@@ -609,62 +609,24 @@ class RuntimeSessionReturn:
                         or type(state["p"]) is not int or state["p"] < 1):
                     raise ValueError("invalid cursor binding")
                 watermark, before = state["w"], state["p"]
-            watermark, window = self.runtime.store.bounded_event_metadata_window(
-                high_water=watermark, before_event_id=before, limit=256)
-            rows = []
-            # Charge pessimistically for each nested root and candidate Event,
-            # even when its actual payload is smaller. No full-history getter.
-            candidate_reads = 0
-            position = None
-            for meta in window:
-                position = meta["event_id"]
-                if (meta["event_type"] != _EVENT
-                        or meta["aggregate_type"] != "session_bridge_continue"
-                        or meta["actor"] != _ACTOR):
-                    continue
-                candidate_reads += 1
-                if candidate_reads > 32:
-                    # Resume before this *uninspected* candidate.
-                    position += 1
-                    break
-                if meta["payload_bytes"] > 65536:
-                    raise ValueError("oversized original request")
-                event = self.runtime.store.bounded_event_by_id(position)
-                if event is None or event.event_type != _EVENT:
-                    raise ValueError("request changed")
-                value = event.payload
-                _validate_payload(value)
-                if (value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
-                        or event.command_id != _PREFIX + _request_key(value["operation_key"])
-                        or event.aggregate_id != _request_key(value["operation_key"])
-                        or value["request_message_key"] != _continue_key(value["operation_key"])
-                        or (event.job_id, event.attempt_id, event.worker_id) !=
-                        (value["job_id"], value["attempt_id"], value["worker_id"])):
-                    raise ValueError("request binding changed")
-                if (value["context"]["work_ref"] != work_ref
-                        or (root_job_id is not None and value["root_job_id"] != root_job_id)
-                        or not _read_matches_original(
-                            value["principal"], identity, principal,
-                            trusted_pair=self._trusted_read_pair)):
-                    continue
-                root = self.runtime.store.unique_root_created_event(value["root_job_id"])
-                if (root.event_id != value["root_event_id"]
-                        or _digest(root.to_dict()) != value["root_event_sha256"]):
-                    raise ValueError("original root changed")
-                rows.append({
-                    "read_ref": value["read_ref"],
-                    "operation_key": value["operation_key"],
-                    "request_ref": event.command_id,
-                    "request_event_id": event.event_id,
-                    "request_revision": _digest(event.to_dict()),
-                    "requested_at": event.created_at,
-                    "work_ref": work_ref,
-                    "root_job_id": value["root_job_id"],
-                    "target_ref": value["target_ref"],
-                    "reference_only": True,
-                })
-                if len(rows) >= page_size:
-                    break
+            original_principals = [tuple(identity[key] for key in _IDENTITY)]
+            if self._trusted_read_pair is not None:
+                original = {**identity, "policy_id": self._trusted_read_pair[1].policy_id}
+                if _read_matches_original(original, identity, principal,
+                                          trusted_pair=self._trusted_read_pair):
+                    paired = tuple(original[key] for key in _IDENTITY)
+                    if paired not in original_principals:
+                        original_principals.append(paired)
+            with self.runtime.observe_bounded_read() as observation:
+                watermark, position, references = observation.read_session_reply_references_bounded(
+                    work_ref=work_ref, root_job_id=root_job_id,
+                    original_principals=tuple(original_principals),
+                    high_water=watermark, before_event_id=before, page_size=page_size,
+                )
+            # A failed close/finalization cannot release a partial public page.
+            # Unbound Runtime's finalized UNKNOWN receipt remains admissible.
+            _ = observation.receipt
+            rows = list(references)
             # Never claim completeness when a partial metadata window exists.
             more = position is not None and position > 1
             next_cursor = None

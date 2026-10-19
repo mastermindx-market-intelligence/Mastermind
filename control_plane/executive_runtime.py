@@ -24554,7 +24554,10 @@ class BoundedRootOrigin:
 
 
 class BoundedRuntimeReadObservation:
-    """Runtime-created fixed facade; no connection, SQL or pagination surface."""
+    """Runtime-owned fixed selections; no connection or SQL surface.
+
+    Pagination is limited to the fixed immutable original-reference selector.
+    """
     def __init__(self, store: RuntimeStore, *, _capability: object) -> None:
         if _capability is not _RUNTIME_ACQUISITION_CAPABILITY:
             raise StateConflict("bounded observation is Runtime-owned")
@@ -24642,6 +24645,137 @@ class BoundedRuntimeReadObservation:
             if type(result.truncated) is bool and not result.truncated:
                 self._origin_roots = tuple(result.roots)
             return result
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_session_reply_references_bounded(
+        self, *, work_ref: str, root_job_id: str | None,
+        original_principals: tuple[tuple[str, ...], ...],
+        high_water: int | None, before_event_id: int | None, page_size: int,
+    ) -> tuple[int, int | None, tuple[dict[str, Any], ...]]:
+        """Select one immutable original-request reference page.
+
+        The calling READ owner derives the one or two accepted identities and
+        authenticates its cursor; neither authority nor a cursor key lives here.
+        The fixed metadata window, candidate Events and matching original roots
+        share one loader and one VM activation on this observation's retained
+        connection. A caller must close the observation and obtain its finalized
+        receipt before returning the page; this selection does not require SAME.
+        """
+        self._select()
+        try:
+            from control_plane.native_continuation import (
+                _ACTOR, _EVENT, _IDENTITY, _PREFIX, _TOKEN, _continue_key,
+                _digest, _request_key, _validate_payload,
+            )
+
+            if (type(work_ref) is not str or _TOKEN.fullmatch(work_ref) is None
+                    or (root_job_id is not None and
+                        (type(root_job_id) is not str or _TOKEN.fullmatch(root_job_id) is None))
+                    or type(page_size) is not int or not 1 <= page_size <= 32
+                    or (high_water is not None and
+                        (type(high_water) is not int or high_water < 0))
+                    or (before_event_id is not None and
+                        (type(before_event_id) is not int or before_event_id < 1))
+                    or type(original_principals) is not tuple
+                    or not 1 <= len(original_principals) <= 2
+                    or any(type(identity) is not tuple or len(identity) != len(_IDENTITY)
+                           or any(type(value) is not str or not value for value in identity)
+                           for identity in original_principals)
+                    or len(set(original_principals)) != len(original_principals)
+                    or (len(original_principals) == 2
+                        and original_principals[0][1:] != original_principals[1][1:])):
+                raise RuntimeReadUnavailable("invalid original reference selector")
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                if high_water is None:
+                    high_water = int(loader.execute(
+                        "SELECT COALESCE(MAX(event_id),0) AS high_water FROM events"
+                    ).fetchone()[0])
+                upper = high_water if before_event_id is None else min(
+                    high_water, before_event_id - 1)
+                window = loader.execute(
+                    "SELECT event_id,event_type,command_id,aggregate_type,aggregate_id,"
+                    "actor,job_id,attempt_id,worker_id,created_at_ms,"
+                    "length(CAST(payload_json AS BLOB)) AS payload_bytes "
+                    "FROM events WHERE event_id<=? ORDER BY event_id DESC LIMIT ?",
+                    (upper, 256),
+                ).fetchall()
+                rows: list[dict[str, Any]] = []
+                candidate_reads = 0
+                position = None
+                for meta in window:
+                    position = meta["event_id"]
+                    if (meta["event_type"] != _EVENT
+                            or meta["aggregate_type"] != "session_bridge_continue"
+                            or meta["actor"] != _ACTOR):
+                        continue
+                    candidate_reads += 1
+                    if candidate_reads > 32:
+                        # The uninspected 33rd candidate remains on the next page.
+                        position += 1
+                        break
+                    if meta["payload_bytes"] > 65536:
+                        raise RuntimeReadUnavailable("oversized original request")
+                    row = loader.execute("SELECT * FROM events WHERE event_id=?",
+                                         (position,)).fetchone()
+                    if row is None:
+                        raise RuntimeReadUnavailable("original request disappeared")
+                    event = _event_from_row(row)
+                    value = event.payload
+                    _validate_payload(value)
+                    if (event.event_type != _EVENT
+                            or value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
+                            or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                            or event.aggregate_id != _request_key(value["operation_key"])
+                            or value["request_message_key"] != _continue_key(value["operation_key"])
+                            or (event.job_id, event.attempt_id, event.worker_id) !=
+                            (value["job_id"], value["attempt_id"], value["worker_id"])):
+                        raise RuntimeReadUnavailable("original request binding changed")
+                    if (value["context"]["work_ref"] != work_ref
+                            or (root_job_id is not None and value["root_job_id"] != root_job_id)
+                            or tuple(value["principal"][key] for key in _IDENTITY)
+                            not in original_principals):
+                        continue
+                    # Foreign work/principal scope never triggers a root read.
+                    metadata = loader.execute(
+                        "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+                        "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
+                        "ORDER BY event_id LIMIT 2", (value["root_job_id"],),
+                    ).fetchall()
+                    if len(metadata) != 1 or metadata[0]["payload_bytes"] > 65536:
+                        raise RuntimeReadUnavailable("original root cardinality or size changed")
+                    root_row = loader.execute("SELECT * FROM events WHERE event_id=?",
+                                              (metadata[0]["event_id"],)).fetchone()
+                    if root_row is None:
+                        raise RuntimeReadUnavailable("original root disappeared")
+                    root = _event_from_row(root_row)
+                    if (root.event_id != value["root_event_id"]
+                            or _digest(root.to_dict()) != value["root_event_sha256"]):
+                        raise RuntimeReadUnavailable("original root changed")
+                    rows.append({
+                        "read_ref": value["read_ref"],
+                        "operation_key": value["operation_key"],
+                        "request_ref": event.command_id,
+                        "request_event_id": event.event_id,
+                        "request_revision": _digest(event.to_dict()),
+                        "requested_at": event.created_at,
+                        "work_ref": work_ref,
+                        "root_job_id": value["root_job_id"],
+                        "target_ref": value["target_ref"],
+                        "reference_only": True,
+                    })
+                    if len(rows) >= page_size:
+                        break
+                return high_water, position, tuple(rows)
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("original reference VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
         except BaseException:
             self._failed = True
             raise
