@@ -78,6 +78,7 @@ fn main() {
             auth::read_mission,
             auth::read_mission_v3,
             auth::read_admitted_plan,
+            auth::read_retained_activity,
             auth::read_result,
             auth::read_current_window,
             auth::executive_auth_status,

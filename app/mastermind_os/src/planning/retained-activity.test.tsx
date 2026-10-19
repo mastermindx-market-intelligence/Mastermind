@@ -5,7 +5,7 @@ import { RetainedActivityInspector } from "./RetainedActivityInspector";
 import {
   decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead,
 } from "./retained-activity";
-import { bindMissionHost } from "../host";
+import { bindMissionHost, createNativeClient } from "../host";
 
 afterEach(() => cleanup());
 const selected: ActivitySelection = {
@@ -181,5 +181,70 @@ describe("same MissionHost source generation, no parallel bearer custody", () =>
     sourceEpoch++;
     release(raw());
     await expect(pending).rejects.toThrow("READ_CANCELLED");
+  });
+});
+
+describe("native Tauri retained-activity Workspace source", () => {
+  const signedIn = { status: "signed_in", reason: null, acquisition: true, content: false };
+  const signedOut = { status: "signed_out", reason: null, acquisition: false, content: false };
+  it("invokes precisely one original four-selector reader and decodes a closed DTO", async () => {
+    const calls: Array<{ command: string; args: unknown }> = [];
+    let readCalls = 0;
+    const invoke = <T,>(command: string, args?: Record<string, unknown>): Promise<T> => {
+      calls.push({ command, args });
+      if (command === "executive_auth_status") return Promise.resolve({ generation: 0, available: false } as T);
+      if (command === "auth_status") return Promise.resolve(signedIn as T);
+      if (command === "read_retained_activity") { readCalls++; return Promise.resolve(raw() as T); }
+      return Promise.reject(new Error("UNEXPECTED_NATIVE_COMMAND"));
+    };
+    const client = await createNativeClient(invoke, async () => () => {});
+    const host = bindMissionHost(client);
+    const decoded = await host.readRetainedActivity!({
+      ...selected, signal: new AbortController().signal,
+    });
+    expect(calls.at(-1)).toEqual({
+      command: "read_retained_activity", args: { selection: selected },
+    });
+    expect(readCalls).toBe(1);
+    expect(decoded.availability).toBe("AVAILABLE");
+    if (decoded.availability === "AVAILABLE") {
+      expect(decoded.rows[0].category).toBe("TOOL_ACTIVITY");
+      expect(Object.keys(decoded.rows[0])).toEqual([
+        "candidate_event_id", "turn_id", "ordinal_in_candidate", "category",
+        "candidate_recorded_at",
+      ]);
+    }
+    await expect(host.readRetainedActivity!({
+      ...selected, attempt_id: "ATT-FOREIGN",
+      signal: new AbortController().signal,
+    })).rejects.toThrow("ACTIVITY_SELECTION_INVALID");
+    expect(readCalls).toBe(1);
+  });
+
+  it("drops late Tauri data across the original logged-out generation", async () => {
+    const calls: string[] = [];
+    let authListener!: (message: { payload: unknown }) => void;
+    let release!: (body: unknown) => void;
+    const invoke = <T,>(command: string): Promise<T> => {
+      calls.push(command);
+      if (command === "executive_auth_status") return Promise.resolve({ generation: 0, available: false } as T);
+      if (command === "auth_status") return Promise.resolve(signedIn as T);
+      if (command === "read_retained_activity") return new Promise<T>(resolve => {
+        release = body => resolve(body as T);
+      });
+      return Promise.reject(new Error("UNEXPECTED_NATIVE_COMMAND"));
+    };
+    const client = await createNativeClient(invoke, async (event, listener) => {
+      if (event === "mastermind-auth-state") authListener = listener;
+      return () => {};
+    });
+    const host = bindMissionHost(client);
+    const signal = new AbortController().signal;
+    const pending = host.readRetainedActivity!({ ...selected, signal });
+    expect(calls.at(-1)).toBe("read_retained_activity");
+    authListener({ payload: signedOut });
+    release(raw());
+    await expect(pending).rejects.toThrow("READ_CANCELLED");
+    expect(host.auth?.getState().status).toBe("signed_out");
   });
 });

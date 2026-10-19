@@ -32,6 +32,7 @@ import subprocess
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 from uuid import uuid4
@@ -5339,7 +5340,7 @@ class ExecutiveControlService:
                 else:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
-                    result = workspace_error("source_unavailable", 503)
+                    result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
                     # Only the *existing installed COO* source may carry a
                     # separately verified Workspace principal to one original
@@ -5349,7 +5350,7 @@ class ExecutiveControlService:
                     if (app_binding.principal_admission_armed is not True
                             or app_binding.principal_facts_factory is None
                             or factory is None):
-                        result = workspace_error("access_denied", 403)
+                        result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
                     else:
                         try:
                             from control_plane.coo_principal_host import CooHostProvider
@@ -5358,16 +5359,16 @@ class ExecutiveControlService:
                                 raise ValueError("original installed COO source required")
                             result = await owner.read_workspace_retained_activity(parsed)
                         except Exception:
-                            result = workspace_error("source_unavailable", 503)
+                            result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 elif factory is None:
-                    result = workspace_error("source_unavailable", 503)
+                    result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 else:
                     try:
                         result = await factory(self._require_runtime()).handle_frame(parsed)
                     except Exception:
                         result = workspace_error("source_unavailable", 503)
                 if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
-                    result = workspace_error("source_unavailable", 503)
+                    result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 try:
                     workspace_encode(result, limit=ceiling - 1)
                 except (TypeError, ValueError):

@@ -465,6 +465,7 @@ export async function createNativeClient(
       | "read_mission"
       | "read_mission_v3"
       | "read_admitted_plan"
+      | "read_retained_activity"
       | "read_result"
       | "read_current_window",
     signal: AbortSignal,
@@ -551,6 +552,12 @@ export async function createNativeClient(
       if (!validPlanSelection({ work_ref, root_job_id }))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
+    },
+    readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selection = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validActivitySelection(selection))
+        return Promise.reject(new Error("ACTIVITY_SELECTION_INVALID"));
+      return read("read_retained_activity", signal, { selection });
     },
     readMissionV3: ({ workRef, rootJobId, signal }) => {
       if (!normalizeWorkspaceSelection({ workRef, rootJobId }))
