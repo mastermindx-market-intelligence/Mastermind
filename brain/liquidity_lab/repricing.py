@@ -703,6 +703,7 @@ class RepricingProjection:
     invalidating_information: tuple[str, ...]
     known_at: datetime
     qualification: RemainderQualification | None = field(default=None, repr=False)
+    _percent_seal: str | None = field(default=None, repr=False, compare=False)
 
     def __post_init__(self) -> None:
         if self.thesis_status not in THESIS_STATUSES:
@@ -731,6 +732,12 @@ class RepricingProjection:
                 raise ContractError("a supported remainder belongs to an active thesis without a reason")
             if self.remaining_interval is None or self.remaining_interval_kind != "pointwise":
                 raise ContractError("a supported remainder carries its pointwise interval")
+            low, high = self.remaining_interval
+            if qual.live_interval_low is None or qual.live_interval_high is None or (
+                float(low),
+                float(high),
+            ) != (float(qual.live_interval_low), float(qual.live_interval_high)):
+                raise ContractError("the remaining interval is the qualification's sealed interval")
         else:
             if self.remaining_reason not in REMAINING_REASONS:
                 raise ContractError("a withheld remainder needs a closed reason")
@@ -739,6 +746,11 @@ class RepricingProjection:
         if self.percent_complete is not None:
             if self.remaining_response_estimate is None or self.percent_withheld_reason is not None:
                 raise ContractError("percent_complete needs a supported remainder and no withheld reason")
+            low, high = self.remaining_interval
+            if low <= 0.0 <= high:
+                raise ContractError("percent_complete is withheld when the remaining interval straddles zero")
+            if not _percent_sealed(self):
+                raise ContractError("percent_complete is issued only by project() for these exact inputs")
         elif self.percent_withheld_reason not in PERCENT_WITHHELD_REASONS:
             raise ContractError("a withheld percent needs a closed reason")
         if self.thesis_status == "eliminated" and (
@@ -782,6 +794,36 @@ class RepricingProjection:
             if self.qualification is None
             else self.qualification.paired_keys_hash,
         }
+
+
+_PERCENT_SEALED_FIELDS = (
+    "forecast_id",
+    "original_exit",
+    "elapsed_sessions",
+    "rules_hash",
+    "travelled_return",
+    "remaining_response_estimate",
+    "remaining_interval",
+    "percent_complete",
+    "percent_withheld_reason",
+)
+
+
+def _percent_seal_digest(values: Mapping[str, Any]) -> str:
+    material = {}
+    for name in _PERCENT_SEALED_FIELDS:
+        value = values.get(name)
+        if name == "remaining_interval" and value is not None:
+            value = [float(value[0]), float(value[1])]
+        material[name] = value
+    message = json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hmac.new(_SEAL_KEY, b"percent:" + message, hashlib.sha256).hexdigest()
+
+
+def _percent_sealed(projection: "RepricingProjection") -> bool:
+    expected = _percent_seal_digest({name: getattr(projection, name) for name in _PERCENT_SEALED_FIELDS})
+    seal = projection._percent_seal
+    return isinstance(seal, str) and hmac.compare_digest(seal, expected)
 
 
 def _sign(value: float) -> int:
@@ -938,6 +980,15 @@ def project(
     interval = (float(qualification.live_interval_low), float(qualification.live_interval_high))
     remaining = float(qualification.live_estimate)
     percent, reason = _percent(point.cumulative_log_return, remaining, interval, reference_exit, rules)
+    percent_seal = _percent_seal_digest(
+        dict(
+            common,
+            remaining_response_estimate=remaining,
+            remaining_interval=interval,
+            percent_complete=percent,
+            percent_withheld_reason=reason,
+        )
+    )
     return RepricingProjection(
         remainder_model_version=qualification.model_version,
         remaining_response_estimate=remaining,
@@ -948,6 +999,7 @@ def project(
         percent_withheld_reason=reason,
         thesis_status="active",
         qualification=qualification,
+        _percent_seal=percent_seal,
         **common,
     )
 

@@ -620,6 +620,27 @@ def test_projection_contract_refuses_inconsistent_states(ledger, qualified):
         dataclasses.replace(projection, discrepancy_label="mispricing")
 
 
+def test_an_issued_percent_is_bound_to_the_sealed_interval_and_inputs(ledger, qualified):
+    projection = _project(ledger, qualified)
+    assert projection.percent_complete is not None
+    # L4 F1 reproduction: an issued percent over a zero-straddling interval.
+    with pytest.raises(ContractError):
+        dataclasses.replace(projection, remaining_interval=(-0.005, 0.005))
+    with pytest.raises(ContractError):
+        dataclasses.replace(projection, remaining_interval=(0.007, 0.018))
+    with pytest.raises(ContractError):
+        dataclasses.replace(projection, travelled_return=projection.travelled_return + 0.001)
+    with pytest.raises(ContractError):
+        dataclasses.replace(projection, percent_complete=projection.percent_complete + 0.25)
+    with pytest.raises(ContractError):
+        dataclasses.replace(projection, _percent_seal=None)
+    forged = {f.name: getattr(projection, f.name) for f in dataclasses.fields(projection)}
+    forged.update(percent_complete=projection.percent_complete + 0.25, _percent_seal="0" * 64)
+    with pytest.raises(ContractError):
+        RepricingProjection(**forged)
+    assert projection.to_payload()["percent_complete"] == projection.percent_complete
+
+
 def test_module_language_avoids_the_forbidden_terms():
     text = Path(repricing.__file__).read_text(encoding="utf-8").lower()
     for term in load_rules().forbidden_terms:
