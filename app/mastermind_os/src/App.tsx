@@ -12,6 +12,7 @@ import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { ConversationWindow } from "./conversations/ConversationWindow";
+import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
 import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
 import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
 import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
@@ -3179,6 +3180,15 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         <ConversationWindow
           locale={locale}
           continuation={sessionContinuationPanel}
+          historicalAnswers={<HistoricalOriginalAnswers
+            binding={sessionBinding}
+            selection={selection}
+            principalScope={sessionOwner?.principalScope ?? null}
+            generation={sessionOwner?.generation ?? null}
+            authRevision={authRevision}
+            selectionSeq={selectionSeq.current}
+            activeReadRef={presentedSessionAnswer?.answer.readRef}
+          />}
           qualifiedAnswer={presentedSessionAnswer}
           onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"

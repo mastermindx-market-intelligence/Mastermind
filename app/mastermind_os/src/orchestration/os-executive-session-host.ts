@@ -28,6 +28,8 @@ import type {
  */
 export type SessionCommandPort = FiniteCommandPort & {
   readonly currentTargetRef: () => string | null;
+  readonly readOriginalReferences?: (selection: MissionSelection, signal: AbortSignal,
+                                     cursor?: string) => Promise<unknown>;
   /** Existing native READ operation; optional only for older injected hosts. */
   readonly readQualifiedAnswer?: (pointer: OperationPointer, signal: AbortSignal) =>
     Promise<QualifiedSessionAnswerRead>;
@@ -68,6 +70,12 @@ export function createOsExecutiveSessionHost(
       submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
       readOperation: (pointer, signal) => original.readOperation(pointer, signal),
       readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
+      readOriginalReferences: transport.references ? (selected, signal, cursor) => {
+        const normalized = selected;
+        const args = { work_ref: normalized.workRef, root_job_id: normalized.rootJobId,
+                       page_size: 16, ...(cursor ? { cursor } : {}) };
+        return transport.references!(args, signal);
+      } : undefined,
       currentTargetRef: () => {
         const state = handle.sessionState();
         return state?.capabilities.send ? state.target?.target_ref ?? null : null;
@@ -131,6 +139,7 @@ export function completeExecutiveSessionBinding(
   )
     return null;
   if (port.readQualifiedAnswer !== undefined && !isFn(port.readQualifiedAnswer)) return null;
+  if (port.readOriginalReferences !== undefined && !isFn(port.readOriginalReferences)) return null;
   if (isFn((store as Record<string, unknown>).write)) return null;
   if (isFn((store as Record<string, unknown>).clear)) return null;
   if (

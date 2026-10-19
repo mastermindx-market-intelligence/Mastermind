@@ -107,6 +107,7 @@ export interface ConversationWindowProps {
   locale?: ConversationLocale;
   /** Exact parent-created owner-keyed element; this window supplies no command identity. */
   continuation?: ReactNode;
+  historicalAnswers?: ReactNode;
   /** Exact current-scope native reply, independent of passive transcript data. */
   qualifiedAnswer?: QualifiedConversationReply | null;
   /** Called after the actual current React DOM commit, never by a receipt. */
@@ -287,6 +288,7 @@ export function ConversationWindow(props: ConversationWindowProps) {
     mission.source.state === "WITHHELD", result.source.state === "WITHHELD"])} {...props} />
     {props.qualifiedAnswer && <QualifiedReplyCard value={props.qualifiedAnswer}
       onCommitted={props.onQualifiedAnswerCommitted} />}
+    {props.historicalAnswers}
     {props.continuation != null && <div className="conversation-continuation-slot">{props.continuation}</div>}
   </div>;
 }

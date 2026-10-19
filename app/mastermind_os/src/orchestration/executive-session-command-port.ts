@@ -390,6 +390,9 @@ export interface ExecutiveSessionTransport {
   context(selection: MissionSelection, signal: AbortSignal): Promise<unknown>;
   send(args: SessionSendArguments, signal: AbortSignal): Promise<unknown>;
   reply(args: SessionReplyArguments, signal: AbortSignal): Promise<unknown>;
+  /** Canonical historical original-request references; no SEND or ACK. */
+  references?(args: { work_ref: string; root_job_id: string; page_size?: number; cursor?: string },
+              signal: AbortSignal): Promise<unknown>;
 }
 
 // ── Port ──────────────────────────────────────────────────────────────────────
