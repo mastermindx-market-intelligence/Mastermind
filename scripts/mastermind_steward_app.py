@@ -37,6 +37,11 @@ from integrations.mastermind_steward_app.server import (
     describe,
     run_stdio,
 )
+from integrations.mastermind_steward_app.research_server import (
+    build_authenticated_research_app,
+    describe_research,
+    run_research_stdio,
+)
 
 _LOOPBACK = {"127.0.0.1", "::1", "localhost"}
 
@@ -82,6 +87,15 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--policy-file", default=os.getenv("MASTERMIND_STEWARD_POLICY"))
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
+    parser.add_argument(
+        "--app-generation",
+        choices=("secretary-v2", "research-v3"),
+        default="secretary-v2",
+        help=(
+            "secretary-v2 preserves the protected six-tool app; research-v3 "
+            "adds read-only search/fetch over those same Steward reads."
+        ),
+    )
     parser.add_argument("--describe", action="store_true")
     return parser
 
@@ -89,7 +103,8 @@ def _parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     if args.describe:
-        print(describe(), end="")
+        renderer = describe_research if args.app_generation == "research-v3" else describe
+        print(renderer(), end="")
         return 0
 
     repo_root = Path(args.repo_root).expanduser().resolve()
@@ -111,7 +126,8 @@ def main(argv: list[str] | None = None) -> int:
     contract = build_contract_server(port)
 
     if args.transport == "stdio":
-        asyncio.run(run_stdio(contract))
+        runner = run_research_stdio if args.app_generation == "research-v3" else run_stdio
+        asyncio.run(runner(contract))
         return 0
 
     if args.host not in _LOOPBACK:
@@ -134,7 +150,12 @@ def main(argv: list[str] | None = None) -> int:
         now=lambda: int(time.time()),
         audit_sink=_StderrAuditSink(),
     )
-    app = build_authenticated_app(
+    app_builder = (
+        build_authenticated_research_app
+        if args.app_generation == "research-v3"
+        else build_authenticated_app
+    )
+    app = app_builder(
         contract,
         policy=policy,
         token_verifier=verifier,

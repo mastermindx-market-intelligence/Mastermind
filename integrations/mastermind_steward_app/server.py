@@ -44,6 +44,7 @@ __all__ = [
     "build_mcp_server",
     "build_tools",
     "initialization_options",
+    "register_ui_resource",
     "run_stdio",
 ]
 
@@ -101,27 +102,8 @@ def _ui_meta() -> dict[str, object]:
     }
 
 
-def build_mcp_server(
-    contract: SecretaryGroundingContractServer,
-) -> Server:
-    if not isinstance(contract, SecretaryGroundingContractServer):
-        raise TypeError("contract must be SecretaryGroundingContractServer")
-
-    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
-    tools = build_tools()
-
-    @server.list_tools()
-    async def list_tools() -> list[mcp_types.Tool]:
-        return list(tools)
-
-    @server.call_tool()
-    async def call_tool(
-        name: str, arguments: dict[str, Any] | None
-    ) -> dict[str, Any]:
-        # The protected contract performs closed input validation and exactly one
-        # injected read-port call. Returning the mapping gives MCP both
-        # structuredContent and a JSON text fallback.
-        return await contract.call_tool(name, arguments or {})
+def register_ui_resource(server: Server) -> None:
+    """Register the one existing read-only Control Room UI resource."""
 
     @server.list_resources()
     async def list_resources() -> list[mcp_types.Resource]:
@@ -151,6 +133,30 @@ def build_mcp_server(
             )
         ]
 
+
+def build_mcp_server(
+    contract: SecretaryGroundingContractServer,
+) -> Server:
+    if not isinstance(contract, SecretaryGroundingContractServer):
+        raise TypeError("contract must be SecretaryGroundingContractServer")
+
+    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
+    tools = build_tools()
+
+    @server.list_tools()
+    async def list_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    @server.call_tool()
+    async def call_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> dict[str, Any]:
+        # The protected contract performs closed input validation and exactly one
+        # injected read-port call. Returning the mapping gives MCP both
+        # structuredContent and a JSON text fallback.
+        return await contract.call_tool(name, arguments or {})
+
+    register_ui_resource(server)
     return server
 
 
