@@ -1351,10 +1351,13 @@ configs, exact release and Runtime quiescence:
 
 ```bash
 AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
-EXPECTED_CREDENTIAL_KIND='service-account'
-WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
-# Reuse the exact finite UTC value already used for --verify-ready.
-CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
+# Copy the exact values recorded in the device-auth readiness receipt at
+# /Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json
+# (JSON keys "expected_credential_kind" and "credential_expires_at", emitted by
+# ops/executive_os/provider_readiness.py:489 and :487 respectively); do not
+# invent or recompute them locally.
+EXPECTED_CREDENTIAL_KIND='<expected_credential_kind from provider-readiness-v2.json>'
+CREDENTIAL_EXPIRES_AT='<credential_expires_at from provider-readiness-v2.json>'
 
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
@@ -1364,9 +1367,12 @@ sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --gate-b-receipt "$GATE_B_RECEIPT" \
   --expected-credential-kind "$EXPECTED_CREDENTIAL_KIND" \
   --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+  --foreground-only
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
+
+`--foreground-only` is the current arm profile for this host; `--native-return` is intentionally omitted because the bounded native-return profile requires the installed Company listener that this host does not yet admit, so the arm command above never selects it.
 
 The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 
