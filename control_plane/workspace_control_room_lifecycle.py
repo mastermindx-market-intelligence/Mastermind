@@ -139,6 +139,12 @@ class HostedControlRoom:
         self.allowed_peer_uids = tuple(int(uid) for uid in allowed_peer_uids)
         self._peer_uid_fn = peer_uid_fn
         self.shutdown_timeout = shutdown_timeout
+        # Constructor-resolved custody values are reused by _start()'s
+        # fail-closed re-check. Falling back to os.geteuid()/os.getegid()
+        # at start time would silently replace the resolved values and
+        # permit a mutation between construction and serve.
+        self.expected_owner_uid = int(expected_owner_uid)
+        self.expected_gid = int(expected_gid)
         self._server = None
         self._server_thread = None
         self._refresh_thread = None
@@ -161,9 +167,13 @@ class HostedControlRoom:
             raise ValueError("control room hosting requires a fresh owner")
         # Fail closed: re-check the adopted socket between construction and
         # any serve_forever() loop, in case anyone mutated the filesystem.
+        # Use the constructor-resolved custody values, not the live
+        # geteuid()/getegid(), so a caller passing explicit values is not
+        # silently overridden at start.
         _verify_socket_custody(
             self._listener, socket_path=self.socket_path,
-            expected_owner_uid=os.geteuid(), expected_gid=os.getegid(),
+            expected_owner_uid=self.expected_owner_uid,
+            expected_gid=self.expected_gid,
             trusted_parent_uid=_TRUSTED_SOCKET_PARENT_UID)
         self.config.workspace_refresh_on_read = False
         self._server = UnixControlRoomServer(

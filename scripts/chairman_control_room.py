@@ -1548,10 +1548,11 @@ class UnixControlRoomServer(socketserver.ThreadingMixIn, socketserver.UnixStream
         address = listener.getsockname()
         socketserver.UnixStreamServer.__init__(
             self, address, handler_cls, bind_and_activate=False)
-        try:
-            os.close(self.socket.fileno())
-        except OSError:
-            pass
+        # Close the placeholder at the Python level so the socket object's
+        # finalizer does not close the same descriptor number a second time
+        # (possibly after the kernel has reused it for another file in another
+        # thread). An os.close(fileno()) here is wrong.
+        self.socket.close()
         self.socket = listener
         self.server_address = listener.getsockname()
         # Same H0 hardening as ControlRoomServer: compose before serve_forever.
@@ -1568,7 +1569,10 @@ class UnixControlRoomServer(socketserver.ThreadingMixIn, socketserver.UnixStream
     def verify_request(self, request, client_address):
         try:
             peer_uid = self._peer_uid_fn(request)
-        except OSError:
+        except Exception:
+            # Any unexpected peer-credential error (OSError or otherwise) must
+            # refuse this connection. Letting it escape into serve_forever
+            # would kill the room thread and the whole listener with it.
             return False
         if type(peer_uid) is not int or peer_uid is True or peer_uid is False:
             return False
