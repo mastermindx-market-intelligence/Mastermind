@@ -12,9 +12,21 @@ import type { AuthState } from './host';
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn().mockResolvedValue({ state: 'BUILT_NOT_PROVEN' }) }));
 const SCOPE = 'c'.repeat(64), REF = `fabric_attempt:${'a'.repeat(64)}`, KEY = `session-continue-${'b'.repeat(64)}`;
 const pointer: OperationPointer = { operationKey: KEY, kind: 'message', targetKey: REF };
+// Original historical request A is distinct from the still-pending command B.
+const HIST_OP_A = 'session-continue-' + 'c'.repeat(64);
+const HIST_DIGEST_A = '47fc2dc67be106469d55109fd1d116d32185022daa6103e087a22ba245ec7e69';
+const HIST_READ_A = 'session-reply-' + HIST_DIGEST_A;
+const HIST_REQUEST_A = 'session-bridge-continue:' + HIST_DIGEST_A;
+const HIST_ROW_A = {
+  read_ref: HIST_READ_A, operation_key: HIST_OP_A, request_ref: HIST_REQUEST_A,
+  request_event_id: 5, request_revision: 'd'.repeat(64),
+  requested_at: '2026-10-18T00:00:00Z', work_ref: 'WS:ALPHA',
+  root_job_id: 'JOB-1', target_ref: REF, reference_only: true as const,
+};
+
 const deferred = <T,>() => { let resolve!: (v:T)=>void; const promise = new Promise<T>(r=>{resolve=r;}); return {promise,resolve}; };
 let dispose: (()=>void) | undefined;
-function fixture(retained: OperationPointer | null = null, target = true, content = false) {
+function fixture(retained: OperationPointer | null = null, target = true, content = false, history = false) {
   let saved = retained, hasTarget = target, gen = 1;
   let auth: AuthState = { status: 'signed_in', reason: null, acquisition: false, content };
   const authListeners = new Set<(a:AuthState)=>void>();
@@ -34,6 +46,13 @@ function fixture(retained: OperationPointer | null = null, target = true, conten
         capabilities:{send:hasTarget,reply_read:true,stop:false} } })),
     send: vi.fn(async () => { expect(saved).toEqual(pointer); throw new Error('lost private response'); }),
     reply: vi.fn(async () => { throw new Error('reply unavailable'); }),
+    ...(history ? { references: vi.fn(async () => ({
+      schema: 'mastermind.os.executive.session_result.v1', operation: 'references',
+      ok: true, effect: 'NONE', operation_key: null, error: null,
+      data: { schema: 'mastermind.session_reply_references.v1',
+        status: 'COMPLETE', references: [HIST_ROW_A],
+        high_water: 5, next_cursor: null },
+    })) } : {}),
   };
   const host = createOsExecutiveSessionHost(transport,store); dispose=host.dispose;
   const readCurrentWindow=vi.fn(async()=>{throw new Error('fixture window unavailable')});
@@ -289,6 +308,38 @@ describe('App selected-session composition',()=>{
     await act(async()=>{read.resolve(pointer);await read.promise;});
     expect(screen.queryByText(KEY)).toBeNull();expect(f.transport.reply).not.toHaveBeenCalled();expect(f.transport.send).not.toHaveBeenCalled();
   });
+  it('reopens historical A inside actual Conversations after a reload while pending B remains untouched', async () => {
+    const f=fixture(pointer,false,true,true);
+    const qualified=vi.spyOn(f.host.binding.port,'readQualifiedAnswer').mockImplementation(async (candidate)=>{
+      expect(candidate.operationKey).toBe(HIST_OP_A);
+      expect(candidate.targetKey).toBe(REF);
+      return {receipt:{...candidate,disposition:'accepted',reason:'ACCEPTED'},
+        answer:{text:'Historical A recovered on the real Conversations screen.',
+          nextStep:'B stays pending.',readRef:HIST_READ_A,parentConsumed:false}};
+    });
+    const first=render(<App/>); await panel();
+    fireEvent.click(await screen.findByRole('button',{name:/Open original request/}));
+    const original=await screen.findByText('Historical A recovered on the real Conversations screen.');
+    expect(original.closest('.conversation-window')).not.toBeNull();
+    expect(f.saved()).toEqual(pointer); // B survives A's unrelated READ.
+    expect(f.transport.send).not.toHaveBeenCalled();
+    expect(f.store.reserve).not.toHaveBeenCalled();
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+    first.unmount();
+
+    // App component remount mimics the user-facing reload composition. The
+    // separately tested IndexedDB test covers durable persistence across
+    // actual pending-store reopen, which this UI fixture intentionally mocks.
+    render(<App/>); await panel();
+    fireEvent.click(await screen.findByRole('button',{name:/Open original request/}));
+    expect(await screen.findByText('Historical A recovered on the real Conversations screen.')).toBeTruthy();
+    expect(f.saved()).toEqual(pointer);
+    expect(f.transport.send).not.toHaveBeenCalled();
+    expect(f.store.clearIfEqual).not.toHaveBeenCalled();
+    expect(qualified).toHaveBeenCalledTimes(2);
+    expect(qualified.mock.calls.every(([candidate])=>candidate.operationKey===HIST_OP_A)).toBe(true);
+  });
+
   it('places one actual Session inside Conversations and preserves its explicit pair across passive read and presentation changes',async()=>{
     const f=fixture(null,true,true); const view=render(<App/>); await panel(); await enter();
     const instruction=screen.getByLabelText('What would you like done?') as HTMLTextAreaElement;
