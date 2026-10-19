@@ -632,12 +632,14 @@ def _price_and_sources(pid: str, syms,
     sources: dict[str, str] = {}
     observations = {}
 
-    def observe(ticker, value, currency, source, upstream, *, input_price=None, input_currency=None):
+    def observe(ticker, value, currency, source, upstream, *, input_price=None, input_currency=None,
+                fx_context=None, fx_operation=None):
         if _evidence is not None:
             try:
                 observations[ticker] = price_evidence.make_read(
                     ticker, value, currency, source, stage="settlement_selection",
                     upstream=upstream, input_price=input_price, input_currency=input_currency,
+                    fx_context=fx_context, fx_operation=fx_operation,
                 )
             except Exception:
                 pass
@@ -685,11 +687,15 @@ def _price_and_sources(pid: str, syms,
             usd, context = paper_account._current_price(t), None
         else:
             usd, context = price_evidence.read_with_evidence(paper_account._current_price, t)
-        base = fx.usd_to(usd, ccy)
+        if _evidence is None:
+            base, fx_context = fx.usd_to(usd, ccy), None
+        else:
+            base, fx_context = price_evidence.read_with_evidence(fx.usd_to, usd, ccy)
         if base and base > 0:
             prices[t] = base
             sources[t] = "last_price"
-            observe(t, base, ccy, "last_price", context, input_price=usd, input_currency="USD")
+            observe(t, base, ccy, "last_price", context, input_price=usd, input_currency="USD",
+                    fx_context=fx_context, fx_operation="multiply")
     return result()
 
 

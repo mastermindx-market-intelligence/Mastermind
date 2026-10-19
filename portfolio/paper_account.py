@@ -1442,6 +1442,7 @@ def _live_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
     upstream = None
     source_label = None
     source_text_sha256 = None
+    fx_context = None
     attempts = []
 
     def read(reader, name):
@@ -1537,6 +1538,7 @@ def _live_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
                     upstream=upstream, input_price=local, input_currency=native_currency,
                     source_bar_label=source_label, source_bar_label_kind="snapshot_asof",
                     source_text_sha256=source_text_sha256, attempts=attempts,
+                    fx_context=fx_context, fx_operation="divide",
                 ))
             except Exception:
                 pass
@@ -1546,7 +1548,10 @@ def _live_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
         return observed(None)
     if convert:
         from portfolio import fx
-        return observed(fx.to_usd(local, t))
+        if _evidence is None:
+            return observed(fx.to_usd(local, t))
+        value, fx_context = price_evidence.read_with_evidence(fx.to_usd, local, t)
+        return observed(value)
     return observed(local)
 
 
@@ -1577,12 +1582,16 @@ def _current_price(ticker: str, *, _evidence: dict | None = None) -> float | Non
         if s is not None and len(s) > 0:
             v = float(s.iloc[-1])
             from portfolio import fx
-            value = fx.to_usd(v, ticker)
+            if _evidence is None:
+                value, fx_context = fx.to_usd(v, ticker), None
+            else:
+                value, fx_context = price_evidence.read_with_evidence(fx.to_usd, v, ticker)
             if _evidence is not None:
                 try:
                     price_evidence.emit(_evidence, price_evidence.make_read(
                         t, value, "USD", "engine_series", stage="paper_current",
                         input_price=v, input_currency=fx.currency_of(ticker),
+                        fx_context=fx_context, fx_operation="divide",
                         source_bar_label=s.index[-1], source_bar_label_kind="series_index",
                         attempts=[{
                             "source": "live_price",

@@ -13,7 +13,11 @@ import re
 from datetime import date, datetime
 from numbers import Real
 
+from . import fx_evidence
+
 READ_SCHEMA = "mastermind.price_read.v1"
+CONVERSION_SCHEMA = "mastermind.price_read.v2"
+_READ_SCHEMAS = (READ_SCHEMA, CONVERSION_SCHEMA)
 SETTLEMENT_SCHEMA = "mastermind.settlement_price_evidence.v1"
 YAHOO_SCHEMA = "mastermind.yahoo_daily_bar_evidence.v1"
 YAHOO_OPEN_SCHEMA = "mastermind.yahoo_daily_bar_evidence.v2"
@@ -82,6 +86,7 @@ _READ_FIELDS = frozenset({
     "market_observed_at", "execution_qualification",
 })
 _CONVERSION_FIELDS = frozenset({"input_price", "input_currency", "fx_observation"})
+_CONVERSION_V2_FIELDS = _CONVERSION_FIELDS | frozenset({"fx_operation", "fx_rate", "fx_binding_reason"})
 _YAHOO_FIELDS = frozenset({
     "schema", "ticker", "field", "status", "reason", "price_local",
     "source_bar_label", "source_bar_label_kind", "fetch_started_at",
@@ -198,7 +203,7 @@ def _binding_reason(copied, ticker, price, currency):
     field = "price_local" if copied["schema"] in _YAHOO_SCHEMAS else "price"
     if expected is None or positive_number(copied.get(field)) != expected:
         return "price_mismatch"
-    if copied["schema"] in (READ_SCHEMA, POLYGON_SCHEMA) and copied.get("currency") != currency:
+    if copied["schema"] in (*_READ_SCHEMAS, POLYGON_SCHEMA) and copied.get("currency") != currency:
         return "currency_mismatch"
     return None
 
@@ -216,10 +221,11 @@ def _snapshot(value, *, depth=0):
         return None, "context_too_deep"
     try:
         schema = value.get("schema")
-        if type(schema) is not str or schema not in (READ_SCHEMA, *_YAHOO_SCHEMAS, POLYGON_SCHEMA):
+        if type(schema) is not str or schema not in (*_READ_SCHEMAS, *_YAHOO_SCHEMAS, POLYGON_SCHEMA):
             return None, "unsupported_schema"
         required = (
-            _READ_FIELDS if schema == READ_SCHEMA
+            _READ_FIELDS | _CONVERSION_V2_FIELDS if schema == CONVERSION_SCHEMA
+            else _READ_FIELDS if schema == READ_SCHEMA
             else _POLYGON_FIELDS if schema == POLYGON_SCHEMA
             else _YAHOO_OPEN_FIELDS if schema == YAHOO_OPEN_SCHEMA
             else _YAHOO_FIELDS
@@ -236,7 +242,7 @@ def _snapshot(value, *, depth=0):
             return None, "qualification_not_supported"
         copied = {}
         for key, item in value.items():
-            if key in ("upstream", "attempts"):
+            if key in ("upstream", "attempts", "fx_rate"):
                 continue
             if item is None or type(item) is bool:
                 copied[key] = item
@@ -293,9 +299,24 @@ def _snapshot(value, *, depth=0):
                     return None, "invalid_conversion"
                 if copied["input_price"] is not None and positive_number(copied["input_price"]) is None:
                     return None, "invalid_conversion"
-                expected_fx = "not_captured" if copied["input_currency"] != copied["currency"] else "not_required"
-                if copied["fx_observation"] != expected_fx:
-                    return None, "invalid_conversion"
+                if schema == READ_SCHEMA:
+                    expected_fx = "not_captured" if copied["input_currency"] != copied["currency"] else "not_required"
+                    if copied["fx_observation"] != expected_fx:
+                        return None, "invalid_conversion"
+                else:
+                    if copied["fx_operation"] not in ("multiply", "divide"):
+                        return None, "invalid_conversion"
+                    copied["fx_rate"] = None
+                    if value["fx_rate"] is not None:
+                        rate, reason = fx_evidence.bound_rate(
+                            value["fx_rate"], copied["input_price"], copied["input_currency"],
+                            copied["price"], copied["currency"], copied["fx_operation"],
+                        )
+                        if reason or copied["fx_observation"] != "matched" or copied["fx_binding_reason"] is not None:
+                            return None, "invalid_fx_binding"
+                        copied["fx_rate"] = rate
+                    elif copied["fx_observation"] != "unavailable" or copied["fx_binding_reason"] not in fx_evidence.BINDING_REASONS:
+                        return None, "invalid_fx_binding"
             attempts = value["attempts"]
             if type(attempts) is not list or len(attempts) > 8:
                 return None, "invalid_attempts"
@@ -341,7 +362,7 @@ def make_read(
     ticker, price, currency, source, *, stage,
     upstream=None, input_price=None, input_currency=None,
     source_bar_label=None, source_bar_label_kind=None, source_text_sha256=None,
-    attempts=(),
+    attempts=(), fx_context=None, fx_operation=None,
 ):
     """Describe one real read/conversion without making its incomplete clocks authoritative."""
     value = positive_number(price)
@@ -385,6 +406,17 @@ def make_read(
             input_currency=_text(input_currency),
             fx_observation="not_captured" if input_currency != currency else "not_required",
         )
+        # Empty legacy adapters retain their exact v1 result. New context uses an
+        # explicit child/schema; old decoders are not forward-compatible with it.
+        if fx_context is not None and (type(fx_context) is not dict or fx_context):
+            rate, reason = fx_evidence.bound_rate(
+                fx_context, input_price, input_currency, price, currency, fx_operation,
+            )
+            record.update(
+                schema=CONVERSION_SCHEMA, fx_operation=fx_operation, fx_rate=rate,
+                fx_observation="matched" if rate is not None else "unavailable",
+                fx_binding_reason=reason,
+            )
     return record
 
 
