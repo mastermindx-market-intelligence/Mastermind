@@ -99,6 +99,7 @@ def assemble(files: dict[str, bytes], sha: str, *, include_native_routing: bool 
         'longDescription': 'Task-scoped CI, product verification, market evidence, quantitative validation and incident methods. Skills provide methods, not new tool access.',
         'developerName': 'Mastermind-X',
         'category': 'Productivity',
+        'capabilities': ['Read'],
     }}
     for directory, projected in (('.codex-plugin', codex), ('.claude-plugin', manifest)):
         result[f'{directory}/plugin.json'] = (json.dumps(projected, sort_keys=True, indent=2) + '\n').encode()

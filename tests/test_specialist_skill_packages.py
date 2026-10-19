@@ -156,5 +156,6 @@ def test_web_manifest_has_display_name_without_polluting_claude_schema():
     claude = json.loads(artifact['.claude-plugin/plugin.json'])
     assert codex['interface']['displayName'] == 'Mastermind Specialists'
     assert codex['interface']['shortDescription'].strip()
+    assert codex['interface']['capabilities'] == ['Read']
     assert 'interface' not in claude
     assert {key: value for key, value in codex.items() if key != 'interface'} == claude
