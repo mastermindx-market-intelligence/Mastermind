@@ -272,3 +272,30 @@ def test_installed_socket_missing_original_coo_fails_before_any_runtime_reader(
         finally:
             await service.close()
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("method", ["HEAD", "POST", "OPTIONS", "DELETE"])
+@pytest.mark.parametrize("signed", [True, False])
+def test_non_get_activity_is_refused_by_original_raw_path_fence_before_auth_or_source(
+    owner, rsa_key, method, signed,
+):
+    fake = _FakeWorkspaceClient(envelope=_run(owner))
+    app, recorded = _make_app(rsa_key, client=fake)
+    headers = ({"Authorization": "Bearer " + _workspace_token(rsa_key)}
+               if signed else {})
+    response = app.request(method, ROUTE, params=owner["selected"], headers=headers)
+    assert response.status_code == 405
+    assert response.headers["cache-control"] == "no-store"
+    assert recorded.calls == []
+
+
+def test_encoded_activity_route_rejected_before_auth_or_runtime(owner, rsa_key):
+    fake = _FakeWorkspaceClient(envelope=_run(owner))
+    app, recorded = _make_app(rsa_key, client=fake)
+    response = app.get(
+        "/workspace/operator%2factivity/current",
+        params=owner["selected"],
+        headers={"Authorization": "Bearer " + _workspace_token(rsa_key)},
+    )
+    assert response.status_code == 400
+    assert recorded.calls == []

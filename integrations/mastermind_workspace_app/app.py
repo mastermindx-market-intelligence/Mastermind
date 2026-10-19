@@ -955,6 +955,7 @@ class _RawPathFence:
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
         _PLAN_ROUTE,
+        _ACTIVITY_ROUTE,
     )
 
     def __init__(self, app: Any) -> None:

@@ -18,6 +18,7 @@ export function RetainedActivityInspector({
   selection, read, sourceGeneration, canRead, locale = "en",
 }: RetainedActivityInspectorProps) {
   const [body, setBody] = useState<ActivityRead | null>(null);
+  const [bodyGeneration, setBodyGeneration] = useState<number | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
   const abort = useRef<AbortController | null>(null);
   const seq = useRef(0);
@@ -28,12 +29,22 @@ export function RetainedActivityInspector({
     abort.current?.abort();
     abort.current = null;
     setBody(null);
+    setBodyGeneration(null);
     setState("idle");
     return () => { seq.current++; abort.current?.abort(); };
   }, [work, root, job, attempt, read, sourceGeneration, canRead]);
   const chinese = locale === "zh-CN";
   const ready = validActivitySelection(selection) && !!read && !!sourceGeneration &&
     !!canRead && canRead();
+  // A prior user's rendered candidate evidence must never survive a viewer
+  // revocation, source-generation change or selected Attempt switch, even in
+  // the commit before React's effect clears cached state.
+  const display = ready && bodyGeneration !== null &&
+    sourceGeneration?.() === bodyGeneration && body && selection &&
+    body.selection.work_ref === selection.work_ref &&
+    body.selection.root_job_id === selection.root_job_id &&
+    body.selection.job_id === selection.job_id &&
+    body.selection.attempt_id === selection.attempt_id ? body : null;
   const open = async () => {
     if (!ready || !selection || !read || !sourceGeneration || !canRead || state === "loading") return;
     const current = new AbortController();
@@ -43,11 +54,13 @@ export function RetainedActivityInspector({
     const authorized = () => !current.signal.aborted && seq.current === ticket &&
       canRead() && sourceGeneration() === generation;
     setBody(null);
+    setBodyGeneration(null);
     setState("loading");
     try {
       const result = await read({ ...selection, signal: current.signal });
       if (!authorized()) return;
       setBody(result);
+      setBodyGeneration(generation);
       setState("ready");
     } catch {
       if (authorized()) setState("unavailable");
@@ -58,21 +71,21 @@ export function RetainedActivityInspector({
       {state === "loading" ? (chinese ? "读取中…" : "Reading…") :
         (chinese ? "查看已保留的代理活动" : "Inspect retained activity")}
     </button>
-    {state === "unavailable" && <span role="status">{chinese ?
+    {ready && state === "unavailable" && <span role="status">{chinese ?
       "原始来源或权限不可用；未推断执行状态。" : "Original source or permission unavailable; execution state unknown."}</span>}
-    {body?.availability === "UNAVAILABLE" && <span role="status">{chinese ?
-      "没有可展示的已授权活动。" : "No authorized activity available."} ({body.reasons.join(", ")})</span>}
-    {body?.availability === "AVAILABLE" && <div className="mm-retained__details">
+    {display?.availability === "UNAVAILABLE" && <span role="status">{chinese ?
+      "没有可展示的已授权活动。" : "No authorized activity available."} ({display.reasons.join(", ")})</span>}
+    {display?.availability === "AVAILABLE" && <div className="mm-retained__details">
       <strong>{chinese ? "候选证据元数据" : "Candidate evidence metadata"}</strong>
       <p>{chinese ? "仅包含已经记录的候选事件；不是实时工具流或模型内部推理。" :
         "Recorded candidate events only; not live tool streaming or private model reasoning."}</p>
-      <p>{chinese ? "来源覆盖" : "Source coverage"}: {body.coverage}
-        {body.sourceTruncated || body.omittedInSample ? " · PARTIAL" : ""}
-        {body.omittedInSample ? ` · ${body.omittedInSample} omitted in sample` : ""}
+      <p>{chinese ? "来源覆盖" : "Source coverage"}: {display.coverage}
+        {display.sourceTruncated || display.omittedInSample ? " · PARTIAL" : ""}
+        {display.omittedInSample ? ` · ${display.omittedInSample} omitted in sample` : ""}
       </p>
-      {body.rows.length === 0 && <p>{chinese ? "未观察到候选记录；不能据此推断代理空闲。" :
+      {display.rows.length === 0 && <p>{chinese ? "未观察到候选记录；不能据此推断代理空闲。" :
         "No retained candidates in this sample; this does not establish an idle worker."}</p>}
-      {body.rows.length > 0 && <ol>{body.rows.map(row =>
+      {display.rows.length > 0 && <ol>{display.rows.map(row =>
         <li key={row.candidate_event_id + ":" + row.ordinal_in_candidate}>
           <span>{row.category.replaceAll("_", " ").toLowerCase()}</span>
           <small> · {chinese ? "候选保存时间" : "candidate recorded"}: {row.candidate_recorded_at}</small>

@@ -131,6 +131,34 @@ describe("explicit retained activity component", () => {
     expect(screen.getByRole("button", { name: "Inspect retained activity" })).toHaveProperty("disabled", true);
     expect(source).not.toHaveBeenCalled();
   });
+  it("drops already displayed private rows on viewer revocation, generation or Attempt switch", async () => {
+    const source = vi.fn(async () => decodeRetainedActivity(raw(), selected));
+    let enrolled = true, generation = 41;
+    const canRead = () => enrolled;
+    const sourceGeneration = () => generation;
+    const { rerender } = render(<RetainedActivityInspector
+      selection={selected} read={source} sourceGeneration={sourceGeneration} canRead={canRead} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect retained activity" }));
+    expect(await screen.findAllByText(/candidate recorded:/)).toHaveLength(2);
+
+    enrolled = false;
+    rerender(<RetainedActivityInspector
+      selection={selected} read={source} sourceGeneration={sourceGeneration} canRead={canRead} />);
+    expect(screen.queryByText(/candidate recorded:/)).toBeNull();
+    expect(screen.getByRole("button", { name: "Inspect retained activity" })).toHaveProperty("disabled", true);
+
+    enrolled = true;
+    generation++;
+    rerender(<RetainedActivityInspector
+      selection={selected} read={source} sourceGeneration={sourceGeneration} canRead={canRead} />);
+    expect(screen.queryByText(/candidate recorded:/)).toBeNull();
+
+    rerender(<RetainedActivityInspector
+      selection={{ ...selected, attempt_id: "ATT-" + "f".repeat(32) }}
+      read={source} sourceGeneration={sourceGeneration} canRead={canRead} />);
+    expect(screen.queryByText(/candidate recorded:/)).toBeNull();
+    expect(source).toHaveBeenCalledTimes(1);
+  });
   it("revocation drops delayed metadata before display", async () => {
     let release!: (result: ActivityRead) => void;
     const source = vi.fn(() => new Promise<ActivityRead>(resolve => { release = resolve; }));
