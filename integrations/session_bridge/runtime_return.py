@@ -287,9 +287,8 @@ class RuntimeSessionReturn:
 
     def _commit_started(self, event, message, *, connection=None):
         """Validate the sole commit-start fact on the existing request aggregate."""
-        events = self.runtime.store.list_events(
-            aggregate_type="session_bridge_continue", aggregate_id=event.aggregate_id,
-            connection=connection)
+        events = self.runtime.store.bounded_aggregate_events(
+            "session_bridge_continue", event.aggregate_id, connection=connection)
         others = [item for item in events if item.event_id != event.event_id]
         native = self._native_commit_admission(event, others, connection=connection)
         if native is not None:
@@ -693,8 +692,8 @@ class RuntimeSessionReturn:
         read and matched before any result can be returned.
         """
         event, value = self._stored_request(read_ref)
-        events = self.runtime.events.list_events(
-            aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+        events = self.runtime.store.bounded_aggregate_events(
+            event.aggregate_type, event.aggregate_id)
         admission = self._native_commit_admission(event, events)
         if admission is None:
             event, value, _ = self._request(read_ref)
@@ -710,8 +709,8 @@ class RuntimeSessionReturn:
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("canonical carrier unavailable")
             messages, request = self._continuation_messages(value, response["result"])
-            events = self.runtime.events.list_events(
-                aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id)
+            events = self.runtime.store.bounded_aggregate_events(
+                event.aggregate_type, event.aggregate_id)
             admission = self._native_commit_admission(event, events)
             if admission is None or not self._commit_started(event, request):
                 raise ValueError("native COMMIT unavailable")
@@ -726,8 +725,8 @@ class RuntimeSessionReturn:
                         "actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("exact canonical native reply unavailable")
             after, after_value, _ = self._request(read_ref)
-            after_events = self.runtime.events.list_events(
-                aggregate_type=after.aggregate_type, aggregate_id=after.aggregate_id)
+            after_events = self.runtime.store.bounded_aggregate_events(
+                after.aggregate_type, after.aggregate_id)
             after_admission = self._native_commit_admission(after, after_events)
             if (after.to_dict() != event.to_dict() or after_value != value
                     or after_admission is None or after_admission.to_dict() != admission.to_dict()

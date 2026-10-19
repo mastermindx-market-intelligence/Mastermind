@@ -499,3 +499,33 @@ def test_original_reference_tool_uses_existing_private_read_peer(setup):
         refused = asyncio.run(tool.handle(s.principal, "session_reply_references", args))
         assert refused["ok"] is False
         assert refused["error"]["code"] == "invalid_input"
+
+
+def test_qualified_original_aggregate_history_is_finite_and_fail_closed(setup):
+    s = setup
+    read_ref = populate(s)
+    event, _ = s.owner._stored_request(read_ref)
+    before = s.runtime.store.bounded_aggregate_events(
+        event.aggregate_type, event.aggregate_id)
+    assert before and before[0].event_id == event.event_id
+    with pytest.raises(ValueError):
+        s.runtime.store.bounded_aggregate_events(
+            event.aggregate_type, event.aggregate_id, max_total_bytes=1)
+    with s.runtime.store.transaction() as conn:
+        for index in range(256):
+            s.runtime.store.append_event(
+                conn, aggregate_type=event.aggregate_type,
+                aggregate_id=event.aggregate_id,
+                event_type="TEST_UNRECOGNIZED", actor="test",
+                command_id=f"test-r2-overlong-aggregate-{index}",
+                payload={"synthetic": index})
+    with pytest.raises(ValueError):
+        s.runtime.store.bounded_aggregate_events(
+            event.aggregate_type, event.aggregate_id)
+    with pytest.raises(ValueError):
+        s.runtime.store.bounded_aggregate_events(
+            event.aggregate_type, event.aggregate_id, max_events=1)
+    result = asyncio.run(tool(s).handle(
+        s.principal, "session_reply_read", {"read_ref": read_ref}))
+    assert result["ok"] is False and result["error"]["code"] == "reply_unavailable"
+    # No new SEND, retry, or parent ACK is involved.

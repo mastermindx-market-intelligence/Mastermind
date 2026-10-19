@@ -4564,6 +4564,50 @@ class RuntimeStore:
                                (event_id,)).fetchone()
             return None if row is None else _event_from_row(row)
 
+    def bounded_aggregate_events(
+        self, aggregate_type: str, aggregate_id: str, *,
+        connection: sqlite3.Connection | None = None,
+        max_events: int = 256, max_total_bytes: int = 1048576,
+    ) -> list[Event]:
+        """Full bounded exact aggregate read; refuse incomplete histories.
+
+        The existing (aggregate_type, aggregate_id, sequence) uniqueness index
+        gives finite metadata acquisition. The aggregate is never silently
+        truncated: overflow or oversized UTF-8 payload material is unavailable.
+        """
+        if (type(aggregate_type) is not str or not aggregate_type
+                or type(aggregate_id) is not str or not aggregate_id
+                or type(max_events) is not int or not 1 <= max_events <= 256
+                or type(max_total_bytes) is not int
+                or not 1 <= max_total_bytes <= 1048576):
+            raise ValueError("invalid bounded aggregate selection")
+
+        def _load(conn: sqlite3.Connection) -> list[Event]:
+            meta = conn.execute(
+                """SELECT event_id, length(CAST(payload_json AS BLOB)) AS nbytes
+                     FROM events WHERE aggregate_type=? AND aggregate_id=?
+                     ORDER BY sequence LIMIT ?""",
+                (aggregate_type, aggregate_id, max_events + 1),
+            ).fetchall()
+            if len(meta) > max_events or sum(int(row["nbytes"]) for row in meta) > max_total_bytes:
+                raise ValueError("original aggregate exceeds reader budget")
+            if not meta:
+                return []
+            rows = conn.execute(
+                """SELECT * FROM events WHERE aggregate_type=? AND aggregate_id=?
+                     ORDER BY sequence LIMIT ?""",
+                (aggregate_type, aggregate_id, max_events),
+            ).fetchall()
+            if len(rows) != len(meta) or [row["event_id"] for row in rows] != [
+                    row["event_id"] for row in meta]:
+                raise ValueError("original aggregate changed")
+            return [_event_from_row(row) for row in rows]
+
+        if connection is not None:
+            return _load(connection)
+        with self.read() as conn:
+            return _load(conn)
+
     def bounded_event_metadata_window(
         self, *, high_water: int | None = None,
         before_event_id: int | None = None, limit: int = 256,
