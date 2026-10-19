@@ -636,6 +636,8 @@ class RuntimeSessionReturn:
                 _validate_payload(value)
                 if (value["read_ref"] != "session-reply-" + _request_key(value["operation_key"])
                         or event.command_id != _PREFIX + _request_key(value["operation_key"])
+                        or event.aggregate_id != _request_key(value["operation_key"])
+                        or value["request_message_key"] != _continue_key(value["operation_key"])
                         or (event.job_id, event.attempt_id, event.worker_id) !=
                         (value["job_id"], value["attempt_id"], value["worker_id"])):
                     raise ValueError("request binding changed")

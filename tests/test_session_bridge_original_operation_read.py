@@ -375,6 +375,72 @@ def test_reference_projection_is_canonical_read_only_and_cursor_bound(setup):
     assert events(s) == before
 
 
+@pytest.mark.parametrize("fault", [
+    pytest.param(None, id="valid-original"),
+    pytest.param("aggregate_id", id="mismatched-aggregate"),
+    pytest.param("request_message_key", id="mismatched-request-message-key"),
+])
+def test_reference_projection_binds_original_request_provenance(setup, monkeypatch, fault):
+    s = setup
+    read_ref = s.owner.bind_request(s.projection, s.args)
+    request, value = s.owner._stored_request(read_ref)
+    before = s.runtime.events.list_events()
+    assert not s.service.calls
+    other_aggregate = "f" * 64
+    other_message = "asd-dot-continue-" + "f" * 40
+    assert request.aggregate_id != other_aggregate
+    assert value["request_message_key"] != other_message
+
+    # Keep the actual Runtime metadata, request and root fixtures. Change only
+    # one otherwise well-formed provenance field at the bounded Event-read seam.
+    bounded_read = s.runtime.store.bounded_event_by_id
+    candidate_reads = []
+
+    def read_candidate(event_id, **kwargs):
+        event = bounded_read(event_id, **kwargs)
+        if event is None or event.event_id != request.event_id:
+            return event
+        candidate_reads.append(event_id)
+        if fault == "aggregate_id":
+            return dataclasses.replace(event, aggregate_id=other_aggregate)
+        if fault == "request_message_key":
+            return dataclasses.replace(
+                event, payload={**event.payload, "request_message_key": other_message})
+        return event
+
+    root_read = s.runtime.store.unique_root_created_event
+    root_reads = []
+
+    def read_root(root_job_id, **kwargs):
+        root_reads.append(root_job_id)
+        return root_read(root_job_id, **kwargs)
+
+    monkeypatch.setattr(s.runtime.store, "bounded_event_by_id", read_candidate)
+    monkeypatch.setattr(s.runtime.store, "unique_root_created_event", read_root)
+    arguments = dict(principal=s.projection,
+        work_ref=value["context"]["work_ref"], page_size=1)
+    if fault is None:
+        page = s.owner.session_reply_references(**arguments)
+        assert page["schema"] == "mastermind.session_reply_references.v1"
+        [row] = page["references"]
+        assert row["read_ref"] == read_ref
+        assert row["operation_key"] == value["operation_key"]
+        assert row["request_ref"] == request.command_id
+        assert row["request_event_id"] == request.event_id
+        assert row["root_job_id"] == value["root_job_id"]
+        assert row["reference_only"] is True
+        assert root_reads == [value["root_job_id"]]
+    else:
+        with pytest.raises(BridgeError,
+                match="authorized canonical reply references unavailable") as error:
+            s.owner.session_reply_references(**arguments)
+        assert error.value.code == "reply_unavailable"
+        assert root_reads == []
+    assert candidate_reads == [request.event_id]
+    assert s.runtime.events.list_events() == before
+    assert not s.service.calls
+
+
 def test_reference_projection_fails_closed_on_duplicate_root(setup):
     s = setup
     populate(s)
