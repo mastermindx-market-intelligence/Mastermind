@@ -247,19 +247,49 @@ def _continuation_child(config, identity, run_dir, original_capture):
     corpus_bytes = corpus_path.read_bytes()
     if hashlib.sha256(corpus_bytes).hexdigest() != document[producer_generation.GENERATION_FIELD]["corpus_sha256"]:
         _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
-    public = Path(config["public_checkout"]) / "data/research_vault"
-    public.mkdir(parents=True, exist_ok=True)
-    (public / "catalog.json").write_bytes(mirror)
     ids = {row["id"] for row in document.get("items", []) if isinstance(row, dict) and row.get("id")}
-    connection = sqlite3.connect(f"file:{corpus_path}?mode=ro", uri=True)
+    # SQLite percent-DECODES the path of a ``file:`` URI, so the raw f-string
+    # form silently retargeted any corpus whose retention path carries ``%``,
+    # ``?`` or ``#`` — opening a decoy at the decoded path, or failing the
+    # open outright. ``as_uri()`` re-encodes the exact digest-checked corpus
+    # above, and the read-only snapshot is computed BEFORE anything public is
+    # written, so a wrong or unreadable corpus cannot leave a partially
+    # published mirror behind.
+    connection = sqlite3.connect(corpus_path.as_uri() + "?mode=ro", uri=True)
     try:
         excerpts = excerpt.snapshot(connection, ids)
     finally:
         connection.close()
-    # Same public-safe excerpt projection as the ordinary CLI; no original
-    # journal, corpus bytes, generation record or receipts enter the mirror.
-    if not excerpt.write_repo_snapshot(excerpts, public / "excerpts.json"):
-        _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
+    public = Path(config["public_checkout"]) / "data/research_vault"
+    public.mkdir(parents=True, exist_ok=True)
+    # Both public candidates are staged on the public filesystem and only then
+    # atomically replaced, so an excerpt.snapshot failure above or a
+    # write_repo_snapshot refusal below leaves the existing public catalog and
+    # excerpts pair byte-identical. The excerpt stage is seeded with the
+    # committed snapshot so the existing collapse guard reads the REAL prior
+    # excerpts, never an absent temp path. Cleanup touches only these two
+    # staged names, and no cross-file crash atomicity is claimed.
+    staged_catalog = public / f".catalog.json.staged-{os.getpid()}"
+    staged_excerpts = public / f".excerpts.json.staged-{os.getpid()}"
+    try:
+        committed = public / "excerpts.json"
+        if committed.is_file():
+            _write_new(staged_excerpts, committed.read_bytes())
+        # Same public-safe excerpt projection as the ordinary CLI; no original
+        # journal, corpus bytes, generation record or receipts enter the mirror.
+        if not excerpt.write_repo_snapshot(excerpts, staged_excerpts):
+            _refuse("PRODUCER_PUBLIC_MIRROR_UNAVAILABLE")
+        _write_new(staged_catalog, mirror)
+        for staged, target in ((staged_catalog, public / "catalog.json"),
+                               (staged_excerpts, public / "excerpts.json")):
+            os.chmod(staged, 0o644)
+            os.replace(staged, target)
+    finally:
+        for staged in (staged_catalog, staged_excerpts):
+            try:
+                os.unlink(staged)
+            except FileNotFoundError:
+                pass
     return 0
 
 
