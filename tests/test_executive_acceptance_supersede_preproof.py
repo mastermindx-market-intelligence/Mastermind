@@ -21,6 +21,8 @@ import os
 import pwd
 import shutil
 import sqlite3
+import subprocess
+import sys
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -696,49 +698,41 @@ def test_u4_prejob_refuses_with_third_receipt(tmp_path, monkeypatch):
 
 def test_u5_prejob_evidence_source_is_byte_identical_to_base():
     """Pre-job evidence function bytes match base commit exactly."""
-    local = ast.get_source_segment(
-        open("/home/longr/lanes/wt/crroom-preproof/ops/executive_os/acceptance_maintenance.py").read(),
-        next(node for node in ast.parse(open(
-            "/home/longr/lanes/wt/crroom-preproof/ops/executive_os/acceptance_maintenance.py").read()
-        ).body if isinstance(node, ast.FunctionDef) and node.name == "prejob_evidence"))
-    import subprocess
-    out = subprocess.check_output(["git", "-C", "/home/longr/lanes/repos/Mastermind",
-                                   "show",
-                                   "9f83376b3d0d54ad331c2e74dd12cea10e46f5b1:ops/executive_os/acceptance_maintenance.py"])
-    base_src = out.decode()
-    base = ast.get_source_segment(base_src, next(node for node in ast.parse(base_src).body
-                                                if isinstance(node, ast.FunctionDef)
-                                                and node.name == "prejob_evidence"))
-    assert local == base
+    # sha256 of ast.get_source_segment(prejob_evidence) at base 9f83376b3d0d54ad331c2e74dd12cea10e46f5b1;
+    # the seat ruling keeps the pre-Job evidence rule byte-identical, so changing it is a reviewed change to this pin.
+    _BASE_PREJOB_EVIDENCE_SHA256 = "5986c1e2766d61e9f976cebe38558d7ece45ec7e48911741e0717230a45b5e2c"
+    source = Path(m.__file__).read_text()
+    tree = ast.parse(source)
+    prejob_nodes = [n for n in tree.body
+                    if isinstance(n, ast.FunctionDef) and n.name == "prejob_evidence"]
+    assert len(prejob_nodes) == 1, (
+        f"expected exactly one prejob_evidence FunctionDef, found {len(prejob_nodes)}"
+    )
+    segment = ast.get_source_segment(source, prejob_nodes[0])
+    assert hashlib.sha256(segment.encode("utf-8")).hexdigest() == _BASE_PREJOB_EVIDENCE_SHA256
 
 
-def test_u6_existing_test_modules_load_unmodified(tmp_path, monkeypatch):
-    """U6 spot check: every pre-existing maintenance test module still
-    collects unchanged against the new descriptor set. The diff against
-    base only adds or touches three files: the new preproof test, the
-    identity review re-pin (acceptance_maintenance), and the chain test
-    edited per AMENDMENT A1; the rest is unchanged."""
-    import subprocess
-    base = "9f83376b3d0d54ad331c2e74dd12cea10e46f5b1"
-    head_out = subprocess.run(["git", "-C", "/home/longr/lanes/wt/crroom-preproof",
-                                "rev-parse", "HEAD"], check=True, capture_output=True)
-    head = head_out.stdout.strip().decode()
-    diff = subprocess.run(["git", "-C", "/home/longr/lanes/wt/crroom-preproof",
-                           "diff", base, head, "--name-only", "--", "tests/"],
-                          check=True, capture_output=True)
-    changed = set(line for line in diff.stdout.decode().splitlines() if line)
-    expected_changed = {"tests/test_executive_acceptance_supersede_preproof.py",
-                        "tests/executive_fabric_release_identity_review.py",
-                        "tests/test_executive_unstarted_supersession_chain.py"}
-    assert changed == expected_changed, (changed - expected_changed, expected_changed - changed)
-    # Sanity collect of the unchanged modules.
-    subprocess.check_call(["/home/longr/lanes/venv/bin/python", "-m", "pytest", "--collect-only", "-q",
-                           "tests/test_executive_acceptance_supersede_unstarted.py",
-                           "tests/test_executive_acceptance_supersede_prejob.py",
-                           "tests/test_executive_carry_chain_depth.py",
-                           "tests/test_executive_maintenance_service_absence.py",
-                           "tests/test_executive_prejob_historical_legacy_group_receipt.py",
-                           "tests/test_incident_maintenance_config_join.py",
-                           "tests/test_executive_acceptance_maintenance.py",
-                           "tests/test_executive_acceptance_maintenance_v2.py"],
-                          cwd="/home/longr/lanes/wt/crroom-preproof")
+def test_u6_existing_test_modules_load_unmodified():
+    """Every pre-existing maintenance test module still collects against the new
+    descriptor set; the byte-unchanged status of those modules is proven by
+    the PR's name-status, not by this test."""
+    modules = (
+        "tests/test_executive_acceptance_supersede_unstarted.py",
+        "tests/test_executive_acceptance_supersede_prejob.py",
+        "tests/test_executive_carry_chain_depth.py",
+        "tests/test_executive_maintenance_service_absence.py",
+        "tests/test_executive_prejob_historical_legacy_group_receipt.py",
+        "tests/test_incident_maintenance_config_join.py",
+        "tests/test_executive_acceptance_maintenance.py",
+        "tests/test_executive_acceptance_maintenance_v2.py",
+    )
+    result = subprocess.run(
+        [sys.executable, "-m", "pytest", "--collect-only", "-q", "-p", "no:cacheprovider",
+         *modules],
+        cwd=Path(__file__).resolve().parents[1],
+        capture_output=True, text=True,
+    )
+    combined = (result.stdout or "") + (result.stderr or "")
+    assert result.returncode == 0, combined[-2000:]
+    for module in modules:
+        assert module in result.stdout, module
