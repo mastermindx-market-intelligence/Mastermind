@@ -6573,13 +6573,168 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
       return /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? _daTime(value, isZh)
         : value.slice(0, 64) + say(' (timezone unavailable)', '（时区不可用）');
     }
+    function isPriceRead(item) {
+      return item.schema === 'mastermind.price_read.v1' || item.schema === 'mastermind.price_read.v2';
+    }
+    function fxView(item) {
+      var invalid = {limited:true, lines:[say('FX context cannot be displayed', '外汇背景证据无法显示')], clocks:[]};
+      var bindingReasons = ['not_captured', 'invalid_fx_fields', 'invalid_fx_field', 'invalid_fx_context',
+        'invalid_fx_source_binding', 'invalid_fx_status', 'fx_context_too_large', 'invalid_conversion_value',
+        'fx_operation_or_currency_mismatch', 'fx_arithmetic_mismatch'];
+      if (item.fx_observation === 'unavailable' && item.fx_rate === null &&
+          bindingReasons.indexOf(item.fx_binding_reason) !== -1) {
+        return {limited:true, lines:[say('FX evidence could not be matched to this conversion',
+          '外汇证据无法与本次换算对应')], clocks:[]};
+      }
+      var f = item.fx_rate;
+      if (item.fx_observation !== 'matched' || item.fx_binding_reason !== null || !object(f)) return invalid;
+      var fields = ['schema', 'currency', 'rate', 'consumed_as', 'source', 'symbol', 'source_path',
+        'source_bar_label', 'source_bar_label_kind', 'source_text_sha256', 'source_text_digest_basis',
+        'source_read_started_at', 'source_read_returned_at', 'cache_population_day', 'cache_day_basis',
+        'cache_state', 'cache_observed_at', 'status', 'reason', 'source_convention_qualification',
+        'market_observed_at', 'execution_qualification'];
+      var keys = Object.keys(f);
+      if (keys.length !== fields.length || keys.some(function(key) {
+        var value = f[key];
+        return fields.indexOf(key) === -1 || !(value === null ||
+          (typeof value === 'string' && value.length <= 128) ||
+          (typeof value === 'number' && Number.isFinite(value)));
+      })) return invalid;
+      if (f.schema !== 'mastermind.fx_rate_evidence.v1' || !positive(f.rate) ||
+          typeof f.currency !== 'string' || !f.currency || f.currency.length > 16 ||
+          f.consumed_as !== 'foreign_units_per_USD' || f.source_convention_qualification !== 'not_established' ||
+          f.market_observed_at !== null || f.execution_qualification !== 'not_checked' ||
+          f.cache_day_basis !== 'process_local_date' ||
+          ['population', 'hit', 'not_used'].indexOf(f.cache_state) === -1) return invalid;
+      if (!positive(item.input_price) || !positive(item.price)) return invalid;
+      var arithmetic;
+      if (item.fx_operation === 'divide' && item.currency === 'USD' && item.input_currency === f.currency) {
+        arithmetic = item.input_price / f.rate;
+      } else if (item.fx_operation === 'multiply' && item.input_currency === 'USD' && item.currency === f.currency) {
+        arithmetic = item.input_price * f.rate;
+      } else return invalid;
+      if (arithmetic !== item.price) return invalid;
+      function validDay(value) {
+        return typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) &&
+          value.slice(0, 4) !== '0000' && Number.isFinite(Date.parse(value)) &&
+          new Date(value).toISOString().slice(0, 10) === value;
+      }
+      function instant(value) {
+        if (value === null) return null;
+        if (typeof value !== 'string' || value.length > 64) return NaN;
+        // The capture clock emits extended ISO timestamps at up to microsecond precision.
+        // Keep that ordering: Date.parse alone truncates a valid partial observation.
+        var parts = value.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,6}))?(Z|[+-]\d{2}:\d{2})$/);
+        if (!parts || !validDay(parts[1]) || Number(parts[2]) > 23 ||
+            Number(parts[3]) > 59 || Number(parts[4]) > 59) return NaN;
+        var zone = parts[6];
+        if (zone !== 'Z' && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4, 6)) > 59)) return NaN;
+        var whole = Date.parse(parts[1] + 'T' + parts[2] + ':' + parts[3] + ':' + parts[4] + zone);
+        if (!Number.isFinite(whole)) return NaN;
+        return BigInt(whole) * 1000n + BigInt((parts[5] || '').padEnd(6, '0'));
+      }
+      function fxCaptureTime(value) {
+        // Display the original capture text; do not round away the evidence being explained.
+        return value.replace('T', ' ').replace(/(?:Z|\+00:00)$/, ' UTC');
+      }
+      var start = instant(f.source_read_started_at), returned = instant(f.source_read_returned_at);
+      var observed = instant(f.cache_observed_at);
+      if ([start, returned, observed].some(function(v) { return v !== null && typeof v !== 'bigint'; })) return invalid;
+      if (f.cache_population_day !== null && !validDay(f.cache_population_day)) return invalid;
+      if (f.source_bar_label !== null && (typeof f.source_bar_label !== 'string' ||
+          !f.source_bar_label || f.source_bar_label.length > 64)) return invalid;
+      if ((f.source_bar_label === null) !== (f.source_bar_label_kind === 'not_provided')) return invalid;
+      var sources = {
+        yahoo_store: ['Stored Yahoo data', 'Yahoo 已存数据'],
+        forex_snapshot: ['Recorded FX snapshot', '已记录外汇快照'],
+        static_fallback: ['Static fallback rate', '静态备用汇率'],
+        identity: ['USD identity conversion', '美元原币换算'],
+        unknown_currency_fallback: ['Fallback for an unsupported currency', '未支持币种的备用汇率'],
+        unavailable: ['Original FX source metadata unavailable', '原始外汇来源元数据不可用']
+      };
+      if (!Object.prototype.hasOwnProperty.call(sources, f.source)) return invalid;
+      var marketSource = f.source === 'yahoo_store' || f.source === 'forex_snapshot';
+      var symbolCurrency = {'CNH=X':'CNY', 'CNY=X':'CNY', 'HKD=X':'HKD', USDCNH:'CNY', USDHKD:'HKD', HKDUSD:'HKD'};
+      if (marketSource) {
+        if (!Object.prototype.hasOwnProperty.call(symbolCurrency, f.symbol) || symbolCurrency[f.symbol] !== f.currency) return invalid;
+        if (f.source === 'yahoo_store' && (['CNH=X','CNY=X','HKD=X'].indexOf(f.symbol) === -1 ||
+            f.source_path !== null || ['selected_close_index','not_provided'].indexOf(f.source_bar_label_kind) === -1)) return invalid;
+        if (f.source === 'forex_snapshot' && (['USDCNH','USDHKD','HKDUSD'].indexOf(f.symbol) === -1 ||
+            ['data/forex/latest.json','site/forexdata/latest.json'].indexOf(f.source_path) === -1 ||
+            ['pair_asof','snapshot_asof','not_provided'].indexOf(f.source_bar_label_kind) === -1)) return invalid;
+      } else if (f.symbol !== null || f.source_path !== null || f.source_bar_label !== null ||
+                 start !== null || returned !== null) return invalid;
+      if (f.source === 'identity' && (f.currency !== 'USD' || f.rate !== 1)) return invalid;
+      if (f.source === 'static_fallback' && ['CNY','HKD'].indexOf(f.currency) === -1) return invalid;
+      if (f.source === 'unknown_currency_fallback' && ['USD','CNY','HKD'].indexOf(f.currency) !== -1) return invalid;
+      if (f.source_text_sha256 !== null && (f.source !== 'forex_snapshot' ||
+          typeof f.source_text_sha256 !== 'string' || !hash.test(f.source_text_sha256) ||
+          f.source_text_digest_basis !== 'decoded_text_utf8')) return invalid;
+      if (f.source_text_sha256 === null && f.source_text_digest_basis !== null) return invalid;
+      var missing = ['source_context_unavailable','cache_context_unavailable','source_value_mismatch','source_context_invalid'];
+      var status = 'available', reason = null;
+      if (f.source === 'unavailable') {
+        if (missing.indexOf(f.reason) === -1) return invalid;
+        status = 'unavailable'; reason = f.reason;
+      } else if (f.cache_state !== 'not_used' && f.cache_population_day === null) {
+        status = 'partial'; reason = 'cache_day_unavailable';
+      } else if (observed === null) {
+        status = 'partial'; reason = 'observation_clock_unavailable';
+      } else if (marketSource && (start === null || returned === null)) {
+        status = 'partial'; reason = 'source_read_clock_unavailable';
+      } else if (marketSource && (start > returned || returned > observed)) {
+        status = 'partial'; reason = 'local_clock_regressed';
+      } else if (marketSource && f.source_bar_label === null) {
+        status = 'partial'; reason = 'source_label_unavailable';
+      } else if (f.source === 'forex_snapshot' && f.source_text_sha256 === null) {
+        status = 'partial'; reason = 'source_text_unavailable';
+      }
+      if (f.status !== status || f.reason !== reason) return invalid;
+      var view = {limited:status !== 'available', lines:[
+        say('Recorded conversion matches the captured rate', '记录的换算结果与捕获汇率相符'),
+        say('Used in this calculation as ', '本次计算使用 ') + String(f.rate) + ' ' + f.currency +
+          say(' per USD', ' / 美元'),
+        say('FX source: ', '外汇来源：') + sources[f.source][isZh ? 1 : 0] + (f.symbol ? ' · ' + f.symbol : ''),
+        status === 'available' ? say('FX source context recorded', '已记录外汇来源背景')
+          : status === 'partial' ? say('FX source context incomplete', '外汇来源背景不完整')
+          : say('Original FX source metadata unavailable', '原始外汇来源元数据不可用'),
+        say('FX cache use: ', '外汇缓存使用：') + (f.cache_state === 'hit'
+          ? say('Previously populated entry', '先前建档的缓存项') : f.cache_state === 'population'
+          ? say('Original population', '原始建档') : say('Not used', '未使用'))
+      ], clocks:[]};
+      var gaps = {
+        source_context_unavailable:['Original source context was not captured','未捕获原始来源背景'],
+        cache_context_unavailable:['Original cache source context unavailable','原始缓存来源背景不可用'],
+        source_value_mismatch:['Source metadata did not match the consumed rate','来源元数据与实际使用汇率不匹配'],
+        source_context_invalid:['Original source context invalid','原始来源背景无效'],
+        cache_day_unavailable:['Cache entry day unavailable','缓存建档日期不可用'],
+        observation_clock_unavailable:['Cache observation clock unavailable','缓存观测时钟不可用'],
+        source_read_clock_unavailable:['Original source read clock incomplete','原始来源读取时钟不完整'],
+        local_clock_regressed:['Recorded local clocks regressed','记录的本地时钟出现回退'],
+        source_label_unavailable:['Original source label unavailable','原始来源标签不可用'],
+        source_text_unavailable:['Original source text fingerprint unavailable','原始来源文本指纹不可用']
+      };
+      if (reason) view.lines.push(gaps[reason][isZh ? 1 : 0]);
+      var leg = 'FX ' + item.input_currency + ' → ' + item.currency + ' · ';
+      if (f.source_bar_label) view.clocks.push(leg + say('Original source label: ', '原始来源标签：') + sourceBarLabel(f.source_bar_label));
+      if (start !== null) view.clocks.push(leg + say('Original source read started: ', '原始来源读取开始：') + fxCaptureTime(f.source_read_started_at));
+      if (returned !== null) view.clocks.push(leg + say('Original source read returned: ', '原始来源读取返回：') + fxCaptureTime(f.source_read_returned_at));
+      if (f.cache_population_day) view.clocks.push(leg + say('Cache entry day (process-local date): ', '缓存建档日期（进程本地日期）：') + f.cache_population_day);
+      if (observed !== null) view.clocks.push(leg + say('Cache observed at capture: ', '捕获时的缓存观测时间：') + fxCaptureTime(f.cache_observed_at));
+      if (f.source_text_sha256) {
+        view.clocks.push(leg + say('Snapshot text SHA256: ', '快照文本 SHA256：') + f.source_text_sha256);
+        view.clocks.push(leg + say('Fingerprint basis: decoded source text encoded as UTF-8',
+          '指纹依据：解码后的来源文本按 UTF-8 编码'));
+      }
+      return view;
+    }
     function contextNodes(symbol, quote) {
       if (!object(quote) || quote.binding_status !== 'matched' || !object(quote.observation)) return null;
       var nodes = [], current = quote.observation;
       while (current) {
         if (!object(current) || nodes.length > 6 || current.ticker !== symbol ||
             current.execution_qualification !== 'not_checked' || current.market_observed_at !== null ||
-            ['mastermind.price_read.v1', 'mastermind.yahoo_daily_bar_evidence.v1', 'mastermind.yahoo_daily_bar_evidence.v2', 'mastermind.polygon_snapshot_evidence.v1'].indexOf(current.schema) === -1) return null;
+            ['mastermind.price_read.v1', 'mastermind.price_read.v2', 'mastermind.yahoo_daily_bar_evidence.v1', 'mastermind.yahoo_daily_bar_evidence.v2', 'mastermind.polygon_snapshot_evidence.v1'].indexOf(current.schema) === -1) return null;
         if (current.schema === 'mastermind.yahoo_daily_bar_evidence.v1' && current.field !== 'Close') return null;
         if (current.schema === 'mastermind.yahoo_daily_bar_evidence.v2' &&
             (current.field !== 'Open' || current.cache_refresh_basis !== 'shared_close_cache')) return null;
@@ -6599,7 +6754,7 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
           if (current.payload_ticker_status !== payloadStatus ||
               (current.status === 'available' && (payloadStatus !== 'matched' || current.source_updated_raw === null))) return null;
         }
-        if (current.schema !== 'mastermind.price_read.v1' &&
+        if (!isPriceRead(current) &&
             ['available', 'partial', 'unavailable'].indexOf(current.status) === -1) return null;
         nodes.push(current);
         current = current.upstream || null;
@@ -6665,6 +6820,11 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
                 String(item.currency).slice(0, 16) + ' ' + number(item.price));
             } else if (item.source && !item.upstream) path.push(sourceName(item.source));
             if (item.fx_observation === 'not_captured') fxMissing = true;
+            if (item.schema === 'mastermind.price_read.v2') {
+              var displayedFx = fxView(item);
+              path = path.concat(displayedFx.lines);
+              clocks = clocks.concat(displayedFx.clocks);
+            }
             if (Array.isArray(item.attempts)) item.attempts.slice(0, 8).forEach(function(attempt) {
               if (object(attempt)) attempts.push(sourceName(attempt.source) + ': ' + String(attempt.outcome || '').slice(0, 64));
             });
@@ -6694,9 +6854,14 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
         '</td><td data-label="' + say('Source time at capture', '捕获时的来源时间') + '">' + clockHtml + '</td></tr>';
     }
     var expiredCount = 0, missingContextCount = 0, limitedSourceCount = 0, limitedSnapshotCount = 0, symbolMismatchCount = 0;
+    var capturedFxCount = 0, limitedFxCount = 0;
     symbols.forEach(function(symbol) {
       var nodes = contextNodes(symbol, capture.quotes[symbol]);
       if (!nodes) missingContextCount++;
+      if (nodes && nodes.some(function(item) { return item.schema === 'mastermind.price_read.v2'; })) capturedFxCount++;
+      if (nodes && nodes.some(function(item) {
+        return item.schema === 'mastermind.price_read.v2' && fxView(item).limited;
+      })) limitedFxCount++;
       if (nodes && nodes.some(function(item) {
         return (item.schema === 'mastermind.yahoo_daily_bar_evidence.v1' ||
           item.schema === 'mastermind.yahoo_daily_bar_evidence.v2') && item.status !== 'available';
@@ -6710,7 +6875,7 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
           item.status !== 'available' && item.payload_ticker_status !== 'mismatch';
       })) limitedSnapshotCount++;
       if (nodes && nodes.some(function(item) {
-        return item.schema !== 'mastermind.price_read.v1' && item.within_cache_ttl === false;
+        return !isPriceRead(item) && item.within_cache_ttl === false;
       })) expiredCount++;
     });
     if (expiredCount) body += '<div class="mm-da-alert"><strong>' + expiredCount + say(
@@ -6733,6 +6898,13 @@ function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
       limitedSnapshotCount === 1 ? ' selected quote has incomplete snapshot evidence.'
         : ' selected quotes have incomplete snapshot evidence.',
       ' 个所选报价的快照证据不完整。') + '</strong></div>';
+    if (limitedFxCount) body += '<div class="mm-da-alert"><strong>' + limitedFxCount + say(
+      limitedFxCount === 1 ? ' selected quote has limited or undisplayable FX evidence.'
+        : ' selected quotes have limited or undisplayable FX evidence.',
+      ' 个所选报价的外汇证据不完整或无法显示。') + '</strong></div>';
+    if (capturedFxCount) body += '<div class="mm-da-foot">' + say(
+      'Rate agreement describes arithmetic only. Source quote direction and proxy suitability have not been established. FX market observation time unavailable; FX execution suitability has not been checked.',
+      '汇率对应关系仅描述算术一致性。尚未确定来源报价方向及代理汇率的适用性。外汇市场观测时间不可用；尚未核验该汇率是否适用于执行。') + '</div>';
     var shown = symbols.slice(0, 12);
     body += '<div class="mm-da-foot">' + text(say('Showing ', '显示 ')) + shown.length + say(' of ', ' / ') +
       symbols.length + say(' captured quotes', ' 个已捕获报价') +
