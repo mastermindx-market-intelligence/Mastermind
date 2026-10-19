@@ -184,7 +184,18 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     import socket
     from contextlib import ExitStack
     sockets = ExitStack()
+    import shutil
+    import control_plane.workspace_control_room_lifecycle as room_lifecycle
+    from tests.executive_installed_control_fixture import unix_listener
+    # The Control Room socket parent is a test-owned egid dir, not /var/run.
+    monkeypatch.setattr(room_lifecycle, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
     def activated(name):
+        if name == "WorkspaceControlRoom":
+            listener, room_path = unix_listener()
+            sockets.callback(shutil.rmtree, os.path.dirname(room_path), ignore_errors=True)
+            sockets.enter_context(listener)
+            raw["workspace_control_room"]["socket_path"] = room_path
+            return listener
         value = sockets.enter_context(socket.socket(socket.AF_UNIX))
         value.bind(str(raw["control_socket_path" if name == "Operator" else "ceo_ingress_socket_path"]))
         value.listen()
