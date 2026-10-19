@@ -27,7 +27,9 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-NATIVE_MANIFEST_SHA = "0b6dfec330404b12120ae764da065cd1e7c054e9838fdc8dccc0a7cc17d6bc58"
+# The portable result-reader repair changes two closure members. Executor,
+# donor, support and deadline identities above remain independently pinned.
+NATIVE_MANIFEST_SHA = "b2fdee7539a2167d8d1b8adf25e789d78570ad360083a456f8c8ccc8cabb1bcf"
 
 
 def _sha(raw):
