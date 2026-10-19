@@ -378,9 +378,9 @@
       "source": "source/operator_stdout_delivery.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 41208,
+      "bytes": 43595,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "648a9aecef2a519f439f920142268dc0258a26fb1e1b77aa261598c36dca230b",
+      "sha256": "3580b25d7986734036e950412a9e43ce63188da7a130809f3cc931a5aa308715",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {
