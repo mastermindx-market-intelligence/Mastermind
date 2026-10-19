@@ -182,6 +182,14 @@ https://github.com/openai/codex/blob/main/codex-rs/protocol/src/protocol.rs
 
 ## Deployment order
 
+The original-parent artifact observer recognizes the current exact 37-file
+support closure emitted by this producer. Earlier observation shapes retain
+their existing admission; arbitrary extensions and subsets remain refused.
+Packet, root, assigning parent, broker, support digest, code hash and filesystem
+custody checks still apply before observation. This compatibility repair grants
+no worker replay, result acceptance, legacy-run adoption or permission bypass.
+Its staged-runtime tests exercise both the prior and current producer contracts.
+
 Install the complete native source group from the actual merged immutable
 release before upgrading the same existing Fabric facade account. The facade
 checks that the adapter supports both quota fallback and successor-following
