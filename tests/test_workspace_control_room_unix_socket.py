@@ -47,8 +47,11 @@ from scripts.chairman_control_room import (
     UNIX_CONTROL_ROOM_HOST, UNIX_CONTROL_ROOM_ORIGIN,
 )
 from tests.executive_installed_control_fixture import (
-    installed_control_config, unix_listener, UnixHTTPConnection, unix_stanza,
+    boot_installed_control, installed_control_config, unix_listener,
+    UnixHTTPConnection, unix_stanza,
 )
+from tests.test_executive_fabric_composition import root_stats
+from tests.test_fabric_attended_routing import router
 
 
 # ---------------------------------------------------------------------------
@@ -377,8 +380,10 @@ def test_custody_parent_writable_refused(tmp_path, tmp_unix_sock, monkeypatch):
 def test_custody_parent_owner_refused_with_default_seam(tmp_path, tmp_unix_sock):
     listener, path = tmp_unix_sock
     parent = os.path.dirname(path)
-    if os.stat(parent).st_uid == 0:
-        pytest.skip("default parent already root-owned; cannot prove refusal here")
+    if os.geteuid() == 0:
+        # Running as root: chown the parent to uid 1 (keep gid) so the
+        # default trusted-parent seam (uid 0) always refuses with "parent-owner".
+        os.chown(parent, 1, -1)
     with pytest.raises(ControlRoomSocketRefused) as info:
         _verify_socket_custody(listener, socket_path=path,
                                 expected_owner_uid=os.geteuid(),
@@ -689,23 +694,43 @@ def test_start_recheck_uses_constructor_custody_values(tmp_path, monkeypatch):
 
 
 # Module-level flag: audit hooks cannot be removed once installed, so the
-# installed hook short-circuits itself outside the T6 window. The flag is
-# only ever True inside T6.
+# installed hook short-circuits itself outside the T6/T7 window. The flag is
+# only ever True inside the boot tests.
 _AUDIT_HOOK_ACTIVE: bool = False
 _AUDIT_HOOK_SEEN: list[tuple[str, object]] = []
 
 
 def _audit_hook(event, args):
+    """Audit-hook recording.
+
+    For ``socket.__new__`` the socket object is not initialised, so ``family``
+    must be read from ``args[1]`` (the family argument). For ``socket.bind``
+    the socket IS initialised and ``args[0].family`` is the right source.
+    T7 deliberately opens a TCP socket so the recording contains that bind
+    event — an empty list at the end of T6 is only meaningful because T7 proves
+    the hook is live.
+    """
     if not _AUDIT_HOOK_ACTIVE:
         return
-    if event in ("socket.__new__", "socket.bind"):
+    if event == "socket.__new__":
+        # args = (socket_cls, family, type, proto, fileno)
+        if len(args) >= 2 and args[1] in (socket.AF_INET, socket.AF_INET6):
+            _AUDIT_HOOK_SEEN.append((event, args[1]))
+        return
+    if event == "socket.bind":
         sock = args[0] if args else None
         family = getattr(sock, "family", None)
         if family in (socket.AF_INET, socket.AF_INET6):
             _AUDIT_HOOK_SEEN.append((event, getattr(sock, "type", "?")))
+        return
 
 
 sys.addaudithook(_audit_hook)
+
+
+class _SocketLike:
+    def is_socket(self):
+        return True
 
 
 def _read_proc_listening_inodes():
@@ -743,252 +768,180 @@ def _read_proc_listening_inodes():
     return listening
 
 
-def test_installed_boot_proves_zero_tcp_listeners(tmp_path, monkeypatch):
-    """Boot the installed composition and prove the room binds no TCP listener.
+def _install_lsof_rewriter(monkeypatch):
+    """Install the acceptance-module lsof rewriter used by both T6 and T7.
 
-    - The audit hook saw no AF_INET / AF_INET6 bind events for this process.
-    - /proc/net/tcp{,6} holds no listening socket whose inode belongs to us.
-    - The unchanged ``_assert_no_public_listener`` accepts the boot.
+    The production code at ``ops/executive_os/acceptance.py`` calls
+    ``subprocess.run(["/usr/sbin/lsof", "-u", <account>, "-nP", "-a", "-iTCP",
+    "-sTCP:LISTEN"])``. On a CI host the fixed lsof path may not exist and
+    ``-u <account>`` may not match the current account; we replace argv[0]
+    with the host-resolved lsof binary and swap ``-u <account>`` for
+    ``-w -p <pid>`` so the query is local and complete. The remaining flags
+    (``-nP -a -iTCP -sTCP:LISTEN``) are preserved verbatim so the listener
+    scan still restricts to listening TCP sockets only — never rewriting the
+    production contract. Returns nothing; raises pytest.fail if lsof is missing.
     """
 
-    # Audit hooks cannot be removed once added, so the hook reads a module-
-    # level flag and is inert by default. T6 activates it for its own window.
-    global _AUDIT_HOOK_ACTIVE, _AUDIT_HOOK_SEEN
-    _AUDIT_HOOK_SEEN = []
-    _AUDIT_HOOK_ACTIVE = True
-    workspace_socket_path = None
-    cache: dict[str, socket.socket] = {}
-    try:
-        workspace_socket_path = os.path.join(tempfile.mkdtemp(prefix="crr-boot", dir="/tmp"), "room.sock")
-        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        listener.bind(workspace_socket_path)
-        os.chmod(workspace_socket_path, 0o600)
-        listener.listen(8)
-        cache["WorkspaceControlRoom"] = listener
+    lsof_path = shutil.which("lsof")
+    if lsof_path is None:
+        pytest.fail("lsof unavailable; install lsof for the acceptance checker")
+    original_run = acceptance_module._run
 
-        # Patch the canonical socket path and the parent-uid test seam so the
-        # AF_UNIX ownership / parent / mode checks all pass in a tmp dir.
-        monkeypatch.setattr(cli, "_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET", workspace_socket_path)
-        monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
-        # Stub the staged Fabric binding source loader so the fixture never
-        # has to point at a real FabricBindingSource file; the boot test
-        # never actually starts Fabric.
-        monkeypatch.setattr(cli, "_staged_fabric_binding_source", lambda raw: None)
+    def rewriter(argv, **kwargs):
+        rewritten = [lsof_path]
+        skip_next = False
+        for token in argv[1:]:
+            if skip_next:
+                skip_next = False
+                continue
+            if token == "-u":
+                skip_next = True
+                rewritten.extend(["-w", "-p", str(os.getpid())])
+                continue
+            rewritten.append(token)
+        return original_run(rewritten, **kwargs)
 
-        # Build and write the installed control.json via the fixture helper.
-        from tests.test_workspace_read_app import _workspace_policy
-        workspace_policy = dataclasses.asdict(_workspace_policy())
-        config = installed_control_config(tmp_path, control_uid=os.geteuid(),
-                                          workspace_socket_path=workspace_socket_path,
-                                          workspace_resource_policy=workspace_policy)
-        # The workspace stanza requires the sealed App boot interpreter. The
-        # boot test never starts the App process; it only walks the
-        # composition through ``require_definition`` and then exits. Stub the
-        # two attest seams so a non-root test can still pass.
-        boot_python = config["ceo_ingress_app_boot_python"]
-        monkeypatch.setattr(cli, "_sealed_root_executable", lambda path, _name: Path(path))
-        monkeypatch.setattr(cli, "_attest_app_boot_runtime", lambda path: Path(path))
-        config["workspace_acquisition"] = {
-            "schema": "mastermind.workspace_acquisition_bindings.v1",
-            "profiles": {
-                "web": {"enabled": False, "binding": None},
-                "mac": {"enabled": False, "binding": None},
-            },
-        }
-        config_path = tmp_path / "control.json"
-        config_path.write_text(json.dumps(config))
-        config_path.chmod(0o600)
-        loaded = cli.load_control_config(config_path)
-        assert loaded["workspace_control_room"]["socket_path"] == workspace_socket_path
-
-        # Drive the composition using the same monkeypatching pattern as the
-        # boot test in tests/test_attended_control_startup_both_stanzas.py,
-        # stopping at the require_definition check so we don't actually start
-        # the production service (no broker / workers available in CI).
-        from control_plane import executive_worker_broker
-        from control_plane.fabric_attended_canary import AttendedControlProbeSource
-        from ops.executive_os import coo_principal_host, dialogue_wake_canary_control
-        from control_plane.model_router import ModelRouter
-        monkeypatch.setattr(executive_worker_broker, "WorkerBrokerClient", lambda *a, **kw: object())
-        monkeypatch.setattr(cli, "_load_control_environment_attestation",
-                            lambda *a, **kw: {"config_sha256": "a" * 64})
-        monkeypatch.setattr(cli, "_bind_exact_worker_target_source", lambda *a, **kw: None)
-        monkeypatch.setattr(cli, "_bind_hot_content_profile_source", lambda *a, **kw: None)
-        monkeypatch.setattr(cli, "_ceo_admission_guard", lambda *a, **kw: lambda: None)
-        monkeypatch.setattr(coo_principal_host, "validate_control_coo", lambda raw: False)
-        monkeypatch.setattr(dialogue_wake_canary_control, "load_verified_profile", lambda **kw: None)
-
-        class _Router:
-            pass
-
-        monkeypatch.setattr(ModelRouter, "load", classmethod(lambda cls, **kw: _Router()))
-
-        class _DefinitionCheckPassed(Exception):
-            pass
-
-        real_require = AttendedControlProbeSource.require_definition
-
-        def spy_require(self, raw):
-            real_require(self, raw)
-            raise _DefinitionCheckPassed()
-
-        monkeypatch.setattr(AttendedControlProbeSource, "require_definition", spy_require)
-
-        # activate_launchd_socket returns our pre-spawned room listener for
-        # the workspace name and a fresh tmp listener for everything else.
-        def factory(name):
-            if name not in cache:
-                listener2, _ = unix_listener()
-                cache[name] = listener2
-            return cache[name]
-
-        monkeypatch.setattr(cli, "activate_launchd_socket", factory)
-
-        # Patch the ExecutiveControlService ctor's activated_socket.family probe.
-        # Anything that pretends to be the real service will still inspect the
-        # socket's family attribute; give it a real AF_UNIX socket.
-        class _FakeService:
-            def __init__(self, config, **kwargs):
-                self.config = config
-                self.kwargs = kwargs
-        monkeypatch.setattr(cli, "ExecutiveControlService", _FakeService)
-
-        # Fake workspace policy loader.
-        authority = {"schema": "mastermind.workspace_acquisition_bindings.v1",
-                     "profiles": {key: {"enabled": False, "binding": None} for key in ("web", "mac")}}
-
-        with pytest.raises(_DefinitionCheckPassed):
-            asyncio.run(cli._serve_from_config(config_path, attended_work_placements=()))
-
-        # The composition passed the boot validator. Now boot the room by
-        # hand to prove HTTP works over AF_UNIX with the right Host header.
-        config_obj = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
-            token="fixture", origin=ccr.UNIX_CONTROL_ROOM_ORIGIN, port=0, state_ttl=10.0)
-        host = HostedControlRoom(config_obj, listener=cache["WorkspaceControlRoom"],
-                                 socket_path=workspace_socket_path,
-                                 allowed_peer_uids=(os.geteuid(),))
-
-        async def serve_and_proof():
-            await host.start()
-            try:
-                body = await asyncio.to_thread(_http_get, workspace_socket_path, "/")
-                assert body  # non-empty index.html over AF_UNIX
-                # 1. Audit hook saw no AF_INET / AF_INET6 bind.
-                assert _AUDIT_HOOK_SEEN == [], f"unexpected AF_INET bind events: {_AUDIT_HOOK_SEEN}"
-                # 2. /proc/net/tcp{,6} holds no listening socket of this process.
-                assert _read_proc_listening_inodes() == set()
-                # 3. The unchanged acceptance check accepts the boot. Force
-                # CONTROL_SOCKET/WORKER_SOCKET is_socket True so the
-                # private-unix step is satisfied.
-                lsof_path = shutil.which("lsof")
-                if lsof_path is None:
-                    pytest.fail("lsof unavailable")
-                original_run = acceptance_module._run
-
-                def rewriter(argv, **kwargs):
-                    # Replace argv[0] (the production "/usr/sbin/lsof" path,
-                    # which may not exist on this host) by the resolved
-                    # lsof binary, and replace the "-u <account>" pair by
-                    # "-w -p <pid>" so the query is local and complete. The
-                    # remaining flags (-nP, -a, -iTCP, -sTCP:LISTEN) are
-                    # kept verbatim so the listener scan still restricts to
-                    # listening TCP sockets only.
-                    rewritten = [lsof_path]
-                    skip_next = False
-                    for token in argv[1:]:
-                        if skip_next:
-                            skip_next = False
-                            continue
-                        if token == "-u":
-                            skip_next = True
-                            rewritten.extend(["-w", "-p", str(os.getpid())])
-                            continue
-                        rewritten.append(token)
-                    return original_run(rewritten, **kwargs)
-
-                monkeypatch.setattr(acceptance_module, "_run", rewriter)
-                monkeypatch.setattr(acceptance_module, "CONTROL_SOCKET", _SocketLike())
-                monkeypatch.setattr(acceptance_module, "WORKER_SOCKET", _SocketLike())
-                instance = object.__new__(acceptance_module.Acceptance)
-                instance._assert_no_public_listener()
-            finally:
-                await host.close()
-
-        asyncio.run(serve_and_proof())
-    finally:
-        _AUDIT_HOOK_ACTIVE = False
-        for listener in cache.values():
-            try:
-                listener.close()
-            except Exception:
-                pass
-        if workspace_socket_path is not None:
-            try:
-                os.unlink(workspace_socket_path)
-            except OSError:
-                pass
-
-
-class _SocketLike:
-    def is_socket(self):
-        return True
-
-
-def test_installed_boot_refuses_owning_a_tcp_listener(tmp_path, monkeypatch):
-    """If Control also opens a TCP listening socket, the unchanged acceptance
-    check refuses it with "owns a TCP listener"."""
-
-    workspace_socket_path = os.path.join(tempfile.mkdtemp(prefix="crr-neg", dir="/tmp"), "room.sock")
-    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-    listener.bind(workspace_socket_path)
-    os.chmod(workspace_socket_path, 0o600)
-    listener.listen(8)
-    monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
-    monkeypatch.setattr(cli, "_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET", workspace_socket_path)
-
-    cache = {"WorkspaceControlRoom": listener}
-
-    def factory(name):
-        if name not in cache:
-            listener2, _ = unix_listener()
-            cache[name] = listener2
-        return cache[name]
-
-    monkeypatch.setattr(cli, "activate_launchd_socket", factory)
-
-    config_obj = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
-        token="fixture", origin=ccr.UNIX_CONTROL_ROOM_ORIGIN, port=0, state_ttl=10.0)
-    host = HostedControlRoom(config_obj, listener=listener, socket_path=workspace_socket_path,
-                             allowed_peer_uids=(os.geteuid(),))
-
-    def fake_run_factory(argv, **kwargs):
-        if fake_run_factory.first:
-            fake_run_factory.first = False
-            header = b"COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n"
-            row = b"python %d _mastermind_exec 9u IPv4 0x1 0t0 TCP 127.0.0.1:9000 (LISTEN)\n" % os.getpid()
-            return subprocess.CompletedProcess(["lsof"], 0, stdout=header + row)
-        return subprocess.CompletedProcess(["lsof"], 1, stdout=b"")
-
-    fake_run_factory.first = True
-    monkeypatch.setattr(acceptance_module, "_run", fake_run_factory)
+    monkeypatch.setattr(acceptance_module, "_run", rewriter)
     monkeypatch.setattr(acceptance_module, "CONTROL_SOCKET", _SocketLike())
     monkeypatch.setattr(acceptance_module, "WORKER_SOCKET", _SocketLike())
 
+
+def _http_get_over_unix(socket_path, url, host_header):
+    """Synchronous GET over the AF_UNIX socket; returns the response body."""
+
+    conn = UnixHTTPConnection(socket_path)
     try:
-        asyncio.run(host.start())
-        try:
-            instance = object.__new__(acceptance_module.Acceptance)
-            with pytest.raises(acceptance_module.AcceptanceError, match="owns a TCP listener"):
-                instance._assert_no_public_listener()
-        finally:
-            asyncio.run(host.close())
+        conn.request("GET", url, headers={"Host": host_header})
+        resp = conn.getresponse()
+        return resp.status, resp.read()
     finally:
-        for listener2 in cache.values():
-            try:
-                listener2.close()
-            except Exception:
-                pass
+        conn.close()
+
+
+def test_installed_boot_proves_zero_tcp_listeners(tmp_path, monkeypatch, root_stats, router):
+    """Drive the REAL ``_serve_from_config`` -> ``load_control_config`` ->
+    ``_service_from_config`` and prove the production room binds no TCP
+    listener. The finite, dialogue Wake, and workspace stanzas are LIVE.
+
+    While the production room serves we assert, in order:
+      1. the audit hook recording holds no AF_INET / AF_INET6 event;
+      2. on Linux, no inode of this process's socket fds appears in
+         ``/proc/net/tcp`` or ``/proc/net/tcp6`` with state ``0A`` (on
+         non-Linux we assert the lsof step below instead; never skip);
+      3. the UNCHANGED ``object.__new__(acceptance.Acceptance)._assert_no_public_listener()``
+         passes with the same r3 rewriter (argv[0] -> shutil.which("lsof"),
+         "-u <account>" -> "-w -p <pid>"; ``pytest.fail("lsof unavailable")``
+         if lsof is missing) and ``CONTROL_SOCKET`` / ``WORKER_SOCKET`` patched
+         to ``is_socket()``-True objects;
+      4. a real HTTP ``GET /`` over the room socket with
+         ``Host workspace-control-room.invalid`` returns 200.
+
+    After the boot we assert: ``WorkspaceControlRoom`` is in the requested
+    launchd names; ``proof.room.config.port == 0``; ``proof.room.config.origin ==
+    UNIX_CONTROL_ROOM_ORIGIN``; ``proof.room.allowed_peer_uids == (raw
+    control_uid,)``; the room's listener family is AF_UNIX; after close the
+    room listener's fileno() is ``-1`` or the room refuses reuse.
+    """
+
+    global _AUDIT_HOOK_ACTIVE, _AUDIT_HOOK_SEEN
+    _AUDIT_HOOK_SEEN = []
+    _AUDIT_HOOK_ACTIVE = True
+    _install_lsof_rewriter(monkeypatch)
+
+    served = {}
+    control_uid = os.geteuid()
+
+    async def during_serve(room):
+        # 4. HTTP GET / over AF_UNIX with the workspace Host header.
+        status, body = await asyncio.to_thread(
+            _http_get_over_unix,
+            room.socket_path,
+            "/",
+            "workspace-control-room.invalid",
+        )
+        assert status == 200, f"expected 200, got {status}"
+        assert body, "expected non-empty body from production room"
+        # 1. Audit hook saw no AF_INET / AF_INET6 bind events.
+        assert _AUDIT_HOOK_SEEN == [], (
+            f"unexpected AF_INET/AF_INET6 bind events: {_AUDIT_HOOK_SEEN}")
+        # 2. /proc/net/tcp{,6} holds no listening socket of this process.
+        if sys.platform.startswith("linux"):
+            assert _read_proc_listening_inodes() == set(), (
+                "process owns a TCP socket in state LISTEN")
+        # 3. The unchanged acceptance check accepts the boot.
+        instance = object.__new__(acceptance_module.Acceptance)
+        instance._assert_no_public_listener()
+        served["room"] = room
+
+    try:
+        proof = boot_installed_control(
+            tmp_path, monkeypatch, root_stats, router, during_serve=during_serve)
+    finally:
+        _AUDIT_HOOK_ACTIVE = False
+
+    # Post-boot invariants: the boot reached the production room construction.
+    assert "WorkspaceControlRoom" in proof.requested_names
+    assert proof.room.config.port == 0
+    assert proof.room.config.origin == UNIX_CONTROL_ROOM_ORIGIN
+    assert proof.room.allowed_peer_uids == (control_uid,)
+    assert proof.room._listener.family == socket.AF_UNIX
+    # The capture class already closed the room; the listener fd must be retired.
+    assert proof.room._listener.fileno() == -1
+    # Reuse is refused.
+    with pytest.raises(ValueError):
+        asyncio.run(proof.room.start())
+
+
+@pytest.mark.parametrize("bind_host,bind_family", [
+    ("127.0.0.1", socket.AF_INET),
+    ("0.0.0.0", socket.AF_INET),
+    ("::", socket.AF_INET6),
+])
+def test_installed_boot_refuses_owning_a_tcp_listener(
+        tmp_path, monkeypatch, root_stats, router, bind_host, bind_family):
+    """Drive the REAL boot with a deliberate TCP listener and prove the
+    audit hook is live AND the unchanged acceptance check refuses.
+
+    Three parameter cases cover AF_INET on loopback, AF_INET on wildcard,
+    and AF_INET6 on wildcard. T7 is the discriminating negative that proves
+    T6's audit hook (empty recording in T6) is live: the deliberate TCP
+    bind must appear in the hook's recording.
+    """
+
+    global _AUDIT_HOOK_ACTIVE, _AUDIT_HOOK_SEEN
+    _AUDIT_HOOK_SEEN = []
+    _AUDIT_HOOK_ACTIVE = True
+    _install_lsof_rewriter(monkeypatch)
+
+    tcp_socket = socket.socket(bind_family, socket.SOCK_STREAM)
+    tcp_socket.bind((bind_host, 0))
+    tcp_socket.listen(1)
+    try:
+        async def during_serve(room):
+            # The TCP listener is already bound and listening. The hook
+            # must have recorded the deliberate family; that proves the
+            # hook is live (T6's empty recording is only meaningful
+            # because T7 proves the hook is live).
+            matching = [(event, value) for (event, value) in _AUDIT_HOOK_SEEN
+                        if event == "socket.__new__" and value == bind_family]
+            assert matching, (
+                f"audit hook did not record the deliberate "
+                f"socket.__new__ for family {bind_family}; "
+                f"events: {_AUDIT_HOOK_SEEN}")
+            instance = object.__new__(acceptance_module.Acceptance)
+            with pytest.raises(acceptance_module.AcceptanceError,
+                               match="owns a TCP listener"):
+                instance._assert_no_public_listener()
+
         try:
-            os.unlink(workspace_socket_path)
-        except OSError:
+            proof = boot_installed_control(
+                tmp_path, monkeypatch, root_stats, router,
+                during_serve=during_serve)
+        finally:
+            _AUDIT_HOOK_ACTIVE = False
+        assert proof.room._listener.family == socket.AF_UNIX
+    finally:
+        try:
+            tcp_socket.close()
+        except Exception:
             pass
