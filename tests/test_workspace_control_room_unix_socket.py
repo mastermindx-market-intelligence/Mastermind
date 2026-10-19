@@ -683,3 +683,312 @@ def test_start_recheck_uses_constructor_custody_values(tmp_path, monkeypatch):
         pass
 
 
+# ---------------------------------------------------------------------------
+# T6 / T7: installed boot proof and negative boot
+# ---------------------------------------------------------------------------
+
+
+# Module-level flag: audit hooks cannot be removed once installed, so the
+# installed hook short-circuits itself outside the T6 window. The flag is
+# only ever True inside T6.
+_AUDIT_HOOK_ACTIVE: bool = False
+_AUDIT_HOOK_SEEN: list[tuple[str, object]] = []
+
+
+def _audit_hook(event, args):
+    if not _AUDIT_HOOK_ACTIVE:
+        return
+    if event in ("socket.__new__", "socket.bind"):
+        sock = args[0] if args else None
+        family = getattr(sock, "family", None)
+        if family in (socket.AF_INET, socket.AF_INET6):
+            _AUDIT_HOOK_SEEN.append((event, getattr(sock, "type", "?")))
+
+
+sys.addaudithook(_audit_hook)
+
+
+def _read_proc_listening_inodes():
+    """Return the inode set of TCP sockets in state 0A that belong to /proc/self/fd."""
+
+    inodes = set()
+    try:
+        for entry in os.listdir("/proc/self/fd"):
+            try:
+                target = os.readlink(os.path.join("/proc/self/fd", entry))
+            except OSError:
+                continue
+            if target.startswith("socket:["):
+                try:
+                    inodes.add(int(target[len("socket:["):-1]))
+                except ValueError:
+                    pass
+    except OSError:
+        return set()
+    listening = set()
+    for path in ("/proc/net/tcp", "/proc/net/tcp6"):
+        try:
+            text = Path(path).read_text()
+        except OSError:
+            continue
+        for line in text.splitlines()[1:]:
+            parts = line.split()
+            if len(parts) < 10:
+                continue
+            if parts[3] != "0A":
+                continue
+            inode = int(parts[9])
+            if inode in inodes:
+                listening.add(inode)
+    return listening
+
+
+def test_installed_boot_proves_zero_tcp_listeners(tmp_path, monkeypatch):
+    """Boot the installed composition and prove the room binds no TCP listener.
+
+    - The audit hook saw no AF_INET / AF_INET6 bind events for this process.
+    - /proc/net/tcp{,6} holds no listening socket whose inode belongs to us.
+    - The unchanged ``_assert_no_public_listener`` accepts the boot.
+    """
+
+    # Audit hooks cannot be removed once added, so the hook reads a module-
+    # level flag and is inert by default. T6 activates it for its own window.
+    global _AUDIT_HOOK_ACTIVE, _AUDIT_HOOK_SEEN
+    _AUDIT_HOOK_SEEN = []
+    _AUDIT_HOOK_ACTIVE = True
+    workspace_socket_path = None
+    cache: dict[str, socket.socket] = {}
+    try:
+        workspace_socket_path = os.path.join(tempfile.mkdtemp(prefix="crr-boot", dir="/tmp"), "room.sock")
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        listener.bind(workspace_socket_path)
+        os.chmod(workspace_socket_path, 0o600)
+        listener.listen(8)
+        cache["WorkspaceControlRoom"] = listener
+
+        # Patch the canonical socket path and the parent-uid test seam so the
+        # AF_UNIX ownership / parent / mode checks all pass in a tmp dir.
+        monkeypatch.setattr(cli, "_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET", workspace_socket_path)
+        monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
+        # Stub the staged Fabric binding source loader so the fixture never
+        # has to point at a real FabricBindingSource file; the boot test
+        # never actually starts Fabric.
+        monkeypatch.setattr(cli, "_staged_fabric_binding_source", lambda raw: None)
+
+        # Build and write the installed control.json via the fixture helper.
+        from tests.test_workspace_read_app import _workspace_policy
+        workspace_policy = dataclasses.asdict(_workspace_policy())
+        config = installed_control_config(tmp_path, control_uid=os.geteuid(),
+                                          workspace_socket_path=workspace_socket_path,
+                                          workspace_resource_policy=workspace_policy)
+        # The workspace stanza requires the sealed App boot interpreter. The
+        # boot test never starts the App process; it only walks the
+        # composition through ``require_definition`` and then exits. Stub the
+        # two attest seams so a non-root test can still pass.
+        boot_python = config["ceo_ingress_app_boot_python"]
+        monkeypatch.setattr(cli, "_sealed_root_executable", lambda path, _name: Path(path))
+        monkeypatch.setattr(cli, "_attest_app_boot_runtime", lambda path: Path(path))
+        config["workspace_acquisition"] = {
+            "schema": "mastermind.workspace_acquisition_bindings.v1",
+            "profiles": {
+                "web": {"enabled": False, "binding": None},
+                "mac": {"enabled": False, "binding": None},
+            },
+        }
+        config_path = tmp_path / "control.json"
+        config_path.write_text(json.dumps(config))
+        config_path.chmod(0o600)
+        loaded = cli.load_control_config(config_path)
+        assert loaded["workspace_control_room"]["socket_path"] == workspace_socket_path
+
+        # Drive the composition using the same monkeypatching pattern as the
+        # boot test in tests/test_attended_control_startup_both_stanzas.py,
+        # stopping at the require_definition check so we don't actually start
+        # the production service (no broker / workers available in CI).
+        from control_plane import executive_worker_broker
+        from control_plane.fabric_attended_canary import AttendedControlProbeSource
+        from ops.executive_os import coo_principal_host, dialogue_wake_canary_control
+        from control_plane.model_router import ModelRouter
+        monkeypatch.setattr(executive_worker_broker, "WorkerBrokerClient", lambda *a, **kw: object())
+        monkeypatch.setattr(cli, "_load_control_environment_attestation",
+                            lambda *a, **kw: {"config_sha256": "a" * 64})
+        monkeypatch.setattr(cli, "_bind_exact_worker_target_source", lambda *a, **kw: None)
+        monkeypatch.setattr(cli, "_bind_hot_content_profile_source", lambda *a, **kw: None)
+        monkeypatch.setattr(cli, "_ceo_admission_guard", lambda *a, **kw: lambda: None)
+        monkeypatch.setattr(coo_principal_host, "validate_control_coo", lambda raw: False)
+        monkeypatch.setattr(dialogue_wake_canary_control, "load_verified_profile", lambda **kw: None)
+
+        class _Router:
+            pass
+
+        monkeypatch.setattr(ModelRouter, "load", classmethod(lambda cls, **kw: _Router()))
+
+        class _DefinitionCheckPassed(Exception):
+            pass
+
+        real_require = AttendedControlProbeSource.require_definition
+
+        def spy_require(self, raw):
+            real_require(self, raw)
+            raise _DefinitionCheckPassed()
+
+        monkeypatch.setattr(AttendedControlProbeSource, "require_definition", spy_require)
+
+        # activate_launchd_socket returns our pre-spawned room listener for
+        # the workspace name and a fresh tmp listener for everything else.
+        def factory(name):
+            if name not in cache:
+                listener2, _ = unix_listener()
+                cache[name] = listener2
+            return cache[name]
+
+        monkeypatch.setattr(cli, "activate_launchd_socket", factory)
+
+        # Patch the ExecutiveControlService ctor's activated_socket.family probe.
+        # Anything that pretends to be the real service will still inspect the
+        # socket's family attribute; give it a real AF_UNIX socket.
+        class _FakeService:
+            def __init__(self, config, **kwargs):
+                self.config = config
+                self.kwargs = kwargs
+        monkeypatch.setattr(cli, "ExecutiveControlService", _FakeService)
+
+        # Fake workspace policy loader.
+        authority = {"schema": "mastermind.workspace_acquisition_bindings.v1",
+                     "profiles": {key: {"enabled": False, "binding": None} for key in ("web", "mac")}}
+
+        with pytest.raises(_DefinitionCheckPassed):
+            asyncio.run(cli._serve_from_config(config_path, attended_work_placements=()))
+
+        # The composition passed the boot validator. Now boot the room by
+        # hand to prove HTTP works over AF_UNIX with the right Host header.
+        config_obj = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
+            token="fixture", origin=ccr.UNIX_CONTROL_ROOM_ORIGIN, port=0, state_ttl=10.0)
+        host = HostedControlRoom(config_obj, listener=cache["WorkspaceControlRoom"],
+                                 socket_path=workspace_socket_path,
+                                 allowed_peer_uids=(os.geteuid(),))
+
+        async def serve_and_proof():
+            await host.start()
+            try:
+                body = await asyncio.to_thread(_http_get, workspace_socket_path, "/")
+                assert body  # non-empty index.html over AF_UNIX
+                # 1. Audit hook saw no AF_INET / AF_INET6 bind.
+                assert _AUDIT_HOOK_SEEN == [], f"unexpected AF_INET bind events: {_AUDIT_HOOK_SEEN}"
+                # 2. /proc/net/tcp{,6} holds no listening socket of this process.
+                assert _read_proc_listening_inodes() == set()
+                # 3. The unchanged acceptance check accepts the boot. Force
+                # CONTROL_SOCKET/WORKER_SOCKET is_socket True so the
+                # private-unix step is satisfied.
+                lsof_path = shutil.which("lsof")
+                if lsof_path is None:
+                    pytest.fail("lsof unavailable")
+                original_run = acceptance_module._run
+
+                def rewriter(argv, **kwargs):
+                    # Replace argv[0] (the production "/usr/sbin/lsof" path,
+                    # which may not exist on this host) by the resolved
+                    # lsof binary, and replace the "-u <account>" pair by
+                    # "-w -p <pid>" so the query is local and complete. The
+                    # remaining flags (-nP, -a, -iTCP, -sTCP:LISTEN) are
+                    # kept verbatim so the listener scan still restricts to
+                    # listening TCP sockets only.
+                    rewritten = [lsof_path]
+                    skip_next = False
+                    for token in argv[1:]:
+                        if skip_next:
+                            skip_next = False
+                            continue
+                        if token == "-u":
+                            skip_next = True
+                            rewritten.extend(["-w", "-p", str(os.getpid())])
+                            continue
+                        rewritten.append(token)
+                    return original_run(rewritten, **kwargs)
+
+                monkeypatch.setattr(acceptance_module, "_run", rewriter)
+                monkeypatch.setattr(acceptance_module, "CONTROL_SOCKET", _SocketLike())
+                monkeypatch.setattr(acceptance_module, "WORKER_SOCKET", _SocketLike())
+                instance = object.__new__(acceptance_module.Acceptance)
+                instance._assert_no_public_listener()
+            finally:
+                await host.close()
+
+        asyncio.run(serve_and_proof())
+    finally:
+        _AUDIT_HOOK_ACTIVE = False
+        for listener in cache.values():
+            try:
+                listener.close()
+            except Exception:
+                pass
+        if workspace_socket_path is not None:
+            try:
+                os.unlink(workspace_socket_path)
+            except OSError:
+                pass
+
+
+class _SocketLike:
+    def is_socket(self):
+        return True
+
+
+def test_installed_boot_refuses_owning_a_tcp_listener(tmp_path, monkeypatch):
+    """If Control also opens a TCP listening socket, the unchanged acceptance
+    check refuses it with "owns a TCP listener"."""
+
+    workspace_socket_path = os.path.join(tempfile.mkdtemp(prefix="crr-neg", dir="/tmp"), "room.sock")
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(workspace_socket_path)
+    os.chmod(workspace_socket_path, 0o600)
+    listener.listen(8)
+    monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
+    monkeypatch.setattr(cli, "_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET", workspace_socket_path)
+
+    cache = {"WorkspaceControlRoom": listener}
+
+    def factory(name):
+        if name not in cache:
+            listener2, _ = unix_listener()
+            cache[name] = listener2
+        return cache[name]
+
+    monkeypatch.setattr(cli, "activate_launchd_socket", factory)
+
+    config_obj = ccr.ServerConfig(repo_root=tmp_path, macro_root=None, bindings_path=None,
+        token="fixture", origin=ccr.UNIX_CONTROL_ROOM_ORIGIN, port=0, state_ttl=10.0)
+    host = HostedControlRoom(config_obj, listener=listener, socket_path=workspace_socket_path,
+                             allowed_peer_uids=(os.geteuid(),))
+
+    def fake_run_factory(argv, **kwargs):
+        if fake_run_factory.first:
+            fake_run_factory.first = False
+            header = b"COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n"
+            row = b"python %d _mastermind_exec 9u IPv4 0x1 0t0 TCP 127.0.0.1:9000 (LISTEN)\n" % os.getpid()
+            return subprocess.CompletedProcess(["lsof"], 0, stdout=header + row)
+        return subprocess.CompletedProcess(["lsof"], 1, stdout=b"")
+
+    fake_run_factory.first = True
+    monkeypatch.setattr(acceptance_module, "_run", fake_run_factory)
+    monkeypatch.setattr(acceptance_module, "CONTROL_SOCKET", _SocketLike())
+    monkeypatch.setattr(acceptance_module, "WORKER_SOCKET", _SocketLike())
+
+    try:
+        asyncio.run(host.start())
+        try:
+            instance = object.__new__(acceptance_module.Acceptance)
+            with pytest.raises(acceptance_module.AcceptanceError, match="owns a TCP listener"):
+                instance._assert_no_public_listener()
+        finally:
+            asyncio.run(host.close())
+    finally:
+        for listener2 in cache.values():
+            try:
+                listener2.close()
+            except Exception:
+                pass
+        try:
+            os.unlink(workspace_socket_path)
+        except OSError:
+            pass
