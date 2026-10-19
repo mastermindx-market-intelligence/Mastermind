@@ -1,0 +1,80 @@
+{
+  "schema": "mastermind.overnight_risk_source_truth_evidence.v1",
+  "operation": "overnight-risk-truth-20261015-sol-001",
+  "base": "a5ebced8f1129871bfe05066090de3328ce783b4",
+  "source_sha256": {
+    "data_layer/overnight.py": "cbdbeaf11e9f62b315ddb42422aa6e70de95340c4e6cf6fe078e162f670536d5",
+    "bot/overnight.py": "fbe8e5db2f3b83561569b06c99622a3dd12cd2a123a17e5736ce901a5b6df18b",
+    "app/web.py": "10628657eaea611471a625a0d7557e257a1edbad18ad366fb60870b2057e9843",
+    "tests/test_overnight.py": "2686a2b7c6f548230b2b7d58706b28ee11a7d8e21f703f6149239582ef6c7fe5",
+    "tests/test_overnight_evidence_integrity.py": "4c4ecb63ff63aca50f2949f813a926c56d5abbb0b7ca1f59574ec4eb3e9497e0",
+    "docs/runbooks/overnight-risk-source-truth.md": "426f41b9ff3992e67229ae819e7249a3bb3bbb7f8ed25fd118a0b5ced7c6d4be"
+  },
+  "red_before": {
+    "tests": 4,
+    "passed": 1,
+    "cause": "no usable overnight risk signals classified calm; watcher reported tape calm or used force to invoke Brain on absent data",
+    "log_sha256": "efe7a6cb7c256f6a0ba3347128be6322633c1bdaea7842de5387fb55b4da1c8c"
+  },
+  "daily_source_red": {
+    "failed": 1,
+    "cause": "Yahoo daily historical ES/VIX changes were mislabeled live actionable overnight risk",
+    "log_sha256": "6460603a150939a8369d161aa168a7fb85202d0004aae4258d3d7d9747d816cf"
+  },
+  "verified_after": {
+    "passed": 34,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_sha256": "fc19da46eccf0cf434c1eaa15e8c417d3651a300310e4f32ec41619a1b217100"
+  },
+  "data_source_proof": {
+    "date": "2026-10-15",
+    "vendor": "tiingo",
+    "materialized_boats_manifest_count": 2,
+    "rows_metadata_only": [
+      2148,
+      720
+    ],
+    "dataos_identity_admitted": false,
+    "redistribution_admitted": false,
+    "pit_backtest_eligible": false,
+    "quotes_or_secrets_copied": false
+  },
+  "effect": "SOURCE_ONLY; no production deployment/provider/account/order/position or released data changes",
+  "runtime_eligibility": "NO_QUALIFIED_LIVE_OVERNIGHT_SOURCE",
+  "disposition": "DRAFT_HOLD_BEFORE_LIVE_DATA_CUTOVER",
+  "source_review_followup": {
+    "original_independent_review": "REQUEST_CHANGES P1 asserted-live, missing-live, force bypass and stale model-tool wording",
+    "test_scope": "144 targeted overnight, web, risk-governor, derisk, MCP and malformed-source tests, zero failures/skips",
+    "passed": 144,
+    "junit_sha256": "44dc0612a510efb5c31f8513a6f974510b95118124f07c371e71f531ebb611c0",
+    "source_sha256": {
+      "data_layer/overnight.py": "a203c5e8ae1bb46c47cebb96fa61cb602d5ecbbac94171e02fb41217dd1ce335",
+      "bot/overnight.py": "626a0689a7df2ad5224f19edc5917a0e5ccf9b45691efcbf861b8a7cc1772fa3",
+      "bot/derisk.py": "556ef0132503e0e9615f647d934f99ad552d5ccc8c542b3009a37425f024ea0a",
+      "app/web.py": "5ac8fd0e60c07d5e9379c472ba487115531b4ea5f1dee84fb466d1cb07eadc73",
+      "brain/bot_mcp.py": "838abcdcc8e2bdd13070b4489518ed1498dae3b762ba3bb1c175c124695b0603",
+      "brain/risk_lens.py": "472a492c53452633840f5027ddb8fe15527656591439152f8fc980f5db06c37b",
+      "tests/test_overnight.py": "2c51c7e12b63669d8accd3908d429767d26c7e9b993af30fb486847cdb5ec35e",
+      "tests/test_overnight_source_admission.py": "cef601374814336edc32ced9a544e0b1cd99ff883850f746e7874917ca2ee75c",
+      "tests/test_overnight_derisk_source_gate.py": "804492106592f6d4651527cd3706b5ffb2cc99a335edeb82a679a734c91c4669",
+      "tests/test_overnight_forced_prompt_truth.py": "d9382bcd3128e5245338e004a6a40b29928daa96e489778f0113ef6e4a3f45d4",
+      "tests/test_overnight_mcp_source_truth.py": "94af0a1b887f37f3b2ca02a703f193db7bebbf894fe34cded82096c163516484",
+      "tests/test_overnight_public_projection.py": "7f8eaf3f823f973d8756250cc86ff94e2a8beeadd7c0604acac42fdae958bff3",
+      "docs/runbooks/overnight-risk-source-truth.md": "f3fbce7eed251623e3118679abbd0ad8f7c5e26e7a993b97b3b3841d9592fc7e"
+    },
+    "producer_admission": "_host_live_source_admitted default FALSE in production, synthetic positive test injection only",
+    "capital_effect": "NONE",
+    "remaining": "actual Data OS source/usage proof before live automated redecision"
+  },
+  "protected_master_merge": {
+    "original_source": "379600f69538bc3232af8399138bc31384f8881e",
+    "protected_parent": "a53062ff18df71869a1363d35a99347f06d9a3fb",
+    "passed": 144,
+    "failed": 0,
+    "skipped": 0,
+    "junit_sha256": "e42f4503966e6d303351150983994445588bbcd4188641def99b6d44ef085ee3",
+    "status": "SOURCE_ONLY_HOLD"
+  }
+}

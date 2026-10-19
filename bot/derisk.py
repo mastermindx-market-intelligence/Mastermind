@@ -239,13 +239,19 @@ def tripwire(pid: str, asof: str, *, regime: dict | None = None) -> dict:
     try:
         from data_layer import overnight
         tp = overnight.tape()
-        ostate = (tp.get("risk") or {}).get("state")
-        if ostate == "stressed":
-            reasons.append("overnight tape STRESSED")
-            severity = max(severity, 2)
-        elif ostate == "elevated":
-            reasons.append("overnight tape elevated")
-            severity = max(severity, 1)
+        # Shrink-only fast de-risk is an actual book effect. A caller's risk
+        # string or asserted live=True is never evidence of a licensed,
+        # source-clock-qualified overnight move. Preserve independent Macro
+        # Risk Officer, dealer gamma, credit and distribution channels below.
+        qualified = overnight.qualified_live_snapshot(tp)
+        if qualified is not None:
+            ostate = qualified["risk"]["state"]
+            if ostate == "stressed":
+                reasons.append("overnight tape STRESSED")
+                severity = max(severity, 2)
+            elif ostate == "elevated":
+                reasons.append("overnight tape elevated")
+                severity = max(severity, 1)
     except Exception:  # noqa: BLE001
         pass
 

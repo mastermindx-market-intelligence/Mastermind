@@ -1837,16 +1837,25 @@ def api_etf_outcomes() -> JSONResponse:
 
 @router.get("/api/overnight-tape")
 def api_overnight_tape() -> JSONResponse:
-    """The LIVE overnight cross-asset tape — US index futures, international indices, FX/rates, vol,
-    commodities and crypto, each with its overnight % change, plus a distilled risk read
-    (calm/elevated/stressed). What's moving while the cash market is shut — the thing the EOD macro
-    dashboard can't see. Polled by the dashboard's Overnight Tape panel; cached ~5 min server-side."""
+    """Best-effort cross-asset change tape. Missing signals are UNKNOWN, not calm.
+
+    Source retrieval is not proof of intraday freshness. The risk read and
+    overnight watcher separately require qualified observations; this endpoint
+    cannot grant paper target or execution authority.
+    """
     try:
         from data_layer import overnight
-        return JSONResponse(overnight.tape())
-    except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"groups": {}, "risk": {"state": "calm", "reasons": ["unavailable"]},
-                             "live": False, "error": str(exc)})
+        return JSONResponse(
+            overnight.public_tape(overnight.tape()),
+            headers={"Cache-Control": "no-store"},
+        )
+    except Exception:  # noqa: BLE001 — never leak provider/network error details
+        return JSONResponse(
+            {"groups": {}, "risk": {"state": "unknown",
+                                    "reasons": ["no qualified overnight risk signals"]},
+             "live": False, "error": "overnight_source_unavailable"},
+            status_code=503, headers={"Cache-Control": "no-store"},
+        )
 
 
 @router.get("/api/research")

@@ -1,0 +1,33 @@
+{
+  "schema": "mastermind.overnight_source_snapshot_merged_proof.v1",
+  "original_carrier": "overnight-risk-truth-20261015-sol-001",
+  "original_source_commit": "5c480428dfe9b0d14b778a2bc1c826f81232841f",
+  "protected_parent": "8f3dcb31d8cec8985eb1bb96e76dd0b9905acb8d",
+  "review": "SCOPED_CLEAR_FOR_THREE_FINITE_SOURCE_DEFECTS; PHYSICAL_PROVIDER_START_P1_OPEN",
+  "exact_source_sha256": {
+    "data_layer/overnight.py": "9a03b8080e9307b3d4f8ab31a29cdd46eb5d96b8f4c41b963e8fddc38f3cc5e5",
+    "bot/overnight.py": "838a8adbd51f2236985942416100cf0f48162553f9d116beb006699b74ec6184",
+    "bot/derisk.py": "17952f32813e65467098614784a4eda04ff81679a065c8d1294faf3f2d21852a",
+    "bot/autonomous.py": "ef677986b11fa156ec9ea34f7258e8a79be562603f90f8ff51941a70eaf3a1b4",
+    "bot/china.py": "cb7c85dc28e774de3a37d988348aa9b9c303870fb47f393c66faf3496a25457e",
+    "bot/hk.py": "05c3a2c5d289d3047cf7edd576b57228ea24dc92d892a54d18ff0eb2d7b63a34",
+    "tests/test_overnight_snapshot_projection.py": "5395d022aee80e15da14993f3aba39a3195f23100402cd5d849b0ad98a4a96c5",
+    "tests/test_overnight_dispatch_fence.py": "0d2d283c225323c64397e43e16db5958749fa78f5b4daa41bab8a50ccdbc4900",
+    "tests/test_overnight_revocation_handshake.py": "87b1bb630608843482c95185bd33206065055f996023cfc849d461dfb7e1ef0f"
+  },
+  "executed": {
+    "passed": 339,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "junit_sha256": "a1a641ae7c292823edd9a2b80b9c998a4706544bea8f8e5f772793427fa37c9b",
+    "owner_selection": "autonomous/China/HK, overnight, source admission, public projection, risk governor, derisk, scheduler, Web/dashboard and protected market-view"
+  },
+  "source_authority": "_host_live_source_admitted remains unimplemented literal FALSE in production",
+  "real_provider_start_proven": false,
+  "display_entitlement_proven": false,
+  "source_captured": false,
+  "production_deployed": false,
+  "paper_or_live_portfolio_action": false,
+  "disposition": "DRAFT_HOLD_UNTIL_EXISTING_PROVIDER_EFFECT_BOUNDARY_AND_REAL_RIGHTS"
+}

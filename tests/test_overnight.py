@@ -59,21 +59,27 @@ def test_risk_read_classification():
     assert overnight.risk_read(elevated)["state"] == "elevated"
 
 
-def test_is_material_tripwire():
+def test_is_material_tripwire(monkeypatch):
+    from datetime import datetime, timezone
     from data_layer import overnight
-    assert overnight.is_material({"risk": {"state": "stressed"}}) is True
-    assert overnight.is_material({"risk": {"state": "elevated"}}) is True
+    from tests.test_overnight_source_admission import synthetic
+    # A risk-state label alone is not a licensed, fresh market-data source.
+    assert overnight.is_material({"risk": {"state": "stressed"}}) is False
+    assert overnight.is_material({"risk": {"state": "elevated"}}) is False
     assert overnight.is_material({"risk": {"state": "calm"}}) is False
+    monkeypatch.setattr(overnight, "_host_live_source_admitted", lambda _: True)
+    assert overnight.is_material(synthetic(datetime.now(timezone.utc), change=-2.0))
+    assert not overnight.is_material(synthetic(datetime.now(timezone.utc), change=0.2))
 
 
 def test_tape_degrades_offline():
-    # conftest stubs yfinance off → the tape degrades to empty groups + a valid calm read, never raises
+    # Offline data is UNKNOWN, never a reassuring calm signal; no network required.
     from data_layer import overnight
     overnight.clear_cache()
     t = overnight.tape(force=True)
     assert t["live"] is False
     assert isinstance(t["groups"], dict) and "us_futures" in t["groups"]
-    assert t["risk"]["state"] == "calm"
+    assert t["risk"]["state"] == "unknown"
     assert "Overnight tape" in overnight.brief(t)
 
 
@@ -81,10 +87,15 @@ def test_get_overnight_tape_tool(monkeypatch):
     pytest.importorskip("claude_agent_sdk")
     from brain import bot_mcp
     from data_layer import overnight as ov
-    monkeypatch.setattr(ov, "tape", lambda force=False: {"risk": {"state": "calm"}, "groups": {}, "live": True})
+    # A model tool cannot promote an asserted live=True and calm label
+    # into an authenticated market-data observation.
+    monkeypatch.setattr(ov, "tape", lambda force=False: {
+        "risk": {"state": "calm"}, "groups": {}, "live": True,
+    })
     out = asyncio.run(bot_mcp.get_overnight_tape.handler({}))
     payload = json.loads(out["content"][0]["text"])
-    assert payload["risk"]["state"] == "calm"
+    assert payload["risk"]["state"] == "unknown"
+    assert payload["live"] is False
 
 
 # --------------------------------------------------------------------------- the watch loop
@@ -106,8 +117,12 @@ def test_watch_skips_when_tape_calm(iso, monkeypatch):
     from data_layer import overnight as ov
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
     paper_account.save_pending_target({"AAPL": 0.5}, "2026-06-23", portfolio_id="autonomous")
-    monkeypatch.setattr(ov, "tape", lambda force=False: {"risk": {"state": "calm", "reasons": ["x"]}, "groups": {}})
-    assert overnight.watch("autonomous")["skipped"] == "tape_calm"  # deterministic tripwire → no LLM
+    from datetime import datetime, timezone
+    from tests.test_overnight_source_admission import synthetic
+    monkeypatch.setattr(ov, "_host_live_source_admitted", lambda _: True)
+    calm = synthetic(datetime.now(timezone.utc), change=0.2)
+    monkeypatch.setattr(ov, "tape", lambda force=False: calm)
+    assert overnight.watch("autonomous")["skipped"] == "tape_calm"  # qualified, nonmaterial → no LLM
 
 
 def test_watch_fires_on_material_move(iso, monkeypatch):
@@ -115,9 +130,10 @@ def test_watch_fires_on_material_move(iso, monkeypatch):
     from data_layer import overnight as ov
     monkeypatch.setattr(settle, "is_open", lambda pid: False)
     paper_account.save_pending_target({"AAPL": 0.5}, "2026-06-23", portfolio_id="autonomous")
-    stressed = {"risk": {"state": "stressed", "reasons": ["US futures -2%"]},
-                "groups": {"us_futures": [{"name": "S&P 500 fut", "change_pct": -2.0}],
-                           "international": [], "vol": [], "fx_rates": []}}
+    from datetime import datetime, timezone
+    from tests.test_overnight_source_admission import synthetic
+    monkeypatch.setattr(ov, "_host_live_source_admitted", lambda _: True)
+    stressed = synthetic(datetime.now(timezone.utc), change=-2.0)
     monkeypatch.setattr(ov, "tape", lambda force=False: stressed)
     captured = {}
 
