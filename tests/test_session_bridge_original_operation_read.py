@@ -536,3 +536,44 @@ def test_qualified_original_aggregate_history_is_finite_and_fail_closed(setup):
         s.principal, "session_reply_read", {"read_ref": read_ref}))
     assert result["ok"] is False and result["error"]["code"] == "reply_unavailable"
     # No new SEND, retry, or parent ACK is involved.
+
+
+def test_installed_private_frames_share_signed_cursor_for_control_lifetime(setup):
+    """One trusted Control composition's per-frame providers can page the same READ."""
+    from common.session_bridge_private_contract import PRIVATE_SCHEMA
+    from integrations.session_bridge.installed import (
+        build_runtime_session_bridge, principal_frame)
+    s = setup
+    expected = populate(s)
+    key = b"x" * 32
+    options = dict(dialogue_socket_path=Path("/private/tmp/r2-cursor-frame-test.sock"))
+    first_owner = build_runtime_session_bridge(s.runtime, **options,
+                                                reference_cursor_key=key)
+    second_owner = build_runtime_session_bridge(s.runtime, **options,
+                                                 reference_cursor_key=key)
+    frame = {"schema": PRIVATE_SCHEMA, "tool": "session_reply_references",
+             "principal": principal_frame(s.principal),
+             "arguments": {"work_ref": "WS:WORKSPACE-AGENT-PROGRAM", "page_size": 1}}
+    before = events(s)
+    first = asyncio.run(first_owner.handle_frame(frame))
+    assert first["ok"] is True
+    assert [r["read_ref"] for r in first["data"]["references"]] == [expected]
+    assert first["data"]["status"] == "PARTIAL"
+    cursor = first["data"]["next_cursor"]
+    second = asyncio.run(second_owner.handle_frame({
+        **frame, "arguments": {**frame["arguments"], "cursor": cursor}}))
+    assert second["ok"] is True
+    assert second["data"]["status"] == "COMPLETE"
+    assert second["data"]["references"] == []
+
+    restarted_owner = build_runtime_session_bridge(
+        s.runtime, **options, reference_cursor_key=b"y" * 32)
+    restarted = asyncio.run(restarted_owner.handle_frame({
+        **frame, "arguments": {**frame["arguments"], "cursor": cursor}}))
+    assert restarted["ok"] is False
+    assert restarted["error"]["code"] == "reply_unavailable"
+    assert events(s) == before
+    for invalid in (b"short", "not-bytes", 123):
+        with pytest.raises(TypeError):
+            build_runtime_session_bridge(s.runtime, **options,
+                                         reference_cursor_key=invalid)

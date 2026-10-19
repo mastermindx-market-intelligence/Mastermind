@@ -137,7 +137,8 @@ class RuntimeSessionReturn:
 
     def __init__(self, runtime: Runtime, *, fabric: RuntimeFabricTargetProjector,
                  codex: RuntimeCodexTargetProjector, socket_path: Path,
-                 service_call=call_service, authorized_policies: AppPolicies | None = None):
+                 service_call=call_service, authorized_policies: AppPolicies | None = None,
+                 reference_cursor_key: bytes | None = None):
         if (type(runtime) is not Runtime or type(fabric) is not RuntimeFabricTargetProjector
                 or type(codex) is not RuntimeCodexTargetProjector
                 or not Path(socket_path).is_absolute() or not callable(service_call)):
@@ -145,7 +146,14 @@ class RuntimeSessionReturn:
         self.runtime, self.fabric, self.codex = runtime, fabric, codex
         self.socket_path, self.service_call = Path(socket_path), service_call
         self._trusted_read_pair = _trusted_read_pair(authorized_policies)
-        self._reference_cursor_key = secrets.token_bytes(32)
+        if reference_cursor_key is not None and (
+                type(reference_cursor_key) is not bytes or len(reference_cursor_key) != 32):
+            raise TypeError("trusted 32-byte session composition cursor key required")
+        # The installed Control composition shares this key across its
+        # per-frame providers; process restart rotates it automatically.
+        self._reference_cursor_key = (
+            reference_cursor_key if reference_cursor_key is not None
+            else secrets.token_bytes(32))
 
     def _target(self, target_ref):
         if target_ref.startswith("codex:"):

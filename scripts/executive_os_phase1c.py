@@ -2398,6 +2398,11 @@ def _service_from_config(
             # cross-policy reply downgrade dark, without disabling existing
             # exact-policy Session Bridge reads.
             session_read_policy_loader = None
+            # Control constructs a fresh per-frame provider. Keep one private
+            # HMAC cursor key for this one installed service composition so
+            # READ pagination works across frames but not across restarts.
+            from secrets import token_bytes as _session_cursor_random_bytes
+            session_reference_cursor_key = _session_cursor_random_bytes(32)
             if installed_profile == WEB_CEO_V3_PROFILE:
                 from ops.executive_os.executive_mcp_entry import (
                     installed_os_session_policy_source)
@@ -2551,7 +2556,8 @@ def _service_from_config(
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
-                    authorized_policies=trusted_policies)
+                    authorized_policies=trusted_policies,
+                    reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),

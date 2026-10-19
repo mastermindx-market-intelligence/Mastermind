@@ -1397,7 +1397,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            '4df0958868c945f32ca8e42d0d029c9b1e29888c06924736d02bc8d61818a2e2'):
+            'ec10d0ffa180d2fc6b026a634c1e6b7268fcef8f0b8cb1f40e3af1875f43cc2b'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
