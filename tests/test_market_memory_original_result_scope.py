@@ -229,3 +229,66 @@ else:
             # follow its aliases or touch the installed runtime generation.
             for path, _directories, _files in os.walk(base, followlinks=False):
                 os.chmod(path, 0o700)
+
+
+def test_artifact_child_binding_keeps_original_parent_under_sealed_root(staged_ext):
+    """The same path repair covers an ordinary artifact run assigned by a child."""
+    with tempfile.TemporaryDirectory(prefix="artifact-native-state-", dir=Path.home()) as directory:
+        base = Path(directory)
+        program = f"""
+import copy, json, os, sys
+from pathlib import Path
+sys.path.insert(0, {str(ROOT / 'ops/native_fabric/quota_continuity/rollout')!r})
+import native_generation
+base = Path({str(base)!r})
+owner = base/'kit/ext'
+state = owner/'state/remote_sub'
+state.mkdir(parents=True, mode=0o700)
+stage = Path({str(staged_ext.parent)!r})
+generation = native_generation.publish(stage, owner, json.loads((stage.parent/'native-manifest.json').read_bytes()))
+sys.path.insert(0, str(generation/'ext'))
+import original_delivery_collector as c
+root, parent, rid = 'inert-root', 'inert-child', 'inert-artifact-run'
+os.environ['CODEX_THREAD_ID'] = root
+support = state/(rid+'.support.json')
+manifest = {{name:c.sha((generation/'ext'/name).read_bytes())
+            for name in ('artifact_production.py','artifact_reader.py')}}
+support.write_bytes(c.canonical(manifest))
+digest = c.sha(c.canonical({{'schema':'remote-support-code.v1','files':manifest}}))
+packet = state/(rid+'.packet.fixture')
+packet.write_text(c.production.encode_packet('inert artifact', root=root, parent=parent,
+    run_id=rid, names=['cache.py'], support_digest=digest))
+log = state/(rid+'.log')
+events = ['LEASE_OK pool=glm', 'SUPPORT_VERSION_READY digest='+digest+' policy='+'1'*64,
+          'LAUNCH stdout=lanes_'+rid+'.stdout rc_file=ext/lanes_'+rid+'.rc cwd=~',
+          'LAUNCH_ATTEMPT attempt=1']
+log.write_text(''.join('2026-10-19T00:00Z [remote_sub id='+rid+' host=inert-host] '+x+'\\n' for x in events))
+(owner/'hosts.json').write_text(json.dumps({{'inert-host':{{'allowed_modes':['glm'],'ssh_alias':'inert-host'}}}}))
+binding = {{'schema':c.BINDING_SCHEMA,'run_id':rid,'root':root,'parent':parent,
+    'host':'inert-host','mode':'glm','requested_model':'glm-5.3-flash','cwd':'~',
+    'artifact_names':['cache.py'],'sources':{{n:{{'path':str(p),'sha256':c.sha(p.read_bytes())}}
+        for n,p in [('packet',packet),('log',log),('support',support)]}}}}
+path = base/'binding.json'
+def qualify(value):
+    path.write_bytes(c.canonical(value))
+    return c.load_binding(path, run_id=rid, root=root, parent=parent)
+assert qualify(binding)[3]['parent'] == parent
+alias = copy.deepcopy(binding)
+for item in alias['sources'].values():
+    item['path'] = str(generation/'ext/state/remote_sub'/Path(item['path']).name)
+assert qualify(alias)[3]['parent'] == parent
+os.environ['CODEX_THREAD_ID'] = parent
+try:
+    qualify(binding)
+except ValueError as error:
+    assert str(error) == 'original_native_root_required'
+else:
+    raise AssertionError('child identity substituted for the actual invoking root')
+"""
+        try:
+            result = subprocess.run([sys.executable, "-B", "-c", program],
+                                    capture_output=True, text=True, timeout=30)
+            assert result.returncode == 0, result.stdout + result.stderr
+        finally:
+            for path, _directories, _files in os.walk(base, followlinks=False):
+                os.chmod(path, 0o700)
