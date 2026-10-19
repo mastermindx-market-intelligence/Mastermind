@@ -160,6 +160,22 @@ def _continue_message_key(operation_key: str) -> str:
     return "asd-dot-continue-" + digest[:40]
 
 
+def _original_request_digest(operation_key: str) -> str:
+    """Exact canonical Runtime request digest, used only as a READ verifier.
+
+    This does not mint identifiers or authorize an operation. Public original
+    references must remain tied to the stored immutable request key.
+    """
+    if type(operation_key) is not str or _CONTINUE_KEY_RE.fullmatch(operation_key) is None:
+        raise ValueError("invalid original operation key")
+    material = json.dumps(
+        {"schema": "mastermind.session_bridge.continue_request.v1",
+         "operation_key": operation_key},
+        sort_keys=True, separators=(",", ":"), ensure_ascii=True,
+    ).encode("ascii")
+    return hashlib.sha256(material).hexdigest()
+
+
 def _native_reply_message_key(operation_key: str) -> str:
     """Owner native-reply key formula, used solely to validate recovery."""
 
@@ -827,7 +843,10 @@ class OsSessionTransportApp:
                                or len(row[key]) > 256
                                for key in expected - {"reference_only", "request_event_id"})
                         or _CONTINUE_KEY_RE.fullmatch(row["operation_key"]) is None
-                        or re.fullmatch(r"session-reply-[0-9a-f]{64}", row["read_ref"]) is None
+                        or row["read_ref"] != ("session-reply-" +
+                            _original_request_digest(row["operation_key"]))
+                        or row["request_ref"] != ("session-bridge-continue:" +
+                            _original_request_digest(row["operation_key"]))
                         or _SHA256_RE.fullmatch(row["request_revision"]) is None
                         or _WORK_REF_RE.fullmatch(row["work_ref"]) is None
                         or _ROOT_JOB_RE.fullmatch(row["root_job_id"]) is None

@@ -27,6 +27,7 @@ ROOT = "JOB-100"
 WORK = "WS:WORKSPACE-AGENT-PROGRAM"
 KEY = "session-continue-" + "b" * 64
 TARGET = "fabric_attempt:" + "a" * 64
+REQUEST_DIGEST = "1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e"
 SELECTION = {"work_ref": WORK, "root_job_id": ROOT}
 ARGS = {"target_ref": TARGET, "instruction": "Read the existing result.",
         "stop_condition": "Stop after reporting it.", "operation_key": KEY}
@@ -83,9 +84,9 @@ class Peer:
         self.references_result = {
             "schema": "mastermind.session_reply_references.v1",
             "status": "COMPLETE", "next_cursor": None, "high_water": 12,
-            "references": [{"read_ref": "session-reply-" + "a" * 64,
+            "references": [{"read_ref": "session-reply-" + REQUEST_DIGEST,
                             "operation_key": KEY,
-                            "request_ref": "session-bridge-continue:" + "a" * 64,
+                            "request_ref": "session-bridge-continue:" + REQUEST_DIGEST,
                             "request_event_id": 12,
                             "request_revision": "c" * 64,
                             "requested_at": "2026-10-18T00:00:00Z",
@@ -707,6 +708,8 @@ def test_original_references_foreign_projection_is_withheld(rsa_key):
 @pytest.mark.parametrize("change", [
     lambda data: data["references"][0].update(private_backend_payload="LEAK"),
     lambda data: data["references"][0].update(request_revision="not-a-hash"),
+    lambda data: data["references"][0].update(read_ref="session-reply-"+"a"*64),
+    lambda data: data["references"][0].update(request_ref="session-bridge-continue:"+"a"*64),
     lambda data: data["references"][0].update(target_ref="codex:unbound"),
     lambda data: data.update(next_cursor="foreign\nraw"),
     lambda data: data.update(high_water=True),
@@ -720,3 +723,12 @@ def test_original_reference_http_cannot_echo_malformed_private_rows(rsa_key, cha
     assert status == 503 and result["effect"] == "NONE"
     assert result["data"] is None
     assert len(peer.calls) == 1 and peer.calls[0]["tool"] == "session_reply_references"
+
+
+def test_original_reference_public_digest_matches_runtime_source_formula():
+    from control_plane.native_continuation import _request_key
+    from integrations.mastermind_executive_app.os_session_transport import (
+        _original_request_digest)
+    assert _original_request_digest(KEY) == _request_key(KEY) == REQUEST_DIGEST
+    with pytest.raises(ValueError):
+        _original_request_digest("session-continue-invalid")
