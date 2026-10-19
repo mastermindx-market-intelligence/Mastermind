@@ -75,7 +75,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _read_input(path: pathlib.Path) -> bytes:
-    """Read with O_NOFOLLOW; refuse symlinks, missing files, oversize, non-regular."""
+    """Read with O_NOFOLLOW; refuse symlinks, missing files, oversize, non-regular.
+
+    Loops until ``st_size`` bytes are read; a short read or premature EOF
+    refuses so the input's content cannot mutate between the fstat that
+    fixes the bound and the read that fills it.
+    """
 
     flags = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC
     eloop = getattr(errno, "ELOOP", 40)
@@ -96,7 +101,16 @@ def _read_input(path: pathlib.Path) -> bytes:
             _refuse("input exceeds 1 MiB bound")
         if info.st_size == 0:
             _refuse("input is empty")
-        return os.read(fd, info.st_size)
+        expected = info.st_size
+        view = bytearray(expected)
+        written = 0
+        while written < expected:
+            chunk = os.read(fd, expected - written)
+            if chunk == b"":
+                _refuse("input changed while reading")
+            view[written:written + len(chunk)] = chunk
+            written += len(chunk)
+        return bytes(view)
     finally:
         os.close(fd)
 
@@ -105,13 +119,17 @@ def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     seen: set[str] = set()
     for key, _value in pairs:
         if key in seen:
-            _refuse("duplicate top-level key in input")
+            _refuse("duplicate key in input")
         seen.add(key)
     # Build an ordered dict that preserves the original key order.
     ordered: dict[str, Any] = {}
     for key, value in pairs:
         ordered[key] = value
     return ordered
+
+
+def _refuse_constant(_name: str) -> Any:
+    _refuse("input contains a non-finite JSON number")
 
 
 def _parse_json(raw: bytes) -> dict[str, Any]:
@@ -121,7 +139,7 @@ def _parse_json(raw: bytes) -> dict[str, Any]:
         text = raw.decode("utf-8")
     except UnicodeDecodeError:
         _refuse("input is not UTF-8")
-    decoder = json.JSONDecoder(object_pairs_hook=_reject_duplicates)
+    decoder = json.JSONDecoder(object_pairs_hook=_reject_duplicates, parse_constant=_refuse_constant)
     try:
         document = decoder.decode(text)
     except json.JSONDecodeError:
@@ -145,11 +163,14 @@ def _validate_legacy(document: dict[str, Any]) -> int:
         _not_needed("workspace_control_room key absent")
     stanza = document["workspace_control_room"]
     if type(stanza) is dict and "transport" in stanza and "port" not in stanza:
-        # Already in the new shape; re-validate through it to confirm.
+        # Already in the new shape; re-validate through it to confirm. A
+        # malformed successor shape (transport mismatch, non-canonical
+        # socket_path, extra peer uid, ...) is a refused topology, not a
+        # "not needed" silent pass.
         try:
             validate_workspace_control_room(stanza, control_uid=int(raw_uid))
-        except ServiceError:
-            _not_needed("workspace_control_room already in unix/launchd shape")
+        except ServiceError as exc:
+            _refuse("workspace_control_room unix stanza fails the shared validator: " + str(exc))
         _not_needed("workspace_control_room already in unix/launchd shape")
     if not (type(stanza) is dict and set(stanza) == {"port"}):
         _refuse("workspace_control_room must be exactly {\"port\": int}")

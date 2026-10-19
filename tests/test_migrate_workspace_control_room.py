@@ -8,6 +8,7 @@ message on stderr, the summary JSON line on stdout.
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import os
 import pathlib
@@ -241,7 +242,7 @@ def test_refuses_duplicate_top_level_key(tmp_path):
     result = _run("--input", str(input_path), "--output", str(out))
     assert result.returncode == 2, (result.stdout, result.stderr)
     assert result.stderr.startswith(_REFUSE_PREFIX), result.stderr
-    assert "duplicate top-level key in input" in result.stderr
+    assert "duplicate key in input" in result.stderr
     assert not out.exists()
 
 
@@ -327,4 +328,177 @@ def test_not_needed_when_stanza_already_unix(tmp_path):
     assert result.stdout == ""
     assert result.stderr.startswith(_NOT_NEEDED_PREFIX)
     assert "already in unix/launchd shape" in result.stderr
+    assert not out.exists()
+
+
+# -- B1: malformed successor-shape unix stanza must be REFUSED, not _not_needed ----
+
+def _stanza_with(overrides: dict) -> dict:
+    stanza = dict(unix_stanza(450))
+    stanza.update(overrides)
+    return stanza
+
+
+def test_refuses_malformed_unix_stanza_with_bad_socket_path(tmp_path):
+    document = _make_legacy_config(tmp_path)
+    document.pop("workspace_control_room")
+    document["workspace_control_room"] = _stanza_with({
+        "socket_path": "/var/run/not-the-canonical.sock",
+    })
+    input_path = _write_input(tmp_path, document)
+    out = _output_path(tmp_path)
+    result = _run("--input", str(input_path), "--output", str(out))
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stderr.startswith(_REFUSE_PREFIX), result.stderr
+    assert "fails the shared validator" in result.stderr, result.stderr
+    assert "workspace Control Room topology refused" in result.stderr, result.stderr
+    assert not out.exists()
+
+
+def test_refuses_malformed_unix_stanza_with_extra_peer_uid(tmp_path):
+    document = _make_legacy_config(tmp_path)
+    document.pop("workspace_control_room")
+    document["workspace_control_room"] = _stanza_with({
+        "allowed_peer_uids": [450, 451],
+    })
+    input_path = _write_input(tmp_path, document)
+    out = _output_path(tmp_path)
+    result = _run("--input", str(input_path), "--output", str(out))
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stderr.startswith(_REFUSE_PREFIX), result.stderr
+    assert "fails the shared validator" in result.stderr, result.stderr
+    assert "workspace Control Room topology refused" in result.stderr, result.stderr
+    assert not out.exists()
+
+
+def test_refuses_malformed_unix_stanza_with_tcp_transport(tmp_path):
+    document = _make_legacy_config(tmp_path)
+    document.pop("workspace_control_room")
+    document["workspace_control_room"] = {
+        "transport": "tcp",
+        "socket_path": "/var/run/x.sock",
+        "launchd_socket_name": "X",
+        "allowed_peer_uids": [450],
+    }
+    input_path = _write_input(tmp_path, document)
+    out = _output_path(tmp_path)
+    result = _run("--input", str(input_path), "--output", str(out))
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stderr.startswith(_REFUSE_PREFIX), result.stderr
+    assert "fails the shared validator" in result.stderr, result.stderr
+    assert "workspace Control Room topology refused" in result.stderr, result.stderr
+    assert not out.exists()
+
+
+# -- B2: NaN / Infinity / -Infinity must be refused -----------------------------
+
+@pytest.mark.parametrize("spelling", ["NaN", "Infinity", "-Infinity"])
+def test_refuses_non_finite_number(tmp_path, spelling):
+    document = _make_legacy_config(tmp_path)
+    document["x"] = {"y": 0}
+    body_json = json.dumps(document)
+    body_json = body_json[:-1] + (',"x":' + spelling + '}')
+    input_path = tmp_path / "control.json"
+    input_path.write_bytes(body_json.encode())
+    out = _output_path(tmp_path)
+    result = _run("--input", str(input_path), "--output", str(out))
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stderr.startswith(_REFUSE_PREFIX), result.stderr
+    assert "non-finite JSON number" in result.stderr, result.stderr
+    assert not out.exists()
+
+
+# -- B3: duplicate-key hook fires for nested objects too ------------------------
+
+def test_refuses_duplicate_key_inside_nested_object(tmp_path):
+    document = _make_legacy_config(tmp_path)
+    document["workspace_acquisition"] = {"peer_uid": 1000, "policy": "strict"}
+    nested = document["workspace_acquisition"]
+    nested_json = json.dumps(nested, sort_keys=True)
+    # Inject a duplicate "peer_uid" key inside the nested object: replace
+    # `,"policy":"strict"` with `,"peer_uid":"dup1","peer_uid":"dup2","policy":"strict"`.
+    splice = ',"peer_uid":"dup1","peer_uid":"dup2"'
+    nested_with_dup = nested_json[:-1] + splice + "}"
+    raw_text = json.dumps(document)
+    raw_text = raw_text.replace(nested_json, nested_with_dup, 1)
+    input_path = tmp_path / "control.json"
+    input_path.write_bytes(raw_text.encode())
+    out = _output_path(tmp_path)
+    result = _run("--input", str(input_path), "--output", str(out))
+    assert result.returncode == 2, (result.stdout, result.stderr)
+    assert result.stderr.startswith(_REFUSE_PREFIX), result.stderr
+    assert "duplicate key in input" in result.stderr, result.stderr
+    assert not out.exists()
+
+
+# -- B4: read loop must drain the input; partial reads succeed byte-identically ---
+
+def test_read_input_collects_partial_reads_byte_identically(tmp_path, monkeypatch):
+    import importlib
+
+    legacy = _make_legacy_config(tmp_path, port=8787)
+    input_path = _write_input(tmp_path, legacy)
+    out = _output_path(tmp_path)
+
+    # First, run the tool normally and capture the expected output bytes.
+    expected = _run("--input", str(input_path), "--output", str(out))
+    assert expected.returncode == 0, (expected.stdout, expected.stderr)
+    expected_output_bytes = out.read_bytes()
+
+    # In-process: import the tool module and patch its os.read so each call
+    # returns at most 7 bytes. The migration must still succeed byte-identically.
+    spec = importlib.util.spec_from_file_location(
+        "migrate_workspace_control_room_under_test",
+        str(TOOL),
+    )
+    assert spec is not None and spec.loader is not None
+    tool_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool_module)
+    tool_module._import_phase1c()
+    real_read = tool_module.os.read
+
+    def _slow_read(fd, size):
+        chunk = real_read(fd, min(size, 7))
+        return chunk
+
+    monkeypatch.setattr(tool_module.os, "read", _slow_read)
+
+    out2 = tmp_path / "control.unix2.json"
+    rc = tool_module.main([
+        "migrate_workspace_control_room.py",
+        "--input", str(input_path),
+        "--output", str(out2),
+    ])
+    assert rc == 0
+    assert out2.read_bytes() == expected_output_bytes
+
+
+def test_read_input_refuses_when_eof_arrives_early(tmp_path, monkeypatch):
+    import importlib
+
+    legacy = _make_legacy_config(tmp_path, port=8787)
+    input_path = _write_input(tmp_path, legacy)
+    out = _output_path(tmp_path)
+
+    spec = importlib.util.spec_from_file_location(
+        "migrate_workspace_control_room_under_test",
+        str(TOOL),
+    )
+    assert spec is not None and spec.loader is not None
+    tool_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool_module)
+    tool_module._import_phase1c()
+
+    def _short_read(fd, size):
+        return b""
+
+    monkeypatch.setattr(tool_module.os, "read", _short_read)
+
+    with pytest.raises(SystemExit) as exit_info:
+        tool_module.main([
+            "migrate_workspace_control_room.py",
+            "--input", str(input_path),
+            "--output", str(out),
+        ])
+    assert exit_info.value.code == 2
     assert not out.exists()
