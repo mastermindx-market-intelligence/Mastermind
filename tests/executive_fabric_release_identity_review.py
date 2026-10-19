@@ -269,8 +269,11 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # shared-key canary exception in _validate_superseded_link. No new identity
 # literal; the count stays 3 and the existing producer's literal contract is
 # unchanged.
+# Re-pinned by CRROOM-INT for the F1 citation repair (line numbers in the
+# _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
+# token sites are unchanged in kind, spelling, and count.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "86d6851c6b72970be379387f4cd385414265f73a318b8e2a804ec79b9df582eb",
+    "sha256": "a7f6d12831066e526fae7fd59219cd0de0657e871b8a71eceda7acf342929472",
     "sites": ((73, 33, 55, "str", '_mastermind_[a-z0-9_]+'),
               (903, 46, 49, "int", "400"),
               (903, 66, 69, "int", "500")),
