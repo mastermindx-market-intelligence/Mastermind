@@ -104,7 +104,12 @@ Build the actual OS assets with real public client/config values. Stage Caddy us
 "python -m ops.executive_os.os_public_edge --source <build-dir> --relay-port <port>
 --out <new-candidate-file>". The renderer verifies the asset manifest against actual
 files. Its fixed template allows only OS assets, callback, canonical Workspace GETs
-and three Executive POSTs, bounds request bodies, removes spoofable forwarding
+and the exact three incumbent Executive POSTs plus three session READ-only
+POSTs (session/context, session/reply, session/references); session/send remains
+closed at the public edge under the held F2 pre-network authorization review.
+The existing transition planner accepts only the previously sealed three-path
+POST set or the exact six-path read-expanded set, and stages the latter without
+loading Caddy. It bounds request bodies, removes spoofable forwarding
 headers and fixes the upstream authority. Validate and qualify routing before the
 existing Caddy owner loads the candidate.
 

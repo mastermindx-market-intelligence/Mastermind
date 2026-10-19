@@ -12,7 +12,15 @@ import stat
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 
 HOST = "mcp.mastermind-x.com"
-POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
+# Historical installed edge paths remain an explicit, closed transition input.
+LEGACY_POST_ROUTES = ("/os/executive/context", "/os/executive/submit", "/os/executive/status")
+# These three new paths are READ-only under the incumbent verified OAuth owner.
+# Do not add /os/executive/session/send while the F2 client SEND guard is held.
+POST_ROUTES = LEGACY_POST_ROUTES + (
+    "/os/executive/session/context",
+    "/os/executive/session/reply",
+    "/os/executive/session/references",
+)
 GET_ROUTES = (
     "/os/", "/os/auth/callback", "/workspace/programs/current",
     "/workspace/work/current", "/workspace/mission/current",
@@ -47,7 +55,8 @@ def render(manifest: object, relay_port: int) -> str:
         raise ValueError("OS edge relay port refused")
     routes = asset_routes(manifest)
     template = _TEMPLATE.read_text(encoding="utf-8")
-    if template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 2:
+    if (template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 2
+            or template.count("path " + " ".join(POST_ROUTES) + "\n") != 1):
         raise ValueError("OS edge template differs")
     return template.replace("__ASSET_PATHS__", " ".join(routes)).replace("__RELAY_PORT__", str(relay_port))
 

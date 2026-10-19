@@ -5,7 +5,7 @@ import os
 import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
-from ops.executive_os.os_public_edge import asset_routes, render, stage
+from ops.executive_os.os_public_edge import POST_ROUTES, LEGACY_POST_ROUTES, asset_routes, render, stage
 
 
 def manifest(noir=False):
@@ -27,7 +27,13 @@ def test_both_accepted_topologies_have_exact_routes(noir):
     assert len(routes) == (9 if noir else 3)
     config = render(value, 49152)
     assert config.count("reverse_proxy 127.0.0.1:49152") == 2
-    assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
+    # All public POSTs are explicit paths. The new session routes are READ
+    # only; effectful session/send stays closed until the held F2 gate clears.
+    assert "path " + " ".join(POST_ROUTES) + "\n" in config
+    assert POST_ROUTES == LEGACY_POST_ROUTES + (
+        "/os/executive/session/context", "/os/executive/session/reply",
+        "/os/executive/session/references")
+    assert "/os/executive/session/send" not in config
     assert "max_size 64KB" in config
     assert config.rstrip().endswith("abort\n  }\n}")
     assert "/mcp" not in config

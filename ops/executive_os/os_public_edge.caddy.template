@@ -20,7 +20,7 @@ mcp.mastermind-x.com {
     }
     @post {
       method POST
-      path /os/executive/context /os/executive/submit /os/executive/status
+      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references
     }
     handle @post {
       request_body {
