@@ -89,15 +89,63 @@ describe("history security and pagination fences",()=>{
     expect(x.store.reserve).not.toHaveBeenCalled();
     expect(x.store.clearIfEqual).not.toHaveBeenCalled();
   });
-  it("paginates across empty PARTIAL pages and never manufactures answer cards",async()=>{
+  it("automatically traverses empty PARTIAL pages before displaying actual references",async()=>{
     const x=setup();
     x.readRefs.mockResolvedValueOnce({...page,data:{...page.data,status:"PARTIAL",
       references:[],next_cursor:"YWJjZA=="}}).mockResolvedValueOnce(page);
     render(<HistoricalOriginalAnswers {...x.props}/>);
-    fireEvent.click(await screen.findByRole("button",{name:"More original requests"}));
     expect(await screen.findByRole("button",{name:/Open original request/})).toBeTruthy();
     expect(x.readRefs).toHaveBeenCalledTimes(2);
     expect(x.readRefs.mock.calls[1][2]).toBe("YWJjZA==");
+    expect(x.qualified).not.toHaveBeenCalled();
+    expect(x.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+  it("caps sparse scanning to four read-only pages per user action",async()=>{
+    const x=setup();
+    const cursors = ["YQ==","Yg==","Yw==","ZA==","ZQ==","Zg==","Zw==","aA=="];
+    let n=0;
+    x.readRefs.mockImplementation(async()=>({...page,data:{...page.data,
+      status:"PARTIAL",references:[],next_cursor:cursors[n++]}}));
+    render(<HistoricalOriginalAnswers {...x.props}/>);
+    fireEvent.click(await screen.findByRole("button",{name:"More original requests"}));
+    await waitFor(()=>expect(x.readRefs).toHaveBeenCalledTimes(8));
+    expect(screen.getByRole("button",{name:"More original requests"})).toBeTruthy();
+    expect(x.qualified).not.toHaveBeenCalled();
+    expect(x.store.reserve).not.toHaveBeenCalled();
+    expect(x.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+  it("refuses a repeated cursor instead of looping forever",async()=>{
+    const x=setup();
+    x.readRefs.mockResolvedValue({...page,data:{...page.data,
+      status:"PARTIAL",references:[],next_cursor:"YQ==" }});
+    render(<HistoricalOriginalAnswers {...x.props}/>);
+    await screen.findByText(/Historical reference or answer unavailable/);
+    expect(x.readRefs).toHaveBeenCalledTimes(2);
+    expect(x.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+  it("rejects a changed high water across cursor pages",async()=>{
+    const x=setup();
+    x.readRefs.mockResolvedValueOnce({...page,data:{...page.data,
+      status:"PARTIAL",references:[],next_cursor:"YQ=="}})
+      .mockResolvedValueOnce({...page,data:{...page.data,high_water:6}});
+    render(<HistoricalOriginalAnswers {...x.props}/>);
+    await screen.findByText(/Historical reference or answer unavailable/);
+    expect(screen.queryByRole("button",{name:/Open original request/})).toBeNull();
+    expect(x.readRefs).toHaveBeenCalledTimes(2);
+  });
+  it("stops automatic sparse traversal when the auth generation changes mid-page",async()=>{
+    const x=setup();
+    let finish!: (raw:unknown) => void;
+    x.readRefs.mockResolvedValueOnce({...page,data:{...page.data,
+      status:"PARTIAL",references:[],next_cursor:"YQ=="}})
+      .mockImplementationOnce(()=>new Promise<unknown>(resolve=>{finish=resolve;}))
+      .mockResolvedValueOnce({...page,data:{...page.data,references:[]}});
+    const {rerender}=render(<HistoricalOriginalAnswers {...x.props}/>);
+    await waitFor(()=>expect(x.readRefs).toHaveBeenCalledTimes(2));
+    rerender(<HistoricalOriginalAnswers {...x.props} authRevision={2}/>);
+    await waitFor(()=>expect(x.readRefs).toHaveBeenCalledTimes(3));
+    await act(async()=>finish(page));
+    expect(screen.queryByRole("button",{name:/Open original request/})).toBeNull();
     expect(x.qualified).not.toHaveBeenCalled();
     expect(x.store.clearIfEqual).not.toHaveBeenCalled();
   });

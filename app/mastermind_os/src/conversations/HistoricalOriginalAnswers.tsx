@@ -15,9 +15,12 @@ const KEY = /^session-continue-[0-9a-f]{64}$/;
 const TARGET = /^fabric_attempt:[0-9a-f]{64}$/;
 const READ = /^session-reply-[0-9a-f]{64}$/;
 const CURSOR = /^[A-Za-z0-9_=-]{1,2048}$/;
+// Each Runtime page reads at most 256 event metadata rows. Never let an
+// automatic UI scan become an unbounded backend query or polling loop.
+const MAX_SPARSE_PAGES_PER_ACTION = 4;
 
 function validPage(raw: unknown, selection: MissionSelection): {
-  references: Row[]; next_cursor: string | null;
+  references: Row[]; next_cursor: string | null; high_water: number;
 } | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const envelope = raw as Record<string, unknown>;
@@ -52,7 +55,42 @@ function validPage(raw: unknown, selection: MissionSelection): {
         Number(r.request_event_id) > Number(page.high_water)) return null;
     rows.push(r as Row);
   }
-  return { references: rows, next_cursor: page.next_cursor as string | null };
+  return { references: rows, next_cursor: page.next_cursor as string | null,
+    high_water: Number(page.high_water) };
+}
+
+/** Skip empty global-ledger pages without claiming that REQUESTED implies REPLIED.
+ * One user action reads at most four finite 256-event windows. The high water
+ * is immutable across every cursor hop, and progress must strictly advance. */
+async function readSparsePages(
+  reading: NonNullable<MountedExecutiveSessionBinding["port"]["readOriginalReferences"]>,
+  selection: MissionSelection, signal: AbortSignal,
+  initialCursor: string | null = null, expectedWatermark: number | null = null,
+): Promise<{ references: Row[]; next_cursor: string | null; high_water: number }> {
+  let cursor = initialCursor;
+  let highWater = expectedWatermark;
+  const visited = new Set<string>();
+  for (let pageNo = 0; pageNo < MAX_SPARSE_PAGES_PER_ACTION; pageNo++) {
+    if (signal.aborted) throw new Error("READ_CANCELLED");
+    const raw = await reading(selection, signal, cursor ?? undefined);
+    if (signal.aborted) throw new Error("READ_CANCELLED");
+    const page = validPage(raw, selection);
+    if (!page || (highWater !== null && page.high_water !== highWater)) {
+      throw new Error("HISTORICAL_PAGE_INVALID");
+    }
+    highWater ??= page.high_water;
+    if (page.next_cursor !== null &&
+        (page.next_cursor === cursor || visited.has(page.next_cursor))) {
+      throw new Error("HISTORICAL_CURSOR_NO_PROGRESS");
+    }
+    if (page.references.length > 0 || page.next_cursor === null) {
+      return { ...page, high_water: highWater };
+    }
+    visited.add(page.next_cursor);
+    cursor = page.next_cursor;
+  }
+  if (highWater === null) throw new Error("HISTORICAL_PAGE_MISSING");
+  return { references: [], next_cursor: cursor, high_water: highWater };
 }
 
 /** Stateless historic READ presentation. Never touches the pending pointer store. */
@@ -86,6 +124,7 @@ export function HistoricalOriginalAnswers({
     qualifiedEpoch.rootJobId === selection.rootJobId;
   const [rows, setRows] = useState<Row[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
+  const [watermark, setWatermark] = useState<number | null>(null);
   const [selected, setSelected] = useState<{ row: Row; answer: QualifiedSessionAnswer } | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "unavailable">("idle");
   const epoch = useRef(0);
@@ -98,18 +137,17 @@ export function HistoricalOriginalAnswers({
     controller.current?.abort();
     controller.current = null;
     setQualifiedEpoch(null);
-    setRows([]); setCursor(null); setSelected(null); setState("idle");
+    setRows([]); setCursor(null); setWatermark(null); setSelected(null); setState("idle");
     if (!binding || !selection || !principalScope || !generation || !reading || !qualified) return;
     setQualifiedEpoch({binding,scope:principalScope,generation,authRevision,
       selectionSeq,workRef:selection.workRef,rootJobId:selection.rootJobId});
     const e = epoch.current;
     const c = new AbortController(); controller.current = c;
     setState("loading");
-    void reading(selection,c.signal).then(raw => {
+    void readSparsePages(reading,selection,c.signal).then(page => {
       if (c.signal.aborted || epoch.current !== e) return;
-      const page = validPage(raw, selection);
-      if (!page) { setState("unavailable"); return; }
-      setRows(page.references); setCursor(page.next_cursor); setState("idle");
+      setRows(page.references); setCursor(page.next_cursor);
+      setWatermark(page.high_water); setState("idle");
     }).catch(() => { if (!c.signal.aborted && epoch.current === e) setState("unavailable"); });
     return () => { c.abort(); epoch.current++; };
   }, [binding, selection?.workRef, selection?.rootJobId, principalScope, generation, authRevision, selectionSeq, reading, qualified]);
@@ -119,17 +157,14 @@ export function HistoricalOriginalAnswers({
     const e = epoch.current;
     const c = new AbortController(); controller.current?.abort(); controller.current = c;
     setState("loading");
-    void reading(selection,c.signal,cursor).then(raw => {
+    void readSparsePages(reading,selection,c.signal,cursor,watermark).then(page => {
       if (c.signal.aborted || epoch.current !== e) return;
-      const page = validPage(raw, selection);
-      if (!page || (page.next_cursor === cursor && page.references.length === 0)) {
-        setState("unavailable"); return;
-      }
       setRows(prev => {
         const seen = new Set(prev.map(row => row.read_ref));
         return [...prev,...page.references.filter(row => !seen.has(row.read_ref))].slice(0,128);
       });
-      setCursor(page.next_cursor); setState("idle");
+      setCursor(page.next_cursor); setWatermark(page.high_water);
+      setState("idle");
     }).catch(() => { if (!c.signal.aborted && epoch.current === e) setState("unavailable"); });
   };
 
