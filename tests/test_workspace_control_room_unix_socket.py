@@ -965,3 +965,45 @@ def test_installed_boot_refuses_owning_a_tcp_listener(
             tcp_socket.close()
         except Exception:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Gate: UnixControlRoomServer refuses a listener that is not AF_UNIX / SOCK_STREAM
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("case", ["tcp", "dgram"])
+def test_unix_server_class_refuses_non_unix_stream_listener(tmp_path, case):
+    """UnixControlRoomServer.__init__ MUST reject a listener whose family
+    is not AF_UNIX or whose type is not SOCK_STREAM. Otherwise disabling the
+    constructor's gate (e.g. ``if False and (...)``) would let the class
+    serve HTTP over a TCP listener, undermining the closed unix-peer model.
+
+    Two cases:
+      1. AF_INET SOCK_STREAM socket bound to ("127.0.0.1", 0) and listening.
+      2. AF_UNIX SOCK_DGRAM socket bound to a path under tmp_path.
+
+    Reuses the handler class and config object the file's existing
+    UnixControlRoomServer tests use (ChairmanControlRoomHandler and the
+    ServerConfig constructed in _spawn_unix_server).
+    """
+    if case == "tcp":
+        listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        listener.bind(("127.0.0.1", 0))
+        listener.listen(1)
+    else:
+        listener = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
+        listener.bind(os.fspath(tmp_path / "dgram.sock"))
+    try:
+        config = ccr.ServerConfig(
+            repo_root=Path("/tmp"), macro_root=None, bindings_path=None,
+            token="fixture", origin=UNIX_CONTROL_ROOM_ORIGIN, port=0, state_ttl=10.0,
+        )
+        with pytest.raises(ValueError, match="control room unix listener refused"):
+            ccr.UnixControlRoomServer(
+                listener, ccr.ChairmanControlRoomHandler, config,
+                allowed_peer_uids=frozenset({os.getuid()}),
+                peer_uid_fn=_peer_uid,
+            )
+    finally:
+        listener.close()
