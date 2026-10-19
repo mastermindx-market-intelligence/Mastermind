@@ -650,6 +650,8 @@ def test_u3_prejob_selecting_prejob_release_admission_a_passes(tmp_path, monkeyp
     # Stage the leaf's acceptance dir with the pre-Job prefix (only two receipts).
     leaf_root = runtime / "control/acceptance" / S
     leaf_root.mkdir(parents=True, exist_ok=True, mode=0o700)
+    # prejob_evidence also requires control/acceptance itself at 0o700; mkdir(parents=True) follows the umask.
+    leaf_root.parent.chmod(0o700)
     (leaf_root / "nonexecutive-launchd-before.json").write_text(json.dumps(launchd_before_receipt()))
     (leaf_root / "nonexecutive-launchd-before.json").chmod(0o400)
     (leaf_root / "protected-group-membership.json").write_text(json.dumps(group_receipt()))
