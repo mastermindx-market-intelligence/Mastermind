@@ -569,3 +569,82 @@ def test_argv_newline_does_not_forge_artifact_header(tmp_path: Path):
     )
     assert argv_line is not None, f"no argv line in artifact:\n{artifact}"
     assert "\n" not in argv_line, f"argv line must contain no newline: {argv_line!r}"
+
+
+# --- PR 1637 hardening (f): acceptance receipts are write-once -------------
+
+def _receipt_entries(root: Path) -> list[str]:
+    return sorted(entry.name for entry in root.iterdir())
+
+
+def test_write_bytes_refuses_existing_destination_and_leaves_it_unchanged(tmp_path):
+    instance = _acceptance(tmp_path)
+    destination = instance._write_bytes("receipt.json", b"first\n")
+    before = destination.lstat()
+    with pytest.raises(acceptance.AcceptanceError, match="acceptance receipt already exists"):
+        instance._write_bytes("receipt.json", b"second\n")
+    after = destination.lstat()
+    assert destination.read_bytes() == b"first\n"
+    assert (after.st_ino, after.st_size, after.st_mtime_ns, after.st_ctime_ns) == (
+        before.st_ino, before.st_size, before.st_mtime_ns, before.st_ctime_ns)
+    assert after.st_nlink == 1
+    assert stat.S_IMODE(after.st_mode) == 0o400
+    assert _receipt_entries(instance.receipt_root) == ["receipt.json"]
+
+
+def test_write_bytes_refuses_dangling_symlink_destination(tmp_path):
+    instance = _acceptance(tmp_path)
+    missing = tmp_path / "elsewhere" / "target.json"
+    (instance.receipt_root / "receipt.json").symlink_to(missing)
+    with pytest.raises(acceptance.AcceptanceError, match="acceptance receipt already exists"):
+        instance._write_bytes("receipt.json", b"payload\n")
+    assert os.readlink(instance.receipt_root / "receipt.json") == str(missing)
+    assert not missing.parent.exists()
+    assert _receipt_entries(instance.receipt_root) == ["receipt.json"]
+
+
+def test_write_bytes_leaves_one_link_and_no_temporary(tmp_path):
+    instance = _acceptance(tmp_path)
+    destination = instance._write_bytes("receipt.json", b"payload\n")
+    info = destination.lstat()
+    assert destination.read_bytes() == b"payload\n"
+    assert stat.S_ISREG(info.st_mode) and info.st_nlink == 1
+    assert stat.S_IMODE(info.st_mode) == 0o400
+    assert (info.st_uid, info.st_gid) == (os.geteuid(), os.getegid())
+    assert _receipt_entries(instance.receipt_root) == ["receipt.json"]
+
+
+def test_write_json_replace_rewrites_only_when_requested(tmp_path):
+    instance = _acceptance(tmp_path)
+    instance._write_json("secret-canary-envelope.json", {"generation": 1})
+    destination = instance._write_json(
+        "secret-canary-envelope.json", {"generation": 2}, replace=True)
+    info = destination.lstat()
+    assert json.loads(destination.read_text()) == {"generation": 2}
+    assert info.st_nlink == 1 and stat.S_IMODE(info.st_mode) == 0o400
+    assert _receipt_entries(instance.receipt_root) == ["secret-canary-envelope.json"]
+
+
+def test_only_the_secret_canary_envelope_receipt_is_rewritable():
+    import ast
+    tree = ast.parse(MODULE_PATH.read_text(encoding="utf-8"))
+    parents = {child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)}
+    sites = []
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"_write_json", "_write_bytes"}):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg is None or keyword.arg == "replace":
+                enclosing = parents.get(node)
+                while enclosing is not None and not isinstance(
+                        enclosing, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                    enclosing = parents.get(enclosing)
+                first = node.args[0] if node.args else None
+                sites.append((getattr(enclosing, "name", None),
+                              first.value if isinstance(first, ast.Constant) else None,
+                              ast.unparse(keyword.value)))
+    assert sorted(sites, key=repr) == sorted([
+        ("_write_json", None, "replace"),
+        ("install_secret_canary_receipt", "secret-canary-envelope.json", "True"),
+    ], key=repr)

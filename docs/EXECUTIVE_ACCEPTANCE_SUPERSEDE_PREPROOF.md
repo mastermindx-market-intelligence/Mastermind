@@ -60,10 +60,18 @@ Strict checks that remain exactly as strong:
   six-key receipts).
 - `extract` ownership/mode/nlink/ACL/S_ISREG checks for every receipt
   and the optional `.txt`; size cap 256 KiB on the optional failure
-  artifact; no decode, parse, or print of its bytes.
-- Trusted canonical `Runtime` `/var` alias handling and the namespace
-  before/after identity recheck (`interrupted acceptance namespace changed`)
-  are unchanged.
+  artifact; no decode, parse, or print of its bytes. Presence of the
+  optional `.txt` is decided by its directory entry, and any entry that
+  is not a regular file (a symlink, dangling or not, or a FIFO) refuses
+  with `interrupted acceptance receipt is unsafe` before it is opened.
+- `awaiting-canary-status.json` must be the verbatim Control `status`
+  response that `start_and_attest_services` persists: `ok` is `true` and
+  `result.service_state` is `AWAITING_CANARY`, else
+  `interrupted acceptance did not reach AWAITING_CANARY`.
+- Trusted canonical `Runtime` `/var` alias handling is unchanged. The
+  namespace before/after identity recheck (`interrupted acceptance
+  namespace changed`) covers both directories and every receipt read,
+  including the optional `.txt`, as `prejob_evidence` does.
 - `recovery_permitted`, the `v1` predecessor-recovery path, and any
   V1-specific grant stay refused.
 

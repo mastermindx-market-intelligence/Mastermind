@@ -1276,7 +1276,7 @@ class Acceptance:
             "TZ=UTC",
         ]
 
-    def _write_bytes(self, name: str, payload: bytes) -> Path:
+    def _write_bytes(self, name: str, payload: bytes, *, replace: bool = False) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
             raise AcceptanceError("unsafe acceptance receipt name")
         destination = self.receipt_root / name
@@ -1298,15 +1298,25 @@ class Acceptance:
             os.close(descriptor)
         os.chown(temporary, self.control_identity.pw_uid, self.control_group.gr_gid)
         os.chmod(temporary, 0o400)
-        temporary.replace(destination)
+        try:
+            if replace:
+                os.replace(temporary, destination)
+            else:
+                # Receipts are write-once: link() refuses an existing destination
+                # (including a dangling symlink) where replace() would clobber it.
+                os.link(temporary, destination)
+        except FileExistsError:
+            raise AcceptanceError("acceptance receipt already exists") from None
+        finally:
+            temporary.unlink(missing_ok=True)
         return destination
 
-    def _write_json(self, name: str, value: Any) -> Path:
+    def _write_json(self, name: str, value: Any, *, replace: bool = False) -> Path:
         payload = (
             json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
             + "\n"
         ).encode("utf-8")
-        return self._write_bytes(name, payload)
+        return self._write_bytes(name, payload, replace=replace)
 
     def _redact_failure_stream(self, payload: bytes) -> str:
         """Render one bounded, redacted stream for the failure artifact.
@@ -2457,7 +2467,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         os.chown(temporary, self.control_identity.pw_uid, self.control_group.gr_gid)
         os.chmod(temporary, 0o400)
         temporary.replace(destination)
-        self._write_json("secret-canary-envelope.json", envelope)
+        # Every live canary activation (_activate_live_canary) re-records its
+        # envelope, so this is the one receipt rewritten in place; all other
+        # receipts are write-once.
+        self._write_json("secret-canary-envelope.json", envelope, replace=True)
 
     def _assert_process_principal(self, pid: int, uid: int, gid: int, label: str) -> None:
         completed = _run(

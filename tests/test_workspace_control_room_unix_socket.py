@@ -47,7 +47,7 @@ from scripts.chairman_control_room import (
     UNIX_CONTROL_ROOM_HOST, UNIX_CONTROL_ROOM_ORIGIN,
 )
 from tests.executive_installed_control_fixture import (
-    boot_installed_control, installed_control_config, unix_listener,
+    boot_installed_control, egid_socket_dir, installed_control_config, unix_listener,
     UnixHTTPConnection, unix_stanza,
 )
 from tests.test_executive_fabric_composition import root_stats
@@ -337,7 +337,7 @@ def test_custody_symlink_refused(tmp_path, tmp_unix_sock, monkeypatch):
     # the lstat step, which observes S_IFLNK.
     listener_fd_was = listener.fileno()
     # Build a real socket file elsewhere, then swap.
-    other_dir = tempfile.mkdtemp(prefix="crr", dir="/tmp")
+    other_dir = egid_socket_dir()
     target = os.path.join(other_dir, "target.sock")
     target_listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     target_listener.bind(target)
@@ -981,19 +981,22 @@ def test_unix_server_class_refuses_non_unix_stream_listener(tmp_path, case):
 
     Two cases:
       1. AF_INET SOCK_STREAM socket bound to ("127.0.0.1", 0) and listening.
-      2. AF_UNIX SOCK_DGRAM socket bound to a path under tmp_path.
+      2. AF_UNIX SOCK_DGRAM socket bound in a short /tmp directory
+         (tmp_path can exceed the 104-byte macOS AF_UNIX path limit).
 
     Reuses the handler class and config object the file's existing
     UnixControlRoomServer tests use (ChairmanControlRoomHandler and the
     ServerConfig constructed in _spawn_unix_server).
     """
+    dgram_dir = None
     if case == "tcp":
         listener = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         listener.bind(("127.0.0.1", 0))
         listener.listen(1)
     else:
         listener = socket.socket(socket.AF_UNIX, socket.SOCK_DGRAM)
-        listener.bind(os.fspath(tmp_path / "dgram.sock"))
+        dgram_dir = egid_socket_dir()
+        listener.bind(os.path.join(dgram_dir, "dgram.sock"))
     try:
         config = ccr.ServerConfig(
             repo_root=Path("/tmp"), macro_root=None, bindings_path=None,
@@ -1007,3 +1010,19 @@ def test_unix_server_class_refuses_non_unix_stream_listener(tmp_path, case):
             )
     finally:
         listener.close()
+        if dgram_dir is not None:
+            shutil.rmtree(dgram_dir, ignore_errors=True)
+
+
+def test_unix_listener_dir_and_socket_take_the_process_egid():
+    """BSD/macOS gives a new file its parent directory's gid (/tmp is root:wheel)
+    where Linux gives the creator's egid; the fixture re-groups its directory so
+    the production socket-gid check runs unchanged on both."""
+    listener, path = unix_listener()
+    try:
+        assert os.lstat(os.path.dirname(path)).st_gid == os.getegid()
+        assert os.lstat(path).st_gid == os.getegid()
+    finally:
+        listener.close()
+        os.unlink(path)
+        os.rmdir(os.path.dirname(path))

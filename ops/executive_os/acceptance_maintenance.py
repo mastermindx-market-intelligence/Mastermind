@@ -1091,8 +1091,19 @@ def preproof_evidence(sha: str) -> tuple[str, dict]:
                 raise _nondict()
             envelope_value = value
             valid = True
-        elif core_name in {"awaiting-canary-status.json", "failure-control-status.json",
-                           "worker-broker-startup.json"}:
+        elif core_name == "awaiting-canary-status.json":
+            # Acceptance.start_and_attest_services persists the verbatim Control
+            # status response ({"ok": true, "result": {...}}) and refuses unless
+            # result.service_state is AWAITING_CANARY before it records the
+            # envelope, so a genuine pre-proof prefix always carries that state.
+            if type(value) is not dict:
+                raise _nondict()
+            control_result = value.get("result")
+            if (value.get("ok") is not True or type(control_result) is not dict
+                    or control_result.get("service_state") != "AWAITING_CANARY"):
+                raise MaintenanceError("interrupted acceptance did not reach AWAITING_CANARY")
+            valid = True
+        elif core_name in {"failure-control-status.json", "worker-broker-startup.json"}:
             # Receipts persisted from a Control response or broker status write
             # the parsed value verbatim; the bounded checked shape is only the
             # top level dict.
@@ -1132,16 +1143,25 @@ def preproof_evidence(sha: str) -> tuple[str, dict]:
         manifest[core_name] = hashlib.sha256(raw).hexdigest()
     for artifact in sorted(_PREPROOF_OPTIONAL_ARTIFACTS):
         optional = path / artifact
-        if not optional.exists():
+        # Presence is the directory entry, not exists(): exists() follows a
+        # symlink, so a dangling one would be skipped instead of refused.
+        if artifact not in names:
             continue
-        if optional.is_symlink():
+        try:
+            initial = optional.lstat()
+        except FileNotFoundError:
+            raise MaintenanceError("interrupted acceptance namespace changed") from None
+        if not stat.S_ISREG(initial.st_mode):
+            # Symlink (dangling or not), FIFO, directory or device: refuse
+            # before any open, which could follow it or block on it.
             raise MaintenanceError("interrupted acceptance receipt is unsafe")
         fd = os.open(optional, os.O_RDONLY | os.O_NOFOLLOW)
         try:
             before = os.fstat(fd)
         finally:
             os.close(fd)
-        if (not stat.S_ISREG(before.st_mode) or before.st_uid != uid
+        if (_identity(before) != _identity(initial)
+                or not stat.S_ISREG(before.st_mode) or before.st_uid != uid
                 or before.st_gid != gid or before.st_nlink != 1
                 or stat.S_IMODE(before.st_mode) != 0o400
                 or has_macos_acl(optional)
@@ -1155,7 +1175,7 @@ def preproof_evidence(sha: str) -> tuple[str, dict]:
         if _identity(optional.lstat()) != _identity(before):
             raise MaintenanceError("interrupted acceptance receipt is unsafe")
         manifest[artifact] = hashlib.sha256(raw).hexdigest()
-    if (any(_identity(p.lstat()) != identity for p, identity in directories)
+    if (any(_identity(p.lstat()) != identity for p, identity in directories + files)
             or {item.name for item in path.iterdir()} != names
             or (alias is not None and
                 (_identity(_MACOS_VAR_ALIAS.lstat()), os.readlink(_MACOS_VAR_ALIAS)) != alias)):

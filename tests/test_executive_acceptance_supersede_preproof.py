@@ -738,3 +738,88 @@ def test_u6_existing_test_modules_load_unmodified():
     assert result.returncode == 0, combined[-2000:]
     for module in modules:
         assert module in result.stdout, module
+
+
+# --- PR 1637 hardening (a)(b)(c) -----------------------------------------
+
+@pytest.mark.parametrize("swap", ["rewrite", "touch", "rename-swap"])
+def test_r23_receipt_swapped_before_namespace_recheck_refuses(tmp_path, monkeypatch, swap):
+    """A core receipt replaced after its own read but before the final namespace
+    recheck is refused, exactly as prejob_evidence rechecks files."""
+    d, selected, before, artifacts, canary, bundle, root, envelope_value = fixture(tmp_path, monkeypatch)
+    from ops.executive_os import autonomy_control
+    real_root_json = autonomy_control._root_json
+    victim = root / "launchd-principals.json"
+    state = {"swapped": False}
+
+    def swapping_root_json(path, **kwargs):
+        result = real_root_json(path, **kwargs)
+        if Path(path).name == "worker-broker-startup.json" and not state["swapped"]:
+            state["swapped"] = True
+            if swap == "rewrite":
+                victim.chmod(0o600)
+                victim.write_text(json.dumps(launchd_principals()) + " ")
+                victim.chmod(0o400)
+            elif swap == "touch":
+                info = victim.lstat()
+                os.utime(victim, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
+            else:
+                replacement = tmp_path / "launchd-principals.replacement"
+                replacement.write_text(json.dumps(launchd_principals()))
+                replacement.chmod(0o400)
+                os.rename(replacement, victim)
+        return result
+
+    monkeypatch.setattr(autonomy_control, "_root_json", swapping_root_json)
+    with pytest.raises(m.MaintenanceError, match="interrupted acceptance namespace changed"):
+        m.preproof_evidence(S)
+    assert state["swapped"] is True
+
+
+@pytest.mark.parametrize("entry", ["dangling", "regular-target", "fifo"])
+def test_r24_optional_artifact_that_is_not_a_regular_file_refuses(tmp_path, monkeypatch, entry):
+    """Presence of the optional failure artifact is its directory entry; any
+    entry that is not a regular file refuses before it is opened or skipped."""
+    d, selected, before, artifacts, canary, bundle, root, envelope_value = fixture(tmp_path, monkeypatch)
+    optional = root / "host-service-status-failure.txt"
+    if entry == "dangling":
+        optional.symlink_to(tmp_path / "absent-failure.txt")
+    elif entry == "regular-target":
+        target = tmp_path / "failure-target.txt"
+        target.write_bytes(b"status.sh failed: exit 1\n")
+        target.chmod(0o400)
+        optional.symlink_to(target)
+    else:
+        os.mkfifo(optional, 0o400)
+    with pytest.raises(m.MaintenanceError, match="interrupted acceptance receipt is unsafe"):
+        m.preproof_evidence(S)
+
+
+@pytest.mark.parametrize("shape", ["ready", "quarantined", "missing-state", "not-ok",
+                                   "ok-missing", "ok-truthy", "result-list"])
+def test_r25_awaiting_canary_status_must_show_awaiting_canary(tmp_path, monkeypatch, shape):
+    """awaiting-canary-status.json is the verbatim Control status response
+    start_and_attest_services persists ({"ok": true, "result": {...}}); only
+    result.service_state == "AWAITING_CANARY" is a pre-proof prefix."""
+    d, selected, before, artifacts, canary, bundle, root, envelope_value = fixture(tmp_path, monkeypatch)
+    value = control_status_response()
+    if shape == "ready":
+        value["result"]["service_state"] = "READY"
+    elif shape == "quarantined":
+        value["result"]["service_state"] = "QUARANTINED"
+    elif shape == "missing-state":
+        del value["result"]["service_state"]
+    elif shape == "not-ok":
+        value["ok"] = False
+    elif shape == "ok-missing":
+        del value["ok"]
+    elif shape == "ok-truthy":
+        value["ok"] = 1
+    else:
+        value["result"] = []
+    receipt = root / "awaiting-canary-status.json"
+    receipt.chmod(0o600)
+    receipt.write_text(json.dumps(value))
+    receipt.chmod(0o400)
+    with pytest.raises(m.MaintenanceError, match="interrupted acceptance did not reach AWAITING_CANARY"):
+        m.preproof_evidence(S)

@@ -26,6 +26,7 @@ from scripts.chairman_control_room import UNIX_CONTROL_ROOM_HOST
 
 __all__ = [
     "unix_listener",
+    "egid_socket_dir",
     "UnixHTTPConnection",
     "unix_stanza",
     "installed_control_config",
@@ -58,6 +59,20 @@ def spawn_workspace_room_listener(monkeypatch, *, socket_path=None):
     return None, socket_path
 
 
+def egid_socket_dir(prefix: str = "crr") -> str:
+    """A fresh short directory under /tmp whose gid is this process's egid.
+
+    BSD/macOS gives a new file its parent directory's gid (/tmp is root:wheel),
+    where Linux gives the creator's egid. Production custody requires the
+    socket gid to equal the configured group, so test-owned socket
+    directories are re-grouped to the egid instead of loosening that check.
+    """
+
+    base = tempfile.mkdtemp(prefix=prefix, dir="/tmp")
+    os.chown(base, -1, os.getegid())
+    return base
+
+
 def unix_listener():
     """Spawn an AF_UNIX SOCK_STREAM listening socket on a short tmp path.
 
@@ -68,7 +83,7 @@ def unix_listener():
     mode ``0o600``. Callers clean up with the returned ``path``.
     """
 
-    base = tempfile.mkdtemp(prefix="crr", dir="/tmp")
+    base = egid_socket_dir()
     path = os.path.join(base, "room.sock")
     listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     listener.bind(path)
@@ -284,7 +299,7 @@ def boot_installed_control(tmp_path, monkeypatch, root_stats, router, *, during_
     # Pre-bind the AF_UNIX listener; the production code activates it via
     # cli.activate_launchd_socket(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME).
     workspace_socket_path = os.path.join(
-        tempfile.mkdtemp(prefix="crr-boot", dir="/tmp"), "room.sock")
+        egid_socket_dir("crr-boot"), "room.sock")
     raw["workspace_control_room"] = unix_stanza(
         int(raw["control_uid"]), socket_path=workspace_socket_path)
     # App keys (the loader requires the entire set if workspace_acquisition

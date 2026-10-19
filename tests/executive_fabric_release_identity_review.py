@@ -57,7 +57,7 @@ REVIEWED_FILES = {
                                                                                              90,
                                                                                              'int',
                                                                                              '0o700'))},
- 'ops/executive_os/acceptance.py': {'sha256': '94e56d5bd1bc7aeda0c43f31235b4815878112235104c16ff9fbd103507f2648',
+ 'ops/executive_os/acceptance.py': {'sha256': '6bb540de6bafd49b08ae0eb085c5e9dd6ddd67e9c9de92549850f6809d09672b',
                                     # Re-pinned for argv redaction + newline flattening in the
                                     # failure artifact: _redact_failure_text extracted from
                                     # _redact_failure_stream, argv_text now redacted and
@@ -69,6 +69,7 @@ REVIEWED_FILES = {
                                     # assert -> raise on _build_failure_payload): the 21 reviewed
                                     # principal/UID literals shifted by +3 lines from the new
                                     # _FAILURE_CONTROL_CHARS_RE definition; no new literal added.
+                                    # Re-pinned 2026-10-19 (PR 1637 hardening): write-once _write_bytes; sites unchanged.
                                     'sites': ((887, 59, 62, 'int', '454'),
                                               (887, 64, 67, 'int', '455'),
                                               (887, 69, 72, 'int', '456'),
@@ -277,8 +278,9 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned by CRROOM-INT for the F1 citation repair (line numbers in the
 # _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
 # token sites are unchanged in kind, spelling, and count.
+# Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "a7f6d12831066e526fae7fd59219cd0de0657e871b8a71eceda7acf342929472",
+    "sha256": "3c45fc1c851576e5260f4544c3329915b4b3ce0efdaadf8d3ad002546acd4bc6",
     "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
               (903, 46, 49, "int", "400"),
               (903, 66, 69, "int", "500")),
