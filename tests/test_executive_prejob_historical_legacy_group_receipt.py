@@ -2,9 +2,12 @@
 
 ``supersede_prejob_v1`` descriptors minted before the eight-key receipt (the Oct 11
 ``protected-group-membership.json`` generation) seal ``prejob_evidence_sha256`` over those
-receipt bytes. The carry-chain walk re-validates such links as ``historical``; every candidate
-path (``prepare``, acceptance start) keeps requiring the current eight-key form. Exactly two
-generations are admitted; any other shape is refused with the same schema-drift error.
+receipt bytes. The carry-chain walk (``validate_prior_carry_binding``, the single
+``historical=True`` site) re-validates such links as ``historical``. ``prepare`` and the strict
+``validate_superseded_binding`` check in ``Maintenance.__init__`` leave the flag unset and keep
+requiring the current eight-key form; at acceptance start the walk also visits the candidate's
+own selected link once, and the strict check that follows it still refuses the legacy form.
+Exactly two generations are admitted; any other shape is refused with the same schema-drift error.
 """
 import argparse
 import ast
@@ -119,7 +122,7 @@ def test_full_carry_walk_admits_a_sealed_prejob_link_of_either_generation(tmp_pa
     m.validate_prior_carry_binding(future)
     # The sealed link was recomputed through the historical flag and matched its sealed digest.
     assert calls == [(S, {"historical": True}, d["prejob_evidence_sha256"])]
-    # The same descriptor reached directly (a candidate shape) is not given the legacy shape.
+    # The same descriptor validated without the flag (the strict candidate call) refuses the legacy shape.
     if generation == "legacy":
         with pytest.raises(m.MaintenanceError, match=SCHEMA_DRIFT):
             m.validate_superseded_binding(d, before=before, artifacts=artifacts, prior_canary=canary)
@@ -268,6 +271,10 @@ def test_acceptance_start_requires_the_current_receipt_shape(tmp_path, monkeypat
         (new / name).write_bytes((bundle / name).read_bytes())
         (new / name).chmod(0o400)
     m.write_sealed(new / "descriptor.json", d, public=True)
+    # The carry walk at the top of ``Maintenance.__init__`` is stubbed out (its prior-carry material
+    # is out of scope here). In production that walk is the historical path and would admit the
+    # legacy form for this link once; the refusal asserted below comes from the strict
+    # ``validate_superseded_binding`` check that follows it, which does not set ``historical``.
     monkeypatch.setattr(m, "validate_prior_carry_binding", lambda descriptor: None)
     monkeypatch.setattr(m, "require_stopped", lambda: None)
     monkeypatch.setattr(m, "verify_inventory", lambda value: None)
