@@ -141,6 +141,7 @@ log.write_text(''.join('2026-10-19T00:00Z [remote_sub id='+rid+' host=inert-host
 (owner/'hosts.json').write_text(json.dumps({{'inert-host':{{'allowed_modes':['minimax'],'ssh_alias':'inert-host'}}}}))
 scope = {{'root':root,'parent':root,'host':'inert-host','packet_path':str(packet),
          'packet_sha256':collector.sha(packet.read_bytes()),'support_digest':support_digest,
+         'destination':str(base/'collection'),
          'source_pins':{{'log':collector.sha(log.read_bytes()),'support':collector.sha(support.read_bytes())}},
          'lease_witness':{{'path':str(lease),'sha256':collector.sha(lease.read_bytes())}}}}
 collector.PLAIN_SCOPES[rid] = scope
@@ -157,6 +158,27 @@ alias_binding = copy.deepcopy(binding)
 for name in ('log','support'):
     alias_binding['sources'][name]['path'] = str(generation/'ext/state/remote_sub'/Path(binding['sources'][name]['path']).name)
 assert qualify(alias_binding)[3]['run_id'] == rid
+collection = base/'collection'
+collection.mkdir(mode=0o700)
+def read_inert_collection(value):
+    chunks = [('binding.json', collector.canonical(value)), ('stdout.000', b'inert review'),
+              ('process.json', b'{{}}'), ('returncode.txt', b'0\\n')]
+    files = []
+    for name, raw in chunks:
+        (collection/name).write_bytes(raw)
+        files.append({{'local_name':name, 'bytes':len(raw), 'sha256':collector.sha(raw)}})
+    receipt = {{'schema':collector.RECEIPT_SCHEMA,'state':'COMPLETE','delivery_verified':True,
+               'worker_terminal_proof':True,'root':root,'parent':root,'run_id':rid,
+               'original_operation_mutated':False,'host':'inert-host','mode':'minimax',
+               'artifacts':[],'artifact_manifest':None,'files':files,'stdout_chunks':['stdout.000'],
+               'binding_sha256':files[0]['sha256'],'stdout_bytes':len(chunks[1][1]),
+               'stdout_sha256':files[1]['sha256']}}
+    raw = collector.canonical(receipt)
+    path = collection/'receipt.json'
+    path.write_bytes(raw)
+    return collector.read_collection(path, expected_sha256=collector.sha(raw), run_id=rid, root=root, parent=root)
+assert read_inert_collection(binding) == b'inert review'
+assert read_inert_collection(alias_binding) == b'inert review'
 outside = copy.deepcopy(binding)
 outside['sources']['log']['path'] = str(base/log.name)
 try:
@@ -165,6 +187,12 @@ except ValueError as error:
     assert str(error) == 'original_source_path_invalid'
 else:
     raise AssertionError('accepted a log outside the original state owner')
+try:
+    read_inert_collection(outside)
+except ValueError as error:
+    assert str(error) == 'plain_collection_source_pin_changed'
+else:
+    raise AssertionError('accepted a collection binding outside its original state owner')
 lease.write_bytes(b'changed inert witness')
 try:
     qualify(binding)
