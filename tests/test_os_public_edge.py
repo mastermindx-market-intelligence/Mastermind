@@ -1,11 +1,14 @@
 import copy
 import hashlib
+import json
 import os
+import shutil
+import subprocess
 
 import pytest
 
 from integrations.mastermind_executive_app.os_assets import os_asset_mimes
-from ops.executive_os.os_public_edge import POST_ROUTES, LEGACY_POST_ROUTES, asset_routes, render, stage
+from ops.executive_os.os_public_edge import POST_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, asset_routes, render, stage
 
 
 def manifest(noir=False):
@@ -106,3 +109,49 @@ def test_dangling_symlink_and_writable_output_directory_refuse(tmp_path):
             stage(manifest=manifest(), relay_port=49152, output=tmp_path / "other")
     finally:
         os.chmod(tmp_path, 0o700)
+
+
+
+@pytest.mark.parametrize("noir", [False, True])
+def test_real_caddy_adapter_preserves_exact_read_only_edge_routes(tmp_path, noir):
+    """Native adapter proof, not a Caddy reload or live-host admission.
+
+    Skip when Caddy is not installed on a CI runner, while preserving the
+    pure-renderer and JSON-transition tests on all hosts.
+    """
+    executable = shutil.which("caddy")
+    if executable is None:
+        pytest.skip("Caddy binary absent: inert native-adapter qualification unavailable")
+    caddyfile = tmp_path / "r2-read-only-edge.caddy"
+    caddyfile.write_text(render(manifest(noir), 49152), encoding="utf-8")
+    actual = subprocess.run(
+        [executable, "adapt", "--config", str(caddyfile), "--adapter", "caddyfile"],
+        stdin=subprocess.DEVNULL, capture_output=True, text=True,
+        timeout=12, check=False,
+    )
+    assert actual.returncode == 0, actual.stderr[:1000]
+    config = json.loads(actual.stdout)
+    servers = config["apps"]["http"]["servers"]
+    assert len(servers) == 1
+
+    route_matchers = []
+    def visit(node):
+        if type(node) is dict:
+            if "match" in node and "handle" in node:
+                for match in node["match"]:
+                    if "method" in match:
+                        route_matchers.append(match)
+            for child in node.values():
+                visit(child)
+        elif type(node) is list:
+            for child in node:
+                visit(child)
+    visit(servers)
+    assert len(route_matchers) == 2
+    by_method = {tuple(match["method"]): match for match in route_matchers}
+    assert set(by_method) == {("GET",), ("POST",)}
+    assert set(by_method[("POST",)]) == {"method", "path"}
+    assert by_method[("POST",)]["path"] == list(POST_ROUTES)
+    assert "/os/executive/session/send" not in by_method[("POST",)]["path"]
+    assert set(by_method[("GET",)]["path"]) == set(GET_ROUTES) | set(asset_routes(manifest(noir)))
+    assert config["apps"]["http"]["servers"]
