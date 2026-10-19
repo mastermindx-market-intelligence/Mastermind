@@ -759,6 +759,32 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
   --arm-privileged-broker
 ```
 
+#### Workspace Control Room migration (install inputs)
+
+The live `control.json` is never hand-edited. The seat generates the
+successor control input as today, then runs the reviewed stdlib migration
+tool against the exact clean release clone it passes to `install.sh` as
+`--source-repo`, verified at the merge SHA:
+
+```bash
+sudo /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/migrate_workspace_control_room.py" \
+  --input "$CONTROL_INPUT" --output "$CONTROL_INPUT_UNIX"
+```
+
+and passes `"$CONTROL_INPUT_UNIX"` as `--control-config` to `install.sh`.
+
+The tool removes `workspace_control_room.port` and adds the closed
+`{"transport": "unix", "socket_path": <canonical>, "launchd_socket_name":
+"WorkspaceControlRoom", "allowed_peer_uids": [control_uid]}` stanza in the
+same key position; every other top-level key is unchanged and
+`workspace_acquisition` is preserved.
+
+Exit codes: `0` migrated, `2` refused (no output written), `3` not needed
+(no output written), `64` usage error. A legacy `{"port": int}` stanza that
+reaches `install.sh` or `load_control_config` is refused loudly by the
+shared `validate_workspace_control_room` validator.
+
 Installation still leaves the ordinary Executive control/worker/backup daemons
 disabled and stopped. With the explicit arm flag, only the root privileged
 broker is socket-activated. From this point onward, reviewed host effects use
