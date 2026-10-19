@@ -111,6 +111,9 @@ _REFUSAL_DETAIL_LIMIT = 300
 _REFUSAL_TRUNCATION_MARKER = "...[truncated]"
 _REFUSAL_REDACTION = "<redacted>"
 _REFUSAL_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# The artifact's own format survives newlines and tabs so the user can still
+# read the stream; the rest collapse to a space.
+_FAILURE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
 # Bounded diagnostic capture for failing host-service calls. The artifact name
 # is fixed per call site (see _FAILURE_ARTIFACTS); the size bounds are the same
 # contract another lane's maintenance tool already admits against
@@ -1306,14 +1309,17 @@ class Acceptance:
         return self._write_bytes(name, payload)
 
     def _redact_failure_stream(self, payload: bytes) -> str:
-        """Render one bounded, redacted, single-line stream for the failure artifact.
+        """Render one bounded, redacted stream for the failure artifact.
 
-        Exact secrets held by the run plus every readable sentinel file value are
-        replaced first (longest match wins); then the same hex / token-shape
+        Exact secrets held by the run plus every readable sentinel file value
+        are replaced first (longest match wins); then the same hex / token-shape
         redaction the operator-visible refusal fragment uses; control
-        characters other than ``\\n`` and ``\\t`` collapse to a space so line
-        structure survives; the result is then bounded with the existing
-        truncation marker.
+        characters other than ``\\n`` and ``\\t`` collapse to a space so the
+        format's own line structure survives; every line is then prefixed with
+        ``"| "`` so stream content cannot forge the artifact's own header lines;
+        the result is bounded on encoded bytes with the existing truncation
+        marker (decode drops a split trailing code point so the bound is exact
+        in UTF-8 even for invalid input).
         """
 
         text = payload.decode("utf-8", errors="replace")
@@ -1334,11 +1340,15 @@ class Acceptance:
             reverse=True,
         ):
             text = text.replace(secret, _REFUSAL_REDACTION)
-        text = _REFUSAL_CONTROL_CHARS_RE.sub(" ", text)
+        text = _FAILURE_CONTROL_CHARS_RE.sub(" ", text)
         text = _REFUSAL_HEX_SECRET_RE.sub(_redact_secret_shaped, text)
         text = _REFUSAL_TOKEN_SECRET_RE.sub(_redact_secret_shaped, text)
-        if len(text) > _FAILURE_STREAM_LIMIT:
-            text = text[:_FAILURE_STREAM_LIMIT] + _REFUSAL_TRUNCATION_MARKER
+        if text:
+            text = "| " + text.replace("\n", "\n| ")
+        encoded = text.encode("utf-8")
+        if len(encoded) > _FAILURE_STREAM_LIMIT:
+            encoded = encoded[:_FAILURE_STREAM_LIMIT]
+            text = encoded.decode("utf-8", errors="ignore") + _REFUSAL_TRUNCATION_MARKER
         return text
 
     def _build_failure_payload(
@@ -1390,9 +1400,10 @@ class Acceptance:
                 f"{stderr_text}\n"
             )
             payload = body.encode("utf-8")
-        assert len(payload) <= _FAILURE_ARTIFACT_LIMIT, (
-            f"failure artifact exceeded bound: {len(payload)} > {_FAILURE_ARTIFACT_LIMIT}"
-        )
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            raise AcceptanceError(
+                "failure artifact exceeded its bound"
+            )
         return payload
 
     def _run_recorded(

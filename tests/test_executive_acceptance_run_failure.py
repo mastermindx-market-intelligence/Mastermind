@@ -288,3 +288,235 @@ def test_leakage_scan_fails_when_canary_escapes(monkeypatch, tmp_path: Path):
 
     with pytest.raises(acceptance.AcceptanceError, match="canary value escaped"):
         instance.leakage_scan(control_pid=99999)
+
+
+# -- A1: byte-bounded failure artifact for non-UTF-8 streams --------------------
+
+def test_failure_artifact_bounds_non_utf8_streams_by_bytes():
+    """A real bug: the decoded-text slice was ~3x too generous after U+FFFD expansion."""
+    instance = object.__new__(acceptance.Acceptance)
+    instance.config = {
+        "runtime_root": "/dev/null",
+        "receipts_root": "/dev/null",
+        "worker_runs_root": "/dev/null",
+        "proof_workspace_root": "/dev/null",
+        "proof_source_repository": "/dev/null",
+        "worker_provider_home": "/dev/null",
+    }
+    instance._sentinel_sources = lambda: []  # type: ignore[assignment]
+    instance.canary_value = ""
+    payload = instance._build_failure_payload(
+        label="host service status",
+        argv=["/bin/bash", "/tmp/anything"],
+        returncode=1,
+        stdout=b"\xff" * 200000,
+        stderr=b"\xfe" * 200000,
+    )
+    assert isinstance(payload, bytes)
+    assert len(payload) <= acceptance._FAILURE_ARTIFACT_LIMIT
+    text = payload.decode("utf-8", errors="replace")
+    stdout_marker = text.find("--- stdout (")
+    stderr_marker = text.find("--- stderr (")
+    stdout_section = text[stdout_marker:text.find("--- stderr", stdout_marker)]
+    stderr_section = text[stderr_marker:]
+    assert acceptance._REFUSAL_TRUNCATION_MARKER in stdout_section
+    assert acceptance._REFUSAL_TRUNCATION_MARKER in stderr_section
+
+
+# -- A2: preserve newline/tab structure, neutralise other control chars, prefix lines ---
+
+def test_failure_artifact_preserves_lines_and_neutralises_controls():
+    instance = object.__new__(acceptance.Acceptance)
+    instance.config = {
+        "runtime_root": "/dev/null",
+        "receipts_root": "/dev/null",
+        "worker_runs_root": "/dev/null",
+        "proof_workspace_root": "/dev/null",
+        "proof_source_repository": "/dev/null",
+        "worker_provider_home": "/dev/null",
+    }
+    instance._sentinel_sources = lambda: []  # type: ignore[assignment]
+    instance.canary_value = ""
+    stdout_blob = b"one\ntwo\tx\x1b[31my\rz\nreturncode: 0"
+    payload = instance._build_failure_payload(
+        label="host service status",
+        argv=["/bin/bash", "/tmp/anything"],
+        returncode=0,
+        stdout=stdout_blob,
+        stderr=b"",
+    )
+    text = payload.decode("utf-8")
+    stdout_marker = text.find("--- stdout (")
+    stdout_section = text[stdout_marker:text.find("--- stderr", stdout_marker)]
+    expected = "| one\n| two\tx [31my z\n| returncode: 0"
+    assert expected in stdout_section
+    header_returns = [
+        line for line in text.splitlines() if line.startswith("returncode: ")
+    ]
+    assert len(header_returns) == 1
+    assert header_returns[0] == "returncode: 0"
+
+
+# -- A3: positive: a real recorded CommandFailure artifact must pass leakage_scan ---
+
+def _acceptance_with_real_roots(tmp_path: Path, sentinel_paths: list[Path]):
+    instance = object.__new__(acceptance.Acceptance)
+    instance.receipt_root = tmp_path / "receipts"
+    instance.receipt_root.mkdir(mode=0o700)
+    os.chmod(instance.receipt_root, 0o700)
+    instance.control_identity = _FakePw(os.geteuid())
+    instance.worker_identity = _FakePw(os.geteuid())
+    instance.control_group = _FakeGr(os.getegid())
+    instance.worker_group = _FakeGr(os.getegid())
+    instance.operator_identity = _FakePw(os.geteuid())
+    instance.config = {
+        "runtime_root": str(tmp_path / "rt"),
+        "receipts_root": str(tmp_path / "rcpts"),
+        "worker_runs_root": str(tmp_path / "wr"),
+        "proof_workspace_root": str(tmp_path / "ws"),
+        "proof_source_repository": str(tmp_path / "src"),
+        "worker_provider_home": str(tmp_path / "workerhome"),
+    }
+    for key, value in instance.config.items():
+        Path(value).mkdir(parents=True, exist_ok=True)
+    instance.release = tmp_path / "release"
+    instance.release.mkdir(parents=True, exist_ok=True)
+    instance.canary_value = SENTINEL
+
+    def _sources():
+        return list(sentinel_paths or [])
+
+    instance._sentinel_sources = _sources  # type: ignore[assignment]
+    return instance
+
+
+def _mock_leakage_scan_subprocess(monkeypatch):
+    """The real leakage_scan invokes /bin/ps with BSD-only flags; on Linux the
+    harness's existing tests stub _run to return an empty process table. The
+    script that produces the artifact still runs through the real
+    _run_recorded; only the subprocess that walks the live process list is stubbed."""
+
+    calls: list[list[str]] = []
+
+    def _capture_ps(argv, **kwargs):
+        label = kwargs.get("label")
+        if label == "process argv/environment leakage scan":
+            calls.append([os.fspath(value) for value in argv])
+            return subprocess.CompletedProcess(argv, 0, stdout=b"", stderr=b"")
+        return _orig_run(argv, **kwargs)
+
+    _orig_run = acceptance._run
+    monkeypatch.setattr(acceptance, "_run", _capture_ps)
+    return calls
+
+
+def test_failing_status_artifact_passes_leakage_scan(monkeypatch, tmp_path: Path):
+    sentinel_a = tmp_path / "sentinel-a.txt"
+    sentinel_a.write_text("SENTINEL-ALPHA-7c1e", encoding="utf-8")
+    sentinel_b = tmp_path / "sentinel-b.txt"
+    sentinel_b.write_text("SENTINEL-BETA-93fd", encoding="utf-8")
+    instance = _acceptance_with_real_roots(tmp_path, [sentinel_a, sentinel_b])
+    _mock_leakage_scan_subprocess(monkeypatch)
+
+    status_script = tmp_path / "status.sh"
+    status_script.write_text(
+        "#!/bin/bash\n"
+        'echo "status line SENTINEL-ALPHA-7c1e"\n'
+        'echo "err SENTINEL-BETA-93fd" 1>&2\n'
+        "exit 3\n"
+    )
+    status_script.chmod(0o755)
+
+    with pytest.raises(acceptance.CommandFailure) as raised:
+        instance._run_recorded(
+            ["/bin/bash", str(status_script)],
+            label="host service status",
+        )
+    assert str(raised.value) == "host service status failed with exit 3"
+
+    artifact = instance.receipt_root / "host-service-status-failure.txt"
+    assert artifact.exists()
+    info = artifact.lstat()
+    assert info.st_uid == os.geteuid()
+    assert info.st_gid == os.getegid()
+    assert stat.S_IMODE(info.st_mode) == 0o400
+    body = artifact.read_text(encoding="utf-8")
+    assert "returncode: 3" in body
+    assert "| status line <redacted>" in body
+    assert "SENTINEL-ALPHA-7c1e" not in body
+    assert "SENTINEL-BETA-93fd" not in body
+
+    instance.leakage_scan(control_pid=os.getpid())
+
+
+def test_failing_final_status_artifact_passes_leakage_scan(
+    monkeypatch, tmp_path: Path
+):
+    sentinel_a = tmp_path / "sentinel-a.txt"
+    sentinel_a.write_text("SENTINEL-ALPHA-7c1e", encoding="utf-8")
+    sentinel_b = tmp_path / "sentinel-b.txt"
+    sentinel_b.write_text("SENTINEL-BETA-93fd", encoding="utf-8")
+    instance = _acceptance_with_real_roots(tmp_path, [sentinel_a, sentinel_b])
+    _mock_leakage_scan_subprocess(monkeypatch)
+
+    status_script = tmp_path / "final-status.sh"
+    status_script.write_text(
+        "#!/bin/bash\n"
+        'echo "final line SENTINEL-ALPHA-7c1e"\n'
+        'echo "err SENTINEL-BETA-93fd" 1>&2\n'
+        "exit 7\n"
+    )
+    status_script.chmod(0o755)
+
+    with pytest.raises(acceptance.CommandFailure) as raised:
+        instance._run_recorded(
+            ["/bin/bash", str(status_script)],
+            label="final host status",
+        )
+    assert str(raised.value) == "final host status failed with exit 7"
+
+    artifact = instance.receipt_root / "final-host-status-failure.txt"
+    assert artifact.exists()
+
+
+# -- A3 negative: a leaking artifact must be caught by leakage_scan -------------
+
+def test_leakage_scan_catches_an_unredacted_failure_artifact(
+    monkeypatch, tmp_path: Path
+):
+    sentinel_a = tmp_path / "sentinel-a.txt"
+    sentinel_a.write_text("SENTINEL-ALPHA-7c1e", encoding="utf-8")
+    sentinel_b = tmp_path / "sentinel-b.txt"
+    sentinel_b.write_text("SENTINEL-BETA-93fd", encoding="utf-8")
+    instance = _acceptance_with_real_roots(tmp_path, [sentinel_a, sentinel_b])
+    _mock_leakage_scan_subprocess(monkeypatch)
+
+    monkeypatch.setattr(
+        acceptance.Acceptance,
+        "_redact_failure_stream",
+        lambda self, payload: payload.decode("utf-8", "replace"),
+    )
+
+    status_script = tmp_path / "status.sh"
+    status_script.write_text(
+        "#!/bin/bash\n"
+        'echo "status line SENTINEL-ALPHA-7c1e"\n'
+        'echo "err SENTINEL-BETA-93fd" 1>&2\n'
+        "exit 3\n"
+    )
+    status_script.chmod(0o755)
+
+    with pytest.raises(acceptance.CommandFailure):
+        instance._run_recorded(
+            ["/bin/bash", str(status_script)],
+            label="host service status",
+        )
+
+    artifact = instance.receipt_root / "host-service-status-failure.txt"
+    assert artifact.exists()
+
+    with pytest.raises(
+        acceptance.AcceptanceError,
+        match="canary value escaped",
+    ):
+        instance.leakage_scan(control_pid=os.getpid())
