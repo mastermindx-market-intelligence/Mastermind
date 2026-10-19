@@ -33,7 +33,8 @@ SCHEMA_V2 = "mastermind.executive_acceptance_maintenance/v2"
 # Same-schema supersession is separate from the schema-migration V3 contract.
 SCHEMA_SUPERSEDE = "mastermind.executive_acceptance_maintenance/supersede_unstarted_v1"
 SCHEMA_PREJOB = "mastermind.executive_acceptance_maintenance/supersede_prejob_v1"
-_TERMINAL_CARRY_SCHEMAS = {SCHEMA_V2, SCHEMA_SUPERSEDE, SCHEMA_PREJOB}
+SCHEMA_PREPROOF = "mastermind.executive_acceptance_maintenance/supersede_preproof_v1"
+_TERMINAL_CARRY_SCHEMAS = {SCHEMA_V2, SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF}
 _TRUSTED_UID = 0
 _TRUSTED_GID = 0
 # The artifact inventory can exceed 16 MiB on an otherwise quiescent host.
@@ -98,9 +99,67 @@ _DESCRIPTOR_SUPERSEDE_KEYS = _DESCRIPTOR_V2_KEYS | {
 _DESCRIPTOR_PREJOB_KEYS = _DESCRIPTOR_V2_KEYS | {
     "interrupted_prejob_sha", "superseded_descriptor_sha256", "prejob_evidence_sha256",
 }
+_DESCRIPTOR_PREPROOF_KEYS = _DESCRIPTOR_V2_KEYS | {
+    "interrupted_preproof_sha", "superseded_descriptor_sha256", "preproof_evidence_sha256",
+}
 
 class MaintenanceError(RuntimeError):
     pass
+
+
+# Required pre-proof receipts; any other name under an interrupted acceptance dir
+# (including host-status.txt or a second probe) refuses with "interrupted acceptance
+# is not a pre-proof prefix".
+_PREPROOF_CORE_RECEIPTS = frozenset({
+    "assignment-root-nonlistability.json",
+    "awaiting-canary-status.json",
+    "failure-control-status.json",
+    "launchd-principals.json",
+    "nonexecutive-launchd-before.json",
+    "protected-group-membership.json",
+    "secret-canary-envelope.json",
+    "worker-broker-startup.json",
+})
+_PREPROOF_PROBE = re.compile(r"control-environment-probe-[1-9][0-9]{0,9}\.json")
+_PREPROOF_OPTIONAL_ARTIFACTS = frozenset({"host-service-status-failure.txt"})
+_MAX_PREPROOF_FAILURE_ARTIFACT_BYTES = 256 * 1024
+#: keep equal to the producer in acceptance.py
+_PREPROOF_RECEIPT_KEYS = {
+    # acceptance.py:1593-1600
+    "assignment-root-nonlistability.json": frozenset({
+        "passed", "workspace_root_listing", "run_root_listing"}),
+    # acceptance.py:2426-2437
+    "launchd-principals.json": frozenset({"control", "worker"}),
+    # acceptance.py:2273 (envelope dict at 2259-2264)
+    "secret-canary-envelope.json": frozenset({
+        "schema_version", "secret_canary", "control_environment_probe",
+        "control_environment_probe_sha256"}),
+    # scripts/executive_os_phase1c_env_probe.py:268-283 (probe persisted at acceptance.py:2353)
+    "control-environment-probe": frozenset({
+        "schema_version", "passed", "control_process_identity", "worker_principal",
+        "config_sha256", "release_manifest_sha256", "sentinel_value_sha256",
+        "process_identity_sha256", "checks"}),
+}
+#: keep equal to the producer in acceptance.py
+_PREPROOF_RECEIPT_VALUE_TYPES = {
+    "assignment-root-nonlistability.json": {
+        "passed": bool, "workspace_root_listing": str, "run_root_listing": str},
+    "launchd-principals.json": {"control": dict, "worker": dict},
+    "secret-canary-envelope.json": {
+        "schema_version": str, "secret_canary": dict,
+        "control_environment_probe": dict, "control_environment_probe_sha256": str},
+    "control-environment-probe": {
+        "schema_version": str, "passed": bool,
+        "control_process_identity": dict, "worker_principal": dict,
+        "config_sha256": str, "release_manifest_sha256": str,
+        "sentinel_value_sha256": str, "process_identity_sha256": str,
+        "checks": dict},
+}
+# Producer-written schema markers (accepted only when the receipt carries it).
+_PREPROOF_SCHEMAS = {
+    "secret-canary-envelope.json": "mastermind.executive_secret_canary_envelope/v1",
+    "control-environment-probe": "mastermind.executive_control_env_probe/v1",
+}
 
 def digest(value: Any) -> str:
     return hashlib.sha256(json.dumps(value, sort_keys=True, separators=(",", ":"),
@@ -174,9 +233,10 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
     keys = _DESCRIPTOR_KEYS if schema == SCHEMA else (
         _DESCRIPTOR_V2_KEYS if schema == SCHEMA_V2 else (
             _DESCRIPTOR_SUPERSEDE_KEYS if schema == SCHEMA_SUPERSEDE else (
-                _DESCRIPTOR_PREJOB_KEYS if schema == SCHEMA_PREJOB else set())
+                _DESCRIPTOR_PREJOB_KEYS if schema == SCHEMA_PREJOB else (
+                    _DESCRIPTOR_PREPROOF_KEYS if schema == SCHEMA_PREPROOF else set())
         )
-    )
+    ))
     if not keys or set(value) != keys:
         raise MaintenanceError("maintenance descriptor schema mismatch")
     if (value["successor_sha"] != sha or not isinstance(value["predecessor_sha"], str)
@@ -198,6 +258,12 @@ def descriptor_for(sha: str) -> dict[str, Any] | None:
         not isinstance(value["interrupted_prejob_sha"], str)
         or _SHA.fullmatch(value["interrupted_prejob_sha"]) is None
         or value["interrupted_prejob_sha"] in {sha, value["predecessor_sha"]}
+    ):
+        raise MaintenanceError("maintenance interrupted release is invalid")
+    if schema == SCHEMA_PREPROOF and (
+        not isinstance(value["interrupted_preproof_sha"], str)
+        or _SHA.fullmatch(value["interrupted_preproof_sha"]) is None
+        or value["interrupted_preproof_sha"] in {sha, value["predecessor_sha"]}
     ):
         raise MaintenanceError("maintenance interrupted release is invalid")
     for key in (key for key in keys if key.endswith("_sha256")):
@@ -299,7 +365,7 @@ def validate_prior_carry_binding(descriptor: dict, *, _seen: frozenset[str] = fr
                ("root_job_id", "root_identity_sha256", "root_event_id", "root_event_sha256")):
             raise MaintenanceError("maintenance predecessor root binding changed")
 
-    if descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
+    if descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF}:
         validate_superseded_binding(descriptor, historical=True)
 
 
@@ -941,6 +1007,164 @@ def prejob_evidence(sha: str, *, historical: bool = False) -> str:
     return digest(manifest)
 
 
+def preproof_evidence(sha: str) -> tuple[str, dict]:
+    """Hash the eight control-owned pre-proof receipts (and exactly one probe),
+    plus any bounded optional failure artifact, returning the manifest digest and
+    the parsed secret-canary envelope. No receipt, marker, service or Runtime
+    state is modified. The selected release must have run ``start_and_attest_services``
+    (replacing the live secret-canary receipt with its own envelope), but no Job;
+    anything after that boundary refuses with ``interrupted acceptance is not a
+    pre-proof prefix``.
+    """
+    import pwd
+    import grp
+    from ops.executive_os.autonomy_control import (
+        RUNTIME_ROOT, CONTROL_USER, CONTROL_GROUP, _root_json, HostControlError,
+    )
+    if _SHA.fullmatch(sha) is None:
+        raise MaintenanceError("invalid interrupted release")
+    uid = pwd.getpwnam(CONTROL_USER).pw_uid
+    gid = grp.getgrnam(CONTROL_GROUP).gr_gid
+    logical = RUNTIME_ROOT / "control/acceptance" / sha
+    path = logical
+    alias = None
+    if (sys.platform == "darwin" and logical.parent ==
+            _MACOS_VAR_ALIAS / "db/mastermind-executive/control/acceptance"):
+        info = _MACOS_VAR_ALIAS.lstat()
+        target = os.readlink(_MACOS_VAR_ALIAS)
+        if (not stat.S_ISLNK(info.st_mode) or info.st_uid != _TRUSTED_UID
+                or target not in ("private/var", os.fspath(_MACOS_VAR_PHYSICAL))):
+            raise MaintenanceError("Runtime /var alias is not trusted")
+        alias = (_identity(info), target)
+        path = _MACOS_VAR_PHYSICAL / logical.relative_to(_MACOS_VAR_ALIAS)
+    if not path.is_absolute() or path.resolve(strict=True) != path:
+        raise MaintenanceError("interrupted acceptance path is not canonical")
+    directories = []
+    for directory in (path.parent, path):
+        info = directory.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != uid or info.st_gid != gid
+                or stat.S_IMODE(info.st_mode) != stat.S_IRWXU or has_macos_acl(directory)):
+            raise MaintenanceError("interrupted acceptance directory identity drifted")
+        directories.append((directory, _identity(info)))
+    names = {item.name for item in path.iterdir()}
+    probe_names = sorted(name for name in names if _PREPROOF_PROBE.fullmatch(name))
+    # Exactly one probe, every core receipt present, and any remaining name is
+    # either the bounded optional artifact or a name explicitly refused above.
+    optional_allowed = _PREPROOF_CORE_RECEIPTS | _PREPROOF_OPTIONAL_ARTIFACTS | set(probe_names)
+    if (len(probe_names) != 1
+            or not _PREPROOF_CORE_RECEIPTS | set(probe_names) <= names
+            or not names <= optional_allowed):
+        raise MaintenanceError("interrupted acceptance is not a pre-proof prefix")
+    manifest: dict[str, str] = {}
+    files: list = []
+    envelope_value: dict | None = None
+    def _nondict() -> "MaintenanceError":
+        return MaintenanceError("interrupted acceptance receipt schema drifted")
+    for core_name in sorted(_PREPROOF_CORE_RECEIPTS | set(probe_names)):
+        receipt = path / core_name
+        initial = receipt.lstat()
+        try:
+            value, raw = _root_json(receipt, modes=frozenset({0o400}), uid=uid, gid=gid)
+        except HostControlError as exc:
+            raise MaintenanceError("interrupted acceptance receipt is unsafe") from exc
+        if _identity(receipt.lstat()) != _identity(initial):
+            raise MaintenanceError("interrupted acceptance receipt changed")
+        files.append((receipt, _identity(initial)))
+        if core_name == "nonexecutive-launchd-before.json":
+            valid = (set(value) == {"sha256", "labels_excluded"}
+                     and isinstance(value["sha256"], str)
+                     and _DIGEST.fullmatch(value["sha256"]) is not None
+                     and type(value["labels_excluded"]) is int and value["labels_excluded"] == 2)
+        elif core_name == "protected-group-membership.json":
+            valid = _group_receipt_valid(value, historical=False)
+        elif core_name == "secret-canary-envelope.json":
+            if type(value) is not dict:
+                raise _nondict()
+            expected_keys = _PREPROOF_RECEIPT_KEYS["secret-canary-envelope.json"]
+            expected_types = _PREPROOF_RECEIPT_VALUE_TYPES["secret-canary-envelope.json"]
+            if set(value) != expected_keys:
+                raise _nondict()
+            if any(type(value[key]) is not expected_types[key] for key in expected_keys):
+                raise _nondict()
+            # Compare the parsed schema marker only; never print the envelope.
+            if value["schema_version"] != _PREPROOF_SCHEMAS["secret-canary-envelope.json"]:
+                raise _nondict()
+            envelope_value = value
+            valid = True
+        elif core_name in {"awaiting-canary-status.json", "failure-control-status.json",
+                           "worker-broker-startup.json"}:
+            # Receipts persisted from a Control response or broker status write
+            # the parsed value verbatim; the bounded checked shape is only the
+            # top level dict.
+            valid = type(value) is dict
+        elif core_name == "launchd-principals.json":
+            if type(value) is not dict:
+                raise _nondict()
+            if set(value) != _PREPROOF_RECEIPT_KEYS["launchd-principals.json"]:
+                raise _nondict()
+            if any(type(value[key]) is not dict for key in value):
+                raise _nondict()
+            valid = True
+        elif core_name == "assignment-root-nonlistability.json":
+            if type(value) is not dict:
+                raise _nondict()
+            if set(value) != _PREPROOF_RECEIPT_KEYS["assignment-root-nonlistability.json"]:
+                raise _nondict()
+            if any(type(value[key]) is not _PREPROOF_RECEIPT_VALUE_TYPES["assignment-root-nonlistability.json"][key]
+                   for key in value):
+                raise _nondict()
+            valid = True
+        else:
+            # Exactly one probe name, already enforced above.
+            if type(value) is not dict:
+                raise _nondict()
+            expected_keys = _PREPROOF_RECEIPT_KEYS["control-environment-probe"]
+            expected_types = _PREPROOF_RECEIPT_VALUE_TYPES["control-environment-probe"]
+            if set(value) != expected_keys:
+                raise _nondict()
+            if any(type(value[key]) is not expected_types[key] for key in expected_keys):
+                raise _nondict()
+            if value["schema_version"] != _PREPROOF_SCHEMAS["control-environment-probe"]:
+                raise _nondict()
+            valid = True
+        if not valid:
+            raise MaintenanceError("interrupted acceptance receipt schema drifted")
+        manifest[core_name] = hashlib.sha256(raw).hexdigest()
+    for artifact in sorted(_PREPROOF_OPTIONAL_ARTIFACTS):
+        optional = path / artifact
+        if not optional.exists():
+            continue
+        if optional.is_symlink():
+            raise MaintenanceError("interrupted acceptance receipt is unsafe")
+        fd = os.open(optional, os.O_RDONLY | os.O_NOFOLLOW)
+        try:
+            before = os.fstat(fd)
+        finally:
+            os.close(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != uid
+                or before.st_gid != gid or before.st_nlink != 1
+                or stat.S_IMODE(before.st_mode) != 0o400
+                or has_macos_acl(optional)
+                or before.st_size > _MAX_PREPROOF_FAILURE_ARTIFACT_BYTES):
+            raise MaintenanceError("interrupted acceptance receipt is unsafe")
+        files.append((optional, _identity(before)))
+        with optional.open("rb") as stream:
+            raw = stream.read(before.st_size)
+        if len(raw) != before.st_size:
+            raise MaintenanceError("interrupted acceptance receipt is unsafe")
+        if _identity(optional.lstat()) != _identity(before):
+            raise MaintenanceError("interrupted acceptance receipt is unsafe")
+        manifest[artifact] = hashlib.sha256(raw).hexdigest()
+    if (any(_identity(p.lstat()) != identity for p, identity in directories)
+            or {item.name for item in path.iterdir()} != names
+            or (alias is not None and
+                (_identity(_MACOS_VAR_ALIAS.lstat()), os.readlink(_MACOS_VAR_ALIAS)) != alias)):
+        raise MaintenanceError("interrupted acceptance namespace changed")
+    if envelope_value is None:
+        raise MaintenanceError("interrupted acceptance is not a pre-proof prefix")
+    return digest(manifest), envelope_value
+
+
 def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
                                  artifacts: dict | None = None,
                                  prior_canary: dict | None = None,
@@ -954,12 +1178,18 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     acceptance start that walk also visits the candidate's own selected link; the strict call that
     follows it, like ``prepare``'s, leaves ``historical`` unset, so a candidate must pass without it.
     """
-    if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
+    if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF}:
         raise MaintenanceError("invalid supersession schema")
     seen = {descriptor["successor_sha"]}
     while True:
+        preproof = descriptor["schema_version"] == SCHEMA_PREPROOF
         prejob = descriptor["schema_version"] == SCHEMA_PREJOB
-        selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
+        if preproof:
+            selected_sha = descriptor["interrupted_preproof_sha"]
+        elif prejob:
+            selected_sha = descriptor["interrupted_prejob_sha"]
+        else:
+            selected_sha = descriptor["superseded_unstarted_sha"]
         if selected_sha in seen:
             raise MaintenanceError("unstarted supersession chain is cyclic")
         if len(seen) >= _MAX_SUPERSEDE_DEPTH:
@@ -968,6 +1198,17 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
         selected = _validate_superseded_link(
             descriptor, before=before, artifacts=artifacts, prior_canary=prior_canary,
             historical=historical)
+        # (iv) After a PREPROOF link validates with prior_canary provided, every
+        # deeper link's expected canary is the selected bundle's sealed prior
+        # canary. Re-read it once, require digest == descriptor.prior_canary_sha256,
+        # and propagate the parsed value forward. SUPERSEDE / PREJOB inner links
+        # inherit that exact canary as today (since all selected bundles in the
+        # interrupted run were sealed with the same envelope).
+        if preproof and prior_canary is not None:
+            next_canary = sealed_json(bundle_path(selected_sha)/"prior-secret-canary.json")
+            if digest(next_canary) != selected["prior_canary_sha256"]:
+                raise MaintenanceError("superseded sealed baseline drifted")
+            prior_canary = next_canary
         if selected["schema_version"] == SCHEMA_V2:
             return
         descriptor = selected
@@ -976,10 +1217,22 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
 def _validate_superseded_link(descriptor: dict, *, before: dict | None,
                               artifacts: dict | None, prior_canary: dict | None,
                               historical: bool = False) -> dict:
-    prejob = descriptor["schema_version"] == SCHEMA_PREJOB
-    selected_sha = descriptor["interrupted_prejob_sha" if prejob else "superseded_unstarted_sha"]
+    schema = descriptor["schema_version"]
+    preproof = schema == SCHEMA_PREPROOF
+    prejob = schema == SCHEMA_PREJOB
+    if preproof:
+        selected_sha = descriptor["interrupted_preproof_sha"]
+    elif prejob:
+        selected_sha = descriptor["interrupted_prejob_sha"]
+    else:
+        selected_sha = descriptor["superseded_unstarted_sha"]
     selected = descriptor_for(selected_sha)
-    allowed = {SCHEMA_V2, SCHEMA_SUPERSEDE}
+    if preproof:
+        allowed = {SCHEMA_V2, SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF}
+    elif prejob:
+        allowed = {SCHEMA_V2, SCHEMA_SUPERSEDE, SCHEMA_PREJOB}
+    else:
+        allowed = {SCHEMA_V2, SCHEMA_SUPERSEDE}
     if (selected is None or selected["schema_version"] not in allowed
             or digest(selected) != descriptor["superseded_descriptor_sha256"]
             or selected["predecessor_sha"] != descriptor["predecessor_sha"]):
@@ -987,12 +1240,16 @@ def _validate_superseded_link(descriptor: dict, *, before: dict | None,
     # Every V2 semantic carry field stays exactly bound; only release identity
     # and the successor's newly created backup bytes may differ.
     shared = _DESCRIPTOR_V2_KEYS - {"schema_version", "successor_sha", "backup_sha256"}
+    if preproof:
+        # The pre-proof link's canary rule binds the envelope digest instead of
+        # the shared prior_canary_sha256, which for PREPROOF holds the live receipt.
+        shared = shared - {"prior_canary_sha256"}
     if any(selected[key] != descriptor[key] for key in shared):
         raise MaintenanceError("superseded sealed binding differs from successor")
     bundle = bundle_path(selected_sha)
     expected = {"descriptor.json", "preparing.json", "baseline.json", "inventory.json",
                 "prior-secret-canary.json", "prestate.sqlite3"}
-    if prejob:
+    if prejob or preproof:
         expected.add("run-started.json")
     entries = {entry.name for entry in bundle.iterdir()}
     legacy_pair = {"prestate.sqlite3-wal", "prestate.sqlite3-shm"}
@@ -1007,19 +1264,44 @@ def _validate_superseded_link(descriptor: dict, *, before: dict | None,
                 or prejob_evidence(selected_sha, historical=historical)
                 != descriptor["prejob_evidence_sha256"]):
             raise MaintenanceError("interrupted pre-Job evidence drifted")
+    elif preproof:
+        if (sealed_json(bundle/"run-started.json") != {
+                "schema_version": selected["schema_version"], "descriptor_sha256": digest(selected)}):
+            raise MaintenanceError("interrupted pre-proof evidence drifted")
+        evidence, envelope = preproof_evidence(selected_sha)
+        if evidence != descriptor["preproof_evidence_sha256"]:
+            raise MaintenanceError("interrupted pre-proof evidence drifted")
     else:
         _require_runtime_acceptance_absent(RUNTIME_ROOT/"control"/"acceptance"/selected_sha)
     baseline = sealed_json(bundle/"baseline.json")
     inventory_value = sealed_json(bundle/"inventory.json")
     canary = sealed_json(bundle/"prior-secret-canary.json")
-    if (digest(baseline) != selected["baseline_sha256"]
-            or digest(inventory_value) != selected["inventory_sha256"]
-            or digest(canary) != selected["prior_canary_sha256"]
-            or sealed_backup_snapshot(bundle/"prestate.sqlite3", selected["backup_sha256"]) != baseline
-            or (before is not None and baseline != before)
-            or (artifacts is not None and inventory_value != artifacts)
-            or (prior_canary is not None and canary != prior_canary)):
-        raise MaintenanceError("superseded sealed baseline drifted")
+    if preproof:
+        # (i) envelope digest binds the descriptor's prior_canary_sha256 value,
+        # (ii) on strict calls prior_canary must equal envelope parsed, and
+        # (iii) the sealed prior-secret-canary.json must still digest to the
+        # selected descriptor's own prior_canary_sha256. The legacy canary vs.
+        # prior_canary comparison is replaced by the envelope check above.
+        if (digest(baseline) != selected["baseline_sha256"]
+                or digest(inventory_value) != selected["inventory_sha256"]
+                or digest(canary) != selected["prior_canary_sha256"]
+                or sealed_backup_snapshot(bundle/"prestate.sqlite3", selected["backup_sha256"]) != baseline
+                or (before is not None and baseline != before)
+                or (artifacts is not None and inventory_value != artifacts)):
+            raise MaintenanceError("superseded sealed baseline drifted")
+        if digest(envelope) != descriptor["prior_canary_sha256"]:
+            raise MaintenanceError("interrupted pre-proof canary binding drifted")
+        if prior_canary is not None and prior_canary != envelope:
+            raise MaintenanceError("interrupted pre-proof canary binding drifted")
+    else:
+        if (digest(baseline) != selected["baseline_sha256"]
+                or digest(inventory_value) != selected["inventory_sha256"]
+                or digest(canary) != selected["prior_canary_sha256"]
+                or sealed_backup_snapshot(bundle/"prestate.sqlite3", selected["backup_sha256"]) != baseline
+                or (before is not None and baseline != before)
+                or (artifacts is not None and inventory_value != artifacts)
+                or (prior_canary is not None and canary != prior_canary)):
+            raise MaintenanceError("superseded sealed baseline drifted")
     versions = [row.get("version") for row in baseline["tables"].get("schema_migrations", [])]
     if not versions or any(type(version) is not int for version in versions) or max(versions) != 5:
         raise MaintenanceError("supersession requires unchanged schema v5")
@@ -1037,9 +1319,11 @@ def prepare(args: argparse.Namespace) -> Path:
         raise MaintenanceError("maintenance requires closed worker harness")
     unstarted_sha = getattr(args, "supersede_unstarted_sha", None)
     prejob_sha = getattr(args, "supersede_prejob_sha", None)
-    if unstarted_sha and prejob_sha:
+    preproof_sha = getattr(args, "supersede_preproof_sha", None)
+    supplied = [bool(unstarted_sha), bool(prejob_sha), bool(preproof_sha)]
+    if sum(supplied) > 1:
         raise MaintenanceError("select one supersession mode")
-    selected_sha = prejob_sha or unstarted_sha
+    selected_sha = preproof_sha or prejob_sha or unstarted_sha
     selected_digest = getattr(args, "superseded_descriptor_sha256", None)
     if bool(selected_sha) != bool(selected_digest):
         raise MaintenanceError("supersession requires an exact selected release and descriptor digest")
@@ -1089,8 +1373,9 @@ def prepare(args: argparse.Namespace) -> Path:
     artifacts = inventory(artifact_roots)
     prior_canary = Path(config["secret_canary_receipt_path"])
     prior_canary_value = json.loads(prior_canary.read_text())
-    schema = SCHEMA_PREJOB if prejob_sha else (
-        SCHEMA_SUPERSEDE if selected_sha else (SCHEMA_V2 if terminal_carry else SCHEMA))
+    schema = SCHEMA_PREPROOF if preproof_sha else (
+        SCHEMA_PREJOB if prejob_sha else (
+            SCHEMA_SUPERSEDE if selected_sha else (SCHEMA_V2 if terminal_carry else SCHEMA)))
     if selected_sha:
         # Qualify every selected seal and the actual prestate before any new
         # preparation directory or marker is written.
@@ -1098,6 +1383,10 @@ def prepare(args: argparse.Namespace) -> Path:
         if prejob_sha:
             selected_fields.update(interrupted_prejob_sha=prejob_sha,
                                    prejob_evidence_sha256=prejob_evidence(prejob_sha))
+        elif preproof_sha:
+            digest_evidence, _envelope = preproof_evidence(preproof_sha)
+            selected_fields.update(interrupted_preproof_sha=preproof_sha,
+                                   preproof_evidence_sha256=digest_evidence)
         else:
             selected_fields["superseded_unstarted_sha"] = selected_sha
         candidate = dict(schema_version=schema, predecessor_sha=args.predecessor_sha,
@@ -1185,7 +1474,7 @@ class Maintenance:
                 or snapshot(self.database) != self.before):
             raise MaintenanceError("maintenance prestate drifted")
         verify_inventory(self.inventory)
-        if self.descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
+        if self.descriptor["schema_version"] in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB, SCHEMA_PREPROOF}:
             validate_superseded_binding(self.descriptor, before=self.before,
                                          artifacts=self.inventory, prior_canary=prior_canary)
         if self.descriptor["schema_version"] in _TERMINAL_CARRY_SCHEMAS:
@@ -1230,6 +1519,8 @@ def main() -> int:
                         help="Explicitly retire an installed unstarted V2 release on unchanged schema v5.")
     parser.add_argument("--supersede-prejob-sha",
                         help="Preserve an interrupted V2 pre-Job prefix; never replay its acceptance.")
+    parser.add_argument("--supersede-preproof-sha",
+                        help="Preserve an acceptance interrupted after service and canary activation but before any proof Job; never replay it.")
     parser.add_argument("--superseded-descriptor-sha256",
                         help="Exact selected V2 descriptor digest; predecessor remains its accepted ancestor.")
     args = parser.parse_args()
