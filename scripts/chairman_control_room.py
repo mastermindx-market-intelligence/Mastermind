@@ -83,6 +83,8 @@ import json
 import os
 import secrets
 import signal
+import socket
+import socketserver
 import subprocess
 import sys
 import threading
@@ -123,6 +125,12 @@ HOST = "127.0.0.1"
 
 #: Every Host header value this server accepts (with or without ``:<port>``).
 _ALLOWED_HOSTNAMES = ("127.0.0.1", "localhost")
+
+#: Hostname the in-process workspace Control Room (AF_UNIX) requires on its
+#: ``Host`` header. The Origin it advertises is the matching origin so the
+#: existing browser-origin nonce gate keeps its token-only contract intact.
+UNIX_CONTROL_ROOM_HOST = "workspace-control-room.invalid"
+UNIX_CONTROL_ROOM_ORIGIN = "http://workspace-control-room.invalid"
 
 #: Bound applied to a POST JSON body before it is even parsed.
 _MAX_BODY_BYTES = 64 * 1024
@@ -1118,6 +1126,14 @@ class ChairmanControlRoomHandler(http.server.BaseHTTPRequestHandler):
 
     def _loopback_and_host_ok(self) -> bool:
         config: ServerConfig = self.server.config  # type: ignore[attr-defined]
+        if isinstance(self.server, UnixControlRoomServer):
+            # The peer uid was already proven in ``UnixControlRoomServer.verify_request``;
+            # we only need the matching Host header so the request reaches the
+            # closed unix origin advertised by the hosted room.
+            if self.headers.get("Host") != UNIX_CONTROL_ROOM_HOST:
+                self._forbidden("Host header not allowed")
+                return False
+            return True
         if not _client_is_loopback(self.client_address[0]):
             self._forbidden("client address is not loopback")
             return False
@@ -1496,6 +1512,69 @@ class ControlRoomServer(http.server.ThreadingHTTPServer):
         # accepting requests via serve_forever(). Never reached from
         # --check (run_check never constructs this class).
         _precompose_initial_state(config)
+
+
+class UnixControlRoomServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    """Adopted-listener AF_UNIX stream server for the in-process Control Room.
+
+    The adopted listener is a launchd-activated, owner/mode-restricted
+    ``/var/run/mastermind-executive/workspace-control-room.sock``. This server
+    binds nothing itself, never unlinks the socket path, and refuses any
+    request whose peer uid is not in the closed allowlist *before* the handler
+    is ever constructed — i.e. before any byte of the request is read.
+    """
+
+    daemon_threads = True
+
+    def __init__(self, listener, handler_cls, config, *,
+                 allowed_peer_uids, peer_uid_fn) -> None:
+        family = getattr(listener, "family", None)
+        sock_type = getattr(listener, "type", None)
+        if family != socket.AF_UNIX or sock_type != socket.SOCK_STREAM:
+            raise ValueError("control room unix listener refused")
+        if type(allowed_peer_uids) is not frozenset and not isinstance(allowed_peer_uids, (frozenset, tuple, list)):
+            raise ValueError("control room unix listener refused")
+        normalized = frozenset(allowed_peer_uids)
+        if (len(normalized) == 0
+                or any((type(item) is not int or item is True or item is False) for item in normalized)):
+            raise ValueError("control room unix listener refused")
+        if not callable(peer_uid_fn):
+            raise ValueError("control room unix listener refused")
+        self.config = config
+        self._allowed_peer_uids = normalized
+        self._peer_uid_fn = peer_uid_fn
+        # Base ctor binds a placeholder socket we don't want. Use
+        # bind_and_activate=False and adopt the launched listener manually.
+        address = listener.getsockname()
+        socketserver.UnixStreamServer.__init__(
+            self, address, handler_cls, bind_and_activate=False)
+        try:
+            os.close(self.socket.fileno())
+        except OSError:
+            pass
+        self.socket = listener
+        self.server_address = listener.getsockname()
+        # Same H0 hardening as ControlRoomServer: compose before serve_forever.
+        _precompose_initial_state(config)
+
+    def get_request(self):
+        conn, _ = self.socket.accept()
+        try:
+            conn.setblocking(True)
+        except OSError:
+            pass
+        return conn, ("unix-peer", 0)
+
+    def verify_request(self, request, client_address):
+        try:
+            peer_uid = self._peer_uid_fn(request)
+        except OSError:
+            return False
+        if type(peer_uid) is not int or peer_uid is True or peer_uid is False:
+            return False
+        if peer_uid not in self._allowed_peer_uids:
+            return False
+        return True
 
 
 # ---------------------------------------------------------------------------

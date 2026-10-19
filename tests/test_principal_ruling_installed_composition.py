@@ -3,6 +3,7 @@ import asyncio
 import copy
 import dataclasses
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -146,7 +147,10 @@ def test_control_dialogue_selection_requires_separate_exact_opt_in(principal, di
     from ops.executive_os.coo_principal_host import validate_control_coo
     raw = dict(coo_principal_armed=principal, coo_principal_dialogue_armed=dialogue,
         executive_mcp_profile="web_ceo_v2", workspace_acquisition={}, workspace_resource_policy={},
-        workspace_control_room={}, ceo_ingress_app_peer_uid=458)
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [os.geteuid()]}, ceo_ingress_app_peer_uid=458)
     if valid: assert validate_control_coo(raw) is principal
     else:
         with pytest.raises(ValueError): validate_control_coo(raw)
@@ -165,7 +169,11 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     owner, _, _, _ = host.setup(tmp_path)
     raw = _raw(tmp_path)
     raw.update(ceo_ingress_app_peer_uid=458, ceo_ingress_app_armed=False,
-        ceo_ingress_app_macro_root=tmp_path/"macro", workspace_control_room={"port": 8787},
+        ceo_ingress_app_macro_root=tmp_path/"macro",
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [raw["control_uid"]]},
         workspace_acquisition={}, workspace_resource_policy=json.loads(json.dumps(dataclasses.asdict(_workspace_policy()))),
         ceo_ingress_app_boot_python=tmp_path/"sealed-python", executive_mcp_profile="web_ceo_v2",
         coo_principal_armed=True, coo_principal_dialogue_armed=selected)
