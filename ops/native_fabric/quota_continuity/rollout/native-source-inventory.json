@@ -468,10 +468,10 @@
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
-      "bytes": 30936,
+      "bytes": 31286,
       "installed_preimage_sha256": "1151cf3e5a3b4c582935b82c08719b6cb0c271c4327fa0607be9067a2ca4c6d5",
-      "sha256": "1151cf3e5a3b4c582935b82c08719b6cb0c271c4327fa0607be9067a2ca4c6d5",
-      "source": "source/run_observation.py"
+      "sha256": "0984a7a221e7d79e30e3c0c0a7cb7425e9f762d73f2946df1d28283f36f85809",
+      "source": "candidate/run_observation.py"
     },
     "ext/run_observation_delivery.py": {
       "bytes": 35705,
