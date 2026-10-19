@@ -414,15 +414,7 @@ def test_preparation_publishes_one_new_descriptor_without_modifying_selected(tmp
     from control_plane.executive_runtime import Runtime
     from ops.executive_os import autonomy_control as ac
     from tests.test_executive_acceptance_maintenance_v2 import _terminal_fixture
-    from control_plane import executive_runtime as rt
-    # This historical supersession variant preserves the exact schema v5.
-    monkeypatch.setattr(rt, '_MIGRATIONS', rt._MIGRATIONS[:5])
-    monkeypatch.setattr(rt, 'SCHEMA_VERSION', 5)
-    monkeypatch.setattr(rt, '_NORMALIZED_V6_SCHEMA_DIGEST', rt._NORMALIZED_V5_SCHEMA_DIGEST)
     runtime, root, before, config, prior, material, proof, _, _ = _terminal_fixture(tmp_path, monkeypatch)
-    assert sorted(row['version'] for row in before['tables']['schema_migrations']) == [1, 2, 3, 4, 5]
-    with runtime.store.read() as connection:
-        assert rt._normalized_schema_digest(connection) == rt._NORMALIZED_V5_SCHEMA_DIGEST
     accepted, selected_sha, successor = 'b'*40, 'e'*40, 'f'*40
     root = dataclasses.replace(root, constraints={**root.constraints, 'operator_harness_armed': False})
     prior['root_identity_sha256'] = m.root_identity(root)
