@@ -3,6 +3,8 @@ from __future__ import annotations
 
 from urllib.parse import parse_qs, urlparse
 
+import pytest
+
 import test_source_continuity as fx
 import test_source_continuity_census_budget as budget
 
@@ -851,3 +853,603 @@ def test_current_target_base_entries_are_resolved_once_per_collision_census() ->
         urlparse(url).path.endswith(f"/git/trees/{CURRENT_BASE_ENGINE}")
         for url in http.calls
     ) == 1
+
+
+def _compact_files_payload(
+    rows: list[tuple[str, str]],
+    *,
+    changed_files: int | None = None,
+    has_next: bool = False,
+    end_cursor: str | None = None,
+    files_null: bool = False,
+    head_sha: str = FOREIGN_HEAD_SHA,
+) -> dict[str, object]:
+    total = len(rows) if changed_files is None else changed_files
+    files: object = None
+    if not files_null:
+        files = {
+            "totalCount": total,
+            "nodes": [
+                {"path": path, "changeType": change_type}
+                for path, change_type in rows
+            ],
+            "pageInfo": {
+                "hasNextPage": has_next,
+                "endCursor": end_cursor,
+            },
+        }
+    return {
+        "data": {
+            "rateLimit": {"cost": 1, "remaining": 4000},
+            "repository": {
+                "pullRequest": {
+                    "number": FOREIGN_PR,
+                    "state": "OPEN",
+                    "headRefOid": head_sha,
+                    "baseRefOid": FOREIGN_BASE_SHA,
+                    "headRepository": {"nameWithOwner": fx.REPOSITORY},
+                    "baseRepository": {"nameWithOwner": fx.REPOSITORY},
+                    "changedFiles": total,
+                    "files": files,
+                }
+            },
+        }
+    }
+
+
+class CompactFilesHTTP:
+    compact_foreign_files_available = True
+
+    def __init__(
+        self,
+        pages: dict[str | None, dict[str, object]],
+        *,
+        rest_rows: list[dict[str, object]] | None = None,
+    ) -> None:
+        self.pages = pages
+        self.rest_rows = rest_rows
+        self.compact_calls: list[str | None] = []
+        self.rest_file_calls = 0
+        self.identity_reads = 0
+
+    def compact_pull_files_page(
+        self,
+        repository: str,
+        pr_number: int,
+        *,
+        cursor: str | None,
+        token: str,
+        timeout: float,
+    ) -> object:
+        assert repository == fx.REPOSITORY
+        assert pr_number == FOREIGN_PR
+        assert token == fx.TOKEN and timeout > 0
+        self.compact_calls.append(cursor)
+        return self.pages[cursor]
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        assert token == fx.TOKEN and timeout > 0
+        parsed = urlparse(url)
+        if parsed.path.endswith(f"/pulls/{FOREIGN_PR}/files"):
+            self.rest_file_calls += 1
+            assert self.rest_rows is not None
+            return self.rest_rows
+        if parsed.path.endswith(f"/pulls/{FOREIGN_PR}"):
+            self.identity_reads += 1
+            return _foreign_row()
+        raise AssertionError(url)
+
+
+def test_compact_foreign_files_avoid_patch_heavy_rest_rows() -> None:
+    module = fx._cli_module()
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                [("docs/compact.md", "MODIFIED")],
+            )
+        }
+    )
+
+    observation = module._foreign_files_observation(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        FOREIGN_PR,
+        raw_pr=_foreign_row(),
+    )
+
+    assert observation.paths == ("docs/compact.md",)
+    assert observation.saturated is False
+    assert http.compact_calls == [None]
+    assert http.rest_file_calls == 0
+    assert http.identity_reads == 0
+
+
+@pytest.mark.parametrize("changed_files", [0, 1])
+def test_compact_null_file_connection_promotes_to_exact_owned_tree_proof(
+    changed_files: int,
+) -> None:
+    # A null connection is not evidence of empty changes. Live REST metadata
+    # reports 0 changes while serving a 100-row file page for some open PRs.
+    module = fx._cli_module()
+    http = CompactFilesHTTP({
+        None: _compact_files_payload([], changed_files=changed_files, files_null=True)
+    })
+    observation = module._foreign_files_observation(
+        http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR, raw_pr=_foreign_row()
+    )
+    assert observation == module._ForeignFilesObservation((), True)
+    assert http.compact_calls == [None]
+    assert http.rest_file_calls == 0
+    assert http.identity_reads == 0
+
+
+def test_compact_rename_promotes_to_owned_path_tree_proof() -> None:
+    module = fx._cli_module()
+    outside = "docs/renamed-away.md"
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                [(outside, "RENAMED")],
+            )
+        },
+    )
+
+    observation = module._foreign_files_observation(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        FOREIGN_PR,
+        raw_pr=_foreign_row(),
+    )
+
+    assert observation == module._ForeignFilesObservation((), True)
+    assert http.compact_calls == [None]
+    assert http.rest_file_calls == 0
+    assert http.identity_reads == 0
+
+
+def test_compact_files_are_bound_to_the_roster_identity() -> None:
+    module = fx._cli_module()
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                [("docs/compact.md", "MODIFIED")],
+                head_sha=MOVED_HEAD_SHA,
+            )
+        }
+    )
+
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http,
+            fx.TOKEN,
+            fx.REPOSITORY,
+            FOREIGN_PR,
+            raw_pr=_foreign_row(),
+        )
+
+    assert http.rest_file_calls == 0
+
+
+def test_compact_files_paginate_without_rest_fallback() -> None:
+    module = fx._cli_module()
+    first_rows = [
+        (f"docs/page-1-{index:03d}.md", "MODIFIED")
+        for index in range(100)
+    ]
+    second_rows = [("docs/page-2-final.md", "ADDED")]
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                first_rows,
+                changed_files=101,
+                has_next=True,
+                end_cursor="cursor-100",
+            ),
+            "cursor-100": _compact_files_payload(
+                second_rows,
+                changed_files=101,
+            ),
+        }
+    )
+
+    observation = module._foreign_files_observation(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        FOREIGN_PR,
+        raw_pr=_foreign_row(),
+    )
+
+    assert len(observation.paths) == 101
+    assert observation.paths[-1] == "docs/page-2-final.md"
+    assert http.compact_calls == [None, "cursor-100"]
+    assert http.rest_file_calls == 0
+
+
+def test_compact_three_thousand_file_pr_uses_existing_saturated_tree_proof() -> None:
+    module = fx._cli_module()
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                [("bulk/first.md", "MODIFIED")],
+                changed_files=3000,
+                has_next=True,
+                end_cursor="unused",
+            )
+        }
+    )
+
+    observation = module._foreign_files_observation(
+        http,
+        fx.TOKEN,
+        fx.REPOSITORY,
+        FOREIGN_PR,
+        raw_pr=_foreign_row(),
+    )
+
+    assert observation == module._ForeignFilesObservation((), True)
+    assert http.compact_calls == [None]
+    assert http.rest_file_calls == 0
+
+
+def test_compact_unknown_change_type_refuses() -> None:
+    module = fx._cli_module()
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                [("docs/unknown.md", "FUTURE_STATUS")],
+            )
+        }
+    )
+
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http,
+            fx.TOKEN,
+            fx.REPOSITORY,
+            FOREIGN_PR,
+            raw_pr=_foreign_row(),
+        )
+
+
+@pytest.mark.parametrize("defect", ["errors", "cost", "remaining"])
+def test_compact_graphql_control_plane_defects_refuse(defect: str) -> None:
+    module = fx._cli_module()
+    payload = _compact_files_payload([("docs/compact.md", "MODIFIED")])
+    if defect == "errors":
+        payload["errors"] = [{"message": "partial response"}]
+    elif defect == "cost":
+        payload["data"]["rateLimit"]["cost"] = 2
+    else:
+        payload["data"]["rateLimit"]["remaining"] = -1
+    http = CompactFilesHTTP({None: payload})
+
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http,
+            fx.TOKEN,
+            fx.REPOSITORY,
+            FOREIGN_PR,
+            raw_pr=_foreign_row(),
+        )
+
+
+def test_compact_duplicate_path_across_pages_refuses() -> None:
+    module = fx._cli_module()
+    first_rows = [
+        (f"docs/page-1-{index:03d}.md", "MODIFIED")
+        for index in range(100)
+    ]
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                first_rows,
+                changed_files=101,
+                has_next=True,
+                end_cursor="cursor-100",
+            ),
+            "cursor-100": _compact_files_payload(
+                [(first_rows[0][0], "MODIFIED")],
+                changed_files=101,
+            ),
+        }
+    )
+
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http,
+            fx.TOKEN,
+            fx.REPOSITORY,
+            FOREIGN_PR,
+            raw_pr=_foreign_row(),
+        )
+
+
+def test_compact_repeated_cursor_refuses() -> None:
+    module = fx._cli_module()
+    first_rows = [
+        (f"docs/page-1-{index:03d}.md", "MODIFIED")
+        for index in range(100)
+    ]
+    second_rows = [
+        (f"docs/page-2-{index:03d}.md", "MODIFIED")
+        for index in range(100)
+    ]
+    http = CompactFilesHTTP(
+        {
+            None: _compact_files_payload(
+                first_rows,
+                changed_files=201,
+                has_next=True,
+                end_cursor="repeat",
+            ),
+            "repeat": _compact_files_payload(
+                second_rows,
+                changed_files=201,
+                has_next=True,
+                end_cursor="repeat",
+            ),
+        }
+    )
+
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http,
+            fx.TOKEN,
+            fx.REPOSITORY,
+            FOREIGN_PR,
+            raw_pr=_foreign_row(),
+        )
+
+
+def test_compact_pages_share_the_existing_http_call_and_byte_budget(
+    monkeypatch,
+) -> None:
+    module = fx._cli_module()
+    clock = budget.Clock()
+    monkeypatch.setattr(module, "monotonic", clock)
+    payload = _compact_files_payload([("docs/compact.md", "MODIFIED")])
+
+    class Transport:
+        compact_foreign_files_available = True
+
+        def __call__(self, _url, *, token, timeout, **_kwargs):
+            raise AssertionError("REST path is not part of this proof")
+
+        def compact_pull_files_page(
+            self,
+            repository,
+            pr_number,
+            *,
+            cursor,
+            token,
+            timeout,
+        ):
+            assert repository == fx.REPOSITORY
+            assert pr_number == FOREIGN_PR
+            assert cursor is None
+            assert token == fx.TOKEN and timeout > 0
+            return payload
+
+    bounded = module._BoundedHTTPGet(Transport())
+    observed = bounded.compact_pull_files_page(
+        fx.REPOSITORY,
+        FOREIGN_PR,
+        cursor=None,
+        token=fx.TOKEN,
+        timeout=20.0,
+    )
+
+    assert observed == payload
+    assert bounded._calls == 1
+    assert bounded._bytes == len(
+        module.canonical_json(payload).encode("utf-8", "backslashreplace")
+    )
+
+
+
+@pytest.mark.parametrize("change_type", ("RENAMED", "COPIED"))
+def test_compact_rename_or_copy_unknown_source_routes_to_exact_tree_proof(
+    change_type: str,
+) -> None:
+    """A copied/renamed source is absent from the GraphQL path-only page."""
+    module = fx._cli_module()
+    http = CompactFilesHTTP(
+        {None: _compact_files_payload([("docs/new-location.md", change_type)])}
+    )
+    observed = module._foreign_files_observation(
+        http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR, raw_pr=_foreign_row(),
+    )
+    assert observed == module._ForeignFilesObservation((), True)
+    assert http.rest_file_calls == 0
+
+
+
+@pytest.mark.parametrize("field,malformed", [
+    ("number", True),
+    ("number", float(FOREIGN_PR)),
+    ("totalCount", True),
+    ("totalCount", 1.0),
+])
+def test_compact_graphql_identity_fields_refuse_bool_or_float(
+    field: str, malformed: object,
+) -> None:
+    module = fx._cli_module()
+    payload = _compact_files_payload([("docs/changed.md", "MODIFIED")])
+    pull = payload["data"]["repository"]["pullRequest"]
+    if field == "totalCount":
+        pull["files"]["totalCount"] = malformed
+    else:
+        pull["number"] = malformed
+    http = CompactFilesHTTP({None: payload})
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR, raw_pr=_foreign_row(),
+        )
+
+
+def test_compact_oversized_cursor_refuses_before_post_replay() -> None:
+    module = fx._cli_module()
+    items = [(f"docs/page-one-{i:03d}.md", "MODIFIED") for i in range(100)]
+    http = CompactFilesHTTP({
+        None: _compact_files_payload(
+            items, changed_files=101, has_next=True,
+            end_cursor="X" * 4097,
+        )
+    })
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR, raw_pr=_foreign_row(),
+        )
+    assert http.compact_calls == [None]
+    assert http.rest_file_calls == 0
+
+
+def test_compact_real_wire_post_uses_fixed_github_endpoint_and_pinned_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The readonly POST endpoint and protocol version are source constants."""
+    module = fx._cli_module()
+    seen = []
+    payload = _compact_files_payload([("docs/changed.md", "MODIFIED")])
+
+    class Response:
+        def __enter__(self): return self
+        def __exit__(self, *_args): return None
+        def read(self, _cap: int): return __import__("json").dumps(payload).encode()
+
+    def urlopen(req, *, timeout):
+        seen.append(req)
+        assert req.full_url == module._GRAPHQL_ROOT
+        assert req.get_method() == "POST"
+        assert req.get_header("X-github-api-version") == module._API_VERSION
+        assert req.get_header("Authorization") == "Bearer local-test-token"
+        assert timeout > 0
+        body = __import__("json").loads(req.data)
+        assert body["query"] == module._GRAPHQL_PULL_FILES_QUERY
+        assert body["variables"] == {
+            "owner": fx.REPOSITORY.split("/", 1)[0],
+            "name": fx.REPOSITORY.split("/", 1)[1],
+            "number": FOREIGN_PR,
+            "cursor": None,
+        }
+        return Response()
+
+    monkeypatch.setattr(module, "urlopen", urlopen)
+    assert module._stdlib_compact_pull_files_page(
+        fx.REPOSITORY, FOREIGN_PR, cursor=None,
+        token="local-test-token", timeout=4.0
+    ) == payload
+    assert len(seen) == 1
+
+
+def test_compact_real_empty_connection_does_not_override_immutable_tree_proof() -> None:
+    module = fx._cli_module()
+    http = CompactFilesHTTP({
+        None: _compact_files_payload([], changed_files=0)
+    })
+    assert module._foreign_files_observation(
+        http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR,
+        raw_pr=_foreign_row()
+    ) == module._ForeignFilesObservation((), True)
+
+
+
+class NullCompactCurrentBaseHTTP(CurrentBaseOverlapHTTP):
+    compact_foreign_files_available = True
+
+    def compact_pull_files_page(
+        self, repository, pr_number, *, cursor, token, timeout,
+    ):
+        assert repository == fx.REPOSITORY and pr_number == FOREIGN_PR
+        assert cursor is None and token == fx.TOKEN and timeout > 0
+        return _compact_files_payload([], changed_files=0, files_null=True)
+
+
+@pytest.mark.parametrize(
+    ("foreign_sha", "missing_foreign", "expected_overlap"),
+    [
+        (SAME_BLOB, False, False),
+        (OTHER_BLOB, False, True),
+        (SAME_BLOB, True, True),
+    ],
+)
+def test_compact_null_file_connection_requires_real_immutable_owned_tree_proof(
+    foreign_sha: str, missing_foreign: bool, expected_overlap: bool,
+) -> None:
+    """GraphQL-null can never waive material differences on owned paths."""
+    module = fx._cli_module()
+    entry = None if missing_foreign else _blob_entry(foreign_sha)
+    http = NullCompactCurrentBaseHTTP(entry)
+    proof, overlaps = module._foreign_collision_evidence(
+        http, fx.TOKEN, fx.REPOSITORY, _foreign_row(),
+        FOREIGN_PR, MATERIAL_OWNED, current_base_head=CURRENT_BASE_SHA,
+    )
+    assert overlaps is expected_overlap
+    assert proof.proof_method == "CURRENT_TARGET_BASE_TREE_EQUALITY"
+    assert proof.target_base_sha == CURRENT_BASE_SHA
+    assert proof.head_sha == FOREIGN_HEAD_SHA
+    assert tuple(x[0] for x in proof.owned_path_entries) == MATERIAL_OWNED
+    assert not any("/files" in url for url in http.calls)
+
+
+def test_compact_present_zero_connection_routes_to_exact_tree_proof() -> None:
+    """A present but empty GraphQL list is not proof when zero-count metadata lies."""
+    module = fx._cli_module()
+    http = CompactFilesHTTP({
+        None: _compact_files_payload([], changed_files=0)
+    })
+    seen = module._foreign_files_observation(
+        http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR, raw_pr=_foreign_row()
+    )
+    assert seen == module._ForeignFilesObservation((), True)
+    assert http.compact_calls == [None]
+
+
+@pytest.mark.parametrize("foreign_entry, expected_overlap", [
+    (_blob_entry(), False),
+    (_blob_entry(OTHER_BLOB), True),
+    (None, True),
+])
+def test_compact_present_zero_connection_uses_actual_owned_tree(
+    foreign_entry, expected_overlap: bool,
+) -> None:
+    module = fx._cli_module()
+    class PresentEmptyCurrentBase(CurrentBaseOverlapHTTP):
+        compact_foreign_files_available = True
+        def compact_pull_files_page(self, repository, pr_number, *, cursor, token, timeout):
+            assert repository == fx.REPOSITORY
+            return _compact_files_payload([], changed_files=0)
+    http = PresentEmptyCurrentBase(foreign_entry)
+    proof, overlap = module._foreign_collision_evidence(
+        http, fx.TOKEN, fx.REPOSITORY, _foreign_row(), FOREIGN_PR,
+        MATERIAL_OWNED, current_base_head=CURRENT_BASE_SHA
+    )
+    assert overlap is expected_overlap
+    assert proof.proof_method == "CURRENT_TARGET_BASE_TREE_EQUALITY"
+
+
+def test_compact_unicode_surrogate_cursor_refuses_as_remote_not_internal_error() -> None:
+    module = fx._cli_module()
+    rows = [(f"docs/p{i:03d}.md", "MODIFIED") for i in range(100)]
+    http = CompactFilesHTTP({
+        None: _compact_files_payload(rows, changed_files=101, has_next=True, end_cursor="\ud800")
+    })
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http, fx.TOKEN, fx.REPOSITORY, FOREIGN_PR, raw_pr=_foreign_row()
+        )
+    assert http.compact_calls == [None]
+
+
+def test_compact_changed_files_boolean_is_refused() -> None:
+    module = fx._cli_module()
+    payload = _compact_files_payload([("docs/p0.md","MODIFIED")])
+    payload["data"]["repository"]["pullRequest"]["changedFiles"] = True
+    http = CompactFilesHTTP({None:payload})
+    with pytest.raises(module._RemoteProbeError):
+        module._foreign_files_observation(
+            http,fx.TOKEN,fx.REPOSITORY,FOREIGN_PR,raw_pr=_foreign_row()
+        )

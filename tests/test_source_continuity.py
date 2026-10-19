@@ -997,6 +997,18 @@ class _ProbeRunner:
             "--ignore-submodules=none", "--name-only", "-z", "--",
         ):
             return self._done()
+        if call == (
+            "diff", "--cached", "--raw", "-z",
+            "--no-renames", "--no-ext-diff", "HEAD", "--",
+        ):
+            # The canonical CLI synthetic workspace stages no changes,
+            # so no index-vs-HEAD gitlinks can be hidden from preflight.
+            return self._done()
+        if call == ("ls-files", "--stage", "-z"):
+            # Closed synthetic fixture has ordinary tracked owned files and no gitlinks.
+            return self._done(stdout="".join(
+                f"100644 {'a'*40} 0\t{path}\0" for path in FINAL_OWNED_PATHS
+            ))
         if call == ("ls-files", "-v", "-z"):
             return self._done(
                 stdout="".join(f"H {path}\0" for path in FINAL_OWNED_PATHS)

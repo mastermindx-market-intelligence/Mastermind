@@ -446,8 +446,15 @@ def test_all_local_probes_use_closed_argv_and_explicit_diff_controls() -> None:
     for command in runner.commands:
         assert_git_prefix(command)
     diffs = [git_tail(c) for c in runner.commands if git_tail(c)[0] == "diff"]
-    assert len(diffs) == 3
-    for command in diffs:
+    assert len(diffs) == 4
+    staged_raw = [row for row in diffs if "--raw" in row]
+    assert staged_raw == [(
+        "diff", "--cached", "--raw", "-z",
+        "--no-renames", "--no-ext-diff", "HEAD", "--",
+    )]
+    ordinary = [row for row in diffs if "--raw" not in row]
+    assert len(ordinary) == 3
+    for command in ordinary:
         for flag in (
             "--no-renames", "--no-ext-diff", "--no-textconv",
             "--ignore-submodules=none", "--name-only", "-z", "--",
@@ -1162,3 +1169,88 @@ def test_real_probe_refuses_dirty_out_of_scope_filtered_path_before_helper_execu
     assert isinstance(result, module.SourceContinuityRefusal)
     assert result.code.value == "LOCAL_PROBE_FAILED"
     assert not marker.exists()
+
+
+# Regression: submodule-local conversion filters must never run during the probe.
+
+def test_local_probe_nested_submodule_active_clean_filter_cannot_run(tmp_path):
+    child=tmp_path/'child'
+    init_repo(child, 'nested')
+    parent=tmp_path/'parent'
+    init_repo(parent, 'super')
+    git(parent,'-c','protocol.file.allow=always','submodule','add','-q',str(child),'sub')
+    git(parent,'commit','-q','-am','add gitlink')
+    base=git(parent,'rev-parse','HEAD^{commit}')
+    (parent/'value.txt').write_text('candidate\n',encoding='utf8')
+    git(parent,'add','value.txt')
+    git(parent,'commit','-q','-m','candidate')
+    head=git(parent,'rev-parse','HEAD^{commit}')
+    git(parent,'config','submodule.sub.ignore','all')
+    nested=parent/'sub'
+    (nested/'.gitattributes').write_text('value.txt filter=tripwire\n',encoding='utf8')
+    marker=tmp_path/'marker.txt'
+    script=tmp_path/'clean-filter.sh'
+    script.write_text('#!/bin/sh\nprintf executed >> '+str(marker)+'\ncat\n',encoding='utf8')
+    script.chmod(0o755)
+    git(nested,'config','filter.tripwire.clean',str(script))
+    git(nested,'config','filter.tripwire.required','true')
+    (nested/'value.txt').write_text('nested-dirty\n',encoding='utf8')
+    marker.unlink(missing_ok=True)
+    mod=_module()
+    result=mod._probe_local_and_entries(subprocess.run,str(parent),repo_request(mod,parent,head),head,base,('value.txt',))
+    assert isinstance(result, mod.SourceContinuityRefusal),result
+    assert result.code.value=='LOCAL_PROBE_FAILED'
+    assert not marker.exists(), 'nested clean filter executed before failure'
+
+def test_local_probe_dirty_submodule_unused_filter_is_allowed(tmp_path):
+    child=tmp_path/'child'; init_repo(child, 'nested')
+    parent=tmp_path/'parent'; init_repo(parent,'super')
+    git(parent,'-c','protocol.file.allow=always','submodule','add','-q',str(child),'sub')
+    git(parent,'commit','-q','-am','add gitlink')
+    base=git(parent,'rev-parse','HEAD^{commit}')
+    (parent/'value.txt').write_text('candidate\n',encoding='utf8')
+    git(parent,'add','value.txt');git(parent,'commit','-q','-m','candidate')
+    head=git(parent,'rev-parse','HEAD^{commit}')
+    git(parent,'config','submodule.sub.ignore','all')
+    nested=parent/'sub'
+    (nested/'.gitattributes').write_text('unused.bin filter=tripwire\n',encoding='utf8')
+    marker=tmp_path/'marker.txt'
+    script=tmp_path/'clean-filter.sh'
+    script.write_text('#!/bin/sh\nprintf executed >> '+str(marker)+'\ncat\n',encoding='utf8')
+    script.chmod(0o755)
+    git(nested,'config','filter.tripwire.clean',str(script))
+    git(nested,'config','filter.tripwire.required','true')
+    (nested/'value.txt').write_text('nested-dirty\n',encoding='utf8')
+    mod=_module()
+    result=mod._probe_local_and_entries(subprocess.run,str(parent),repo_request(mod,parent,head),head,base,('value.txt',))
+    assert not isinstance(result,mod.SourceContinuityRefusal), result
+    local,_=result
+    assert local.uncommitted_out_of_scope_count==1
+    assert not marker.exists()
+
+
+
+def test_removed_head_gitlink_not_hidden_from_filter_preflight(tmp_path) -> None:
+    """An index deletion cannot make HEAD's tracked gitlink invisible."""
+    child=tmp_path/"child";init_repo(child,"nested")
+    parent=tmp_path/"parent";init_repo(parent,"super")
+    git(parent,"-c","protocol.file.allow=always","submodule","add","-q",str(child),"sub")
+    git(parent,"commit","-q","-am","tracked gitlink")
+    git(parent,"rm","--cached","-q","sub")
+    assert (parent/"sub").is_dir()
+    mod=_module()
+    assert mod._nested_submodules_have_no_filters(subprocess.run,str(parent)) is False
+
+
+def test_nested_filter_preflight_caps_total_tracked_paths(tmp_path) -> None:
+    """Resource bounds must fail closed for oversized nested Git indexes."""
+    child=tmp_path/"child";init_repo(child,"nested")
+    for n in range(514):
+        (child/f"item-{n:04d}.txt").write_text("data\n",encoding="utf8")
+    git(child,"add",".")
+    git(child,"commit","-q","-m","large nested index")
+    parent=tmp_path/"parent";init_repo(parent,"super")
+    git(parent,"-c","protocol.file.allow=always","submodule","add","-q",str(child),"sub")
+    git(parent,"commit","-q","-am","tracked large gitlink")
+    mod=_module()
+    assert mod._nested_submodules_have_no_filters(subprocess.run,str(parent)) is False

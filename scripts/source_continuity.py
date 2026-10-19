@@ -2,7 +2,7 @@
 """Read-only production adapter for deterministic Source Continuity V1 receipts.
 
 This adapter observes one explicit local Git worktree plus authenticated GitHub
-GET-only facts, then delegates all classification to the pure verifier in
+read-only facts, then delegates all classification to the pure verifier in
 ``control_plane.source_continuity``. It intentionally owns no persistence,
 lifecycle, retry/failover, watcher, receiver-transfer, release, merge, provider,
 or runtime effect.
@@ -65,8 +65,36 @@ from control_plane.source_continuity import (  # noqa: E402
 
 _GIT = "/usr/bin/git"
 _API_ROOT = "https://api.github.com"
+_GRAPHQL_ROOT = "https://api.github.com/graphql"
 _API_VERSION = "2022-11-28"
+_GRAPHQL_PULL_FILES_QUERY = """query($owner:String!,$name:String!,$number:Int!,$cursor:String){
+  rateLimit { cost remaining }
+  repository(owner:$owner,name:$name) {
+    pullRequest(number:$number) {
+      number
+      state
+      headRefOid
+      baseRefOid
+      headRepository { nameWithOwner }
+      baseRepository { nameWithOwner }
+      changedFiles
+      files(first:100,after:$cursor) {
+        totalCount
+        nodes { path changeType }
+        pageInfo { hasNextPage endCursor }
+      }
+    }
+  }
+}"""
+_GRAPHQL_CHANGE_TYPES = frozenset(
+    {"ADDED", "DELETED", "RENAMED", "COPIED", "MODIFIED", "CHANGED"}
+)
 _COMMAND_TIMEOUT_SECONDS = 20.0
+# Fail-closed local Git preflight resource ceilings (remote budgets unchanged).
+_NESTED_GIT_PREFLIGHT_SECONDS = 40.0
+_NESTED_GIT_MATERIALIZED_REPOS = 16
+_NESTED_GIT_CHECKED_PATHS = 512
+_NESTED_GIT_RAW_STAGED_BYTES = 1_048_576
 _HTTP_TIMEOUT_SECONDS = 20.0
 _MAX_HTTP_BODY_BYTES = 5_000_000
 _MAX_GIT_CONFIG_CENSUS_BYTES = 65_536
@@ -315,6 +343,15 @@ class _BoundedHTTPGet:
         self._semantic_revalidations: list[str] = []
         self._missing_observations: list[str] = []
         self._base_head_update: tuple[str, str] | None = None
+        compact_transport = None
+        if transport is _stdlib_http_get:
+            compact_transport = _stdlib_compact_pull_files_page
+        elif getattr(transport, "compact_foreign_files_available", False) is True:
+            candidate = getattr(transport, "compact_pull_files_page", None)
+            if callable(candidate):
+                compact_transport = candidate
+        self._compact_transport = compact_transport
+        self.compact_foreign_files_available = compact_transport is not None
         self.parallel_safe = (
             transport is _stdlib_http_get
             or getattr(transport, "_source_continuity_parallel_safe", False) is True
@@ -439,6 +476,28 @@ class _BoundedHTTPGet:
         self._account_payload(payload)
         return payload
 
+    def compact_pull_files_page(
+        self,
+        repository: str,
+        pr_number: int,
+        *,
+        cursor: str | None,
+        token: str,
+        timeout: float,
+    ) -> object:
+        if self._compact_transport is None:
+            raise _RemoteProbeError()
+        call_timeout = self._admit_call(timeout)
+        payload = self._compact_transport(
+            repository,
+            pr_number,
+            cursor=cursor,
+            token=token,
+            timeout=call_timeout,
+        )
+        self._account_payload(payload)
+        return payload
+
     def collision_census_reader(self) -> "_CollisionCensusHTTP":
         return _CollisionCensusHTTP(self)
 
@@ -550,6 +609,26 @@ class _CollisionCensusHTTP:
     def __init__(self, parent: _BoundedHTTPGet) -> None:
         self._parent = parent
         self.parallel_safe = parent.parallel_safe
+        self.compact_foreign_files_available = (
+            parent.compact_foreign_files_available
+        )
+
+    def compact_pull_files_page(
+        self,
+        repository: str,
+        pr_number: int,
+        *,
+        cursor: str | None,
+        token: str,
+        timeout: float,
+    ) -> object:
+        return self._parent.compact_pull_files_page(
+            repository,
+            pr_number,
+            cursor=cursor,
+            token=token,
+            timeout=timeout,
+        )
 
     def __call__(
         self,
@@ -823,6 +902,69 @@ def _stdlib_http_get(
     return _HTTPRepresentation(payload=payload, etag=etag, not_modified=False)
 
 
+def _stdlib_compact_pull_files_page(
+    repository: str,
+    pr_number: int,
+    *,
+    cursor: str | None,
+    token: str,
+    timeout: float,
+) -> object:
+    """Read one compact PR-file page without REST patch bodies."""
+
+    if (
+        not _is_safe_repository(repository)
+        or type(pr_number) is not int
+        or pr_number <= 0
+        or (cursor is not None and (not isinstance(cursor, str) or not cursor))
+        or not isinstance(token, str)
+        or not token
+    ):
+        raise _RemoteProbeError()
+    owner, name = repository.split("/", 1)
+    body = canonical_json(
+        {
+            "query": _GRAPHQL_PULL_FILES_QUERY,
+            "variables": {
+                "owner": owner,
+                "name": name,
+                "number": pr_number,
+                "cursor": cursor,
+            },
+        }
+    ).encode("utf-8")
+    request = Request(
+        _GRAPHQL_ROOT,
+        data=body,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "Content-Type": "application/json",
+            "X-GitHub-Api-Version": _API_VERSION,
+            "User-Agent": "mastermind-source-continuity-v1",
+        },
+    )
+    try:
+        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - fixed GitHub API root
+            raw = response.read(_MAX_HTTP_BODY_BYTES + 1)
+    except HTTPError as exc:
+        if exc.code in {401, 403}:
+            raise _AuthProbeError() from None
+        raise _RemoteProbeError() from None
+    except (URLError, TimeoutError, OSError):
+        raise _RemoteProbeError() from None
+    if len(raw) > _MAX_HTTP_BODY_BYTES:
+        raise _RemoteProbeError()
+    try:
+        payload = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, ValueError):
+        raise _RemoteProbeError() from None
+    if not isinstance(payload, dict):
+        raise _RemoteProbeError()
+    return payload
+
+
 _stdlib_http_get._source_continuity_conditional = True  # type: ignore[attr-defined]
 
 
@@ -1016,12 +1158,183 @@ def _subject_changed_paths(
     return paths, complete, rename_within_ownership
 
 
+def _compact_foreign_files_observation(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    pr_number: int,
+    raw_pr: object,
+) -> _ForeignFilesObservation:
+    identity = _foreign_pull_identity(raw_pr, repository)
+    compact = getattr(http_get, "compact_pull_files_page", None)
+    if not callable(compact):
+        raise _RemoteProbeError()
+
+    changed_files: int | None = None
+    paths: list[str] = []
+    seen_paths: set[str] = set()
+    seen_cursors: set[str] = set()
+    cursor: str | None = None
+
+    for page in range(1, _MAX_FOREIGN_FILE_PAGES + 1):
+        payload = compact(
+            repository,
+            pr_number,
+            cursor=cursor,
+            token=token,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        if not isinstance(payload, dict):
+            raise _RemoteProbeError()
+        errors = payload.get("errors")
+        if errors not in (None, []):
+            raise _RemoteProbeError()
+        data = payload.get("data")
+        if not isinstance(data, dict):
+            raise _RemoteProbeError()
+        rate = data.get("rateLimit")
+        if (
+            not isinstance(rate, dict)
+            or type(rate.get("cost")) is not int
+            or rate["cost"] != 1
+            or type(rate.get("remaining")) is not int
+            or rate["remaining"] < 0
+        ):
+            raise _RemoteProbeError()
+        repository_payload = data.get("repository")
+        if not isinstance(repository_payload, dict):
+            raise _RemoteProbeError()
+        pull = repository_payload.get("pullRequest")
+        if not isinstance(pull, dict):
+            raise _RemoteProbeError()
+
+        head_repository = pull.get("headRepository")
+        base_repository = pull.get("baseRepository")
+        if (
+            type(pull.get("number")) is not int
+            or pull.get("number") != identity.pr_number
+            or pull.get("state") != "OPEN"
+            or pull.get("headRefOid") != identity.head_sha
+            or pull.get("baseRefOid") != identity.base_sha
+            or not isinstance(head_repository, dict)
+            or head_repository.get("nameWithOwner") != identity.head_repository
+            or not isinstance(base_repository, dict)
+            or base_repository.get("nameWithOwner") != identity.base_repository
+        ):
+            raise _RemoteProbeError()
+
+        observed_changed_files = pull.get("changedFiles")
+        if type(observed_changed_files) is not int or observed_changed_files < 0:
+            raise _RemoteProbeError()
+        if changed_files is None:
+            changed_files = observed_changed_files
+        elif changed_files != observed_changed_files:
+            raise _RemoteProbeError()
+
+        files = pull.get("files")
+        # GraphQL may return files:null with changedFiles=0 while REST still
+        # advertises 100 or more changed paths. A missing connection is never
+        # a proved empty diff; use the existing immutable target-owned tree
+        # proof, exactly as for RENAMED/COPIED or a saturated file roster.
+        if files is None:
+            return _ForeignFilesObservation((), True)
+        if (
+            not isinstance(files, dict)
+            or type(files.get("totalCount")) is not int
+            or files["totalCount"] != changed_files
+        ):
+            raise _RemoteProbeError()
+
+        # GitHub has returned changedFiles=0 while exposing 100+ REST
+        # /files entries. A present empty GraphQL page is therefore not proof
+        # of disjointness either: resolve the immutable owned-path tree just
+        # as for an unavailable or saturated connection.
+        if changed_files == 0:
+            return _ForeignFilesObservation((), True)
+
+        # Large PRs already use immutable owned-path tree proof. Do not retrieve
+        # thousands of path rows merely to rediscover that the file list is large.
+        if changed_files >= _MAX_FOREIGN_FILE_PAGES * _PAGE_SIZE:
+            return _ForeignFilesObservation((), True)
+
+        nodes = files.get("nodes")
+        page_info = files.get("pageInfo")
+        if (
+            not isinstance(nodes, list)
+            or len(nodes) > _PAGE_SIZE
+            or not isinstance(page_info, dict)
+            or type(page_info.get("hasNextPage")) is not bool
+        ):
+            raise _RemoteProbeError()
+
+        for node in nodes:
+            if not isinstance(node, dict):
+                raise _RemoteProbeError()
+            path = node.get("path")
+            change_type = node.get("changeType")
+            if (
+                not _is_safe_remote_path(path)
+                or not isinstance(change_type, str)
+                or change_type not in _GRAPHQL_CHANGE_TYPES
+                or path in seen_paths
+            ):
+                raise _RemoteProbeError()
+            if change_type in {"RENAMED", "COPIED"}:
+                # GraphQL omits the original source path for both moves and
+                # copies. Promote to the existing exact owned-path tree proof
+                # rather than falsely conclude the source cannot intersect.
+                return _ForeignFilesObservation((), True)
+            seen_paths.add(path)
+            paths.append(path)
+
+        has_next = page_info["hasNextPage"]
+        end_cursor = page_info.get("endCursor")
+        if not has_next:
+            if len(paths) != changed_files:
+                raise _RemoteProbeError()
+            return _ForeignFilesObservation(tuple(paths), False)
+        if not isinstance(end_cursor, str) or not end_cursor:
+            raise _RemoteProbeError()
+        try:
+            cursor_bytes = end_cursor.encode("utf-8")
+        except UnicodeEncodeError:
+            raise _RemoteProbeError() from None
+        if (
+            page == _MAX_FOREIGN_FILE_PAGES
+            or len(cursor_bytes) > _MAX_GIT_PATH_BYTES
+            or end_cursor in seen_cursors
+        ):
+            raise _RemoteProbeError()
+        seen_cursors.add(end_cursor)
+        cursor = end_cursor
+
+    raise _RemoteProbeError()
+
+
 def _foreign_files_observation(
     http_get: HTTPGet,
     token: str,
     repository: str,
     pr_number: int,
+    *,
+    raw_pr: object | None = None,
 ) -> _ForeignFilesObservation:
+    if (
+        raw_pr is not None
+        and getattr(http_get, "compact_foreign_files_available", False) is True
+    ):
+        try:
+            _foreign_pull_identity(raw_pr, repository)
+        except _RemoteProbeError:
+            pass
+        else:
+            return _compact_foreign_files_observation(
+                http_get,
+                token,
+                repository,
+                pr_number,
+                raw_pr,
+            )
     first = _pull_files_page(http_get, token, repository, pr_number, 1)
     if len(first) < _PAGE_SIZE:
         return _ForeignFilesObservation(_parse_changed_path_rows(first), False)
@@ -1407,6 +1720,7 @@ def _foreign_collision_evidence(
         token,
         repository,
         pr_number,
+        raw_pr=raw_pr,
     )
     if current_base_head is not None:
         if not files.saturated:
@@ -2301,11 +2615,15 @@ def _paths_have_no_filters(
     runner: Runner,
     workspace: str,
     paths: tuple[str, ...],
+    *,
+    deadline: float | None = None,
 ) -> bool:
     """Refuse any path whose worktree conversion may invoke a Git filter."""
 
     # Keep each argv comfortably below the platform limit even with maximum-size paths.
     for offset in range(0, len(paths), 16):
+        if deadline is not None and monotonic() >= deadline:
+            return False
         batch = paths[offset:offset + 16]
         result = _invoke_git(
             runner,
@@ -2331,6 +2649,135 @@ def _paths_have_no_filters(
                 or value not in {"unspecified", "unset"}
             ):
                 return False
+        if deadline is not None and monotonic() >= deadline:
+            return False
+    return True
+
+
+def _nested_submodules_have_no_filters(
+    runner: Runner,
+    workspace: str,
+) -> bool:
+    """Preflight materialized nested gitlinks before an unrestricted worktree diff.
+
+    Superproject check-attr cannot see attributes from a submodule's local
+    worktree, while --ignore-submodules=none can recurse and run clean filters.
+    Enumerate tracked nested paths with non-transforming Git reads, including
+    recursively nested gitlinks. A configured but unused nested filter is safe.
+    """
+    started = monotonic()
+    if not isinstance(started, (int, float)) or not math.isfinite(started):
+        return False
+    deadline = float(started) + _NESTED_GIT_PREFLIGHT_SECONDS
+    if not math.isfinite(deadline):
+        return False
+    pending: list[tuple[Path, int]] = [(Path(workspace), 0)]
+    examined = 0
+    materialized = 0
+    checked_total = 0
+    visited: set[str] = set()
+    while pending:
+        if monotonic() >= deadline:
+            return False
+        current, depth = pending.pop()
+        key = os.path.normpath(str(current))
+        if key in visited or depth > 4:
+            return False
+        visited.add(key)
+        staged = _invoke_git(runner, str(current), "ls-files", "--stage", "-z")
+        if staged is None or staged.returncode != 0:
+            return False
+        # An index-only scan misses tracked HEAD gitlinks staged for deletion.
+        # Cached raw diff compares index/Git objects, never the worktree or
+        # clean/process filters. Refuse any staged gitlink change.
+        if monotonic() >= deadline:
+            return False
+        raw = _invoke_git(
+            runner, str(current), "diff", "--cached", "--raw", "-z",
+            "--no-renames", "--no-ext-diff", "HEAD", "--",
+        )
+        if (
+            raw is None or raw.returncode != 0
+            or len(raw.stdout.encode("utf-8")) > _NESTED_GIT_RAW_STAGED_BYTES
+        ):
+            return False
+        entries = [part for part in raw.stdout.split("\0") if part]
+        if len(entries) % 2:
+            return False
+        for index in range(0, len(entries), 2):
+            header, path = entries[index], entries[index + 1]
+            fields = header.removeprefix(":").split()
+            if (
+                not header.startswith(":")
+                or len(fields) != 5
+                or not _is_safe_remote_path(path)
+            ):
+                return False
+            if fields[0] == "160000" or fields[1] == "160000":
+                return False
+        for record in (row for row in staged.stdout.split("\0") if row):
+            try:
+                header, path = record.split("\t", 1)
+                mode, object_sha, stage = header.split()
+            except ValueError:
+                return False
+            if (
+                not _is_safe_remote_path(path)
+                or not _is_sha(object_sha)
+                or stage not in {"0", "1", "2", "3"}
+            ):
+                return False
+            if mode != "160000":
+                continue
+            examined += 1
+            if examined > 128:
+                return False
+            # Never follow an untrusted intermediate symlink or escape root.
+            target = current
+            missing = False
+            for part in PurePosixPath(path).parts:
+                target = target / part
+                try:
+                    observed = os.lstat(target)
+                except FileNotFoundError:
+                    missing = True
+                    break
+                except OSError:
+                    return False
+                if not stat.S_ISDIR(observed.st_mode):
+                    return False
+            if missing:  # Sparse/unmaterialized gitlink: no nested filter runs.
+                continue
+            materialized += 1
+            if materialized > _NESTED_GIT_MATERIALIZED_REPOS or monotonic() >= deadline:
+                return False
+            top = _invoke_git(runner, str(target), "rev-parse", "--show-toplevel")
+            if (
+                top is None
+                or top.returncode != 0
+                or os.path.normpath(top.stdout.strip()) != os.path.normpath(str(target))
+            ):
+                return False
+            if monotonic() >= deadline:
+                return False
+            flags = _invoke_git(runner, str(target), "ls-files", "-v", "-z")
+            if flags is None or flags.returncode != 0:
+                return False
+            checked: list[str] = []
+            for item in (row for row in flags.stdout.split("\0") if row):
+                if len(item) < 3 or item[1] != " " or not _is_safe_remote_path(item[2:]):
+                    return False
+                if item[0] != "S":
+                    checked.append(item[2:])
+            checked_total += len(checked)
+            if (
+                checked_total > _NESTED_GIT_CHECKED_PATHS
+                or not _paths_have_no_filters(
+                    runner, str(target), tuple(checked), deadline=deadline
+                )
+            ):
+                return False
+            pending.append((target, depth + 1))
     return True
 
 
@@ -2470,6 +2917,9 @@ def _probe_local_and_entries(
     if not _paths_have_no_filters(
         runner, workspace, other_materialized_paths
     ):
+        return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
+
+    if not _nested_submodules_have_no_filters(runner, workspace):
         return _refusal(RefusalCode.LOCAL_PROBE_FAILED, 2)
 
     unstaged = _invoke_git(runner, workspace, "diff", *diff_controls, "HEAD", "--")

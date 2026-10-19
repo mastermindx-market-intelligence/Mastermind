@@ -546,23 +546,52 @@ def test_saturated_colliding_pr_movement_that_substitutes_overlap_path_refuses()
     second = module._ForeignCollisionRecord(
         FOREIGN_A, second_identity, second_evidence, True
     )
-    details = module._CollisionCensusDetails(
-        module.CollisionState.OVERLAP,
-        (FOREIGN_A,),
-        True,
-        ((sat.TARGET_PR, ()), (FOREIGN_A, second_evidence)),
-        (second,),
-    )
+    # Exercise the real main() revalidation helper, not the unused
+    # _revalidate_collision_records test helper. The first pass has a real
+    # typed record; the second pass observes a moved head and re-proves it.
+    called = []
+    def second_roster(url: str, *, token: str, timeout: float):
+        assert token == sat.TOKEN and timeout > 0
+        assert url.endswith(
+            f"/repos/{sat.REPOSITORY}/pulls?state=open&per_page=100&page=1"
+        ), url
+        called.append(("roster", url))
+        return [
+            {"number": sat.TARGET_PR, "state": "open"},
+            {
+                "number": FOREIGN_A, "state": "open",
+                "head": {"sha": A_HEAD_MOVED,
+                         "repo": {"full_name": sat.REPOSITORY}},
+                "base": {"sha": FOREIGN_BASE,
+                         "repo": {"full_name": sat.REPOSITORY}},
+            },
+        ]
 
-    matched, complete, records = module._revalidate_collision_records(
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("no HTTP expected")),
+    def reprove(
+        http_get, token, repository, raw_pr, number, owned_paths,
+        *, current_base_head=None, target_base_resolver=None,
+    ):
+        assert token == sat.TOKEN and repository == sat.REPOSITORY
+        assert number == FOREIGN_A and tuple(owned_paths) == owned
+        assert raw_pr["head"]["sha"] == A_HEAD_MOVED
+        called.append(("reproved", number))
+        return second_evidence, True
+
+    module._foreign_collision_evidence = reprove
+    matched, complete, records = module._revalidate_collision_census(
+        second_roster,
         sat.TOKEN,
         sat.REPOSITORY,
+        sat.TARGET_PR,
         owned,
         (first,),
         (FOREIGN_A,),
-        details,
     )
+    assert called == [
+        ("roster", f"{module._API_ROOT}/repos/{sat.REPOSITORY}/pulls"
+         "?state=open&per_page=100&page=1"),
+        ("reproved", FOREIGN_A),
+    ]
     assert (matched, complete, records) == (False, True, ())
 
 
