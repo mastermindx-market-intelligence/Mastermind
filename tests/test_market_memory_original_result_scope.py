@@ -98,7 +98,8 @@ def test_scope_provenance_preserves_original_dispatch_and_lease():
     assert proof["effect"] == "LOCAL_SOURCE_QUALIFICATION_ONLY_NO_REMOTE_READ_NO_LEASE_MUTATION"
 
 
-def test_sealed_generation_uses_original_state_owner_and_keeps_custody_checks(staged_ext):
+@pytest.mark.parametrize("mode", ["minimax", "qwen"])
+def test_sealed_generation_uses_original_state_owner_and_keeps_custody_checks(staged_ext, mode):
     # Every byte and path below belongs to this inert kit. No real run, host,
     # credential, lease or selection pointer is read or changed.
     with tempfile.TemporaryDirectory(prefix="l0-native-state-", dir=Path.home()) as directory:
@@ -120,6 +121,8 @@ manifest = json.loads((stage.parent/'native-manifest.json').read_text())
 generation = native_generation.publish(stage, owner, manifest)
 sys.path.insert(0, str(generation/'ext'))
 import original_delivery_collector as collector
+mode = {mode!r}
+model = 'qwen3.8-max' if mode == 'qwen' else 'MiniMax-M3'
 rid = 'inert-original-l0'
 root = 'inert-parent'
 os.environ['CODEX_THREAD_ID'] = root
@@ -129,31 +132,39 @@ lease = state/(rid+'.lease.fixture')
 lease.write_bytes(b'inert lease witness')
 manifest = {{name: collector.sha((generation/'ext'/name).read_bytes())
             for name in ('artifact_production.py', 'artifact_reader.py')}}
+if mode == 'qwen':
+    # The original Qwen run used an older producer. Exercise the real fixed
+    # historical validator, without copying any live run or support files.
+    manifest['artifact_production.py'] = collector.delivery._ORIGINAL_PRODUCER_SHA256
 support = state/(rid+'.support.json')
 support.write_bytes(collector.canonical(manifest))
 support_digest = collector.sha(collector.canonical({{'schema':'remote-support-code.v1','files':manifest}}))
 log = state/(rid+'.log')
-events = ['LEASE_OK pool=minimax',
+events = ['LEASE_OK pool='+('bailian' if mode == 'qwen' else 'minimax'),
           'SUPPORT_VERSION_READY digest='+support_digest+' policy='+'1'*64,
           'LAUNCH stdout=lanes_'+rid+'.stdout rc_file=ext/lanes_'+rid+'.rc cwd=~',
           'LAUNCH_ATTEMPT attempt=1']
 log.write_text(''.join('2026-10-19T00:00Z [remote_sub id='+rid+' host=inert-host] '+event+'\\n' for event in events))
-(owner/'hosts.json').write_text(json.dumps({{'inert-host':{{'allowed_modes':['minimax'],'ssh_alias':'inert-host'}}}}))
+(owner/'hosts.json').write_text(json.dumps({{'inert-host':{{'allowed_modes':[mode],'ssh_alias':'inert-host'}}}}))
 scope = {{'root':root,'parent':root,'host':'inert-host','packet_path':str(packet),
+         'mode':mode,'requested_model':model,
          'packet_sha256':collector.sha(packet.read_bytes()),'support_digest':support_digest,
          'destination':str(base/'collection'),
          'source_pins':{{'log':collector.sha(log.read_bytes()),'support':collector.sha(support.read_bytes())}},
          'lease_witness':{{'path':str(lease),'sha256':collector.sha(lease.read_bytes())}}}}
 collector.PLAIN_SCOPES[rid] = scope
 binding = {{'schema':collector.BINDING_SCHEMA,'run_id':rid,'root':root,'parent':root,
-           'host':'inert-host','mode':'minimax','requested_model':'MiniMax-M3','cwd':'~',
+           'host':'inert-host','mode':mode,'requested_model':model,'cwd':'~',
            'artifact_names':[], 'sources':{{name:{{'path':str(path),'sha256':collector.sha(path.read_bytes())}}
                     for name,path in [('packet',packet),('log',log),('support',support)]}}}}
 binding_path = base/'binding.json'
 def qualify(value):
     binding_path.write_bytes(collector.canonical(value))
     return collector.load_binding(binding_path, run_id=rid, root=root, parent=root)
-assert qualify(binding)[3]['run_id'] == rid
+qualified = qualify(binding)
+assert qualified[3]['run_id'] == rid
+if mode == 'qwen':
+    assert qualified[6] is not None, 'historical producer validator was not exercised'
 alias_binding = copy.deepcopy(binding)
 for name in ('log','support'):
     alias_binding['sources'][name]['path'] = str(generation/'ext/state/remote_sub'/Path(binding['sources'][name]['path']).name)
@@ -169,7 +180,7 @@ def read_inert_collection(value):
         files.append({{'local_name':name, 'bytes':len(raw), 'sha256':collector.sha(raw)}})
     receipt = {{'schema':collector.RECEIPT_SCHEMA,'state':'COMPLETE','delivery_verified':True,
                'worker_terminal_proof':True,'root':root,'parent':root,'run_id':rid,
-               'original_operation_mutated':False,'host':'inert-host','mode':'minimax',
+               'original_operation_mutated':False,'host':'inert-host','mode':mode,
                'artifacts':[],'artifact_manifest':None,'files':files,'stdout_chunks':['stdout.000'],
                'binding_sha256':files[0]['sha256'],'stdout_bytes':len(chunks[1][1]),
                'stdout_sha256':files[1]['sha256']}}
