@@ -54,9 +54,11 @@ def test_linked_never_materializes_excluded_files_and_preserves_source_config(tm
     calls = []
     actual = ew._run
 
-    def observe(argv, *, cwd, env):
-        result = actual(argv, cwd=cwd, env=env)
+    def observe(argv, *, cwd, env, **kwargs):
+        result = actual(argv, cwd=cwd, env=env, **kwargs)
         calls.append(tuple(argv))
+        if tuple(argv) == ("git", "read-tree", "-mu", "HEAD"):
+            assert kwargs.get("timeout_seconds") == 240
         assert not (destination / "data/large.bin").exists(), "full hydration occurred"
         assert not (destination / "site/large.bin").exists(), "full hydration occurred"
         return result
