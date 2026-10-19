@@ -1396,7 +1396,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     from tests.executive_identity_review import _reviewed_ast_dump
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            '75089f050178c8b67bf56e41a976868eb9e0ea083aee421d84e4d256249272cb'):
+            '1257acf8a8f58197f30b6ff0f1ce9704a616ddde674d410651353d155727db8f'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
