@@ -714,8 +714,10 @@ def test_u5_prejob_evidence_source_is_byte_identical_to_base():
 
 def test_u6_existing_test_modules_load_unmodified(tmp_path, monkeypatch):
     """U6 spot check: every pre-existing maintenance test module still
-    passes unchanged against the new descriptor set. The diff against base
-    only touches the chain test (per AMENDMENT A1); the rest is unchanged."""
+    collects unchanged against the new descriptor set. The diff against
+    base only adds or touches three files: the new preproof test, the
+    identity review re-pin (acceptance_maintenance), and the chain test
+    edited per AMENDMENT A1; the rest is unchanged."""
     import subprocess
     base = "9f83376b3d0d54ad331c2e74dd12cea10e46f5b1"
     head_out = subprocess.run(["git", "-C", "/home/longr/lanes/wt/crroom-preproof",
@@ -724,10 +726,11 @@ def test_u6_existing_test_modules_load_unmodified(tmp_path, monkeypatch):
     diff = subprocess.run(["git", "-C", "/home/longr/lanes/wt/crroom-preproof",
                            "diff", base, head, "--name-only", "--", "tests/"],
                           check=True, capture_output=True)
-    # Either nothing is changed yet (HEAD == base) or only the chain file.
-    changed = [line for line in diff.stdout.decode().splitlines() if line]
-    if changed:
-        assert changed == ["tests/test_executive_unstarted_supersession_chain.py"], changed
+    changed = set(line for line in diff.stdout.decode().splitlines() if line)
+    expected_changed = {"tests/test_executive_acceptance_supersede_preproof.py",
+                        "tests/executive_fabric_release_identity_review.py",
+                        "tests/test_executive_unstarted_supersession_chain.py"}
+    assert changed == expected_changed, (changed - expected_changed, expected_changed - changed)
     # Sanity collect of the unchanged modules.
     subprocess.check_call(["/home/longr/lanes/venv/bin/python", "-m", "pytest", "--collect-only", "-q",
                            "tests/test_executive_acceptance_supersede_unstarted.py",
