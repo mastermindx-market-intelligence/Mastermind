@@ -264,9 +264,14 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for the historical-only legacy six-key admission (no new literal; the same three
 # tokens moved with the added constant and helper), and again for the comment/docstring
 # wording that names the single historical site and the strict candidate re-check.
+# Re-pinned for the supersede_preproof_v1 admission: the same three tokens moved
+# with the added SCHEMA_PREPROOF constant, preproof_evidence helper, and the
+# shared-key canary exception in _validate_superseded_link. No new identity
+# literal; the count stays 3 and the existing producer's literal contract is
+# unchanged.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "033ad12ff9d130a4a91a7d8a6d449450a2d1a205c107e2b82a70f2684752a38d",
-    "sites": ((72, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (837, 46, 49, "int", "400"),
-              (837, 66, 69, "int", "500")),
+    "sha256": "86d6851c6b72970be379387f4cd385414265f73a318b8e2a804ec79b9df582eb",
+    "sites": ((73, 33, 55, "str", '_mastermind_[a-z0-9_]+'),
+              (903, 46, 49, "int", "400"),
+              (903, 66, 69, "int", "500")),
 }

@@ -5,8 +5,9 @@ or `supersede_unstarted_v1` acceptance prefix (the interrupted release may itsel
 be an unstarted-supersession successor) into one fresh protected release. It never
 replays the failed release, credits it with PASS, changes its files, rebaselines
 Runtime, recovers historical capacity or arms a service. Unstarted supersession
-remains strict, and another `supersede_prejob_v1` release is never a valid
-interrupted release.
+remains strict, and a selected `supersede_prejob_v1` release is admitted and
+re-validated with its own sealed bundle, run-started marker and pre-Job evidence
+exactly like any other selected link.
 
 This repairs the observed `0123ad5ae7408a35fd38b4a0b4e9bf5a132bbe65` service-start
 exit 141. The failed descriptor is
@@ -81,8 +82,8 @@ or reused to simulate a clean run.
 The new release still needs its real install, provider readiness, full acceptance,
 PASS summary/carry receipt and normal arming through the existing owners. A failed
 attempt remains evidence on its original operation. This branch cannot carry a
-later-stage acceptance, another pre-Job successor, or an unknown effect merely
-because an operator describes it as pre-Job.
+later-stage acceptance, an unrelated supersede_preproof_v1 interruption, or an
+unknown effect merely because an operator describes it as pre-Job.
 
 Tests use isolated files and Runtime fixtures with explicit principal/service
 test seams. They establish source behavior, not live installation or execution.
