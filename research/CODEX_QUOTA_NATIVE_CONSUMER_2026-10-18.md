@@ -270,3 +270,35 @@ production install occurred. Test and source current-head hosted CI remains
 required. The existing ranker PR #1365 must consume this sanitized model
 observation in its own bounded helper; separate manually supplied visibility
 must not override a native mismatch.
+
+
+## October 19: six-seat lock and metadata integration proof
+
+Live credential-safe native account metadata comparison (no raw IDs or
+hashes printed) verified six unique per-seat realms: four separate Personal
+Pro subscription workspaces; B1/B2 share one Business workspace and have
+different user/member IDs; C2 Personal/B2 Business share the underlying
+user but have distinct workspaces. Each of six isolated App Server reads
+successfully passed into the current #1365 sanitized observation-to-selector
+bridge with native Astra/Sol 6.1 visibility. No new aliases were admitted:
+binding_verified=false and seat capacity=0 for all six, both requested
+models selected NONE, and there were no provider model tasks.
+
+The existing native_codex_account_scope holds a nonblocking exclusive
+flock on its OWN private provider-home directory. A new provider-free
+regression exercises six distinct synthetic private homes concurrently
+under one barrier, proves all six scopes overlap without contention,
+checks private lock file permissions, checks locks release afterward,
+and confirms no auth file was created. A separate existing process test
+continues to refuse two writers for the SAME private subscription home.
+The complete focused account/quota/reset/native-worker suite passed.
+This is lock-level parallelism only, NOT six authenticated worker STARTs,
+Business Premium entitlement attestation, atomic Capacity enrollment
+or original-parent result consumption.
+
+Additional current root-identity blockers remain: legacy Macro native
+remote scope still requires POOL_ACCOUNT=default and a nonlocal lanes host;
+Executive root worker provider homes are NOT_READY; M2 installed Codex
+binary bytes differ from its existing pinned worker readiness hash. No
+physical principal provisioning, credential transfer, runtime pool edit
+or live broker state changes occurred.

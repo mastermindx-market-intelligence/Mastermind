@@ -755,3 +755,44 @@ def test_native_model_rpc_failure_does_not_forge_model_eligibility_or_erase_quot
     assert result["model_visibility"]["supported_models"] == []
     assert "CANARY" not in json.dumps(result)
     assert result["stop"]["private_group_empty"] is True
+
+
+
+def test_six_seat_account_locks_are_independent_and_release_without_provider(tmp_path):
+    """Six provider homes may be locked at once; this grants no worker lease.
+
+    Existing second-process refusal separately proves exclusivity for ONE
+    native subscription home. This is only provider-free file-lock isolation,
+    not a model-concurrency, entitlement, or host-admission claim.
+    """
+    from concurrent.futures import ThreadPoolExecutor
+    from threading import Barrier, Lock
+    import stat
+
+    names = ("C1", "C2", "C3", "C4", "B1", "B2")
+    root = tmp_path.resolve()
+    homes = [root / name for name in names]
+    for target in homes:
+        target.mkdir(mode=0o700)
+    overlap = Barrier(len(homes))
+    entrants = []
+    mutex = Lock()
+
+    def verify_separate_scope(target):
+        with native_codex_account_scope(target):
+            with mutex:
+                entrants.append(target.name)
+            overlap.wait(timeout=12)
+        return target.name
+
+    with ThreadPoolExecutor(max_workers=len(homes)) as worker:
+        seen = list(worker.map(verify_separate_scope, homes, timeout=20))
+
+    assert set(entrants) == set(names)
+    assert set(seen) == set(names)
+    for target in homes:
+        with native_codex_account_scope(target):
+            lock = target / ".executive-native-account.lock"
+            assert lock.is_file()
+            assert stat.S_IMODE(lock.stat().st_mode) == 0o600
+    assert all(not (target / "auth.json").exists() for target in homes)
