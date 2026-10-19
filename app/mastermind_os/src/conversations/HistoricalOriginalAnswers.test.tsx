@@ -149,6 +149,41 @@ describe("history security and pagination fences",()=>{
     expect(x.qualified).not.toHaveBeenCalled();
     expect(x.store.clearIfEqual).not.toHaveBeenCalled();
   });
+  it("recovers an expired signed cursor with an explicit new first-page READ", async()=>{
+    const x=setup();
+    const old = {...page, data:{...page.data,status:"PARTIAL",
+      references:[row],next_cursor:"YQ=="}};
+    x.readRefs.mockResolvedValueOnce(old).mockRejectedValueOnce(new Error("expired cursor"))
+      .mockResolvedValueOnce(page);
+    render(<HistoricalOriginalAnswers {...x.props}/>);
+    fireEvent.click(await screen.findByRole("button",{name:"More original requests"}));
+    await screen.findByText(/Historical reference or answer unavailable/);
+    expect(x.readRefs.mock.calls[1][2]).toBe("YQ==");
+    fireEvent.click(screen.getByRole("button",{name:"Reload original references"}));
+    expect(await screen.findByRole("button",{name:/Open original request/})).toBeTruthy();
+    await waitFor(()=>expect(screen.queryByRole("button",{name:"Reload original references"})).toBeNull());
+    expect(x.readRefs).toHaveBeenCalledTimes(3);
+    expect(x.readRefs.mock.calls[2][2]).toBeUndefined();
+    expect(x.qualified).not.toHaveBeenCalled();
+    expect(x.store.read).not.toHaveBeenCalled();
+    expect(x.store.reserve).not.toHaveBeenCalled();
+    expect(x.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+  it("only retries an unavailable original answer by refreshing references, never SEND",async()=>{
+    const x=setup();
+    x.qualified.mockRejectedValueOnce(new Error("original reply temporarily unavailable"));
+    render(<HistoricalOriginalAnswers {...x.props}/>);
+    fireEvent.click(await screen.findByRole("button",{name:/Open original request/}));
+    await screen.findByText(/Historical reference or answer unavailable/);
+    fireEvent.click(screen.getByRole("button",{name:"Reload original references"}));
+    fireEvent.click(await screen.findByRole("button",{name:/Open original request/}));
+    await screen.findByText("Recovered historical A.");
+    expect(x.readRefs).toHaveBeenCalledTimes(2);
+    expect(x.qualified).toHaveBeenCalledTimes(2);
+    expect(x.store.reserve).not.toHaveBeenCalled();
+    expect(x.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+
   it("rejects foreign and extended backend metadata before exposing a reference",async()=>{
     const x=setup();
     x.readRefs.mockResolvedValueOnce({...page,data:{...page.data,

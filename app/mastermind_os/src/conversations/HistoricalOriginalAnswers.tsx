@@ -152,6 +152,26 @@ export function HistoricalOriginalAnswers({
     return () => { c.abort(); epoch.current++; };
   }, [binding, selection?.workRef, selection?.rootJobId, principalScope, generation, authRevision, selectionSeq, reading, qualified]);
 
+  // A process restart deliberately invalidates old signed cursors. Offer a
+  // fresh FIRST-PAGE user-triggered READ instead of retrying an expired
+  // cursor or requiring navigation away from the selected conversation.
+  // No historical selection, SEND, pending pointer or parent ACK is mutated.
+  const reload = () => {
+    if (!renderIsQualified || !selection || !reading || state === "loading") return;
+    const e = epoch.current;
+    const c = new AbortController();
+    controller.current?.abort(); controller.current = c;
+    setRows([]); setCursor(null); setWatermark(null); setSelected(null);
+    setState("loading");
+    void readSparsePages(reading,selection,c.signal).then(page => {
+      if (c.signal.aborted || epoch.current !== e) return;
+      setRows(page.references); setCursor(page.next_cursor);
+      setWatermark(page.high_water); setState("idle");
+    }).catch(() => {
+      if (!c.signal.aborted && epoch.current === e) setState("unavailable");
+    });
+  };
+
   const loadMore = () => {
     if (!renderIsQualified || !selection || !reading || !cursor || state !== "idle") return;
     const e = epoch.current;
@@ -200,6 +220,9 @@ export function HistoricalOriginalAnswers({
     </div>}
     {cursor && rows.length < 128 && <button type="button" disabled={state === "loading"} onClick={loadMore}>More original requests</button>}
     {state === "loading" && <p>Reading canonical references…</p>}
-    {state === "unavailable" && <p>Historical reference or answer unavailable. No operation was resent.</p>}
+    {state === "unavailable" && <>
+      <p>Historical reference or answer unavailable. No operation was resent.</p>
+      <button type="button" onClick={reload}>Reload original references</button>
+    </>}
   </section>;
 }
