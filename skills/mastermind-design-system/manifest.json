@@ -1,0 +1,46 @@
+{
+  "schema": "mastermind.claude-design-system-bundle.v1",
+  "name": "mastermind-design-system",
+  "target": "Authorized Web, native Codex/Claude and admitted Fabric skill consumers",
+  "source": {
+    "mastermind_procedure": {
+      "repo": "mastermindx-market-intelligence/Mastermind",
+      "commit": "877b1e7f275da0b6d3558d2667778b32d628bf67"
+    },
+    "macro_design_authority": {
+      "repo": "mastermindx-market-intelligence/macro",
+      "commit": "a136a9e67f0e435a495e1b86a63eaa924e23b683"
+    },
+    "paper": {
+      "file_name": "MASTERMIND PAGES",
+      "file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "page_id": "p-5-0",
+      "token_content_hash": "cfd3d65c"
+    }
+  },
+  "install_hint": "Copy folder to ~/.claude/skills/mastermind-design-system",
+  "authority_note": "Skill is a portable projection; current repository law remains authoritative.",
+  "paper_artboards": [
+    "5FCS-2",
+    "5FE2-2",
+    "5FGO-2",
+    "5FJA-2",
+    "5FLR-2",
+    "5FO8-2",
+    "5FPP-2",
+    "5FSH-2",
+    "5FV9-2",
+    "5FY3-2",
+    "5G0X-2",
+    "5G1H-2",
+    "5G1Z-2"
+  ],
+  "method_reconciliation": {
+    "repo": "mastermindx-market-intelligence/macro",
+    "commit": "7ed871335f980fb3d0b0483b13ad5b6072cdda6d",
+    "scope": "accepted no-colored-container-edge rule and portable method metadata",
+    "token_projection_refreshed": false,
+    "paper_reverified": false,
+    "live_installation_changed": false
+  }
+}
