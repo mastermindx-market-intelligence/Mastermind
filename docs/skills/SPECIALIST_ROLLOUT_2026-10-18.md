@@ -150,3 +150,21 @@ useful task evidence, the reconciled legacy routing installation and the existin
 design-system distribution outcome. Source/package completion alone does not meet
 that ruler. Continue safe independent work while a specific review or runtime lane
 is blocked; retain exact pending actions and their real evidence requirements.
+
+## Published candidate and packaging repair
+
+PR #1627 initially published `a8ee81fdf23653e9b4630e7238e433aabf1800eb`.
+At that source, both real credential-free Codex catalog canaries passed, including
+exact five/six Skill names, content hashes, empty baseline/clear and closed process.
+The 163 existing plugin-package, Workforce-package and Web-CEO regression tests
+also passed. Both Claude manifests passed the actual installed strict validator
+with zero errors/warnings. These receipts do not establish model task behavior.
+
+The first private Web import was rejected before action invocation because
+`interface.displayName` was missing; no plugin creation effect occurred. A red-first
+regression reproduced the missing field, then 29 static tests passed after adding
+OpenAI presentation metadata only to its manifest. Claude's manifest remains
+unchanged so its strict schema does not receive OpenAI-only fields. The repaired
+candidate must be re-exported from its actual new commit; do not relabel the old
+archive hash or presume a Web import succeeded. Keep private development import
+separate from reviewed release and all-account deployment.

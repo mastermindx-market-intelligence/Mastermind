@@ -148,3 +148,13 @@ def test_eval_fixture_has_positive_negative_missing_and_adversarial_cases():
         assert {c['kind'] for c in group}=={'positive','negative','missing_evidence','adversarial'}
         assert all(c['prompt'] and c['required_behavior'] and c['must_not'] for c in group)
         assert next(c for c in group if c['kind']=='negative')['should_activate'] is False
+
+
+def test_web_manifest_has_display_name_without_polluting_claude_schema():
+    artifact = pack.assemble(sources(), 'a' * 40)
+    codex = json.loads(artifact['.codex-plugin/plugin.json'])
+    claude = json.loads(artifact['.claude-plugin/plugin.json'])
+    assert codex['interface']['displayName'] == 'Mastermind Specialists'
+    assert codex['interface']['shortDescription'].strip()
+    assert 'interface' not in claude
+    assert {key: value for key, value in codex.items() if key != 'interface'} == claude

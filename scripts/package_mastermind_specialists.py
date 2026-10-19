@@ -92,9 +92,16 @@ def assemble(files: dict[str, bytes], sha: str, *, include_native_routing: bool 
         'skills': './skills/',
     }
     result = dict(files)
-    # Provider formats carry one logical package identity. No MCP, hook or permission config.
-    for directory in ('.codex-plugin', '.claude-plugin'):
-        result[f'{directory}/plugin.json'] = (json.dumps(manifest, sort_keys=True, indent=2) + '\n').encode()
+    # OpenAI requires presentation metadata; Claude must not inherit unknown keys.
+    codex = {**manifest, 'interface': {
+        'displayName': 'Mastermind Specialists',
+        'shortDescription': 'Evidence-based engineering and market validation workflows',
+        'longDescription': 'Task-scoped CI, product verification, market evidence, quantitative validation and incident methods. Skills provide methods, not new tool access.',
+        'developerName': 'Mastermind-X',
+        'category': 'Productivity',
+    }}
+    for directory, projected in (('.codex-plugin', codex), ('.claude-plugin', manifest)):
+        result[f'{directory}/plugin.json'] = (json.dumps(projected, sort_keys=True, indent=2) + '\n').encode()
     result['BUILD.json'] = (json.dumps({
         'schema': 'mastermind.specialist_method_artifact.v1',
         'source_commit': sha,
