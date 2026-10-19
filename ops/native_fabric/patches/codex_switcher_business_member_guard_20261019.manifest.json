@@ -1,0 +1,26 @@
+{
+  "installed_app_modified": false,
+  "model_turns": 0,
+  "modified_paths": [
+    "src-tauri/src/auth/storage.rs",
+    "src-tauri/src/types.rs"
+  ],
+  "patch_sha256": "4ab95063ffdf8d79d0b28146e7cee028cc2e4ef1787a80659c2c1ca8c2687cc1",
+  "postimages_sha256": {
+    "src-tauri/src/auth/storage.rs": "c48774c4b4a33b29f1c93936fb435c22a1a02b70062a429f57d76ef71fc06c92",
+    "src-tauri/src/types.rs": "f7b51135f974e463d6a2c7c5d132e82b3f624d5bf2aa1163dd0da8db5d26d0e1"
+  },
+  "preimages_sha256": {
+    "src-tauri/src/auth/storage.rs": "6a2e8b9499ea3fa1bd39b683a87b04a60d91f2054be73d0b547266d8a7d312a3",
+    "src-tauri/src/types.rs": "e5a0619fbc583fd41c2c8a30c815cd8f63a2ce4f8af2ebb99c912242809fcfaf"
+  },
+  "production_credentials_modified": false,
+  "rust_unit_tests_failed": 0,
+  "rust_unit_tests_ignored": 1,
+  "rust_unit_tests_passed": 78,
+  "schema": "mastermind.switcher_member_token_guard_source/v1",
+  "source_base_git_sha": "5f067ef615a6a4d1f80fe4fd79f086c0beac22c3",
+  "source_candidate_git_sha": "ef43d9e5734e5b2e2bf31cb808feb23bee141cd9",
+  "source_repo_has_remote": false,
+  "status": "candidate_not_installed"
+}

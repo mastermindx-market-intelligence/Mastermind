@@ -1,0 +1,434 @@
+diff --git a/src-tauri/src/auth/storage.rs b/src-tauri/src/auth/storage.rs
+index c7aca94..1da8113 100644
+--- a/src-tauri/src/auth/storage.rs
++++ b/src-tauri/src/auth/storage.rs
+@@ -13,0 +14,89 @@ use crate::types::{
++/// Refuse cross-user OAuth token changes while retaining legacy Personal
++/// subscription refresh compatibility when neither token exposes a member.
++/// A workspace is not a user identity in shared Business accounts.
++fn matching_oauth_subscription_member(
++    stored_id_token: &str,
++    stored_workspace_hint: Option<&str>,
++    incoming_id_token: &str,
++    incoming_workspace_hint: Option<&str>,
++    stored_plan: Option<&str>,
++) -> Option<String> {
++    let before = parse_chatgpt_id_token_claims(stored_id_token);
++    let after = parse_chatgpt_id_token_claims(incoming_id_token);
++    // Do not let an untrusted stale top-level account ID override a conflicting
++    // claim, or vice versa. Require the same workspace on both sides.
++    if before
++        .account_id
++        .as_deref()
++        .zip(stored_workspace_hint)
++        .is_some_and(|(a, b)| a != b)
++        || after
++            .account_id
++            .as_deref()
++            .zip(incoming_workspace_hint)
++            .is_some_and(|(a, b)| a != b)
++    {
++        return None;
++    }
++    let stored_workspace = before.account_id.as_deref().or(stored_workspace_hint)?;
++    let current_workspace = after.account_id.as_deref().or(incoming_workspace_hint)?;
++    if stored_workspace.is_empty() || stored_workspace != current_workspace {
++        return None;
++    }
++    let is_shared_workspace_plan = [
++        stored_plan,
++        before.plan_type.as_deref(),
++        after.plan_type.as_deref(),
++    ]
++    .into_iter()
++    .flatten()
++    .any(|p| {
++        matches!(
++            p,
++            "self_serve_business_prolite" | "business" | "team" | "enterprise"
++        )
++    });
++    match (before.user_id.as_deref(), after.user_id.as_deref()) {
++        (Some(a), Some(b)) if a == b => {}
++        (None, None) if !is_shared_workspace_plan => {}
++        _ => return None,
++    }
++    Some(current_workspace.to_string())
++}
++
++/// Credential-only update primitive shared with explicit network refresh.
++/// Verifies the stored workspace and member before *any* mutation; a rotated
++/// OAuth response may not silently change the account holding that token.
++fn replace_account_oauth_credentials(
++    account: &mut StoredAccount,
++    id_token: String,
++    access_token: String,
++    refresh_token: String,
++    chatgpt_account_id: Option<String>,
++) -> Result<()> {
++    let AuthData::ChatGPT {
++        id_token: stored_id_token,
++        access_token: stored_access_token,
++        refresh_token: stored_refresh_token,
++        account_id: stored_account_id,
++    } = &mut account.auth_data
++    else {
++        anyhow::bail!("Cannot update OAuth tokens for an API key account");
++    };
++    let Some(workspace) = matching_oauth_subscription_member(
++        stored_id_token,
++        stored_account_id.as_deref(),
++        &id_token,
++        chatgpt_account_id.as_deref(),
++        account.plan_type.as_deref(),
++    ) else {
++        // No body, token, e-mail, or identity is emitted in the refusal.
++        anyhow::bail!("OAuth account identity changed; token update refused");
++    };
++    *stored_id_token = id_token;
++    *stored_access_token = access_token;
++    *stored_refresh_token = refresh_token;
++    *stored_account_id = Some(workspace);
++    Ok(())
++}
++
+@@ -38,9 +127,7 @@ pub fn sync_active_account_tokens(store: &mut AccountsStore, auth: &AuthDotJson)
+-    let stored_account_id = parse_chatgpt_id_token_claims(id_token)
+-        .account_id
+-        .or_else(|| account_id.clone());
+-    let current_account_id = parse_chatgpt_id_token_claims(&tokens.id_token)
+-        .account_id
+-        .or_else(|| tokens.account_id.clone());
+-    let (Some(stored_account_id), Some(current_account_id)) =
+-        (stored_account_id, current_account_id)
+-    else {
++    let Some(current_account_id) = matching_oauth_subscription_member(
++        id_token,
++        account_id.as_deref(),
++        &tokens.id_token,
++        tokens.account_id.as_deref(),
++        account.plan_type.as_deref(),
++    ) else {
+@@ -49,3 +135,0 @@ pub fn sync_active_account_tokens(store: &mut AccountsStore, auth: &AuthDotJson)
+-    if stored_account_id != current_account_id {
+-        return false;
+-    }
+@@ -380,18 +464,7 @@ pub fn update_account_chatgpt_tokens(
+-    match &mut account.auth_data {
+-        AuthData::ChatGPT {
+-            id_token: stored_id_token,
+-            access_token: stored_access_token,
+-            refresh_token: stored_refresh_token,
+-            account_id: stored_account_id,
+-        } => {
+-            *stored_id_token = id_token;
+-            *stored_access_token = access_token;
+-            *stored_refresh_token = refresh_token;
+-            if let Some(new_account_id) = chatgpt_account_id {
+-                *stored_account_id = Some(new_account_id);
+-            }
+-        }
+-        AuthData::ApiKey { .. } => {
+-            anyhow::bail!("Cannot update OAuth tokens for an API key account");
+-        }
+-    }
++    replace_account_oauth_credentials(
++        account,
++        id_token,
++        access_token,
++        refresh_token,
++        chatgpt_account_id,
++    )?;
+@@ -588,0 +662,227 @@ mod tests {
++
++#[cfg(test)]
++mod member_identity_regressions {
++    use super::{replace_account_oauth_credentials, sync_active_account_tokens};
++    use crate::types::{AccountsStore, AuthData, AuthDotJson, StoredAccount, TokenData};
++    use base64::Engine;
++
++    fn token(workspace: &str, member: Option<&str>, marker: &str) -> String {
++        let claims = serde_json::json!({
++            "https://api.openai.com/auth": {
++                "chatgpt_account_id": workspace,
++                "chatgpt_user_id": member,
++                "chatgpt_plan_type": "self_serve_business_prolite",
++            }
++        });
++        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
++        format!("header.{payload}.{marker}")
++    }
++
++    fn business_store(member: Option<&str>) -> AccountsStore {
++        let account = StoredAccount::new_chatgpt(
++            "Synthetic Business Member".into(),
++            None,
++            Some("self_serve_business_prolite".into()),
++            None,
++            token("shared-workspace", member, "old"),
++            "old-access".into(),
++            "old-refresh".into(),
++            Some("shared-workspace".into()),
++        );
++        AccountsStore {
++            active_account_id: Some(account.id.clone()),
++            accounts: vec![account],
++            ..AccountsStore::default()
++        }
++    }
++
++    fn current_auth(member: Option<&str>) -> AuthDotJson {
++        AuthDotJson {
++            openai_api_key: None,
++            tokens: Some(TokenData {
++                id_token: token("shared-workspace", member, "new"),
++                access_token: "new-access".into(),
++                refresh_token: "new-refresh".into(),
++                account_id: Some("shared-workspace".into()),
++            }),
++            last_refresh: None,
++        }
++    }
++
++    fn stored_refresh(store: &AccountsStore) -> &str {
++        match &store.accounts[0].auth_data {
++            AuthData::ChatGPT { refresh_token, .. } => refresh_token,
++            AuthData::ApiKey { .. } => panic!("wrong fixture"),
++        }
++    }
++
++    #[test]
++    fn same_business_workspace_different_member_refuses_token_rebinding() {
++        let mut store = business_store(Some("member-a"));
++        assert!(!sync_active_account_tokens(
++            &mut store,
++            &current_auth(Some("member-b"))
++        ));
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn same_business_workspace_same_member_preserves_single_use_rotation() {
++        let mut store = business_store(Some("member-a"));
++        assert!(sync_active_account_tokens(
++            &mut store,
++            &current_auth(Some("member-a"))
++        ));
++        assert_eq!(stored_refresh(&store), "new-refresh");
++    }
++
++    #[test]
++    fn business_without_member_claim_on_live_side_refuses_ambiguous_sync() {
++        let mut store = business_store(Some("member-a"));
++        assert!(!sync_active_account_tokens(&mut store, &current_auth(None)));
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn business_without_member_claim_on_stored_side_refuses_ambiguous_sync() {
++        let mut store = business_store(None);
++        assert!(!sync_active_account_tokens(
++            &mut store,
++            &current_auth(Some("member-a"))
++        ));
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn business_without_either_member_claim_cannot_infer_identity_from_workspace() {
++        let mut store = business_store(None);
++        assert!(!sync_active_account_tokens(&mut store, &current_auth(None)));
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn direct_refresh_cannot_overwrite_different_business_member_credentials() {
++        let mut store = business_store(Some("member-b1"));
++        let original = stored_refresh(&store).to_string();
++        let outcome = replace_account_oauth_credentials(
++            &mut store.accounts[0],
++            token("shared-workspace", Some("member-b2"), "refreshed"),
++            "other-access".into(),
++            "other-refresh".into(),
++            Some("shared-workspace".into()),
++        );
++        assert!(outcome.is_err());
++        assert_eq!(stored_refresh(&store), original);
++    }
++
++    #[test]
++    fn direct_refresh_preserves_rotated_credentials_for_verified_same_member() {
++        let mut store = business_store(Some("member-b1"));
++        replace_account_oauth_credentials(
++            &mut store.accounts[0],
++            token("shared-workspace", Some("member-b1"), "refreshed"),
++            "new-access".into(),
++            "new-refresh".into(),
++            Some("shared-workspace".into()),
++        )
++        .unwrap();
++        assert_eq!(stored_refresh(&store), "new-refresh");
++    }
++
++    #[test]
++    fn direct_refresh_unknown_member_fails_closed_before_changing_any_tokens() {
++        let mut store = business_store(None);
++        let result = replace_account_oauth_credentials(
++            &mut store.accounts[0],
++            token("shared-workspace", Some("member-b2"), "refreshed"),
++            "other-access".into(),
++            "other-refresh".into(),
++            Some("shared-workspace".into()),
++        );
++        assert!(result.is_err());
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn direct_refresh_rejects_conflicting_workspace_metadata_in_same_token() {
++        let mut store = business_store(Some("member-b1"));
++        let result = replace_account_oauth_credentials(
++            &mut store.accounts[0],
++            token("shared-workspace", Some("member-b1"), "refreshed"),
++            "other-access".into(),
++            "other-refresh".into(),
++            Some("other-workspace".into()),
++        );
++        assert!(result.is_err());
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn legacy_personal_pro_without_member_claims_can_rotate_same_subscription() {
++        // Do not reuse the Business fixture builder for a Personal case:
++        // its embedded plan claim deliberately says self_serve_business_prolite.
++        let personal_token = |suffix: &str| {
++            let payload = serde_json::json!({
++                "https://api.openai.com/auth": {
++                    "chatgpt_account_id": "personal-workspace",
++                    "chatgpt_plan_type": "pro"
++                }
++            });
++            let encoded =
++                base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(payload.to_string());
++            format!("header.{encoded}.{suffix}")
++        };
++        let mut account = StoredAccount::new_chatgpt(
++            "Synthetic Personal".into(),
++            None,
++            Some("pro".into()),
++            None,
++            personal_token("before"),
++            "access-before".into(),
++            "refresh-before".into(),
++            Some("personal-workspace".into()),
++        );
++        replace_account_oauth_credentials(
++            &mut account,
++            personal_token("after"),
++            "access-after".into(),
++            "refresh-after".into(),
++            Some("personal-workspace".into()),
++        )
++        .unwrap();
++        match account.auth_data {
++            AuthData::ChatGPT { refresh_token, .. } => {
++                assert_eq!(refresh_token, "refresh-after");
++            }
++            _ => panic!("expected ChatGPT account"),
++        }
++    }
++
++    #[test]
++    fn personal_pro_cannot_migrate_to_business_member_silently() {
++        let mut account = StoredAccount::new_chatgpt(
++            "Synthetic Personal".into(),
++            None,
++            Some("pro".into()),
++            None,
++            token("shared-workspace", None, "personal"),
++            "access-before".into(),
++            "refresh-before".into(),
++            Some("shared-workspace".into()),
++        );
++        assert!(replace_account_oauth_credentials(
++            &mut account,
++            token("shared-workspace", Some("business-member"), "new"),
++            "access-after".into(),
++            "refresh-after".into(),
++            Some("shared-workspace".into()),
++        )
++        .is_err());
++        match account.auth_data {
++            AuthData::ChatGPT { refresh_token, .. } => {
++                assert_eq!(refresh_token, "refresh-before");
++            }
++            _ => panic!("expected ChatGPT account"),
++        }
++    }
++}
+diff --git a/src-tauri/src/types.rs b/src-tauri/src/types.rs
+index f3e1883..0274bd3 100644
+--- a/src-tauri/src/types.rs
++++ b/src-tauri/src/types.rs
+@@ -329,0 +330,2 @@ pub struct ChatGptIdTokenClaims {
++    /// Distinguish two Business members within one ChatGPT workspace.
++    pub user_id: Option<String>,
+@@ -360,0 +363,5 @@ pub fn parse_chatgpt_id_token_claims(id_token: &str) -> ChatGptIdTokenClaims {
++        user_id: auth_claims
++            .and_then(|auth| auth.get("chatgpt_user_id"))
++            .and_then(|v| v.as_str())
++            .filter(|v| !v.is_empty() && v.len() <= 256)
++            .map(String::from),
+@@ -617,0 +625,51 @@ mod tests {
++
++#[cfg(test)]
++mod business_member_claim_tests {
++    use super::parse_chatgpt_id_token_claims;
++    use base64::Engine;
++
++    fn token(user: serde_json::Value) -> String {
++        let encoded = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(
++            serde_json::json!({
++                "https://api.openai.com/auth": {
++                    "chatgpt_account_id": "shared-business-workspace",
++                    "chatgpt_plan_type": "self_serve_business_prolite",
++                    "chatgpt_user_id": user,
++                }
++            })
++            .to_string(),
++        );
++        format!("header.{encoded}.signature")
++    }
++
++    #[test]
++    fn parses_bounded_business_member_without_changing_workspace_identity() {
++        let claims = parse_chatgpt_id_token_claims(&token(serde_json::json!("member-a")));
++        assert_eq!(
++            claims.account_id.as_deref(),
++            Some("shared-business-workspace")
++        );
++        assert_eq!(claims.user_id.as_deref(), Some("member-a"));
++    }
++
++    #[test]
++    fn rejects_empty_oversized_and_wrong_type_member_identifiers() {
++        for malformed in [
++            serde_json::json!(""),
++            serde_json::json!("x".repeat(257)),
++            serde_json::json!(123),
++            serde_json::Value::Null,
++        ] {
++            assert!(parse_chatgpt_id_token_claims(&token(malformed))
++                .user_id
++                .is_none());
++        }
++        assert_eq!(
++            parse_chatgpt_id_token_claims(&token(serde_json::json!("x".repeat(256))))
++                .user_id
++                .as_deref()
++                .map(str::len),
++            Some(256),
++        );
++    }
++}
