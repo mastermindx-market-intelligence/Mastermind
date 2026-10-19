@@ -230,7 +230,8 @@ def _make_sealed_python(tmp_path: Path) -> Path:
     return sealed
 
 
-def boot_installed_control(tmp_path, monkeypatch, root_stats, router, *, during_serve):
+def boot_installed_control(tmp_path, monkeypatch, root_stats, router, *, during_serve,
+                           transform=None):
     """Boot the installed composition through the REAL loader and REAL composition.
 
     Runs ``asyncio.run(cli._serve_from_config(path, attended_work_placements=(selected(),)))``
@@ -299,6 +300,8 @@ def boot_installed_control(tmp_path, monkeypatch, root_stats, router, *, during_
     raw["ceo_ingress_launchd_socket_name"] = "CeoIngress"
     raw["ceo_ingress_peer_uid"] = int(os.geteuid()) + 16
 
+    if transform is not None:
+        raw = transform(raw)
     config_path = _write(tmp_path, raw)
 
     # Recorder for every launchd-socket name the production code asks for.

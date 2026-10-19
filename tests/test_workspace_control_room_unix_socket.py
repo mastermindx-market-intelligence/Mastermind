@@ -843,6 +843,35 @@ def test_installed_boot_proves_zero_tcp_listeners(tmp_path, monkeypatch, root_st
     room listener's fileno() is ``-1`` or the room refuses reuse.
     """
 
+    proof = zero_tcp_boot(tmp_path, monkeypatch, root_stats, router)
+    control_uid = os.geteuid()
+
+    # Post-boot invariants: the boot reached the production room construction.
+    assert "WorkspaceControlRoom" in proof.requested_names
+    assert proof.room.config.port == 0
+    assert proof.room.config.origin == UNIX_CONTROL_ROOM_ORIGIN
+    assert proof.room.allowed_peer_uids == (control_uid,)
+    assert proof.room._listener.family == socket.AF_UNIX
+    # The capture class already closed the room; the listener fd must be retired.
+    assert proof.room._listener.fileno() == -1
+    # Reuse is refused.
+    with pytest.raises(ValueError):
+        asyncio.run(proof.room.start())
+
+
+def zero_tcp_boot(tmp_path, monkeypatch, root_stats, router, *, transform=None):
+    """Boot the installed composition through the REAL loader and REAL
+    composition and prove zero TCP listeners. Extracted from
+    ``test_installed_boot_proves_zero_tcp_listeners`` so other tests can drive
+    the same audit-hook window, lsof rewriter, and ``during_serve`` invariants.
+    A ``transform`` (applied to the composed ``raw`` dict immediately before
+    writing) lets a caller inject a finite-staging candidate into the same
+    boot. Returns the ``BootProof``; the caller performs any post-boot invariants.
+    """
+
+    _ = root_stats
+    _ = router
+
     global _AUDIT_HOOK_ACTIVE, _AUDIT_HOOK_SEEN
     _AUDIT_HOOK_SEEN = []
     _AUDIT_HOOK_ACTIVE = True
@@ -875,21 +904,12 @@ def test_installed_boot_proves_zero_tcp_listeners(tmp_path, monkeypatch, root_st
 
     try:
         proof = boot_installed_control(
-            tmp_path, monkeypatch, root_stats, router, during_serve=during_serve)
+            tmp_path, monkeypatch, root_stats, router,
+            during_serve=during_serve, transform=transform)
     finally:
         _AUDIT_HOOK_ACTIVE = False
 
-    # Post-boot invariants: the boot reached the production room construction.
-    assert "WorkspaceControlRoom" in proof.requested_names
-    assert proof.room.config.port == 0
-    assert proof.room.config.origin == UNIX_CONTROL_ROOM_ORIGIN
-    assert proof.room.allowed_peer_uids == (control_uid,)
-    assert proof.room._listener.family == socket.AF_UNIX
-    # The capture class already closed the room; the listener fd must be retired.
-    assert proof.room._listener.fileno() == -1
-    # Reuse is refused.
-    with pytest.raises(ValueError):
-        asyncio.run(proof.room.start())
+    return proof
 
 
 @pytest.mark.parametrize("bind_host,bind_family", [

@@ -441,3 +441,57 @@ def test_staging_publishes_unix_room_composition_with_only_the_finite_delta(inst
     assert owner.WORKER_CONFIG.read_bytes() == s.worker
 
 
+
+def test_staged_candidate_boots_with_zero_tcp_listeners(monkeypatch, tmp_path, root_stats, router):
+    from tests.test_workspace_control_room_unix_socket import (
+        zero_tcp_boot,
+    )
+
+    seen: list[object] = []
+
+    def transform(raw):
+        """Split the finite delta out of the composed raw, build the prior
+        shape ``candidate()`` consumes, run ``candidate`` and the static
+        ``control_boot_smoke``, and return the merged proposed control so the
+        installed-control boot fixture writes the exact same composition the
+        staging verb would publish. The canonical workspace socket path is
+        rebound to the boot fixture's runtime path so
+        ``validate_workspace_control_room`` accepts the stanza; the same path
+        the boot fixture will later patch as well, so the two writes are
+        consistent.
+        """
+
+        from scripts import executive_os_phase1c as cli
+        from ops.executive_os import autonomy_control as owner
+        cli._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET = (
+            raw['workspace_control_room']['socket_path'])
+        finite = staging.NATIVE_FIELDS if 'native_capacity_v2' in raw else staging.FIELDS
+        prior_control = {key: value for key, value in raw.items() if key not in finite}
+        delta = {key: raw[key] for key in finite}
+        worker = {'operator_harness_armed': False}
+        prior_bytes = owner.encode_config(prior_control)
+        worker_bytes = owner.encode_config(worker)
+        from ops.executive_os.autonomy_control import ConfigEvidence
+        prior = ConfigEvidence(
+            control_sha256=owner.sha256_bytes(prior_bytes),
+            worker_sha256=owner.sha256_bytes(worker_bytes),
+            control=prior_control,
+            worker=worker,
+            control_bytes=prior_bytes,
+            worker_bytes=worker_bytes,
+        )
+        proposed = staging.candidate(prior, delta)
+        staging.control_boot_smoke(proposed.control)
+        seen.append(set(delta))
+        return proposed.control
+
+    proof = zero_tcp_boot(tmp_path, monkeypatch, root_stats, router, transform=transform)
+
+    assert proof.room.config.port == 0
+    from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+    assert proof.room.config.origin == UNIX_CONTROL_ROOM_ORIGIN
+    assert 'WorkspaceControlRoom' in proof.requested_names
+    assert seen, 'transform did not record the split finite delta'
+    on_disk = json.loads((tmp_path / 'control.json').read_bytes())
+    for key in seen[-1]:
+        assert key in on_disk
