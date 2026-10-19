@@ -56,8 +56,10 @@ _GROUP_RECEIPT_KEYS = frozenset({
     "primary_gid_census", "name_members", "uuid_members", "nested_groups",
 })
 # The pre-``control_definition_sha256`` / pre-``attended_worker_membership`` generation of the same
-# receipt (Oct 11, e.g. interrupted release 0123ad5a). It is admitted only while re-validating an
-# already-sealed historical ``supersede_prejob_v1`` link, never for a candidate release.
+# receipt (Oct 11, e.g. interrupted release 0123ad5a). It is admitted only on the historical path,
+# whose single ``historical=True`` site is ``validate_prior_carry_binding``. That walk also visits a
+# candidate's own selected link once at acceptance start (``Maintenance.__init__``); the strict
+# ``validate_superseded_binding`` call that follows it, like ``prepare``'s, refuses this form.
 _LEGACY_GROUP_RECEIPT_KEYS = frozenset({
     "passed", "effective_members", "primary_gid_census", "name_members", "uuid_members",
     "nested_groups",
@@ -872,8 +874,9 @@ def prejob_evidence(sha: str, *, historical: bool = False) -> str:
 
     This is evidence of an interrupted prefix, never a successful acceptance.
     No receipt, marker, service or Runtime state is modified. ``historical`` re-validates an
-    already-sealed link and additionally admits the legacy six-key group receipt; a candidate
-    release never sets it.
+    already-sealed link and additionally admits the legacy six-key group receipt. Only the
+    carry-chain walk sets it; ``prepare`` and the strict check in ``Maintenance.__init__`` leave
+    it unset and so require the current eight-key form.
     """
     import pwd
     import grp
@@ -947,7 +950,9 @@ def validate_superseded_binding(descriptor: dict, *, before: dict | None = None,
     No provider recovery, schema translation, or partial-acceptance replay is
     granted. Future carry validation retains this immutable selected binding,
     but compares live prestate only before this successor starts acceptance.
-    ``historical`` is set only by the carry-chain walk over already-sealed links.
+    ``historical`` is set only by the carry-chain walk (``validate_prior_carry_binding``). At
+    acceptance start that walk also visits the candidate's own selected link; the strict call that
+    follows it, like ``prepare``'s, leaves ``historical`` unset, so a candidate must pass without it.
     """
     if descriptor["schema_version"] not in {SCHEMA_SUPERSEDE, SCHEMA_PREJOB}:
         raise MaintenanceError("invalid supersession schema")

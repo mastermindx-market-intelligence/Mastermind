@@ -3798,3 +3798,171 @@ class TestC2PersonalClosedPublisher(unittest.TestCase):
             for key in ("paperDesign","fleetRouting","fleetStatus","maxPerSessionConcurrency","maxQueuedPerSession"):
                 self.assertEqual(config[key], old_config[key])
             self.assertEqual({n for n in before if (roots["base"]/n).read_bytes() != before[n]}, {"gateway.mjs","git-publish.mjs"})
+
+
+class TestC2PersonalGitTimeoutOnly(unittest.TestCase):
+    """Sealed C2 Personal config-only migration; no fleet or source changes."""
+
+    @contextmanager
+    def _installed(self):
+        fixture = TestC2BusinessHistoricalCompatibility()
+        with fixture._installed_c2(account="chatgpt2-personal") as (args, roots, _cfg, _prior):
+            rc, result = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            self.assertEqual(json.loads(result)["effect"], "APPLIED")
+            args.c2_personal_closed_publisher = False
+            args.c2_personal_git_timeout_only = True
+            args.publisher_preflight_only = False
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+            with mock.patch.object(
+                svc, "C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256",
+                args.publisher_expected_manifest_sha256,
+            ), mock.patch.object(svc, "_lifecycle_inspect", return_value=None):
+                yield args, roots
+
+    def test_readonly_preflight_keeps_every_installed_byte(self):
+        with self._installed() as (args, roots):
+            before = (roots["config"].read_bytes(), roots["manifest"].read_bytes(),
+                      {n: (roots["base"] / n).read_bytes()
+                       for n in json.loads(roots["manifest"].read_text())["files"]})
+            args.publisher_preflight_only = True
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            self.assertEqual(result["effect"], "NOT_APPLIED")
+            self.assertTrue(result["preflight"])
+            self.assertEqual(result["commandTimeoutBeforeMs"], 15000)
+            self.assertEqual(result["commandTimeoutAfterMs"], 45000)
+            self.assertEqual(result["pushTimeoutPreservedMs"], 60000)
+            self.assertEqual(before, (
+                roots["config"].read_bytes(), roots["manifest"].read_bytes(),
+                {n: (roots["base"] / n).read_bytes()
+                 for n in json.loads(roots["manifest"].read_text())["files"]},
+            ))
+
+    def test_apply_updates_only_git_command_budget_and_manifest_hash(self):
+        with self._installed() as (args, roots):
+            original_config = json.loads(roots["config"].read_text())
+            prior = json.loads(roots["manifest"].read_text())
+            unchanged = {n: (roots["base"] / n).read_bytes() for n in prior["files"]}
+            plist = roots["plist"].read_bytes()
+            rc, out = _capture_stdout(lambda: svc.cmd_upgrade(args))
+            self.assertEqual(rc, 0)
+            result = json.loads(out)
+            self.assertEqual(result["effect"], "APPLIED")
+            self.assertTrue(result["sourceModulesPreserved"])
+            new_config = json.loads(roots["config"].read_text())
+            expected_config = json.loads(json.dumps(original_config))
+            expected_config["gitPublish"]["commandTimeoutMs"] = 45000
+            self.assertEqual(new_config, expected_config)
+            now = svc._verify_staged_install(
+                args.account, _label_for(args.account), roots, require_runtime_seal=True)
+            self.assertEqual(now["files"], prior["files"])
+            self.assertEqual(now["nodeHash"], prior["nodeHash"])
+            self.assertEqual(now["backendHash"], prior["backendHash"])
+            self.assertEqual(now["dependencyTreeHash"], prior["dependencyTreeHash"])
+            self.assertEqual(now["plistHash"], prior["plistHash"])
+            self.assertEqual(roots["plist"].read_bytes(), plist)
+            self.assertEqual(
+                {n: (roots["base"] / n).read_bytes() for n in unchanged}, unchanged)
+            # A same-generation replay cannot use the consumed CAS.
+            with self.assertRaisesRegex(SystemExit, "installed manifest CAS mismatch"):
+                svc.cmd_upgrade(args)
+
+    def test_wrong_cas_and_loaded_service_refuse_without_mutation(self):
+        with self._installed() as (args, roots):
+            old = (roots["config"].read_bytes(), roots["manifest"].read_bytes())
+            args.publisher_expected_manifest_sha256 = "f" * 64
+            with self.assertRaisesRegex(SystemExit, "original closed owner and manifest CAS required"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(old, (roots["config"].read_bytes(), roots["manifest"].read_bytes()))
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+            with mock.patch.object(svc, "_lifecycle_inspect", return_value={"pid": 123, "state": "running"}):
+                with self.assertRaisesRegex(SystemExit, "service must be stopped"):
+                    svc.cmd_upgrade(args)
+            self.assertEqual(old, (roots["config"].read_bytes(), roots["manifest"].read_bytes()))
+
+    def test_incorrect_installed_module_refuses_before_any_write(self):
+        with self._installed() as (args, roots):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes())
+            path = roots["base"] / "git-publish.mjs"
+            path.write_bytes(b"unreviewed")
+            with self.assertRaises(SystemExit):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+
+    def test_post_rename_config_write_failure_rolls_back_exact_original(self):
+        with self._installed() as (args, roots):
+            before = (roots["config"].read_bytes(), roots["manifest"].read_bytes())
+            raw_write = svc._atomic_write_bytes
+            injected = [False]
+            def fail_first_config_after_rename(target, contents, *a, **kw):
+                done = raw_write(target, contents, *a, **kw)
+                if target == roots["config"] and not injected[0]:
+                    injected[0] = True
+                    raise OSError("injected after replacement")
+                return done
+            with mock.patch.object(svc, "_atomic_write_bytes", side_effect=fail_first_config_after_rename):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(injected[0])
+            self.assertEqual(before, (roots["config"].read_bytes(), roots["manifest"].read_bytes()))
+            svc._verify_staged_install(
+                args.account, _label_for(args.account), roots, require_runtime_seal=True)
+
+    def test_unreviewed_source_or_extra_repo_enrollment_refuses(self):
+        with self._installed() as (args, roots):
+            before = (roots["config"].read_bytes(), roots["manifest"].read_bytes())
+            args.source = str(Path(args.source).parent)
+            with self.assertRaisesRegex(SystemExit, "runtime/source identity mismatch"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["config"].read_bytes(), roots["manifest"].read_bytes()))
+            args.source = json.loads(roots["manifest"].read_text())["source"]
+            args.enable_repository_workspaces = True
+            with self.assertRaisesRegex(SystemExit, "original closed owner and manifest CAS required"):
+                svc.cmd_upgrade(args)
+            self.assertEqual(before, (roots["config"].read_bytes(), roots["manifest"].read_bytes()))
+
+    def test_post_manifest_verification_failure_freezes_effect_unknown(self):
+        with self._installed() as (args, roots):
+            original_manifest = roots["manifest"].read_bytes()
+            verify = svc._verify_staged_install
+            def fail_verified_commit(account, label, incoming, **kw):
+                if roots["manifest"].read_bytes() != original_manifest:
+                    raise RuntimeError("injected postcommit readback unavailable")
+                return verify(account, label, incoming, **kw)
+            with mock.patch.object(svc, "_verify_staged_install", side_effect=fail_verified_commit):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after manifest commit"):
+                    svc.cmd_upgrade(args)
+            self.assertNotEqual(roots["manifest"].read_bytes(), original_manifest)
+            self.assertEqual(
+                json.loads(roots["config"].read_text())["gitPublish"]["commandTimeoutMs"],
+                45000,
+            )
+            # Exact readback can reconcile the canonical installed generation.
+            svc._verify_staged_install(
+                args.account, _label_for(args.account), roots, require_runtime_seal=True)
+
+    def test_owner_lifecycle_lock_required_for_write_but_not_preflight(self):
+        with self._installed() as (args, roots):
+            original = (roots["manifest"].read_bytes(), roots["config"].read_bytes())
+            # A competing canonical C2/Paper writer must block this config
+            # transaction before its first write. No new lock is introduced.
+            with mock.patch.object(
+                svc, "_c2_lifecycle_mutex", side_effect=SystemExit("owner lifecycle busy")
+            ) as denied:
+                with self.assertRaisesRegex(SystemExit, "owner lifecycle busy"):
+                    svc.cmd_upgrade(args)
+                self.assertEqual(denied.call_count, 1)
+            self.assertEqual(original, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+            # The same live closed-profile preflight must remain genuinely
+            # read-only and never contend for the write-only lifecycle mutex.
+            args.publisher_preflight_only = True
+            with mock.patch.object(
+                svc, "_c2_lifecycle_mutex", side_effect=SystemExit("should not lock")
+            ) as unused:
+                rc, payload = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(rc, 0)
+                self.assertEqual(json.loads(payload)["effect"], "NOT_APPLIED")
+                unused.assert_not_called()
+            self.assertEqual(original, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
