@@ -103,6 +103,21 @@ PLAIN_SCOPES.update({'rv-original-tail-risk-review-01a13301-r1': {'destination':
                                               'source_pins': {'log': '62e5fadda6398d0c33ffc5e531cefc1b672fb7ad8237140fff54c032edfa89a1',
                                                               'support': 'fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2'},
                                               'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
+# Original Market Memory review: verified dispatch and immutable source witnesses.
+# See rollout/market_memory_l0_original_scope.json; this adds no lifecycle effect.
+PLAIN_SCOPES.update({'mm-l0-price-metadata-review-20261015-01a1333c-v1': {'destination': '/Volumes/Mastermind/evidence/market-memory-20261012-01a1333c/retained-returns/mm-l0-price-metadata-review-20261015-01a1333c-v1-collection-v1',
+                                                      'host': 'ubuntu1',
+                                                      'lease_witness': {'path': '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/mm-l0-price-metadata-review-20261015-01a1333c-v1.lease.kPZhMS',
+                                                                        'sha256': '70ba6a698a49d7401611ef5ab5cf6f2f64f10355329d6593f38a76b3d3f5887b'},
+                                                      'mode': 'qwen',
+                                                      'packet_path': '/Volumes/Mastermind/evidence/market-memory-20261012-01a1333c/integration/L0_PRICE_METADATA_REVIEW_PACKET.txt',
+                                                      'packet_sha256': 'baf0b1e363b85a22796086029202e6b2e8330d21f4caa6b78a02d40c2916d197',
+                                                      'parent': '01a1333c-a475-7052-95a8-72c623fb12e1',
+                                                      'requested_model': 'qwen3.8-max',
+                                                      'root': '01a1333c-a475-7052-95a8-72c623fb12e1',
+                                                      'source_pins': {'log': 'b1a89114c36ed8133306a4c654e0995ae2799d9bc77fcf64a24d0d7698c3b954',
+                                                                      'support': 'fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2'},
+                                                      'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
 BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
 RECEIPT_SCHEMA = 'mastermind.original_delivery_receipt.v1'
 MAX_STDOUT = 8 * 1024 * 1024
@@ -161,7 +176,7 @@ def verify_plain_lease_witness(run_id, plain):
             or not HEX.fullmatch(witness['sha256'])):
         raise ValueError('plain_original_lease_witness_invalid')
     path = Path(witness['path'])
-    if (path.parent != HERE/'state/remote_sub'
+    if (path.parent != delivery.owner_path(HERE/'state/remote_sub', HERE)
             or not re.fullmatch(re.escape(run_id) + r'\.lease\.[A-Za-z0-9_]+', path.name)):
         raise ValueError('plain_original_lease_witness_invalid')
     if sha(delivery.local_file(path, 4096)) != witness['sha256']:
@@ -197,7 +212,8 @@ def load_binding(path, *, run_id, root, parent):
         if name == 'packet' and plain is not None:
             allowed_path = str(p) == plain['packet_path'] and item['sha256'] == plain['packet_sha256']
         else:
-            allowed_path = (p.parent == HERE/'state/remote_sub' and
+            allowed_path = (delivery.owner_path(p, HERE).parent ==
+                            delivery.owner_path(HERE/'state/remote_sub', HERE) and
                 ((name == 'packet' and re.fullmatch(re.escape(run_id)+r'\.packet\.[A-Za-z0-9_]+',p.name)) or
                  (name != 'packet' and p.name == run_id + ('.log' if name=='log' else '.support.json'))))
         if not allowed_path:
@@ -541,8 +557,11 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
                 raise ValueError('plain_collection_binding_invalid')
             for name, digest in plain.get('source_pins', {}).items():
                 filename = run_id + ('.log' if name == 'log' else '.support.json')
-                if binding['sources'].get(name) != {
-                        'path': str(HERE/'state/remote_sub'/filename), 'sha256': digest}:
+                source = binding['sources'].get(name)
+                if (type(source) is not dict or set(source) != {'path', 'sha256'}
+                        or type(source['path']) is not str or source['sha256'] != digest
+                        or delivery.owner_path(Path(source['path']), HERE) !=
+                           delivery.owner_path(HERE/'state/remote_sub'/filename, HERE)):
                     raise ValueError('plain_collection_source_pin_changed')
         stdout=b''.join(delivery.read_local_at(chain,name,reader.MAX_FILE) for name in chunks)
         if len(stdout)!=receipt['stdout_bytes'] or sha(stdout)!=receipt['stdout_sha256']:

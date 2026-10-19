@@ -58,7 +58,7 @@
   "ext/native_runtime_bindings.py": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
   "ext/oc_free_exec.sh": "279842e54d6095276b087fd78eae9268026db3079add4b61e474119ce08d3783",
   "ext/operator_stdout_delivery.py": "1f32bf396ebdbe3fee289f7cb6ff323b37f461343a243e3ec2a76a21886768ab",
-  "ext/original_delivery_collector.py": "648a9aecef2a519f439f920142268dc0258a26fb1e1b77aa261598c36dca230b",
+  "ext/original_delivery_collector.py": "3580b25d7986734036e950412a9e43ce63188da7a130809f3cc931a5aa308715",
   "ext/original_result_delivery.py": "0e19a7f50d19a94e1d9a5c72184509f8c1748991420437a41cf278ac647c0887",
   "ext/original_result_read.py": "31836841e7043c81ff175a737227e50b6d41fd2f4a2202ceb44a560410bb3371",
   "ext/pick.py": "74bd656884739d61e7a1892735fdcf7844e030fa55b2dc51ecaad1b4c8560286",
