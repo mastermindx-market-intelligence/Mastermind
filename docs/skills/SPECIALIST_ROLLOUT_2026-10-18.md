@@ -168,3 +168,27 @@ unchanged so its strict schema does not receive OpenAI-only fields. The repaired
 candidate must be re-exported from its actual new commit; do not relabel the old
 archive hash or presume a Web import succeeded. Keep private development import
 separate from reviewed release and all-account deployment.
+
+## Existing design-skill correction
+
+A bounded comparison of the installed M2 design projection with accepted Macro
+`7ed871335f980fb3d0b0483b13ad5b6072cdda6d` found a real conflict: the local
+`references/components.md:24` and `references/states-accessibility.md:35` still
+prescribed a colored 3px callout/highlight rail. The accepted October 18 amendment
+in DESIGN_DOCTRINE and MASTER_PRODUCT_DESIGN_SYSTEM prohibits that idiom.
+
+This source carrier now preserves the complete existing 15-file design bundle,
+adds portable UI metadata and repairs those two instructions plus the entrypoint.
+Its original 115 token projection and Paper/extraction identifiers remain intact;
+newer theme aliases were deliberately not silently re-extracted. A separate method
+reconciliation field records the accepted source and the limits. The package's
+existing file-hash census was regenerated; three new regressions check the rule,
+unchanged token hashes and complete file closure. All three tests failed against
+the copied preimage and pass after repair; combined static/package tests are 32
+passed. This is an update to the existing `mastermind-design-system`, not a second
+design authority or a revision of draft Macro #7394.
+
+The five-specialist Web pilot and its published ea220bfd artifact generation remain
+unchanged; design ships as a separate complete skill bundle. The live M2 design
+and agent-pools copies are unchanged. Their installation, protected merge and
+actual task-use proof remain owed. No Paper/browser effects occurred.
