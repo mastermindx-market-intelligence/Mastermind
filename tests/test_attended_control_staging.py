@@ -463,8 +463,8 @@ def test_staged_candidate_boots_with_zero_tcp_listeners(monkeypatch, tmp_path, r
 
         from scripts import executive_os_phase1c as cli
         from ops.executive_os import autonomy_control as owner
-        cli._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET = (
-            raw['workspace_control_room']['socket_path'])
+        monkeypatch.setattr(cli, '_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET',
+                            raw['workspace_control_room']['socket_path'])
         finite = staging.NATIVE_FIELDS if 'native_capacity_v2' in raw else staging.FIELDS
         prior_control = {key: value for key, value in raw.items() if key not in finite}
         delta = {key: raw[key] for key in finite}

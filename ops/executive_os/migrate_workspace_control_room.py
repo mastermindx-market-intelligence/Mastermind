@@ -110,6 +110,11 @@ def _read_input(path: pathlib.Path) -> bytes:
                 _refuse("input changed while reading")
             view[written:written + len(chunk)] = chunk
             written += len(chunk)
+        # The file must not have grown between fstat and the read that filled
+        # the bound; one extra byte after st_size means the bound was a lie.
+        trailing = os.read(fd, 1)
+        if trailing != b"":
+            _refuse("input changed while reading")
         return bytes(view)
     finally:
         os.close(fd)

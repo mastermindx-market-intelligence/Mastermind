@@ -125,16 +125,16 @@ _PREPROOF_OPTIONAL_ARTIFACTS = frozenset({"host-service-status-failure.txt"})
 _MAX_PREPROOF_FAILURE_ARTIFACT_BYTES = 256 * 1024
 #: keep equal to the producer in acceptance.py
 _PREPROOF_RECEIPT_KEYS = {
-    # acceptance.py:1593-1600
+    # Acceptance._assert_worker_cannot_list_assignment_roots
     "assignment-root-nonlistability.json": frozenset({
         "passed", "workspace_root_listing", "run_root_listing"}),
-    # acceptance.py:2426-2437
+    # Acceptance.start_and_attest_services
     "launchd-principals.json": frozenset({"control", "worker"}),
-    # acceptance.py:2273 (envelope dict at 2259-2264)
+    # Acceptance.install_secret_canary_receipt
     "secret-canary-envelope.json": frozenset({
         "schema_version", "secret_canary", "control_environment_probe",
         "control_environment_probe_sha256"}),
-    # scripts/executive_os_phase1c_env_probe.py:268-283 (probe persisted at acceptance.py:2353)
+    # scripts.executive_os_phase1c_env_probe.main (persisted by Acceptance._assert_environment_boundary)
     "control-environment-probe": frozenset({
         "schema_version", "passed", "control_process_identity", "worker_principal",
         "config_sha256", "release_manifest_sha256", "sentinel_value_sha256",

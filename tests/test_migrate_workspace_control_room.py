@@ -502,3 +502,47 @@ def test_read_input_refuses_when_eof_arrives_early(tmp_path, monkeypatch):
         ])
     assert exit_info.value.code == 2
     assert not out.exists()
+
+
+def test_read_input_refuses_when_file_grew_after_fstat(tmp_path, monkeypatch):
+    """B4 follow-up: if the input file grows after the fstat that fixed
+    ``st_size``, the tool must refuse with the same
+    ``"input changed while reading"`` message; no output is written."""
+    import importlib
+
+    legacy = _make_legacy_config(tmp_path, port=8787)
+    input_path = _write_input(tmp_path, legacy)
+    out = _output_path(tmp_path)
+
+    spec = importlib.util.spec_from_file_location(
+        "migrate_workspace_control_room_under_test_grew",
+        str(TOOL),
+    )
+    assert spec is not None and spec.loader is not None
+    tool_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(tool_module)
+    tool_module._import_phase1c()
+
+    real_read = tool_module.os.read
+    file_size = input_path.stat().st_size
+    calls = {"n": 0}
+
+    def _growing_read(fd, size):
+        # First, deliver the full st_size bytes exactly the way the real
+        # kernel would (one read per os.read call). Then return one extra
+        # byte on the post-loop probe call: the file grew after fstat.
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return real_read(fd, file_size)
+        return b"X"
+
+    monkeypatch.setattr(tool_module.os, "read", _growing_read)
+
+    with pytest.raises(SystemExit) as exit_info:
+        tool_module.main([
+            "migrate_workspace_control_room.py",
+            "--input", str(input_path),
+            "--output", str(out),
+        ])
+    assert exit_info.value.code == 2
+    assert not out.exists()
