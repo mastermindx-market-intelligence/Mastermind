@@ -256,10 +256,11 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # gid and grants nothing. Exact full-file bytes and the three token sites only;
 # any changed byte exposes every site to the generic D8 scanner again.
 # Re-pinned for the historical-only legacy six-key admission (no new literal; the same three
-# tokens moved with the added constant and helper).
+# tokens moved with the added constant and helper), and again for the comment/docstring
+# wording that names the single historical site and the strict candidate re-check.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "2523c0c0618106555b49b29199a6151f12f3ddd725d929c0595dce388dd5a314",
-    "sites": ((70, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (835, 46, 49, "int", "400"),
-              (835, 66, 69, "int", "500")),
+    "sha256": "033ad12ff9d130a4a91a7d8a6d449450a2d1a205c107e2b82a70f2684752a38d",
+    "sites": ((72, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
+              (837, 46, 49, "int", "400"),
+              (837, 66, 69, "int", "500")),
 }
