@@ -279,7 +279,7 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # token sites are unchanged in kind, spelling, and count.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
     "sha256": "a7f6d12831066e526fae7fd59219cd0de0657e871b8a71eceda7acf342929472",
-    "sites": ((73, 33, 55, "str", '_mastermind_[a-z0-9_]+'),
+    "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
               (903, 46, 49, "int", "400"),
               (903, 66, 69, "int", "500")),
 }
