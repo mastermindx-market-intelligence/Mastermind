@@ -1,0 +1,14 @@
+{
+  "kind": "baseline_fixture_adversarial_green",
+  "tests_run": 36,
+  "failures": 0,
+  "test_exit_code": 0,
+  "output": "....................................\n----------------------------------------------------------------------\nRan 36 tests in 0.084s\n\nOK\n",
+  "output_sha256": "c167d5ad02962c8616c1e78223649452d12a68fcfb06071d9115511f1703423f",
+  "replay_module_sha256": "2f2610328dcae44cc507565cdc6245b2ed3a8a4d4a6b1d1cd7ab0cfa6bd0cec4",
+  "test_driver_sha256": "c54c4bc52b98d447b59dd0183e7ab152d5175801a09c9c09d83389b16f5e7670",
+  "same_test_driver_as_red": true,
+  "input_responses_unchanged": true,
+  "i3_acceptance": false,
+  "production_proof": false
+}

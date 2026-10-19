@@ -1,0 +1,12 @@
+{
+  "started_at": "2026-10-03T20:04:12.263935+00:00",
+  "state": "replay_passed",
+  "pytest_exit_code": 0,
+  "queries_executed": true,
+  "archive_sha256": "b7c257a07b07381994c38a8438bf959d19082d0a6629ad6938332a0cf7ce13cf",
+  "pytest_output_sha256": "b2a17d6a08fb91b016a1d0e1e7562ae5474301509072476752c7d53a5e8bbb35",
+  "query_exit_code": 0,
+  "completed_at": "2026-10-03T20:04:28.300364+00:00",
+  "production_proof": false,
+  "i3_acceptance": false
+}

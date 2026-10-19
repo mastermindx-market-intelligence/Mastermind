@@ -1,0 +1,324 @@
+{
+  "case": "aapl_same_filing_annual_revenue",
+  "source_commit": "37122b69fffa98cb160022c4831df0338ef3e7e3",
+  "response_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+  "actual_sha256": "a752302d0d11457920be1425cb9ebb6d1f29560b7f1e8f41a5de98075083c6af",
+  "bytes": 76239,
+  "query_hash": "57e7c61f71eb468b1b7813856074a9118d46d987ced3953a02b857610c9cdec7",
+  "delivery": {
+    "kind": "committed_golden_fixture",
+    "attested": false,
+    "production_issuer_service": false
+  },
+  "authority": {
+    "class": "context_only",
+    "display_only": true
+  },
+  "root_cells": [
+    {
+      "cell_id": "metric_cell_0631c08c7ac1f82284f92dcbd5325963366734f80aa2b71f6897ab472f35e080",
+      "governance_bundle_id": "716c2b82d8d5e8f451be2fcd3646c3965c816735327c1fc7875320a8d8c54671",
+      "ticker": "AAPL",
+      "entity_id": "0000320193",
+      "metric_id": "revenue",
+      "period": {
+        "kind": "duration",
+        "start": "2023-10-01",
+        "end": "2024-09-28",
+        "fiscal_year": null,
+        "fiscal_quarter": null,
+        "calendar_kind": "unknown",
+        "fiscal_year_weeks": null,
+        "week_count": null,
+        "inferred_week_count": 52,
+        "semantics": [
+          "duration"
+        ],
+        "label": "FY2024"
+      },
+      "state": "value",
+      "status": "value",
+      "value": "391035000000",
+      "unit": "USD",
+      "reason": null,
+      "provenance": {
+        "kind": "direct",
+        "evaluation_policy": "on_demand_cutoff_projection",
+        "policy": "latest_known_as_of",
+        "source_snapshot_at": "2026-08-01T00:00:00.000000Z",
+        "recorded_cutoff_at": "2026-08-23T12:00:00.000000Z",
+        "source_entity_id": "0000320193",
+        "source": "sec-edgar",
+        "accession": "0000320193-25-000079",
+        "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+        "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm",
+        "source_body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+        "form": "10-K",
+        "filed_at": "2025-10-31",
+        "filing_metadata_available_at": "2026-08-23T00:32:31.000000Z",
+        "filing_metadata_content_sha256": "7f1052a92bd77c3ae1aee01be82f387eb5a0165fd7303fbd836db597a725b297",
+        "accepted_at": "2025-10-31T10:01:26.000000Z",
+        "recorded_at": "2026-08-23T00:32:31.000000Z",
+        "mapping_available_at": null,
+        "governance_available_at": "2026-08-02T00:00:00.000000Z",
+        "computed_at": null,
+        "published_at": null,
+        "source_ready_at": "2025-10-31T10:01:26.000000Z",
+        "system_ready_at": "2026-08-23T00:32:31.000000Z",
+        "concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "taxonomy": "us-gaap",
+        "concept": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "unit": "USD",
+        "metric_rule_id": "metric.revenue/v1",
+        "metric_rule_version": "1.0.0",
+        "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+        "mapping_rule_id": "mapping.revenue/v1",
+        "mapping_rule_version": "1.0.0",
+        "mapping_digest": "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa",
+        "mapping_rule_ids": [
+          "mapping.revenue/v1"
+        ],
+        "mapping_rule_versions": [
+          "1.0.0"
+        ],
+        "mapping_digests": [
+          "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa"
+        ],
+        "formula_rule_id": null,
+        "formula_rule_version": null,
+        "formula_digest": null,
+        "catalog_id": "fundamental_forensics_core_gaap_metrics",
+        "catalog_version": "cutoff-projection-v1",
+        "catalog_digest": "737db87533977c90db806b7808239b2ac0bda58d21551674a750f21d28d89921",
+        "mapping_pack_version": "cutoff-projection-v1",
+        "mapping_pack_digest": "4794177f62a59f91818126627534624f37236b32145587c3749b3b908e74b308",
+        "formula_pack_version": "cutoff-projection-v1",
+        "formula_pack_digest": "effc801cdb10ddffccd0829ec64df245d13fa5f5d53369916ded2e9175ab7c47",
+        "confidence": "A",
+        "alias_priority": 10,
+        "source_occurrence_ids": [
+          "rawfact_4499322b7e8011f8b5f198307fd8a8f41eaac55a7c277a4824f53f59fbef4d4e",
+          "rawfact_4c2a6f2e2d6752f152810e1b17215b8defded8555fd942c7af6449c0531197a8",
+          "rawfact_5c17220be0ca9751d0a34109cdd34a8177fca3f8e2522eb372c8699499a96851",
+          "rawfact_accfa54cab677c1f9a3dd45b206a62c140d0b98dd3e946ba0f4312fc0aaed817"
+        ],
+        "dependency_cell_ids": [],
+        "selected_raw_fact": {
+          "occurrence_id": "rawfact_accfa54cab677c1f9a3dd45b206a62c140d0b98dd3e946ba0f4312fc0aaed817",
+          "logical_key": "rawfact_lineage_0c2521f8978b8a0723932b30a08a577f81cfb050667d799a6c962379fcf7f2d0",
+          "duplicate_group_key": "rawfact_duplicate_4e6264ef0bf3654b57b57458213346eab30947c9413255e7abe295b2e6e17af6",
+          "source": {
+            "source": "sec-edgar",
+            "entity_id": "0000320193",
+            "accession": "0000320193-25-000079",
+            "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+            "body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+          },
+          "concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+          "context": {
+            "context_id": "c-18",
+            "entity_scheme": "http://www.sec.gov/CIK",
+            "entity_identifier": "0000320193",
+            "instant": null,
+            "start": "2023-10-01",
+            "end": "2024-09-28",
+            "explicit_dimensions": {},
+            "typed_dimensions": {},
+            "semantic_key": "context_ffb5916af63c93b1363a53365214e92ed2926f69303ea47fd0d47cee8cadb630"
+          },
+          "unit": {
+            "unit_id": "usd",
+            "measures": [
+              "iso4217:USD"
+            ],
+            "denominator_measures": [],
+            "semantic_key": "unit_9af5e1b3809df68b24a70d4e7f131fbed2c97b7a992a3a11fbe3eeb3b8bab2f3"
+          },
+          "dimensions_known": true,
+          "source_occurrence_key": "f-79",
+          "raw_token": "391,035",
+          "parsed_value": "391035000000",
+          "is_nil": false,
+          "xml_lang": null,
+          "decimals": "-6",
+          "precision": null,
+          "inline_format": "{http://www.xbrl.org/inlineXBRL/transformation/2020-02-12}num-dot-decimal",
+          "inline_sign": null,
+          "inline_scale": 6,
+          "hidden": false,
+          "source_span": [
+            493551,
+            493753
+          ],
+          "event_type": "filed",
+          "revision_of": null,
+          "clocks": {
+            "accepted_at": "2025-10-31T10:01:26.000000Z",
+            "recorded_at": "2026-08-23T00:32:31.000000Z",
+            "mapping_available_at": null,
+            "computed_at": null,
+            "published_at": null
+          }
+        },
+        "reason": null
+      }
+    },
+    {
+      "cell_id": "metric_cell_b4d478d34816e28ae5a855df58b5a97cdb5937fff6d67b5933e59e0dd381fc6c",
+      "governance_bundle_id": "716c2b82d8d5e8f451be2fcd3646c3965c816735327c1fc7875320a8d8c54671",
+      "ticker": "AAPL",
+      "entity_id": "0000320193",
+      "metric_id": "revenue",
+      "period": {
+        "kind": "duration",
+        "start": "2024-09-29",
+        "end": "2025-09-27",
+        "fiscal_year": null,
+        "fiscal_quarter": null,
+        "calendar_kind": "unknown",
+        "fiscal_year_weeks": null,
+        "week_count": null,
+        "inferred_week_count": 52,
+        "semantics": [
+          "duration"
+        ],
+        "label": "FY2025"
+      },
+      "state": "value",
+      "status": "value",
+      "value": "416161000000",
+      "unit": "USD",
+      "reason": null,
+      "provenance": {
+        "kind": "direct",
+        "evaluation_policy": "on_demand_cutoff_projection",
+        "policy": "latest_known_as_of",
+        "source_snapshot_at": "2026-08-01T00:00:00.000000Z",
+        "recorded_cutoff_at": "2026-08-23T12:00:00.000000Z",
+        "source_entity_id": "0000320193",
+        "source": "sec-edgar",
+        "accession": "0000320193-25-000079",
+        "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+        "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm",
+        "source_body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+        "form": "10-K",
+        "filed_at": "2025-10-31",
+        "filing_metadata_available_at": "2026-08-23T00:32:31.000000Z",
+        "filing_metadata_content_sha256": "7f1052a92bd77c3ae1aee01be82f387eb5a0165fd7303fbd836db597a725b297",
+        "accepted_at": "2025-10-31T10:01:26.000000Z",
+        "recorded_at": "2026-08-23T00:32:31.000000Z",
+        "mapping_available_at": null,
+        "governance_available_at": "2026-08-02T00:00:00.000000Z",
+        "computed_at": null,
+        "published_at": null,
+        "source_ready_at": "2025-10-31T10:01:26.000000Z",
+        "system_ready_at": "2026-08-23T00:32:31.000000Z",
+        "concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+        "taxonomy": "us-gaap",
+        "concept": "RevenueFromContractWithCustomerExcludingAssessedTax",
+        "unit": "USD",
+        "metric_rule_id": "metric.revenue/v1",
+        "metric_rule_version": "1.0.0",
+        "metric_rule_digest": "9dd8727b44913da3d1d040eb15f21f16325a6f5b0674a848c50dd138953e13f4",
+        "mapping_rule_id": "mapping.revenue/v1",
+        "mapping_rule_version": "1.0.0",
+        "mapping_digest": "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa",
+        "mapping_rule_ids": [
+          "mapping.revenue/v1"
+        ],
+        "mapping_rule_versions": [
+          "1.0.0"
+        ],
+        "mapping_digests": [
+          "ef978677cbbce3a8f65ae7910e5ea1a772df296bae81fe91fe599f6b5e7ff5aa"
+        ],
+        "formula_rule_id": null,
+        "formula_rule_version": null,
+        "formula_digest": null,
+        "catalog_id": "fundamental_forensics_core_gaap_metrics",
+        "catalog_version": "cutoff-projection-v1",
+        "catalog_digest": "737db87533977c90db806b7808239b2ac0bda58d21551674a750f21d28d89921",
+        "mapping_pack_version": "cutoff-projection-v1",
+        "mapping_pack_digest": "4794177f62a59f91818126627534624f37236b32145587c3749b3b908e74b308",
+        "formula_pack_version": "cutoff-projection-v1",
+        "formula_pack_digest": "effc801cdb10ddffccd0829ec64df245d13fa5f5d53369916ded2e9175ab7c47",
+        "confidence": "A",
+        "alias_priority": 10,
+        "source_occurrence_ids": [
+          "rawfact_124d2836cc39ea1dbf4203633d1259429282d7b4590fb377d1366e6957bc58de",
+          "rawfact_d8da3124993f1d2b789ddb9653678004724292725bc8ad37ff57715bbd1d6b0f",
+          "rawfact_d92267fb14ddf958f6f5802c335d624cf9bae891bee0b5f67189e0af348f6826",
+          "rawfact_f0f776342cf8ee64dfe90b973900cce58da0965c94a20974a231d55e8b4bad82"
+        ],
+        "dependency_cell_ids": [],
+        "selected_raw_fact": {
+          "occurrence_id": "rawfact_d8da3124993f1d2b789ddb9653678004724292725bc8ad37ff57715bbd1d6b0f",
+          "logical_key": "rawfact_lineage_014da7f872f982e35dac6ab4b1320ac31e9c8b210cce6a08ae3ad4bd4c5d197c",
+          "duplicate_group_key": "rawfact_duplicate_41445ae4d5cd7d76d9ef12a59f34db0dfde2867d5668b99876c5a6e342434398",
+          "source": {
+            "source": "sec-edgar",
+            "entity_id": "0000320193",
+            "accession": "0000320193-25-000079",
+            "document_id": "sec_document_d23a609841f9a32489dd7abc952d39622540f8a24905612bda1d43e5577860b8",
+            "body_sha256": "548ae59778cf08ee0f2ee088e7ece20d947076c3c01f74d2d65db4c2777e436a",
+            "source_url": "https://www.sec.gov/Archives/edgar/data/320193/000032019325000079/aapl-20250927.htm"
+          },
+          "concept_qname": "us-gaap:RevenueFromContractWithCustomerExcludingAssessedTax",
+          "context": {
+            "context_id": "c-1",
+            "entity_scheme": "http://www.sec.gov/CIK",
+            "entity_identifier": "0000320193",
+            "instant": null,
+            "start": "2024-09-29",
+            "end": "2025-09-27",
+            "explicit_dimensions": {},
+            "typed_dimensions": {},
+            "semantic_key": "context_51aff8f0bbc3931da19c1272e26031e6753421706ed75544b408f8a32cb9faa8"
+          },
+          "unit": {
+            "unit_id": "usd",
+            "measures": [
+              "iso4217:USD"
+            ],
+            "denominator_measures": [],
+            "semantic_key": "unit_9af5e1b3809df68b24a70d4e7f131fbed2c97b7a992a3a11fbe3eeb3b8bab2f3"
+          },
+          "dimensions_known": true,
+          "source_occurrence_key": "f-78",
+          "raw_token": "416,161",
+          "parsed_value": "416161000000",
+          "is_nil": false,
+          "xml_lang": null,
+          "decimals": "-6",
+          "precision": null,
+          "inline_format": "{http://www.xbrl.org/inlineXBRL/transformation/2020-02-12}num-dot-decimal",
+          "inline_sign": null,
+          "inline_scale": 6,
+          "hidden": false,
+          "source_span": [
+            492891,
+            493092
+          ],
+          "event_type": "filed",
+          "revision_of": null,
+          "clocks": {
+            "accepted_at": "2025-10-31T10:01:26.000000Z",
+            "recorded_at": "2026-08-23T00:32:31.000000Z",
+            "mapping_available_at": null,
+            "computed_at": null,
+            "published_at": null
+          }
+        },
+        "reason": null
+      }
+    }
+  ],
+  "executed_at": "2026-10-03T19:49:32.881167+00:00",
+  "completed_at": "2026-10-03T19:49:34.631060+00:00",
+  "I3_emission_at": null,
+  "historical_emission_at": null,
+  "trial_registered": false,
+  "development_only": true,
+  "method_sha256": "b183fa79087c1f2bc4f53f6eba345553cfbb1eed55d6751c1ce3af525dbf7c08"
+}
