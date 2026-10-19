@@ -111,6 +111,20 @@ _REFUSAL_DETAIL_LIMIT = 300
 _REFUSAL_TRUNCATION_MARKER = "...[truncated]"
 _REFUSAL_REDACTION = "<redacted>"
 _REFUSAL_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# The artifact's own format survives newlines and tabs so the user can still
+# read the stream; the rest collapse to a space.
+_FAILURE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# Bounded diagnostic capture for failing host-service calls. The artifact name
+# is fixed per call site (see _FAILURE_ARTIFACTS); the size bounds are the same
+# contract another lane's maintenance tool already admits against
+# host-service-status-failure.txt (see acceptance_maintenance).
+_FAILURE_STREAM_LIMIT = 64 * 1024
+_FAILURE_ARGV_LIMIT = 4 * 1024
+_FAILURE_ARTIFACT_LIMIT = 256 * 1024
+_FAILURE_ARTIFACTS = {
+    "host service status": "host-service-status-failure.txt",
+    "final host status": "final-host-status-failure.txt",
+}
 # Secret shapes this runtime actually mints are ``secrets.token_hex`` (hex) and
 # ``secrets.token_urlsafe`` (base64url).  ``/`` is deliberately excluded from the
 # token class so that filesystem paths (the most useful part of a workspace
@@ -137,6 +151,31 @@ _GIT_OBJECT_ID_RE = re.compile(r"[0-9a-f]{40}")
 
 class AcceptanceError(RuntimeError):
     pass
+
+
+class CommandFailure(AcceptanceError):
+    """A failing `_run` call whose captured streams must reach the operator.
+
+    ``str(exc)`` is exactly the historical `_run` message
+    ``f"{label} failed with exit {rc}"`` so every existing
+    ``except AcceptanceError`` site keeps catching it without text matching.
+    """
+
+    def __init__(
+        self,
+        *,
+        label: str,
+        argv: list[str],
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+    ) -> None:
+        super().__init__(f"{label} failed with exit {returncode}")
+        self.label = label
+        self.argv = argv
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def _validate_operator_harness_policy(
@@ -204,7 +243,13 @@ def _run(
         env=dict(env) if env is not None else None,
     )
     if check and completed.returncode != 0:
-        raise AcceptanceError(f"{label} failed with exit {completed.returncode}")
+        raise CommandFailure(
+            label=label,
+            argv=[os.fspath(value) for value in argv],
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     return completed
 
 
@@ -1262,6 +1307,144 @@ class Acceptance:
             + "\n"
         ).encode("utf-8")
         return self._write_bytes(name, payload)
+
+    def _redact_failure_stream(self, payload: bytes) -> str:
+        """Render one bounded, redacted stream for the failure artifact.
+
+        Exact secrets held by the run plus every readable sentinel file value
+        are replaced first (longest match wins); then the same hex / token-shape
+        redaction the operator-visible refusal fragment uses; control
+        characters other than ``\\n`` and ``\\t`` collapse to a space so the
+        format's own line structure survives; every line is then prefixed with
+        ``"| "`` so stream content cannot forge the artifact's own header lines;
+        the result is bounded on encoded bytes with the existing truncation
+        marker (decode drops a split trailing code point so the bound is exact
+        in UTF-8 even for invalid input).
+        """
+
+        text = payload.decode("utf-8", errors="replace")
+        secrets_to_redact: list[str] = []
+        held = self._refusal_redactions()
+        secrets_to_redact.extend(secret for secret in held if isinstance(secret, str))
+        for source in self._sentinel_sources():
+            try:
+                raw = source.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            value = raw.strip()
+            if value:
+                secrets_to_redact.append(value)
+        for secret in sorted(
+            {item for item in secrets_to_redact if isinstance(item, str)},
+            key=len,
+            reverse=True,
+        ):
+            text = text.replace(secret, _REFUSAL_REDACTION)
+        text = _FAILURE_CONTROL_CHARS_RE.sub(" ", text)
+        text = _REFUSAL_HEX_SECRET_RE.sub(_redact_secret_shaped, text)
+        text = _REFUSAL_TOKEN_SECRET_RE.sub(_redact_secret_shaped, text)
+        if text:
+            text = "| " + text.replace("\n", "\n| ")
+        encoded = text.encode("utf-8")
+        if len(encoded) > _FAILURE_STREAM_LIMIT:
+            encoded = encoded[:_FAILURE_STREAM_LIMIT]
+            text = encoded.decode("utf-8", errors="ignore") + _REFUSAL_TRUNCATION_MARKER
+        return text
+
+    def _build_failure_payload(
+        self,
+        *,
+        label: str,
+        argv: list[str],
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+        timeout: float | None = None,
+    ) -> bytes:
+        if timeout is not None and returncode == -1:
+            returncode_repr = f"timeout after {timeout}s"
+        else:
+            returncode_repr = str(returncode)
+        argv_text = " ".join(argv)
+        if len(argv_text) > _FAILURE_ARGV_LIMIT:
+            argv_text = argv_text[:_FAILURE_ARGV_LIMIT] + _REFUSAL_TRUNCATION_MARKER
+        stdout_text = self._redact_failure_stream(stdout or b"")
+        stderr_text = self._redact_failure_stream(stderr or b"")
+        body = (
+            f"label: {label}\n"
+            f"argv: {argv_text}\n"
+            f"returncode: {returncode_repr}\n"
+            f"--- stdout ({len(stdout or b'')} bytes, redacted, bounded) ---\n"
+            f"{stdout_text}\n"
+            f"--- stderr ({len(stderr or b'')} bytes, redacted, bounded) ---\n"
+            f"{stderr_text}\n"
+        )
+        payload = body.encode("utf-8")
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            overflow = len(payload) - _FAILURE_ARTIFACT_LIMIT
+            cutoff = len(argv_text) - overflow
+            if cutoff < 0:
+                cutoff = 0
+            argv_text = (
+                argv_text[:cutoff] + _REFUSAL_TRUNCATION_MARKER
+                if cutoff > 0
+                else _REFUSAL_TRUNCATION_MARKER
+            )
+            body = (
+                f"label: {label}\n"
+                f"argv: {argv_text}\n"
+                f"returncode: {returncode_repr}\n"
+                f"--- stdout ({len(stdout or b'')} bytes, redacted, bounded) ---\n"
+                f"{stdout_text}\n"
+                f"--- stderr ({len(stderr or b'')} bytes, redacted, bounded) ---\n"
+                f"{stderr_text}\n"
+            )
+            payload = body.encode("utf-8")
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            raise AcceptanceError(
+                "failure artifact exceeded its bound"
+            )
+        return payload
+
+    def _run_recorded(
+        self,
+        argv: Sequence[str | os.PathLike[str]],
+        *,
+        label: str,
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[bytes]:
+        if label not in _FAILURE_ARTIFACTS:
+            raise AcceptanceError(f"unknown failure-artifact label: {label}")
+        timeout = kwargs.get("timeout")
+        try:
+            return _run(argv, label=label, **kwargs)
+        except (CommandFailure, subprocess.TimeoutExpired) as exc:
+            artifact_name = _FAILURE_ARTIFACTS[label]
+            try:
+                if isinstance(exc, CommandFailure):
+                    payload = self._build_failure_payload(
+                        label=exc.label,
+                        argv=list(exc.argv),
+                        returncode=exc.returncode,
+                        stdout=exc.stdout,
+                        stderr=exc.stderr,
+                    )
+                else:
+                    captured_argv = [os.fspath(value) for value in argv]
+                    payload = self._build_failure_payload(
+                        label=label,
+                        argv=captured_argv,
+                        returncode=-1,
+                        stdout=getattr(exc, "stdout", None) or b"",
+                        stderr=getattr(exc, "stderr", None) or b"",
+                        timeout=getattr(exc, "timeout", None) or timeout,
+                    )
+                self._write_bytes(artifact_name, payload)
+            except Exception as recording_exc:  # noqa: BLE001 - keep the original
+                exc.add_note(
+                    "failure artifact not recorded: " + type(recording_exc).__name__
+                )
+            raise
 
     def _refusal_redactions(self) -> tuple[str, ...]:
         """Plaintext secrets this run holds that must never reach the operator.
@@ -2435,7 +2618,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 },
             },
         )
-        status = _run(
+        status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="host service status",
         )
@@ -3114,7 +3297,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         self._assert_no_public_listener()
         self.leakage_scan(control_pid)
-        final_status = _run(
+        final_status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="final host status",
         )
