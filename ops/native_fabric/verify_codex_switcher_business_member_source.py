@@ -19,7 +19,11 @@ HERE = Path(__file__).resolve().parent
 STEM = "codex_switcher_business_member_guard_20261019"
 PATCH = HERE / "patches" / (STEM + ".patch")
 MANIFEST = HERE / "patches" / (STEM + ".manifest.json")
-PATHS = frozenset(("src-tauri/src/auth/storage.rs", "src-tauri/src/types.rs"))
+PATHS = frozenset((
+    "src-tauri/src/auth/storage.rs",
+    "src-tauri/src/auth/token_refresh.rs",
+    "src-tauri/src/types.rs",
+))
 HASH = re.compile(r"^[a-f0-9]{64}$")
 SHA = re.compile(r"^[a-f0-9]{40}$")
 
