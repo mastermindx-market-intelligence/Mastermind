@@ -1,6 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import { decodeSessionContext } from "./orchestration/executive-session-command-port";
+import { createOsExecutiveSessionHost } from "./orchestration/os-executive-session-host";
+import type { PendingPointerStore } from "./orchestration/operation-controller";
 const deferred = () => { let resolve!: (x: unknown) => void; let reject!: (x: unknown) => void;
   const promise = new Promise<unknown>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 async function fixture() {
@@ -108,6 +110,59 @@ describe("native fixed Executive bridge", () => {
     expect(f.invoke.mock.calls.map(([cmd])=>cmd)).toEqual([
       "executive_auth_status","executive_session_context",
     ]);
+  });
+  it("mounts native historical READ under the real Session host with B pending and no SEND",async()=>{
+    const f=await fixture();
+    const selection={workRef:"WS:ALPHA",rootJobId:"JOB-1"};
+    const bPointer={operationKey:"session-continue-"+"d".repeat(64),
+      kind:"message" as const,targetKey:"fabric_attempt:"+"a".repeat(64)};
+    const store:PendingPointerStore={
+      read:vi.fn(async()=>bPointer),reserve:vi.fn(async()=>({reserved:false,pointer:bPointer})),
+      clearIfEqual:vi.fn(async()=>false),
+    };
+    const context={
+      schema:"mastermind.os.executive.session_result.v1",operation:"context",
+      ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.os.executive.session_context.v1",
+        principal_scope:"c".repeat(64),verified_expiry:4102444800,
+        selection:{work_ref:selection.workRef,root_job_id:selection.rootJobId},
+        selection_state:"RESOLVED",
+        target:{target_ref:bPointer.targetKey,generation:"a".repeat(24),
+          addressable:true,kind:"fabric_attempt",
+          continuation_operation_key:bPointer.operationKey,
+          work_ref:selection.workRef,root_job_id:selection.rootJobId},
+        capabilities:{send:true,reply_read:true,stop:false},
+      },
+    };
+    const references={schema:"mastermind.os.executive.session_result.v1",
+      operation:"references",ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.session_reply_references.v1",status:"COMPLETE",
+        high_water:5,references:[],next_cursor:null}};
+    f.invoke.mockImplementation(async (cmd)=>{
+      if(cmd==="executive_session_context")return context;
+      if(cmd==="executive_session_references")return references;
+      throw new Error("unexpected native command");
+    });
+    const host=createOsExecutiveSessionHost(f.sessionTransport,store);
+    try {
+      await host.refresh(selection);
+      expect(host.binding.port.currentTargetRef()).toBeNull();
+      expect(host.binding.port.context()?.principalScope).toBe("c".repeat(64));
+      const signal=new AbortController().signal;
+      await expect(host.binding.port.readOriginalReferences!(selection,signal))
+        .resolves.toEqual(references);
+      await expect(f.sessionTransport.send({
+        target_ref:bPointer.targetKey,
+        operation_key:bPointer.operationKey,
+        instruction:"do not send",stop_condition:"do not send",
+      },signal)).rejects.toThrow("NATIVE_SESSION_READ_ONLY");
+      expect(store.reserve).not.toHaveBeenCalled();
+      expect(store.clearIfEqual).not.toHaveBeenCalled();
+      expect(await store.read("c".repeat(64))).toEqual(bPointer);
+      expect(f.invoke.mock.calls.map(([cmd])=>cmd)).toEqual([
+        "executive_auth_status","executive_session_context","executive_session_references",
+      ]);
+    } finally { host.dispose(); }
   });
   it("stale native historical READ is withheld after auth epoch changes",async()=>{
     const f=await fixture(), late=deferred(),signal=new AbortController().signal;
