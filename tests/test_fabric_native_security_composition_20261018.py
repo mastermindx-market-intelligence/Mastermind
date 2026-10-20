@@ -29,7 +29,7 @@ DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8c
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # Observer, portable reader and original-state collector changes compose here.
 # Executor, donor, support and deadline identities remain independently pinned.
-NATIVE_MANIFEST_SHA = "4555d73b16740a964de105471c7f13189956da4fb08967d06526edfa3bc8189d"
+NATIVE_MANIFEST_SHA = "a2085f8239c2181a810f968bc14556811c4a3eb22bcc8c2f6dad7f3df9213ad7"
 
 
 def _sha(raw):
@@ -113,7 +113,7 @@ def native_stage(tmp_path_factory):
     assert (output / "native-source-inventory.json").read_bytes() == (
         NATIVE / "rollout/native-source-inventory.json").read_bytes()
     manifest = json.loads(expected)
-    assert len(manifest) == 82
+    assert len(manifest) == 83
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
     assert manifest["ext/remote_sub_exec.py"] == COMPOSED_SHA
@@ -142,7 +142,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == 82 and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert len(files) == 83 and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
