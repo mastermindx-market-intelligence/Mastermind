@@ -180,7 +180,7 @@ this cohort as `corrupt manifest` before any effect; inspection established that
 pointer is retained provenance, not a safe instruction to restage its current bytes.
 
 The canonical private installer owns the bounded `paper-runtime-upgrade` operation.
-It recognizes only the reviewed C2 account and exact installed file digests, verifies
+The C2 Personal case recognizes that reviewed account and exact installed file digests, verifies
 the existing node/backend/dependency seal and plist, and requires a caller-supplied
 compare-and-swap digest of the current manifest. Admission is restricted to the
 canonical digests of the reviewed original manifest and its planned v12 successor;
@@ -230,6 +230,54 @@ to edit JSON manually. The transaction reconciles observed bytes before rollback
 an unknown effect requires reconciliation through this same owner before restart
 or replay. Existing Paper
 snapshot, file-writer, operation-id and no-cross-carrier-replay rules still apply.
+
+### C4 exact-cohort qualification — 2026-10-18
+
+The C4 installation uses account `chatgpt4`, port `45024` and launchd label
+`com.mastermind.studio-direct-private.chatgpt4`. A read-only host census verified all
+eleven installed module hashes, the Node/backend hashes, plist, the two-pass
+dependency seal, and the original non-Paper configuration. Although its eleven
+module bytes equal the reviewed C2 bundle, its manifest, configuration and dependency
+pins are independent. The new C4 predicate admits only its original manifest and the
+planned v12 successor. Existing C2 account eligibility and pins are preserved.
+
+This proposal composes incumbent PR #1603 at
+`12fe3d9a7f5ed7deff75b1e8c9101227a92d0aa8` in an isolated source branch; it does not
+modify that source branch or adopt a C2 live rollout. Review found that the existing
+C2 Business compatibility updater can write the same manifest as the Paper updater.
+Its modifying dispatch now takes the same account lifecycle mutex across validation,
+writes and recovery. The genuine Business read-only preflight remains lock-free,
+and its account, source, module, capability and manifest admission rules are unchanged.
+
+Source `0ef1aa2c1900ee5b0141c2e6357dac20187de3e2` passed all **148** installer tests.
+Ten new tests exercise the actual C4 command paths, including ambiguous service
+absence, both pre-commit and post-commit uncertain effects, safe rollback, lifecycle
+contention and replay refusal. Four sibling-writer tests prove mutual exclusion at
+real configuration/module write boundaries and during recovery. Both public command
+intents independently pass real preflight in the same sealed fixture before re-entry;
+the mutex itself is not mocked.
+
+Protected master then advanced to `d5cce731a23588ddbf4df806bd9e8dcfa5eecf24`
+(PR #1604), which adds a separately admitted C2 Personal publisher operation.
+Integrated source `b442c550dde1fe4136f93806516b108b0ef20590` preserves that protected
+operation and its admission rules. Both C2 compatibility applies take their existing
+account lifecycle mutex, while genuine read-only preflights stay lock-free.
+The integrated suite passes **153** tests, including two new Personal publisher
+contention/recovery cases. This does not select or apply either C2 publisher operation.
+
+The real C4 `--preflight-only` invocation then returned `NOT_APPLIED`, preserving
+configuration, manifest and plist bytes and creating no lifecycle lock. It proposes
+original manifest `849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071`
+to target `5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9`.
+The immutable v12 runtime was already present and passed the protected verifier.
+
+Evidence is retained in
+[the C4 verification directory](verification/paper-c4-runtime-20261018/verification.json).
+These receipts prove source tests and read-only planning. Live selection follows the
+existing accepted-release stop / Paper upgrade / start sequence above with the exact
+C4 account and freshly observed manifest. Acceptance still requires a new gateway
+generation, the qualified catalog, exact-file preparation, and a requested guarded
+edit with visual readback on the same Studio Direct carrier.
 
 ### Paper release-version compatibility ruling — 2026-09-30
 
@@ -539,3 +587,30 @@ then repeat the same Paper inspection canary.
 
 These two account/client ceremonies are the remaining native-human gates; they are
 not reasons to create additional Paper user accounts or another MCP gateway.
+
+### C4 composition with protected Fabric release
+
+The C4 proposal integrates protected master `89cf2399c47da20c0c23826266e52984f88c27e7`.
+Its installer code at `7347c319db18c86b4f6f6dc5a0714e0aebca56c3` retains the dedicated
+Fabric owner and its stage/upgrade/seal/start/stop decorators. The shared mutex admits
+the union of the qualified Paper accounts and that exact Fabric account; the separate
+decorator predicates prevent double acquisition. Dedicated Paper inspections still
+request positive service-state evidence, while generic C2 Business behavior is preserved.
+
+The combined installer and backend-release suites pass 162 tests. A fresh actual C4
+preflight with this installer remains `NOT_APPLIED`: installed configuration, manifest,
+plist and lock existence are unchanged. See `paper-c4-integrated-preflight.json` and the
+current integration entry in `verification.json`. No Fabric runtime action was performed.
+
+The current Portfolio mission adopts the exact inherited #1603 source
+`12fe3d9a7f5ed7deff75b1e8c9101227a92d0aa8` into the owned #1611 composition, including
+the independently reviewed shared-writer lock correction. Normal acceptance of the
+combined source dispositions that inherited component; the original branch remains
+untouched. A protected-commit comparison must establish what landed. C2 runtime
+selection and publisher operations retain their separate release and live-proof scope.
+
+The C4 stop/select/start operator must remain available after C4 stops. Use the existing
+accepted installer from an independently authorized local or RDC host installation
+context, checking each stage before the next. A command launched through the C4 backend
+itself is not a qualified self-cutover mechanism. The subsequent Paper prepare/edit and
+visual readback remain on Studio Direct C4.

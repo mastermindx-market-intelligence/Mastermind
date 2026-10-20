@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mastermind Market Source Validation"
+  short_description: "Validate market claims, vintage, units and provenance"

@@ -172,6 +172,17 @@ C2_BUSINESS_V10_ORIGINAL_BLOBS = {
     "private-tunnel-gateway.mjs": "6ea4b75a0ce76995cde4c7f090ad4e28a183f3db",
     "tailnet-gateway.mjs": "d654200a417d5a4dadfcc4e0f6141ef9adda6a04",
 }
+C2_PERSONAL_CURRENT_MANIFEST_SHA256 = "c5744dcc7a96d0bc0b019f3c153e8acc8761320ff11541340df753fb493c5460"
+# Exact live C2 Personal post-#1604 sealed generation. A dedicated stopped-
+# service, manifest-CAS migration changes ONLY the Git command budget.
+# Repository enrollment, Git source, fleet, Paper and all module hashes stay fixed.
+C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256 = "4bb0b40cbc7849487c0d886b30261f70fd6e1828d1d217643a56e3fa6aea40fb"
+C2_PERSONAL_TIMEOUT_COMMAND_MS = 45000
+C2_PERSONAL_TARGET_PATCH_SHA256 = {
+    "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
+    "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+    "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+}
 C2_BUSINESS_TARGET_PATCH_SHA256 = {
     "gateway.mjs": "17157fa5f8739dbe17aae767a335e97dd713a978dde9b192feb1b41a7b036b30",
     "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
@@ -200,6 +211,15 @@ C2_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
     "d477cd952b86d76c07a2554a94a1ce5dc8c5e42bda544a5603caf0f54e17c9b7",
 ))
 C2_LIFECYCLE_LOCK_NAME = "private-service.lifecycle.lock"
+# These are the two already enrolled restricted Fabric seats, not a caller-selectable
+# account family. Their backends may advance independently of their sealed gateways.
+FABRIC_BACKEND_ACCOUNT = "subagent-fabric-c3"
+FABRIC_BACKEND_MODERN_ACCOUNT = "fabric-c3-570f6f34"
+FABRIC_BACKEND_MODERN_PORT = 45280
+FABRIC_BACKEND_ACCOUNTS = frozenset((FABRIC_BACKEND_ACCOUNT, FABRIC_BACKEND_MODERN_ACCOUNT))
+FABRIC_BACKEND_SOURCE = "integrations/studio_direct_mcp/fabric-backend.mjs"
+FABRIC_BACKEND_RELEASES_REL = Path(".local/share/studio-direct-mcp/releases")
+FABRIC_BACKEND_RELEASE_SCHEMA = "mastermind.fabric_backend_release.v1"
 C2_PAPER_NON_PAPER_CONFIG_SHA256 = "adc1c3367236b8a3a49b30169c2fb0a5dc3e85ecb415ab1b7d4d799fdf075b38"
 C2_PAPER_ORIGINAL_BRIDGE_SHA256 = "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc"
 C2_PAPER_FILES_SHA256 = {
@@ -222,6 +242,35 @@ C2_PAPER_RUNTIME_IDENTITY = {
     "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
     "dependencyTreeHash": "91ce96dc69159edcabb3eee472e6ebafb18450b93a03addd6adf0df6dca47e29",
 }
+
+# Distinct sealed, already-enrolled C2 Business Paper v10 installation. This is
+# an independent per-seat transaction, never permission to rewrite another
+# account's config, fleet modules, workspace grants, or immutable runtime.
+C2_PAPER_BUSINESS_ACCOUNT = "chatgpt2-business"
+C2_PAPER_UPGRADE_ACCOUNTS = frozenset((C2_PAPER_ACCOUNT, C2_PAPER_BUSINESS_ACCOUNT))
+C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256 = "504c22af839e154bb1a5314134240b9eb7064f043e1003a357922e1103c21b06"
+C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256 = "ed2dc2b9f7f812406c7ef7e9297b3ad5b54c8c15c11903463e61a1d628b0fdf0"
+C2_PAPER_BUSINESS_RUNTIME_IDENTITY = {**C2_PAPER_RUNTIME_IDENTITY, "port": 45028}
+
+# Independently verified C4 installation, observed 2026-10-18. Its eleven module
+# bytes equal C2_PAPER_FILES_SHA256, but its account, manifests, configuration and
+# dependency seal are distinct. This admits only its original and planned Paper
+# configuration; it does not enroll a new workspace or change installed grants.
+C4_PAPER_ACCOUNT = "chatgpt4"
+C4_PAPER_ORIGINAL_MANIFEST_SHA256 = "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071"
+C4_PAPER_MANIFEST_CANONICAL_SHA256 = frozenset((
+    "e0e7865965285af6372fdf27ee70ae27f494b37fe19e1f5af763406295a96ec2",
+    "2252819766e266ac0be6b30c94694b503aad4634d8de184f62611542fb581bd0",
+))
+C4_PAPER_NON_PAPER_CONFIG_SHA256 = "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894"
+C4_PAPER_RUNTIME_IDENTITY = {
+    "host": "127.0.0.1",
+    "port": 45024,
+    "nodeHash": "3fbe98203f8f4a86ce5b0b573a1a30aa4253064c4c2a0299c436d259b68e54b0",
+    "backendHash": "a4145198dc75cd34e7c7452c2054b4cc0d29e199ae1459961a17e4da25a13500",
+    "dependencyTreeHash": "639c904d1d5832baa832eac8519cf2304073d3d72fdacc03fd879281068e6211",
+}
+PAPER_RUNTIME_UPGRADE_ACCOUNTS = C2_PAPER_UPGRADE_ACCOUNTS | frozenset((C4_PAPER_ACCOUNT,))
 
 
 KNOWN_MANIFEST_FILESETS = frozenset(
@@ -578,14 +627,15 @@ def _build_runtime_roots(account: str) -> dict:
 
 @contextmanager
 def _c2_lifecycle_mutex(account: str):
-    """Serialize C2 installer mutations on one persistent, private lock inode.
+    """Serialize enrolled Paper and Fabric mutations on persistent private lock inodes.
 
     Never unlink this file: replacement would let another invocation lock a new
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account != C2_PAPER_ACCOUNT:
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
+    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
     _assert_dest_safe(lock_path)
     current = lock_path.parent
@@ -594,18 +644,18 @@ def _c2_lifecycle_mutex(account: str):
         try:
             info = current.lstat()
         except OSError as exc:
-            raise SystemExit("C2 lifecycle lock parent is unavailable") from exc
+            raise SystemExit(f"{subject} lifecycle lock parent is unavailable") from exc
         if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
                 or stat.S_IMODE(info.st_mode) & 0o022
                 or (current == lock_path.parent and stat.S_IMODE(info.st_mode) & 0o077)):
-            raise SystemExit("C2 lifecycle lock parent is unsafe")
+            raise SystemExit(f"{subject} lifecycle lock parent is unsafe")
         if current == home:
             break
         current = current.parent
     try:
         fd = os.open(lock_path, os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW | os.O_CLOEXEC, FILE_MODE)
     except OSError as exc:
-        raise SystemExit("C2 lifecycle lock is unavailable") from exc
+        raise SystemExit(f"{subject} lifecycle lock is unavailable") from exc
     try:
         def verify_inode():
             held = os.fstat(fd)
@@ -614,14 +664,14 @@ def _c2_lifecycle_mutex(account: str):
             if (not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
                     or stat.S_IMODE(held.st_mode) != FILE_MODE or held.st_nlink != 1
                     or held.st_size != 0 or (held.st_dev, held.st_ino) != (named.st_dev, named.st_ino)):
-                raise SystemExit("C2 lifecycle lock inode is unsafe or changed")
+                raise SystemExit(f"{subject} lifecycle lock inode is unsafe or changed")
         verify_inode()
         try:
             fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError as exc:
-            raise SystemExit("C2 lifecycle mutation already in progress; refusing concurrent operation") from exc
+            raise SystemExit(f"{subject} lifecycle mutation already in progress; refusing concurrent operation") from exc
         except OSError as exc:
-            raise SystemExit("C2 lifecycle lock could not be acquired") from exc
+            raise SystemExit(f"{subject} lifecycle lock could not be acquired") from exc
         verify_inode()
         yield
     finally:
@@ -632,8 +682,27 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account != C2_PAPER_ACCOUNT
+            if (args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
+                return function(args)
+            with _c2_lifecycle_mutex(args.account):
+                return function(args)
+        return guarded
+    return decorate
+
+
+def _fabric_lifecycle_serialized(*, readonly_preflight: bool = False):
+    """Only the two enrolled Fabric seats share their release locks with lifecycle calls."""
+    def decorate(function):
+        @wraps(function)
+        def guarded(args):
+            if (args.account not in FABRIC_BACKEND_ACCOUNTS
+                    or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
+                return function(args)
+            # First-install staging predates a runtime/state directory. There can
+            # be no backend release until that first manifest exists.
+            if (function.__name__ == "cmd_stage"
+                    and not _build_runtime_roots(args.account)["state"].exists()):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
                 return function(args)
@@ -888,13 +957,19 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         and all(data.get(key) == value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())
         and _canonical_json_sha256(data) in C2_PAPER_MANIFEST_CANONICAL_SHA256
     )
+    c4_paper_cohort = (
+        version == MANIFEST_VERSION and account == C4_PAPER_ACCOUNT
+        and files == C2_PAPER_FILES_SHA256
+        and all(data.get(key) == value for key, value in C4_PAPER_RUNTIME_IDENTITY.items())
+        and _canonical_json_sha256(data) in C4_PAPER_MANIFEST_CANONICAL_SHA256
+    )
     if (fileset not in KNOWN_MANIFEST_FILESETS
             and not (version == MANIFEST_VERSION and (
                 fileset == V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
                 or (account == "chatgpt2-business"
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
-            and not c2_paper_predecessor):
+            and not c2_paper_predecessor and not c4_paper_cohort):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -989,17 +1064,24 @@ def _launchd_inspect(label: str) -> dict | None:
     return parsed
 
 
-def _lifecycle_inspect(account: str, label: str, roots: dict) -> dict | None:
-    """C2 mutations require positively observed identity or exact service absence."""
-    if account != C2_PAPER_ACCOUNT:
+def _lifecycle_inspect(account: str, label: str, roots: dict, *,
+                       require_positive: bool = False) -> dict | None:
+    """Enrolled lifecycle owners require positive identity or exact absence.
+
+    Preserve generic C2 Business lifecycle inspection semantics; its dedicated
+    Paper cutover explicitly opts into stricter absence proof.
+    """
+    if (account not in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT)
+            and account not in FABRIC_BACKEND_ACCOUNTS and not require_positive):
         return _launchd_inspect(label)
+    subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     target = _launchd_target(label)
     absent = (f'Bad request.\nCould not find service "{label}" '
               f'in domain for user gui: {os.getuid()}\n')
     try:
         result = _run(["launchctl", "print", target], check=False)
     except Exception as exc:
-        raise SystemExit("C2 launchctl state is indeterminate; refusing lifecycle effect") from exc
+        raise SystemExit(f"{subject} launchctl state is indeterminate; refusing lifecycle effect") from exc
     if result.returncode == 113 and result.stdout == "" and result.stderr == absent:
         return None
     lines = result.stdout.splitlines()
@@ -1015,7 +1097,7 @@ def _lifecycle_inspect(account: str, label: str, roots: dict) -> dict | None:
             or parsed["state"] not in ("running", "waiting")
             or (fields["pid"] and (not isinstance(parsed["pid"], int) or parsed["pid"] <= 0))
             or (parsed["state"] == "running" and parsed["pid"] is None)):
-        raise SystemExit("C2 launchctl state is indeterminate; refusing lifecycle effect")
+        raise SystemExit(f"{subject} launchctl state is indeterminate; refusing lifecycle effect")
     return parsed
 
 
@@ -1388,6 +1470,7 @@ def _commission_setting(args, roots: dict, prior: dict | None) -> str | None:
     return digest
 
 
+@_fabric_lifecycle_serialized()
 def cmd_stage(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -1747,16 +1830,25 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
     """
     expected = getattr(args, "publisher_expected_manifest_sha256", None)
     preview = getattr(args, "publisher_preflight_only", False)
-    if (account != "chatgpt2-business" or type(preview) is not bool
+    if (account not in ("chatgpt2-business", C2_PAPER_ACCOUNT) or type(preview) is not bool
             or not _sha256_hex(expected)
             or getattr(args, "enable_repository_workspaces", False) is True
             or getattr(args, "fabric_only", False) is True
             or type(getattr(args, "os_commission_config_sha256", None)) is str):
         raise SystemExit("C2 compatibility requires original Business owner, sealed manifest CAS and no new repository grants")
+    personal = account == C2_PAPER_ACCOUNT
+    if ((getattr(args, "c2_business_fleet_compat", False) is True)
+            == (getattr(args, "c2_personal_closed_publisher", False) is True)):
+        raise SystemExit("C2 compatibility: select one original owner operation")
+    if personal != (getattr(args, "c2_personal_closed_publisher", False) is True):
+        raise SystemExit("C2 compatibility: operation/account mismatch")
+    target_patch = C2_PERSONAL_TARGET_PATCH_SHA256 if personal else C2_BUSINESS_TARGET_PATCH_SHA256
     manifest_path = roots["manifest"]
     config_path = roots["config"]
     if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
         raise SystemExit("C2 compatibility: original manifest CAS mismatch")
+    if personal and expected != C2_PERSONAL_CURRENT_MANIFEST_SHA256:
+        raise SystemExit("C2 compatibility: Personal identity mismatch")
     prior = _verify_staged_install(
         account, label, roots, require_runtime_seal=True)
     if (prior.get("version") != MANIFEST_VERSION
@@ -1767,16 +1859,17 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
             or prior.get("host") != "127.0.0.1"
             or prior.get("port") != port):
         raise SystemExit("C2 compatibility: original sealed identity does not match")
-    for name, expected_blob in C2_BUSINESS_V10_ORIGINAL_BLOBS.items():
+    original_blobs = C2_PAPER_FILES_SHA256 if personal else C2_BUSINESS_V10_ORIGINAL_BLOBS
+    for name, expected_blob in original_blobs.items():
         installed = roots["base"] / name
         _assert_dest_safe(installed)
         raw = installed.read_bytes()
         observed_blob = hashlib.sha1(
             b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw
         ).hexdigest()
-        if observed_blob != expected_blob:
+        if (hashlib.sha256(raw).hexdigest() if personal else observed_blob) != expected_blob:
             raise SystemExit("C2 compatibility: original generation changed")
-    if frozenset(C2_BUSINESS_V10_ORIGINAL_BLOBS) != V2_C2_BUSINESS_FLEET_PREDECESSOR:
+    if frozenset(original_blobs) != V2_C2_BUSINESS_FLEET_PREDECESSOR:
         raise SystemExit("C2 compatibility: pinned predecessor incomplete")
     if (_stable_regular_file_hash(config_path, label="installed config")
             != prior["configHash"]):
@@ -1801,12 +1894,12 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
     if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
             or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
         raise SystemExit("C2 compatibility: original snapshot changed")
-    if frozenset(C2_BUSINESS_TARGET_PATCH_SHA256) != frozenset((
+    if frozenset(target_patch) != frozenset((
             "gateway.mjs", "git-publish.mjs", "workspace-access.mjs")):
         raise SystemExit("C2 compatibility: proposed patch scope invalid")
     old_modules: dict[str, bytes | None] = {}
     new_modules: dict[str, bytes] = {}
-    for name, digest in C2_BUSINESS_TARGET_PATCH_SHA256.items():
+    for name, digest in target_patch.items():
         installed = roots["base"] / name
         staged = source / name
         _assert_dest_safe(installed)
@@ -1825,10 +1918,16 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
                 raise SystemExit("C2 compatibility: new module already exists")
             old_modules[name] = None
         new_modules[name] = data
+    new_config = dict(old_config)
+    if personal:
+        new_config["gitPublish"] = _typed_git_config(_user_root(), closed_repositories=True)
+        new_config["repositoryWorkspaces"] = {"enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
     future = dict(prior)
     future["files"] = dict(prior["files"])
     for name, data in new_modules.items():
         future["files"][name] = hashlib.sha256(data).hexdigest()
+    if personal:
+        future["configHash"] = hashlib.sha256(json.dumps(new_config, indent=2, sort_keys=True).encode()).hexdigest()
     if (frozenset(future["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR
             or not _valid_manifest(future, account, label)):
         raise SystemExit("C2 compatibility: proposed 12-file sealed manifest refused")
@@ -1841,7 +1940,7 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
             "preflight": True, "effect": "NOT_APPLIED",
             "account": account, "originalManifestSha256": expected,
             "changedModules": sorted(new_modules),
-            "noNewRepositoryGrants": True,
+            "noNewRepositoryGrants": not personal, "closedRepositoriesEnabled": personal,
             "fleetRoutesPreserved": 2,
             "concurrencyPreserved": [8, 16],
             "serviceStarted": False,
@@ -1856,8 +1955,12 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
             or (roots["base"] / "workspace-access.mjs").exists()):
         raise SystemExit("C2 compatibility: previous installation changed before write")
     before = {roots["base"] / n: old_modules[n] for n in new_modules}
+    if personal:
+        before[config_path] = old_config_bytes
     before[manifest_path] = manifest_path.read_bytes()
     planned = {roots["base"] / n: new_modules[n] for n in new_modules}
+    if personal:
+        planned[config_path] = json.dumps(new_config, indent=2, sort_keys=True).encode()
     planned[manifest_path] = new_manifest_bytes
     committed = False
     try:
@@ -1915,13 +2018,151 @@ def _upgrade_c2_business_original_fleet_mastermind_only(
         "account": account, "effect": "APPLIED",
         "gatewayCompatibilityInstalled": True,
         "manifestSha256": _sha256_file(manifest_path),
-        "noNewRepositoryGrants": True,
+        "noNewRepositoryGrants": not personal, "closedRepositoriesEnabled": personal,
         "fleetModulesPreserved": True,
         "serviceStarted": False,
     }, sort_keys=True))
     return 0
 
 
+def _upgrade_c2_personal_git_timeout_only(
+    args, source: Path, node_abs: Path, backend_abs: Path,
+    account: str, label: str, port: int, roots: dict,
+) -> int:
+    """Change only the bounded Git command timeout on exact sealed C2 Personal.
+
+    Status prechecks can exceed 15s on the 127k-index Macro checkout under M2
+    contention. This is not a repository grant, module upgrade, transport
+    retry or a new publication authority. Manifest/config writes are fenced
+    and the service must be unloaded before any mutation.
+    """
+    expected = getattr(args, "publisher_expected_manifest_sha256", None)
+    preview = getattr(args, "publisher_preflight_only", False)
+    if (account != C2_PAPER_ACCOUNT
+            or getattr(args, "c2_personal_git_timeout_only", False) is not True
+            or type(preview) is not bool or not _sha256_hex(expected)
+            or expected != C2_PERSONAL_TIMEOUT_PREDECESSOR_SHA256
+            or getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True
+            or getattr(args, "publisher_only_fleet_v10", False) is True
+            or getattr(args, "enable_repository_workspaces", False) is True
+            or getattr(args, "fabric_only", False) is True
+            or type(getattr(args, "os_commission_config_sha256", None)) is str):
+        raise SystemExit("C2 Git timeout: original closed owner and manifest CAS required")
+    manifest_path, config_path = roots["manifest"], roots["config"]
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 Git timeout: installed manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    if (prior.get("version") != MANIFEST_VERSION
+            or prior.get("source") != str(source)
+            or prior.get("node") != str(node_abs)
+            or prior.get("backend") != str(backend_abs)
+            or prior.get("host") != "127.0.0.1"
+            or prior.get("port") != port
+            or not prior.get("dependencyTreeHash")
+            or frozenset(prior["files"]) != V2_CHATGPT1_FLEET_TAILNET_PREDECESSOR):
+        raise SystemExit("C2 Git timeout: runtime/source identity mismatch")
+    if any(prior["files"].get(n) != digest
+           for n, digest in C2_PERSONAL_TARGET_PATCH_SHA256.items()):
+        raise SystemExit("C2 Git timeout: reviewed installed modules changed")
+    old_config_bytes, old_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+    if (hashlib.sha256(old_config_bytes).hexdigest() != prior["configHash"]
+            or hashlib.sha256(old_manifest_bytes).hexdigest() != expected):
+        raise SystemExit("C2 Git timeout: sealed snapshot changed")
+    try:
+        old_config = json.loads(old_config_bytes)
+    except (UnicodeError, ValueError) as exc:
+        raise SystemExit("C2 Git timeout: config not valid JSON") from exc
+    original_git = _typed_git_config(_user_root(), closed_repositories=True)
+    if (type(old_config) is not dict or old_config.get("accountLabel") != account
+            or old_config.get("gitPublish") != original_git
+            or old_config.get("repositoryWorkspaces") != {
+                "enabled": True, "allowedRepositories": ["mastermind", "macro", "terminal"]}
+            or old_config.get("fleetRouting", {}).get("enabled") is not True
+            or len(old_config["fleetRouting"].get("routes", [])) != 2
+            or old_config.get("maxPerSessionConcurrency") != 8
+            or old_config.get("maxQueuedPerSession") != 16
+            or old_config.get("paperDesign", {}).get("enabled") is not True
+            or old_config.get("fabricOnly") is True
+            or "commissionPublication" in old_config
+            or "modernFabricProtocol" in old_config):
+        raise SystemExit("C2 Git timeout: installed capability identity changed")
+    new_config = dict(old_config)
+    new_git = dict(original_git)
+    new_git["commandTimeoutMs"] = C2_PERSONAL_TIMEOUT_COMMAND_MS
+    new_config["gitPublish"] = new_git
+    if ({k: v for k, v in new_config.items() if k != "gitPublish"}
+            != {k: v for k, v in old_config.items() if k != "gitPublish"}):
+        raise SystemExit("C2 Git timeout: unrelated config change")
+    config_bytes = json.dumps(new_config, indent=2, sort_keys=True).encode("utf-8")
+    future = dict(prior)
+    future["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("C2 Git timeout: target sealed manifest refused")
+    manifest_bytes = json.dumps(future, indent=2, sort_keys=True).encode("utf-8")
+    if _stable_regular_file_hash(manifest_path, label="installed manifest") != expected:
+        raise SystemExit("C2 Git timeout: manifest moved during planning")
+    if preview:
+        print(json.dumps({
+            "account": account, "effect": "NOT_APPLIED", "preflight": True,
+            "originalManifestSha256": expected,
+            "commandTimeoutBeforeMs": original_git["commandTimeoutMs"],
+            "commandTimeoutAfterMs": C2_PERSONAL_TIMEOUT_COMMAND_MS,
+            "pushTimeoutPreservedMs": original_git["pushTimeoutMs"],
+            "changedFiles": ["config.json", "manifest.json"],
+            "sourceModulesPreserved": True, "fleetAndPaperPreserved": True,
+            "serviceStarted": False,
+        }, sort_keys=True))
+        return 0
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("C2 Git timeout: service must be stopped")
+    if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
+            or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]
+            or _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior):
+        raise SystemExit("C2 Git timeout: original installation changed before mutation")
+    before = {config_path: old_config_bytes, manifest_path: old_manifest_bytes}
+    planned = {config_path: config_bytes, manifest_path: manifest_bytes}
+    committed = False
+    try:
+        for target, payload in planned.items():
+            _atomic_write_bytes(target, payload)
+        committed = True
+        _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    except BaseException as exc:
+        if committed:
+            raise SystemExit("C2 Git timeout: EFFECT_UNKNOWN after manifest commit") from exc
+        try:
+            if _lifecycle_inspect(account, label, roots) is not None:
+                raise RuntimeError("service restarted during config transaction")
+            observed = {}
+            for target in planned:
+                if target.is_symlink():
+                    raise RuntimeError("symlink detected during rollback")
+                observed[target] = target.read_bytes()
+                if observed[target] not in (before[target], planned[target]):
+                    raise RuntimeError("concurrent out-of-scope change during rollback")
+            for target in reversed(tuple(planned)):
+                if observed[target] != before[target]:
+                    _atomic_write_bytes(target, before[target])
+            if (any(target.read_bytes() != before[target] for target in planned)
+                    or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
+                raise RuntimeError("original sealed bytes could not be restored")
+            _verify_staged_install(account, label, roots, require_runtime_seal=True)
+        except BaseException as recovery_error:
+            raise SystemExit("C2 Git timeout: EFFECT_UNKNOWN during rollback") from recovery_error
+        raise SystemExit("C2 Git timeout: NOT_APPLIED original state restored") from exc
+    print(json.dumps({
+        "account": account, "effect": "APPLIED",
+        "manifestSha256": _sha256_file(manifest_path),
+        "commandTimeoutMs": C2_PERSONAL_TIMEOUT_COMMAND_MS,
+        "pushTimeoutPreservedMs": original_git["pushTimeoutMs"],
+        "sourceModulesPreserved": True, "fleetAndPaperPreserved": True,
+        "serviceStarted": False,
+    }, sort_keys=True))
+    return 0
+
+
+@_fabric_lifecycle_serialized()
 def cmd_upgrade(args) -> int:
     account = args.account
     _validate_account_label(account)
@@ -1935,7 +2176,9 @@ def cmd_upgrade(args) -> int:
         raise SystemExit(f"source dir invalid: {source}")
     # C2 fleet predecessor migration is a tightly hash-pinned three-module
     # compatibility package, NOT the incompatible current STAGE_FILES bundle.
-    if getattr(args, "c2_business_fleet_compat", False) is not True:
+    if not (getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True
+            or getattr(args, "c2_personal_git_timeout_only", False) is True):
         _check_source_files(source)
     node_abs = _resolve_abs("--node", args.node)
     backend_abs = _resolve_abs("--backend", args.backend)
@@ -1943,7 +2186,28 @@ def cmd_upgrade(args) -> int:
     _validate_port(port)
 
     roots = _build_runtime_roots(account)
-    if getattr(args, "c2_business_fleet_compat", False) is True:
+    if getattr(args, "c2_personal_git_timeout_only", False) is True:
+        # The C2 Personal timeout migration shares the exact same installed
+        # files/manifest with Paper and publisher writers. Retain the protected
+        # C2 lifecycle mutex for a modifying transaction, not for read-only
+        # preflight. Do not introduce a second lock/owner or a bypass.
+        if (account == C2_PAPER_ACCOUNT
+                and getattr(args, "publisher_preflight_only", False) is False):
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_c2_personal_git_timeout_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots)
+        return _upgrade_c2_personal_git_timeout_only(
+            args, source, node_abs, backend_abs, account, label, port, roots)
+    if (getattr(args, "c2_business_fleet_compat", False) is True
+            or getattr(args, "c2_personal_closed_publisher", False) is True):
+        # Both existing C2 compatibility writers share installation state with
+        # Paper/lifecycle operations. Hold the same inode through recovery too.
+        # Read-only preflight and the helper's exact eligibility stay unchanged.
+        if (account in C2_PAPER_UPGRADE_ACCOUNTS
+                and getattr(args, "publisher_preflight_only", False) is False):
+            with _c2_lifecycle_mutex(account):
+                return _upgrade_c2_business_original_fleet_mastermind_only(
+                    args, source, node_abs, backend_abs, account, label, port, roots)
         return _upgrade_c2_business_original_fleet_mastermind_only(
             args, source, node_abs, backend_abs, account, label, port, roots)
     if getattr(args, "publisher_only_fleet_v10", False) is True:
@@ -2006,7 +2270,7 @@ def cmd_upgrade(args) -> int:
 
 @_c2_lifecycle_serialized(readonly_preflight=True)
 def cmd_paper_runtime_upgrade(args) -> int:
-    """Select reviewed Paper v12 on the exact sealed C2 fleet without restaging it.
+    """Select reviewed Paper v12 on an exact qualified fleet without restaging it.
 
     This dedicated transaction grants no new account, file cohort or capability.
     It cannot stop/start a service, copy gateway source or select an arbitrary bridge.
@@ -2016,11 +2280,25 @@ def cmd_paper_runtime_upgrade(args) -> int:
     _validate_account_label(account)
     expected = args.expected_manifest_sha256
     preview = args.preflight_only
-    if account != C2_PAPER_ACCOUNT or type(preview) is not bool:
-        raise SystemExit("paper runtime compatibility requires the exact enrolled C2 account")
+    if account == C2_PAPER_ACCOUNT:
+        original_manifest = C2_PAPER_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C2_PAPER_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C2_PAPER_RUNTIME_IDENTITY
+    elif account == C2_PAPER_BUSINESS_ACCOUNT:
+        original_manifest = C2_PAPER_BUSINESS_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C2_PAPER_BUSINESS_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C2_PAPER_BUSINESS_RUNTIME_IDENTITY
+    elif account == C4_PAPER_ACCOUNT:
+        original_manifest = C4_PAPER_ORIGINAL_MANIFEST_SHA256
+        non_paper_pin = C4_PAPER_NON_PAPER_CONFIG_SHA256
+        runtime_identity = C4_PAPER_RUNTIME_IDENTITY
+    else:
+        raise SystemExit("paper runtime compatibility requires the exact enrolled Paper account")
+    if type(preview) is not bool:
+        raise SystemExit("paper runtime compatibility preflight flag invalid")
     if not _sha256_hex(expected):
         raise SystemExit("paper runtime compatibility requires an exact manifest CAS")
-    if expected != C2_PAPER_ORIGINAL_MANIFEST_SHA256:
+    if expected != original_manifest:
         raise SystemExit("paper runtime compatibility: original manifest is not the reviewed predecessor")
     if PAPER_RUNTIME_REL.name != "v12":
         raise SystemExit("paper runtime compatibility requires the reviewed v12 target")
@@ -2034,7 +2312,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
         raise SystemExit("paper runtime compatibility: installed manifest CAS mismatch")
     prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
     if (prior.get("files") != C2_PAPER_FILES_SHA256
-            or any(prior.get(key) != value for key, value in C2_PAPER_RUNTIME_IDENTITY.items())):
+            or any(prior.get(key) != value for key, value in runtime_identity.items())):
         raise SystemExit("paper runtime compatibility: original sealed identity does not match")
     for name in prior["files"]:
         _assert_dest_safe(roots["base"] / name)
@@ -2052,7 +2330,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     non_paper_sha = hashlib.sha256(json.dumps(
         non_paper, sort_keys=True, separators=(",", ":"),
     ).encode("utf-8")).hexdigest()
-    if non_paper_sha != C2_PAPER_NON_PAPER_CONFIG_SHA256:
+    if non_paper_sha != non_paper_pin:
         raise SystemExit("paper runtime compatibility: original non-Paper profile changed")
 
     user_root = _user_root()
@@ -2086,7 +2364,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     if preview:
         print(json.dumps({**receipt, "preflight": True, "effect": "NOT_APPLIED"}, sort_keys=True))
         return 0
-    if _lifecycle_inspect(account, label, roots) is not None:
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
         raise SystemExit("refusing Paper runtime upgrade while service is loaded; stop first")
     # Reconfirm the complete sealed installation and target before the first write.
     if _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior:
@@ -2095,7 +2373,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
     if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
             or _stable_regular_file_hash(config_path, label="installed config") != prior["configHash"]):
         raise SystemExit("paper runtime compatibility: original snapshot CAS mismatch")
-    if _lifecycle_inspect(account, label, roots) is not None:
+    if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
         raise SystemExit("refusing Paper runtime upgrade while service is loaded; stop first")
 
     old_bytes = {config_path: old_config_bytes, manifest_path: old_manifest_bytes}
@@ -2106,7 +2384,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
         # Manifest commits last so fresh integrity checks reject partial file updates.
         if (_stable_regular_file_hash(manifest_path, label="installed manifest") != expected
                 or _stable_regular_file_hash(config_path, label="installed config") != future["configHash"]
-                or _lifecycle_inspect(account, label, roots) is not None):
+                or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
             raise RuntimeError("installed state changed before manifest commit")
         _atomic_write_bytes(manifest_path, manifest_bytes)
         committed = True
@@ -2114,7 +2392,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                 or _stable_regular_file_hash(manifest_path, label="installed manifest") != target_manifest_sha):
             raise RuntimeError("committed installation does not match the planned result")
         _verify_paper_runtime(user_root)
-        if _lifecycle_inspect(account, label, roots) is not None:
+        if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
             raise RuntimeError("service became loaded during commit verification")
     except BaseException as exc:
         if committed:
@@ -2123,7 +2401,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                 "inspect the original service before recovery or restart"
             ) from exc
         try:
-            if _lifecycle_inspect(account, label, roots) is not None:
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
                 raise RuntimeError("service became loaded during transaction")
             observed = {}
             for path in planned:
@@ -2136,7 +2414,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                     raise RuntimeError("non-owned concurrent mutation while recovering")
             for path in reversed(tuple(planned)):
                 if observed[path] != old_bytes[path]:
-                    if (_lifecycle_inspect(account, label, roots) is not None
+                    if (_lifecycle_inspect(account, label, roots, require_positive=True) is not None
                             or _stable_regular_file_hash(path, label="rollback target")
                             != hashlib.sha256(observed[path]).hexdigest()):
                         raise RuntimeError("rollback target or service changed before restoration")
@@ -2145,7 +2423,7 @@ def cmd_paper_runtime_upgrade(args) -> int:
                     or _stable_regular_file_hash(manifest_path, label="installed manifest") != expected):
                 raise RuntimeError("rollback byte identity differs")
             _verify_staged_install(account, label, roots, require_runtime_seal=True)
-            if _lifecycle_inspect(account, label, roots) is not None:
+            if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
                 raise RuntimeError("service became loaded during rollback verification")
         except BaseException as rollback_exc:
             raise SystemExit(
@@ -2157,6 +2435,349 @@ def cmd_paper_runtime_upgrade(args) -> int:
     return 0
 
 
+def _fabric_release_bytes(path: Path, *, limit: int = 2 * 1024 * 1024) -> bytes:
+    """Read a bounded, owned regular file without following a replacement link."""
+    _assert_dest_safe(path)
+    current = path.parent
+    while True:
+        info = current.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid != os.getuid()
+                or info.st_mode & 0o022):
+            raise SystemExit("Fabric release file parent is unsafe")
+        if current == _user_root():
+            break
+        current = current.parent
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK)
+    except OSError as exc:
+        raise SystemExit("Fabric release file unavailable") from exc
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+                or before.st_nlink != 1 or before.st_mode & 0o022
+                or before.st_size > limit):
+            raise SystemExit("Fabric release file is unsafe or too large")
+        data = bytearray()
+        while len(data) <= limit:
+            part = os.read(fd, min(65536, limit + 1 - len(data)))
+            if not part:
+                break
+            data.extend(part)
+        after = os.fstat(fd)
+        named = path.lstat()
+        identity = lambda x: (x.st_dev, x.st_ino, x.st_mode, x.st_size, x.st_mtime_ns, x.st_ctime_ns)
+        if (len(data) > limit or identity(before) != identity(after)
+                or identity(after) != identity(named)):
+            raise SystemExit("Fabric release file changed while reading")
+        return bytes(data)
+    finally:
+        os.close(fd)
+
+
+def _fabric_release_source(release_commit: str, expected_sha: str) -> tuple[Path, dict]:
+    """Bind the sole backend path to a commit already in observed protected master.
+
+    The operator refreshes the fixed source-admin repository and checks protected
+    merge evidence before invoking this local installer. This does not fetch,
+    change a ref, bypass review, or treat an arbitrary path/hash as a release.
+    """
+    if (not isinstance(release_commit, str)
+            or re.fullmatch(r"[0-9a-f]{40}", release_commit) is None
+            or not _sha256_hex(expected_sha)):
+        raise SystemExit("Fabric release requires an exact commit and backend SHA256")
+    home = _user_root()
+    repo = home / TYPED_GIT_SOURCE_REPOSITORY_REL
+    _assert_no_symlink_ancestors(repo)
+    if not repo.is_dir():
+        raise SystemExit("Fabric release source-admin repository unavailable")
+
+    def git(*argv):
+        try:
+            result = _run([TYPED_GIT_BINARY, "--no-replace-objects", "-C", str(repo),
+                           "--git-dir", str(repo / ".git"), *argv], check=False, timeout=15)
+        except Exception as exc:
+            raise SystemExit("Fabric release Git evidence unavailable") from exc
+        if result.returncode != 0:
+            raise SystemExit("Fabric release Git evidence refused")
+        return result.stdout
+
+    if git("remote", "get-url", "--all", "origin").splitlines() != [TYPED_GIT_REMOTE_URL]:
+        raise SystemExit("Fabric release requires the exact Mastermind origin")
+    observed = git("rev-parse", "--verify", "refs/remotes/origin/master^{commit}").strip()
+    if re.fullmatch(r"[0-9a-f]{40}", observed) is None:
+        raise SystemExit("Fabric release protected-master observation invalid")
+    if git("rev-parse", "--verify", release_commit + "^{commit}").strip() != release_commit:
+        raise SystemExit("Fabric release commit is not exact")
+    git("merge-base", "--is-ancestor", release_commit, observed)
+    tree = git("ls-tree", "--full-tree", release_commit, "--", FABRIC_BACKEND_SOURCE)
+    match = re.fullmatch(r"100(?:644|755) blob ([0-9a-f]{40})\t" + re.escape(FABRIC_BACKEND_SOURCE) + r"\n", tree)
+    if match is None:
+        raise SystemExit("Fabric release backend is not the exact regular Git source")
+    backend = home / FABRIC_BACKEND_RELEASES_REL / ("fabric-c3-" + release_commit) / FABRIC_BACKEND_SOURCE
+    raw = _fabric_release_bytes(backend)
+    blob = hashlib.sha1(b"blob " + str(len(raw)).encode("ascii") + b"\0" + raw).hexdigest()
+    if hashlib.sha256(raw).hexdigest() != expected_sha or blob != match.group(1):
+        raise SystemExit("Fabric release backend differs from the merged source or pinned SHA256")
+    return backend, {"releaseCommit": release_commit, "backendGitBlob": blob,
+                     "backendSha256": expected_sha, "observedProtectedMaster": observed}
+
+
+def _fabric_release_new(path: Path, data: bytes) -> None:
+    """Persist evidence exactly once; interrupted operations are never replayed."""
+    _assert_dest_safe(path)
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, FILE_MODE)
+    with os.fdopen(fd, "wb") as stream:
+        os.fchmod(stream.fileno(), FILE_MODE)
+        stream.write(data)
+        stream.flush()
+        os.fsync(stream.fileno())
+    _fsync_dir(path.parent)
+
+
+def _fabric_release_json(value: dict) -> bytes:
+    return json.dumps(value, indent=2, sort_keys=True, allow_nan=False).encode("utf-8")
+
+
+def _validate_legacy_fleet_status(config: dict, user_root: Path) -> bool:
+    """Admit only the narrow legacy fleetStatus on an existing restricted profile.
+
+    The legacy sealed config contained fleetStatus but predated the
+    modernFabricProtocol and backendMode selectors. This validator never invokes
+    the launcher. It re-derives the owner-bound helper and requires exact field
+    and type equality with the freshly derived owner configuration; the launcher
+    descriptor bytes are then read through the existing owned, regular-file,
+    no-symlink, no-follow reader and their SHA256 must equal the freshly
+    derived expected['launcherSha256']. A None, missing, or unsafe launcher,
+    wrong field type, ownership/file-type/links/permissions/read/stability or
+    digest error, or any extra/omitted key fails closed. Profile-driven
+    launcher execution is not authorised by this validator; only sealed
+    fleetStatus identity is admitted.
+
+    Profiles without fleetStatus continue to be governed by every other check.
+    """
+    if "fleetStatus" not in config:
+        return True
+    if "modernFabricProtocol" in config or "backendMode" in config:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus requires absent "
+            "modernFabricProtocol and backendMode selectors"
+        )
+    fleet_status = config["fleetStatus"]
+    required_keys = frozenset(("enabled", "launcherPath", "launcherSha256", "timeoutMs"))
+    if type(fleet_status) is not dict or set(fleet_status) != required_keys:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus requires exact "
+            "enabled/launcherPath/launcherSha256/timeoutMs keys"
+        )
+    if (fleet_status["enabled"] is not True
+            or type(fleet_status["launcherPath"]) is not str
+            or type(fleet_status["launcherSha256"]) is not str
+            or type(fleet_status["timeoutMs"]) is not int):
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus field types are invalid"
+        )
+    expected = _fleet_status_config(user_root)
+    if expected is None:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus owner launcher unavailable"
+        )
+    # _fleet_status_config delegates launcher reads to _stable_regular_file_hash,
+    # which does not check st_uid. Read the launcher descriptor via the existing
+    # owned, regular, no-follow, bounded reader so a wrong-owner launcher is
+    # caught before this validator returns. Any ownership, file-type, links,
+    # permissions, read/stability or digest error must refuse the release.
+    launcher_bytes = _fabric_release_bytes(user_root / FLEET_STATUS_LAUNCHER_REL)
+    if hashlib.sha256(launcher_bytes).hexdigest() != expected["launcherSha256"]:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus owner launcher digest mismatch"
+        )
+    if fleet_status != expected:
+        raise SystemExit(
+            "Fabric backend release: legacy fleetStatus does not match owner"
+        )
+    return True
+
+
+@_fabric_lifecycle_serialized(readonly_preflight=True)
+def cmd_fabric_backend_release(args) -> int:
+    """Select one merged Fabric backend while preserving the entire sealed seat.
+
+    Preview is read-only. Apply requires its exact plan and the unloaded original
+    service. It changes config args[0] and three manifest fields only; the same
+    private-service owner performs any later explicit start.
+    """
+    account = args.account
+    _validate_account_label(account)
+    if account not in FABRIC_BACKEND_ACCOUNTS or type(args.preflight_only) is not bool:
+        raise SystemExit("Fabric backend release requires an explicitly enrolled restricted c3 account")
+    expected = args.expected_manifest_sha256
+    if not _sha256_hex(expected):
+        raise SystemExit("Fabric backend release requires the original manifest CAS")
+    label = f"com.mastermind.studio-direct-private.{account}"
+    roots = _build_runtime_roots(account)
+    config_path, manifest_path = roots["config"], roots["manifest"]
+    before_manifest = _fabric_release_bytes(manifest_path)
+    if hashlib.sha256(before_manifest).hexdigest() != expected:
+        raise SystemExit("Fabric backend release: original manifest CAS mismatch")
+    prior = _verify_staged_install(account, label, roots, require_runtime_seal=True)
+    before_config = _fabric_release_bytes(config_path)
+    if (hashlib.sha256(before_config).hexdigest() != prior["configHash"]
+            or _fabric_release_bytes(manifest_path) != before_manifest):
+        raise SystemExit("Fabric backend release: sealed snapshot changed")
+    try:
+        old_config = json.loads(before_config)
+    except (ValueError, UnicodeError) as exc:
+        raise SystemExit("Fabric backend release: original config invalid") from exc
+    argv = old_config.get("args") if isinstance(old_config, dict) else None
+    # The live modern seat is one exact enrollment, not permission to migrate
+    # another profile or change its protocol, port, or capability boundary.
+    if account == FABRIC_BACKEND_MODERN_ACCOUNT and (
+            type(old_config) is not dict
+            or old_config.get("modernFabricProtocol") is not True
+            or old_config.get("backendMode") != "shared-account"
+            or type(old_config.get("port")) is not int
+            or old_config["port"] != FABRIC_BACKEND_MODERN_PORT
+            or "fleetStatus" in old_config):
+        raise SystemExit("Fabric backend release: exact enrolled modern profile required")
+    if (type(old_config) is not dict or old_config.get("fabricOnly") is not True
+            or old_config.get("gitPublish") is not False or old_config.get("paperDesign") is not False
+            or any(key in old_config for key in ("repositoryWorkspaces", "commissionPublication", "fleetRouting", "publicUrl"))
+            or not _validate_legacy_fleet_status(old_config, _user_root())
+            or old_config.get("testMode") is not False
+            or old_config.get("accountLabel") != account
+            or old_config.get("command") != prior["node"]
+            or old_config.get("host") != "127.0.0.1" or prior.get("host") != "127.0.0.1"
+            or old_config.get("port") != prior["port"]
+            or old_config.get("stateDir") != str(roots["state"])
+            or type(argv) is not list or not argv or not all(isinstance(x, str) for x in argv)
+            or argv[0] != prior["backend"] or type(old_config.get("childEnv")) is not dict
+            or old_config["childEnv"].get("MMX_FABRIC_SDK_PACKAGE") != str(roots["base"] / "package.json")):
+        raise SystemExit("Fabric backend release: original restricted profile or SDK binding differs")
+    backend, source = _fabric_release_source(args.release_commit, args.backend_sha256)
+    if str(backend) == prior["backend"]:
+        raise SystemExit("Fabric backend release: backend already selected; no replay")
+    new_config = {**old_config, "args": [str(backend), *argv[1:]]}
+    config_bytes = _fabric_release_json(new_config)
+    future = {**prior, "backend": str(backend), "backendHash": args.backend_sha256,
+              "configHash": hashlib.sha256(config_bytes).hexdigest()}
+    if not _valid_manifest(future, account, label):
+        raise SystemExit("Fabric backend release: prospective manifest invalid")
+    manifest_bytes = _fabric_release_json(future)
+    target_manifest = hashlib.sha256(manifest_bytes).hexdigest()
+    plan = {
+        "schema": FABRIC_BACKEND_RELEASE_SCHEMA, "account": account,
+        "originalManifestSha256": expected, "targetManifestSha256": target_manifest,
+        "originalConfigSha256": prior["configHash"], "targetConfigSha256": future["configHash"],
+        "originalBackend": prior["backend"], "originalBackendSha256": prior["backendHash"],
+        "targetBackend": str(backend), "targetBackendSha256": args.backend_sha256,
+        "releaseCommit": source["releaseCommit"], "backendGitBlob": source["backendGitBlob"],
+        "preservedGatewayFiles": len(prior["files"]), "preservedDependencyTreeSha256": prior["dependencyTreeHash"],
+        "preservedPlistSha256": prior["plistHash"], "serviceStarted": False,
+        "changedConfigFields": ["args[0]"], "changedManifestFields": ["backend", "backendHash", "configHash"],
+    }
+    plan_sha = _canonical_json_sha256(plan)
+    evidence_root = roots["state"] / "fabric-backend-releases"
+    transaction = evidence_root / plan_sha
+    if transaction.exists() or transaction.is_symlink():
+        raise SystemExit("Fabric backend release: retained transaction already exists; inspect its exact effect before proceeding")
+    if (_fabric_release_bytes(manifest_path) != before_manifest
+            or _fabric_release_bytes(config_path) != before_config):
+        raise SystemExit("Fabric backend release: original snapshot changed while planning")
+    if args.preflight_only:
+        print(json.dumps({**plan, "planSha256": plan_sha, "preflight": True,
+                          "effect": "NOT_APPLIED", "observedProtectedMaster": source["observedProtectedMaster"]}, sort_keys=True))
+        return 0
+    if not _sha256_hex(args.expected_plan_sha256) or args.expected_plan_sha256 != plan_sha:
+        raise SystemExit("Fabric backend release: exact reviewed preview plan is required")
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
+    if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+            or _fabric_release_bytes(manifest_path) != before_manifest
+            or _fabric_release_bytes(config_path) != before_config):
+        raise SystemExit("Fabric backend release: original runtime changed before write")
+    _fabric_release_source(args.release_commit, args.backend_sha256)
+    if _lifecycle_inspect(account, label, roots) is not None:
+        raise SystemExit("refusing Fabric backend release while service is loaded; stop first")
+    _ensure_secure_dir(evidence_root)
+    _assert_dest_safe(transaction)
+    transaction.mkdir(mode=DIR_MODE)
+    _fsync_dir(evidence_root)
+    _fabric_release_new(transaction / "config.before.json", before_config)
+    _fabric_release_new(transaction / "manifest.before.json", before_manifest)
+    intent_bytes = _fabric_release_json({**plan, "planSha256": plan_sha,
+        "observedProtectedMaster": source["observedProtectedMaster"], "intentRecordedAt": time.time()})
+    _fabric_release_new(transaction / "intent.json", intent_bytes)
+    intent_sha = hashlib.sha256(intent_bytes).hexdigest()
+
+    def record(name, effect, **extra):
+        value = {"schema": FABRIC_BACKEND_RELEASE_SCHEMA, "account": account,
+                 "planSha256": plan_sha, "intentSha256": intent_sha,
+                 "effect": effect, "serviceStarted": False, "recordedAt": time.time(), **extra}
+        _fabric_release_new(transaction / name, _fabric_release_json(value))
+
+    try:
+        if (_fabric_release_bytes(manifest_path) != before_manifest
+                or _fabric_release_bytes(config_path) != before_config
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("original state changed after intent persistence")
+        _atomic_write_bytes(config_path, config_bytes)
+        if (_fabric_release_bytes(manifest_path) != before_manifest
+                or _fabric_release_bytes(config_path) != config_bytes
+                or _stable_regular_file_hash(backend, label="Fabric backend") != args.backend_sha256
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("original state changed before manifest commit")
+        # The sealed manifest commits last. A partial config update fails all
+        # incumbent start/integrity checks until it is restored or reconciled.
+        _atomic_write_bytes(manifest_path, manifest_bytes)
+        if (_verify_staged_install(account, label, roots, require_runtime_seal=True) != future
+                or _fabric_release_bytes(manifest_path) != manifest_bytes
+                or _fabric_release_bytes(config_path) != config_bytes
+                or _lifecycle_inspect(account, label, roots) is not None):
+            raise RuntimeError("committed runtime differs from the planned selection")
+        record("result.json", "APPLIED", manifestSha256=target_manifest,
+               backendSha256=args.backend_sha256, runtimeSealVerified=True)
+    except BaseException as exc:
+        # Any observed commit or concurrent change requires effect reconciliation.
+        # Never overwrite a manifest which may already have committed successfully.
+        rollback_proven = False
+        try:
+            if (_lifecycle_inspect(account, label, roots) is not None
+                    or _fabric_release_bytes(manifest_path) != before_manifest):
+                raise RuntimeError("manifest committed or service absence is unverified")
+            observed = _fabric_release_bytes(config_path)
+            if observed not in (before_config, config_bytes):
+                raise RuntimeError("non-owned concurrent configuration change")
+            if observed != before_config:
+                if (_fabric_release_bytes(config_path) != observed
+                        or _fabric_release_bytes(manifest_path) != before_manifest
+                        or _lifecycle_inspect(account, label, roots) is not None):
+                    raise RuntimeError("rollback target or service changed before restoration")
+                _atomic_write_bytes(config_path, before_config)
+            if (_fabric_release_bytes(manifest_path) != before_manifest
+                    or _fabric_release_bytes(config_path) != before_config
+                    or _verify_staged_install(account, label, roots, require_runtime_seal=True) != prior
+                    or _lifecycle_inspect(account, label, roots) is not None):
+                raise RuntimeError("original sealed runtime restoration unverified")
+            record("rollback.json", "ROLLED_BACK", originalManifestSha256=expected,
+                   originalConfigSha256=prior["configHash"], runtimeSealVerified=True)
+            record("result.json", "NOT_APPLIED", originalManifestSha256=expected,
+                   originalStateRestored=True)
+            rollback_proven = True
+        except BaseException:
+            try:
+                record("failure.json", "EFFECT_UNKNOWN", retryAllowed=False,
+                       recovery="Inspect retained intent and exact original account before any retry or start")
+            except BaseException:
+                pass
+        if rollback_proven:
+            raise SystemExit("Fabric backend release: NOT_APPLIED; original sealed state restored; evidence retained") from exc
+        raise SystemExit("Fabric backend release: EFFECT_UNKNOWN; inspect retained intent and original account before retry or start") from exc
+    print(json.dumps({**plan, "planSha256": plan_sha, "intentSha256": intent_sha,
+                      "preflight": False, "effect": "APPLIED", "evidenceDirectory": str(transaction)}, sort_keys=True))
+    return 0
+
+
+@_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_seal_runtime(args) -> int:
     account = args.account
@@ -2193,6 +2814,7 @@ def cmd_seal_runtime(args) -> int:
     return 0
 
 
+@_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_start(args) -> int:
     account = args.account
@@ -2247,6 +2869,7 @@ def cmd_status(args) -> int:
     return 0
 
 
+@_fabric_lifecycle_serialized()
 @_c2_lifecycle_serialized()
 def cmd_stop(args) -> int:
     account = args.account
@@ -2279,8 +2902,9 @@ def cmd_stop(args) -> int:
                 return 1
             time.sleep(0.2)
     except SystemExit as exc:
-        if account == C2_PAPER_ACCOUNT:
-            raise SystemExit("C2 stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
+        if account in (C2_PAPER_ACCOUNT, C4_PAPER_ACCOUNT) or account in FABRIC_BACKEND_ACCOUNTS:
+            subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "Paper"
+            raise SystemExit(f"{subject} stop: EFFECT_UNKNOWN after bootout; service absence is unverified") from exc
         raise
 
     print(json.dumps({"stopped": True, "account": account}))
@@ -2291,10 +2915,21 @@ def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
 
+    fabric = sub.add_parser("fabric-backend-release")
+    fabric.add_argument("--account", required=True)
+    fabric.add_argument("--expected-manifest-sha256", required=True)
+    fabric.add_argument("--release-commit", required=True,
+                        help="exact protected merged commit for the fixed Fabric backend release path")
+    fabric.add_argument("--backend-sha256", required=True)
+    fabric.add_argument("--expected-plan-sha256",
+                        help="exact plan digest returned by the reviewed read-only preview; required for apply")
+    fabric.add_argument("--preflight-only", action="store_true")
+    fabric.set_defaults(func=cmd_fabric_backend_release)
+
     paper = sub.add_parser("paper-runtime-upgrade")
     paper.add_argument("--account", required=True)
     paper.add_argument("--expected-manifest-sha256", required=True,
-                       help="CAS pin for the exact reviewed sealed C2 predecessor")
+                       help="CAS pin for the exact reviewed sealed Paper predecessor")
     paper.add_argument("--preflight-only", action="store_true",
                        help="read-only Paper selection plan; no service or installation changes")
     paper.set_defaults(func=cmd_paper_runtime_upgrade)
@@ -2315,6 +2950,9 @@ def build_parser() -> argparse.ArgumentParser:
         if name == "upgrade":
             s.add_argument("--c2-business-fleet-compat", action="store_true",
                            help="exact hash-pinned C2 11-to-12-file gateway compatibility; no new repo grants")
+            s.add_argument("--c2-personal-closed-publisher", action="store_true")
+            s.add_argument("--c2-personal-git-timeout-only", action="store_true",
+                           help="exact sealed C2 Personal stopped-service Git command budget patch")
             s.add_argument("--publisher-only-fleet-v10", action="store_true",
                            help="preserve the exact sealed enrolled fleet v0.1.10 runtime; patch only two publisher modules")
             s.add_argument("--publisher-expected-manifest-sha256",

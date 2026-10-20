@@ -1,0 +1,506 @@
+"""Offline deadline proofs through the actual Bash and owned-process runtime.
+
+Each transport/broker executable is an inert, finite fixture. No live config,
+provider, account or SSH session is used. Source copies remain byte-identical;
+the fixture supplies host metadata and never permits a model task to execute.
+"""
+from __future__ import annotations
+
+import hashlib
+import fcntl
+import importlib.util
+from importlib.machinery import SourceFileLoader
+import json
+import math
+import os
+from pathlib import Path
+import shutil
+import signal
+import subprocess
+import sys
+import tempfile
+import textwrap
+import time
+from types import SimpleNamespace
+import unittest
+
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path[:0] = [str(ROOT / 'candidate'), str(ROOT / 'source')]
+import commission_deadline as deadline
+
+
+def write(path, source, executable=False):
+    path.write_text(textwrap.dedent(source).lstrip(), encoding='utf-8')
+    path.chmod(0o700 if executable else 0o600)
+
+
+FIXTURE = r'''
+import json, os, re, sys, time
+from pathlib import Path
+root = Path(os.environ['DEADLINE_FIXTURE_ROOT'])
+name = Path(sys.argv[0]).name
+case = os.environ['DEADLINE_FIXTURE_CASE']
+args = sys.argv[1:]
+def record(stage, **extra):
+    row = dict(stage=stage, monotonic_ns=time.monotonic_ns(), pid=os.getpid(),
+               origin_deadline_ns=os.environ.get('POOL_COMMISSION_DEADLINE_NS'), **extra)
+    with (root/'events.jsonl').open('a') as stream:
+        stream.write(json.dumps(row, sort_keys=True)+'\n')
+    return row
+def count(stage):
+    if not (root/'events.jsonl').exists(): return 0
+    return sum(json.loads(line)['stage']==stage for line in (root/'events.jsonl').read_text().splitlines())
+if name == 'broker':
+    operation = args[0]
+    if operation == 'acquire':
+        wait = float(args[args.index('--wait')+1])
+        wire_deadline = args[args.index('--deadline-ns')+1] if '--deadline-ns' in args else None
+        record('acquire', requested_wait_seconds=wait, wire_deadline_ns=wire_deadline,
+               inherited_remaining_seconds=os.environ.get('POOL_COMMISSION_REMAINING_SECONDS'))
+        if case == 'deny':
+            time.sleep(min(wait, float(os.environ['POOL_COMMISSION_REMAINING_SECONDS'])+2))
+            record('broker_denied')
+            raise SystemExit(75)
+        time.sleep(float(os.environ.get('DEADLINE_FIXTURE_BROKER_DELAY', '0')))
+        print('LEASE=0123456789ab ACCOUNT=fixture-account')
+        record('granted')
+        raise SystemExit(0)
+    if operation in ('release','heartbeat'):
+        record(operation)
+        raise SystemExit(0)
+elif name == 'ssh':
+    command = args[-1]
+    if 'nohup env ' in command:
+        child = re.search(r"REMOTE_SUB_CHILD_TIMEOUT='([0-9]+)'", command)
+        budget = re.search(r"REMOTE_SUB_COMMISSION_BUDGET_SECONDS='([0-9]+)'", command)
+        record('launch', child_timeout=int(child.group(1)) if child else None,
+               remote_budget=int(budget.group(1)) if budget else None,
+               origin_clock_forwarded='POOL_COMMISSION_DEADLINE_NS' in command)
+        if case == 'retry_ambiguous':
+            raise SystemExit(0 if count('launch')==1 else 255)
+        if case == 'admission_expiry': raise SystemExit(0)
+        if case == 'launch_timeout': time.sleep(10); raise SystemExit(0)
+    if '__REMOTE_SUB_PENDING__' in command:
+        record('poll'); print('75'); raise SystemExit(0)
+    if 'tail -c 4096' in command:
+        record('admission_read')
+        if case == 'admission_expiry': time.sleep(10)
+        print('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}')
+        raise SystemExit(0)
+    if 'support_bundle.py' in command:
+        record('support_publish'); raise SystemExit(0)
+    if 'mkdir -p ~/lanes/tmp ' in command:
+        record('setup')
+        if case == 'slow_setup': time.sleep(10)
+        raise SystemExit(0)
+    if 'mkdir ' in command:
+        record('support_mkdir'); raise SystemExit(0)
+    if command.startswith('test -f '):
+        record('settlement_read'); raise SystemExit(1)
+    if command.startswith('rm -f '):
+        record('remote_cleanup'); raise SystemExit(0)
+elif name == 'scp':
+    record('scp')
+    if case == 'slow_scp': time.sleep(10)
+    if case == 'retry_ambiguous' and count('scp')==1: time.sleep(1.2)
+    raise SystemExit(0)
+elif name == 'rsync':
+    record('collect')
+    Path(args[-1]).write_text('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}\n')
+    raise SystemExit(0)
+elif name == 'ledger':
+    record('ledger'); raise SystemExit(0)
+record('forbidden', command=name)
+raise SystemExit(125)
+'''
+
+
+PYTHON_FIXTURE = r'''
+"""Use the real process census wherever the platform supports it.
+
+Only this sandbox's qualified virtual-PID mismatch gets an observation adapter
+from actual POSIX identity syscalls. Never return a canned empty/proven census.
+Production Popen, timeout, signals, reaping and receipt code remain unchanged.
+The finite inert fixtures do not spawn independent descendants.
+"""
+import os, runpy, sys
+from pathlib import Path
+sys.path.insert(0,str(Path(os.environ['DEADLINE_FIXTURE_ROOT'])/'ext'))
+import lane_runtime
+def census(argv, *, timeout):
+    if not (0 < os.getpid() < 2048):
+        raise lane_runtime.ProcessCensusError('fixture_pid_namespace_out_of_bounds')
+    if argv not in (['/bin/ps','-axo','pid=,pgid=,stat='], ['/bin/ps','-axo','pid=,stat=']):
+        if len(argv)!=5 or argv[:3]!=['/bin/ps','-o','pid=,stat='] or argv[3]!='-p':
+            raise lane_runtime.ProcessCensusError('fixture_census_argv_unknown')
+        wanted=int(argv[4])
+    else:
+        wanted=None
+    rows=[]
+    for pid in range(1,2048) if wanted is None else [wanted]:
+        try:
+            pgid=os.getpgid(pid)
+            os.getsid(pid)
+        except ProcessLookupError:
+            continue
+        except PermissionError as exc:
+            raise lane_runtime.ProcessCensusError('fixture_census_permission') from exc
+        state='R'
+        try:
+            observed=os.waitid(os.P_PID,pid,os.WEXITED|os.WNOHANG|os.WNOWAIT)
+        except ChildProcessError:
+            observed=None
+        if observed is not None and observed.si_pid==pid:
+            state='Z'
+        rows.append(f'{pid} {pgid} {state}' if argv[2]=='pid=,pgid=,stat=' else f'{pid} {state}')
+    if not rows:
+        raise lane_runtime.ProcessCensusError('fixture_census_empty')
+    return tuple(rows)
+def needs_virtual_census():
+    # This simulator intermittently makes ps succeed in the host namespace.
+    # Choose by the stable, exact namespace mismatch; an occasional successful
+    # ps call cannot qualify that host-domain census for virtual process IDs.
+    # macOS and ordinary Linux keep the incumbent census entirely unchanged.
+    if not sys.platform.startswith('linux'):
+        return False
+    try:
+        raw=Path('/proc/self/stat').read_text()
+        actual_pid=int(raw.split(' ',1)[0])
+        fields=raw.rsplit(') ',1)[1].split()
+        actual_pgid=int(fields[2])
+    except (OSError,ValueError,IndexError):
+        return False
+    if actual_pid==os.getpid() and actual_pgid==os.getpgid(0):
+        return False
+    if (not 0<os.getpid()<2048 or actual_pid==os.getpid()
+            or actual_pgid==os.getpgid(0)
+            or not hasattr(os,'waitid') or not hasattr(os,'WNOWAIT')):
+        raise lane_runtime.ProcessCensusError('fixture_virtual_namespace_unqualified')
+    return True
+if needs_virtual_census():
+    lane_runtime._run_ps_lines=census
+args=sys.argv[1:]
+if args[0]=='-c':
+    sys.argv=['-c',*args[2:]]
+    exec(compile(args[1],'<fixture -c>','exec'),{'__name__':'__main__'})
+elif args[0]=='-':
+    sys.argv=args
+    exec(compile(sys.stdin.read(),'<fixture stdin>','exec'),{'__name__':'__main__'})
+else:
+    sys.argv=args
+    runpy.run_path(args[0],run_name='__main__')
+'''
+
+
+class DeadlineValues(unittest.TestCase):
+    def test_canonical_origin_and_narrowing_never_extend(self):
+        self.assertEqual(deadline.read_deadline_ns({}), None)
+        self.assertEqual(deadline.read_deadline_ns({deadline.DEADLINE_ENV:'123456789'}),123456789)
+        self.assertEqual(deadline.narrow_deadline_ns(9_000_000_000,20,now_ns=1_000_000_000),9_000_000_000)
+        self.assertEqual(deadline.narrow_deadline_ns(9_000_000_000,2,now_ns=1_000_000_000),3_000_000_000)
+        self.assertEqual(deadline.remaining_seconds(1_234_567_890,now_ns=1_000_000_000),0.23456789)
+
+    def test_invalid_clock_and_duration_inputs_fail_closed(self):
+        for value in ('', '0', '01', '+1', ' 1', '1.0', True, 1.0, -1, 2**63):
+            with self.subTest(value=value), self.assertRaises(deadline.CommissionDeadlineInvalid):
+                deadline.validate_deadline_ns(value)
+        for value in (-1, math.inf, math.nan, True, '1', 7201):
+            with self.subTest(value=value), self.assertRaises(deadline.CommissionDeadlineInvalid):
+                deadline.narrow_deadline_ns(None,value,now_ns=1_000_000_000)
+
+    def test_exact_expiry_and_minimum_are_not_rounded_up(self):
+        for now in (1_000_000_000,1_000_000_001):
+            with self.assertRaises(deadline.CommissionDeadlineExpired):
+                deadline.require_remaining(1_000_000_000,now_ns=now)
+        with self.assertRaises(deadline.CommissionDeadlineExpired):
+            deadline.require_remaining(999_999_999,minimum_seconds=1,now_ns=0)
+        self.assertEqual(deadline.require_remaining(1_000_000_000,minimum_seconds=1,now_ns=0),1)
+
+
+class ControllerDeadline(unittest.TestCase):
+    def setUp(self):
+        self.temporary=tempfile.TemporaryDirectory(prefix='commission-',dir=ROOT/'tests')
+        self.addCleanup(self.temporary.cleanup)
+        self.root=Path(self.temporary.name)
+        self.ext=self.root/'ext'; self.bin=self.root/'bin'; self.tmp=self.root/'tmp'
+        for path in (self.ext,self.bin,self.tmp): path.mkdir(mode=0o700)
+        for folder in (ROOT/'source',ROOT/'candidate'):
+            for path in folder.iterdir():
+                if path.is_file() and not path.is_symlink():
+                    shutil.copyfile(path,self.ext/path.name)
+        self.copied={name:hashlib.sha256((self.ext/name).read_bytes()).hexdigest()
+                     for name in ('remote_sub.sh','remote_sub_helpers.py','commission_deadline.py','lane_runtime.py')}
+        for name in ('remote_sub.sh','remote_sub_helpers.py','commission_deadline.py'):
+            self.assertEqual(self.copied[name],hashlib.sha256((ROOT/'candidate'/name).read_bytes()).hexdigest())
+        (self.ext/'hosts.json').write_text(json.dumps({'fixture':{
+            'ssh_alias':'inert-transport','cores':2,'max_active':1,'load_gate':1,
+            'roles':['lanes'],'allowed_modes':['minimax'],'min_free_gb':0,'checkout_reserve_gb':0}}))
+        policy=self.root/'orch/fabric'; policy.mkdir(parents=True)
+        (policy/'pools.yaml').write_text('{}\n')
+        # The support manifest hashes these exact files but transport fixtures
+        # never execute the uploaded support or read a real remote filesystem.
+        (self.ext/'yes').write_text('#!/bin/sh\nexit 125\n')
+        self.packet=self.root/'packet.txt';self.packet.write_text('INERT TEST: no model task may start.\n')
+        for name in ('ssh','scp','rsync','broker','ledger','claude','codex','curl','node'):
+            write(self.bin/name,'#!'+sys.executable+'\n'+FIXTURE,executable=True)
+        write(self.bin/'fixture-python','#!'+sys.executable+'\n'+PYTHON_FIXTURE,executable=True)
+
+    def run_controller(self,case,budget=4,broker_delay=0):
+        origin=time.monotonic_ns()+int(budget*1_000_000_000)
+        env={'PATH':str(self.bin)+':/usr/bin:/bin','LANG':'C','LC_ALL':'C',
+             'PYTHONDONTWRITEBYTECODE':'1','PYTHONNOUSERSITE':'1','TMPDIR':str(self.tmp),
+             'DEADLINE_FIXTURE_ROOT':str(self.root),'DEADLINE_FIXTURE_CASE':case,
+             'DEADLINE_FIXTURE_BROKER_DELAY':str(broker_delay),
+             'REMOTE_SUB_MAX_SECS':str(int(budget)),'REMOTE_SUB_POLL_SECS':'1',
+             'REMOTE_SUB_ADMISSION_RETRY_SECS':'1','REMOTE_SUB_ADMISSION_WAIT_SECS':'10',
+             'REMOTE_SUB_PYTHON':str(self.bin/'fixture-python'),'REMOTE_SUB_BROKER_CMD':str(self.bin/'broker'),
+             'REMOTE_SUB_LEDGER_CMD':str(self.bin/'ledger'),'REMOTE_SUB_SSH_CMD':str(self.bin/'ssh'),
+             'REMOTE_SUB_SCP_CMD':str(self.bin/'scp'),'REMOTE_SUB_RSYNC_CMD':str(self.bin/'rsync'),
+             'POOL_ORCHESTRATOR_ID':'offline-root','POOL_PARENT_RUN_ID':'offline-parent',
+             'POOL_TASK_COMPLEXITY':'C0_MECHANICAL',
+             'POOL_COMMISSION_REMAINING_SECONDS':str(int(budget)),
+             'POOL_COMMISSION_DEADLINE_NS':str(origin)}
+        command=['/bin/bash',str(self.ext/'remote_sub.sh'),'fixture','minimax',str(self.packet),'~',
+                 'fixture-model','--run-id','offline-'+case]
+        started=time.monotonic()
+        proc=subprocess.Popen(command,cwd=self.root,env=env,stdin=subprocess.DEVNULL,
+                              stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+        try:
+            stdout,stderr=proc.communicate(timeout=20)
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid,signal.SIGTERM)
+            try: stdout,stderr=proc.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                os.killpg(proc.pid,signal.SIGKILL);stdout,stderr=proc.communicate(timeout=3)
+            self.fail('Independent harness, not the original owner, timed out: '+stderr)
+        self.assertTrue((self.root/'events.jsonl').exists(),stderr)
+        events=[json.loads(line) for line in (self.root/'events.jsonl').read_text().splitlines()]
+        self.assertNotIn('forbidden',[row['stage'] for row in events],stderr)
+        receipt=self.ext/'state/remote_sub'/('offline-'+case+'.controller-process.jsonl')
+        receipts=[json.loads(line) for line in receipt.read_text().splitlines()] if receipt.exists() else []
+        return dict(returncode=proc.returncode,stdout=stdout,stderr=stderr,events=events,
+                    elapsed=time.monotonic()-started,budget=budget,origin=origin,receipts=receipts)
+
+    def test_real_bash_passes_origin_and_bounds_capacity_wait(self):
+        result=self.run_controller('deny')
+        self.assertEqual(result['returncode'],75,result['stderr'])
+        acquire=next(row for row in result['events'] if row['stage']=='acquire')
+        self.assertEqual(acquire['wire_deadline_ns'],str(result['origin']))
+        self.assertEqual(acquire['origin_deadline_ns'],str(result['origin']))
+        self.assertLessEqual(acquire['requested_wait_seconds'],result['budget'])
+        self.assertLessEqual(result['elapsed'],result['budget']+0.5,result)
+        self.assertEqual([row['stage'] for row in result['events']],['acquire','broker_denied'])
+        self.assertIn('LEASE_REFUSED rc=75',result['stderr'])
+
+    def test_owned_setup_expiry_releases_only_unlaunched_provider_lease(self):
+        result=self.run_controller('slow_setup',budget=3)
+        self.check_prelaunch_expiry(result,'commission-setup')
+        self.assertNotIn('scp',[row['stage'] for row in result['events']])
+
+    def test_owned_support_transfer_expiry_never_launches_worker(self):
+        result=self.run_controller('slow_scp',budget=3)
+        self.check_prelaunch_expiry(result,'commission-packet-upload')
+
+    def check_prelaunch_expiry(self,result,label):
+        self.assertEqual(result['returncode'],75,result['stderr'])
+        stages=[row['stage'] for row in result['events']]
+        self.assertIn('granted',stages);self.assertIn('release',stages);self.assertNotIn('launch',stages)
+        self.assertLess(result['elapsed'],result['budget']+2,result)
+        receipt=next(row for row in result['receipts'] if row['label']==label)
+        self.assertTrue(receipt['timed_out'])
+        self.assertTrue(receipt['cleanup']['census_proven'])
+        self.assertEqual(receipt['cleanup']['residual_count'],0)
+
+    def test_each_actual_launch_recomputes_duration_and_keeps_ambiguous_lease(self):
+        result=self.run_controller('retry_ambiguous',budget=12,broker_delay=1)
+        self.assertEqual(result['returncode'],255,result['stderr'])
+        launches=[row for row in result['events'] if row['stage']=='launch']
+        self.assertEqual(len(launches),2,result['stderr'])
+        self.assertLess(launches[0]['child_timeout'],10)
+        self.assertLess(launches[1]['child_timeout'],launches[0]['child_timeout'])
+        for row in launches:
+            self.assertEqual(row['remote_budget'],row['child_timeout'])
+            self.assertFalse(row['origin_clock_forwarded'])
+            self.assertLess(row['monotonic_ns'],result['origin'])
+        self.assertNotIn('release',[row['stage'] for row in result['events']])
+        self.assertIn('LEASE_PRESERVED effect_unknown=1',result['stderr'])
+
+    def test_expired_admission_retry_keeps_terminal_and_collects_after_deadline(self):
+        # Leave room for real prelaunch preparation; the finite 10-second
+        # admission-read stall still exceeds the entire original budget.
+        result=self.run_controller('admission_expiry',budget=8)
+        self.assertEqual(result['returncode'],75,result['stderr'])
+        stages=[row['stage'] for row in result['events']]
+        self.assertEqual(stages.count('launch'),1,result['stderr'])
+        self.assertIn('collect',stages);self.assertIn('release',stages)
+        collection=next(row for row in result['events'] if row['stage']=='collect')
+        self.assertGreaterEqual(collection['monotonic_ns'],result['origin'])
+        self.assertIn('REMOTE_DONE rc=75',result['stderr'])
+        self.assertNotIn('EFFECT_UNKNOWN timeout',result['stderr'])
+
+
+REMOTE_FIXTURE = r'''
+import json, os, sys, time
+from pathlib import Path
+import remote_sub_exec as remote
+root=Path(os.environ['DEADLINE_FIXTURE_ROOT'])
+original_acquire=remote.LaneLease.acquire
+def acquire(cls,*args,**kwargs):
+    kwargs.update(load1=0.0,cpu_count=2,max_active=1)
+    (root/'before-acquire.json').write_text(json.dumps({'monotonic_ns':time.monotonic_ns()}))
+    return original_acquire(*args,**kwargs)
+remote.LaneLease.acquire=classmethod(acquire)
+original_workspace=remote._new_macro_workspace
+def workspace(*args,**kwargs):
+    result=original_workspace(*args,**kwargs)
+    time.sleep(float(os.environ.get('DEADLINE_FIXTURE_PREPARE_DELAY','0')))
+    return result
+remote._new_macro_workspace=workspace
+original_process=remote.run_owned_process
+def process(command,**kwargs):
+    (root/'before-worker.json').write_text(json.dumps({
+        'timeout':kwargs['timeout'],'monotonic_ns':time.monotonic_ns(),
+        'origin_clock_in_worker_env':'POOL_COMMISSION_DEADLINE_NS' in kwargs['env'],
+        'commission_envelope_in_worker_env':'REMOTE_SUB_COMMISSION_BUDGET_SECONDS' in kwargs['env']}))
+    return original_process(command,**kwargs)
+remote.run_owned_process=process
+raise SystemExit(remote.main(sys.argv))
+'''
+
+
+class RemoteDeadline(unittest.TestCase):
+    setUp=ControllerDeadline.setUp
+
+    def remote(self,budget,prepare_delay=0,lock_delay=0):
+        write(self.ext/'fixture-remote.py',REMOTE_FIXTURE)
+        (self.ext/'yes').chmod(0o700)
+        (self.ext/'lanes').mkdir(exist_ok=True)
+        # The positive control is an inert local process: no CLI or provider.
+        write(self.ext/'sub.sh','#!/bin/bash\nprintf "INERT COMPLETE\\n"\n',executable=True)
+        active=self.ext/'active';active.mkdir(exist_ok=True)
+        env={'PATH':str(self.bin)+':/usr/bin:/bin','LANG':'C','LC_ALL':'C',
+             'PYTHONDONTWRITEBYTECODE':'1','PYTHONNOUSERSITE':'1','TMPDIR':str(self.tmp),
+             'DEADLINE_FIXTURE_ROOT':str(self.root),
+             'DEADLINE_FIXTURE_PREPARE_DELAY':str(prepare_delay),
+             'REMOTE_SUB_CHILD_TIMEOUT':'20','REMOTE_SUB_COMMISSION_BUDGET_SECONDS':str(budget),
+             # Deliberately unrelated origin-domain value must not be compared
+             # on this host, nor enter the eventual worker environment.
+             'POOL_COMMISSION_DEADLINE_NS':'1',
+             'LANE_MAX_ACTIVE':'1','LANE_MAX_LOAD_RATIO':'1.5',
+             'POOL_TASK_COMPLEXITY':'C0_MECHANICAL'}
+        command=[str(self.bin/'fixture-python'),str(self.ext/'fixture-remote.py'),
+                 'offline-remote-deadline','minimax',str(self.packet),str(self.root),'fixture-model']
+        lock=(active/'.admission.lock').open('w')
+        proc=None
+        started=time.monotonic()
+        try:
+            if lock_delay: fcntl.flock(lock,fcntl.LOCK_EX)
+            proc=subprocess.Popen(command,cwd=self.root,env=env,stdin=subprocess.DEVNULL,
+                                  stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
+            if lock_delay:
+                until=time.monotonic()+2
+                while not (self.root/'before-acquire.json').exists() and time.monotonic()<until:
+                    if proc.poll() is not None: break
+                    time.sleep(0.01)
+                self.assertTrue((self.root/'before-acquire.json').exists(),'Real executor never entered admission')
+                time.sleep(lock_delay)
+                fcntl.flock(lock,fcntl.LOCK_UN)
+            stdout,stderr=proc.communicate(timeout=10)
+        finally:
+            fcntl.flock(lock,fcntl.LOCK_UN);lock.close()
+            if proc is not None and proc.poll() is None:
+                os.killpg(proc.pid,signal.SIGTERM)
+                try: proc.communicate(timeout=2)
+                except subprocess.TimeoutExpired:
+                    os.killpg(proc.pid,signal.SIGKILL);proc.communicate(timeout=2)
+        return proc.returncode,stdout,stderr,time.monotonic()-started
+
+    def test_original_physical_admission_lock_consumes_received_budget(self):
+        rc,out,err,elapsed=self.remote(1,lock_delay=1.1)
+        self.assertEqual(rc,75,err)
+        self.assertIn('before_worker=1 stage=admission',err)
+        self.assertFalse((self.root/'before-worker.json').exists())
+        self.assertFalse((self.ext/'active/offline-remote-deadline').exists())
+        self.assertLess(elapsed,4)
+
+    def test_final_preworker_gate_deducts_elapsed_remote_preparation(self):
+        rc,out,err,elapsed=self.remote(1,prepare_delay=1.1)
+        self.assertEqual(rc,75,err)
+        self.assertIn('before_worker=1 stage=launch',err)
+        self.assertFalse((self.root/'before-worker.json').exists())
+        self.assertFalse((self.ext/'active/offline-remote-deadline').exists())
+        self.assertLess(elapsed,4)
+
+    def test_inert_positive_control_receives_only_remaining_remote_duration(self):
+        rc,out,err,elapsed=self.remote(3,prepare_delay=0.2)
+        self.assertEqual(rc,0,err)
+        self.assertEqual(out,'INERT COMPLETE\n')
+        launch=json.loads((self.root/'before-worker.json').read_text())
+        self.assertGreater(launch['timeout'],0)
+        self.assertLess(launch['timeout'],2.85)
+        self.assertFalse(launch['origin_clock_in_worker_env'])
+        self.assertFalse(launch['commission_envelope_in_worker_env'])
+        receipt=json.loads((self.ext/'lanes/offline-remote-deadline.process.jsonl').read_text().splitlines()[-1])
+        self.assertTrue(receipt['cleanup']['census_proven'])
+        self.assertEqual(receipt['cleanup']['residual_count'],0)
+
+
+class FullCliDeadline(unittest.TestCase):
+    def test_frozen_original_real_cli_case_passes_with_exact_followup_sources(self):
+        """Reuse the frozen failing test without rewriting production or red evidence."""
+        original_path=ROOT/'tests/fixtures/original_commission_deadline_20261018.py.txt'
+        self.assertEqual(hashlib.sha256(original_path.read_bytes()).hexdigest(),
+                         '47cdfd98e9f59adf446365e230bf9bc263e3ecbeaddaaef451870f28b2c2b20b')
+        spec=importlib.util.spec_from_file_location('frozen_original_deadline',original_path,
+            loader=SourceFileLoader('frozen_original_deadline',str(original_path)))
+        original=importlib.util.module_from_spec(spec);spec.loader.exec_module(original)
+        with tempfile.TemporaryDirectory(prefix='full-cli-',dir=ROOT/'tests') as tmp:
+            root=Path(tmp);source=root/'source';source.mkdir()
+            names=(*original.SOURCE_SHA256,'remote_sub_helpers.py','commission_deadline.py',
+                   'lane_runtime.py','quota_circuit.py','lease_broker.py')
+            for name in names:
+                origin=ROOT/'candidate'/name
+                if not origin.exists(): origin=ROOT/'source'/name
+                shutil.copyfile(origin,source/name)
+            original.HERE=root;original.SOURCE=source
+            original.SOURCE_SHA256={name:hashlib.sha256((source/name).read_bytes()).hexdigest() for name in names}
+            # Only the existing test interpreter seam changes to supply this
+            # sandbox's real namespace census. CLI/request/Bash code is exact.
+            def launch(command,**kwargs):
+                fixture_root=Path(kwargs['env']['DEADLINE_FIXTURE_ROOT'])
+                adapter=fixture_root/'bin/fixture-python'
+                write(adapter,'#!'+sys.executable+'\n'+PYTHON_FIXTURE,executable=True)
+                kwargs['env']['REMOTE_SUB_PYTHON']=str(adapter)
+                proc=subprocess.Popen([str(adapter),*command[2:]],**kwargs)
+                communicate=proc.communicate
+                def communicate_and_retain(*args,**opts):
+                    result=communicate(*args,**opts)
+                    stages={}
+                    for path in (fixture_root/'ext/state/remote_sub').glob('*.json*'):
+                        if path.is_file() and path.stat().st_size<=65536:
+                            stages[path.name]=path.read_text()
+                    (ROOT/'tests/last-full-cli-request-stages.json').write_text(json.dumps(stages,indent=2)+'\n')
+                    return result
+                proc.communicate=communicate_and_retain
+                return proc
+            original.subprocess=SimpleNamespace(Popen=launch,TimeoutExpired=subprocess.TimeoutExpired,
+                                                DEVNULL=subprocess.DEVNULL,PIPE=subprocess.PIPE)
+            case=original.OriginalDeadline('test_original_budget_bounds_real_cli_broker_wait_before_task_start')
+            try:
+                case.test_original_budget_bounds_real_cli_broker_wait_before_task_start()
+            finally:
+                if (root/'last-run.json').exists():
+                    shutil.copyfile(root/'last-run.json',ROOT/'tests/last-full-cli-attempt.json')
+                if (root/'last-controller.stderr').exists():
+                    shutil.copyfile(root/'last-controller.stderr',ROOT/'tests/last-full-cli-attempt.stderr')
+            evidence=json.loads((root/'last-run.json').read_text())
+            self.assertEqual(evidence['transport_or_task_invocation_count'],0)
+            self.assertFalse(evidence['launch_log_present'])
+            self.assertEqual(evidence['continuation_finished']['reason'],'commission_time_exhausted')
+            (ROOT/'tests/last-full-cli-green.json').write_text(json.dumps(evidence,indent=2,sort_keys=True)+'\n')
+            (ROOT/'tests/last-full-cli-green.stderr').write_text((root/'last-controller.stderr').read_text())
+
+
+if __name__=='__main__':
+    unittest.main(verbosity=2)
