@@ -1,8 +1,11 @@
 diff --git a/src-tauri/src/auth/storage.rs b/src-tauri/src/auth/storage.rs
-index c7aca94..1da8113 100644
+index c7aca94..f93c319 100644
 --- a/src-tauri/src/auth/storage.rs
 +++ b/src-tauri/src/auth/storage.rs
-@@ -13,0 +14,89 @@ use crate::types::{
+@@ -11,6 +11,103 @@ use crate::types::{
+     parse_chatgpt_id_token_claims, AccountsStore, AppSettings, AuthData, AuthDotJson, StoredAccount,
+ };
+ 
 +/// Refuse cross-user OAuth token changes while retaining legacy Personal
 +/// subscription refresh compatibility when neither token exposes a member.
 +/// A workspace is not a user identity in shared Business accounts.
@@ -35,22 +38,30 @@ index c7aca94..1da8113 100644
 +    if stored_workspace.is_empty() || stored_workspace != current_workspace {
 +        return None;
 +    }
-+    let is_shared_workspace_plan = [
++    // Legacy Personal tokens sometimes lack individual user claims. That is
++    // safe to reconcile only when at least one existing source explicitly
++    // identifies a known Personal plan and EVERY supplied plan is Personal.
++    // Missing, Business, or future unknown plans must not silently inherit
++    // a Personal-only exemption within a shared workspace.
++    let mut saw_personal_plan = false;
++    let mut saw_other_plan = false;
++    for plan in [
 +        stored_plan,
 +        before.plan_type.as_deref(),
 +        after.plan_type.as_deref(),
 +    ]
 +    .into_iter()
 +    .flatten()
-+    .any(|p| {
-+        matches!(
-+            p,
-+            "self_serve_business_prolite" | "business" | "team" | "enterprise"
-+        )
-+    });
++    {
++        if matches!(plan, "free" | "go" | "plus" | "pro") {
++            saw_personal_plan = true;
++        } else {
++            saw_other_plan = true;
++        }
++    }
 +    match (before.user_id.as_deref(), after.user_id.as_deref()) {
 +        (Some(a), Some(b)) if a == b => {}
-+        (None, None) if !is_shared_workspace_plan => {}
++        (None, None) if saw_personal_plan && !saw_other_plan => {}
 +        _ => return None,
 +    }
 +    Some(current_workspace.to_string())
@@ -92,7 +103,13 @@ index c7aca94..1da8113 100644
 +    Ok(())
 +}
 +
-@@ -38,9 +127,7 @@ pub fn sync_active_account_tokens(store: &mut AccountsStore, auth: &AuthDotJson)
+ pub fn sync_active_account_tokens(store: &mut AccountsStore, auth: &AuthDotJson) -> bool {
+     let Some(active_id) = store.active_account_id.as_deref() else {
+         return false;
+@@ -35,20 +132,15 @@ pub fn sync_active_account_tokens(store: &mut AccountsStore, auth: &AuthDotJson)
+         return false;
+     };
+ 
 -    let stored_account_id = parse_chatgpt_id_token_claims(id_token)
 -        .account_id
 -        .or_else(|| account_id.clone());
@@ -109,11 +126,18 @@ index c7aca94..1da8113 100644
 +        tokens.account_id.as_deref(),
 +        account.plan_type.as_deref(),
 +    ) else {
-@@ -49,3 +135,0 @@ pub fn sync_active_account_tokens(store: &mut AccountsStore, auth: &AuthDotJson)
+         return false;
+     };
 -    if stored_account_id != current_account_id {
 -        return false;
 -    }
-@@ -380,18 +464,7 @@ pub fn update_account_chatgpt_tokens(
+ 
+     let changed = *id_token != tokens.id_token
+         || *access_token != tokens.access_token
+@@ -377,24 +469,13 @@ pub fn update_account_chatgpt_tokens(
+         .find(|a| a.id == account_id)
+         .context("Account not found")?;
+ 
 -    match &mut account.auth_data {
 -        AuthData::ChatGPT {
 -            id_token: stored_id_token,
@@ -139,7 +163,27 @@ index c7aca94..1da8113 100644
 +        refresh_token,
 +        chatgpt_account_id,
 +    )?;
-@@ -588,0 +662,227 @@ mod tests {
+ 
+     if let Some(new_email) = email {
+         account.email = Some(new_email);
+@@ -434,10 +515,12 @@ mod tests {
+     use base64::Engine;
+ 
+     fn account(name: &str, account_id: &str, suffix: &str) -> StoredAccount {
++        // This legacy opaque-token fixture represents a known Personal Pro
++        // subscription; unknown plans must no longer inherit its exemption.
+         StoredAccount::new_chatgpt(
+             name.into(),
+             None,
+-            None,
++            Some("pro".into()),
+             None,
+             format!("id-{suffix}"),
+             format!("access-{suffix}"),
+@@ -586,3 +669,334 @@ mod tests {
+         assert_eq!(refresh_token(&store.accounts[0]), "refresh-a2");
+     }
+ }
 +
 +#[cfg(test)]
 +mod member_identity_regressions {
@@ -157,6 +201,110 @@ index c7aca94..1da8113 100644
 +        });
 +        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
 +        format!("header.{payload}.{marker}")
++    }
++
++    fn token_with_plan(workspace: &str, plan: Option<&str>, marker: &str) -> String {
++        let claims = serde_json::json!({
++            "https://api.openai.com/auth": {
++                "chatgpt_account_id": workspace,
++                "chatgpt_user_id": null,
++                "chatgpt_plan_type": plan,
++            }
++        });
++        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(claims.to_string());
++        format!("header.{payload}.{marker}")
++    }
++
++    fn ambiguous_memberless_plan_must_refuse(plan: Option<&str>) {
++        let before = token_with_plan("shared-workspace", plan, "old");
++        let after = token_with_plan("shared-workspace", plan, "new");
++        let account = StoredAccount::new_chatgpt(
++            "Unknown plan".into(),
++            None,
++            plan.map(String::from),
++            None,
++            before,
++            "old-access".into(),
++            "old-refresh".into(),
++            Some("shared-workspace".into()),
++        );
++        let mut store = AccountsStore {
++            active_account_id: Some(account.id.clone()),
++            accounts: vec![account],
++            ..AccountsStore::default()
++        };
++        let live = AuthDotJson {
++            openai_api_key: None,
++            tokens: Some(TokenData {
++                id_token: after.clone(),
++                access_token: "new-access".into(),
++                refresh_token: "new-refresh".into(),
++                account_id: Some("shared-workspace".into()),
++            }),
++            last_refresh: None,
++        };
++        assert!(!sync_active_account_tokens(&mut store, &live));
++        assert_eq!(stored_refresh(&store), "old-refresh");
++        let result = replace_account_oauth_credentials(
++            &mut store.accounts[0],
++            after,
++            "new-access".into(),
++            "new-refresh".into(),
++            Some("shared-workspace".into()),
++        );
++        assert!(result.is_err());
++        assert_eq!(stored_refresh(&store), "old-refresh");
++    }
++
++    #[test]
++    fn completely_missing_plan_and_member_is_not_assumed_personal() {
++        ambiguous_memberless_plan_must_refuse(None);
++    }
++
++    #[test]
++    fn future_unknown_plan_and_missing_member_is_not_assumed_personal() {
++        ambiguous_memberless_plan_must_refuse(Some("future-unknown-plan"));
++    }
++
++    #[test]
++    fn memberless_token_cannot_change_known_personal_into_unknown_plan() {
++        let account = StoredAccount::new_chatgpt(
++            "Legacy Personal".into(),
++            None,
++            Some("pro".into()),
++            None,
++            token_with_plan("shared-workspace", Some("pro"), "old"),
++            "old-access".into(),
++            "old-refresh".into(),
++            Some("shared-workspace".into()),
++        );
++        let mut store = AccountsStore {
++            active_account_id: Some(account.id.clone()),
++            accounts: vec![account],
++            ..AccountsStore::default()
++        };
++        let next = token_with_plan("shared-workspace", Some("future-unknown"), "new");
++        let live = AuthDotJson {
++            openai_api_key: None,
++            tokens: Some(TokenData {
++                id_token: next.clone(),
++                access_token: "new-access".into(),
++                refresh_token: "new-refresh".into(),
++                account_id: Some("shared-workspace".into()),
++            }),
++            last_refresh: None,
++        };
++        assert!(!sync_active_account_tokens(&mut store, &live));
++        assert_eq!(stored_refresh(&store), "old-refresh");
++        assert!(replace_account_oauth_credentials(
++            &mut store.accounts[0],
++            next,
++            "new-access".into(),
++            "new-refresh".into(),
++            Some("shared-workspace".into()),
++        )
++        .is_err());
++        assert_eq!(stored_refresh(&store), "old-refresh");
 +    }
 +
 +    fn business_store(member: Option<&str>) -> AccountsStore {
@@ -367,20 +515,53 @@ index c7aca94..1da8113 100644
 +        }
 +    }
 +}
+diff --git a/src-tauri/src/auth/token_refresh.rs b/src-tauri/src/auth/token_refresh.rs
+index 7b37b66..8a1f305 100644
+--- a/src-tauri/src/auth/token_refresh.rs
++++ b/src-tauri/src/auth/token_refresh.rs
+@@ -424,10 +424,12 @@ mod tests {
+     #[test]
+     fn active_account_uses_fresh_tokens_from_live_auth() {
+         let now = chrono::Utc::now().timestamp();
++        // Old id_token fixture intentionally has no member claim. A verified
++        // Personal subscription plan, not an unknown plan, allows rotation.
+         let mut account = StoredAccount::new_chatgpt(
+             "Active".into(),
+             None,
+-            None,
++            Some("pro".into()),
+             None,
+             account_jwt("workspace-a", now - 3_600, "stored"),
+             jwt_with_exp(now - 3_600),
 diff --git a/src-tauri/src/types.rs b/src-tauri/src/types.rs
 index f3e1883..0274bd3 100644
 --- a/src-tauri/src/types.rs
 +++ b/src-tauri/src/types.rs
-@@ -329,0 +330,2 @@ pub struct ChatGptIdTokenClaims {
+@@ -327,6 +327,8 @@ pub struct ChatGptIdTokenClaims {
+     pub email: Option<String>,
+     pub plan_type: Option<String>,
+     pub account_id: Option<String>,
 +    /// Distinguish two Business members within one ChatGPT workspace.
 +    pub user_id: Option<String>,
-@@ -360,0 +363,5 @@ pub fn parse_chatgpt_id_token_claims(id_token: &str) -> ChatGptIdTokenClaims {
+     pub subscription_expires_at: Option<DateTime<Utc>>,
+ }
+ 
+@@ -358,6 +360,11 @@ pub fn parse_chatgpt_id_token_claims(id_token: &str) -> ChatGptIdTokenClaims {
+             .and_then(|auth| auth.get("chatgpt_account_id"))
+             .and_then(|v| v.as_str())
+             .map(String::from),
 +        user_id: auth_claims
 +            .and_then(|auth| auth.get("chatgpt_user_id"))
 +            .and_then(|v| v.as_str())
 +            .filter(|v| !v.is_empty() && v.len() <= 256)
 +            .map(String::from),
-@@ -617,0 +625,51 @@ mod tests {
+         subscription_expires_at: auth_claims
+             .and_then(|auth| auth.get("chatgpt_subscription_active_until"))
+             .and_then(|v| v.as_str())
+@@ -615,3 +622,54 @@ mod tests {
+         assert_eq!(settings.auto_switch_fallback_min_remaining_percent, 10.0);
+     }
+ }
 +
 +#[cfg(test)]
 +mod business_member_claim_tests {
