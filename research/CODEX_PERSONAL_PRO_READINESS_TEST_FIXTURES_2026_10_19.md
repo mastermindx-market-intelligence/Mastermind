@@ -1,8 +1,9 @@
 # Codex Personal Pro readiness: protected test-fixture correction
 
-**Scope:** provider-free test-only change to the existing Executive OS
-readiness owner. No worker installation, credential, receipt, canary, routing
-or production admission mutation.
+**Scope:** provider-free test-fixture correction plus one bounded
+fail-closed change to the EXISTING Executive provider-slot-status reader.
+No installed worker/service code, credential, receipt, canary, routing or
+production admission was modified.
 
 **Source baseline:** protected Mastermind master commit
 fd1159695b0491a1b2c8d3042dce1232ad8365b4. Protected skillpack law
@@ -80,3 +81,32 @@ extend any credential expiry; reserve and fresh inference canary must remain
 on existing owners with the exact Chairman-approved deadline. Executive
 plugin backend_unavailable and the legacy Macro Fabric one-default-seat
 broker are independent unresolved lanes.
+
+## October 20: fail closed on inaccessible protected realms
+
+The existing provider-slot-status.py::_lstat_present previously caught
+EVERY OSError and returned False. On macOS, a non-root operator
+cannot inspect root-owned, private worker homes. This caused a misleading
+sanitized result provider_home_present=false when the path was present
+but EACCES/EPERM prevented inspection. A later approved root inspection
+proved the four reviewed homes and credential files had always been present.
+No source-privileged access or credential reading is needed to reproduce
+this logic defect with a synthetic PermissionError.
+
+RED: two new tests proved that permission denial was reported as absence
+and that a raised visibility failure was allowed to escape the CLI.
+GREEN: _lstat_present returns False only on FileNotFoundError and raises
+WorkerStatusVisibilityError (fixed static code) on any other OS lookup
+error. The existing main() assembles the complete status array BEFORE
+printing any JSON, catches only that closed error type, prints one constant
+worker_slot_visibility_unavailable to stderr and returns code 2. It
+never prints a protected path, raw exception, partial roster, OAuth
+credential, account ID or profile. The existing exact reviewed slot
+inventory and the runtime STATUS_FIELDS schema remain unchanged.
+
+The seven provider-free readiness modules continue to pass. Production
+ACL/lstat/UID/GID checks have NOT been loosened. The source-only change
+is not installed; root-level provider-slot-status in the existing release
+continues to function under its original contract. The source update must
+clear independent review/hosted CI and then follow Executive's existing
+release installation path before it changes live operator diagnostics.
