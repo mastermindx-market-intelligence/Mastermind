@@ -32,6 +32,13 @@ KNOWN_PRE_ISOLATION_GUARD_SHA256 = (
     "1b39013fa1770ab9447a822513dfc8cc0810a79a8f133761165b79996794e736"
 )
 GUARD_ANCHOR = "    # A push or explicit GitHub mutation is a material invalidator"
+GUARD_START = "    # A generic Claude Desktop launch uses"
+# Exact M2 observed block after the previous incremental guard repair. This
+# digest fences migration of that installed prefix: any other local edits
+# require explicit reconciliation, not replacement.
+KNOWN_INSTALLED_V1_BLOCK_SHA256 = (
+    "c8c44578bd008662f3faa0fd5c8ed7ae51f3f66118317a49a8074bba97baa169"
+)
 LEGACY_WORKSPACE_ROOT = '        "/Volumes/Mastermind/agent-workspaces",\n'
 NEW_WORKSPACE_ROOT = '        "/Volumes/Mastermind 2/agent-workspaces",\n'
 DOC_ANCHORS = {
@@ -58,13 +65,23 @@ def render(kind: str, before: str) -> str:
     if before.count(block) == 1:
         after = before
     elif kind == "guard":
-        # Only upgrade the exact reviewed M2 pre-isolation guard. Unknown
-        # versions require reconciliation rather than overwrite.
-        if sha(before.encode()) != KNOWN_PRE_ISOLATION_GUARD_SHA256:
+        # Unknown hook versions or edits require reconciliation. Do not
+        # normalize or overwrite a partially modified guard by guessing.
+        if (before.count(GUARD_START) == 1 and
+                before.count(GUARD_ANCHOR) == 1 and
+                before.index(GUARD_START) < before.index(GUARD_ANCHOR)):
+            start = before.index(GUARD_START)
+            end = before.index(GUARD_ANCHOR)
+            installed_block = before[start:end]
+            if sha(installed_block.encode()) != KNOWN_INSTALLED_V1_BLOCK_SHA256:
+                raise ValueError("unrecognized guard block: preserve existing owner edits")
+            after = before[:start] + block + before[end:]
+        elif sha(before.encode()) == KNOWN_PRE_ISOLATION_GUARD_SHA256:
+            if before.count(GUARD_ANCHOR) != 1 or "unmanaged_desktop" in before:
+                raise ValueError("guard insertion location ambiguous")
+            after = before.replace(GUARD_ANCHOR, block + GUARD_ANCHOR, 1)
+        else:
             raise ValueError("unrecognized guard: preserve existing owner edits")
-        if before.count(GUARD_ANCHOR) != 1 or "unmanaged_desktop" in before:
-            raise ValueError("guard insertion location ambiguous")
-        after = before.replace(GUARD_ANCHOR, block + GUARD_ANCHOR, 1)
     else:
         if DOC_MARKER in before or before.count(DOC_ANCHORS[kind]) != 1:
             raise ValueError("instruction marker drift or ambiguous anchor")

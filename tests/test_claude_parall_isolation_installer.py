@@ -59,6 +59,13 @@ def test_known_legacy_guard_installs_and_is_idempotent():
     ("claude --resume native-session-id", False),
     ("claude --version", False),
     ("open -a '/Applications/Claude 6.app'", False),
+    ("bash -lc 'open -a Claude'", True),
+    ("env CLAUDE_TEST=1 claude --desktop --resume id", True),
+    ('osascript -e \'tell application "Claude" to activate\'', True),
+    ('claude -p "Explain the --desktop flag"', False),
+    ('claude -p "Why does open -a Claude break Parall?"', False),
+    ('echo "open -a Claude"', False),
+    ('git commit -m "explain claude --desktop behavior"', False),
 ])
 def test_installed_hook_respects_cli_desktop_boundary(command, denied):
     source = legacy_source()
@@ -128,3 +135,34 @@ def test_concurrent_target_change_blocks_effects(tmp_path):
         with pytest.raises(ValueError, match="changed after preflight"):
             rollout.apply(plan, evidence)
         assert not evidence.exists()
+
+
+def test_exact_previous_guard_block_migrates_once_without_other_edits():
+    source = legacy_source()
+    before_fragment = (
+        rollout.GUARD_START + " the shared Anthropic application identity.\n"
+        + "    # previously installed body\n"
+    )
+    assert source.count(rollout.GUARD_ANCHOR) == 1
+    old = source.replace(
+        rollout.GUARD_ANCHOR,
+        before_fragment + rollout.GUARD_ANCHOR, 1,
+    )
+    with patch.object(
+        rollout, "KNOWN_INSTALLED_V1_BLOCK_SHA256",
+        rollout.sha(before_fragment.encode()),
+    ):
+        updated = rollout.render("guard", old)
+        assert before_fragment not in updated
+        assert rollout.template("guard") in updated
+        assert rollout.render("guard", updated) == updated
+
+
+def test_unknown_previous_guard_block_refuses_before_write():
+    source = legacy_source()
+    fragment = rollout.GUARD_START + " unknown edit\n"
+    old = source.replace(
+        rollout.GUARD_ANCHOR, fragment + rollout.GUARD_ANCHOR, 1
+    )
+    with pytest.raises(ValueError, match="unrecognized guard block"):
+        rollout.render("guard", old)

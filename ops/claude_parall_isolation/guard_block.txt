@@ -1,23 +1,92 @@
     # A generic Claude Desktop launch uses the shared Anthropic application identity.
-    # On Parall multi-account Macs this can attach to or disrupt a numbered instance.
-    # Headless `claude` and explicit Parall wrapper paths are not desktop launches.
-    unmanaged_desktop = re.search(
-        r'''(?ix)(?:\bopen\s+(?:-[A-Za-z]+\s+)*-a\s+["']?Claude(?:\.app)?(?:["']|\s+(?![0-9])|$)'''
-        r'''|\bopen\s+(?:-[A-Za-z]+\s+)*["']?/Applications/Claude(?:\.app)?["']?(?:\s+(?![0-9])|$)'''
-        r'''|/Applications/Claude\ Official\.app'''
-        r'''|/Applications/Claude\ Runtimes/Claude\ (?:Default|[0-9]+)/Claude\.app/Contents/MacOS/Claude\b)''',
-        clean,
-    )
-    # Complete the known GUI-only routes while leaving ordinary Claude Code
-    # CLI invocation (including -p and --resume) unaffected.
-    unmanaged_desktop = unmanaged_desktop or any(
-        re.search(pattern, clean, re.I) for pattern in (
-            r'\bopen\s+(?:-[A-Za-z]+\s+)*-b\s+["\x27]?com\.anthropic\.claudefordesktop\b',
-            r'\bopen\s+(?:-[A-Za-z]+\s+)*["\x27]?claude://',
-            r'(?:^|[;&|\n(])\s*(?:[^\s;]+/)?claude\b[^\n;&|]*?\s--desktop(?:\s|$)',
-            r'\bopen\s+(?:-[A-Za-z]+\s+)*["\x27]?/Applications/Claude\s+(?:Official|Default)\.app\b',
-            r'\btell\s+application\s+["\x27]Claude(?:\.app)?["\x27]',
-        )
+    # On Parall multi-account Macs it can attach to or disrupt a numbered instance.
+    # Inspect shell arguments rather than matching words inside Claude CLI prompts.
+    import shlex
+
+    def shell_clauses(command):
+        try:
+            lexer = shlex.shlex(command, posix=True, punctuation_chars=";&|()\n")
+            lexer.whitespace_split = True
+            lexer.whitespace = " \t\r"
+            lexer.commenters = ""
+            argv = list(lexer)
+        except ValueError:
+            return []
+        clauses, clause = [], []
+        for arg in argv:
+            if arg in {";", "&&", "&", "|", "||", "(", ")", "\n"}:
+                if clause:
+                    clauses.append(clause)
+                clause = []
+            else:
+                clause.append(arg)
+        if clause:
+            clauses.append(clause)
+        return clauses
+
+    def is_unmanaged_desktop_launch(argv, depth=0):
+        if not argv:
+            return False
+        exe = argv[0].rsplit("/", 1)[-1]
+        if exe == "env":
+            j = 1
+            while j < len(argv) and "=" in argv[j] and not argv[j].startswith("-"):
+                j += 1
+            return is_unmanaged_desktop_launch(argv[j:], depth)
+        if exe in {"sh", "bash", "zsh"} and depth < 1:
+            for i, arg in enumerate(argv[1:], 1):
+                if arg.startswith("-") and "c" in arg[1:] and i + 1 < len(argv):
+                    return any(is_unmanaged_desktop_launch(x, depth + 1)
+                               for x in shell_clauses(argv[i + 1]))
+        if exe == "claude" and "--desktop" in argv[1:]:
+            return True
+        path = argv[0]
+        if re.fullmatch(
+            r"/Applications/Claude Runtimes/Claude (?:Default|[0-9]+)/"
+            r"Claude\.app/Contents/MacOS/Claude",
+            path,
+        ):
+            return True
+        if re.fullmatch(
+            r"/Applications/Claude (?:Default|Official)\.app/Contents/MacOS/[^/]+",
+            path,
+        ):
+            return True
+        if exe == "osascript":
+            script = " ".join(argv[1:])
+            if re.search(
+                r'\btell\s+application(?:\s+id)?\s+["\x27]'
+                r'(?:Claude(?:\.app)?|com\.anthropic\.claudefordesktop)["\x27]',
+                script, re.I,
+            ):
+                return True
+        if exe != "open":
+            return False
+        unsafe_apps = {
+            "Claude", "Claude.app", "Claude Official", "Claude Official.app",
+            "Claude Default", "Claude Default.app", "/Applications/Claude.app",
+            "/Applications/Claude Official.app", "/Applications/Claude Default.app",
+        }
+        for i, arg in enumerate(argv[1:], 1):
+            if (arg == "/Applications/Claude" and i + 1 < len(argv)
+                    and argv[i + 1] in {"Default.app", "Official.app"}):
+                return True
+            if arg.startswith("claude://") or arg in unsafe_apps:
+                return True
+            if re.fullmatch(
+                r"/Applications/Claude Runtimes/Claude (?:Default|[0-9]+)/Claude\.app",
+                arg,
+            ):
+                return True
+            if i + 1 < len(argv) and arg.startswith("-"):
+                if ("a" in arg[1:] and argv[i + 1] in unsafe_apps
+                        or "b" in arg[1:] and
+                        argv[i + 1] == "com.anthropic.claudefordesktop"):
+                    return True
+        return False
+
+    unmanaged_desktop = any(
+        is_unmanaged_desktop_launch(clause) for clause in shell_clauses(clean)
     )
     if unmanaged_desktop:
         deny(
