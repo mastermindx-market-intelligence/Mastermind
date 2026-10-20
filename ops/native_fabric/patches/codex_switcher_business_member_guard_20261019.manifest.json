@@ -3,24 +3,27 @@
   "model_turns": 0,
   "modified_paths": [
     "src-tauri/src/auth/storage.rs",
+    "src-tauri/src/auth/token_refresh.rs",
     "src-tauri/src/types.rs"
   ],
-  "patch_sha256": "4ab95063ffdf8d79d0b28146e7cee028cc2e4ef1787a80659c2c1ca8c2687cc1",
+  "patch_sha256": "cd13b98008b66950f432f65cd2704e4626c573da39d90d3474d86de9cfdaddf7",
   "postimages_sha256": {
-    "src-tauri/src/auth/storage.rs": "c48774c4b4a33b29f1c93936fb435c22a1a02b70062a429f57d76ef71fc06c92",
-    "src-tauri/src/types.rs": "f7b51135f974e463d6a2c7c5d132e82b3f624d5bf2aa1163dd0da8db5d26d0e1"
+    "src-tauri/src/auth/storage.rs": "c82a16079a3a8436620dcba96d83a99a83abeb49cc4af95103bc4e350cbf5548",
+    "src-tauri/src/types.rs": "f7b51135f974e463d6a2c7c5d132e82b3f624d5bf2aa1163dd0da8db5d26d0e1",
+    "src-tauri/src/auth/token_refresh.rs": "00b6dec56b3dadf9915d9f1ae4c1481a3182c74635bd77f9260cca8a47cf12f0"
   },
   "preimages_sha256": {
     "src-tauri/src/auth/storage.rs": "6a2e8b9499ea3fa1bd39b683a87b04a60d91f2054be73d0b547266d8a7d312a3",
-    "src-tauri/src/types.rs": "e5a0619fbc583fd41c2c8a30c815cd8f63a2ce4f8af2ebb99c912242809fcfaf"
+    "src-tauri/src/types.rs": "e5a0619fbc583fd41c2c8a30c815cd8f63a2ce4f8af2ebb99c912242809fcfaf",
+    "src-tauri/src/auth/token_refresh.rs": "66bc54d901173b5171d3918841bab776e3dacb191678f32310e34a7ee1d86ac1"
   },
   "production_credentials_modified": false,
   "rust_unit_tests_failed": 0,
   "rust_unit_tests_ignored": 1,
-  "rust_unit_tests_passed": 78,
+  "rust_unit_tests_passed": 81,
   "schema": "mastermind.switcher_member_token_guard_source/v1",
   "source_base_git_sha": "5f067ef615a6a4d1f80fe4fd79f086c0beac22c3",
-  "source_candidate_git_sha": "ef43d9e5734e5b2e2bf31cb808feb23bee141cd9",
+  "source_candidate_git_sha": "a744e4f8128db1074e91b4f18e16b445fab40af6",
   "source_repo_has_remote": false,
   "status": "candidate_not_installed"
 }
