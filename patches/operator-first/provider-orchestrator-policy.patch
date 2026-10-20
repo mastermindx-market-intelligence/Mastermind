@@ -54,12 +54,13 @@
      if begins == 1:
          start = text.index(BEGIN)
          finish = text.index(END, start) + len(END)
-@@ -492,6 +473,15 @@
+@@ -492,6 +473,16 @@
      if len(starts) > 1:
          raise OrchestratorPolicyError("Codex config contains duplicate [agents] tables")
      native_reset = _native_codex_isolation(parsed)
 +    if (
 +        native_reset is None
++        and bool(starts)
 +        and isinstance(agents, dict)
 +        and agents.get("enabled") is True
 +    ):
@@ -70,7 +71,7 @@
      if native_reset is not None:
          if not starts or native_reset is False:
              raise OrchestratorPolicyError(
-@@ -570,7 +560,7 @@
+@@ -570,7 +561,7 @@
  
  def _paths(home: Path) -> dict[str, Path]:
      home = home.expanduser().resolve()
@@ -79,7 +80,7 @@
          "codex_doc": home / ".codex" / "AGENTS.md",
          "claude_doc": home / ".claude" / "CLAUDE.md",
          "codex_hooks": home / ".codex" / "hooks.json",
-@@ -580,16 +570,66 @@
+@@ -580,16 +571,66 @@
          "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
      }
  
@@ -146,7 +147,7 @@
  
      # Reject known unsafe path shapes before any managed file can change. Unexpected
      # I/O failure can still interrupt a multi-file apply and is handled separately.
-@@ -623,6 +663,14 @@
+@@ -623,6 +664,14 @@
          ("codex_hooks", rendered["codex_hooks"]),
          ("codex_config", rendered["codex_config"]),
      ]
@@ -161,7 +162,7 @@
      modified: list[str] = []
      try:
          for key, payload in operations:
-@@ -704,12 +752,28 @@
+@@ -704,12 +753,28 @@
      return count
  
  
@@ -193,7 +194,7 @@
          try:
              installed = _regular_bytes(paths[name])
          except OrchestratorPolicyError:
-@@ -718,7 +782,7 @@
+@@ -718,7 +783,7 @@
          if installed != canonical:
              issues.append(f"{name}.digest")
  
@@ -202,7 +203,7 @@
          try:
              text = _regular_bytes(paths[name]).decode("utf-8")
          except (OrchestratorPolicyError, UnicodeError):
-@@ -731,66 +795,155 @@
+@@ -731,66 +796,155 @@
          ):
              issues.append(f"{name}.managed_block")
  
@@ -407,7 +408,7 @@
  
  
  def _parser() -> argparse.ArgumentParser:
-@@ -798,17 +951,25 @@
+@@ -798,17 +952,25 @@
      parser.add_argument("mode", choices=("verify", "apply"))
      parser.add_argument("--home", type=Path, default=Path.home())
      parser.add_argument("--guard-source", type=Path)

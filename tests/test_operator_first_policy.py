@@ -535,3 +535,27 @@ def test_incumbent_guard_digest_is_pinned_independently_of_role_fixture(tmp_path
     pins = json.loads((ROOT / "patches/operator-first/source-pins.json").read_text())
     assert pins["incumbent_head"] == "a2b4964e789b5b75ac9236f8db6f839a41813d52"
     assert pins["guard_sha256"] == "6c3549eb0ff4616980ce34621548d76db7f784909716963927f1442e1a502e9e"
+
+
+def test_scoped_dotted_native_shape_keeps_structural_refusal(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    codex = home / ".codex"
+    codex.mkdir(parents=True)
+    original = (
+        'model = "gpt-6.1-sol"\n'
+        'agents.enabled = true\n'
+        'agents.max_concurrent_threads_per_session = 4\n'
+    )
+    (codex / "config.toml").write_text(original)
+    with pytest.raises(m.OrchestratorPolicyError, match=r"one explicit \[agents\] table"):
+        m.apply_provider_policy(home, "codex", guard_source=guard)
+    assert (codex / "config.toml").read_text() == original
+    assert not (home / ".agents").exists()
+
+
+def test_incumbent_test_patch_digest_is_bound(tmp_path):
+    pins = json.loads((ROOT / "patches/operator-first/source-pins.json").read_text())
+    test_patch = ROOT / "patches/operator-first/provider-policy-tests.patch"
+    assert pins["incumbent_tests"]["path"] == "tests/test_provider_orchestrator_policy.py"
+    assert hashlib.sha256(test_patch.read_bytes()).hexdigest() == pins["incumbent_tests"]["patch_sha256"]
