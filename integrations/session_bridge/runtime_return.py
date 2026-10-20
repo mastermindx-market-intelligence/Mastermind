@@ -132,6 +132,54 @@ def _read_matches_original(original: dict, current: dict,
     )
 
 
+def _validate_original_writer(value, facts) -> None:
+    if (_generation(facts) != value["generation"]
+            or (facts.job_id, facts.worker_id) != (value["job_id"], value["worker_id"])):
+        raise ValueError("original writer changed")
+
+
+def _validate_original_epoch(value, current) -> None:
+    if _epoch(current) != value["epoch"]:
+        raise ValueError("original session changed")
+
+
+def _validate_original_dialogue_source(value, source) -> None:
+    commission = (source.commission_ref.to_dict() if hasattr(source.commission_ref,"to_dict")
+                  else dict(source.commission_ref))
+    if (source.work_ref != value["context"]["work_ref"]
+            or commission != value["context"]["commission_ref"]
+            or source.watch_mode != value["context"]["watch_mode"]):
+        raise ValueError("original dialogue source changed")
+
+
+def _validate_original_physical_events(value, events, *, parent_fingerprint=None) -> None:
+    if len(events) > 1024:
+        raise ValueError("physical source evidence exceeds bound")
+    found = False
+    for event in events:
+        if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
+            continue
+        physical = event.payload.get("physical_source")
+        if not isinstance(physical, dict) or physical.get("operation_key") != value["context"]["operation_key"]:
+            continue
+        record = wake_record_from_event(event)
+        physical, obligation = record.physical_source, record.obligation
+        if (physical is None or obligation is None
+                or {k:getattr(physical,k) for k in ("workspace_id","channel_id","thread_ts")} != value["carrier"]
+                or (parent_fingerprint is not None
+                    and physical.parent_fingerprint != parent_fingerprint)
+                or physical.candidate.root_job_id != value["root_job_id"]
+                or physical.candidate.job_id != value["job_id"]
+                or physical.candidate.attempt_id != value["attempt_id"]
+                or physical.candidate.worker_id != value["worker_id"]
+                or obligation.job_id != value["job_id"] or obligation.attempt_id != value["attempt_id"]
+                or obligation.source_workstream != value["context"]["work_ref"]):
+            raise ValueError("original physical carrier changed")
+        found = True
+    if not found:
+        raise ValueError("original physical carrier absent")
+
+
 class RuntimeSessionReturn:
     """Stateless joins over immutable request events and the current writer."""
 
@@ -458,19 +506,11 @@ class RuntimeSessionReturn:
     def _request(self, read_ref: str):
         event, value = self._stored_request(read_ref)
         facts = self.runtime.current_harness_binding_source(value["attempt_id"])
-        if (_generation(facts) != value["generation"]
-                or (facts.job_id, facts.worker_id) != (value["job_id"], value["worker_id"])):
-            raise ValueError("original writer changed")
+        _validate_original_writer(value, facts)
         current = _read_current_target(self.runtime, value["context"]["operation_key"])
-        if _epoch(current) != value["epoch"]:
-            raise ValueError("original session changed")
+        _validate_original_epoch(value, current)
         source = _read_dialogue_source(self.runtime, value["root_job_id"])
-        commission = (source.commission_ref.to_dict() if hasattr(source.commission_ref,"to_dict")
-                      else dict(source.commission_ref))
-        if (source.work_ref != value["context"]["work_ref"]
-                or commission != value["context"]["commission_ref"]
-                or source.watch_mode != value["context"]["watch_mode"]):
-            raise ValueError("original dialogue source changed")
+        _validate_original_dialogue_source(value, source)
         self._same_thread(value)
         return event, value, facts
 
@@ -478,31 +518,8 @@ class RuntimeSessionReturn:
         # Parent messages may advance on this thread. No second physical thread
         # may be substituted; every matching Wake source is validated by its owner.
         events = self.runtime.events.list_events(job_id=value["job_id"], attempt_id=value["attempt_id"])
-        if len(events) > 1024:
-            raise ValueError("physical source evidence exceeds bound")
-        found = False
-        for event in events:
-            if event.event_type != LedgerPhase.WAKE_REQUESTED.value:
-                continue
-            physical = event.payload.get("physical_source")
-            if not isinstance(physical, dict) or physical.get("operation_key") != value["context"]["operation_key"]:
-                continue
-            record = wake_record_from_event(event)
-            physical, obligation = record.physical_source, record.obligation
-            if (physical is None or obligation is None
-                    or {k:getattr(physical,k) for k in ("workspace_id","channel_id","thread_ts")} != value["carrier"]
-                    or (parent_fingerprint is not None
-                        and physical.parent_fingerprint != parent_fingerprint)
-                    or physical.candidate.root_job_id != value["root_job_id"]
-                    or physical.candidate.job_id != value["job_id"]
-                    or physical.candidate.attempt_id != value["attempt_id"]
-                    or physical.candidate.worker_id != value["worker_id"]
-                    or obligation.job_id != value["job_id"] or obligation.attempt_id != value["attempt_id"]
-                    or obligation.source_workstream != value["context"]["work_ref"]):
-                raise ValueError("original physical carrier changed")
-            found = True
-        if not found:
-            raise ValueError("original physical carrier absent")
+        _validate_original_physical_events(
+            value, events, parent_fingerprint=parent_fingerprint)
 
     @staticmethod
     def _continuation_messages(value, result):
@@ -694,10 +711,18 @@ class RuntimeSessionReturn:
         others = tuple(item for item in events if item.event_id != event.event_id
                        and (admission is None or item.event_id != admission.event_id))
         if admission is None:
-            # Preserve the live-writer fallback. Its current target, harness,
-            # root Dialogue source and Wake reads are a separate, unqualified
-            # acquisition boundary; this immutable selection does not bound it.
-            event, value, _ = self._request(read_ref)
+            # The live fallback acquires its own fresh original request.
+            # Close and finalize that separate observation before validating
+            # or exposing its material through the shared provenance rules.
+            with self.runtime.observe_bounded_read() as live_observation:
+                live_event, live_value, facts, current, source, scoped_events = (
+                    live_observation.read_session_live_writer_bounded(read_ref=read_ref))
+            _ = live_observation.receipt
+            _validate_original_writer(live_value, facts)
+            _validate_original_epoch(live_value, current)
+            _validate_original_dialogue_source(live_value, source)
+            _validate_original_physical_events(live_value, scoped_events)
+            event, value = live_event, live_value
         return event, value, admission, others, indexed
 
     async def require_committed_native_reply(self, *, read_ref):

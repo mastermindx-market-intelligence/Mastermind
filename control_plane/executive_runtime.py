@@ -5963,6 +5963,55 @@ def _quota_from_row(row: sqlite3.Row) -> WorkerQuotaClass:
     )
 
 
+def _worker_from_rows(
+    worker_row: sqlite3.Row, quota_rows: list[sqlite3.Row],
+) -> Worker:
+    """Construct the canonical Worker from its row and all acquired quota rows."""
+
+    quotas = [_quota_from_row(row) for row in quota_rows]
+    statuses = {quota.status for quota in quotas}
+    if worker_row["identity_status"] != "ONLINE":
+        aggregate_status = WorkerStatus(worker_row["identity_status"])
+    else:
+        for candidate in (
+            WorkerStatus.AVAILABLE,
+            WorkerStatus.BUSY,
+            WorkerStatus.RATE_LIMITED,
+            WorkerStatus.DRAINING,
+            WorkerStatus.OFFLINE,
+            WorkerStatus.ERROR,
+        ):
+            if candidate in statuses:
+                aggregate_status = candidate
+                break
+        else:  # pragma: no cover - registration guarantees a class
+            aggregate_status = WorkerStatus.ERROR
+    active_jobs = sorted(
+        {quota.active_job_id for quota in quotas if quota.active_job_id}
+    )
+    capabilities = sorted({item for quota in quotas for item in quota.capabilities})
+    legacy_quotas = {
+        quota.quota_class: {
+            "status": quota.status.value,
+            "capabilities": quota.capabilities,
+            "active_job_id": quota.active_job_id,
+        }
+        for quota in quotas
+    }
+    return Worker(
+        worker_id=str(worker_row["worker_id"]),
+        provider=str(worker_row["provider"]),
+        account_label=str(worker_row["account_label"]),
+        worker_type=str(worker_row["worker_type"]),
+        status=aggregate_status,
+        capabilities=capabilities,
+        active_job_id=active_jobs[0] if active_jobs else None,
+        last_seen_at=_iso(int(worker_row["last_seen_at_ms"])),
+        metadata=dict(_json_loads(worker_row["metadata_json"], fallback={})),
+        quota_classes=legacy_quotas,
+    )
+
+
 class WorkerRegistry:
     def __init__(self, store: RuntimeStore) -> None:
         self.store = store
@@ -6227,48 +6276,7 @@ class WorkerRegistry:
                 """,
                 (worker_id,),
             ).fetchall()
-        quotas = [_quota_from_row(row) for row in quota_rows]
-        statuses = {quota.status for quota in quotas}
-        if worker_row["identity_status"] != "ONLINE":
-            aggregate_status = WorkerStatus(worker_row["identity_status"])
-        else:
-            for candidate in (
-                WorkerStatus.AVAILABLE,
-                WorkerStatus.BUSY,
-                WorkerStatus.RATE_LIMITED,
-                WorkerStatus.DRAINING,
-                WorkerStatus.OFFLINE,
-                WorkerStatus.ERROR,
-            ):
-                if candidate in statuses:
-                    aggregate_status = candidate
-                    break
-            else:  # pragma: no cover - registration guarantees a class
-                aggregate_status = WorkerStatus.ERROR
-        active_jobs = sorted(
-            {quota.active_job_id for quota in quotas if quota.active_job_id}
-        )
-        capabilities = sorted({item for quota in quotas for item in quota.capabilities})
-        legacy_quotas = {
-            quota.quota_class: {
-                "status": quota.status.value,
-                "capabilities": quota.capabilities,
-                "active_job_id": quota.active_job_id,
-            }
-            for quota in quotas
-        }
-        return Worker(
-            worker_id=str(worker_row["worker_id"]),
-            provider=str(worker_row["provider"]),
-            account_label=str(worker_row["account_label"]),
-            worker_type=str(worker_row["worker_type"]),
-            status=aggregate_status,
-            capabilities=capabilities,
-            active_job_id=active_jobs[0] if active_jobs else None,
-            last_seen_at=_iso(int(worker_row["last_seen_at_ms"])),
-            metadata=dict(_json_loads(worker_row["metadata_json"], fallback={})),
-            quota_classes=legacy_quotas,
-        )
+        return _worker_from_rows(worker_row, quota_rows)
 
     def list_workers(self) -> list[Worker]:
         with self.store.read() as connection:
@@ -24780,6 +24788,127 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    def read_session_live_writer_bounded(
+        self, *, read_ref: str,
+    ) -> tuple[
+        Event, dict[str, Any], ActiveOperatorBindingFacts, Any,
+        ExecutiveDialogueSource, tuple[Event, ...],
+    ]:
+        """Acquire one original request's live fallback facts on a bounded read.
+
+        Return request, payload, original harness facts, CurrentTargetEpoch,
+        root Dialogue source and complete original Job/Attempt Event history.
+        Every selector derives from the newly validated original payload.
+
+        This is a separate observation after immutable reply evidence when
+        native admission is absent; those two snapshots do not share a budget.
+        The READ owner must close this observation and obtain its receipt before
+        validating the detached bridge facts or awaiting Dialogue. UNKNOWN is
+        valid. One loader and VM activation cover all selected SQLite material,
+        including nested harness/enrollment reads. Inherited retained-writer
+        CooCyclePolicy and ExecutionCapabilityRegistry I/O is not qualified by
+        those SQL bounds.
+        """
+        self._select()
+        try:
+            from control_plane.executive_current_target import (
+                _current_target_epoch_from_facts,
+                _current_target_job_identity,
+                _validate_current_target_attempt,
+                _validate_current_target_worker_quota,
+                job_id_from_operation_key,
+            )
+
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                event, value = self._load_session_original_request_bounded(loader, read_ref)
+                original_facts = _current_harness_binding_source_from_snapshot(
+                    self._store, loader, value["attempt_id"])
+
+                operation_key = value["context"]["operation_key"]
+                job_id = job_id_from_operation_key(operation_key)
+                row = loader.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (job_id,)
+                ).fetchone()
+                job = None if row is None else _job_from_row(row)
+                identity = _current_target_job_identity(
+                    operation_key=operation_key, job_id=job_id, job=job)
+                row = loader.execute(
+                    "SELECT * FROM attempts WHERE attempt_id=?",
+                    (job.current_attempt_id,),
+                ).fetchone()
+                attempt = None if row is None else _attempt_from_row(row)
+                _validate_current_target_attempt(job_id=job_id, job=job, attempt=attempt)
+
+                worker_row = loader.execute(
+                    "SELECT * FROM workers WHERE worker_id=?", (attempt.worker_id,)
+                ).fetchone()
+                worker = None
+                if worker_row is not None:
+                    quota_rows = loader.execute(
+                        """
+                        SELECT q.*, a.job_id AS active_job_id
+                        FROM worker_quota_classes q
+                        LEFT JOIN attempts a ON a.attempt_id=q.held_attempt_id
+                        WHERE q.worker_id=? ORDER BY q.quota_class
+                        """,
+                        (attempt.worker_id,),
+                    ).fetchall()
+                    worker = _worker_from_rows(worker_row, quota_rows)
+                # Keep the exact held-slot selection separate from aggregate
+                # Worker availability, including its canonical normalization.
+                quota_row = loader.execute(
+                    """
+                    SELECT q.*, a.job_id AS active_job_id
+                    FROM worker_quota_classes q
+                    LEFT JOIN attempts a ON a.attempt_id=q.held_attempt_id
+                    WHERE q.worker_id=? AND q.quota_class=?
+                    """,
+                    (attempt.worker_id, str(attempt.quota_class).strip().lower()),
+                ).fetchone()
+                quota = None if quota_row is None else _quota_from_row(quota_row)
+                _validate_current_target_worker_quota(
+                    job_id=job_id, job=job, attempt=attempt, worker=worker, quota=quota)
+
+                # The original and current Attempt selectors are independent.
+                # Even equal IDs retain the second canonical lease-time check.
+                current_token = str(attempt.attempt_id or "").strip()
+                if not current_token:
+                    raise StateConflict("runtime binding source requires an attempt_id")
+                current_facts = _current_harness_binding_source_from_snapshot(
+                    self._store, loader, current_token)
+                current = _current_target_epoch_from_facts(
+                    job_id=job_id, identity=identity, job=job, attempt=attempt,
+                    quota=quota, harness=current_facts)
+
+                source = _dialogue_source_from_root_creation(
+                    loader, root_job_id=value["root_job_id"])
+                if type(source) is not ExecutiveDialogueSource:
+                    raise RuntimeReadUnavailable("original dialogue source unavailable")
+                # The complete existing scope counts every Event before the
+                # bridge filters Wake records. Never accept a truncated prefix.
+                # The shared 512-row loader may refuse before the legacy 1024
+                # history ceiling; that fixed budget is not increased here.
+                rows = loader.execute(
+                    "SELECT * FROM events WHERE job_id=? AND attempt_id=? "
+                    "ORDER BY event_id LIMIT 1025",
+                    (value["job_id"], value["attempt_id"]),
+                ).fetchall()
+                if len(rows) > 1024:
+                    raise RuntimeReadUnavailable("physical source evidence exceeds bound")
+                events = tuple(_event_from_row(row) for row in rows)
+                return event, value, original_facts, current, source, events
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("live writer VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
     def read_session_reply_references_bounded(
         self, *, work_ref: str, root_job_id: str | None,
         original_principals: tuple[tuple[str, ...], ...],
@@ -25176,6 +25305,528 @@ class BoundedRuntimeReadObservation:
         if self._receipt is None or self._failed:
             raise StateConflict("bounded observation receipt is not finalized")
         return self._receipt
+
+
+def _current_harness_binding_source_from_snapshot(
+    store: RuntimeStore,
+    connection: sqlite3.Connection | _BoundedRoleResultLoader,
+    token: str,
+) -> ActiveOperatorBindingFacts:
+    """Validate one admitted writer through the canonical snapshot reader.
+
+    Runtime owners call this private helper after snapshot custody checks or
+    through their existing private bounded loader. The store supplies the
+    original lease clock at its unchanged short-circuit validation point.
+    """
+
+    rows = connection.execute(
+        """
+            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
+                   j.status AS job_status,j.owner_seat,j.orchestration_role,
+                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
+                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
+                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
+                   j.requested_authorities_json AS job_requested_authorities_json,
+                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
+                   j.validation_commands_json AS job_validation_commands_json,
+                   j.authority_policy_hash AS job_authority_policy_hash,
+                   w.provider AS worker_provider,w.account_label AS worker_account_label,
+                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
+                   q.provider AS quota_provider,q.status AS quota_status,
+                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
+                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
+                   e.provider_session_id AS epoch_provider_session,
+                   g.process_generation_id,g.worker_id AS generation_worker,
+                   g.generation_number,g.provider_session_id AS generation_provider_session,
+                   g.pid AS generation_pid,g.pgid AS generation_pgid,
+                   g.process_start_identity AS generation_process_start_identity,
+                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
+                   g.observed_attestation_digest
+            FROM main.attempts a
+            JOIN main.jobs j ON j.job_id=a.job_id
+            JOIN main.workers w ON w.worker_id=a.worker_id
+            JOIN main.worker_quota_classes q
+              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
+            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
+              AND e.state='CURRENT'
+            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
+              AND g.executive_writer_held=1
+            WHERE a.attempt_id=?
+            """,
+        (token,),
+    ).fetchall()
+    cardinality = connection.execute(
+        """
+            SELECT
+              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
+              (SELECT COUNT(*) FROM main.harness_session_epochs
+                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
+              (SELECT COUNT(*) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
+              (SELECT MAX(g.generation_number) FROM main.process_generations g
+                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
+                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
+            """,
+        (token, token, token, token),
+    ).fetchone()
+    if len(rows) != 1 or cardinality is None:
+        raise StateConflict("runtime binding source cardinality is not exact")
+    row = rows[0]
+    accepted_statuses = {
+        AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
+        AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
+        AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
+    }
+    expected_job_status = accepted_statuses.get(str(row["status"]))
+    if (
+        int(cardinality["current_jobs"]) != 1
+        or int(cardinality["current_epochs"]) != 1
+        or int(cardinality["held_writers"]) != 1
+        or cardinality["current_epoch_max_generation"] is None
+        or row["job_current_attempt_id"] != token
+        or expected_job_status is None
+        or row["job_status"] != expected_job_status
+        or row["lease_token"] is None
+        or int(row["lease_expires_at_ms"]) <= store.now_ms()
+        or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
+        or row["orchestration_role"] not in _ORCHESTRATION_ROLES
+        or row["quota_worker_id"] != row["worker_id"]
+        or row["quota_quota_class"] != row["quota_class"]
+        or row["quota_provider"] != row["worker_provider"]
+        or row["quota_status"] != WorkerStatus.BUSY.value
+        or row["held_attempt_id"] != token
+        or int(row["quota_fence_counter"]) != int(row["fence_generation"])
+        or row["session_epoch_id"] is None
+        or row["process_generation_id"] is None
+        or row["epoch_state"] != SessionEpochState.CURRENT.value
+        or row["epoch_worker"] != row["worker_id"]
+        or row["generation_worker"] != row["worker_id"]
+        or not row["executive_writer_held"]
+        or row["ended_at_ms"] is not None
+        or not row["epoch_provider_session"]
+        or row["generation_provider_session"] != row["epoch_provider_session"]
+        or int(row["generation_number"])
+        != int(cardinality["current_epoch_max_generation"])
+        or not row["observed_attestation_digest"]
+    ):
+        raise StateConflict(
+            "runtime binding source is not one current actionable OHF writer"
+        )
+
+    try:
+        placement = _load_canonical_digest_pair(
+            row["placement_snapshot_json"],
+            row["placement_snapshot_digest"],
+            name="runtime binding placement snapshot",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding placement evidence is invalid: {exc}"
+        ) from exc
+    if (
+        not isinstance(placement, dict)
+        or placement.get("worker_id") != row["worker_id"]
+        or placement.get("quota_class") != row["quota_class"]
+        or placement.get("provider") != row["worker_provider"]
+        or placement.get("account_label") != row["worker_account_label"]
+    ):
+        raise StateConflict("runtime binding placement evidence drifted")
+
+    try:
+        grant = _load_canonical_digest_pair(
+            row["effective_grant_json"],
+            row["effective_grant_digest"],
+            name="runtime binding effective grant",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding effective grant evidence is invalid: {exc}"
+        ) from exc
+    try:
+        job_authorities = _strict_canonical_json_loads(
+            str(row["job_requested_authorities_json"]),
+            name="runtime binding Job requested authorities",
+        )
+        job_write_paths = _strict_canonical_json_loads(
+            str(row["job_allowed_write_paths_json"]),
+            name="runtime binding Job allowed write paths",
+        )
+        job_validation_argv = _strict_canonical_json_loads(
+            str(row["job_validation_commands_json"]),
+            name="runtime binding Job validation commands",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding effective grant Job evidence is invalid: {exc}"
+        ) from exc
+    grant_keys = {
+        "schema_version",
+        "authorities",
+        "write_paths",
+        "validation_argv",
+        "policy_sha",
+        "job_id",
+        "role",
+    }
+    if (
+        not isinstance(grant, dict)
+        or set(grant) != grant_keys
+        or grant.get("schema_version") != "mastermind.executive_effective_grant/v1"
+        or grant.get("job_id") != row["job_id"]
+        or grant.get("role") != row["orchestration_role"]
+        or grant.get("policy_sha") != row["authority_policy_hash"]
+        or row["job_authority_policy_hash"] != row["authority_policy_hash"]
+        or not _runtime_binding_ordered_unique_strings(
+            job_authorities, require_nonempty=True
+        )
+        or not _runtime_binding_ordered_unique_strings(
+            job_write_paths, require_nonempty=False
+        )
+        or not _runtime_binding_validation_argv(job_validation_argv)
+        or not _runtime_binding_ordered_unique_strings(
+            grant.get("authorities"), require_nonempty=True
+        )
+        or not _runtime_binding_ordered_unique_strings(
+            grant.get("write_paths"), require_nonempty=False
+        )
+        or not _runtime_binding_validation_argv(grant.get("validation_argv"))
+        or any(item not in job_authorities for item in grant["authorities"])
+        or any(item not in job_write_paths for item in grant["write_paths"])
+        or any(item not in job_validation_argv for item in grant["validation_argv"])
+    ):
+        raise StateConflict("runtime binding effective grant evidence drifted")
+    if row["orchestration_role"] in {"plan", "aggregation"} and (
+        grant["authorities"] != ["READ"]
+        or grant["write_paths"]
+        or grant["validation_argv"]
+    ):
+        raise StateConflict(
+            "runtime binding effective grant role semantics drifted"
+        )
+    if row["orchestration_role"] == "review" and (
+        grant["authorities"] != job_authorities
+        or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
+        or "READ" not in job_authorities
+        or job_write_paths
+        or grant["write_paths"]
+        or grant["validation_argv"] != job_validation_argv
+        or bool(grant["validation_argv"]) != ("RUN_TESTS" in grant["authorities"])
+    ):
+        raise StateConflict(
+            "runtime binding effective grant role semantics drifted"
+        )
+
+    creation_events = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='JOB_CREATED' AND job_id=?
+               ORDER BY event_id""",
+        (row["job_id"],),
+    ).fetchall()
+    if len(creation_events) != 1:
+        raise StateConflict("runtime binding Job creation cardinality is not exact")
+    creation_event = creation_events[0]
+    try:
+        job_role, job_provenance, job_provenance_digest = (
+            _decode_orchestration_job_fields(row)
+        )
+        creation_payload = _strict_canonical_json_loads(
+            str(creation_event["payload_json"]),
+            name="runtime binding JOB_CREATED payload",
+        )
+    except PersistenceError as exc:
+        raise StateConflict(
+            f"runtime binding Job creation evidence is invalid: {exc}"
+        ) from exc
+    expected_creation_actor = (
+        "operator" if job_role in {"aggregation", "plan"} else "coo"
+    )
+    if (
+        not isinstance(job_provenance, dict)
+        or not isinstance(creation_payload, dict)
+        or creation_event["sequence"] != 1
+        or creation_event["actor"] != expected_creation_actor
+        or creation_event["aggregate_type"] != "job"
+        or creation_event["aggregate_id"] != row["job_id"]
+        or creation_event["job_id"] != row["job_id"]
+        or creation_event["attempt_id"] is not None
+        or creation_event["worker_id"] is not None
+        or creation_event["quota_class"] is not None
+        or creation_event["command_id"] != job_provenance.get("command_id")
+        or not isinstance(creation_payload.get("owner_seat"), str)
+        or creation_payload.get("owner_seat") != row["owner_seat"]
+        or creation_payload.get("orchestration_role") != job_role
+        or creation_payload.get("orchestration_provenance_digest")
+        != job_provenance_digest
+    ):
+        raise StateConflict("runtime binding Job creation evidence drifted")
+
+    admissions = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+        (row["process_generation_id"],),
+    ).fetchall()
+    decisions = connection.execute(
+        """SELECT * FROM main.events
+               WHERE event_type='OHF_LAUNCH_DECISION'
+                 AND aggregate_type='process_generation' AND aggregate_id=?
+               ORDER BY event_id""",
+        (row["process_generation_id"],),
+    ).fetchall()
+    seals = connection.execute(
+        """SELECT 1 FROM main.events
+               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
+        (token,),
+    ).fetchall()
+    if seals:
+        retained_job = connection.execute(
+            "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
+        ).fetchone()
+        retained_attempt = connection.execute(
+            "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
+        ).fetchone()
+        if (len(seals) != 1 or retained_job is None or retained_attempt is None
+                or not _interactive_tx5_admitted(retained_job)
+                or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
+                != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
+            raise StateConflict("runtime binding source is not a retained native writer")
+        retained_seal = _validated_interactive_active_plan_seal(
+            connection, attempt_row=retained_attempt, job_row=retained_job)
+        if retained_seal["process_generation_id"] != row["process_generation_id"]:
+            raise StateConflict("runtime binding retained native generation changed")
+    if len(admissions) != 1 or len(decisions) != 1:
+        raise StateConflict(
+            "runtime binding source lacks one active work admission"
+        )
+    admission_event = admissions[0]
+    admission = _strict_canonical_json_loads(
+        str(admission_event["payload_json"]), name="runtime binding work admission"
+    )
+    decision = _strict_canonical_json_loads(
+        str(decisions[0]["payload_json"]), name="runtime binding launch decision"
+    )
+    admission_keys = {
+        "schema_version",
+        "job_id",
+        "attempt_id",
+        "worker_id",
+        "quota_class",
+        "orchestration_role",
+        "process_generation_id",
+        "provider_session_id",
+        "tx3_applied_command_id",
+        "observed_attestation_digest",
+        "principal_observation",
+        "principal_observation_digest",
+        "execution_principal_snapshot_digest",
+        "placement_snapshot_digest",
+        "effective_grant_digest",
+        "policy_sha",
+        "launch_decision",
+    }
+    immutable_digests = (
+        "observed_attestation_digest",
+        "principal_observation_digest",
+        "execution_principal_snapshot_digest",
+        "placement_snapshot_digest",
+        "effective_grant_digest",
+        "policy_sha",
+    )
+    decision_event = decisions[0]
+    tx3: sqlite3.Row | None = None
+    tx3_payload: Any = None
+    tx3_intent: sqlite3.Row | None = None
+    tx3_intent_payload: Any = None
+    expected_tx3_command_id: str | None = None
+    expected_tx3_applied: dict[str, Any] | None = None
+    expected_tx3_intent: dict[str, Any] | None = None
+    try:
+        generation_number = int(row["generation_number"])
+        if generation_number == 1:
+            expected_tx3_applied = {
+                "operation_kind": OperationKind.START_SESSION.value,
+                "provider_session_id": row["epoch_provider_session"],
+                "process_generation_id": row["process_generation_id"],
+            }
+            expected_tx3_intent = {
+                "schema_version": "mastermind.operator_harness_intent/v1",
+                "operation_kind": OperationKind.START_SESSION.value,
+                "attempt_id": token,
+                "session_epoch_id": row["session_epoch_id"],
+                "process_generation_id": row["process_generation_id"],
+                "worker_id": row["worker_id"],
+                "provider_session_id": None,
+            }
+        elif generation_number == 2:
+            expected_tx3_applied = {
+                "operation_kind": OperationKind.RESUME_SESSION.value,
+                "provider_session_id": row["epoch_provider_session"],
+                "process_generation_id": row["process_generation_id"],
+            }
+            expected_tx3_intent = {
+                "operation_kind": OperationKind.RESUME_SESSION.value,
+                "attempt_id": token,
+                "session_epoch_id": row["session_epoch_id"],
+                "process_generation_id": row["process_generation_id"],
+                "worker_id": row["worker_id"],
+                "provider_session_id": row["epoch_provider_session"],
+            }
+        from control_plane.native_desktop_parent import (
+            has_existing_parent, validated_enrollment_receipts,
+        )
+        if has_existing_parent(connection, token):
+            _, _, expected_tx3_intent, expected_tx3_applied = validated_enrollment_receipts(
+                connection, row, str(row["process_generation_id"]))
+        if expected_tx3_applied is not None and expected_tx3_intent is not None:
+            tx3_rows = connection.execute(
+                """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                (
+                    OperationReceiptKind.APPLIED.value,
+                    token,
+                    expected_tx3_applied["operation_kind"],
+                    row["process_generation_id"],
+                ),
+            ).fetchall()
+            tx3_intent_rows = connection.execute(
+                """SELECT * FROM main.events
+                       WHERE event_type=? AND attempt_id=?
+                         AND json_extract(payload_json,'$.operation_kind')=?
+                         AND json_extract(payload_json,'$.process_generation_id')=?
+                       ORDER BY event_id""",
+                (
+                    OperationReceiptKind.INTENT.value,
+                    token,
+                    expected_tx3_intent["operation_kind"],
+                    row["process_generation_id"],
+                ),
+            ).fetchall()
+            tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
+            tx3_intent = tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
+        if tx3 is not None and tx3_intent is not None:
+            tx3_payload = _strict_canonical_json_loads(
+                str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
+            )
+            operation_id = OperationId(str(tx3["aggregate_id"]))
+            expected_tx3_command_id = operation_receipt_command_id(
+                operation_id, OperationReceiptKind.APPLIED
+            )
+            tx3_intent_payload = _strict_canonical_json_loads(
+                str(tx3_intent["payload_json"]),
+                name="runtime binding TX-3 INTENT",
+            )
+    except (StateConflict, TypeError, ValueError) as exc:
+        raise StateConflict(
+            f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
+        ) from exc
+    if (
+        tx3 is None
+        or expected_tx3_applied is None
+        or expected_tx3_intent is None
+        or tx3["event_type"] != OperationReceiptKind.APPLIED.value
+        or tx3["command_id"] != expected_tx3_command_id
+        or tx3["command_id"] != admission.get("tx3_applied_command_id")
+        or tx3["actor"] != "supervisor"
+        or tx3["aggregate_type"] != "operator_operation"
+        or tx3["job_id"] != row["job_id"]
+        or tx3["attempt_id"] != token
+        or tx3["worker_id"] != row["worker_id"]
+        or tx3["quota_class"] != row["quota_class"]
+        or tx3_payload != expected_tx3_applied
+        or tx3_intent is None
+        or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
+        or tx3_intent["command_id"] != tx3["aggregate_id"]
+        or tx3_intent["actor"] != "supervisor"
+        or tx3_intent["aggregate_type"] != "operator_operation"
+        or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
+        or tx3_intent["job_id"] != row["job_id"]
+        or tx3_intent["attempt_id"] != token
+        or tx3_intent["worker_id"] != row["worker_id"]
+        or tx3_intent["quota_class"] != row["quota_class"]
+        or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
+        or int(tx3["event_id"]) >= int(decision_event["event_id"])
+        or int(decision_event["event_id"]) >= int(admission_event["event_id"])
+        or tx3_intent_payload != expected_tx3_intent
+    ):
+        raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
+    observation = _validated_admission_principal(row, admission)
+    if (
+        set(admission) != admission_keys
+        or admission_event["command_id"]
+        != f"ohf-work-admit:{row['process_generation_id']}"
+        or admission_event["actor"] != "supervisor"
+        or admission_event["aggregate_type"] != "process_generation"
+        or admission_event["aggregate_id"] != row["process_generation_id"]
+        or admission_event["job_id"] != row["job_id"]
+        or admission_event["attempt_id"] != token
+        or admission_event["worker_id"] != row["worker_id"]
+        or admission_event["quota_class"] != row["quota_class"]
+        or admission.get("schema_version")
+        != "mastermind.orchestration_work_admission/v1"
+        or admission.get("job_id") != row["job_id"]
+        or admission.get("attempt_id") != token
+        or admission.get("worker_id") != row["worker_id"]
+        or admission.get("quota_class") != row["quota_class"]
+        or admission.get("orchestration_role") != row["orchestration_role"]
+        or admission.get("process_generation_id") != row["process_generation_id"]
+        or admission.get("provider_session_id") != row["epoch_provider_session"]
+        or admission.get("observed_attestation_digest")
+        != row["observed_attestation_digest"]
+        or admission.get("placement_snapshot_digest")
+        != row["placement_snapshot_digest"]
+        or admission.get("effective_grant_digest") != row["effective_grant_digest"]
+        or any(
+            not isinstance(admission.get(field), str)
+            or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
+            for field in immutable_digests
+        )
+        or admission.get("launch_decision") != LaunchDecision.ALLOW.value
+        or decision_event["actor"] != "supervisor"
+        or decision_event["aggregate_type"] != "process_generation"
+        or decision_event["aggregate_id"] != row["process_generation_id"]
+        or decision_event["job_id"] != row["job_id"]
+        or decision_event["attempt_id"] != token
+        or decision_event["worker_id"] != row["worker_id"]
+        or decision_event["quota_class"] != row["quota_class"]
+        or decision
+        != {
+            "decision": LaunchDecision.ALLOW.value,
+            "attestation_digest": row["observed_attestation_digest"],
+        }
+        or observation["process_generation_id"] != row["process_generation_id"]
+        or observation["provider_session_id"] != row["epoch_provider_session"]
+        or base_process_identity(observation["process_identity"])
+        != {
+            "pid": row["generation_pid"],
+            "pgid": row["generation_pgid"],
+            "process_start_identity": row["generation_process_start_identity"],
+            "boot_id": row["generation_boot_id"],
+        }
+    ):
+        raise StateConflict("runtime binding admission evidence drifted")
+    return ActiveOperatorBindingFacts(
+        attempt_id=token,
+        session_epoch_id=str(row["session_epoch_id"]),
+        generation_number=int(row["generation_number"]),
+        provider_session_id=str(row["epoch_provider_session"]),
+        provider=str(placement["provider"]),
+        account_label=str(placement["account_label"]),
+        owner_seat=str(row["owner_seat"]),
+        job_id=str(row["job_id"]),
+        worker_id=str(row["worker_id"]),
+        process_generation_id=str(row["process_generation_id"]),
+        pid=int(row["generation_pid"]),
+        pgid=int(row["generation_pgid"]),
+        process_start_identity=str(row["generation_process_start_identity"]),
+        boot_id=str(row["generation_boot_id"]),
+        admitted_unique_id=observation["process_identity"].get("unique_id"),
+        admitted_pidversion=observation["process_identity"].get("pidversion"),
+    )
 
 
 @dataclasses.dataclass(frozen=True)
@@ -26067,513 +26718,8 @@ class Runtime:
                 )
         self.store._assert_owned_snapshot_connection(connection)
 
-        rows = connection.execute(
-            """
-            SELECT a.*,j.current_attempt_id AS job_current_attempt_id,
-                   j.status AS job_status,j.owner_seat,j.orchestration_role,
-                   j.parent_job_id,j.root_job_id,j.orchestration_provenance_json,
-                   j.orchestration_provenance_digest,j.plan_attempt_id,j.plan_digest,
-                   j.plan_step_id,j.repair_round,j.supersedes_job_id,
-                   j.requested_authorities_json AS job_requested_authorities_json,
-                   j.allowed_write_paths_json AS job_allowed_write_paths_json,
-                   j.validation_commands_json AS job_validation_commands_json,
-                   j.authority_policy_hash AS job_authority_policy_hash,
-                   w.provider AS worker_provider,w.account_label AS worker_account_label,
-                   q.worker_id AS quota_worker_id,q.quota_class AS quota_quota_class,
-                   q.provider AS quota_provider,q.status AS quota_status,
-                   q.held_attempt_id,q.fence_counter AS quota_fence_counter,
-                   e.session_epoch_id,e.worker_id AS epoch_worker,e.state AS epoch_state,
-                   e.provider_session_id AS epoch_provider_session,
-                   g.process_generation_id,g.worker_id AS generation_worker,
-                   g.generation_number,g.provider_session_id AS generation_provider_session,
-                   g.pid AS generation_pid,g.pgid AS generation_pgid,
-                   g.process_start_identity AS generation_process_start_identity,
-                   g.boot_id AS generation_boot_id,g.executive_writer_held,g.ended_at_ms,
-                   g.observed_attestation_digest
-            FROM main.attempts a
-            JOIN main.jobs j ON j.job_id=a.job_id
-            JOIN main.workers w ON w.worker_id=a.worker_id
-            JOIN main.worker_quota_classes q
-              ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class
-            LEFT JOIN main.harness_session_epochs e ON e.attempt_id=a.attempt_id
-              AND e.state='CURRENT'
-            LEFT JOIN main.process_generations g ON g.session_epoch_id=e.session_epoch_id
-              AND g.executive_writer_held=1
-            WHERE a.attempt_id=?
-            """,
-            (token,),
-        ).fetchall()
-        cardinality = connection.execute(
-            """
-            SELECT
-              (SELECT COUNT(*) FROM main.jobs WHERE current_attempt_id=?) AS current_jobs,
-              (SELECT COUNT(*) FROM main.harness_session_epochs
-                 WHERE attempt_id=? AND state='CURRENT') AS current_epochs,
-              (SELECT COUNT(*) FROM main.process_generations g
-                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
-                 WHERE e.attempt_id=? AND g.executive_writer_held=1) AS held_writers,
-              (SELECT MAX(g.generation_number) FROM main.process_generations g
-                 JOIN main.harness_session_epochs e ON e.session_epoch_id=g.session_epoch_id
-                 WHERE e.attempt_id=? AND e.state='CURRENT') AS current_epoch_max_generation
-            """,
-            (token, token, token, token),
-        ).fetchone()
-        if len(rows) != 1 or cardinality is None:
-            raise StateConflict("runtime binding source cardinality is not exact")
-        row = rows[0]
-        accepted_statuses = {
-            AttemptStatus.RUNNING.value: JobStatus.RUNNING.value,
-            AttemptStatus.CHECKPOINTED.value: JobStatus.CHECKPOINTED.value,
-            AttemptStatus.CANCEL_REQUESTED.value: JobStatus.CANCEL_REQUESTED.value,
-        }
-        expected_job_status = accepted_statuses.get(str(row["status"]))
-        if (
-            int(cardinality["current_jobs"]) != 1
-            or int(cardinality["current_epochs"]) != 1
-            or int(cardinality["held_writers"]) != 1
-            or cardinality["current_epoch_max_generation"] is None
-            or row["job_current_attempt_id"] != token
-            or expected_job_status is None
-            or row["job_status"] != expected_job_status
-            or row["lease_token"] is None
-            or int(row["lease_expires_at_ms"]) <= self.store.now_ms()
-            or row["execution_mode"] != AttemptExecutionMode.OPERATOR_HARNESS.value
-            or row["orchestration_role"] not in _ORCHESTRATION_ROLES
-            or row["quota_worker_id"] != row["worker_id"]
-            or row["quota_quota_class"] != row["quota_class"]
-            or row["quota_provider"] != row["worker_provider"]
-            or row["quota_status"] != WorkerStatus.BUSY.value
-            or row["held_attempt_id"] != token
-            or int(row["quota_fence_counter"]) != int(row["fence_generation"])
-            or row["session_epoch_id"] is None
-            or row["process_generation_id"] is None
-            or row["epoch_state"] != SessionEpochState.CURRENT.value
-            or row["epoch_worker"] != row["worker_id"]
-            or row["generation_worker"] != row["worker_id"]
-            or not row["executive_writer_held"]
-            or row["ended_at_ms"] is not None
-            or not row["epoch_provider_session"]
-            or row["generation_provider_session"] != row["epoch_provider_session"]
-            or int(row["generation_number"])
-            != int(cardinality["current_epoch_max_generation"])
-            or not row["observed_attestation_digest"]
-        ):
-            raise StateConflict(
-                "runtime binding source is not one current actionable OHF writer"
-            )
-
-        try:
-            placement = _load_canonical_digest_pair(
-                row["placement_snapshot_json"],
-                row["placement_snapshot_digest"],
-                name="runtime binding placement snapshot",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding placement evidence is invalid: {exc}"
-            ) from exc
-        if (
-            not isinstance(placement, dict)
-            or placement.get("worker_id") != row["worker_id"]
-            or placement.get("quota_class") != row["quota_class"]
-            or placement.get("provider") != row["worker_provider"]
-            or placement.get("account_label") != row["worker_account_label"]
-        ):
-            raise StateConflict("runtime binding placement evidence drifted")
-
-        try:
-            grant = _load_canonical_digest_pair(
-                row["effective_grant_json"],
-                row["effective_grant_digest"],
-                name="runtime binding effective grant",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding effective grant evidence is invalid: {exc}"
-            ) from exc
-        try:
-            job_authorities = _strict_canonical_json_loads(
-                str(row["job_requested_authorities_json"]),
-                name="runtime binding Job requested authorities",
-            )
-            job_write_paths = _strict_canonical_json_loads(
-                str(row["job_allowed_write_paths_json"]),
-                name="runtime binding Job allowed write paths",
-            )
-            job_validation_argv = _strict_canonical_json_loads(
-                str(row["job_validation_commands_json"]),
-                name="runtime binding Job validation commands",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding effective grant Job evidence is invalid: {exc}"
-            ) from exc
-        grant_keys = {
-            "schema_version",
-            "authorities",
-            "write_paths",
-            "validation_argv",
-            "policy_sha",
-            "job_id",
-            "role",
-        }
-        if (
-            not isinstance(grant, dict)
-            or set(grant) != grant_keys
-            or grant.get("schema_version") != "mastermind.executive_effective_grant/v1"
-            or grant.get("job_id") != row["job_id"]
-            or grant.get("role") != row["orchestration_role"]
-            or grant.get("policy_sha") != row["authority_policy_hash"]
-            or row["job_authority_policy_hash"] != row["authority_policy_hash"]
-            or not _runtime_binding_ordered_unique_strings(
-                job_authorities, require_nonempty=True
-            )
-            or not _runtime_binding_ordered_unique_strings(
-                job_write_paths, require_nonempty=False
-            )
-            or not _runtime_binding_validation_argv(job_validation_argv)
-            or not _runtime_binding_ordered_unique_strings(
-                grant.get("authorities"), require_nonempty=True
-            )
-            or not _runtime_binding_ordered_unique_strings(
-                grant.get("write_paths"), require_nonempty=False
-            )
-            or not _runtime_binding_validation_argv(grant.get("validation_argv"))
-            or any(item not in job_authorities for item in grant["authorities"])
-            or any(item not in job_write_paths for item in grant["write_paths"])
-            or any(item not in job_validation_argv for item in grant["validation_argv"])
-        ):
-            raise StateConflict("runtime binding effective grant evidence drifted")
-        if row["orchestration_role"] in {"plan", "aggregation"} and (
-            grant["authorities"] != ["READ"]
-            or grant["write_paths"]
-            or grant["validation_argv"]
-        ):
-            raise StateConflict(
-                "runtime binding effective grant role semantics drifted"
-            )
-        if row["orchestration_role"] == "review" and (
-            grant["authorities"] != job_authorities
-            or any(item not in {"READ", "RUN_TESTS"} for item in job_authorities)
-            or "READ" not in job_authorities
-            or job_write_paths
-            or grant["write_paths"]
-            or grant["validation_argv"] != job_validation_argv
-            or bool(grant["validation_argv"]) != ("RUN_TESTS" in grant["authorities"])
-        ):
-            raise StateConflict(
-                "runtime binding effective grant role semantics drifted"
-            )
-
-        creation_events = connection.execute(
-            """SELECT * FROM main.events
-               WHERE event_type='JOB_CREATED' AND job_id=?
-               ORDER BY event_id""",
-            (row["job_id"],),
-        ).fetchall()
-        if len(creation_events) != 1:
-            raise StateConflict("runtime binding Job creation cardinality is not exact")
-        creation_event = creation_events[0]
-        try:
-            job_role, job_provenance, job_provenance_digest = (
-                _decode_orchestration_job_fields(row)
-            )
-            creation_payload = _strict_canonical_json_loads(
-                str(creation_event["payload_json"]),
-                name="runtime binding JOB_CREATED payload",
-            )
-        except PersistenceError as exc:
-            raise StateConflict(
-                f"runtime binding Job creation evidence is invalid: {exc}"
-            ) from exc
-        expected_creation_actor = (
-            "operator" if job_role in {"aggregation", "plan"} else "coo"
-        )
-        if (
-            not isinstance(job_provenance, dict)
-            or not isinstance(creation_payload, dict)
-            or creation_event["sequence"] != 1
-            or creation_event["actor"] != expected_creation_actor
-            or creation_event["aggregate_type"] != "job"
-            or creation_event["aggregate_id"] != row["job_id"]
-            or creation_event["job_id"] != row["job_id"]
-            or creation_event["attempt_id"] is not None
-            or creation_event["worker_id"] is not None
-            or creation_event["quota_class"] is not None
-            or creation_event["command_id"] != job_provenance.get("command_id")
-            or not isinstance(creation_payload.get("owner_seat"), str)
-            or creation_payload.get("owner_seat") != row["owner_seat"]
-            or creation_payload.get("orchestration_role") != job_role
-            or creation_payload.get("orchestration_provenance_digest")
-            != job_provenance_digest
-        ):
-            raise StateConflict("runtime binding Job creation evidence drifted")
-
-        admissions = connection.execute(
-            """SELECT * FROM main.events
-               WHERE event_type='ORCHESTRATION_WORK_ADMITTED'
-                 AND aggregate_type='process_generation' AND aggregate_id=?
-               ORDER BY event_id""",
-            (row["process_generation_id"],),
-        ).fetchall()
-        decisions = connection.execute(
-            """SELECT * FROM main.events
-               WHERE event_type='OHF_LAUNCH_DECISION'
-                 AND aggregate_type='process_generation' AND aggregate_id=?
-               ORDER BY event_id""",
-            (row["process_generation_id"],),
-        ).fetchall()
-        seals = connection.execute(
-            """SELECT 1 FROM main.events
-               WHERE event_type='ORCHESTRATION_ROLE_RESULT_SEALED' AND attempt_id=?""",
-            (token,),
-        ).fetchall()
-        if seals:
-            retained_job = connection.execute(
-                "SELECT * FROM main.jobs WHERE job_id=?", (row["job_id"],)
-            ).fetchone()
-            retained_attempt = connection.execute(
-                "SELECT * FROM main.attempts WHERE attempt_id=?", (token,)
-            ).fetchone()
-            if (len(seals) != 1 or retained_job is None or retained_attempt is None
-                    or not _interactive_tx5_admitted(retained_job)
-                    or _json_loads(retained_job["constraints_json"], fallback={}).get("execution_profile_id")
-                    != NATIVE_RETURN_TX5_EXECUTION_PROFILE):
-                raise StateConflict("runtime binding source is not a retained native writer")
-            retained_seal = _validated_interactive_active_plan_seal(
-                connection, attempt_row=retained_attempt, job_row=retained_job)
-            if retained_seal["process_generation_id"] != row["process_generation_id"]:
-                raise StateConflict("runtime binding retained native generation changed")
-        if len(admissions) != 1 or len(decisions) != 1:
-            raise StateConflict(
-                "runtime binding source lacks one active work admission"
-            )
-        admission_event = admissions[0]
-        admission = _strict_canonical_json_loads(
-            str(admission_event["payload_json"]), name="runtime binding work admission"
-        )
-        decision = _strict_canonical_json_loads(
-            str(decisions[0]["payload_json"]), name="runtime binding launch decision"
-        )
-        admission_keys = {
-            "schema_version",
-            "job_id",
-            "attempt_id",
-            "worker_id",
-            "quota_class",
-            "orchestration_role",
-            "process_generation_id",
-            "provider_session_id",
-            "tx3_applied_command_id",
-            "observed_attestation_digest",
-            "principal_observation",
-            "principal_observation_digest",
-            "execution_principal_snapshot_digest",
-            "placement_snapshot_digest",
-            "effective_grant_digest",
-            "policy_sha",
-            "launch_decision",
-        }
-        immutable_digests = (
-            "observed_attestation_digest",
-            "principal_observation_digest",
-            "execution_principal_snapshot_digest",
-            "placement_snapshot_digest",
-            "effective_grant_digest",
-            "policy_sha",
-        )
-        decision_event = decisions[0]
-        tx3: sqlite3.Row | None = None
-        tx3_payload: Any = None
-        tx3_intent: sqlite3.Row | None = None
-        tx3_intent_payload: Any = None
-        expected_tx3_command_id: str | None = None
-        expected_tx3_applied: dict[str, Any] | None = None
-        expected_tx3_intent: dict[str, Any] | None = None
-        try:
-            generation_number = int(row["generation_number"])
-            if generation_number == 1:
-                expected_tx3_applied = {
-                    "operation_kind": OperationKind.START_SESSION.value,
-                    "provider_session_id": row["epoch_provider_session"],
-                    "process_generation_id": row["process_generation_id"],
-                }
-                expected_tx3_intent = {
-                    "schema_version": "mastermind.operator_harness_intent/v1",
-                    "operation_kind": OperationKind.START_SESSION.value,
-                    "attempt_id": token,
-                    "session_epoch_id": row["session_epoch_id"],
-                    "process_generation_id": row["process_generation_id"],
-                    "worker_id": row["worker_id"],
-                    "provider_session_id": None,
-                }
-            elif generation_number == 2:
-                expected_tx3_applied = {
-                    "operation_kind": OperationKind.RESUME_SESSION.value,
-                    "provider_session_id": row["epoch_provider_session"],
-                    "process_generation_id": row["process_generation_id"],
-                }
-                expected_tx3_intent = {
-                    "operation_kind": OperationKind.RESUME_SESSION.value,
-                    "attempt_id": token,
-                    "session_epoch_id": row["session_epoch_id"],
-                    "process_generation_id": row["process_generation_id"],
-                    "worker_id": row["worker_id"],
-                    "provider_session_id": row["epoch_provider_session"],
-                }
-            from control_plane.native_desktop_parent import (
-                has_existing_parent, validated_enrollment_receipts,
-            )
-            if has_existing_parent(connection, token):
-                _, _, expected_tx3_intent, expected_tx3_applied = validated_enrollment_receipts(
-                    connection, row, str(row["process_generation_id"]))
-            if expected_tx3_applied is not None and expected_tx3_intent is not None:
-                tx3_rows = connection.execute(
-                    """SELECT * FROM main.events
-                       WHERE event_type=? AND attempt_id=?
-                         AND json_extract(payload_json,'$.operation_kind')=?
-                         AND json_extract(payload_json,'$.process_generation_id')=?
-                       ORDER BY event_id""",
-                    (
-                        OperationReceiptKind.APPLIED.value,
-                        token,
-                        expected_tx3_applied["operation_kind"],
-                        row["process_generation_id"],
-                    ),
-                ).fetchall()
-                tx3_intent_rows = connection.execute(
-                    """SELECT * FROM main.events
-                       WHERE event_type=? AND attempt_id=?
-                         AND json_extract(payload_json,'$.operation_kind')=?
-                         AND json_extract(payload_json,'$.process_generation_id')=?
-                       ORDER BY event_id""",
-                    (
-                        OperationReceiptKind.INTENT.value,
-                        token,
-                        expected_tx3_intent["operation_kind"],
-                        row["process_generation_id"],
-                    ),
-                ).fetchall()
-                tx3 = tx3_rows[0] if len(tx3_rows) == 1 else None
-                tx3_intent = tx3_intent_rows[0] if len(tx3_intent_rows) == 1 else None
-            if tx3 is not None and tx3_intent is not None:
-                tx3_payload = _strict_canonical_json_loads(
-                    str(tx3["payload_json"]), name="runtime binding TX-3 APPLIED"
-                )
-                operation_id = OperationId(str(tx3["aggregate_id"]))
-                expected_tx3_command_id = operation_receipt_command_id(
-                    operation_id, OperationReceiptKind.APPLIED
-                )
-                tx3_intent_payload = _strict_canonical_json_loads(
-                    str(tx3_intent["payload_json"]),
-                    name="runtime binding TX-3 INTENT",
-                )
-        except (StateConflict, TypeError, ValueError) as exc:
-            raise StateConflict(
-                f"runtime binding TX-3/TX-11 evidence is invalid: {exc}"
-            ) from exc
-        if (
-            tx3 is None
-            or expected_tx3_applied is None
-            or expected_tx3_intent is None
-            or tx3["event_type"] != OperationReceiptKind.APPLIED.value
-            or tx3["command_id"] != expected_tx3_command_id
-            or tx3["command_id"] != admission.get("tx3_applied_command_id")
-            or tx3["actor"] != "supervisor"
-            or tx3["aggregate_type"] != "operator_operation"
-            or tx3["job_id"] != row["job_id"]
-            or tx3["attempt_id"] != token
-            or tx3["worker_id"] != row["worker_id"]
-            or tx3["quota_class"] != row["quota_class"]
-            or tx3_payload != expected_tx3_applied
-            or tx3_intent is None
-            or tx3_intent["event_type"] != OperationReceiptKind.INTENT.value
-            or tx3_intent["command_id"] != tx3["aggregate_id"]
-            or tx3_intent["actor"] != "supervisor"
-            or tx3_intent["aggregate_type"] != "operator_operation"
-            or tx3_intent["aggregate_id"] != tx3["aggregate_id"]
-            or tx3_intent["job_id"] != row["job_id"]
-            or tx3_intent["attempt_id"] != token
-            or tx3_intent["worker_id"] != row["worker_id"]
-            or tx3_intent["quota_class"] != row["quota_class"]
-            or int(tx3_intent["event_id"]) >= int(tx3["event_id"])
-            or int(tx3["event_id"]) >= int(decision_event["event_id"])
-            or int(decision_event["event_id"]) >= int(admission_event["event_id"])
-            or tx3_intent_payload != expected_tx3_intent
-        ):
-            raise StateConflict("runtime binding TX-3/TX-11 evidence drifted")
-        observation = _validated_admission_principal(row, admission)
-        if (
-            set(admission) != admission_keys
-            or admission_event["command_id"]
-            != f"ohf-work-admit:{row['process_generation_id']}"
-            or admission_event["actor"] != "supervisor"
-            or admission_event["aggregate_type"] != "process_generation"
-            or admission_event["aggregate_id"] != row["process_generation_id"]
-            or admission_event["job_id"] != row["job_id"]
-            or admission_event["attempt_id"] != token
-            or admission_event["worker_id"] != row["worker_id"]
-            or admission_event["quota_class"] != row["quota_class"]
-            or admission.get("schema_version")
-            != "mastermind.orchestration_work_admission/v1"
-            or admission.get("job_id") != row["job_id"]
-            or admission.get("attempt_id") != token
-            or admission.get("worker_id") != row["worker_id"]
-            or admission.get("quota_class") != row["quota_class"]
-            or admission.get("orchestration_role") != row["orchestration_role"]
-            or admission.get("process_generation_id") != row["process_generation_id"]
-            or admission.get("provider_session_id") != row["epoch_provider_session"]
-            or admission.get("observed_attestation_digest")
-            != row["observed_attestation_digest"]
-            or admission.get("placement_snapshot_digest")
-            != row["placement_snapshot_digest"]
-            or admission.get("effective_grant_digest") != row["effective_grant_digest"]
-            or any(
-                not isinstance(admission.get(field), str)
-                or re.fullmatch(r"[0-9a-f]{64}", str(admission.get(field))) is None
-                for field in immutable_digests
-            )
-            or admission.get("launch_decision") != LaunchDecision.ALLOW.value
-            or decision_event["actor"] != "supervisor"
-            or decision_event["aggregate_type"] != "process_generation"
-            or decision_event["aggregate_id"] != row["process_generation_id"]
-            or decision_event["job_id"] != row["job_id"]
-            or decision_event["attempt_id"] != token
-            or decision_event["worker_id"] != row["worker_id"]
-            or decision_event["quota_class"] != row["quota_class"]
-            or decision
-            != {
-                "decision": LaunchDecision.ALLOW.value,
-                "attestation_digest": row["observed_attestation_digest"],
-            }
-            or observation["process_generation_id"] != row["process_generation_id"]
-            or observation["provider_session_id"] != row["epoch_provider_session"]
-            or base_process_identity(observation["process_identity"])
-            != {
-                "pid": row["generation_pid"],
-                "pgid": row["generation_pgid"],
-                "process_start_identity": row["generation_process_start_identity"],
-                "boot_id": row["generation_boot_id"],
-            }
-        ):
-            raise StateConflict("runtime binding admission evidence drifted")
-        return ActiveOperatorBindingFacts(
-            attempt_id=token,
-            session_epoch_id=str(row["session_epoch_id"]),
-            generation_number=int(row["generation_number"]),
-            provider_session_id=str(row["epoch_provider_session"]),
-            provider=str(placement["provider"]),
-            account_label=str(placement["account_label"]),
-            owner_seat=str(row["owner_seat"]),
-            job_id=str(row["job_id"]),
-            worker_id=str(row["worker_id"]),
-            process_generation_id=str(row["process_generation_id"]),
-            pid=int(row["generation_pid"]),
-            pgid=int(row["generation_pgid"]),
-            process_start_identity=str(row["generation_process_start_identity"]),
-            boot_id=str(row["generation_boot_id"]),
-            admitted_unique_id=observation["process_identity"].get("unique_id"),
-            admitted_pidversion=observation["process_identity"].get("pidversion"),
+        return _current_harness_binding_source_from_snapshot(
+            self.store, connection, token
         )
 
 

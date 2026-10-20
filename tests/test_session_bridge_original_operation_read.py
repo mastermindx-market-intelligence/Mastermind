@@ -1383,3 +1383,415 @@ def test_exact_read_never_releases_failed_close_or_final_receipt(
         _assert_exact_read_closed(trace, finalized=fail_at - 1)
     assert [call['operation'] for call in s.service.calls] == ['read_thread'] * dialogue_reads
     assert events(s) == before
+
+
+# These integration fixtures use canonically admitted temporary Runtime/OHF
+# records. The older setup fixture above remains a unit material-source fixture.
+# No provider, installed grant, native COMMIT admission or live return is claimed.
+def _live_original_reply_fixture(tmp_path, monkeypatch):
+    import hashlib
+    import time
+    from types import SimpleNamespace
+
+    from integrations.business_mcp_auth.contracts import VerifiedPrincipal
+    from integrations.session_bridge import runtime_return as bridge
+    from integrations.session_bridge.runtime_owner import (
+        RuntimeFabricTargetProjector, RuntimeCodexTargetProjector,
+    )
+    from test_session_bridge_runtime_return import NATIVE, Service
+    from tests import test_company_inbox_iac1 as fixtures
+    from tests.test_company_consultation_target_resolution import _seed
+
+    workers, profile = fixtures._workers, fixtures._profile_per_attempt
+    sessions = {
+        'thread-recipient-0': NATIVE,
+        'thread-recipient-1': 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
+    }
+
+    def native_work_input(runtime, dispatch, provider_session):
+        # Only inert provider input changes. The original fixture still owns
+        # canonical seal/start/bind/attestation; its planner receipt is unchanged.
+        return profile(runtime, dispatch, sessions.get(provider_session, provider_session))
+
+    with monkeypatch.context() as fixture_patch:
+        fixture_patch.setattr(fixtures, '_profile_per_attempt', native_work_input)
+        fixture_patch.setattr(fixtures, '_workers',
+                              lambda runtime: workers(runtime, extra_available_quota=True))
+        seeded = _seed(tmp_path, fixture_patch)
+    runtime = seeded.runtime
+    fabric = RuntimeFabricTargetProjector(runtime)
+    actual = [target for target in fabric.list_targets()
+              if target.epoch.attempt_id == seeded.a[1]]
+    assert len(actual) == 1
+    target = actual[0]
+    enabled = [True]
+    codex = RuntimeCodexTargetProjector(fabric, owner_configured=lambda: enabled[0])
+    binding = codex.resolve('codex:' + target.target_ref.removeprefix('fabric_attempt:')).reply_binding()
+    facts = runtime.current_harness_binding_source(seeded.a[1])
+    assert facts.provider_session_id == NATIVE
+    assert (facts.job_id, facts.attempt_id, facts.worker_id) == seeded.a[:3]
+    worker = runtime.workers.get_worker(facts.worker_id)
+    assert worker.status is er.WorkerStatus.AVAILABLE
+    held_quota = runtime.attempts.get_attempt(facts.attempt_id).quota_class
+    spare = [name for name in worker.quota_classes if name != held_quota]
+    assert len(spare) == 1
+    quota = runtime.workers.get_quota_class(facts.worker_id, held_quota)
+    assert quota.status is er.WorkerStatus.BUSY and quota.active_attempt_id == facts.attempt_id
+    service = Service()
+    owner = bridge.RuntimeSessionReturn(runtime, fabric=fabric, codex=codex,
+        socket_path=Path('/private/tmp/live-original-reply-fixture.sock'), service_call=service)
+    now = int(time.time())
+    principal = VerifiedPrincipal(policy_id='test', issuer='https://auth.test/',
+        issuer_digest=hashlib.sha256(b'https://auth.test/').hexdigest(),
+        resource='https://executive.test/mcp', subject_digest='2' * 64,
+        client_ref='3' * 64, scopes=(READ_SCOPE, SUBMIT_SCOPE),
+        issued_at=now - 10, expires_at=now + 3600, jti_digest=None)
+    state = SimpleNamespace(runtime=runtime, owner=owner, binding=binding,
+        principal=principal, projection=principal_projection(principal),
+        args={'target_ref': binding.target_ref,
+              'operation_key': binding.continuation_operation_key,
+              'instruction': 'Read and return the bounded finding.',
+              'stop_condition': 'Return one finding.'},
+        facts=facts, epoch=target.epoch, target=target, seeded=seeded,
+        held_quota=held_quota, spare_quota=spare[0],
+        service=service, enabled=enabled)
+    state.read_ref = populate(state)
+    request, value = owner._stored_request(state.read_ref)
+    assert runtime.store.get_event_by_command_id(bridge._COMMIT_PREFIX + request.aggregate_id) is None
+    assert runtime.store.get_event_by_command_id(bridge._NATIVE_COMMIT_PREFIX + request.aggregate_id) is None
+    aggregate = runtime.store.bounded_aggregate_events(request.aggregate_type, request.aggregate_id)
+    assert owner._native_commit_admission(request, aggregate) is None
+    assert value['generation'] == bridge._generation(facts)
+    assert value['epoch'] == bridge._epoch(target.epoch)
+    state.request_event, state.request_value = request, value
+    service.calls.clear()
+    return state
+
+
+def _capture_live_read_ownership(monkeypatch):
+    trace = _capture_exact_read_ownership(monkeypatch)
+    trace['live_results'] = []
+    selection = getattr(er.BoundedRuntimeReadObservation, 'read_session_live_writer_bounded', None)
+    if selection is not None:
+        def selected(self, *, read_ref):
+            trace['selections'].append(('live', self))
+            result = selection(self, read_ref=read_ref)
+            trace['live_results'].append(result)
+            return result
+        monkeypatch.setattr(er.BoundedRuntimeReadObservation,
+                            'read_session_live_writer_bounded', selected)
+    return trace
+
+
+def _live_limits(monkeypatch, *, fail_at=1, **limits):
+    """Lower only the actual live acquisition budget, never fake its result."""
+    entered = []
+    selection = getattr(er.BoundedRuntimeReadObservation, 'read_session_live_writer_bounded', None)
+    if selection is not None:
+        def selected(self, *, read_ref):
+            entered.append(self)
+            with monkeypatch.context() as budget:
+                if len(entered) >= fail_at:
+                    for name, value in limits.items():
+                        if name == 'BOUNDED_ROLE_RESULT_MAX_VM_STEPS':
+                            # This real guard already exists when selection
+                            # starts; its constructor's default was captured at
+                            # definition time. Lower this owned inactive guard,
+                            # then let actual SQLite instructions trip it.
+                            assert not self._vm_progress._active
+                            budget.setattr(self._vm_progress, '_limit', value)
+                        else:
+                            budget.setattr(er, name, value)
+                return selection(self, read_ref=read_ref)
+        monkeypatch.setattr(er.BoundedRuntimeReadObservation,
+                            'read_session_live_writer_bounded', selected)
+    return entered
+
+
+def _live_metadata(s, *, worker_text='', quota_text=''):
+    import json
+    worker_json = json.dumps({'fixture_material': worker_text}, sort_keys=True, separators=(',', ':'))
+    quota_json = json.dumps({'fixture_material': quota_text}, sort_keys=True, separators=(',', ':'))
+    with s.runtime.store.transaction() as connection:
+        assert connection.execute('UPDATE main.workers SET metadata_json=? WHERE worker_id=?',
+            (worker_json, s.facts.worker_id)).rowcount == 1
+        assert connection.execute(
+            'UPDATE main.worker_quota_classes SET metadata_json=? WHERE worker_id=? AND quota_class=?',
+            (quota_json, s.facts.worker_id, s.spare_quota)).rowcount == 1
+    return len(worker_json.encode()), len(quota_json.encode())
+
+
+def _append_live_history(s, *, count=1, actor='fixture'):
+    with s.runtime.store.transaction() as connection:
+        for index in range(count):
+            s.runtime.store.append_event(connection,
+                aggregate_type='fixture_live_history', aggregate_id=s.facts.attempt_id,
+                event_type='FIXTURE_LIVE_NOTE', actor=actor, job_id=s.facts.job_id,
+                attempt_id=s.facts.attempt_id, worker_id=s.facts.worker_id,
+                quota_class=s.held_quota, command_id=f'fixture-live-note:{s.facts.attempt_id}:{index}',
+                payload={'fixture_note': True})
+        return {row[0] for row in connection.execute(
+            "SELECT event_id FROM main.events WHERE aggregate_type='fixture_live_history' AND aggregate_id=?",
+            (s.facts.attempt_id,)).fetchall()}
+
+
+@pytest.mark.parametrize('entry', ['read_ref', 'operation_key'])
+def test_live_original_reply_uses_actual_admitted_sources_and_closed_observations(
+        tmp_path, monkeypatch, entry):
+    from integrations.session_bridge import runtime_return as bridge
+
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    # A valid non-Wake Event belongs to the complete evidence set too.
+    added = _append_live_history(s)
+    before = events(s)
+    callbacks = []
+    with monkeypatch.context() as patch:
+        trace = _capture_live_read_ownership(patch)
+        patch.setattr(s.runtime.store, 'transaction',
+                      lambda *a, **k: pytest.fail('READ must not acquire a mutation transaction'))
+        def before_dialogue():
+            _assert_exact_read_closed(trace)
+            callbacks.append(len(trace['observations']))
+        s.service.on_read = before_dialogue
+        result = _call_exact_read_public(s, s.read_ref, entry)
+        assert result['ok'] is True and result['data']['text'] == 'The bounded finding is confirmed.'
+        assert result['data']['reply_committed'] is True and result['data']['parent_consumed'] is False
+        expected = ['reply', 'live'] * 4
+        if entry == 'operation_key':
+            expected = ['original', *expected, 'original']
+        assert [kind for kind, _ in trace['selections']] == expected
+        assert callbacks == ([2, 4, 6] if entry == 'read_ref' else [3, 5, 7])
+        assert len(trace['live_results']) == 4
+        for request, value, facts, current, source, scoped in trace['live_results']:
+            assert request.to_dict() == s.request_event.to_dict() and value == s.request_value
+            assert facts == s.facts and bridge._epoch(current) == bridge._epoch(s.epoch)
+            assert source.work_ref == s.target.source.work_ref
+            assert added.issubset({event.event_id for event in scoped})
+            assert all((event.job_id, event.attempt_id) == (s.facts.job_id, s.facts.attempt_id)
+                       for event in scoped)
+        _assert_exact_read_closed(trace)
+    s.service.on_read = None
+    assert [call['operation'] for call in s.service.calls] == ['read_thread'] * 3
+    assert events(s) == before
+
+
+def _change_live_source(s, fault):
+    if fault == 'malformed-wake':
+        with s.runtime.store.transaction() as connection:
+            s.runtime.store.append_event(connection,
+                aggregate_type='wake_ledger', aggregate_id='fixture-malformed-' + s.facts.attempt_id,
+                event_type='WAKE_REQUESTED', actor='fixture', job_id=s.facts.job_id,
+                attempt_id=s.facts.attempt_id, worker_id=s.facts.worker_id,
+                command_id='fixture-malformed-wake:' + s.facts.attempt_id,
+                payload={'physical_source': {'operation_key': s.target.operation_key}})
+        return
+    if fault == 'conflicting-wake':
+        from tests.test_company_consultation_target_resolution import _physical, THREAD_B
+        _physical(s.seeded, s.seeded.a, THREAD_B, 'asd-live-conflicting-0001')
+        return
+    with s.runtime.store.transaction() as connection:
+        if fault == 'lease':
+            changed = connection.execute('UPDATE main.attempts SET lease_expires_at_ms=0 WHERE attempt_id=?',
+                                         (s.facts.attempt_id,))
+        elif fault == 'worker-offline':
+            changed = connection.execute("UPDATE main.workers SET identity_status='OFFLINE' WHERE worker_id=?",
+                                         (s.facts.worker_id,))
+        else:
+            assert fault == 'other-quota'
+            # The schema admits this finite INTEGER, but canonical quota
+            # conversion cannot represent year 10000 as a Python datetime.
+            # Only the spare class changes; the held slot/harness stay valid.
+            changed = connection.execute(
+                'UPDATE main.worker_quota_classes SET last_seen_at_ms=253402300800000 '
+                'WHERE worker_id=? AND quota_class=?', (s.facts.worker_id, s.spare_quota))
+        assert changed.rowcount == 1
+
+
+@pytest.mark.parametrize('fault', [
+    'lease', 'worker-offline', 'other-quota', 'malformed-wake', 'conflicting-wake',
+])
+@pytest.mark.parametrize('when', ['before', 'after-dialogue'])
+def test_live_original_reply_revalidates_canonical_sources_before_and_after_dialogue(
+        tmp_path, monkeypatch, fault, when):
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    expected_events = [events(s)]
+    if when == 'before':
+        _change_live_source(s, fault)
+        expected_events[0] = events(s)
+    connect = sqlite3.connect
+    callbacks = []
+    with monkeypatch.context() as patch:
+        trace = _capture_live_read_ownership(patch)
+        def before_dialogue():
+            _assert_exact_read_closed(trace)
+            callbacks.append(len(trace['observations']))
+            assert callbacks == [2]
+            # Explicit test-owned concurrent fixture mutation is outside READ's
+            # acquisition trace, after its actual connection was closed.
+            with patch.context() as fixture_change:
+                fixture_change.setattr(sqlite3, 'connect', connect)
+                _change_live_source(s, fault)
+                expected_events[0] = events(s)
+        if when == 'after-dialogue':
+            s.service.on_read = before_dialogue
+        _expect_exact_read_unavailable(s, s.read_ref, 'read_ref')
+        assert callbacks == ([] if when == 'before' else [2])
+        # SQL acquisition may return facts which the pure owner subsequently
+        # refuses; those successfully closed observations still have receipts.
+        assert [kind for kind, _ in trace['selections']] == ['reply', 'live'] * (1 if when == 'before' else 2)
+        finalized = 0
+        for observation in trace['observations']:
+            try:
+                _ = observation.receipt
+                finalized += 1
+            except er.StateConflict:
+                break
+        assert finalized in {len(trace['observations']), len(trace['observations']) - 1}
+        _assert_exact_read_closed(trace, finalized=finalized)
+    s.service.on_read = None
+    # Provenance-only reference recovery must not inherit live target gates.
+    assert _call_exact_read_public(s, s.read_ref, 'reference') == s.read_ref
+    if fault in {'worker-offline', 'other-quota'}:
+        # The original admitted harness alone remains valid. Current target
+        # reconstruction must independently qualify Worker identity/all quotas.
+        assert s.runtime.current_harness_binding_source(s.facts.attempt_id) == s.facts
+    assert [call['operation'] for call in s.service.calls] == ['read_thread'] * (when == 'after-dialogue')
+    assert events(s) == expected_events[0]
+
+
+@pytest.mark.parametrize('site', ['other-quota', 'non-wake-history'])
+def test_live_original_reply_bounds_all_column_material_before_conversion(
+        tmp_path, monkeypatch, site):
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    ceiling = 65536
+    bad_events = set()
+    if site == 'other-quota':
+        _live_metadata(s, quota_text='q' * (ceiling + 1))
+    else:
+        bad_events = _append_live_history(s, actor='e' * (ceiling + 1))
+    # The fixture is admitted under ordinary caps, so an unrelated semantic
+    # refusal cannot masquerade as pre-conversion resource protection.
+    assert _call_exact_read_public(s, s.read_ref, 'read_ref')['ok'] is True
+    s.service.calls.clear()
+    before = events(s)
+    decoded_events, decoded_quotas = [], []
+    event_decode, quota_decode = er._event_from_row, er._quota_from_row
+    def event_from_row(row):
+        decoded_events.append(row['event_id'])
+        return event_decode(row)
+    def quota_from_row(row):
+        decoded_quotas.append(row['quota_class'])
+        return quota_decode(row)
+    with monkeypatch.context() as patch:
+        _live_limits(patch, BOUNDED_ROLE_RESULT_MAX_CELL_BYTES=ceiling)
+        trace = _capture_live_read_ownership(patch)
+        patch.setattr(er, '_event_from_row', event_from_row)
+        patch.setattr(er, '_quota_from_row', quota_from_row)
+        _expect_exact_read_unavailable(s, s.read_ref, 'read_ref')
+        assert not bad_events.intersection(decoded_events)
+        if site == 'other-quota':
+            assert s.spare_quota not in decoded_quotas
+        assert [kind for kind, _ in trace['selections']] == ['reply', 'live']
+        _assert_exact_read_closed(trace, finalized=1)
+    assert not s.service.calls and events(s) == before
+
+
+def test_live_original_reply_counts_non_wake_rows_in_the_shared_budget(tmp_path, monkeypatch):
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    bad_events = _append_live_history(s, count=520)
+    assert len(bad_events) == 520  # below the legacy 1024 history ceiling
+    before = events(s)
+    decoded, original = [], er._event_from_row
+    def decode(row):
+        decoded.append(row['event_id'])
+        return original(row)
+    with monkeypatch.context() as patch:
+        trace = _capture_live_read_ownership(patch)
+        patch.setattr(er, '_event_from_row', decode)
+        _expect_exact_read_unavailable(s, s.read_ref, 'read_ref')
+        assert not bad_events.intersection(decoded)
+        assert [kind for kind, _ in trace['selections']] == ['reply', 'live']
+        _assert_exact_read_closed(trace, finalized=1)
+    assert not s.service.calls and events(s) == before
+
+
+def test_live_original_reply_shares_bytes_across_worker_and_all_quota_reads(tmp_path, monkeypatch):
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    worker, quota = 'w' * 262144, 'q' * 262144
+    worker_bytes, quota_bytes = _live_metadata(s, worker_text=worker, quota_text=quota)
+    ceiling = worker_bytes + quota_bytes - 1
+    assert max(worker_bytes, quota_bytes) < ceiling
+    before = events(s)
+    # Each separate source fits the same total ceiling. Their combination must
+    # refuse, proving the budget cannot reset between these SELECT stages.
+    for worker_text, quota_text in ((worker, ''), ('', quota)):
+        _live_metadata(s, worker_text=worker_text, quota_text=quota_text)
+        with monkeypatch.context() as patch:
+            _live_limits(patch, BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES=ceiling)
+            assert _call_exact_read_public(s, s.read_ref, 'read_ref')['ok'] is True
+    _live_metadata(s, worker_text=worker, quota_text=quota)
+    s.service.calls.clear()
+    decoded, original = [], er._quota_from_row
+    def decode(row):
+        decoded.append(row['quota_class'])
+        return original(row)
+    with monkeypatch.context() as patch:
+        _live_limits(patch, BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES=ceiling)
+        trace = _capture_live_read_ownership(patch)
+        patch.setattr(er, '_quota_from_row', decode)
+        _expect_exact_read_unavailable(s, s.read_ref, 'read_ref')
+        assert s.spare_quota not in decoded
+        _assert_exact_read_closed(trace, finalized=1)
+    assert not s.service.calls and events(s) == before
+
+
+@pytest.mark.parametrize('fail_at', [1, 2])
+def test_live_original_reply_exhausts_actual_vm_before_result(tmp_path, monkeypatch, fail_at):
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    before = events(s)
+    with monkeypatch.context() as patch:
+        entered = _live_limits(patch, fail_at=fail_at, BOUNDED_ROLE_RESULT_MAX_VM_STEPS=1)
+        trace = _capture_live_read_ownership(patch)
+        _expect_exact_read_unavailable(s, s.read_ref, 'read_ref')
+        assert len(entered) == fail_at
+        assert entered[-1]._vm_progress.tripped and entered[-1]._vm_progress.steps == 1
+        _assert_exact_read_closed(trace, finalized=len(trace['observations']) - 1)
+    assert [call['operation'] for call in s.service.calls] == ['read_thread'] * (fail_at - 1)
+    assert events(s) == before
+
+
+@pytest.mark.parametrize('fault', ['close', 'finalize'])
+@pytest.mark.parametrize('fail_at', [1, 2])
+def test_live_original_reply_withholds_close_or_finalization_failure(
+        tmp_path, monkeypatch, fault, fail_at):
+    s = _live_original_reply_fixture(tmp_path, monkeypatch)
+    before = events(s)
+    with monkeypatch.context() as patch:
+        trace = _capture_live_read_ownership(patch)
+        failures = []
+        def at_selected_live_boundary():
+            live = [observation for kind, observation in trace['selections'] if kind == 'live']
+            return bool(trace['selections'] and trace['selections'][-1][0] == 'live'
+                        and len(live) == fail_at)
+        if fault == 'close':
+            original = s.runtime.store._close_read_connection
+            def close(connection):
+                original(connection)
+                if at_selected_live_boundary():
+                    failures.append(connection)
+                    raise er.RuntimeReadUnavailable('fixture live acquisition close failure')
+            patch.setattr(s.runtime.store, '_close_read_connection', close)
+        else:
+            original = er.BoundedRuntimeReadObservation._finalize
+            def finalize(self):
+                original(self)
+                if at_selected_live_boundary():
+                    failures.append(self)
+                    raise er.RuntimeReadUnavailable('fixture live acquisition finalization failure')
+            patch.setattr(er.BoundedRuntimeReadObservation, '_finalize', finalize)
+        _expect_exact_read_unavailable(s, s.read_ref, 'read_ref')
+        assert len(failures) == 1
+        assert len(trace['observations']) == fail_at * 2
+        _assert_exact_read_closed(trace, finalized=fail_at * 2 - 1)
+    assert [call['operation'] for call in s.service.calls] == ['read_thread'] * (fail_at - 1)
+    assert events(s) == before
