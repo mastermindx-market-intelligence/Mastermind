@@ -53,7 +53,9 @@ proving the read.  Scope and boundaries:
   atomic publication reuse the incumbent primitives; an interrupted or
   duplicate destination fails closed.  The public source command is
   UNINSTALLED and NOT LIVE: no owner grant is installed by this source, and
-  the registry must separately allow the ``current-source`` mode first.
+  qualified immutable-generation installation and current scoped OS/tool
+  permission remain separate external prerequisites. Provider allowed_modes
+  remain unchanged; no new source-read grant registry is invented.
 * The response is exact and bounded and carries a receipt binding
   receiver/request/admission.  It claims no historical execution, no worker
   acceptance, no controller completion, no lease clearance and no retry.
@@ -862,6 +864,7 @@ def _loose_state(reader: Reader, common_parts, oid: str) -> str:
             raise CurrentSourceError("filesystem_refused", str(exc))
         if not stat.S_ISDIR(shard.st_mode):
             return "invalid"
+        reader._check_dir(0, shard)
         shard_fd = reader._opener(oid[:2], os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW,
                                   dir_fd=fds[-1])
         try:
@@ -963,7 +966,10 @@ def read_object(reader: Reader, common_parts, common_dir: str, oid: str,
     through the constrained batch.  Returns (payload, store)."""
     if time.monotonic() > getattr(reader, "deadline", float('inf')):
         raise CurrentSourceError("process_deadline")
-    if _loose_state(reader, common_parts, oid) == "present":
+    loose = _loose_state(reader, common_parts, oid)
+    if loose == "invalid":
+        raise CurrentSourceError("loose_custody_invalid")
+    if loose == "present":
         body, store = _read_loose(reader, common_parts, oid, want_type, cap), "loose"
     else:
         body, store = _read_packed(reader, common_dir, oid, want_type, cap, deadline), "packed"

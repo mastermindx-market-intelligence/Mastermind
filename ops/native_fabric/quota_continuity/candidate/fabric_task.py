@@ -898,11 +898,13 @@ def _current_source_owner_factory(registry):
     principal, the original observer correlation and the registry host with its
     declared custody; the ssh_alias for the incumbent strict-SSH transport
     comes only from that same registry entry.  No grant is installed by this
-    source: without a separately installed ``current-source`` allowed mode the
-    owner refuses everything, so the public command stays NOT LIVE.  Untrusted
-    request JSON can never construct the invocation scope it gates.
+    source: the new route is unavailable until its qualified generation is
+    installed/selected. Current OS/tool permission and the external scoped
+    commission authorize the invocation; labels and host provider modes do not
+    grant read authority. No provider-mode or grant-registry addition is made.
     """
     import current_source_observation as observation
+    from host_pick import MODE_TOOLS
 
     class CurrentSourceOwner(observation.NativeInvocationOwner):
         def __init__(self, request_sha256: str):
@@ -913,10 +915,15 @@ def _current_source_owner_factory(registry):
         def _entry(self, view):
             entry = registry.get(view.host) if isinstance(registry, dict) else None
             if (type(entry) is not dict
-                    or "current-source" not in entry.get("allowed_modes", [])
+                    or type(entry.get("roles")) is not list or "lanes" not in entry["roles"]
                     or not isinstance(entry.get("ssh_alias"), str)
                     or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}",
                                     entry["ssh_alias"]) is None):
+                return None
+            modes = entry.get("allowed_modes")
+            if modes is not None and (type(modes) is not list
+                    or any(type(mode) is not str or mode not in MODE_TOOLS for mode in modes)
+                    or len(modes) != len(set(modes))):
                 return None
             return entry
 
@@ -1160,8 +1167,8 @@ def main(argv: list[str] | None = None) -> int:
 
     p_current_source = sub.add_parser(
         "current-source",
-        help="bounded CURRENT Git source observation; NOT LIVE until the host "
-             "registry separately allows the current-source mode")
+        help="bounded CURRENT Git source observation; requires qualified installed "
+             "route and current external scoped OS/tool permission")
     p_current_source.add_argument("--request", required=True)
     p_current_source.add_argument("--destination", required=True)
 

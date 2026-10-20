@@ -263,8 +263,9 @@ host registry/strict host-key SSH transport, generated Git reader and exclusive
 receiver-bound publication. It does not recover a historical run. The owning OS
 principal and its current external commission/tool/resource permission authorize
 the invocation. Request labels, the environment observer correlation and typed
-invocation are not credentials or proof of that external permission. The registry's
-separately qualified `current-source` mode is a default-off route capability; this
+invocation are not credentials or proof of that external permission. The route is unavailable until its qualified immutable generation is installed and
+selected. Registry registration binds the lane host and strict-SSH alias; provider
+`allowed_modes` retain their existing enum and grant no source-read authority. This
 change installs no grant, signer, source-custody registry or generic issuer. The
 caller must already hold permission for the declared host/custody and receiver.
 
@@ -309,5 +310,5 @@ closure. Existing controllers keep their original immutable generation paths and
 flat compatibility helpers remain unchanged. Publication must use protected merged
 bytes. Selection must compare-and-swap the exact freshly verified `CURRENT.json`
 predecessor (generation **and sequence**), never a stale observation or forced
-selection. Installation, registry capability/profile qualification, current scoped
+selection. Installation, installed-route/host qualification, current scoped
 permission and target proof remain separate owner operations; this PR performs none.

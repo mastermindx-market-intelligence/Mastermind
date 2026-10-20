@@ -268,8 +268,8 @@ def subprocess_transport():
 
 def make_owner_factory(registry):
     """Registry-bound owner factory mirroring the incumbent CLI boundary: the
-    registry must separately allow the current-source mode, so an uninstalled
-    deployment refuses everything (the command stays NOT LIVE)."""
+    lane-host registry binds transport; current external OS/tool permission
+    authorizes the scoped read. Provider modes remain unchanged."""
     try:
         import fabric_task
     except ImportError:
@@ -288,7 +288,7 @@ def make_owner_factory(registry):
             entry = self.registry.get(view.host) if isinstance(self.registry,
                                                                dict) else None
             if (type(entry) is not dict
-                    or "current-source" not in entry.get("allowed_modes", [])
+                    or "lanes" not in entry.get("roles", [])
                     or not isinstance(entry.get("ssh_alias"), str)):
                 return None
             return entry
@@ -509,6 +509,35 @@ class ObservationTests(Host):
             self.request(sources=sized),
             self.owner(sources=[sized[0]["path"]]), in_process_transport())
         self.assertRefused(response, "declared_size_mismatch")
+
+    def test_invalid_loose_shard_refuses_without_git_fallback(self):
+        # F-1: Git's cat-file can itself follow a symlinked loose shard, even
+        # when the direct no-follow reader would refuse it. Never fall back.
+        request = self.request(); owner = self.owner()
+        shard = os.path.join(self.repo, ".git", "objects", self.commit[:2])
+        outside = os.path.join(self.base, "outside-shard")
+        os.rename(shard, outside)
+        try:
+            for kind in ("symlink", "file"):
+                if kind == "symlink":
+                    os.symlink(outside, shard)
+                else:
+                    with open(shard, "wb") as handle:
+                        handle.write(b"not a directory")
+                try:
+                    def spawn(*args, **kwargs):
+                        self.fail("invalid shard reached Git fallback")
+                    reader = cso.Reader(spawn=spawn)
+                    response = self.observe(request, owner,
+                        lambda req: cso.canonical(cso.observe_remote(req, reader)))
+                    self.assertRefused(response, "loose_custody_invalid")
+                    body = cso.strict_json(subprocess_transport()(request))
+                    self.assertEqual(body["status"], "REFUSED")
+                    self.assertEqual(body["reason"], "loose_custody_invalid")
+                finally:
+                    os.unlink(shard)
+        finally:
+            os.rename(outside, shard)
 
     def test_path_only_request_delivers_exact_bytes_and_git_proofs(self):
         request = self.request(sources=[{"path": "src/alpha.py"}])
@@ -1068,15 +1097,15 @@ class CompositionTests(Host):
 
 
 class CliTests(Host):
-    def test_fabric_task_wiring_refuses_without_installed_grant(self):
+    def test_fabric_task_wiring_requires_registered_lane_host(self):
         try:
             import fabric_task  # noqa: F401  (incumbent CLI under test)
         except ImportError as exc:
             self.skipTest("incumbent fabric_task dependencies unavailable: %s"
                           % exc)
         import artifact_delivery
-        # Registry without the current-source mode: the owner must refuse to
-        # admit anything, which keeps the public command NOT LIVE.
+        # A transport entry without the registered lane role is insufficient.
+        # Provider allowed_modes are preserved and are never read grants.
         registry = {"ubuntu2": {"allowed_modes": ["glm"], "ssh_alias": "hostalias"}}
         from fabric_task import _current_source_owner_factory
         factory = _current_source_owner_factory(registry)
@@ -1085,19 +1114,36 @@ class CliTests(Host):
         bound = factory(digest)
         self.assertFalse(bound.admit_invocation(
             cso.NativeInvocationView.of(request, digest), os.getuid()))
-        with_installed = _current_source_owner_factory(
-            {"ubuntu2": {"allowed_modes": ["glm", "current-source"],
+        registered = _current_source_owner_factory(
+            {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
                          "ssh_alias": "hostalias"}})(digest)
         with mock.patch.dict(os.environ, CODEX_THREAD_ID=request["observer"]):
-            self.assertTrue(with_installed.admit_invocation(
+            self.assertTrue(registered.admit_invocation(
                 cso.NativeInvocationView.of(request, digest), os.getuid()))
-        self.assertEqual(with_installed.transport_alias(
+        self.assertEqual(registered.transport_alias(
             cso.NativeInvocationView.of(request, digest)), "hostalias")
         self.assertIsNone(bound.transport_alias(
             cso.NativeInvocationView.of(request, digest)))
-        # Wrong uid refused at the boundary even with the mode installed.
-        self.assertFalse(with_installed.admit_invocation(
+        # Wrong uid refused even for a registered lane host.
+        self.assertFalse(registered.admit_invocation(
             cso.NativeInvocationView.of(request, digest), os.getuid() + 1))
+
+    def test_source_route_preserves_provider_registry_enum(self):
+        import fabric_task
+        from host_pick import MODE_TOOLS
+        request = self.request(); digest = cso.validate_request(request)
+        registry = {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
+                                "ssh_alias": "hostalias"}}
+        original = copy.deepcopy(registry)
+        with mock.patch.dict(os.environ, CODEX_THREAD_ID=request["observer"]):
+            owner = fabric_task._current_source_owner_factory(registry)(digest)
+            self.assertTrue(owner.admit_invocation(cso.NativeInvocationView.of(request, digest), os.getuid()))
+            self.assertEqual(registry, original)
+            self.assertTrue(all(mode in MODE_TOOLS for mode in registry["ubuntu2"]["allowed_modes"]))
+            invalid = copy.deepcopy(registry)
+            invalid["ubuntu2"]["allowed_modes"].append("current-source")
+            owner = fabric_task._current_source_owner_factory(invalid)(digest)
+            self.assertFalse(owner.admit_invocation(cso.NativeInvocationView.of(request, digest), os.getuid()))
 
     def test_fabric_task_current_source_cli_end_to_end(self):
         try:
@@ -1131,7 +1177,7 @@ class CliTests(Host):
             request_path = os.path.join(req_dir, "request.json")
             with open(request_path, "wb") as handle:
                 handle.write(cso.canonical(request))
-            registry = {"ubuntu2": {"allowed_modes": ["current-source"],
+            registry = {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
                                     "ssh_alias": "fixture-host-alias"}}
             captured = {}
 

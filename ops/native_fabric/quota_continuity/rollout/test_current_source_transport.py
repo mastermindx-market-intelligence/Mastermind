@@ -120,7 +120,7 @@ class CurrentSourceTransportTests(Host):
             request_path = os.path.join(req_dir, "request.json")
             with open(request_path, "wb") as handle:
                 handle.write(cso.canonical(request))
-            registry = {"ubuntu2": {"allowed_modes": ["current-source"],
+            registry = {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
                                     "ssh_alias": "fixture-host-alias"}}
             factory = base.make_owner_factory(registry)
             artifact_delivery.subprocess.Popen = mocked_ssh
@@ -147,7 +147,7 @@ class CurrentSourceTransportTests(Host):
                              "current-source-%s.json"
                              % receipt["response_sha256"][:16])
 
-    def test_registry_without_installed_mode_stays_not_live(self):
+    def test_registry_without_lane_role_refuses(self):
         request = self.request(repo=self.worktree)
         registry = {"ubuntu2": {"allowed_modes": ["glm"],
                                 "ssh_alias": "fixture-host-alias"}}
