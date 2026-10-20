@@ -84,7 +84,16 @@ const PUBLIC_ACCOUNTS = new Set([
 const PUBLIC_TRANSPORT_TTL = '5h';
 const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
-const MAX_ACCOUNTS = PUBLIC_ACCOUNTS.size;
+// The current owner has these exact additional private Fabric seats.
+// Validate all seats, but disclose only the already-public account subset.
+const PRIVATE_FABRIC_ACCOUNTS = new Set([
+  'fabric-c3-570f6f34',
+  'fabric-chatgpt3-w570f6f34',
+  'fabric-design',
+  'fabric-read',
+  'subagent-fabric-c3',
+]);
+const MAX_OWNER_ACCOUNTS = PUBLIC_ACCOUNTS.size + PRIVATE_FABRIC_ACCOUNTS.size;
 const MAX_OWNER_ERROR_CHARS = 4096;
 
 function invalidOwner() {
@@ -129,14 +138,15 @@ function expectNullableBoundedString(value, maxChars, pattern = null) {
   return value;
 }
 
-function expectAccount(value) {
-  if (typeof value !== 'string' || !PUBLIC_ACCOUNTS.has(value)) invalidOwner();
+function expectOwnerAccount(value) {
+  if (typeof value !== 'string'
+      || (!PUBLIC_ACCOUNTS.has(value) && !PRIVATE_FABRIC_ACCOUNTS.has(value))) invalidOwner();
   return value;
 }
 
 function projectErrorRow(row) {
   exactKeys(row, ['account', 'ready', 'error']);
-  const account = expectAccount(row.account);
+  const account = expectOwnerAccount(row.account);
   if (row.ready !== false) invalidOwner();
   if (typeof row.error !== 'string' || row.error.length < 1 || row.error.length > MAX_OWNER_ERROR_CHARS) {
     invalidOwner();
@@ -153,7 +163,7 @@ function projectErrorRow(row) {
 
 function projectStatusRow(row) {
   exactKeys(row, ['account', 'action', 'steps', 'ready', 'gateway', 'tunnel']);
-  const account = expectAccount(row.account);
+  const account = expectOwnerAccount(row.account);
   if (row.action !== 'status' || !Array.isArray(row.steps) || row.steps.length !== 0) invalidOwner();
   const ready = expectBoolean(row.ready);
 
@@ -208,7 +218,12 @@ function projectStatusRow(row) {
   if (managedAliasRunning) invalidOwner();
   const pollReady = expectBoolean(row.tunnel.controlPlanePollReady);
   const transportTTL = row.tunnel.transportTTL;
-  if (transportTTL !== PUBLIC_TRANSPORT_TTL) invalidOwner();
+  // Stopped private tunnels legitimately have no TTL; public ones do not
+  // get this exception. A ready private tunnel must still report 5h.
+  if (transportTTL !== PUBLIC_TRANSPORT_TTL
+      && !(PRIVATE_FABRIC_ACCOUNTS.has(account) && transportTTL === null && !ready)) {
+    invalidOwner();
+  }
   const maxConcurrentRequests = row.tunnel.maxConcurrentRequests === null
     ? null
     : expectBoundedInteger(row.tunnel.maxConcurrentRequests, 1, 64);
@@ -271,26 +286,30 @@ function validateAndProjectOwnerResult(value) {
   if (value.schema !== OWNER_SCHEMA || value.action !== 'status' || !Array.isArray(value.accounts)) {
     invalidOwner();
   }
-  const accountCount = expectBoundedInteger(value.accountCount, 0, MAX_ACCOUNTS);
-  const readyCount = expectBoundedInteger(value.readyCount, 0, MAX_ACCOUNTS);
+  const accountCount = expectBoundedInteger(value.accountCount, 0, MAX_OWNER_ACCOUNTS);
+  const readyCount = expectBoundedInteger(value.readyCount, 0, MAX_OWNER_ACCOUNTS);
   const allReady = expectBoolean(value.allReady);
   if (value.accounts.length !== accountCount || readyCount > accountCount) invalidOwner();
 
-  const accounts = value.accounts.map((row) =>
+  // Check the entire raw owner result and counts before filtering; no private
+  // account identity, path, PID, token or even private count escapes this call.
+  const verified = value.accounts.map((row) =>
     Object.hasOwn(row ?? {}, 'error') ? projectErrorRow(row) : projectStatusRow(row));
   const seen = new Set();
-  for (const row of accounts) {
+  for (const row of verified) {
     if (seen.has(row.account)) invalidOwner();
     seen.add(row.account);
   }
-  const computedReadyCount = accounts.filter((row) => row.ready).length;
-  const computedAllReady = accountCount > 0 && computedReadyCount === accountCount;
-  if (readyCount !== computedReadyCount || allReady !== computedAllReady) invalidOwner();
+  const actualReadyCount = verified.filter((row) => row.ready).length;
+  const ownerAllReady = accountCount > 0 && actualReadyCount === accountCount;
+  if (readyCount !== actualReadyCount || allReady !== ownerAllReady) invalidOwner();
 
+  const accounts = verified.filter((row) => PUBLIC_ACCOUNTS.has(row.account));
+  const visibleReadyCount = accounts.filter((row) => row.ready).length;
   return {
-    accountCount,
-    readyCount,
-    allReady,
+    accountCount: accounts.length,
+    readyCount: visibleReadyCount,
+    allReady: accounts.length > 0 && visibleReadyCount === accounts.length,
     accounts,
   };
 }
