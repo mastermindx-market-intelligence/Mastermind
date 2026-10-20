@@ -10,8 +10,17 @@ PR #1585 and PR #1365 produced native quota/member/model observations and
 advisory six-seat selection, but the installed Macro Fabric broker remains
 codex-native/default, cap one, with no eligible account-specific host route.
 The existing Executive worker broker has a reviewed company slot plus only
-three fixed Personal Pro slots; live read-only provider-slot-status reported
-all of its root worker provider homes absent/not-ready. Its identity owner
+three fixed Personal Pro slots. A prior *unprivileged* status read incorrectly
+classified their protected homes as absent. Privileged root-scoped Executive
+`provider-slot-status.py` readback on 2026-10-20 confirmed all four incumbent
+`codex-01` / `codex-pro-01/02/03` homes and credential files present with
+valid metadata, though their readiness states were not READY. Following the
+Chairman-attended Pro 02 credential reauthorization, its approved login
+`--verify-only` passed; the predecessor readiness receipt was invalidated and
+needs separate one-canary qualification. These are **not** reasons to recreate
+any incumbent service principal, home or credential. The additional C4
+`codex-pro-04` principal/home remains a separate unprovisioned candidate.
+The Executive identity owner
 requires a separately provisioned OS principal, exact source-pinned config,
 private provider home, matching CODEX_HOME/HOME, attested binary and
 root-owned enrollment; normal attended user's private auth home is NOT a
@@ -51,8 +60,9 @@ isolated structural test stubs canonical filesystem identity only, never
 claims a real root-owned home. All incumbent source native-realm and three
 broker topology tests stay green.
 
-**Still required:** independent review and exact-head hosted CI; real
-root-admin principal/home provision with OS identity evidence; original
+**Still required:** independent review and exact-head hosted CI; separately
+approved **C4-only** root-admin principal/home provision with OS identity
+evidence (never duplicate or mutate incumbent four static slots); original
 CapacitySource enrollment and claim/START; C4 account identity, quota and
 model binding under the registered worker process; original-parent
 return acceptance. B1/B2 require a separate Business-member root realm and
