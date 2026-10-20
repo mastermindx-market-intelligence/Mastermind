@@ -308,7 +308,11 @@ files, the additive observation module, and its narrow `fabric_task.py` and
 `artifact_delivery.py` wiring; the explicit stage/inventory includes their exact
 closure. Existing controllers keep their original immutable generation paths and
 flat compatibility helpers remain unchanged. Publication must use protected merged
-bytes. Selection must compare-and-swap the exact freshly verified `CURRENT.json`
-predecessor (generation **and sequence**), never a stale observation or forced
+bytes. Read and retain a fresh `CURRENT.json` generation and sequence at the owning
+rollout boundary. The incumbent selector takes `--expect <prior-generation>`
+(or `absent` for a genuinely unselected store), verifies that exact generation
+under its publication lock and increments the observed sequence. Its API does
+not accept a caller-bound sequence comparison; this source does not claim a
+two-field CAS or add one. Never substitute a stale observed generation or force
 selection. Installation, installed-route/host qualification, current scoped
 permission and target proof remain separate owner operations; this PR performs none.
