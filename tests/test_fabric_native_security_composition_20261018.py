@@ -27,7 +27,9 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-NATIVE_MANIFEST_SHA = "0b6dfec330404b12120ae764da065cd1e7c054e9838fdc8dccc0a7cc17d6bc58"
+# Observer, portable reader and original-state collector changes compose here.
+# Executor, donor, support and deadline identities remain independently pinned.
+NATIVE_MANIFEST_SHA = "4555d73b16740a964de105471c7f13189956da4fb08967d06526edfa3bc8189d"
 
 
 def _sha(raw):

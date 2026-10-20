@@ -1,0 +1,99 @@
+{
+  "definition_hash": "026efcf4320973b6e76b45bffd4d7f1c0a88bb51b882d7e3c86ccdb90e68623f",
+  "evidence_tier": "research",
+  "frozen_at": "2026-10-19",
+  "language": {
+    "discrepancy_label": "observed divergence from the reference path",
+    "forbidden_terms": [
+      "mispricing",
+      "upside",
+      "upside remaining",
+      "must catch up",
+      "percent repriced"
+    ]
+  },
+  "ledger_update": {
+    "row_kind": "forecast_repricing_update",
+    "rule": "one appended row per update with its own known_at; the original forecast row is never rewritten; ForwardLedger has no public forecast amendment method, so the row is appended through the ledger's own locked append (declared deviation)"
+  },
+  "percent_withholding": {
+    "denominator_near_zero_abs": 0.005,
+    "denominator_rule": "denominator_near_zero when |m0(H)| < denominator_near_zero_abs or |a(u) + g(u,H)| < denominator_near_zero_abs",
+    "not_economically_meaningful_abs": 0.0025,
+    "not_economically_meaningful_rule": "not_economically_meaningful when |g(u,H)| < not_economically_meaningful_abs, or when a(u) / (a(u) + g(u,H)) < 0 (the observed path moved against the reference direction)",
+    "rationale": "Chosen before any fit from the units alone: 0.005 log return (about 50 bp) is the smallest denominator for which a ratio is not dominated by a single session's close noise on a broad ETF; 0.0025 (about 25 bp) is the scale of a round-trip trading cost plus a margin on the most liquid targets. Neither value was selected from a display example or a fitted outcome.",
+    "reason_precedence": [
+      "expired",
+      "no_qualified_remainder",
+      "denominator_near_zero",
+      "sign_uncertain",
+      "not_economically_meaningful"
+    ],
+    "sign_rule": "sign_uncertain when the remaining interval straddles zero (low <= 0 <= high), or sign(m0(H)) != sign(g(u,H)), or sign(a(u) + g(u,H)) != sign(m0(H))"
+  },
+  "preregistration_card_hash": "da060bf47e8eafc7e94d0cadbb4135c9207a069aad9eef3539ea9d62911d6aee",
+  "qualification": {
+    "comparator_definitions": {
+      "direct_state": "DirectStateBaseline: the T15 direct-observable rung (ComponentBaseline or DirectFundingBaseline) refit at the elapsed cutoff u on the remaining-interval outcome; accepted only when model_version starts with glt_t15_component.v1 or glt_t15_direct_funding.v1 and ends with @<first 8 hex of the preregistration card_hash>",
+      "no_gap": "NoGapComparator: g = 0 for every remaining interval",
+      "original_fixed": "OriginalFixedResponse: g = m0(H) - m0(u) read from the T16 reference path"
+    },
+    "comparators": [
+      "no_gap",
+      "direct_state",
+      "original_fixed"
+    ],
+    "failure_reason": "no_incremental_support",
+    "fold": "dev",
+    "guard": "every member's rows pass WindowGuard.admit(fold='dev') built from the preregistration card before the paired-population check; refused rows never enter any loss",
+    "loss": "paired out-of-sample mean squared error of remaining-interval log returns log(P_H / P_u) on identical (shock_id, target_id, horizon_bdays) keys",
+    "margin": 0.98,
+    "min_paired_keys": 10,
+    "paired_population": "brain.liquidity_lab.baselines.PairedPopulation.require over all four members",
+    "rule": "qualified only when candidate_mse <= margin * comparator_mse for EVERY comparator",
+    "significance": "not tested in T18: the canonical HAC interface (engine.validation) is absent in this checkout; T20 owns significance and multiplicity"
+  },
+  "quantities": {
+    "percent_complete": "a(u) / (a(u) + g(u,H)), computed ONLY when the qualification passed and every withholding gate below is clear; otherwise null with a typed reason",
+    "reference_path_discrepancy": "d(u) = m0(u) - a(u): the original reference path at the elapsed cutoff minus the observed cumulative return to that cutoff; a diagnostic about the path already travelled, labelled 'observed divergence from the reference path'",
+    "remaining_interval_kind": "pointwise",
+    "remaining_response_estimate": "g(u,H) = E[log(P_H / P_u) | I_u]: set ONLY from a RemainderQualification that passed; never computed as m0(H) - a(u)",
+    "sign_function": "sign(x) in {-1, 0, +1}; a zero sign never matches a non-zero sign"
+  },
+  "reference_path": {
+    "exit_binding": "m0(H) read from the path must equal the ledger forecast's expected_return within 1e-12",
+    "interpolation": "linear in elapsed sessions between grid horizons with m0(0) = 0; a read beyond the largest grid horizon or across a missing grid cell is refused",
+    "model_version_binding": "the ledger ForwardForecast.model_version must equal ledger_model_version(path.model_version): the path model_version lowercased with '+' replaced by '.' and '@' replaced by ':' (the contracts identifier grammar [a-z0-9_.:-] admits neither '+' nor '@')",
+    "source": "the T16 ResponsePath of the forecast's own model_version and target_id"
+  },
+  "remaining_reasons": [
+    "no_qualified_remainder",
+    "no_incremental_support",
+    "invalidated_by_new_information",
+    "expired"
+  ],
+  "schema": "glt_repricing_rules.v1",
+  "status": "frozen_ex_ante_before_any_fit",
+  "target_card": {
+    "card_version": "glt_broad_target_card.v1",
+    "sha256": "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537"
+  },
+  "task": "T18",
+  "thesis": {
+    "eliminated": "invalidating_information is non-empty (supplied by the caller from the docket; T18 discovers no events): remainder null with invalidated_by_new_information, H unchanged",
+    "expired": "the ledger already holds a forecast_grade row for the forecast_key",
+    "horizon": "the original exit H is immutable; any other exit argument raises HorizonExtensionError",
+    "statuses": [
+      "active",
+      "eliminated",
+      "expired"
+    ]
+  },
+  "units": {
+    "currency": "USD",
+    "definition": "cumulative log return log(P_h / P_anchor) on the broad target card's total_return basis, quoted in USD; m0, a, d and g all share these units",
+    "path": "log_total_return",
+    "return_basis": "total_return"
+  },
+  "validated": false
+}

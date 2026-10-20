@@ -1,0 +1,3 @@
+interface:
+  display_name: "Mastermind CI Triage"
+  short_description: "Diagnose exact-head CI failures without rerun loops"

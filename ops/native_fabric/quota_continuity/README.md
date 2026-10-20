@@ -182,6 +182,14 @@ https://github.com/openai/codex/blob/main/codex-rs/protocol/src/protocol.rs
 
 ## Deployment order
 
+The original-parent artifact observer recognizes the current exact 37-file
+support closure emitted by this producer. Earlier observation shapes retain
+their existing admission; arbitrary extensions and subsets remain refused.
+Packet, root, assigning parent, broker, support digest, code hash and filesystem
+custody checks still apply before observation. This compatibility repair grants
+no worker replay, result acceptance, legacy-run adoption or permission bypass.
+Its staged-runtime tests exercise both the prior and current producer contracts.
+
 Install the complete native source group from the actual merged immutable
 release before upgrading the same existing Fabric facade account. The facade
 checks that the adapter supports both quota fallback and successor-following
@@ -219,6 +227,15 @@ publication lock. Running controllers retain their selected code and remote
 support closure; broker heartbeat and lease release remain on their own existing
 lock. Bootstrap rollback restores exact future-ingress preimages, preserves all
 running attempts and state, and ends that bootstrap epoch. It never kills work.
+
+The original-result collector generates a portable directory reader. Its remote
+paths are already bound to the original host; the Mac generation's `owner_path`
+adapter must remain local. Embedding that adapter without its native globals
+caused the generated helper to raise `NameError` before opening a directory.
+The portable export changes only that path normalization line and retains every
+ownership, mode, no-follow and directory-edge check. It grants no new recovery
+scope, worker replay, lease mutation or alternate result carrier. Regression
+checks execute the actual generated helper against inert local directories.
 
 Advance the already enrolled `subagent-fabric-c3` backend with
 `private_service.py fabric-backend-release`, after the native rollout. The normal

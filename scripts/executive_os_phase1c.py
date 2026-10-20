@@ -883,6 +883,64 @@ _CANONICAL_COMPANY_CONSULTATION_SOCKET = "/var/run/mastermind-executive/company-
 _COMPANY_CONSULTATION_SOCKET_NAME = "CompanyConsultation"
 
 
+_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET = "/var/run/mastermind-executive/workspace-control-room.sock"
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+
+
+def validate_workspace_control_room(stanza: Any, *, control_uid: int) -> dict[str, Any]:
+    """Closed unix/launchd stanza for the in-process workspace Control Room.
+
+    The legacy ``{"port": int}`` TCP shape is refused loudly so a forgotten
+    migration tool never silently degrades Control back onto a loopback socket.
+    """
+
+    if type(stanza) is dict and set(stanza) == {"port"}:
+        raise ServiceError(
+            "workspace Control Room legacy TCP port stanza refused; "
+            "migrate it with ops/executive_os/migrate_workspace_control_room.py"
+        )
+    if type(stanza) is not dict:
+        raise ServiceError("workspace Control Room topology refused")
+    expected = {"transport", "socket_path", "launchd_socket_name", "allowed_peer_uids"}
+    if set(stanza) != expected:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["transport"] != "unix":
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["socket_path"] != _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["launchd_socket_name"] != _WORKSPACE_CONTROL_ROOM_SOCKET_NAME:
+        raise ServiceError("workspace Control Room topology refused")
+    peers = stanza["allowed_peer_uids"]
+    if (type(peers) is not list or len(peers) == 0
+            or any(type(item) is not int for item in peers)
+            or any(item is True or item is False for item in peers)
+            or len(set(peers)) != len(peers)):
+        raise ServiceError("workspace Control Room topology refused")
+    if any(peer != control_uid for peer in peers):
+        raise ServiceError("workspace Control Room topology refused")
+    return {key: value for key, value in stanza.items()}
+
+
+def workspace_control_room_launchd_entry(
+    config: Mapping[str, Any], *, control_gid: int
+) -> dict[str, Any] | None:
+    """Closed optional host binding, shared by loader, installer and factory."""
+
+    if "workspace_control_room" not in config:
+        return None
+    validate_workspace_control_room(
+        config["workspace_control_room"], control_uid=int(config["control_uid"]))
+    if type(control_gid) is not int or control_gid <= 0:
+        raise ServiceError("workspace Control Room launchd entry requires a positive control gid")
+    return {
+        "SockPathName": _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+        "SockType": "stream", "SockPassive": True,
+        "SockPathOwner": int(config["control_uid"]),
+        "SockPathGroup": control_gid,
+        "SockPathMode": 0o600,
+    }
+
+
 def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, Any] | None:
     """One closed optional host binding, shared by loader, installer and factory."""
     value = config.get("company_consultation")
@@ -1069,10 +1127,8 @@ def load_control_config(
     if keys & workspace_keys:
         if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
             raise ServiceError("workspace acquisition requires its policy and installed App peer")
-        topology = config["workspace_control_room"]
-        if (type(topology) is not dict or set(topology) != {"port"}
-                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
-            raise ServiceError("workspace Control Room topology refused")
+        config["workspace_control_room"] = validate_workspace_control_room(
+            config["workspace_control_room"], control_uid=config["control_uid"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
         try:
@@ -2324,12 +2380,24 @@ def _service_from_config(
             )
             # Existing source paths and existing controller permissions only.
             # Bind the installation-selected incumbent topology before publishing.
-            port = raw["workspace_control_room"]["port"]
-            workspace_control_room = HostedControlRoom(ServerConfig(
-                repo_root=Path(raw["proof_source_repository"]),
-                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
-                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
-                compose_inputs=compose_inputs))
+            # Closed AF_UNIX launchd listener; never a TCP loopback port.
+            room_listener = activate_launchd_socket(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+            activated_listeners.append(room_listener)
+            from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+            workspace_control_room = HostedControlRoom(
+                ServerConfig(
+                    repo_root=Path(raw["proof_source_repository"]),
+                    macro_root=str(raw["ceo_ingress_app_macro_root"]),
+                    bindings_path=workspace_bindings_path,
+                    token=secrets.token_urlsafe(32),
+                    origin=UNIX_CONTROL_ROOM_ORIGIN,
+                    port=0,
+                    compose_inputs=compose_inputs,
+                ),
+                listener=room_listener,
+                socket_path=str(raw["workspace_control_room"]["socket_path"]),
+                allowed_peer_uids=tuple(raw["workspace_control_room"]["allowed_peer_uids"]),
+            )
             from integrations.product_acceptance_read import read_acceptance
             from integrations.product_acceptance_selector import read_original_acceptance_observation
             from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo

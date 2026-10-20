@@ -216,7 +216,7 @@ def test_real_control_service_factory_binds_exact_installed_os_read_pair(
         return policy_source != "absent" if path == canonical else original_exists(path)
     monkeypatch.setattr(Path, "exists", exists)
 
-    selections, supplied = [], []
+    selections, supplied, cursor_keys = [], [], []
     def sealed_source(path, source, *, expected_uid):
         assert path == canonical
         assert source.is_absolute()
@@ -232,6 +232,7 @@ def test_real_control_service_factory_binds_exact_installed_os_read_pair(
     actual_build = bridge.build_runtime_session_bridge
     def capture_factory(runtime, **kwargs):
         supplied.append(kwargs["authorized_policies"])
+        cursor_keys.append(kwargs["reference_cursor_key"])
         return actual_build(runtime, **kwargs)
     monkeypatch.setattr(bridge, "build_runtime_session_bridge", capture_factory)
 
@@ -240,9 +241,13 @@ def test_real_control_service_factory_binds_exact_installed_os_read_pair(
                 profile=WEB_CEO_V3_PROFILE) as (service, _raw, _):
             await service.start()
             runtime = service._require_runtime()
-            owner = service._ceo_ingress_app_binding.session_bridge_provider_factory(runtime)
-            assert type(owner) is SessionBridgeIngressOwner
-            assert len(supplied) == 1
-            assert supplied[0] == (pair if policy_source == "approved" else None)
+            factory = service._ceo_ingress_app_binding.session_bridge_provider_factory
+            owners = [factory(runtime), factory(runtime)]
+            assert all(type(owner) is SessionBridgeIngressOwner for owner in owners)
+            expected_pair = pair if policy_source == "approved" else None
+            assert supplied == [expected_pair, expected_pair]
+            assert len(cursor_keys) == 2
+            assert all(type(key) is bytes and len(key) == 32 for key in cursor_keys)
+            assert cursor_keys[0] == cursor_keys[1]
     asyncio.run(run())
     assert len(selections) == (0 if policy_source == "absent" else 1)

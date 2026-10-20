@@ -1016,6 +1016,22 @@ class DirectoryChain:
         self.close()
 
 
+
+def remote_directory_chain_source():
+    """Export the same no-follow checks without the Mac-only owner-path adapter.
+
+    Remote requests already bind absolute original-host paths. The native
+    generation owner mapping is local-only; its imports and HERE binding do
+    not exist in a generated remote helper. All directory checks are retained.
+    """
+    import inspect
+    source = inspect.getsource(DirectoryChain)
+    local_adapter = "            path = owner_path(path, HERE)"
+    if source.count(local_adapter) != 1:
+        raise ValueError("remote_directory_chain_source_changed")
+    return source.replace(local_adapter, "            path = Path(path)", 1)
+
+
 def reserve_destination(destination):
     path = Path(destination)
     if not path.is_absolute() or ".." in path.parts or path == DESTINATION_ROOT or not path.is_relative_to(DESTINATION_ROOT):
