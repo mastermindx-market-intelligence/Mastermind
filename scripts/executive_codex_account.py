@@ -25,6 +25,8 @@ def main(argv=None) -> int:
     probe.add_argument("--binary", required=True, type=Path)
     probe.add_argument("--previous-observation-stdin", action="store_true",
                        help="Compare a prior sanitized native result from stdin; no new store")
+    probe.add_argument("--include-models", action="store_true",
+                       help="Include one bounded same-session native model/list read; advisory only")
     args = parser.parse_args(argv)
     previous = None
     if args.command == "readiness" and args.previous_observation_stdin:
@@ -43,7 +45,8 @@ def main(argv=None) -> int:
             result = ({"state": environment.seed_if_missing(args.seed_file)}
                       if args.command == "seed-once"
                       else probe_native_account(environment, args.binary,
-                                                previous_observation=previous))
+                                                previous_observation=previous,
+                                                include_models=args.include_models))
         print(json.dumps(result, sort_keys=True, allow_nan=False))
         return 0 if result["state"] in {"NATIVE_READS_COMPLETED", "SEEDED_ONCE",
             "PRESERVED_EXISTING", "PRESERVED_CONCURRENT_PUBLICATION"} else 2
