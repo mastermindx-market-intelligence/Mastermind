@@ -20,7 +20,11 @@ from unittest import mock
 import private_service as svc
 
 
-class BackendReleaseTests(unittest.TestCase):
+class BackendReleaseFixture:
+    ACCOUNT = svc.FABRIC_BACKEND_ACCOUNT
+    PORT = 45119
+    MODERN = False
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
@@ -29,7 +33,7 @@ class BackendReleaseTests(unittest.TestCase):
         self.fixture_root = mock.patch.object(svc, '_user_root', return_value=self.home)
         self.fixture_root.start()
         self.addCleanup(self.fixture_root.stop)
-        self.account = svc.FABRIC_BACKEND_ACCOUNT
+        self.account = self.ACCOUNT
         self.label = f'com.mastermind.studio-direct-private.{self.account}'
         self.roots = svc._build_runtime_roots(self.account)
         self.loaded = False
@@ -62,9 +66,9 @@ class BackendReleaseTests(unittest.TestCase):
         node.chmod(0o700)
         self.old_backend = self.home / 'old-backend.mjs'
         self.old_backend.write_text('export const oldBackend = true;\n')
-        stage = SimpleNamespace(account=self.account, port=45119, source=str(source),
+        stage = SimpleNamespace(account=self.account, port=self.PORT, source=str(source),
             node=str(node), backend=str(self.old_backend), fabric_only=True,
-            modern_fabric_protocol=None, enable_repository_workspaces=False,
+            modern_fabric_protocol=True if self.MODERN else None, enable_repository_workspaces=False,
             os_commission_config_sha256=None)
         self.capture(lambda: svc.cmd_stage(stage))
         deps = self.roots['node_modules'] / 'fixture-package'
@@ -74,7 +78,7 @@ class BackendReleaseTests(unittest.TestCase):
         # Preserve deliberately non-default policy values and opaque child env.
         config = json.loads(self.roots['config'].read_bytes())
         config.update({'requestTimeoutMs': 199_999, 'backendMode': 'shared-account',
-                       'modernFabricProtocol': False, 'maxPerSessionConcurrency': 6})
+                       'modernFabricProtocol': self.MODERN, 'maxPerSessionConcurrency': 6})
         config['args'].append('--retained-existing-flag')
         config['childEnv']['OPAQUE_EXISTING_POLICY'] = 'fixture-only'
         self.roots['config'].write_bytes(svc._fabric_release_json(config))
@@ -133,6 +137,7 @@ class BackendReleaseTests(unittest.TestCase):
         self.assertEqual(len(dirs), 1)
         return dirs[0]
 
+class BackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
     def test_live_preview_has_no_effect_and_exact_diff_then_apply_preserves_seal(self):
         self.loaded = True
         preview = self.preview()
@@ -315,6 +320,443 @@ class BackendReleaseTests(unittest.TestCase):
                 svc.cmd_fabric_backend_release(self.args)
         self.assertEqual(self.roots['config'].read_bytes(), alien)
         self.assertEqual(self.roots['manifest'].read_bytes(), self.before[self.roots['manifest']])
+
+    def _install_legacy_fleet_status_profile(self):
+        """Drop modern selectors, install a launcher, and seal the matching legacy fleetStatus.
+
+        Mirrors the historical restricted install: fleetStatus is present, while
+        modernFabricProtocol and backendMode are absent. The launcher is harmless
+        and owned by the fixture so the existing safe regular-file hash check
+        produces the same digest both when the fixture is sealed and when the
+        owner re-derives fleet_status_config.
+        """
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text('#!/bin/sh\nexit 0\n')
+        launcher.chmod(0o700)
+        fleet_status = svc._fleet_status_config(self.home)
+        self.assertIsNotNone(fleet_status)
+        config = json.loads(self.roots['config'].read_bytes())
+        config.pop('modernFabricProtocol', None)
+        config.pop('backendMode', None)
+        config['fleetStatus'] = fleet_status
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.before = self.snapshot()
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+
+    def _reseal_with_fleet_status(self, value):
+        config = json.loads(self.roots['config'].read_bytes())
+        config.pop('modernFabricProtocol', None)
+        config.pop('backendMode', None)
+        config['fleetStatus'] = value
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+
+    def test_regression_legacy_fleet_status_preview_and_apply_round_trip(self):
+        """The pre-fix release refused any sealed config containing fleetStatus.
+
+        The accepted legacy install lacks modernFabricProtocol/backendMode. After
+        the fix, preview and apply preserve the legacy fleetStatus exactly while
+        changing only args[0] in the config and the three documented manifest
+        fields.
+        """
+        self._install_legacy_fleet_status_profile()
+        preview = self.preview()
+        self.assertEqual(preview['changedConfigFields'], ['args[0]'])
+        self.assertEqual(preview['changedManifestFields'], ['backend', 'backendHash', 'configHash'])
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+        self.args.preflight_only = False
+        self.args.expected_plan_sha256 = preview['planSha256']
+        result = self.capture(lambda: svc.cmd_fabric_backend_release(self.args))
+        self.assertEqual(result['effect'], 'APPLIED')
+        self.assertFalse(result['serviceStarted'])
+        old_config = json.loads(self.before[self.roots['config']])
+        new_config = json.loads(self.roots['config'].read_bytes())
+        expected_config = copy.deepcopy(old_config)
+        expected_config['args'][0] = str(self.backend)
+        self.assertEqual(new_config, expected_config)
+        self.assertEqual(new_config['fleetStatus'], old_config['fleetStatus'])
+        self.assertNotIn('modernFabricProtocol', new_config)
+        self.assertNotIn('backendMode', new_config)
+        old_manifest = json.loads(self.before[self.roots['manifest']])
+        new_manifest = json.loads(self.roots['manifest'].read_bytes())
+        self.assertEqual({k for k in new_manifest if old_manifest[k] != new_manifest[k]},
+                         {'backend', 'backendHash', 'configHash'})
+        for path, data in self.before.items():
+            if path not in (self.roots['config'], self.roots['manifest']):
+                self.assertEqual(path.read_bytes(), data)
+
+    def test_rejects_legacy_fleet_status_with_modern_protocol_selector(self):
+        """A present modernFabricProtocol selector (even False) violates the legacy form."""
+        self._install_legacy_fleet_status_profile()
+        config = json.loads(self.roots['config'].read_bytes())
+        config['modernFabricProtocol'] = False
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus requires absent'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_with_backend_mode_selector(self):
+        """A present backendMode selector (even null) violates the legacy form."""
+        self._install_legacy_fleet_status_profile()
+        config = json.loads(self.roots['config'].read_bytes())
+        config['backendMode'] = None
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus requires absent'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_with_invalid_field_types(self):
+        """Legacy fleetStatus must satisfy exact type contract for all four keys."""
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        launcher.parent.mkdir(parents=True, exist_ok=True)
+        launcher.write_text('#!/bin/sh\nexit 0\n')
+        launcher.chmod(0o700)
+        base = svc._fleet_status_config(self.home)
+
+        cases = (
+            ({**base, 'enabled': 1}, 'legacy fleetStatus field types'),
+            ({**base, 'enabled': None}, 'legacy fleetStatus field types'),
+            ({**base, 'enabled': False}, 'legacy fleetStatus field types'),
+            ({**base, 'timeoutMs': True}, 'legacy fleetStatus field types'),
+            ({**base, 'timeoutMs': False}, 'legacy fleetStatus field types'),
+            ({**base, 'timeoutMs': 15000.0}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherPath': 12345}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherPath': None}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherSha256': 12345}, 'legacy fleetStatus field types'),
+            ({**base, 'launcherSha256': None}, 'legacy fleetStatus field types'),
+            ({**base, 'extra': 'unauthorized'}, 'legacy fleetStatus requires exact'),
+        )
+        missing = dict(base)
+        missing.pop('launcherSha256')
+        all_cases = cases + ((missing, 'legacy fleetStatus requires exact'),)
+        for value, expected_message in all_cases:
+            self._reseal_with_fleet_status(value)
+            with self.assertRaisesRegex(SystemExit, expected_message):
+                self.preview()
+            self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_with_owner_mismatch(self):
+        """Legacy fleetStatus must equal the current owner's fresh output exactly."""
+        self._install_legacy_fleet_status_profile()
+        base = svc._fleet_status_config(self.home)
+        cases = (
+            ({**base, 'launcherPath': str(self.home / 'fake-launcher')}),
+            ({**base, 'launcherSha256': 'a' * 64}),
+            ({**base, 'timeoutMs': 12345}),
+        )
+        for value in cases:
+            self._reseal_with_fleet_status(value)
+            with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus does not match owner'):
+                self.preview()
+            self.assertEqual(self.snapshot(), self.before)
+
+    def test_rejects_legacy_fleet_status_when_owner_launcher_is_missing_or_unsafe(self):
+        """None / missing / unsafe owner launcher must fail closed without writing."""
+        self._install_legacy_fleet_status_profile()
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        # 1. Owner launcher deleted -> fresh _fleet_status_config returns None.
+        launcher.unlink()
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus owner launcher unavailable'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        # 2. Owner launcher replaced by a symlink -> safe regular-file hash raises.
+        launcher.symlink_to(self.home / 'node')
+        with self.assertRaisesRegex(SystemExit, 'Studio Direct control launcher'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+
+    def test_legacy_fleet_status_apply_revalidates_after_state_change(self):
+        """Apply revalidates under the existing lock; an earlier passing preview cannot bypass."""
+        self._install_legacy_fleet_status_profile()
+        preview = self.preview()
+        self.assertEqual(preview['changedConfigFields'], ['args[0]'])
+        self.args.preflight_only = False
+        self.args.expected_plan_sha256 = preview['planSha256']
+        # Tamper with the sealed config so the legacy form no longer holds.
+        config = json.loads(self.roots['config'].read_bytes())
+        config['modernFabricProtocol'] = True
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus requires absent'):
+            svc.cmd_fabric_backend_release(self.args)
+        # No service mutation: the transaction directory was never created.
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_rejects_legacy_fleet_status_when_launcher_descriptor_owner_changes(self):
+        """Wrong-owner launcher descriptor fails closed even with valid bytes.
+
+        The sealed config and launcher bytes stay valid; only the descriptor
+        st_uid the validator sees is narrow-mocked to a different owner. The
+        rest of the validator runs and the file system itself is untouched
+        (no chown, no process-wide UID change, no whole-validator mock).
+        """
+        self._install_legacy_fleet_status_profile()
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        # _fabric_release_bytes consults both os.open and os.fstat. Patch only
+        # these two module-level names so the launcher's fstat reports a
+        # different st_uid. Every other path uses the real syscall.
+        real_open = os.open
+        real_fstat = os.fstat
+        launcher_path = os.path.realpath(str(launcher))
+        launcher_fds: set[int] = set()
+
+        def tracking_open(path, *args, **kwargs):
+            fd = real_open(path, *args, **kwargs)
+            try:
+                opened = os.path.realpath(os.fspath(path))
+            except (TypeError, ValueError):
+                opened = ''
+            if opened == launcher_path:
+                launcher_fds.add(fd)
+            return fd
+
+        def faked_fstat(fd):
+            result = real_fstat(fd)
+            if fd in launcher_fds:
+                # os.stat_result is a structseq; rebuild with st_uid overridden.
+                # st_uid is at positional index 4 in the standard sequence.
+                return os.stat_result(
+                    result[:4]
+                    + (((result.st_uid + 1) % (2 ** 32),) if result.st_uid != (2 ** 32) - 1 else (0,))
+                    + result[5:]
+                )
+            return result
+
+        with mock.patch('os.open', tracking_open), mock.patch('os.fstat', faked_fstat):
+            with self.assertRaisesRegex(SystemExit, 'unsafe or too large'):
+                self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_legacy_fleet_status_preview_then_apply_drift_refuses_with_seal_intact(self):
+        """Apply revalidates freshly; a passing preview cannot bypass a later
+        launcher-byte change. Config, manifest, expected_manifest_sha256 and
+        expected_plan_sha256 stay pinned. Sealed files remain unchanged and
+        no transaction is created.
+        """
+        self._install_legacy_fleet_status_profile()
+        preview = self.prepare_apply()
+        launcher = self.home / svc.FLEET_STATUS_LAUNCHER_REL
+        original_launcher_bytes = launcher.read_bytes()
+        launcher.write_text('#!/bin/sh\necho drifted launcher\n')
+        launcher.chmod(0o700)
+        try:
+            with self.assertRaisesRegex(SystemExit, 'legacy fleetStatus does not match owner'):
+                svc.cmd_fabric_backend_release(self.args)
+            self.assertEqual(self.snapshot(), self.before)
+            self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+        finally:
+            launcher.write_bytes(original_launcher_bytes)
+            launcher.chmod(0o700)
+
+
+class ModernBackendReleaseTests(BackendReleaseFixture, unittest.TestCase):
+    ACCOUNT = svc.FABRIC_BACKEND_MODERN_ACCOUNT
+    PORT = svc.FABRIC_BACKEND_MODERN_PORT
+    MODERN = True
+
+    def reseal_config(self, config, **manifest_fields):
+        """Keep the fixture seal valid so profile refusals exercise admission."""
+        self.roots['config'].write_bytes(svc._fabric_release_json(config))
+        manifest = json.loads(self.roots['manifest'].read_bytes())
+        manifest.update(manifest_fields)
+        manifest['configHash'] = svc._sha256_file(self.roots['config'])
+        self.roots['manifest'].write_bytes(svc._fabric_release_json(manifest))
+        self.args.expected_manifest_sha256 = svc._sha256_file(self.roots['manifest'])
+        self.before = self.snapshot()
+
+    def assert_profile_refused_without_write(self):
+        with self.assertRaisesRegex(SystemExit, 'modern profile|restricted profile'):
+            self.preview()
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_modern_13_file_preview_apply_preserves_every_other_byte(self):
+        self.assertEqual(self.account, 'fabric-c3-570f6f34')
+        original_manifest = json.loads(self.before[self.roots['manifest']])
+        self.assertEqual(len(original_manifest['files']), 13)
+        self.assertIn('modern-fabric-http.mjs', original_manifest['files'])
+        original_config = json.loads(self.before[self.roots['config']])
+        self.assertIs(original_config['modernFabricProtocol'], True)
+        self.assertEqual(original_config['backendMode'], 'shared-account')
+        self.assertEqual(original_config['port'], 45280)
+        self.assertNotIn('fleetStatus', original_config)
+        # Exercise every existing round-trip, seal, transaction and no-lifecycle
+        # assertion against the modern seat, without inheriting legacy-only tests.
+        BackendReleaseTests.test_live_preview_has_no_effect_and_exact_diff_then_apply_preserves_seal(self)
+        expected_config = {**original_config, 'args': [str(self.backend), *original_config['args'][1:]]}
+        expected_config_bytes = svc._fabric_release_json(expected_config)
+        self.assertEqual(self.roots['config'].read_bytes(), expected_config_bytes)
+        expected_manifest = {**original_manifest, 'backend': str(self.backend),
+            'backendHash': self.args.backend_sha256,
+            'configHash': hashlib.sha256(expected_config_bytes).hexdigest()}
+        self.assertEqual(self.roots['manifest'].read_bytes(), svc._fabric_release_json(expected_manifest))
+
+    def test_neighbor_accounts_cannot_release_or_acquire_enrolled_lock(self):
+        for account in ('fabric-c3-570f6f35', 'fabric-c3-other', 'subagent-fabric-c3-extra'):
+            with self.subTest(account=account):
+                args = SimpleNamespace(**{**vars(self.args), 'account': account})
+                with self.assertRaisesRegex(SystemExit, 'explicitly enrolled restricted c3 account'):
+                    svc.cmd_fabric_backend_release(args)
+                with self.assertRaisesRegex(SystemExit, 'cannot select another account'):
+                    with svc._c2_lifecycle_mutex(account):
+                        self.fail('neighbor acquired an enrolled lifecycle lock')
+                self.assertFalse(svc._build_runtime_roots(account)['base'].exists())
+                self.assertEqual(self.snapshot(), self.before)
+
+    def test_modern_selectors_are_required_with_exact_types_and_values(self):
+        original = json.loads(self.before[self.roots['config']])
+        cases = (
+            ('modernFabricProtocol', False), ('modernFabricProtocol', None),
+            ('modernFabricProtocol', 1), ('modernFabricProtocol', 'true'),
+            ('backendMode', 'per-session'), ('backendMode', None),
+            ('backendMode', False), ('backendMode', 'SHARED-ACCOUNT'),
+        )
+        for key, value in cases:
+            with self.subTest(key=key, value=value):
+                self.reseal_config({**original, key: value})
+                self.assert_profile_refused_without_write()
+        for key in ('modernFabricProtocol', 'backendMode'):
+            with self.subTest(missing=key):
+                config = {k: v for k, v in original.items() if k != key}
+                self.reseal_config(config)
+                self.assert_profile_refused_without_write()
+
+    def test_modern_port_is_the_exact_enrolled_integer(self):
+        original = json.loads(self.before[self.roots['config']])
+        for port in (45119, 45281, '45280', 45280.0, True, None):
+            with self.subTest(port=port):
+                self.reseal_config({**original, 'port': port}, port=port)
+                self.assert_profile_refused_without_write()
+        self.reseal_config({k: v for k, v in original.items() if k != 'port'}, port=45280)
+        self.assert_profile_refused_without_write()
+
+    def test_modern_capability_boundary_cannot_be_broadened_or_normalized(self):
+        original = json.loads(self.before[self.roots['config']])
+        for key in ('fleetStatus', 'repositoryWorkspaces', 'commissionPublication',
+                    'fleetRouting', 'publicUrl'):
+            with self.subTest(forbidden=key):
+                self.reseal_config({**original, key: None})
+                self.assert_profile_refused_without_write()
+        for key, value in (('fabricOnly', False), ('fabricOnly', 1),
+                           ('gitPublish', True), ('gitPublish', 0),
+                           ('paperDesign', True), ('paperDesign', 0),
+                           ('host', 'localhost'), ('host', '0.0.0.0'),
+                           ('accountLabel', 'fabric-c3-570f6f35')):
+            with self.subTest(key=key, value=value):
+                self.reseal_config({**original, key: value})
+                self.assert_profile_refused_without_write()
+
+    def test_modern_release_and_lifecycle_share_the_same_lock(self):
+        self.prepare_apply()
+        with svc._c2_lifecycle_mutex(self.account):
+            with self.assertRaisesRegex(SystemExit, 'already in progress'):
+                svc.cmd_fabric_backend_release(self.args)
+            for operation in (svc.cmd_start, svc.cmd_stop, svc.cmd_seal_runtime):
+                with self.subTest(operation=operation.__name__):
+                    with self.assertRaisesRegex(SystemExit, 'already in progress'):
+                        operation(SimpleNamespace(account=self.account))
+        self.assertEqual(self.snapshot(), self.before)
+        self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_legacy_lock_does_not_block_modern_lock_or_release(self):
+        legacy_roots = svc._build_runtime_roots(svc.FABRIC_BACKEND_ACCOUNT)
+        legacy_roots['state'].mkdir(mode=0o700, parents=True)
+        self.prepare_apply()
+        with svc._c2_lifecycle_mutex(svc.FABRIC_BACKEND_ACCOUNT):
+            legacy_lock = legacy_roots['state'] / svc.C2_LIFECYCLE_LOCK_NAME
+            legacy_identity = (legacy_lock.stat().st_dev, legacy_lock.stat().st_ino)
+            with svc._c2_lifecycle_mutex(self.account):
+                modern_lock = self.roots['state'] / svc.C2_LIFECYCLE_LOCK_NAME
+                self.assertNotEqual(legacy_identity, (modern_lock.stat().st_dev, modern_lock.stat().st_ino))
+            result = self.capture(lambda: svc.cmd_fabric_backend_release(self.args))
+            self.assertEqual(result['effect'], 'APPLIED')
+            self.assertEqual(legacy_identity, (legacy_lock.stat().st_dev, legacy_lock.stat().st_ino))
+            self.assertEqual(legacy_lock.read_bytes(), b'')
+            self.assertFalse(legacy_roots['config'].exists())
+            self.assertFalse(legacy_roots['manifest'].exists())
+            self.assertFalse((legacy_roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_malformed_named_absence_blocks_modern_release_before_intent(self):
+        self.prepare_apply()
+        exact_absence = (f'Bad request.\nCould not find service "{self.label}" '
+                         f'in domain for user gui: {os.getuid()}\n')
+        cases = (
+            svc.CmdResult(1, '', 'permission denied'),
+            svc.CmdResult(113, 'unexpected output', exact_absence),
+            svc.CmdResult(113, '', exact_absence + '\n'),
+            svc.CmdResult(113, '', exact_absence.replace(self.account, svc.FABRIC_BACKEND_ACCOUNT)),
+            svc.CmdResult(0, '', ''),
+        )
+        original_run = svc._run
+        for result in cases:
+            def run(argv, **kwargs):
+                if argv[0] == 'launchctl':
+                    self.assertEqual(argv, ['launchctl', 'print', svc._launchd_target(self.label)])
+                    return result
+                return original_run(argv, **kwargs)
+            with self.subTest(returncode=result.returncode, stdout=result.stdout, stderr=result.stderr):
+                with mock.patch.object(svc, '_run', side_effect=run):
+                    with self.assertRaisesRegex(SystemExit, 'state is indeterminate'):
+                        svc.cmd_fabric_backend_release(self.args)
+                self.assertEqual(self.snapshot(), self.before)
+                self.assertFalse((self.roots['state'] / 'fabric-backend-releases').exists())
+
+    def test_modern_stop_preserves_unknown_after_bootout_until_exact_absence(self):
+        target = svc._launchd_target(self.label)
+        running = svc.CmdResult(0, f'{target} = {{\n'
+            f'\tpath = {self.roots["plist"]}\n\tstate = running\n\tpid = 4321\n}}\n', '')
+        exact_absence = svc.CmdResult(113, '',
+            f'Bad request.\nCould not find service "{self.label}" '
+            f'in domain for user gui: {os.getuid()}\n')
+        for after_bootout in (svc.CmdResult(113, '', 'unverified absence'), exact_absence):
+            calls = []
+            observations = iter((running, after_bootout))
+
+            def run(argv, **kwargs):
+                calls.append(argv)
+                if argv == ['launchctl', 'print', target]:
+                    return next(observations)
+                self.assertEqual(argv, ['launchctl', 'bootout', target])
+                return svc.CmdResult(0, '', '')
+
+            with self.subTest(stderr=after_bootout.stderr):
+                with mock.patch.object(svc, '_run', side_effect=run):
+                    if after_bootout is exact_absence:
+                        result = self.capture(lambda: svc.cmd_stop(SimpleNamespace(account=self.account)))
+                        self.assertIs(result['stopped'], True)
+                        self.assertEqual(result['account'], self.account)
+                    else:
+                        with self.assertRaisesRegex(SystemExit, 'EFFECT_UNKNOWN after bootout; service absence is unverified'):
+                            svc.cmd_stop(SimpleNamespace(account=self.account))
+                self.assertEqual(calls, [
+                    ['launchctl', 'print', target],
+                    ['launchctl', 'bootout', target],
+                    ['launchctl', 'print', target],
+                ])
+                self.assertEqual(self.snapshot(), self.before)
 
 
 if __name__ == '__main__':

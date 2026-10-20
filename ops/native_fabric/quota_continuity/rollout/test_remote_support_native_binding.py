@@ -19,7 +19,13 @@ class RemoteBindingPublication(unittest.TestCase):
         support = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(support)
         self.assertIn("native_runtime_bindings.py", support.SOURCE_FILES)
-        self.assertEqual(support.SOURCE_FILES - {"native_runtime_bindings.py"}, support.PRE_NATIVE_BINDING_SOURCE_FILES)
+        self.assertEqual(len(support.SOURCE_FILES), 37)
+        self.assertEqual(support.SOURCE_FILES - {"commission_deadline.py"},
+                         support.PRE_COMMISSION_DEADLINE_SOURCE_FILES)
+        self.assertEqual(len(support.PRE_COMMISSION_DEADLINE_SOURCE_FILES), 36)
+        self.assertEqual(support.PRE_COMMISSION_DEADLINE_SOURCE_FILES - {"native_runtime_bindings.py"},
+                         support.PRE_NATIVE_BINDING_SOURCE_FILES)
+        self.assertEqual(len(support.PRE_NATIVE_BINDING_SOURCE_FILES), 35)
         shell = (root / "candidate/remote_sub.sh").read_text()
         names = set(re.search(r"SUPPORT_FILES=\(\n(.*?)\n\)", shell, re.S).group(1).split())
         self.assertEqual(names, support.SOURCE_FILES)

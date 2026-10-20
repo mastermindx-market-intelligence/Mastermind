@@ -13,6 +13,186 @@ import re
 
 import provider_outcome
 
+PRELEASE_SCHEMA = "mastermind.fabric_prelease_quota_refusal.v1"
+PRELEASE_SOURCES = ("remote_sub.sh", "lease_broker.py", "quota_circuit.py")
+PRELEASE_UNCERTAINTY_MARKERS = (
+    "LEASE_PRESERVED effect_unknown=1", "REMOTE_EFFECT_UNKNOWN", "signal=effect_unknown",
+    "CONTROLLER_PROCESS_UNPROVEN", "GO_EFFECT_UNKNOWN", "NATIVE_EFFECT_UNKNOWN",
+    "EFFECT_UNKNOWN timeout ", "EFFECT_UNKNOWN_NONZERO", "GLM_CAPABILITY_TRANSFER_UNPROVEN",
+)
+
+
+def capacity_blockade(br, conn, pool, preferred=None):
+    """A locked capacity refusal, never an inference from missing accounts.
+
+    Every relevant configured account must be otherwise enabled and excluded
+    by an existing recorded capacity cooldown. Unknown, parked, malformed and
+    ordinary resource states do not qualify this pre-lease handoff.
+    """
+    spec = br.provider(pool)
+    if spec.get("enabled") is not True:
+        return None
+    accounts = spec.get("accounts")
+    if not isinstance(accounts, list) or not accounts:
+        return None
+    names = [a.get("name") if isinstance(a, dict) else None for a in accounts]
+    if (any(not isinstance(n, str) or not n for n in names)
+            or len(set(names)) != len(names)):
+        return None
+    selected = [a for a in accounts if not preferred or a["name"] == preferred]
+    if not selected:
+        return None
+    stamp = br.now()
+    blocked = []
+    for acct in selected:
+        try:
+            base = br._base_account_cap(pool, acct)
+            row = cooldown(br, pool, acct["name"], conn)
+            if (type(base) is not int or base <= 0 or row is None
+                    or row.get("kind") not in provider_outcome.CAPACITY
+                    or any(type(row.get(k)) not in (int, float)
+                           or not math.isfinite(row[k]) for k in ("observed_at", "until_ts"))
+                    or not row["observed_at"] <= stamp < row["until_ts"]
+                    or not isinstance(row.get("source_run"), str)
+                    or not provider_outcome.IDENT.fullmatch(row["source_run"])):
+                return None
+            blocked.append({"account": acct["name"], "scope": row["scope"],
+                "kind": row["kind"], "observed_at": row["observed_at"],
+                "until_ts": row["until_ts"], "source_run": row["source_run"]})
+        except (ValueError, TypeError, KeyError):
+            return None
+    return {"observed_at": stamp, "accounts": blocked}
+
+
+def write_prelease_refusal(path, *, run_id, root_id, parent_run_id,
+                          pool, host, model, pid, request_sha256, launch_sha256,
+                          controller_sha256, blockade):
+    """Publish the exact acquire invocation's no-grant result after return.
+
+    Only Broker.acquire's typed locked capacity branch calls this function.
+    The caller's original subprocess return is a separate required witness.
+    """
+    for value in (run_id, root_id, parent_run_id):
+        if not isinstance(value, str) or not provider_outcome.IDENT.fullmatch(value):
+            raise ValueError("prelease_identity_invalid")
+    for value in (request_sha256, launch_sha256, controller_sha256):
+        if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{64}", value) is None:
+            raise ValueError("prelease_source_binding_invalid")
+    if (type(pid) is not int or pid <= 0 or not isinstance(blockade, dict)
+            or not all(isinstance(v, str) and v for v in (pool, host, model))):
+        raise ValueError("prelease_invocation_invalid")
+    here = Path(__file__).resolve().parent
+    native_sources = {
+        "remote_sub.sh": controller_sha256,
+        "lease_broker.py": provider_outcome.digest(provider_outcome.regular_bytes(here / "lease_broker.py", 256 * 1024)),
+        "quota_circuit.py": provider_outcome.digest(provider_outcome.regular_bytes(here / "quota_circuit.py", 256 * 1024)),
+    }
+    provider_outcome.write_new(Path(path), {
+        "schema": PRELEASE_SCHEMA, "run_id": run_id, "root_id": root_id,
+        "parent_run_id": parent_run_id, "pool": pool, "host": host, "model": model,
+        "controller_pid": pid, "reason": "prelease_quota_cooldown", "rc": 75,
+        "lease_granted": False, "task_cli_started": False,
+        "request_sha256": request_sha256, "launch_sha256": launch_sha256,
+        "native_sources": native_sources, "blockade": blockade,
+    })
+
+
+def validate_prelease_refusal(here, run, root, parent, *, packet_limit=8 * 1024 * 1024):
+    """Read an original controller return; this cannot dispatch or resurrect.
+
+    A source-bound broker refusal alone is insufficient: the adapter must have
+    observed its exact one-shot controller return, after which that invocation
+    cannot create a remote child. Missing or contradictory evidence fails closed.
+    """
+    if not all(isinstance(v, str) and provider_outcome.IDENT.fullmatch(v)
+               for v in (run, root, parent)):
+        raise ValueError("prelease_identity_invalid")
+    directory = Path(here) / "state" / "remote_sub"
+    def read(suffix, limit=32768):
+        raw = provider_outcome.regular_bytes(directory / (run + suffix), limit)
+        obj = json.loads(raw)
+        if not isinstance(obj, dict):
+            raise ValueError("prelease_artifact_invalid")
+        return raw, obj
+    request_raw, request = read(".request.json")
+    launch_raw, launch = read(".request-launch.json")
+    refusal_raw, refusal = read(".prelease-quota.json")
+    returned_raw, returned = read(".request-return.json")
+    schemas = ((request, "mastermind.fabric_request_artifact.v1"),
+               (launch, "mastermind.fabric_request_launch.v1"),
+               (refusal, PRELEASE_SCHEMA),
+               (returned, "mastermind.fabric_request_return.v1"))
+    for obj, schema in schemas:
+        if (obj.get("schema") != schema or obj.get("run_id") != run
+                or obj.get("root_id") != root or obj.get("parent_run_id") != parent):
+            raise ValueError("prelease_artifact_identity")
+    if (refusal.get("reason") != "prelease_quota_cooldown"
+            or type(refusal.get("rc")) is not int or refusal["rc"] != 75
+            or refusal.get("lease_granted") is not False
+            or refusal.get("task_cli_started") is not False
+            or type(refusal.get("controller_pid")) is not int or refusal["controller_pid"] <= 0
+            or launch.get("state") != "LAUNCH_ATTEMPT_RESERVED"
+            or launch.get("capacity_handoff") is not True
+            or returned.get("state") != "NATIVE_CONTROLLER_RETURNED"
+            or type(returned.get("controller_rc")) is not int or returned["controller_rc"] != 75
+            or any(obj.get("request_sha256") != provider_outcome.digest(request_raw)
+                   for obj in (launch, refusal, returned))
+            or any(obj.get("launch_sha256") != provider_outcome.digest(launch_raw)
+                   for obj in (refusal, returned))
+            or returned.get("prelease_sha256") != provider_outcome.digest(refusal_raw)):
+        raise ValueError("prelease_controller_return_unqualified")
+    sources = launch.get("native_sources")
+    if (not isinstance(sources, dict) or set(sources) != set(PRELEASE_SOURCES)
+            or any(not isinstance(v, str) or re.fullmatch(r"[0-9a-f]{64}", v) is None
+                   for v in sources.values())
+            or refusal.get("native_sources") != sources):
+        raise ValueError("prelease_source_changed")
+    route = launch.get("route")
+    if (not isinstance(route, dict)
+            or any(refusal.get(k.lower()) != route.get(k) for k in ("POOL", "HOST", "MODEL"))):
+        raise ValueError("prelease_route_changed")
+    blockade = refusal.get("blockade")
+    if (not isinstance(blockade, dict) or type(blockade.get("observed_at")) not in (int, float)
+            or not math.isfinite(blockade["observed_at"])
+            or not isinstance(blockade.get("accounts"), list) or not blockade["accounts"]):
+        raise ValueError("prelease_capacity_evidence_invalid")
+    names = set()
+    for account in blockade["accounts"]:
+        if (not isinstance(account, dict) or not isinstance(account.get("account"), str)
+                or not account["account"] or account["account"] in names
+                or account.get("kind") not in provider_outcome.CAPACITY
+                or not isinstance(account.get("scope"), str) or not account["scope"]
+                or not isinstance(account.get("source_run"), str)
+                or not provider_outcome.IDENT.fullmatch(account["source_run"])
+                or any(type(account.get(k)) not in (int, float) or not math.isfinite(account[k])
+                       for k in ("observed_at", "until_ts"))
+                or not account["observed_at"] <= blockade["observed_at"] < account["until_ts"]):
+            raise ValueError("prelease_capacity_evidence_invalid")
+        names.add(account["account"])
+    log = provider_outcome.regular_bytes(directory / (run + ".log"), 8 * 1024 * 1024)
+    if returned.get("log_sha256") != provider_outcome.digest(log):
+        raise ValueError("prelease_controller_log_changed")
+    text = log.decode("utf-8", errors="replace")
+    if any(marker in text for marker in (*PRELEASE_UNCERTAINTY_MARKERS,
+            "LEASE_OK pool=", "SUPPORT_VERSION_READY ", "LAUNCH stdout=", "REMOTE_DONE rc=", "DONE rc=")):
+        raise ValueError("prelease_contradictory_execution_evidence")
+    artifacts = [directory / (run + suffix) for suffix in (
+        ".process.jsonl", ".provider.json", ".provider-observed.json", ".native-terminal.json",
+        ".support.json", ".usage.json", ".go-run.json", ".session-created.json", ".session-retained.json")]
+    artifacts.append(Path(here) / "lanes" / (run + ".remote.stdout"))
+    for artifact in artifacts:
+        if artifact.exists() or artifact.is_symlink():
+            raise ValueError("prelease_contradictory_execution_artifact")
+    if (request.get("packet") != run + ".request.packet"
+            or launch.get("packet_sha256") != request.get("packet_sha256")
+            or provider_outcome.digest(provider_outcome.regular_bytes(
+                directory / (run + ".request.packet"), packet_limit)) != request.get("packet_sha256")):
+        raise ValueError("prelease_packet_changed")
+    return {"packet_sha256": request["packet_sha256"],
+            "prelease_sha256": provider_outcome.digest(refusal_raw),
+            "request_return_sha256": provider_outcome.digest(returned_raw),
+            "kind": "prelease_quota_cooldown"}
+
 
 def init_schema(conn):
     conn.execute("""CREATE TABLE IF NOT EXISTS quota_cooldowns (

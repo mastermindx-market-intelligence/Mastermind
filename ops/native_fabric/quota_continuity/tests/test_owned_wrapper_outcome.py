@@ -29,7 +29,7 @@ class OwnedWrapperOutcome(unittest.TestCase):
 
     def setUp(self):
         fixtures.Preflight.setUp(self)
-        for name in ('remote_sub_exec.py', 'pick.py'):
+        for name in ('remote_sub_exec.py', 'pick.py', 'commission_deadline.py'):
             shutil.copyfile(ROOT / 'candidate' / name, self.ext / name)
         for name in ('lane_runtime.py', 'native_remote.py',
                      'fabric_client_projection.py', 'yes'):

@@ -4,6 +4,21 @@ import { sameTarget, type OfficeProjection, type ProjectionContext, type SourceC
 import "./office.css";
 import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
 import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
+import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
+import type { PlanSelection } from "../planning/admitted-plan";
+import type { ActivitySelection } from "../planning/retained-activity";
+
+// Stable presentation callbacks: parent render churn cannot invalidate an acquired plan.
+// Each call resolves the *current* installed host; neither reference conveys authorization.
+const readOfficePlan = (request: PlanSelection & { signal: AbortSignal }) =>
+  window.MastermindMissionHost!.readAdmittedPlan!(request);
+const readOfficeActivity = (request: ActivitySelection & { signal: AbortSignal }) =>
+  window.MastermindMissionHost!.readRetainedActivity!(request);
+const officePlanGeneration = () => window.MastermindMissionHost!.invalidationGeneration!();
+const officePlanPermission = () => {
+  const state = window.MastermindMissionHost!.auth!.getState();
+  return state.status === "signed_in" && state.acquisition;
+};
 
 /** Draft storage belongs to the existing shell. Inspection never rewrites or sends it. */
 export interface OfficeDraft { text: string; context: ProjectionContext }
@@ -166,6 +181,23 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
 
     <details className="fi-disclosure">
       <summary>{locale === "zh-CN" ? "子代理 Fabric · 查看执行内部状态" : "Subagent Fabric · inspect execution"}</summary>
+    <AdmittedPlanInspector
+      key={`plan:${projection.context.authGeneration}`}
+      selection={mission?.program?.work_ref && mission?.mission?.root_job_id
+        ? { work_ref: mission.program.work_ref, root_job_id: mission.mission.root_job_id } : null}
+      read={typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
+        ? readOfficePlan : undefined}
+      readActivity={typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
+        ? readOfficeActivity : undefined}
+      sourceGeneration={typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
+        ? officePlanGeneration : undefined}
+      canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth
+        ? officePlanPermission : undefined}
+      locale={locale}
+      mission={mission}
+      missionSourceState={projection.mission.source.state}
+      missionObservedAt={projection.mission.source.observed_at}
+    />
     <FabricMissionInspector
       key={JSON.stringify([projection.context.authGeneration, projection.context.selection])}
       mission={mission} locale={locale}
