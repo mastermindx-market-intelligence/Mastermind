@@ -568,6 +568,58 @@ describe("optional Executive authentication in the existing web owner", () => {
       await e.login();
       expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" ") || returnedScope === "mastermind.executive.read");
     });
+  it("keeps READ-only Executive grants usable for observation but refuses SEND before fetch", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? "mastermind.executive.read"
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    expect(e.client.executive!.available()).toBe(true);
+    expect(e.client.executiveSession!.available()).toBe(true);
+    e.fetcher.mockClear();
+    const signal = new AbortController().signal;
+    await expect(e.client.executive!.submit({ operation_key: "readonly-denied" }, signal))
+      .rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    await expect(e.client.executiveSession!.send({
+      target_ref: "fabric_attempt:" + "a".repeat(64),
+      instruction: "continue", stop_condition: "finish",
+      operation_key: "session-continue-" + "b".repeat(64),
+    }, signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockImplementation(async () => response({ ok: true }));
+    await e.client.executive!.context(signal);
+    await e.client.executive!.status({ intent_id: "read-only-status" }, signal);
+    await e.client.executiveSession!.reply({ operation_key: "read-only-result" }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/context", ORIGIN + "/os/executive/status",
+      ORIGIN + "/os/executive/session/reply",
+    ]);
+  });
+  it("retains SEND only when the exact combined Executive scopes are granted, regardless of ordering", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? scopes.split(" ").reverse().join(" ")
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    e.fetcher.mockClear();
+    e.fetcher.mockImplementation(async () => response({ ok: true }));
+    const signal = new AbortController().signal;
+    await e.client.executive!.submit({ operation_key: "combined-grant" }, signal);
+    await e.client.executiveSession!.send({
+      target_ref: "fabric_attempt:" + "a".repeat(64),
+      instruction: "continue", stop_condition: "finish",
+      operation_key: "session-continue-" + "b".repeat(64),
+    }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/submit", ORIGIN + "/os/executive/session/send",
+    ]);
+  });
   it("exposes only three fixed authenticated POST routes with exact bodies", async () => {
     const e = setup({ executiveResource: resource }); await e.login();
     e.fetcher.mockClear(); e.fetcher.mockResolvedValue(response({ ok: true }));
