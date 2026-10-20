@@ -23,6 +23,7 @@ import {
 } from "./public-config";
 import { normalizeSelection, normalizeWorkspaceSelection, type MissionSelection } from "./mission";
 import { normalizeResultSelection, RESULT_HTTP_BODY_BYTES } from "./result";
+import { validActivitySelection } from "./planning/retained-activity";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
 import { evidenceUrl, EVIDENCE_BODY_BYTES } from "./research/evidence-contract";
@@ -691,6 +692,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       reply: (arguments_, signal) => executivePost("session/reply", arguments_, signal),
       references: (arguments_, signal) => executivePost("session/references", arguments_, signal),
     } satisfies ExecutiveSessionTransport,
+    // Same existing OAuth generation used by every bounded acquisition read.
+    // The MissionHost requires this proof before it mounts the plan port.
+    invalidationGeneration: () => generation,
     getState,
     subscribe(listener) {
       listeners.add(listener);
@@ -712,6 +716,19 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
           typedUnavailableSchema: "mastermind.workspace_work_queue.v1",
         },
       ),
+    readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
+      if (!/^WS:[A-Z0-9][A-Za-z0-9._-]{1,63}$/.test(work_ref) || !/^JOB-[0-9]{1,9}$/.test(root_job_id))
+        return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/plan/current?${new URLSearchParams({ work_ref, root_job_id })}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_admitted_execution_plan.v1" });
+    },
+    readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selected = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validActivitySelection(selected))
+        return Promise.reject(new Error("ACTIVITY_SELECTION_INVALID"));
+      return read("acquisition", `${ORIGIN}/workspace/operator/activity/current?${new URLSearchParams(selected)}`,
+        signal, { cap: 16_384, typedUnavailableSchema: "mastermind.workspace_retained_activity.v1" });
+    },
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
