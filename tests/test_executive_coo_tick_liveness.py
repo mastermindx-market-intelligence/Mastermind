@@ -152,6 +152,13 @@ def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tm
             await running.start()
             try:
                 assert await _until(lambda: running.service_state == "QUARANTINED")
+                # Quarantine is visible before the physical cycle has unwound.
+                # Its refusal receipt proves the background tick settled before
+                # fixture cleanup uses the deliberately short shutdown grace.
+                assert await _until(lambda: any(
+                    event.event_type == "COO_SERVICE_TICK_REFUSED"
+                    for event in running.runtime.events.list_events(job_id=ids[0])
+                ))
                 assert _children(running, ids[1]) == []
                 attempted = _children(running, ids[0])
                 assert len(attempted) == 1

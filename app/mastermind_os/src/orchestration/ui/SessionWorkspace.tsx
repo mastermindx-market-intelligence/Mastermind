@@ -24,7 +24,7 @@ export type SessionOutcome = { status: "accepted" } | { status: "refused" };
  *   proxy values stay visibly in flight; the same handle remains usable for a
  *   later valid reconciliation and does not throw. Stop uses this same gate.
  * - `"accepted"` on a send clears the submitted draft (only if the draft still
- *   holds the submitted text) and releases the guard. On a stop it simply
+ *   holds the submitted text at its original revision) and releases the guard. On a stop it simply
  *   releases the guard.
  * - `"refused"` releases the guard and preserves the draft for an explicit
  *   retry. Surface the reason via the `error` prop.
@@ -120,8 +120,10 @@ export function SessionWorkspace({
   // Draft state — preserved until the owner reports a successful send.
   const [draft, setDraft] = useState("");
   const draftRef = useRef("");
+  const draftRevisionRef = useRef(0);
   const setDraftText = (next: string) => {
     draftRef.current = next;
+    draftRevisionRef.current += 1;
     setDraft(next);
   };
 
@@ -138,6 +140,7 @@ export function SessionWorkspace({
   const tokenSeqRef = useRef(0);
 
   const sentTextRef = useRef("");
+  const sentRevisionRef = useRef(-1);
 
   const completeSend = (token: number, outcome: unknown) => {
     const status = readTerminalStatus(outcome);
@@ -145,9 +148,10 @@ export function SessionWorkspace({
     if (sendTokenRef.current !== token) return;
     sendTokenRef.current = null;
     setSendInFlight(false);
-    if (status === "accepted" && draftRef.current === sentTextRef.current) {
-      // Success clears only the text that was actually submitted; anything
-      // else in the box is preserved. A refusal keeps the draft.
+    if (status === "accepted" && draftRef.current === sentTextRef.current &&
+        draftRevisionRef.current === sentRevisionRef.current) {
+      // Clear only the submitted revision. Editing away and back to the same
+      // text is still a newer draft. A refusal always keeps the draft.
       setDraftText("");
     }
   };
@@ -169,6 +173,7 @@ export function SessionWorkspace({
     previousSessionKey.current = sessionKey;
     setDraftText("");
     sentTextRef.current = "";
+    sentRevisionRef.current = -1;
     sendTokenRef.current = null;
     stopTokenRef.current = null;
     setSendInFlight(false);
@@ -199,6 +204,7 @@ export function SessionWorkspace({
     const token = ++tokenSeqRef.current;
     sendTokenRef.current = token;
     sentTextRef.current = draft;
+    sentRevisionRef.current = draftRevisionRef.current;
     setSendInFlight(true);
     // Draft is kept until the correlated completion reports the outcome, so a
     // refusal never loses the user's text.
@@ -327,15 +333,26 @@ export function SessionWorkspace({
                 id={sendId}
                 value={draft}
                 onChange={(e) => setDraftText(e.target.value)}
+                onKeyDown={(event) => {
+                  if (
+                    event.key !== "Enter" || event.shiftKey || event.altKey ||
+                    event.ctrlKey || event.metaKey || event.nativeEvent.isComposing ||
+                    event.nativeEvent.keyCode === 229
+                  ) return;
+                  event.preventDefault();
+                  // Reuse form submission and its synchronous duplicate guard.
+                  // A held Enter must not submit a later draft after completion.
+                  if (!event.repeat) event.currentTarget.form?.requestSubmit();
+                }}
                 rows={3}
                 placeholder={
                   connection !== "connected"
                     ? "Connect to send messages."
                     : turnBusy || sendPending
-                      ? "Wait for the current turn to complete."
+                      ? "Draft your next message…"
                       : "Type a message…"
                 }
-                disabled={connection !== "connected" || turnBusy || sendPending}
+                disabled={connection !== "connected"}
                 aria-describedby={textTooLong ? `${sendId}-length` : undefined}
                 aria-invalid={textTooLong}
               />
