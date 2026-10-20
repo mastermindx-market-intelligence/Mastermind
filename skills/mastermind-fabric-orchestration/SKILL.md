@@ -13,7 +13,7 @@ The operator delegates easy bounded work to economical workers rather than doing
 
 ## Future-project default and product-quality obligation
 
-Apply this at intake for **every newly assigned Mastermind project** in a session that actually loaded this policy. Classify the outcome as (a) small bounded reversible work, (b) consequential single-domain work, or (c) consequential multi-domain product delivery. This classification changes the required ownership and review depth, not provider permissions or runtime roles.
+Apply this at intake for **every newly assigned Mastermind project, including Mastermind OS, Macro Dashboard, Terminal and future company products** in a session that actually loaded this policy. Classify the outcome as (a) small bounded reversible work, (b) consequential single-domain work, or (c) consequential multi-domain product delivery. This classification changes the required ownership and review depth, not provider permissions or runtime roles.
 
 For a consequential multi-domain product, the assigning Meta-CEO must keep strategic direction, dependency arbitration, original outcome and final user-path acceptance; it must **not split ordinary implementation between itself and one coordinator as peer builders**. Assign meaningful domain supervision and integrated-result ownership to admitted Sol/Opus program coordinators and/or qualified Fabric operators. One coordinator may own several compatible domains when the actual work and review capacity allow. Do not force agent-count quotas or extra management layers. The supervisor consumes and challenges returned work; source authors cannot self-attest independent review.
 

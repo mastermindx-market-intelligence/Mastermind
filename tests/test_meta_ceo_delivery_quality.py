@@ -26,7 +26,7 @@ def test_operator_does_not_confuse_execution_with_accepted_product():
 
 def test_future_project_default_covers_full_quality_chain():
     policy = (ROOT / "skills/mastermind-fabric-orchestration/SKILL.md").read_text()
-    for contract in ("every newly assigned Mastermind project", "consequential multi-domain product",
+    for contract in ("every newly assigned Mastermind project", "Macro Dashboard", "Terminal", "consequential multi-domain product",
                      "not split ordinary implementation", "original-intent falsifiers",
                      "independence", "NOT_ACCEPTED", "Small reversible tasks",
                      "future-session loading"):
