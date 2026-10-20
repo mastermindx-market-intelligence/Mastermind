@@ -268,3 +268,100 @@ def test_readiness_cli_passes_previous_probe_without_new_store(monkeypatch, caps
                      "--binary", "/not-launched", "--previous-observation-stdin"])
     assert code == 0
     assert json.loads(capsys.readouterr().out)["quota_change"]["state"] == "NO_MATERIAL_CHANGE"
+
+
+@pytest.mark.parametrize("with_catalog,model_rpc_fails", [
+    (False, False), (True, False), (True, True),
+])
+def test_readiness_cli_opt_in_models_uses_same_appserver_and_refuses_unknown(
+    tmp_path, monkeypatch, capsys, with_catalog, model_rpc_fails,
+):
+    """CLI-to-actual-probe test: never opens a real provider home or starts Codex."""
+    import json
+    import time
+    from contextlib import nullcontext
+    from scripts import executive_codex_account as cli
+    from scripts.ohf import laboratory
+
+    calls = []
+    class FakeEnvironment:
+        home = tmp_path
+        def auth_metadata(self):
+            return {"account_id_sha256": "a" * 64}
+        def process_environment(self):
+            return {"PATH": "/usr/bin:/bin"}
+
+    class FakeAppServer:
+        def __init__(self, argv, *, env, cwd, start_new_session):
+            assert argv[1] == "app-server"
+            assert start_new_session and cwd == tmp_path
+            assert "OPENAI_API_KEY" not in env
+            calls.append("created")
+        def start(self):
+            calls.append("started")
+        def request(self, method, *args, **kwargs):
+            calls.append(method)
+            if method == "initialize":
+                return {"userAgent": "fixture-only"}
+            if method == "account/read":
+                return {"account": {"type": "chatgpt", "planType": "pro"}}
+            if method == "account/rateLimits/read":
+                return {"rateLimitsByLimitId": {"codex": {
+                    "primary": {
+                        "usedPercent": 10,
+                        "windowDurationMins": 10080,
+                        "resetsAt": int(time.time()) + 3600,
+                    },
+                    "secondary": None,
+                }}}
+            if method == "model/list":
+                assert args[0] == {"limit": 100, "includeHidden": False}
+                if model_rpc_fails:
+                    raise RuntimeError("Bearer SENSITIVE-SENTINEL")
+                return {"data": [{"id": "gpt-6-astra"}, {"id": "gpt-6.1-sol"}]}
+            raise AssertionError("unexpected native RPC")
+        def notify(self, *args):
+            calls.append("notify")
+        def graceful_close(self):
+            calls.append("closed")
+            return laboratory.AppServerStopProof(
+                controller_returncode=0, private_group_id=12345,
+                private_group_empty=True, leader_exit_confirmed_graceful=True,
+                survivors_detected_after_controller_exit=False,
+                termination_outcome="fixture",
+            )
+
+    monkeypatch.setattr(cli, "native_codex_account_scope",
+                        lambda *args: nullcontext(FakeEnvironment()))
+    monkeypatch.setattr(laboratory, "AppServerClient", FakeAppServer)
+    argv = ["--provider-home", str(tmp_path), "readiness", "--binary",
+            "/not-launched-codex"]
+    if with_catalog:
+        argv.append("--include-models")
+    code = cli.main(argv)
+    output = capsys.readouterr().out
+    result = json.loads(output)
+    assert code == 0 and result["state"] == "NATIVE_READS_COMPLETED"
+    assert result["stop"]["private_group_empty"] is True
+    assert result["account"]["capacity_state"] == "AVAILABLE_OBSERVED"
+    assert "SENSITIVE-SENTINEL" not in output
+    rpc_order = [name for name in calls if name in (
+        "initialize", "account/read", "account/rateLimits/read", "model/list",
+    )]
+    expected = ["initialize", "account/read", "account/rateLimits/read"]
+    if with_catalog:
+        expected.append("model/list")
+    assert rpc_order == expected
+    assert calls.count("created") == calls.count("closed") == 1
+    if not with_catalog:
+        assert "model_visibility" not in result
+    elif model_rpc_fails:
+        assert result["model_visibility"]["state"] == "UNKNOWN"
+        assert result["model_visibility"]["supported_models"] == []
+        assert result["model_visibility"]["admission_granted"] is False
+    else:
+        assert result["model_visibility"]["state"] == "OBSERVED"
+        assert result["model_visibility"]["supported_models"] == [
+            "gpt-6-astra", "gpt-6.1-sol",
+        ]
+        assert result["model_visibility"]["admission_granted"] is False
