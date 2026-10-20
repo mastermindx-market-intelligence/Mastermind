@@ -893,6 +893,12 @@ def transport(alias, request, *, observer_source_hash=None, current_sources_sha2
     elif type(request) is dict and request.get("schema") == "mastermind.fabric_run_observation_request.v1":
         import run_observation_delivery
         code = run_observation_delivery.code_for_request(request, expected_hash=observer_source_hash)
+    elif type(request) is dict and request.get("schema") == "mastermind.fabric_current_source_request.v1":
+        # Fixed generated reader composed only from reviewed module source; the
+        # request travels on stdin, so no caller bytes can shape the command.
+        import current_source_observation
+        code = current_source_observation.generated_reader_source()
+        response_limit = current_source_observation.MAX_RESPONSE
     else:
         code = local_file(HERE / "artifact_reader.py", 65536).decode("utf-8")
     command = "python3 -I -S -c " + shlex.quote(code)
