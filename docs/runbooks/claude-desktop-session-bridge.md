@@ -50,6 +50,29 @@ The browser sends only:
 
 The browser never supplies the project path, Claude session id, CLI path, URL, or argv. Those are resolved server-side from the validated binding and server configuration.
 
+## Multiple Parall Desktop accounts (October 19, 2026 repair)
+
+Parall's numbered Claude wrappers can have distinct outer bundle identifiers
+and private user-data-dir paths while their underlying Claude runtime still
+uses the shared Anthropic Desktop identity. The wrappers also register
+claude:// as the same URL scheme. A generic native Desktop handoff therefore
+cannot reliably choose the account that owns a bound session.
+
+On macOS hosts with at least two numbered Parall wrappers installed,
+open_claude_code_in_desktop now refuses the native Desktop handoff with
+failure_kind=ambiguous before invoking the PTY handoff. Likewise,
+open_claude_desktop refuses claude:// URLs before asking LaunchServices
+to select a handler. No app is launched or credential inspected, and there
+is no retry under another account. The existing binding vocabulary has no
+authorized exact Parall account selector: adding such a selector requires
+explicit account-to-session qualification, not an arbitrary default.
+
+Ordinary Claude Code CLI operations (claude, claude -p, claude --resume)
+and HTTPS browser navigation are unchanged. The 2026-10-01 single-handler
+Desktop handoff canary below predates this safety repair and must not be
+interpreted as proof of multi-account selection. Source publication alone
+is not installed-runtime acceptance.
+
 ## Remote-use boundary
 
 This handoff is local to the Mac that runs Claude Desktop. It is the path for remotely commanding the M2 to open an M2-local Desktop session.
