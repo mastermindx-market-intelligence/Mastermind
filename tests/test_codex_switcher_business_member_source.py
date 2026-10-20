@@ -24,7 +24,7 @@ def test_exact_digest_bound_source_patch_is_present():
     assert document["status"] == "candidate_not_installed"
     assert set(document["modified_paths"]) == PATHS
     assert document["source_base_git_sha"] != document["source_candidate_git_sha"]
-    assert document["rust_unit_tests_passed"] == 78
+    assert document["rust_unit_tests_passed"] == 81
     assert document["rust_unit_tests_failed"] == 0
     assert document["rust_unit_tests_ignored"] == 1
     assert document["installed_app_modified"] is False
