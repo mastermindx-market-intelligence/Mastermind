@@ -1,0 +1,107 @@
+{
+  "definition_version": "glt_ltifo_sensitivity.v1",
+  "task_id": "T15",
+  "frozen_at": "2026-10-19",
+  "status": "sensitivity_only",
+  "card_ref": {
+    "path": "research/liquidity_transmission/glt_preregistration_card.v1.json",
+    "card_hash": "da060bf47e8eafc7e94d0cadbb4135c9207a069aad9eef3539ea9d62911d6aee"
+  },
+  "target_family_source": {
+    "path": "research/liquidity_transmission/glt_estimand_card.v1.json",
+    "relation_id": "glt_rel_monetary_impulse_to_broad_targets.v1",
+    "card_hash": "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537",
+    "field": "outcome_family.targets[].overlap_families",
+    "rule": "a target is in the funding family when its return mechanically shares a component of the usd_funding composite (broad_dollar, real_yield_10y, high_yield_oas): rates and credit through yields and spreads; USD-quoted commodities and non-US equity funds through the dollar numeraire. Each such target is evaluated against a leave-target-family-out baseline (protocol section 6)"
+  },
+  "families": [
+    {
+      "family_id": "broad_dollar",
+      "members": [
+        "dtwexbgs",
+        "fx_eurusd",
+        "fx_usdjpy"
+      ],
+      "note": "the broad dollar and its FX legs; fx legs are UNPROVEN in the card and never enter a v1 baseline"
+    },
+    {
+      "family_id": "real_yield_10y",
+      "members": [
+        "dfii10"
+      ],
+      "note": "10-year TIPS real yield"
+    },
+    {
+      "family_id": "high_yield_oas",
+      "members": [
+        "hy_oas"
+      ],
+      "note": "HY OAS is UNPROVEN and does not feed the first outcome; listed so the family is complete"
+    },
+    {
+      "family_id": "cb_balance_sheet",
+      "members": [
+        "fed_total_assets",
+        "ecb_total_assets",
+        "boj_total_assets"
+      ],
+      "note": "no registered target mechanically shares a balance-sheet component; no target maps here"
+    }
+  ],
+  "target_family_map": {
+    "cper": [
+      "broad_dollar"
+    ],
+    "dbc": [
+      "broad_dollar"
+    ],
+    "eem": [
+      "broad_dollar"
+    ],
+    "efa": [
+      "broad_dollar"
+    ],
+    "fxi": [
+      "broad_dollar"
+    ],
+    "gld": [
+      "broad_dollar"
+    ],
+    "hyg": [
+      "high_yield_oas"
+    ],
+    "igv": [],
+    "iwm": [],
+    "kweb": [
+      "broad_dollar"
+    ],
+    "lqd": [
+      "high_yield_oas",
+      "real_yield_10y"
+    ],
+    "mchi": [
+      "broad_dollar"
+    ],
+    "qqq": [],
+    "slv": [
+      "broad_dollar"
+    ],
+    "smh": [],
+    "spy": [],
+    "tlt": [
+      "real_yield_10y"
+    ],
+    "uso": [
+      "broad_dollar"
+    ]
+  },
+  "member_rule": "an outcome whose target_id is itself a family member (e.g. dtwexbgs as an outcome) belongs to that family",
+  "rule": "drop the family containing the target from direct-input comparators; report as sensitivity, never as the v1 result",
+  "applies_to": [
+    "ComponentBaseline",
+    "DirectFundingBaseline"
+  ],
+  "first_outcome_note": "spy maps to [] (T13 leave_target_family_out false), so the mask is empty for the v1 first outcome; the card's B5 lagged common-risk-factor baseline replaces leave-target-family-out for spy",
+  "v1_card_untouched": true,
+  "definition_hash": "d4746b2ba92f23f16c51e9abae37e78a23a4a76f7342def3d42157171ba49c62"
+}

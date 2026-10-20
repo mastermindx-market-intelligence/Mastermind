@@ -1,6 +1,7 @@
 import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
 import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
 import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
+import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
@@ -62,6 +63,7 @@ export interface RawClient {
   signOut(): Promise<unknown>;
   /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
   readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
   readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
@@ -108,6 +110,7 @@ export interface MissionHost {
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
+  readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readPrograms?: ProgramRead;
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
@@ -186,6 +189,22 @@ export function bindMissionHost(
         const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
         if (!authorized()) throw new Error("READ_CANCELLED");
         return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readRetainedActivity && client.invalidationGeneration ? {
+      async readRetainedActivity(request: ActivitySelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validActivitySelection(selected)) throw new Error("ACTIVITY_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && epoch === started && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("ACTIVITY_READ_UNAUTHORIZED");
+        const raw = await client.readRetainedActivity!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeRetainedActivity(raw, selected);
       },
     } : {}),
     ...(client.readAttendedFabric && client.invalidationGeneration ? {
@@ -446,6 +465,7 @@ export async function createNativeClient(
       | "read_mission"
       | "read_mission_v3"
       | "read_admitted_plan"
+      | "read_retained_activity"
       | "read_result"
       | "read_current_window",
     signal: AbortSignal,
@@ -532,6 +552,12 @@ export async function createNativeClient(
       if (!validPlanSelection({ work_ref, root_job_id }))
         return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
       return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
+    },
+    readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selection = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validActivitySelection(selection))
+        return Promise.reject(new Error("ACTIVITY_SELECTION_INVALID"));
+      return read("read_retained_activity", signal, { selection });
     },
     readMissionV3: ({ workRef, rootJobId, signal }) => {
       if (!normalizeWorkspaceSelection({ workRef, rootJobId }))

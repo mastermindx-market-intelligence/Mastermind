@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://mcp.mastermind-x.com/os/"}
+import { planObservationFixture } from "./planning/plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createWebAuth,
@@ -626,12 +627,9 @@ describe("optional Executive authentication in the existing web owner", () => {
 describe("authenticated admitted-plan Web host transport", () => {
   const selection = { work_ref: "WS:PLAN-VISIBILITY", root_job_id: "JOB-123" };
   const request = () => ({ ...selection, signal: new AbortController().signal });
-  const observation = (state: "SAME" | "UNKNOWN") => ({
-    schema: "mastermind.workspace_plan_observation.v1",
-    selection: { ...selection }, state,
-    control_room: state === "SAME" ? {} : null,
-    runtime: state === "SAME" ? {} : null,
-  });
+  const observation = (state: "SAME" | "UNKNOWN") => state === "SAME"
+    ? planObservationFixture(selection)
+    : { ...planObservationFixture(selection), state, control_room: null, runtime: null };
   const unavailablePlan = () => ({
     schema: "mastermind.workspace_admitted_execution_plan.v1",
     selection: { ...selection }, availability: "UNAVAILABLE",

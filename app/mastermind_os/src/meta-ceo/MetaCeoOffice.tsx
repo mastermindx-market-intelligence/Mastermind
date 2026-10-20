@@ -6,11 +6,14 @@ import { FabricMissionInspector } from "../fabric/FabricMissionInspector";
 import { AttendedFabricInspector } from "../fabric/AttendedFabricInspector";
 import { AdmittedPlanInspector } from "../planning/AdmittedPlanInspector";
 import type { PlanSelection } from "../planning/admitted-plan";
+import type { ActivitySelection } from "../planning/retained-activity";
 
 // Stable presentation callbacks: parent render churn cannot invalidate an acquired plan.
 // Each call resolves the *current* installed host; neither reference conveys authorization.
 const readOfficePlan = (request: PlanSelection & { signal: AbortSignal }) =>
   window.MastermindMissionHost!.readAdmittedPlan!(request);
+const readOfficeActivity = (request: ActivitySelection & { signal: AbortSignal }) =>
+  window.MastermindMissionHost!.readRetainedActivity!(request);
 const officePlanGeneration = () => window.MastermindMissionHost!.invalidationGeneration!();
 const officePlanPermission = () => {
   const state = window.MastermindMissionHost!.auth!.getState();
@@ -184,6 +187,8 @@ export function MetaCeoOffice({ projection, draft, onDraftChange, locale = "en" 
         ? { work_ref: mission.program.work_ref, root_job_id: mission.mission.root_job_id } : null}
       read={typeof window !== "undefined" && window.MastermindMissionHost?.readAdmittedPlan
         ? readOfficePlan : undefined}
+      readActivity={typeof window !== "undefined" && window.MastermindMissionHost?.readRetainedActivity
+        ? readOfficeActivity : undefined}
       sourceGeneration={typeof window !== "undefined" && window.MastermindMissionHost?.invalidationGeneration
         ? officePlanGeneration : undefined}
       canRead={typeof window !== "undefined" && window.MastermindMissionHost?.auth

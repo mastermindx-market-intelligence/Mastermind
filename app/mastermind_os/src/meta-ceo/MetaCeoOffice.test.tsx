@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "../planning/plan-observation.fixture";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useState } from "react";
@@ -246,8 +247,7 @@ describe("Meta-CEO admitted-plan live host wiring", () => {
         reads++;
         return { schema: "mastermind.workspace_admitted_execution_plan.v1",
           selection: selected, availability: "AVAILABLE", reason_codes: [],
-          source_observation: { schema: "mastermind.workspace_plan_observation.v1",
-            selection: selected, state: "SAME", control_room: {}, runtime: {} },
+          source_observation: planObservationFixture(selected),
           plan: { schema: "mastermind.admitted_execution_plan_view.v1",
             root_job_id: selected.root_job_id, plan_attempt_id: "ATT-1",
             plan_schema_version: "mastermind.execution_plan/v3",

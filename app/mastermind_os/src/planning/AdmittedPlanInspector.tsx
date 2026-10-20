@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { validPlanSelection, type PlanRead, type PlanSelection } from "./admitted-plan";
+import { RetainedActivityInspector, type RetainedActivityReader } from "./RetainedActivityInspector";
+import { validActivitySelection } from "./retained-activity";
 import type { MissionDocument, Missionv3Document } from "../mission";
 import { observePlanWorkers } from "./plan-mission-observation";
 import "./admitted-plan.css";
@@ -9,6 +11,7 @@ export type AdmittedPlanReader = (request: PlanSelection & { signal: AbortSignal
 export interface AdmittedPlanInspectorProps {
   selection: PlanSelection | null;
   read?: AdmittedPlanReader;
+  readActivity?: RetainedActivityReader;
   /** Existing auth/source generation, not a new identity or permission authority. */
   sourceGeneration?: () => number;
   canRead?: () => boolean;
@@ -20,10 +23,11 @@ export interface AdmittedPlanInspectorProps {
 }
 
 export function AdmittedPlanInspector({
-  selection, read, sourceGeneration, canRead, locale = "en",
+  selection, read, readActivity, sourceGeneration, canRead, locale = "en",
   mission = null, missionSourceState = "UNAVAILABLE", missionObservedAt = null,
 }: AdmittedPlanInspectorProps) {
   const [document, setDocument] = useState<PlanRead | null>(null);
+  const [documentGeneration, setDocumentGeneration] = useState<number | null>(null);
   const [state, setState] = useState<"idle" | "loading" | "ready" | "unavailable">("idle");
   const request = useRef<AbortController | null>(null);
   const requestSeq = useRef(0);
@@ -34,15 +38,36 @@ export function AdmittedPlanInspector({
     request.current?.abort();
     request.current = null;
     setDocument(null);
+    setDocumentGeneration(null);
     setState("idle");
     return () => { requestSeq.current += 1; request.current?.abort(); };
   }, [selectedWork, selectedRoot, read, sourceGeneration, canRead]);
 
   const qualified = validPlanSelection(selection);
   const ready = qualified && !!read && !!sourceGeneration && !!canRead && canRead();
+  useLayoutEffect(() => {
+    if (!ready) {
+      // Revocation is irreversible for the old acquisition. A future
+      // regrant—even if the host reuses the numeric source generation—
+      // must make a fresh authorized read before any old content reappears.
+      requestSeq.current += 1;
+      request.current?.abort();
+      request.current = null;
+      setDocument(null);
+      setDocumentGeneration(null);
+      setState("idle");
+    }
+  }, [ready]);
+  // Cached plan objectives and their nested Mission/Attempt observations must
+  // disappear on the *same render* as viewer revocation, source-generation
+  // rotation, or root selection change; a later useEffect cleanup is too late.
+  const displayedPlan = ready && documentGeneration !== null &&
+    sourceGeneration?.() === documentGeneration && document && selection &&
+    document.selection.work_ref === selection.work_ref &&
+    document.selection.root_job_id === selection.root_job_id ? document : null;
   const chinese = locale === "zh-CN";
-  const observedWorkers = document?.availability === "AVAILABLE" && selection
-    ? observePlanWorkers(selection, document.plan, mission, missionSourceState, missionObservedAt)
+  const observedWorkers = displayedPlan?.availability === "AVAILABLE" && selection
+    ? observePlanWorkers(selection, displayedPlan.plan, mission, missionSourceState, missionObservedAt)
     : null;
   const open = async () => {
     if (!ready || !selection || !read || !sourceGeneration || !canRead || state === "loading") return;
@@ -54,11 +79,13 @@ export function AdmittedPlanInspector({
     const current = () => !controller.signal.aborted && requestSeq.current === seq &&
       canRead() && sourceGeneration() === initialGeneration;
     setDocument(null);
+    setDocumentGeneration(null);
     setState("loading");
     try {
       const qualifiedPlan = await read({ ...selection, signal: controller.signal });
       if (!current()) return;
       setDocument(qualifiedPlan);
+      setDocumentGeneration(initialGeneration);
       setState("ready");
     } catch {
       if (current()) setState("unavailable");
@@ -81,19 +108,19 @@ export function AdmittedPlanInspector({
     </div>
     {!ready && <p role="status">{chinese ? "当前身份未提供已授权的计划读取。" :
       "No authorized plan reader is available for the current identity."}</p>}
-    {state === "unavailable" && <p role="status">{chinese ? "当前计划不可用；未推断进度。" :
+    {ready && state === "unavailable" && <p role="status">{chinese ? "当前计划不可用；未推断进度。" :
       "Plan read unavailable; no progress inferred."}</p>}
-    {document?.availability === "UNAVAILABLE" && <p role="status">
+    {displayedPlan?.availability === "UNAVAILABLE" && <p role="status">
       {chinese ? "执行系统尚未提供可用的准入计划。" : "No available admitted plan was provided by the execution owner."}
-      {" "}({document.reason_codes.join(", ")})
+      {" "}({displayedPlan.reason_codes.join(", ")})
     </p>}
-    {document?.availability === "AVAILABLE" && <div className="mm-admitted-plan__results">
+    {displayedPlan?.availability === "AVAILABLE" && <div className="mm-admitted-plan__results">
       <div className="mm-admitted-plan__summary">
-        <strong>{document.plan.steps.length} {chinese ? "个已准入步骤" : "admitted steps"}</strong>
+        <strong>{displayedPlan.plan.steps.length} {chinese ? "个已准入步骤" : "admitted steps"}</strong>
         <span>{chinese ? "执行状态：未由此读取确认" : "Execution status: not asserted by this read"}</span>
       </div>
       <ol>
-        {document.plan.steps.map(step => <li key={step.step_id}>
+        {displayedPlan.plan.steps.map(step => <li key={step.step_id}>
           <div className="mm-admitted-plan__step-title">
             <span aria-hidden="true" className="mm-admitted-plan__step-no">{step.ordinal + 1}</span>
             <span>{step.objective}</span>
@@ -116,6 +143,15 @@ export function AdmittedPlanInspector({
             <ul>{observedWorkers.get(step.step_id)!.workers.map(worker => <li key={worker.job_id}>
               <code>{worker.job_id}</code> · {chinese ? "观测状态" : "observed job state"}: {worker.status ?? (chinese ? "未知" : "unknown")}
               {worker.worker_id && <span> · {chinese ? "工作代理" : "worker"}: {worker.worker_id}</span>}
+              {readActivity && selection && worker.current_attempt_id &&
+                validActivitySelection({ ...selection, job_id: worker.job_id,
+                  attempt_id: worker.current_attempt_id }) &&
+                <RetainedActivityInspector
+                  key={worker.job_id + ":" + worker.current_attempt_id}
+                  selection={{ ...selection, job_id: worker.job_id,
+                    attempt_id: worker.current_attempt_id }}
+                  read={readActivity} sourceGeneration={sourceGeneration}
+                  canRead={canRead} locale={locale} />}
             </li>)}</ul>
             {observedWorkers.get(step.step_id)!.omitted && <p>{chinese ? "部分关联任务未显示。" : "Some associated jobs exceed this display bound."}</p>}
           </div>}

@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "./plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 afterEach(() => cleanup());
@@ -12,8 +13,7 @@ function fixture() {
     schema: "mastermind.workspace_admitted_execution_plan.v1",
     selection: { ...selection },
     availability: "AVAILABLE", reason_codes: [],
-    source_observation: { schema: "mastermind.workspace_plan_observation.v1",
-      selection: { ...selection }, state: "SAME", control_room: {}, runtime: {} },
+    source_observation: planObservationFixture(selection),
     plan: {
       schema: "mastermind.admitted_execution_plan_view.v1",
       plan_schema_version: "mastermind.execution_plan/v3",
@@ -33,7 +33,7 @@ function fixture() {
 const unavailable = () => {
   const x = fixture();
   return { ...x, availability: "UNAVAILABLE", reason_codes: ["ADMISSION_NOT_ESTABLISHED"],
-    source_observation: { ...x.source_observation, state: "UNKNOWN" }, plan: null };
+    source_observation: { ...x.source_observation, state: "UNKNOWN", control_room: null, runtime: null }, plan: null };
 };
 
 describe("authenticated admitted-plan contract", () => {
@@ -122,6 +122,35 @@ describe("admitted plan inspector", () => {
     await waitFor(() => expect(screen.queryByText("Investigate the original parent route")).toBeNull());
     view.rerender(<AdmittedPlanInspector selection={{ ...selection, root_job_id: "JOB-124" }} {...props} />);
     expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+  });
+  it("hides an already rendered plan on sign-out, generation rotation or root switch", async () => {
+    let granted = true;
+    let generation = 10;
+    const read = vi.fn(async () => decodeAdmittedPlan(fixture(), selection));
+    const sourceGeneration = () => generation;
+    const canRead = () => granted;
+    const props = { read, sourceGeneration, canRead };
+    const view = render(<AdmittedPlanInspector selection={selection} {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect plan" }));
+    expect(await screen.findByText("Investigate the original parent route")).toBeTruthy();
+
+    granted = false;
+    view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+    expect(screen.getByRole("button", { name: "Inspect plan" })).toHaveProperty("disabled", true);
+
+    granted = true;
+    view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
+    // Regrant without a generation increment must not resurrect cached secrets.
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+    generation++;
+    view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+
+    view.rerender(<AdmittedPlanInspector
+      selection={{ ...selection, root_job_id: "JOB-987" }} {...props} />);
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+    expect(read).toHaveBeenCalledTimes(1);
   });
   it("preserves unavailable vs admitted and localizes the surface", async () => {
     const read = vi.fn(async () => decodeAdmittedPlan(unavailable(), selection));

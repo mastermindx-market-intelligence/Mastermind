@@ -1,0 +1,30 @@
+{
+  "installed_file_sha256": {
+    "com.mastermind.studio-direct-private.chatgpt4.plist": "b63dcc9017b61553888b95d9ffc68c572020ef02b74e73ee60c990ed1f89fe16",
+    "config.json": "bada228d827e63017c9fee6aa7817ad531338115d3597773ceb9762967db997b",
+    "manifest.json": "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071"
+  },
+  "installed_files_unchanged": true,
+  "installer_sha256": "36de5c47234da8e98b995a0ecc2fd7e60716290927404bfdbc677c260ed47aed",
+  "lifecycle_lock_existed_before": false,
+  "lifecycle_lock_existence_unchanged": true,
+  "observed_at": "2026-10-18T08:27:04.516550+00:00",
+  "production_acceptance": false,
+  "receipt": {
+    "account": "chatgpt4",
+    "bridgeSha256": "82bc7f2d75aec423711922198b68f317618a83de177bf4934b73d7b418a6ecfb",
+    "effect": "NOT_APPLIED",
+    "fromGeneration": "v10",
+    "nonPaperConfigSha256": "94a480d9db9c59e2d76b6d3fdd9f9b1a448bcd77c26fbe30f430f79357e36894",
+    "originalManifestSha256": "849e0af6b498408eba843bcbf2c9c500e199c218db06f00db9cb13b54303b071",
+    "preflight": true,
+    "preservedGatewayFiles": 11,
+    "runtimeSealPreserved": true,
+    "serviceStarted": false,
+    "sourcePointerPreserved": true,
+    "targetManifestSha256": "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+    "toGeneration": "v12"
+  },
+  "schema": "mastermind.paper_runtime_preflight_evidence.v1",
+  "source_commit": "7347c319db18c86b4f6f6dc5a0714e0aebca56c3"
+}

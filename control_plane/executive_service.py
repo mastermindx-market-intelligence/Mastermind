@@ -32,6 +32,7 @@ import subprocess
 import sys
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from datetime import datetime, timezone
+from http import HTTPStatus
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Mapping, Protocol
 from uuid import uuid4
@@ -5293,7 +5294,13 @@ class ExecutiveControlService:
             from common.product_acceptance_read_contract import (
                 FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame,
             )
-            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA}:
+            from common.executive_workspace_activity_contract import (
+                FRAME_SCHEMA as ACTIVITY_FRAME_SCHEMA,
+                MAX_RESPONSE_BYTES as ACTIVITY_MAX_RESPONSE_BYTES,
+                validate_frame as validate_activity_frame,
+                unavailable as activity_unavailable,
+            )
+            if app_peer and isinstance(parsed, dict) and parsed.get("schema") in {FRAME_SCHEMA, FRAME_SCHEMA_V2, FRAME_SCHEMA_V3, ACCEPTANCE_FRAME_SCHEMA, ACTIVITY_FRAME_SCHEMA}:
                 factory = app_binding.workspace_read_provider_factory
                 # Pick the operation-specific ceiling BEFORE any work so an
                 # unknown or malformed frame never widens to a larger ceiling.
@@ -5312,6 +5319,14 @@ class ExecutiveControlService:
                         await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
                                                              response_ceiling=ceiling)
                         return
+                elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
+                    ceiling = ACTIVITY_MAX_RESPONSE_BYTES
+                    try:
+                        validate_activity_frame(parsed)
+                    except (TypeError, ValueError):
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                                                             response_ceiling=ceiling)
+                        return
                 elif parsed.get("schema") == FRAME_SCHEMA_V3:
                     ceiling = MAX_PLAN_RESPONSE_BYTES
                     try:
@@ -5324,20 +5339,43 @@ class ExecutiveControlService:
                     ceiling = response_ceiling_for(operation)
                 else:
                     ceiling = WORKSPACE_MAX_RESPONSE_BYTES
-                if factory is None or self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
-                    result = workspace_error("source_unavailable", 503)
+                if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
+                    # Only the *existing installed COO* source may carry a
+                    # separately verified Workspace principal to one original
+                    # Executive Attempt. Generic Workspace login is NOT an
+                    # original OHF run grant. Original installer byte remains
+                    # unchanged by this additional per-request composition.
+                    if (app_binding.principal_admission_armed is not True
+                            or app_binding.principal_facts_factory is None
+                            or factory is None):
+                        result = workspace_error("access_denied", HTTPStatus.FORBIDDEN)
+                    else:
+                        try:
+                            from control_plane.coo_principal_host import CooHostProvider
+                            owner = app_binding.principal_facts_factory(self._require_runtime())
+                            if type(owner) is not CooHostProvider:
+                                raise ValueError("original installed COO source required")
+                            result = await owner.read_workspace_retained_activity(parsed)
+                        except Exception:
+                            result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
+                elif factory is None:
+                    result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 else:
                     try:
                         result = await factory(self._require_runtime()).handle_frame(parsed)
                     except Exception:
                         result = workspace_error("source_unavailable", 503)
-                    if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
-                        result = workspace_error("source_unavailable", 503)
+                if self._closing or self._service_state not in {"READY", "AWAITING_CANARY"}:
+                    result = workspace_error("source_unavailable", HTTPStatus.SERVICE_UNAVAILABLE)
                 try:
                     workspace_encode(result, limit=ceiling - 1)
                 except (TypeError, ValueError):
                     result = (plan_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
                               if parsed.get("schema") == FRAME_SCHEMA_V3
+                              else activity_unavailable(parsed["selection"], "RESPONSE_OVER_BUDGET")
+                              if parsed.get("schema") == ACTIVITY_FRAME_SCHEMA
                               else workspace_error("source_unavailable", 503))
                 await self._send_ceo_ingress_response(writer, result, response_ceiling=ceiling)
                 return
