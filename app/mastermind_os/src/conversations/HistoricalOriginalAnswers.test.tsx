@@ -47,6 +47,26 @@ describe("historical original answer READ",()=>{
     expect(x.store.reserve).not.toHaveBeenCalled();
     expect(x.store.clearIfEqual).not.toHaveBeenCalled();
   });
+  it("pins the exact validated reference against post-READ transport mutation",async()=>{
+    const x=setup();
+    const mutable = {...row};
+    const raw = {...page,data:{...page.data,references:[mutable]}};
+    x.readRefs.mockResolvedValueOnce(raw);
+    render(<HistoricalOriginalAnswers {...x.props}/>);
+    const button = await screen.findByRole("button",{name:/Open original request/});
+    // The transport keeps and mutates the original object after the view has
+    // validated it. The displayed operation and native READ must remain A.
+    mutable.operation_key = "session-continue-"+"f".repeat(64);
+    mutable.read_ref = "session-reply-"+"e".repeat(64);
+    mutable.requested_at = "2050-01-01T00:00:00Z";
+    expect(screen.queryByRole("button",{name:/2050-01-01/})).toBeNull();
+    fireEvent.click(button);
+    await screen.findByText("Recovered historical A.");
+    expect(x.qualified).toHaveBeenCalledWith(
+      {operationKey,targetKey,kind:"message"},expect.any(AbortSignal));
+    expect(x.store.clearIfEqual).not.toHaveBeenCalled();
+  });
+
   it("withholds a foreign readRef even on an accepted native receipt",async()=>{
     const x=setup();
     x.qualified.mockResolvedValueOnce({receipt:{operationKey,targetKey,kind:"message",disposition:"accepted"},

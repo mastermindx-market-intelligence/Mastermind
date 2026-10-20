@@ -53,7 +53,21 @@ function validPage(raw: unknown, selection: MissionSelection): {
         typeof r.requested_at !== "string" || r.requested_at.length > 64 ||
         !Number.isSafeInteger(r.request_event_id) || Number(r.request_event_id) < 1 ||
         Number(r.request_event_id) > Number(page.high_water)) return null;
-    rows.push(r as Row);
+    // Capture the exact closed projection at validation time. Even a test
+    // transport retaining and mutating its raw JSON frame afterward cannot
+    // rewrite an original operation/read ref in the rendered click target.
+    rows.push(Object.freeze({
+      read_ref: r.read_ref as string,
+      operation_key: r.operation_key as string,
+      request_ref: r.request_ref as string,
+      request_event_id: r.request_event_id as number,
+      request_revision: r.request_revision as string,
+      requested_at: r.requested_at as string,
+      work_ref: r.work_ref as string,
+      root_job_id: r.root_job_id as string,
+      target_ref: r.target_ref as string,
+      reference_only: true as const,
+    }));
   }
   return { references: rows, next_cursor: page.next_cursor as string | null,
     high_water: Number(page.high_water) };
