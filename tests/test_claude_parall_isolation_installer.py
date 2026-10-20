@@ -19,6 +19,7 @@ BASELINE = (
 V1_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_block_v1.txt"
 V2_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_before_review.txt"
 V3_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_v3.txt"
+V4_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_v4.txt"
 
 
 def legacy_source():
@@ -59,6 +60,31 @@ def test_known_legacy_guard_installs_and_is_idempotent():
     ("claude --resume native-session-id", False),
     ("claude --version", False),
     ("open -a '/Applications/Claude 6.app'", False),
+    ("open -a claude", True),
+    ("open -a CLAUDE", True),
+    ("open -a " + chr(92) + chr(10) + "Claude", True),
+    ("open -a C" + chr(92) + chr(10) + "laude", True),
+    ('claude -p "Explain open -a ' + chr(92) + chr(10) + 'Claude"', False),
+    ('osascript -e \'tell application "Claude Default" to activate\'', True),
+    ('osascript -e \'tell application "Claude Official" to activate\'', True),
+    ('osascript -e \'tell application "Claude 6" to activate\'', False),
+    ("open CLAUDE://open/session", True),
+    ("open -b COM.ANTHROPIC.CLAUDEFORDESKTOP", True),
+    ('open -a "claude default"', True),
+    ('open -a "Claude 6"', False),
+    ('claude -p "Explain CLAUDE:// in text"', False),
+    ("env - open -a Claude", True),
+    ("command -p open -a Claude", True),
+    ("exec -a harmless open -a Claude", True),
+    ("nice -10 open -a Claude", True),
+    ("time open -a Claude", True),
+    ("caffeinate -i open -a Claude", True),
+    ("caffeinate -t 30 -i open -a Claude", True),
+    ("env - claude --resume native-session-id", False),
+    ('command -p claude -p "Review this text"', False),
+    ('nice -10 claude -p "Why open -a Claude breaks accounts"', False),
+    ("time claude --resume native-session-id", False),
+    ('caffeinate -i claude -p "Explain --desktop"', False),
     ("env -i open -a Claude", True),
     ("env -u PATH open -a Claude", True),
     ("env --ignore-environment open -a Claude", True),
@@ -160,12 +186,15 @@ def test_historical_pins_match_committed_exact_byte_fixtures():
     assert rollout.sha(normalized_v2.encode()) == rollout.KNOWN_INSTALLED_V2_BLOCK_SHA256
     normalized_v3 = V3_BLOCK.read_text().rstrip("\n") + "\n\n"
     assert rollout.sha(normalized_v3.encode()) == rollout.KNOWN_INSTALLED_V3_BLOCK_SHA256
+    normalized_v4 = V4_BLOCK.read_text().rstrip("\n") + "\n\n"
+    assert rollout.sha(normalized_v4.encode()) == rollout.KNOWN_INSTALLED_V4_BLOCK_SHA256
 
 
 @pytest.mark.parametrize("old_fragment", [
     lambda: V1_BLOCK.read_text().rstrip("\n") + "\n\n",
     lambda: V2_BLOCK.read_text().rstrip("\n") + "\n\n",
     lambda: V3_BLOCK.read_text().rstrip("\n") + "\n\n",
+    lambda: V4_BLOCK.read_text().rstrip("\n") + "\n\n",
 ])
 def test_exact_previous_guard_blocks_migrate_without_other_edits(old_fragment):
     source = legacy_source()
@@ -193,6 +222,31 @@ def test_unknown_previous_guard_block_refuses_before_write():
 @pytest.mark.parametrize("cwd", ["/tmp", "/Users/chriswong/Downloads"])
 @pytest.mark.parametrize("command,blocked", [
     ("open -a Claude", True),
+    ("open -a claude", True),
+    ("open -a CLAUDE", True),
+    ("open -a " + chr(92) + chr(10) + "Claude", True),
+    ("open -a C" + chr(92) + chr(10) + "laude", True),
+    ('claude -p "Explain open -a ' + chr(92) + chr(10) + 'Claude"', False),
+    ('osascript -e \'tell application "Claude Default" to activate\'', True),
+    ('osascript -e \'tell application "Claude Official" to activate\'', True),
+    ('osascript -e \'tell application "Claude 6" to activate\'', False),
+    ("open CLAUDE://open/session", True),
+    ("open -b COM.ANTHROPIC.CLAUDEFORDESKTOP", True),
+    ('open -a "claude default"', True),
+    ('open -a "Claude 6"', False),
+    ('claude -p "Explain CLAUDE:// in text"', False),
+    ("env - open -a Claude", True),
+    ("command -p open -a Claude", True),
+    ("exec -a harmless open -a Claude", True),
+    ("nice -10 open -a Claude", True),
+    ("time open -a Claude", True),
+    ("caffeinate -i open -a Claude", True),
+    ("caffeinate -t 30 -i open -a Claude", True),
+    ("env - claude --resume native-session-id", False),
+    ('command -p claude -p "Review this text"', False),
+    ('nice -10 claude -p "Why open -a Claude breaks accounts"', False),
+    ("time claude --resume native-session-id", False),
+    ('caffeinate -i claude -p "Explain --desktop"', False),
     ("env -i open -a Claude", True),
     ("sudo -n open -a Claude", True),
     ("nohup open -a Claude", True),
@@ -221,3 +275,26 @@ def test_gui_denial_covers_shell_tools_outside_mastermind(cwd, command, blocked)
             assert exit_info.code == 0
     denied = '"permissionDecision": "deny"' in output.getvalue()
     assert denied is blocked, (cwd, command, output.getvalue())
+
+
+
+def test_previously_global_guard_migrates_without_losing_scope_tail():
+    original = legacy_source()
+    previous = V4_BLOCK.read_text().rstrip("\n") + "\n\n"
+    old = original.replace(
+        rollout.GUARD_ANCHOR, previous + rollout.GUARD_ANCHOR, 1
+    )
+    old = old.replace(
+        rollout.SCOPED_GUARD_START, rollout.GLOBAL_GUI_GUARD_START, 1
+    )
+    old = old.replace(
+        rollout.GUARD_ANCHOR,
+        rollout.REMAINING_SCOPE_GATE + rollout.GUARD_ANCHOR,
+        1,
+    )
+    assert old.count(rollout.REMAINING_SCOPE_GATE + rollout.GUARD_ANCHOR) == 1
+    updated = rollout.render("guard", old)
+    assert rollout.template("guard") in updated
+    assert updated.count(rollout.REMAINING_SCOPE_GATE + rollout.GUARD_ANCHOR) == 1
+    assert rollout.SCOPED_GUARD_START not in updated
+    assert rollout.render("guard", updated) == updated

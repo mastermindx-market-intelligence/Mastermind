@@ -64,8 +64,11 @@ open_claude_code_in_desktop refuses the native Desktop handoff with
 failure_kind=ambiguous before invoking the PTY handoff. Likewise,
 open_claude_desktop refuses claude:// URLs before asking LaunchServices
 to select a handler. Symlink aliases of the same bundle do not count as
-separate accounts; an unreadable/missing application inventory refuses
-closed rather than guessing which account owns the session. No app is launched or credential inspected, and there
+separate accounts. Both /Applications and ~/Applications are inspected:
+LaunchServices can resolve an app bundle from either directory. An
+unreadable required inventory refuses closed rather than guessing which
+account owns the session; an absent optional ~/Applications directory
+does not create a false ambiguity. No app is launched or credential inspected, and there
 is no retry under another account. The existing binding vocabulary has no
 authorized exact Parall account selector: adding such a selector requires
 explicit account-to-session qualification, not an arbitrary default.
@@ -108,9 +111,12 @@ Unrecognized host drift refuses without replacing another owner's
 configuration; applies use private backups and atomic per-file writes. No
 background daemon, CLI binary change, provider login, or Parall account
 data modification occurs. The covered shell guard now recursively inspects
-common execution prefixes (env, sudo, nohup, exec, command, nice and nested
-sh/bash/zsh -c up to a bound), but does not parse all possible shell scripts
-or guard a native Electron auto-updater. Claude CLI -p, --resume, and prompts
+common execution prefixes (env, sudo, nohup, exec, command, nice, time,
+caffeinate and nested sh/bash/zsh -c up to a bound). It also handles
+case-insensitive generic Claude app names, bundle IDs and URL schemes,
+and joins POSIX backslash-newline command continuations before shell
+argument inspection. This does not parse all possible shell scripts or
+guard a native Electron auto-updater. Claude CLI -p, --resume, and prompts
 *describing* GUI commands remain allowed. Do not claim OS-wide enforcement.
 
 ### Native updater residual risk and account-safe vendor migration

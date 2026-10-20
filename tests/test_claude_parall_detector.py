@@ -74,3 +74,62 @@ def test_invalid_symlink_target_does_not_count_as_second_account(tmp_path, mac_p
         tmp_path / "missing.app", target_is_directory=True
     )
     assert claude._has_multiple_parall_claude_wrappers(tmp_path) is False
+
+
+
+def test_system_plus_user_applications_are_both_scanned(tmp_path, mac_platform):
+    system_apps = tmp_path / "system"
+    user_apps = tmp_path / "user"
+    system_apps.mkdir()
+    user_apps.mkdir()
+    wrapper(system_apps, "Claude Default")
+    wrapper(user_apps, "Claude 1")
+    assert claude._has_multiple_parall_claude_wrappers(
+        system_apps, user_apps
+    ) is True
+
+
+def test_cross_root_alias_is_one_account(tmp_path, mac_platform):
+    system_apps = tmp_path / "system"
+    user_apps = tmp_path / "user"
+    system_apps.mkdir()
+    user_apps.mkdir()
+    original = wrapper(system_apps, "Claude Default")
+    (user_apps / "Claude.app").symlink_to(
+        original, target_is_directory=True
+    )
+    assert claude._has_multiple_parall_claude_wrappers(
+        system_apps, user_apps
+    ) is False
+    wrapper(user_apps, "Claude 4 Legacy")
+    assert claude._has_multiple_parall_claude_wrappers(
+        system_apps, user_apps
+    ) is True
+
+
+def test_optional_missing_user_applications_does_not_force_ambiguity(
+    tmp_path, mac_platform
+):
+    system_apps = tmp_path / "system"
+    system_apps.mkdir()
+    wrapper(system_apps, "Claude 1")
+    assert claude._has_multiple_parall_claude_wrappers(
+        system_apps, tmp_path / "missing-user"
+    ) is False
+
+
+def test_optional_inaccessible_user_apps_fails_closed(tmp_path, mac_platform, monkeypatch):
+    system_apps = tmp_path / "system"
+    system_apps.mkdir()
+    wrapper(system_apps, "Claude 1")
+    real_scandir = claude.os.scandir
+
+    def scoped_scandir(path):
+        if path == tmp_path / "denied-user":
+            raise PermissionError("access denied")
+        return real_scandir(path)
+
+    monkeypatch.setattr(claude.os, "scandir", scoped_scandir)
+    assert claude._has_multiple_parall_claude_wrappers(
+        system_apps, tmp_path / "denied-user"
+    ) is True
