@@ -303,3 +303,27 @@ def test_personal_same_user_two_distinct_subscription_workspaces_are_not_collaps
         row("C3",92,workspace="c"*64,user="1"*64,entitlement=None),
     ]
     assert pick(rows).alias=="C3"
+
+
+@pytest.mark.parametrize("strategy", [
+    "conserve_resets", "single_account_heavy", "timer_priority",
+])
+@pytest.mark.parametrize("invalid", [None, "", "a"*63, "Z"*64, True, {}])
+def test_model_bound_personal_workspace_must_be_verified_even_for_sticky(
+    strategy, invalid,
+):
+    # Direct model-bound selector callers may supply AccountObservation rows.
+    # Never turn a missing/malformed workspace into another paid subscription.
+    ambiguous=row("C2", 100, workspace=invalid, user="2"*64,
+                  entitlement="personal_pro")
+    valid=row("C4", 75, workspace="d"*64, user="4"*64,
+              entitlement="personal_pro")
+    assert pick([ambiguous], strategy=strategy, sticky="C2") is None
+    chosen=pick([ambiguous, valid], strategy=strategy, sticky="C2")
+    assert chosen is not None and chosen.alias == "C4"
+
+
+def test_model_bound_personal_two_distinct_verified_workspaces_remain_eligible():
+    first=row("C1", 90, workspace="1"*64, entitlement="personal_pro")
+    second=row("C2", 80, workspace="2"*64, entitlement="personal_pro")
+    assert pick([first, second]).alias == "C1"
