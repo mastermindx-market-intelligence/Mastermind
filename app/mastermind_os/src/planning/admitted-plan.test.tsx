@@ -123,6 +123,32 @@ describe("admitted plan inspector", () => {
     view.rerender(<AdmittedPlanInspector selection={{ ...selection, root_job_id: "JOB-124" }} {...props} />);
     expect(screen.queryByText("Investigate the original parent route")).toBeNull();
   });
+  it("hides an already rendered plan on sign-out, generation rotation or root switch", async () => {
+    let granted = true;
+    let generation = 10;
+    const read = vi.fn(async () => decodeAdmittedPlan(fixture(), selection));
+    const sourceGeneration = () => generation;
+    const canRead = () => granted;
+    const props = { read, sourceGeneration, canRead };
+    const view = render(<AdmittedPlanInspector selection={selection} {...props} />);
+    fireEvent.click(screen.getByRole("button", { name: "Inspect plan" }));
+    expect(await screen.findByText("Investigate the original parent route")).toBeTruthy();
+
+    granted = false;
+    view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+    expect(screen.getByRole("button", { name: "Inspect plan" })).toHaveProperty("disabled", true);
+
+    granted = true;
+    generation++;
+    view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+
+    view.rerender(<AdmittedPlanInspector
+      selection={{ ...selection, root_job_id: "JOB-987" }} {...props} />);
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
+    expect(read).toHaveBeenCalledTimes(1);
+  });
   it("preserves unavailable vs admitted and localizes the surface", async () => {
     const read = vi.fn(async () => decodeAdmittedPlan(unavailable(), selection));
     render(<AdmittedPlanInspector selection={selection} read={read}
