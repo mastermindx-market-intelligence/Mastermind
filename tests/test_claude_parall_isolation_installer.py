@@ -18,6 +18,7 @@ BASELINE = (
 )
 V1_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_block_v1.txt"
 V2_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_before_review.txt"
+V3_BLOCK = rollout.ROOT / "tests/fixtures/claude_parall_isolation/installed_guard_v3.txt"
 
 
 def legacy_source():
@@ -58,6 +59,25 @@ def test_known_legacy_guard_installs_and_is_idempotent():
     ("claude --resume native-session-id", False),
     ("claude --version", False),
     ("open -a '/Applications/Claude 6.app'", False),
+    ("env -i open -a Claude", True),
+    ("env -u PATH open -a Claude", True),
+    ("env --ignore-environment open -a Claude", True),
+    ("env --unset=HOME open -a Claude", True),
+    ('env -S "open -a Claude"', True),
+    ("sudo -n open -a Claude", True),
+    ("sudo -u build -- open -a Claude", True),
+    ("sudo -n env -i claude --desktop --resume session-id", True),
+    ("nohup open -a Claude", True),
+    ("command open -a Claude", True),
+    ("exec open -a Claude", True),
+    ("nice -n 10 open -a Claude", True),
+    ('bash -lc "bash -lc \'open -a Claude\'"', True),
+    ('zsh -c \'env -i open -b com.anthropic.claudefordesktop\'', True),
+    ("env -i claude --resume session-id", False),
+    ('sudo -n claude -p "Explain the --desktop flag"', False),
+    ('nohup claude -p "Why open -a Claude breaks Parall"', False),
+    ('bash -lc "bash -lc \'echo open -a Claude\'"', False),
+    ("nice -n 10 claude --resume session-id", False),
     ("/Applications/Claude.app/Contents/MacOS/Claude", True),
     ('"/Applications/Claude Official.app/Contents/MacOS/Claude"', True),
     ("bash -lc 'open -a Claude'", True),
@@ -138,11 +158,14 @@ def test_historical_pins_match_committed_exact_byte_fixtures():
     assert rollout.sha(normalized_v1.encode()) == rollout.KNOWN_INSTALLED_V1_BLOCK_SHA256
     normalized_v2 = V2_BLOCK.read_text().rstrip("\n") + "\n\n"
     assert rollout.sha(normalized_v2.encode()) == rollout.KNOWN_INSTALLED_V2_BLOCK_SHA256
+    normalized_v3 = V3_BLOCK.read_text().rstrip("\n") + "\n\n"
+    assert rollout.sha(normalized_v3.encode()) == rollout.KNOWN_INSTALLED_V3_BLOCK_SHA256
 
 
 @pytest.mark.parametrize("old_fragment", [
     lambda: V1_BLOCK.read_text().rstrip("\n") + "\n\n",
     lambda: V2_BLOCK.read_text().rstrip("\n") + "\n\n",
+    lambda: V3_BLOCK.read_text().rstrip("\n") + "\n\n",
 ])
 def test_exact_previous_guard_blocks_migrate_without_other_edits(old_fragment):
     source = legacy_source()

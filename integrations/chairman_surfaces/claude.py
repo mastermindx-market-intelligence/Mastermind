@@ -51,25 +51,33 @@ MINIMUM_DESKTOP_HANDOFF_VERSION = (2, 1, 285)
 _CLAUDE_VERSION_RE = re.compile(r"(?<![0-9])(\d+)\.(\d+)\.(\d+)(?![0-9])")
 
 
-def _has_multiple_parall_claude_wrappers() -> bool:
-    """Detect ambiguous native Desktop routing on a multi-account macOS host.
+def _has_multiple_parall_claude_wrappers(applications_dir: Path | None = None) -> bool:
+    """Refuse ambiguous native Claude Desktop routing on multi-account macOS.
 
-    This detects application wrappers, not Claude Code CLI sessions. No app is
-    started, selected, killed or inspected for credentials. Each Parall wrapper
-    has a distinct outer app identity but shares the underlying Anthropic app
-    identity and claude:// handler with other accounts.
+    Detect distinct Desktop app bundles, not CLI sessions. A default/official
+    Claude wrapper plus one numbered Parall wrapper is already ambiguous.
+    Resolve aliases so /Applications/Claude.app -> Claude Default.app cannot
+    artificially count as two accounts. Read only directory metadata: no apps,
+    session data, credentials or profile contents are opened.
     """
     if sys.platform != "darwin":
         return False
+    applications = applications_dir if applications_dir is not None else Path("/Applications")
     try:
-        applications = Path("/Applications")
-        wrappers = (
-            app for app in applications.glob("Claude *.app")
-            if re.fullmatch(r"Claude [0-9]+\.app", app.name) and app.is_dir()
-        )
-        return sum(1 for _ in wrappers) >= 2
-    except OSError:
-        # Unknown handler selection is not proof of a safe single-account host.
+        distinct_bundles: set[Path] = set()
+        with os.scandir(applications) as entries:
+            for entry in entries:
+                if not re.fullmatch(r"Claude(?: (?:[0-9]+(?: Legacy)?|Default|Official))?\.app", entry.name):
+                    continue
+                if not entry.is_dir(follow_symlinks=True):
+                    continue
+                distinct_bundles.add(Path(entry.path).resolve(strict=True))
+                if len(distinct_bundles) >= 2:
+                    return True
+        return False
+    except (OSError, RuntimeError):
+        # If the app inventory is inaccessible, exact account selection is
+        # unverified; never ask LaunchServices to choose one implicitly.
         return True
 
 

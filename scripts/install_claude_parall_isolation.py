@@ -42,6 +42,10 @@ KNOWN_INSTALLED_V1_BLOCK_SHA256 = (
 KNOWN_INSTALLED_V2_BLOCK_SHA256 = (
     "ed05652cb4316438b48eeedf1957a62d96f96e24906dc9878d0275f04e87d82d"
 )
+# Exact guard block from protected merge PR #1647; also observed live on M2.
+KNOWN_INSTALLED_V3_BLOCK_SHA256 = (
+    "5f6dec8c7d95444410c3cde497f65cfa6985cada00ef1e0fd5366059d818aeea"
+)
 LEGACY_WORKSPACE_ROOT = '        "/Volumes/Mastermind/agent-workspaces",\n'
 NEW_WORKSPACE_ROOT = '        "/Volumes/Mastermind 2/agent-workspaces",\n'
 DOC_ANCHORS = {
@@ -79,6 +83,7 @@ def render(kind: str, before: str) -> str:
             if sha(installed_block.encode()) not in (
                 KNOWN_INSTALLED_V1_BLOCK_SHA256,
                 KNOWN_INSTALLED_V2_BLOCK_SHA256,
+                KNOWN_INSTALLED_V3_BLOCK_SHA256,
             ):
                 raise ValueError("unrecognized guard block: preserve existing owner edits")
             after = before[:start] + block + before[end:]

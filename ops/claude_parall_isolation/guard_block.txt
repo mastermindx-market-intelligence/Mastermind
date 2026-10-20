@@ -25,19 +25,85 @@
         return clauses
 
     def is_unmanaged_desktop_launch(argv, depth=0):
-        if not argv:
+        if not argv or depth >= 8:
             return False
         exe = argv[0].rsplit("/", 1)[-1]
+
         if exe == "env":
+            # Unwrap real GNU/BSD env forms, not shell-quoted documentation.
             j = 1
-            while j < len(argv) and "=" in argv[j] and not argv[j].startswith("-"):
-                j += 1
-            return is_unmanaged_desktop_launch(argv[j:], depth)
-        if exe in {"sh", "bash", "zsh"} and depth < 1:
+            while j < len(argv):
+                arg = argv[j]
+                if arg == "--":
+                    j += 1
+                    break
+                if arg in {"-S", "--split-string"} and j + 1 < len(argv):
+                    return any(
+                        is_unmanaged_desktop_launch(clause, depth + 1)
+                        for clause in shell_clauses(argv[j + 1])
+                    )
+                if arg.startswith("--split-string="):
+                    return any(
+                        is_unmanaged_desktop_launch(clause, depth + 1)
+                        for clause in shell_clauses(arg.split("=", 1)[1])
+                    )
+                if arg in {"-i", "--ignore-environment", "-0", "--null", "-v", "--debug"}:
+                    j += 1
+                    continue
+                if arg in {"-u", "--unset", "-C", "--chdir"}:
+                    j += 2
+                    continue
+                if (arg.startswith(("-u", "--unset=", "--chdir="))
+                        and arg not in {"-u", "--unset", "--chdir"}):
+                    j += 1
+                    continue
+                if "=" in arg and not arg.startswith("-"):
+                    j += 1
+                    continue
+                break
+            return is_unmanaged_desktop_launch(argv[j:], depth + 1)
+
+        if exe == "sudo":
+            # Only inspect the command after sudo's launcher flags; this
+            # guard does not elevate privileges or execute sudo.
+            j = 1
+            while j < len(argv):
+                arg = argv[j]
+                if arg == "--":
+                    j += 1
+                    break
+                if arg in {"-u", "--user", "-g", "--group", "-C", "-p", "-R", "-D"}:
+                    j += 2
+                    continue
+                if arg.startswith("-"):
+                    j += 1
+                    continue
+                break
+            return is_unmanaged_desktop_launch(argv[j:], depth + 1)
+
+        if exe in {"nohup", "exec", "command"}:
+            rest = argv[1:]
+            if rest and rest[0] == "--":
+                rest = rest[1:]
+            return is_unmanaged_desktop_launch(rest, depth + 1)
+
+        if exe == "nice":
+            rest = argv[1:]
+            if len(rest) >= 2 and rest[0] in {"-n", "--adjustment"}:
+                rest = rest[2:]
+            elif rest and rest[0].startswith("--adjustment="):
+                rest = rest[1:]
+            elif rest and rest[0] == "--":
+                rest = rest[1:]
+            return is_unmanaged_desktop_launch(rest, depth + 1)
+
+        if exe in {"sh", "bash", "zsh"}:
             for i, arg in enumerate(argv[1:], 1):
                 if arg.startswith("-") and "c" in arg[1:] and i + 1 < len(argv):
-                    return any(is_unmanaged_desktop_launch(x, depth + 1)
-                               for x in shell_clauses(argv[i + 1]))
+                    return any(
+                        is_unmanaged_desktop_launch(clause, depth + 1)
+                        for clause in shell_clauses(argv[i + 1])
+                    )
         if exe == "claude" and "--desktop" in argv[1:]:
             return True
         path = argv[0]
