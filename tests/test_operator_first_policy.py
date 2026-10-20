@@ -312,3 +312,24 @@ def test_principal_role_overlay_does_not_mutate_protected_operator_package():
     assert "not authentication" in core
     assert "missing access is not authority" in delivery
     assert "independent review" in delivery
+
+@pytest.mark.parametrize("key,configured", [
+    ("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS", "12"),
+    ("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH", "3"),
+])
+def test_existing_claude_capacity_not_silently_reduced(tmp_path, key, configured):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    seed_home(home)
+    settings_path = home / ".claude/settings.json"
+    settings = json.loads(settings_path.read_text())
+    settings.setdefault("env", {})[key] = configured
+    settings_path.write_text(json.dumps(settings, sort_keys=True))
+    existing_doc = (home / ".claude/CLAUDE.md").read_bytes()
+    existing_settings = settings_path.read_bytes()
+    with pytest.raises(m.OrchestratorPolicyError, match="Claude native limit"):
+        m.apply_policy(home, guard_source=guard)
+    assert settings_path.read_bytes() == existing_settings
+    assert (home / ".claude/CLAUDE.md").read_bytes() == existing_doc
+    assert not (home / ".codex/hooks/mastermind_fabric_routing_guard.py").exists()
+    assert not (home / ".agents/skills/mastermind-fabric-orchestration").exists()

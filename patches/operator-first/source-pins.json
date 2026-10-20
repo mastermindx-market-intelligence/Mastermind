@@ -4,8 +4,8 @@
   "incumbent_head": "d2f73a8fbd360f2cfbcb39e67ff2dece1bde403c",
   "path": "ops/executive_os/provider_orchestrator_policy.py",
   "before_sha256": "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594",
-  "after_sha256": "fe89c169e164234d23bdfb78b6950ae0e6b94416a795d9e56211ed3d76d31c5a",
-  "patch_sha256": "41837ae36ba188a5e128d31278c0f2aa9db13298415cb2b713eb9731949e5e33",
+  "after_sha256": "c8e110c42a436384f3044fb830c29c31a1b4c25d7034ee26aebe1a6687a8b047",
+  "patch_sha256": "3dbca77678836b044bfa5e15d691620b985a4a0724b6474a7563eaf26fc16373",
   "role_source_sha256": {
     "SKILL.md": "2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8",
     "references/meta-ceo.md": "df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240",
