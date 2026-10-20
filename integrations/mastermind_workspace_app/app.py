@@ -890,15 +890,10 @@ def _plan_envelope_response(envelope):
                 if type(reasons) is not list or len(reasons) != 1 or envelope != contract.plan_unavailable(selected, reasons[0]):
                     return _refuse_json(503, "source_unavailable")
             else:
-                observed = body["source_observation"]
                 if (body["reason_codes"] != [] or type(body["plan"]) is not dict
-                        or body["plan"].get("root_job_id") != selected["root_job_id"]
-                        or type(observed) is not dict
-                        or set(observed) != {"schema", "state", "selection", "control_room", "runtime"}
-                        or observed["schema"] != contract.PLAN_OBSERVATION_SCHEMA
-                        or observed["state"] != "SAME" or observed["selection"] != selected
-                        or type(observed["control_room"]) is not dict or type(observed["runtime"]) is not dict):
+                        or body["plan"].get("root_job_id") != selected["root_job_id"]):
                     return _refuse_json(503, "source_unavailable")
+                contract.validate_available_plan_observation(body["source_observation"], selected)
             try:
                 contract.bounded_canonical(envelope, limit=contract.MAX_PLAN_RESPONSE_BYTES - 1)
             except (TypeError, ValueError):
