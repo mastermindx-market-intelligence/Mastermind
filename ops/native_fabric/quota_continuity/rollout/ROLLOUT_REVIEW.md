@@ -46,7 +46,7 @@ waiting for controllers. That would obstruct heartbeat and release operations.
 
 The baseline closure contains 72 Python/shell helpers plus the original `yes`
 guard, `host_pull_probe.template`, and the relocated pool dispatcher: 75 files.
-Six new helpers bring the proposed native generation to 81 files. No recursive
+Eight additive helpers bring this proposed native generation to 83 files. No recursive
 copy of the kit, arbitrary JSON files, credentials, historical packets, caches,
 or old run artifacts is part of that source group.
 
@@ -241,3 +241,78 @@ The parent integration separately owns the real provider-wrapper rejection/
 success/denial fixture, protected source merge, facade runtime release, live
 source readback, finite legacy-parent census, and final deployment receipts.
 This handoff alone does not assert those operations are complete.
+
+
+## Forward plain collection and current Git observation (source qualification)
+
+These are separate consumers of the existing transport and original state owners.
+Neither is installed or live from this source publication.
+
+New ordinary non-operator GLM/Qwen plain requests retain the exact transported
+packet in the existing request store. After observed acquisition, the controller
+reads back the remote packet and complete immutable support manifest/files, then
+fsyncs their bound prelaunch record before the first worker launch. The existing
+original-delivery collector requires that evidence and its ordering, original
+root/parent/run/host and acquisition witness. A lost foreground handle can then
+return the original bytes without changing controller/lifecycle truth, releasing
+a lease, accepting work, authorizing cleanup or permitting a replay. Older runs
+without this producer contract remain refused; fixed historical scopes are unchanged.
+
+The additive `current-source` command composes the native invocation owner, existing
+host registry/strict host-key SSH transport, generated Git reader and exclusive
+receiver-bound publication. It does not recover a historical run. The owning OS
+principal and its current external commission/tool/resource permission authorize
+the invocation. Request labels, the environment observer correlation and typed
+invocation are not credentials or proof of that external permission. The route is unavailable until its qualified immutable generation is installed and
+selected. Registry registration binds the lane host and strict-SSH alias; provider
+`allowed_modes` retain their existing enum and grant no source-read authority. This
+change installs no grant, signer, source-custody registry or generic issuer. The
+caller must already hold permission for the declared host/custody and receiver.
+
+A request binds `schema=mastermind.fabric_current_source_request.v1`, `run_id`,
+`root`, current `observer`, distinct `receiver`, registered `host`, exact absolute
+`worktree`, `git_dir`, `common_dir`, lowercase 40-hex `commit`, finite `sources`
+(entries with `path`, optional exact `blob` and `size`), and bounded `limits`
+(`max_file_bytes`, `max_bytes_total`, `deadline_ms`). `historical` is optional opaque
+reference only. Every field is included in the request digest. A real linked
+worktree must declare its gitdir/common-dir pointers and backlink exactly.
+
+The receipt delivers raw commit/tree objects and selected blob bytes as base64,
+with Git identities and path membership independently revalidated locally. With
+an empty `sources` list it proves the commit and its root tree only; it is not a
+complete source snapshot or history bundle. Up to eight finite paths may be
+requested; further objects, parent history, full-tree closure and worktree
+cleanliness are not claimed. This route is enough to deliver selected pinned
+source bytes, not a blanket assertion that an unknown target is currently clean.
+No PNG or working-file/census export is implemented. Loose Git objects use bounded
+raw reads. Packed reads require Linux's enforced 512 MiB address-space cap plus
+bounded stdout/stderr and whole-request deadlines; unsupported platforms refuse.
+Alternates, unsafe/promisor packs, symlink custody, changed objects, unknown fields,
+wrong binding, duplicate or interrupted destination publication all refuse.
+
+Proposed invocation **after protected merge, qualified generation rollout and
+current effect admission** (not an available installed recovery command):
+
+```sh
+python3 <kit>/ext/fabric_task.py current-source --request <owned-request.json> --destination <new-evidence-directory>
+```
+
+The request must name the actual current observer and separately authorized
+receiver; historical `WS:MARKET-OS` labels cannot supply ancestry or admission.
+For target commit `9704aa8e358d2cf8440e293a30a09a24be9038b2`, neither source
+custody nor bytes have been observed by this qualification. Existing published
+images do not require this Git route.
+
+The smallest immutable-generation delta is the three plain producer/collector
+files, the additive observation module, and its narrow `fabric_task.py` and
+`artifact_delivery.py` wiring; the explicit stage/inventory includes their exact
+closure. Existing controllers keep their original immutable generation paths and
+flat compatibility helpers remain unchanged. Publication must use protected merged
+bytes. Read and retain a fresh `CURRENT.json` generation and sequence at the owning
+rollout boundary. The incumbent selector takes `--expect <prior-generation>`
+(or `absent` for a genuinely unselected store), verifies that exact generation
+under its publication lock and increments the observed sequence. Its API does
+not accept a caller-bound sequence comparison; this source does not claim a
+two-field CAS or add one. Never substitute a stale observed generation or force
+selection. Installation, installed-route/host qualification, current scoped
+permission and target proof remain separate owner operations; this PR performs none.

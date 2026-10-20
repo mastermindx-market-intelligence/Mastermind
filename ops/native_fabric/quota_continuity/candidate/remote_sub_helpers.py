@@ -4,6 +4,7 @@
 These helpers execute only from the pre-existing Mastermind controller.
 They do not create a new broker, admission or credential surface.
 """
+import re
 import sys
 
 
@@ -249,15 +250,225 @@ def validate_usage():
     raise SystemExit(0 if valid else 1)
 
 
+TRANSPORT_OBSERVATION_SCHEMA = 'mastermind.transport_observation.v1'
+TRANSPORT_RECEIPT_SCHEMA = 'mastermind.transport_verification.v1'
+TRANSPORT_STAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z\Z')
+# Controller observations only. None of these events authenticates anything;
+# they are the retained, ordered narration the read-only collector re-reads.
+TRACKED_EVENT_NAMES = ('RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
+                       'TRANSPORT_VERIFIED', 'LAUNCH_BINDING', 'LAUNCH',
+                       'LAUNCH_ATTEMPT')
+FORBIDDEN_LOG_MARKERS = ('REFUSED', 'FAILED', 'EFFECT_UNKNOWN', 'UNPROVEN',
+                         'LEASE_PRESERVED')
+ACQUIRE_RESPONSE = re.compile(rb'LEASE=([a-f0-9]{12}) ACCOUNT=([A-Za-z0-9_.:-]{1,128})\n?')
+
+
+def _tracked_events(events):
+    """Classify log events by tracked control-plane name, in file order."""
+    tracked = []
+    for event in events:
+        for name in TRACKED_EVENT_NAMES:
+            if event.startswith(name + ' '):
+                tracked.append((name, event))
+                break
+    return tracked
+
+
+def _open_bound_log(log_name, dir_fd, run_id, host):
+    """Open the per-run log under its directory chain with the incumbent guards."""
+    import fcntl
+    import os
+    import stat
+    fd = os.open(log_name, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
+                 dir_fd=dir_fd)
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    before = os.fstat(fd)
+    identity = lambda s: (s.st_dev, s.st_ino, s.st_uid, s.st_mode, s.st_nlink)
+    if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
+            or before.st_nlink != 1 or before.st_mode & 0o022
+            or not 0 < before.st_size <= 1024 * 1024):
+        os.close(fd)
+        raise ValueError('launch_binding_log_unsafe')
+    raw = os.read(fd, 1024 * 1024 + 1)
+    if len(raw) != before.st_size or not raw.endswith(b'\n'):
+        os.close(fd)
+        raise ValueError('launch_binding_log_incomplete')
+    prefix = (r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(run_id)
+              + r' host=' + re.escape(host) + r'\] ')
+    events = []
+    for line in raw.decode('utf-8').splitlines():
+        event = re.fullmatch(prefix + '(.*)', line)
+        if not event:
+            os.close(fd)
+            raise ValueError('launch_binding_foreign_log')
+        events.append(event[1])
+    return fd, before, identity, raw, events
+
+
+def _publish_log_line(log_name, dir_fd, fd, chain, before, identity, raw, appended):
+    """Append exactly one line and prove the durable publication, or fail."""
+    import os
+    if os.write(fd, appended) != len(appended):
+        raise OSError('launch_binding_short_write')
+    os.fsync(fd)
+    os.fsync(chain.fd)
+    chain.verify()
+    after = os.fstat(fd)
+    visible = os.stat(log_name, dir_fd=dir_fd, follow_symlinks=False)
+    if (identity(after) != identity(before) or identity(visible) != identity(before)
+            or after.st_size != len(raw) + len(appended)
+            or visible.st_size != after.st_size
+            or os.pread(fd, after.st_size, 0) != raw + appended):
+        raise ValueError('launch_binding_publication_unconfirmed')
+
+
+def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
+                     observation_path, *, run_id, host, mode, model,
+                     support_digest, policy_sha256, launch_lease_id,
+                     launch_account):
+    """Verify the transported packet and published support before any launch.
+
+    Fixed read-only controller observation over the incumbent SSH transport:
+    the uploaded packet bytes and the published immutable RELEASE manifest were
+    read back on the selected host and are compared here against the exact
+    local packet and the locally computed generation digest. The strict bounded
+    receipt plus the fsynced TRANSPORT_VERIFIED log line are controller
+    observations only — never authentication, admission or settlement.
+    """
+    import hashlib
+    import json
+    import os
+    from pathlib import Path
+    from datetime import datetime, timezone
+    import artifact_delivery as delivery
+
+    ident = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z')
+    if (type(run_id) is not str or not ident.fullmatch(run_id)
+            or type(host) is not str or not ident.fullmatch(host)
+            or type(model) is not str or not ident.fullmatch(model)
+            or mode not in {'glm', 'qwen'}
+            or type(support_digest) is not str
+            or not re.fullmatch('[a-f0-9]{64}', support_digest)
+            or type(policy_sha256) is not str
+            or not re.fullmatch('[a-f0-9]{64}', policy_sha256)):
+        raise ValueError('transport_verification_scope')
+    packet = delivery.local_file(Path(packet_path), 2 * 1024 * 1024)
+    packet_sha = hashlib.sha256(packet).hexdigest()
+    acquired = delivery.local_file(Path(lease_output_path), 1024)
+    match = ACQUIRE_RESPONSE.fullmatch(acquired)
+    if not match:
+        raise ValueError('transport_verification_acquire_response')
+    lease_id, account = (x.decode('ascii') for x in match.groups())
+    if lease_id != launch_lease_id or account != launch_account:
+        raise ValueError('transport_verification_acquire_mismatch')
+    observation = json.loads(delivery.local_file(Path(observation_path), 65536)
+                             .decode('utf-8'))
+    files = observation.get('files') if type(observation) is dict else None
+    if (type(observation) is not dict
+            or set(observation) != {'schema', 'run_id', 'packet_bytes', 'packet_sha256',
+                                    'support_digest', 'policy_sha256', 'files'}
+            or observation['schema'] != TRANSPORT_OBSERVATION_SCHEMA
+            or observation['run_id'] != run_id
+            or type(observation['packet_bytes']) is not int
+            or observation['packet_bytes'] != len(packet)
+            or observation['packet_sha256'] != packet_sha
+            or observation['support_digest'] != support_digest
+            or observation['policy_sha256'] != policy_sha256
+            or type(files) is not dict or not 1 <= len(files) <= 256
+            or any(type(name) is not str or not name or Path(name).name != name
+                   or type(want) is not str or not re.fullmatch('[a-f0-9]{64}', want)
+                   for name, want in files.items())):
+        raise ValueError('transport_verification_observation_invalid')
+    # The observed file set must hash to the exact published generation the
+    # controller computed locally before transport (same canonical construction).
+    observed_digest = hashlib.sha256(json.dumps(
+        {'schema': 'remote-support-code.v1', 'files': files},
+        sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if observed_digest != support_digest:
+        raise ValueError('transport_verification_generation_mismatch')
+    record = {
+        'schema': TRANSPORT_RECEIPT_SCHEMA,
+        'run_id': run_id, 'host': host, 'mode': mode, 'requested_model': model,
+        'packet_sha256': packet_sha, 'support_digest': support_digest,
+        'policy_sha256': policy_sha256, 'files': files,
+        'lease_id': lease_id, 'account': account,
+        'acquire_response_sha256': hashlib.sha256(acquired).hexdigest(),
+        'phase': 'PRE_LAUNCH',
+        'verified_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ'),
+    }
+    log = Path(log_path)
+    if log.name != run_id + '.log':
+        raise ValueError('transport_verification_log_name')
+    with delivery.DirectoryChain(log.parent) as chain:
+        fd, before, identity, raw, events = _open_bound_log(log.name, chain.fd,
+                                                            run_id, host)
+        try:
+            tracked = _tracked_events(events)
+            if ([name for name, _ in tracked] != ['RUN_RESERVED', 'LEASE_OK',
+                                                  'SUPPORT_VERSION_READY']
+                    or tracked[0][1] != 'RUN_RESERVED explicit=1'
+                    or tracked[1][1] != 'LEASE_OK pool=' + {'glm': 'glm', 'qwen': 'bailian'}[mode]
+                    or not re.fullmatch('SUPPORT_VERSION_READY digest=' + support_digest
+                                        + r' policy=[a-f0-9]{64}', tracked[2][1])
+                    or any(marker in event for event in events
+                           for marker in FORBIDDEN_LOG_MARKERS)):
+                raise ValueError('transport_verification_log_not_prelaunch')
+            if (delivery.local_file(Path(packet_path), 2 * 1024 * 1024) != packet
+                    or delivery.local_file(Path(lease_output_path), 1024) != acquired):
+                raise ValueError('transport_verification_input_changed')
+            chain.verify()
+            visible = os.stat(log.name, dir_fd=chain.fd, follow_symlinks=False)
+            if (identity(visible) != identity(before) or visible.st_size != before.st_size
+                    or os.pread(fd, before.st_size + 1, 0) != raw):
+                raise ValueError('transport_verification_log_changed')
+            line = ('TRANSPORT_VERIFIED packet=' + packet_sha
+                    + ' support=' + support_digest
+                    + ' policy=' + policy_sha256
+                    + ' lease=' + lease_id
+                    + ' account=' + account
+                    + ' acquire=' + record['acquire_response_sha256'])
+            appended = (f"{record['verified_at']} [remote_sub id={run_id} host={host}] "
+                        + line + '\n').encode()
+            _publish_log_line(log.name, chain.fd, fd, chain, before, identity, raw,
+                              appended)
+        finally:
+            os.close(fd)
+    payload = json.dumps(record, sort_keys=True, separators=(',', ':'))
+    fd = os.open(receipt_path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
+                 0o600)
+    try:
+        if os.write(fd, payload.encode()) != len(payload):
+            raise OSError('transport_verification_receipt_short_write')
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    print(payload)
+
+
+def custody_chain_source():
+    # Export the incumbent strict reader; never weaken native owner mapping or
+    # duplicate its directory-custody rules in the inline transport readback.
+    import artifact_delivery as delivery
+    print(delivery.remote_directory_chain_source())
+
+
 def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                           root, parent, host, mode, model, support_digest,
-                          launch_lease_id, launch_account):
+                          launch_lease_id, launch_account, transport_receipt=None):
     """Retain the existing acquire return before a NEW artifact worker starts.
 
     Correlation evidence only: no authentication, new admission, settlement,
     acceptance or retry. Never applies to an already launched/legacy run.
+    Forward-only plain retention: an ordinary GLM/Qwen plain packet is retained
+    the same way (exact acquire return, transported packet digest and the
+    prelaunch SUPPORT_VERSION_READY readback) so the read-only collector can
+    qualify that one run after foreground loss. Plain worker-facing task bytes
+    are never touched and older evidence is never re-qualified.
+
+    A NEW plain record additionally requires the actual prelaunch transport
+    verification receipt (exact packet/support/acquire readback), not merely a
+    SUPPORT_VERSION_READY publication line; the artifact path is unchanged.
     """
-    import fcntl
     import hashlib
     import json
     import os
@@ -278,7 +489,8 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
         opted_in = os.read(probe_fd, len(prefix)) == prefix
     finally:
         os.close(probe_fd)
-    if not opted_in:
+    if not opted_in and mode not in {'glm', 'qwen'}:
+        # Non-ordinary plain modes keep their unchanged no-retention path.
         return {'state': 'NOT_ARTIFACT_RUN'}
     import artifact_delivery as delivery
 
@@ -290,10 +502,17 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
             or not re.fullmatch('[a-f0-9]{64}', support_digest)):
         raise ValueError('launch_binding_scope')
     packet = delivery.local_file(Path(packet_path), 2 * 1024 * 1024)
-    contract = production.parse_packet(packet.decode('utf-8'))
-    if contract is None:
-        return {'state': 'NOT_ARTIFACT_RUN'}
-    if any(contract.get(k) != v for k, v in {
+    if opted_in:
+        contract = production.parse_packet(packet.decode('utf-8'))
+        if contract is None:
+            return {'state': 'NOT_ARTIFACT_RUN'}
+    else:
+        # Plain retention for this one ordinary run. The record binds the exact
+        # transported packet digest and support generation; the prelaunch event
+        # rules below still require the confirmed remote transport readback
+        # before this line can ever be appended.
+        contract = None
+    if contract is not None and any(contract.get(k) != v for k, v in {
             'run_id': run_id, 'root': root, 'parent': parent,
             'support_digest': support_digest}.items()):
         raise ValueError('launch_binding_packet_mismatch')
@@ -307,42 +526,102 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
     if lease_id != launch_lease_id or account != launch_account:
         raise ValueError('launch_binding_launch_mismatch')
     pool = {'glm': 'glm', 'qwen': 'bailian'}[mode]
+    packet_sha = hashlib.sha256(packet).hexdigest()
+    transport = None
+    if contract is None:
+        # A NEW plain record binds the ACTUAL transport verification receipt,
+        # not merely the SUPPORT_VERSION_READY publication line. Missing,
+        # truncated, unknown-field, mismatched or unreadable receipts refuse
+        # the binding (and therefore the launch) exactly like a failed ack.
+        if transport_receipt is None:
+            raise ValueError('launch_binding_transport_unconfirmed')
+        receipt = json.loads(delivery.local_file(Path(transport_receipt), 65536)
+                             .decode('utf-8'))
+        receipt_files = receipt.get('files') if type(receipt) is dict else None
+        if (type(receipt) is not dict
+                or receipt.get('schema') != TRANSPORT_RECEIPT_SCHEMA
+                or set(receipt) != {'schema', 'run_id', 'host', 'mode',
+                                    'requested_model', 'packet_sha256',
+                                    'support_digest', 'policy_sha256', 'files',
+                                    'lease_id', 'account',
+                                    'acquire_response_sha256', 'phase',
+                                    'verified_at'}
+                or receipt['run_id'] != run_id or receipt['host'] != host
+                or receipt['mode'] != mode or receipt['requested_model'] != model
+                or receipt['packet_sha256'] != packet_sha
+                or receipt['support_digest'] != support_digest
+                or type(receipt['policy_sha256']) is not str
+                or not re.fullmatch('[a-f0-9]{64}', receipt['policy_sha256'])
+                or type(receipt_files) is not dict
+                or not 1 <= len(receipt_files) <= 256
+                or any(type(name) is not str or not name or Path(name).name != name
+                       or type(want) is not str
+                       or not re.fullmatch('[a-f0-9]{64}', want)
+                       for name, want in receipt_files.items())
+                or receipt['lease_id'] != lease_id or receipt['account'] != account
+                or receipt['acquire_response_sha256'] != hashlib.sha256(acquired).hexdigest()
+                or receipt['phase'] != 'PRE_LAUNCH'
+                or type(receipt['verified_at']) is not str
+                or not TRANSPORT_STAMP.fullmatch(receipt['verified_at'])
+                or hashlib.sha256(json.dumps(
+                    {'schema': 'remote-support-code.v1', 'files': receipt_files},
+                    sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+                != support_digest):
+            raise ValueError('launch_binding_transport_unconfirmed')
+        transport = {'packet_sha256': receipt['packet_sha256'],
+                     'support_digest': receipt['support_digest'],
+                     'policy_sha256': receipt['policy_sha256'],
+                     'files': receipt_files,
+                     'lease_id': receipt['lease_id'],
+                     'account': receipt['account'],
+                     'acquire_response_sha256': receipt['acquire_response_sha256'],
+                     'phase': receipt['phase'],
+                     'verified_at': receipt['verified_at']}
     record = {
-        'schema': 'mastermind.fabric_launch_binding.v1',
+        'schema': ('mastermind.fabric_launch_binding.v1' if contract is not None
+                   else 'mastermind.fabric_plain_launch_binding.v1'),
         'run_id': run_id, 'root': root, 'parent': parent, 'host': host,
         'mode': mode, 'requested_model': model, 'pool': pool,
         'lease_id': lease_id, 'account': account,
-        'packet_sha256': hashlib.sha256(packet).hexdigest(),
+        'packet_sha256': packet_sha,
         'support_digest': support_digest,
         'acquire_response_sha256': hashlib.sha256(acquired).hexdigest(),
         'source': 'controller_original_acquire_return',
         'phase': 'PRE_LAUNCH',
     }
+    if transport is not None:
+        record['transport'] = transport
     path = Path(log_path)
     if path.name != run_id + '.log':
         raise ValueError('launch_binding_log_name')
     with delivery.DirectoryChain(path.parent) as chain:
-        fd = os.open(path.name, os.O_RDWR | os.O_APPEND | os.O_NOFOLLOW | os.O_NONBLOCK,
-                     dir_fd=chain.fd)
+        fd, before, identity, raw, events = _open_bound_log(path.name, chain.fd,
+                                                            run_id, host)
         try:
-            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-            before = os.fstat(fd)
-            identity = lambda s: (s.st_dev, s.st_ino, s.st_uid, s.st_mode, s.st_nlink)
-            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
-                    or before.st_nlink != 1 or before.st_mode & 0o022
-                    or not 0 < before.st_size <= 1024 * 1024):
-                raise ValueError('launch_binding_log_unsafe')
-            raw = os.read(fd, 1024 * 1024 + 1)
-            if len(raw) != before.st_size or not raw.endswith(b'\n'):
-                raise ValueError('launch_binding_log_incomplete')
-            prefix = r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(run_id) + r' host=' + re.escape(host) + r'\] '
-            events = []
-            for line in raw.decode('utf-8').splitlines():
-                event = re.fullmatch(prefix + '(.*)', line)
-                if not event:
-                    raise ValueError('launch_binding_foreign_log')
-                events.append(event[1])
-            if (sum(e == 'RUN_RESERVED explicit=1' for e in events) != 1
+            if contract is None:
+                # Strict prelaunch order for a NEW plain run: the retained
+                # publication and the verified transport readback must both be
+                # present, unique and in sequence before any binding exists.
+                tracked = _tracked_events(events)
+                if ([name for name, _ in tracked]
+                        != ['RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
+                            'TRANSPORT_VERIFIED']
+                        or tracked[0][1] != 'RUN_RESERVED explicit=1'
+                        or tracked[1][1] != 'LEASE_OK pool=' + pool
+                        or not re.fullmatch('SUPPORT_VERSION_READY digest='
+                                            + support_digest + r' policy=[a-f0-9]{64}',
+                                            tracked[2][1])
+                        or tracked[3][1] != (
+                            'TRANSPORT_VERIFIED packet=' + packet_sha
+                            + ' support=' + support_digest
+                            + ' policy=' + transport['policy_sha256']
+                            + ' lease=' + lease_id
+                            + ' account=' + account
+                            + ' acquire=' + record['acquire_response_sha256'])
+                        or any(marker in event for event in events
+                               for marker in FORBIDDEN_LOG_MARKERS)):
+                    raise ValueError('launch_binding_not_fresh_prelaunch')
+            elif (sum(e == 'RUN_RESERVED explicit=1' for e in events) != 1
                     or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool=' + pool]
                     or len([e for e in events if e.startswith('SUPPORT_VERSION_READY ')]) != 1
                     or not any(re.fullmatch(
@@ -361,18 +640,8 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
             now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ')
             payload = json.dumps(record, sort_keys=True, separators=(',', ':'))
             appended = f'{now} [remote_sub id={run_id} host={host}] LAUNCH_BINDING {payload}\n'.encode()
-            if os.write(fd, appended) != len(appended):
-                raise OSError('launch_binding_short_write')
-            os.fsync(fd)
-            os.fsync(chain.fd)
-            chain.verify()
-            after = os.fstat(fd)
-            visible = os.stat(path.name, dir_fd=chain.fd, follow_symlinks=False)
-            if (identity(after) != identity(before) or identity(visible) != identity(before)
-                    or after.st_size != len(raw) + len(appended)
-                    or visible.st_size != after.st_size
-                    or os.pread(fd, after.st_size, 0) != raw + appended):
-                raise ValueError('launch_binding_publication_unconfirmed')
+            _publish_log_line(path.name, chain.fd, fd, chain, before, identity, raw,
+                              appended)
         finally:
             os.close(fd)
     return {'state': 'RETAINED_PRE_LAUNCH', 'run_id': run_id,
@@ -382,12 +651,22 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
 def launch_binding():
     import json
     (log, packet, acquired, run, root, parent, host, mode, model, support,
-     launch_lease_id, launch_account) = sys.argv[1:]
+     launch_lease_id, launch_account, receipt) = sys.argv[1:14]
     result = record_launch_binding(log, packet, acquired, run_id=run, root=root,
                                   parent=parent, host=host, mode=mode,
                                   model=model, support_digest=support,
-                                  launch_lease_id=launch_lease_id, launch_account=launch_account)
+                                  launch_lease_id=launch_lease_id, launch_account=launch_account,
+                                  transport_receipt=None if receipt == '-' else receipt)
     print(json.dumps(result, sort_keys=True))
+
+
+def transport_verification():
+    (log, receipt, packet, acquired, observation, run, host, mode, model,
+     support, policy, lease_id, account) = sys.argv[1:14]
+    transport_verify(log, receipt, packet, acquired, observation, run_id=run,
+                     host=host, mode=mode, model=model, support_digest=support,
+                     policy_sha256=policy, launch_lease_id=lease_id,
+                     launch_account=account)
 
 
 def main():
@@ -400,7 +679,9 @@ def main():
         'deadline-command': deadline_command,
         'controller-source-sha': controller_source_sha,
         'support-meta': support_meta,
+        'transport-verify': transport_verification,
         'launch-binding': launch_binding,
+        'custody-chain-source': custody_chain_source,
         'go-settled': go_settled,
         'glm-cap-sha': glm_cap_sha,
         'routing-env': routing_env,

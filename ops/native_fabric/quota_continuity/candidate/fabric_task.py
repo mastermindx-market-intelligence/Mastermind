@@ -890,6 +890,91 @@ def request(
         raise
 
 
+def _current_source_owner_factory(registry):
+    """Native CLI owner boundary for bounded CURRENT source observation.
+
+    Built from the host registry this incumbent process read itself.  Admission
+    re-checks the exact validated request digest handed to it, the invoking OS
+    principal, the original observer correlation and the registry host with its
+    declared custody; the ssh_alias for the incumbent strict-SSH transport
+    comes only from that same registry entry.  No grant is installed by this
+    source: the new route is unavailable until its qualified generation is
+    installed/selected. Current OS/tool permission and the external scoped
+    commission authorize the invocation; labels and host provider modes do not
+    grant read authority. No provider-mode or grant-registry addition is made.
+    """
+    import current_source_observation as observation
+    from host_pick import MODE_TOOLS
+
+    class CurrentSourceOwner(observation.NativeInvocationOwner):
+        def __init__(self, request_sha256: str):
+            self.request_sha256 = request_sha256
+            self.active = set()
+            self.revoked = False
+
+        def _entry(self, view):
+            entry = registry.get(view.host) if isinstance(registry, dict) else None
+            if (type(entry) is not dict
+                    or type(entry.get("roles")) is not list or "lanes" not in entry["roles"]
+                    or not isinstance(entry.get("ssh_alias"), str)
+                    or re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}",
+                                    entry["ssh_alias"]) is None):
+                return None
+            modes = entry.get("allowed_modes")
+            if modes is not None and (type(modes) is not list
+                    or any(type(mode) is not str or mode not in MODE_TOOLS for mode in modes)
+                    or len(modes) != len(set(modes))):
+                return None
+            return entry
+
+        def admit_invocation(self, view, invoking_uid):
+            if (type(view) is not observation.NativeInvocationView
+                    or view.request_sha256 != self.request_sha256 or self.revoked
+                    or type(invoking_uid) is not int or invoking_uid != os.getuid()
+                    or os.environ.get('CODEX_THREAD_ID') != view.observer
+                    or view.observer == view.receiver
+                    or not isinstance(view.worktree, str)
+                    or not view.worktree.startswith("/")
+                    or not isinstance(view.git_dir, str)
+                    or not view.git_dir.startswith("/")
+                    or not isinstance(view.common_dir, str)
+                    or not view.common_dir.startswith("/")):
+                return False
+            return self._entry(view) is not None
+
+        def registered(self, invocation):
+            self.active.add(invocation.scope_digest)
+
+        def invocation_active(self, invocation):
+            return not self.revoked and invocation.scope_digest in self.active
+
+        def authorize_publication(self, invocation):
+            return self.invocation_active(invocation)
+
+        def transport_alias(self, view):
+            if view.request_sha256 != self.request_sha256 or self.revoked:
+                return None
+            entry = self._entry(view)
+            return None if entry is None else entry["ssh_alias"]
+
+    return CurrentSourceOwner
+
+
+def current_source_flow(request_path: Path, destination: str, owner_factory, *,
+                        reserve=None, transport=None, load_request=None) -> dict:
+    """One bounded CURRENT observation: qualified native invocation -> the
+    incumbent strict-SSH bounded transport -> the fixed generated Git reader
+    -> validated receiver-bound exclusive receipt.  The invocation scope is
+    minted inside this incumbent CLI process through ``owner_factory``;
+    ``transport``/``reserve``/``load_request`` default to the incumbent
+    transport, the incumbent exclusive destination reservation and the
+    incumbent owned request reader."""
+    import current_source_observation as observation
+    return observation.native_current_source_receipt(
+        request_path, destination, owner_factory, transport=transport,
+        reserve=reserve, load_request=load_request)
+
+
 def plan_accepted_macro_worktree_release(
     run_id: str, *, root_id: str, parent_run_id: str, pinned_sha: str,
 ) -> dict[str, Any]:
@@ -1080,6 +1165,13 @@ def main(argv: list[str] | None = None) -> int:
     p_current.add_argument("--root", required=True)
     p_current.add_argument("--destination", required=True)
 
+    p_current_source = sub.add_parser(
+        "current-source",
+        help="bounded CURRENT Git source observation; requires qualified installed "
+             "route and current external scoped OS/tool permission")
+    p_current_source.add_argument("--request", required=True)
+    p_current_source.add_argument("--destination", required=True)
+
     p_accept = sub.add_parser("accept")
     p_accept.add_argument("run_id")
     p_accept.add_argument("--by", required=True, choices=("deterministic", "reviewer"))
@@ -1141,6 +1233,21 @@ def main(argv: list[str] | None = None) -> int:
                    "--mac-policy-return", args.run_id, "--root", args.root,
                    "--destination", args.destination]
         return subprocess.run(command).returncode
+    if args.cmd == "current-source":
+        import artifact_delivery
+        import current_source_observation as observation
+        try:
+            registry_raw = artifact_delivery.local_file(HERE / "hosts.json", 65536)
+            registry = artifact_delivery.reader.strict_json(registry_raw)
+            summary = current_source_flow(Path(args.request), args.destination,
+                                          _current_source_owner_factory(registry))
+            print(artifact_delivery.reader.canonical(summary).decode())
+            return 0 if summary["state"] == "PUBLISHED" else 76
+        except (observation.CurrentSourceError, OSError, ValueError, TypeError,
+                KeyError, subprocess.SubprocessError):
+            print('{"state":"REFUSED",'
+                  '"reason":"current_source_intent_or_delivery_unconfirmed"}')
+            return 75
     if args.cmd == "current-output":
         command = ["/bin/bash", str(HERE / "remote_sub.sh"), "--read-artifacts", "--current-output",
                    args.run_id, "--root", args.root, "--destination", args.destination]

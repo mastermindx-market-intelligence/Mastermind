@@ -158,6 +158,7 @@ RC=1
 WORKER_RC=""
 RC_OBSERVED=0
 RESULT_FAILURE_REASON=""
+PLAIN_PACKET_RETAINED=""
 POLL_FILE="$HERE/lanes/${ID}.poll"
 declare -a SCRATCH_PATHS=()
 declare -a TEMP_FILES=()
@@ -445,6 +446,42 @@ PY_RESERVE
     LEASE_OUTPUT_FILE="$(mktemp "${TMPDIR:-/tmp}/remote_sub_lease.XXXXXX")" || exit 78
   fi
   TEMP_FILES+=("$LEASE_OUTPUT_FILE")
+  # Retain the exact ordinary plain packet in the existing private run
+  # directory before any lease or transport. The read-only collector later
+  # re-reads this retained original (never a broker row or caller path).
+  # Artifact packets keep the unchanged artifact evidence path instead.
+  if [ "$OPERATOR_CHILD_BUDGET" = 0 ] && [ -n "${POOL_PARENT_RUN_ID:-}" ] &&
+     { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
+     ! LC_ALL=C grep -q '^FABRIC_ARTIFACT_REQUEST_V1 ' "$PACKET"; then
+    "$REMOTE_SUB_PYTHON" - "$PACKET" "$LOG_DIR/${ID}.request.packet" <<'PY_RETAIN_PLAIN_PACKET'
+import hashlib, os, stat, sys
+source, retained = sys.argv[1], sys.argv[2]
+fd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+try:
+    info = os.fstat(fd)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or not 0 < info.st_size <= 2 * 1024 * 1024):
+        raise SystemExit('PLAIN_PACKET_SOURCE_UNQUALIFIED')
+    data = os.read(fd, 2 * 1024 * 1024 + 1)
+    if len(data) != info.st_size:
+        raise SystemExit('PLAIN_PACKET_SOURCE_CHANGED')
+finally:
+    os.close(fd)
+out = os.open(retained, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+try:
+    if os.write(out, data) != len(data):
+        raise SystemExit('PLAIN_PACKET_RETENTION_SHORT_WRITE')
+    os.fsync(out)
+finally:
+    os.close(out)
+with open(retained, 'rb') as check:
+    if hashlib.sha256(check.read()).hexdigest() != hashlib.sha256(data).hexdigest():
+        raise SystemExit('PLAIN_PACKET_RETENTION_UNVERIFIED')
+PY_RETAIN_PLAIN_PACKET
+    [ "$?" -eq 0 ] || { RC=78; log "PLAIN_PACKET_RETENTION_REFUSED rc=$RC before_lease=1"; exit "$RC"; }
+    PLAIN_PACKET_RETAINED="$LOG_DIR/${ID}.request.packet"
+    log "PACKET_RETAINED bytes=$(wc -c < "$PLAIN_PACKET_RETAINED")"
+  fi
 fi
 
 if [ "$HOST_ARG" = m2 ]; then
@@ -961,6 +998,88 @@ else
   run_scp || { RC=$?; log "SCP_FAILED rc=$RC"; exit "$RC"; }
 fi
 
+# Read-only transport verification for a NEW ordinary plain run. The controller
+# actually reads the uploaded packet bytes and the published immutable RELEASE
+# manifest (every published code file hash) back over the same selected SSH
+# alias from the host registry, and compares them to the exact local packet and
+# the locally computed generation digest before any binding or launch. This is
+# a controller observation, never authentication; it changes no worker-facing
+# task bytes. A pending, missing, truncated, unknown-field or failed readback
+# refuses the launch and the binding exactly like a failed ack.
+if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
+   { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
+   [ -n "${POOL_PARENT_RUN_ID:-}" ] && [ -n "$LEASE_ID" ] &&
+   [ -n "$PLAIN_PACKET_RETAINED" ]; then
+  TRANSPORT_OBSERVATION="$(mktemp "${TMPDIR:-/tmp}/remote_sub_transport.XXXXXX")" || exit 78
+  TEMP_FILES+=("$TRANSPORT_OBSERVATION")
+  PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" custody-chain-source) || exit 78
+  commission_run transport-read "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
+    "python3 - '$ID' '$SUPPORT_DIGEST' '$POLICY_SHA' <<'PY_VERIFY_PLAIN_TRANSPORT'
+import hashlib, json, os, pwd, stat, sys
+from pathlib import Path
+$PLAIN_TRANSPORT_CHAIN_SOURCE
+run, support, policy = sys.argv[1:4]
+chains = {}; held = []
+def identity(info):
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink,
+            info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+def read_regular(path, limit):
+    key = str(path.parent)
+    if key not in chains: chains[key] = DirectoryChain(path.parent)
+    chain = chains[key]; chain.verify()
+    fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=chain.fd)
+    info = os.fstat(fd); held.append((chain, path.name, fd, identity(info)))
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()
+            or info.st_nlink != 1 or info.st_mode & 0o022
+            or not 0 < info.st_size <= limit):
+        raise ValueError('transport_observation_file_unqualified')
+    data = b''
+    while len(data) <= limit:
+        part = os.read(fd, min(65536, limit + 1 - len(data)))
+        if not part: break
+        data += part
+    if len(data) != info.st_size:
+        raise ValueError('transport_observation_file_changed')
+    return data
+home = Path(pwd.getpwuid(os.getuid()).pw_dir)
+packet = read_regular(home / 'lanes/tmp' / (run + '.txt'), 2 * 1024 * 1024)
+release = home / 'lanes/support-releases' / support
+meta = json.loads(read_regular(release / 'RELEASE.json', 65536).decode('utf-8'))
+files = meta.get('files') if type(meta) is dict else None
+if (type(files) is not dict or not 1 <= len(files) <= 256
+        or meta.get('digest') != support
+        or hashlib.sha256(json.dumps({'schema': 'remote-support-code.v1', 'files': files},
+                                     sort_keys=True, separators=(',', ':')).encode()).hexdigest() != support):
+    raise ValueError('transport_observation_manifest_invalid')
+for name, want in files.items():
+    if (type(name) is not str or not name or Path(name).name != name
+            or hashlib.sha256(read_regular(release / 'ext' / name, 2 * 1024 * 1024)).hexdigest() != want):
+        raise ValueError('transport_observation_code_mismatch')
+observation = {'schema': 'mastermind.transport_observation.v1', 'run_id': run,
+               'packet_bytes': len(packet),
+               'packet_sha256': hashlib.sha256(packet).hexdigest(),
+               'support_digest': support, 'policy_sha256': policy, 'files': files}
+for chain, name, fd, before in held:
+    chain.verify()
+    if before != identity(os.fstat(fd)) or before != identity(os.stat(name, dir_fd=chain.fd, follow_symlinks=False)):
+        raise ValueError('transport_observation_file_changed')
+sys.stdout.write(json.dumps(observation, sort_keys=True, separators=(',', ':')))
+PY_VERIFY_PLAIN_TRANSPORT" > "$TRANSPORT_OBSERVATION" || {
+    RC=$?; log "TRANSPORT_READBACK_REFUSED rc=$RC before_launch=1"; exit "$RC";
+  }
+  [ -s "$TRANSPORT_OBSERVATION" ] || { RC=78; log "TRANSPORT_READBACK_EMPTY before_launch=1"; exit "$RC"; }
+  TRANSPORT_RECEIPT="$LOG_DIR/${ID}.transport-verified.json"
+  commission_run transport-verify "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" transport-verify \
+    "$LOG_FILE" "$TRANSPORT_RECEIPT" "$PLAIN_PACKET_RETAINED" "$LEASE_OUTPUT_FILE" \
+    "$TRANSPORT_OBSERVATION" "$ID" "$HOST_ARG" "$MODE" "$MODEL" \
+    "$SUPPORT_DIGEST" "$POLICY_SHA" "$LEASE_ID" "${POOL_ACCOUNT:-}" \
+    >/dev/null || {
+      RC=78; log "TRANSPORT_VERIFICATION_REFUSED rc=$RC before_launch=1"; exit "$RC";
+    }
+  [ -s "$TRANSPORT_RECEIPT" ] || { RC=78; log "TRANSPORT_VERIFICATION_EMPTY before_launch=1"; exit "$RC"; }
+  log "TRANSPORT_RECEIPT_SAVED file=$(basename "$TRANSPORT_RECEIPT")"
+fi
+
 if [ "$MODE" = go-codex ] && [ "$DRY_RUN" -eq 0 ]; then
   commission_refresh_runtime go_launch || exit "$RC"
   GO_RUN_RECEIPT="$LOG_DIR/${ID}.go-run.json"
@@ -1124,13 +1243,23 @@ if [ -n "$GLM_CAP_REMOTE" ]; then
 fi
 # Retain original lease/account correlation for new ordinary artifact runs.
 # This is evidence in the existing log, not a second lifecycle or retry grant.
+# A NEW plain record additionally binds the actual prelaunch transport receipt;
+# the binding refuses (and the launch never starts) when that evidence is
+# absent, truncated, unknown-field or mismatched.
 if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
    { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
    [ -n "${POOL_PARENT_RUN_ID:-}" ]; then
+  if [ -n "$PLAIN_PACKET_RETAINED" ]; then
+    BINDING_PACKET="$PLAIN_PACKET_RETAINED"
+    BINDING_TRANSPORT_RECEIPT="$LOG_DIR/${ID}.transport-verified.json"
+  else
+    BINDING_PACKET="$PACKET"
+    BINDING_TRANSPORT_RECEIPT="-"
+  fi
   commission_run launch-binding "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" launch-binding \
-    "$LOG_FILE" "$PACKET" "$LEASE_OUTPUT_FILE" "$ID" "$ROUTING_ROOT" \
+    "$LOG_FILE" "$BINDING_PACKET" "$LEASE_OUTPUT_FILE" "$ID" "$ROUTING_ROOT" \
     "$POOL_PARENT_RUN_ID" "$HOST_ARG" "$MODE" "$MODEL" "$SUPPORT_DIGEST" \
-    "$LEASE_ID" "$ACCOUNT_ARG" >&2 || {
+    "$LEASE_ID" "$ACCOUNT_ARG" "$BINDING_TRANSPORT_RECEIPT" >&2 || {
       RC=78; log "LAUNCH_BINDING_UNCONFIRMED rc=$RC before_launch=1"; exit "$RC";
     }
 fi
