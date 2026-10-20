@@ -54,7 +54,7 @@
      if begins == 1:
          start = text.index(BEGIN)
          finish = text.index(END, start) + len(END)
-@@ -519,7 +500,7 @@
+@@ -570,7 +551,7 @@
  
  def _paths(home: Path) -> dict[str, Path]:
      home = home.expanduser().resolve()
@@ -63,7 +63,7 @@
          "codex_doc": home / ".codex" / "AGENTS.md",
          "claude_doc": home / ".claude" / "CLAUDE.md",
          "codex_hooks": home / ".codex" / "hooks.json",
-@@ -529,16 +510,66 @@
+@@ -580,16 +561,66 @@
          "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
      }
  
@@ -130,7 +130,7 @@
  
      # Reject known unsafe path shapes before any managed file can change. Unexpected
      # I/O failure can still interrupt a multi-file apply and is handled separately.
-@@ -572,6 +603,14 @@
+@@ -623,6 +654,14 @@
          ("codex_hooks", rendered["codex_hooks"]),
          ("codex_config", rendered["codex_config"]),
      ]
@@ -145,7 +145,7 @@
      modified: list[str] = []
      try:
          for key, payload in operations:
-@@ -657,6 +696,19 @@
+@@ -708,6 +747,19 @@
      paths = _paths(home)
      canonical = _canonical_guard(guard_source)
      issues: list[str] = []
@@ -165,7 +165,7 @@
  
      for name in ("codex_guard", "claude_guard"):
          try:
-@@ -731,6 +783,9 @@
+@@ -786,6 +838,9 @@
          "home": str(Path(home).expanduser().resolve()),
          "issues": issues,
          "guard_sha256": _sha256(canonical),

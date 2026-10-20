@@ -22,7 +22,7 @@ ROOT = Path(__file__).resolve().parents[1]
 BASELINE = ROOT / "tests/fixtures/operator_first/provider_orchestrator_policy.baseline.txt"
 PATCH = ROOT / "patches/operator-first/provider-orchestrator-policy.patch"
 ASSETS = ROOT / "skills/mastermind-fabric-orchestration"
-BASELINE_SHA = "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594"
+BASELINE_SHA = "1db7e21fcbdac041304b27101eb506cc7810340d61330db293f2ad22efc0bfe1"
 ROLE_FILES = ("SKILL.md", "references/meta-ceo.md", "references/program-ceo.md",
               "references/operator.md", "references/worker.md", "references/reviewer.md")
 

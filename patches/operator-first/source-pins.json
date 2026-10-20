@@ -1,11 +1,11 @@
 {
   "schema": "mastermind.source_patch_evidence.v1",
   "incumbent_pr": 1228,
-  "incumbent_head": "d2f73a8fbd360f2cfbcb39e67ff2dece1bde403c",
+  "incumbent_head": "a2b4964e789b5b75ac9236f8db6f839a41813d52",
   "path": "ops/executive_os/provider_orchestrator_policy.py",
-  "before_sha256": "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594",
-  "after_sha256": "c8e110c42a436384f3044fb830c29c31a1b4c25d7034ee26aebe1a6687a8b047",
-  "patch_sha256": "3dbca77678836b044bfa5e15d691620b985a4a0724b6474a7563eaf26fc16373",
+  "before_sha256": "1db7e21fcbdac041304b27101eb506cc7810340d61330db293f2ad22efc0bfe1",
+  "after_sha256": "579ed208401d282db7034869cbe1ed61a3d296f88a73327a389118e59da936b5",
+  "patch_sha256": "b4963f2c758d98bba13334c66dc1cdaf50675ddb5b190b1447b4876e09d007ac",
   "role_source_sha256": {
     "SKILL.md": "2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8",
     "references/meta-ceo.md": "df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240",
@@ -18,8 +18,8 @@
   "runtime_admission_proven": false,
   "incumbent_tests": {
     "path": "tests/test_provider_orchestrator_policy.py",
-    "before_sha256": "ebb40cdccf6cfc454e25ed652700f3cae7402e5735192154b289936940e5bd5d",
-    "after_sha256": "897c869955b9b9afc60b5d8ed3442b67ae5c331ec0a4a1021ccecdc5ccc256d5",
+    "before_sha256": "591e0b91cac9a8d5ed0a43352900da13e2b878f6a705a60b3ac6755d5aa70bcc",
+    "after_sha256": "57ef07c80bee78132acad968bd72853f57a1c03f0e291d99febcf879c2792d81",
     "patch_sha256": "e385065ae78450c96a18c3110c7abf0e6379b04a798ab9dcb5291fe18a2eabf6",
     "reason": "Three old Sol-default assertions updated to current operator-first intent; all mechanical tests retained."
   }
