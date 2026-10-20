@@ -4,13 +4,13 @@
   "incumbent_head": "d2f73a8fbd360f2cfbcb39e67ff2dece1bde403c",
   "path": "ops/executive_os/provider_orchestrator_policy.py",
   "before_sha256": "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594",
-  "after_sha256": "bf5a7ff88fb781c6c4efa313430cd96e63053342358578d6467518e0c18049a6",
-  "patch_sha256": "a76bcda3509bbbd4af101bd6469329a15504bab32ddff6069ff0b110bf333fa1",
+  "after_sha256": "30f1230cd9a4cb59c0a4badbeb108095c68c735846e1dda83079e11ea1291f9f",
+  "patch_sha256": "7a57f3e487a53c38dfb03065c3417905ab15bf6dd4ad9ccd51210cb958aebde6",
   "role_source_sha256": {
-    "SKILL.md": "926cd8d3ec4930589a85f74feca22efbf83dad7cf1920589261eae756fe40558",
+    "SKILL.md": "17da3cc69373c210975deae92445ca4b7fbcb3fecf63dd213730f9a173b9a3dc",
     "references/meta-ceo.md": "df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240",
     "references/program-ceo.md": "91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47",
-    "references/operator.md": "1c085514f922851fd7d94a67166dc6a5463e4bf603d5c64ae5500b342bdc79a8",
+    "references/operator.md": "8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c",
     "references/worker.md": "c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924",
     "references/reviewer.md": "0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c"
   },

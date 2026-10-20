@@ -11,3 +11,9 @@ Return one integrated outcome with exact revisions, validation, independent-revi
 ## Consequential product closure
 
 For a feature spanning data correctness and interface behavior, keep distinct acceptance obligations even if one operator supervises both. Verify a worker's context and tools were actually loaded; if a required source or capability was absent, classify the result UNVERIFIED and request repair or escalation. Record reproducible reviewer findings bound to exact artifact revisions. An accepted_by label or exit code is not independent review. Consume all returns, preserve the original product thesis, and include real-path, missing/stale/error-state evidence when the feature promises user-visible behavior. Do not flood the principal with raw transcripts.
+
+## Artifact-owner partition and concrete review
+
+Before parallel Fabric dispatch, partition by exclusive artifact ownership, not attractive topic names. A data lane and a UI lane must not both become writers of the same schema, test fixture or shared configuration. Freeze the interface consumed by each lane (field names, types, nullability, units, evidence provenance and version) before admitting its dependent worker; unresolved design choices belong to the accountable domain supervisor. Use one worktree/writer per modifying source lane and serialize shared-file updates.
+
+Keep a return small enough for one substantive independent review. The reviewer inspects the exact changed artifacts and discriminating tests, counts delivered acceptance obligations against the original brief, and challenges negative or 'all clear' claims within their actual search coverage. A reviewer's PASS is not the integration parent's product acceptance. Missing checks or unresolved material integration conflicts remain explicit GAPS. Reserve time and capacity for review, repairs and real-path verification rather than using every available worker slot for builders.
