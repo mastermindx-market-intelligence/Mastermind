@@ -14,6 +14,7 @@ import json
 import math
 import os
 from pathlib import Path
+import re
 import shutil
 import signal
 import subprocess
@@ -36,7 +37,7 @@ def write(path, source, executable=False):
 
 
 FIXTURE = r'''
-import json, os, re, sys, time
+import hashlib, json, os, re, sys, time
 from pathlib import Path
 root = Path(os.environ['DEADLINE_FIXTURE_ROOT'])
 name = Path(sys.argv[0]).name
@@ -71,6 +72,26 @@ if name == 'broker':
         raise SystemExit(0)
 elif name == 'ssh':
     command = args[-1]
+    if 'mastermind.transport_observation' in command:
+        # Inert stand-in for the fixed remote readback: the selected host's
+        # uploaded packet and published RELEASE manifest are represented by the
+        # local fixture packet and the support manifest this controller wrote.
+        record('transport_read')
+        head = re.match(r"python3 - '([^']+)' '([a-f0-9]{64})' '([a-f0-9]{64})'", command)
+        run, support, policy = head.group(1), head.group(2), head.group(3)
+        packet = (root/'packet.txt').read_bytes()
+        manifest = json.loads((root/'ext/state/remote_sub'/(run+'.support.json')).read_text())
+        files = manifest.get('files') if isinstance(manifest, dict) and 'files' in manifest else manifest
+        observation = {'schema': 'mastermind.transport_observation.v1', 'run_id': run,
+                       'packet_bytes': len(packet),
+                       'packet_sha256': hashlib.sha256(packet).hexdigest(),
+                       'support_digest': support, 'policy_sha256': policy,
+                       'files': files}
+        if case == 'transport_mutated_packet':
+            observation['packet_bytes'] = len(packet) + 1
+            observation['packet_sha256'] = 'f'*64
+        print(json.dumps(observation, sort_keys=True, separators=(',', ':')))
+        raise SystemExit(0)
     if 'nohup env ' in command:
         child = re.search(r"REMOTE_SUB_CHILD_TIMEOUT='([0-9]+)'", command)
         budget = re.search(r"REMOTE_SUB_COMMISSION_BUDGET_SECONDS='([0-9]+)'", command)
@@ -81,8 +102,9 @@ elif name == 'ssh':
             raise SystemExit(0 if count('launch')==1 else 255)
         if case == 'admission_expiry': raise SystemExit(0)
         if case == 'launch_timeout': time.sleep(10); raise SystemExit(0)
+        raise SystemExit(0)
     if '__REMOTE_SUB_PENDING__' in command:
-        record('poll'); print('75'); raise SystemExit(0)
+        record('poll'); print('0' if case == 'plain_ok' else '75'); raise SystemExit(0)
     if 'tail -c 4096' in command:
         record('admission_read')
         if case == 'admission_expiry': time.sleep(10)
@@ -220,7 +242,8 @@ class DeadlineValues(unittest.TestCase):
 
 class ControllerDeadline(unittest.TestCase):
     def setUp(self):
-        self.temporary=tempfile.TemporaryDirectory(prefix='commission-',dir=ROOT/'tests')
+        self.temporary=tempfile.TemporaryDirectory(prefix='commission-',
+            dir=os.environ.get('NATIVE_ROLLOUT_TEST_ROOT',str(ROOT/'tests')))
         self.addCleanup(self.temporary.cleanup)
         self.root=Path(self.temporary.name)
         self.ext=self.root/'ext'; self.bin=self.root/'bin'; self.tmp=self.root/'tmp'
@@ -235,7 +258,8 @@ class ControllerDeadline(unittest.TestCase):
             self.assertEqual(self.copied[name],hashlib.sha256((ROOT/'candidate'/name).read_bytes()).hexdigest())
         (self.ext/'hosts.json').write_text(json.dumps({'fixture':{
             'ssh_alias':'inert-transport','cores':2,'max_active':1,'load_gate':1,
-            'roles':['lanes'],'allowed_modes':['minimax'],'min_free_gb':0,'checkout_reserve_gb':0}}))
+            'roles':['lanes'],'allowed_modes':['minimax','glm','qwen'],
+            'min_free_gb':0,'checkout_reserve_gb':0}}))
         policy=self.root/'orch/fabric'; policy.mkdir(parents=True)
         (policy/'pools.yaml').write_text('{}\n')
         # The support manifest hashes these exact files but transport fixtures
@@ -246,7 +270,7 @@ class ControllerDeadline(unittest.TestCase):
             write(self.bin/name,'#!'+sys.executable+'\n'+FIXTURE,executable=True)
         write(self.bin/'fixture-python','#!'+sys.executable+'\n'+PYTHON_FIXTURE,executable=True)
 
-    def run_controller(self,case,budget=4,broker_delay=0):
+    def run_controller(self,case,budget=4,broker_delay=0,mode='minimax',model='fixture-model'):
         origin=time.monotonic_ns()+int(budget*1_000_000_000)
         env={'PATH':str(self.bin)+':/usr/bin:/bin','LANG':'C','LC_ALL':'C',
              'PYTHONDONTWRITEBYTECODE':'1','PYTHONNOUSERSITE':'1','TMPDIR':str(self.tmp),
@@ -258,11 +282,12 @@ class ControllerDeadline(unittest.TestCase):
              'REMOTE_SUB_LEDGER_CMD':str(self.bin/'ledger'),'REMOTE_SUB_SSH_CMD':str(self.bin/'ssh'),
              'REMOTE_SUB_SCP_CMD':str(self.bin/'scp'),'REMOTE_SUB_RSYNC_CMD':str(self.bin/'rsync'),
              'POOL_ORCHESTRATOR_ID':'offline-root','POOL_PARENT_RUN_ID':'offline-parent',
+             'POOL_TASK_CLASS':'domain_orchestration',
              'POOL_TASK_COMPLEXITY':'C0_MECHANICAL',
              'POOL_COMMISSION_REMAINING_SECONDS':str(int(budget)),
              'POOL_COMMISSION_DEADLINE_NS':str(origin)}
-        command=['/bin/bash',str(self.ext/'remote_sub.sh'),'fixture','minimax',str(self.packet),'~',
-                 'fixture-model','--run-id','offline-'+case]
+        command=['/bin/bash',str(self.ext/'remote_sub.sh'),'fixture',mode,str(self.packet),'~',
+                 model,'--run-id','offline-'+case]
         started=time.monotonic()
         proc=subprocess.Popen(command,cwd=self.root,env=env,stdin=subprocess.DEVNULL,
                               stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,start_new_session=True)
@@ -338,6 +363,69 @@ class ControllerDeadline(unittest.TestCase):
         self.assertGreaterEqual(collection['monotonic_ns'],result['origin'])
         self.assertIn('REMOTE_DONE rc=75',result['stderr'])
         self.assertNotIn('EFFECT_UNKNOWN timeout',result['stderr'])
+
+    def tracked_log_events(self,run_id):
+        """Classify the real controller log exactly as the collector does."""
+        import remote_sub_helpers
+        log_path=self.ext/'state/remote_sub'/(run_id+'.log')
+        prefix=re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id='
+                          +re.escape(run_id)+r' host=fixture\] (.*)')
+        events=[prefix.fullmatch(line).group(1)
+                for line in log_path.read_text().splitlines()
+                if prefix.fullmatch(line)]
+        return remote_sub_helpers._tracked_events(events),log_path
+
+    def test_plain_prelaunch_evidence_is_verified_and_ordered_before_launch(self):
+        # An actual qwen plain controller run through the real Bash: the
+        # transport readback, the verified receipt and the fsynced binding all
+        # appear in strict order in the per-run log before the launch event.
+        result=self.run_controller('plain_ok',budget=8,mode='qwen',model='qwen3.8-flash')
+        self.assertEqual(result['returncode'],0,result['stderr'])
+        tracked,log_path=self.tracked_log_events('offline-plain_ok')
+        self.assertEqual([name for name,_ in tracked],
+                         ['RUN_RESERVED','LEASE_OK','SUPPORT_VERSION_READY',
+                          'TRANSPORT_VERIFIED','LAUNCH_BINDING','LAUNCH',
+                          'LAUNCH_ATTEMPT'])
+        order=[name for name,_ in tracked]
+        self.assertLess(order.index('TRANSPORT_VERIFIED'),order.index('LAUNCH_BINDING'))
+        self.assertLess(order.index('LAUNCH_BINDING'),order.index('LAUNCH'))
+        packet_sha=hashlib.sha256((self.root/'packet.txt').read_bytes()).hexdigest()
+        retained=self.ext/'state/remote_sub'/'offline-plain_ok.request.packet'
+        self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(),packet_sha)
+        transport_line=next(event for name,event in tracked if name=='TRANSPORT_VERIFIED')
+        self.assertTrue(transport_line.startswith('TRANSPORT_VERIFIED packet='+packet_sha
+                         + ' support='),transport_line)
+        receipt=json.loads((self.ext/'state/remote_sub'
+                            /'offline-plain_ok.transport-verified.json').read_text())
+        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v1')
+        self.assertEqual(receipt['packet_sha256'],packet_sha)
+        self.assertEqual(receipt['phase'],'PRE_LAUNCH')
+        binding_line=next(event for name,event in tracked if name=='LAUNCH_BINDING')
+        binding=json.loads(binding_line[len('LAUNCH_BINDING '):])
+        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v1')
+        self.assertEqual(binding['transport']['packet_sha256'],packet_sha)
+        self.assertEqual(binding['packet_sha256'],packet_sha)
+        self.assertEqual(binding['acquire_response_sha256'],
+                         receipt['acquire_response_sha256'])
+        # The real shell event stream proves the actual ordering: the readback
+        # and receipt happened before the only launch.
+        stages=[row['stage'] for row in result['events']]
+        self.assertEqual(stages.count('launch'),1,result['stderr'])
+        self.assertLess(stages.index('transport_read'),stages.index('launch'))
+
+    def test_mutated_remote_packet_refuses_launch_and_binding(self):
+        result=self.run_controller('transport_mutated_packet',budget=8,
+                                   mode='qwen',model='qwen3.8-flash')
+        self.assertEqual(result['returncode'],78,result['stderr'])
+        self.assertIn('TRANSPORT_VERIFICATION_REFUSED',result['stderr'])
+        stages=[row['stage'] for row in result['events']]
+        self.assertIn('transport_read',stages)
+        self.assertNotIn('launch',stages)
+        tracked,_=self.tracked_log_events('offline-transport_mutated_packet')
+        self.assertNotIn('TRANSPORT_VERIFIED',[name for name,_ in tracked])
+        self.assertNotIn('LAUNCH_BINDING',[name for name,_ in tracked])
+        self.assertFalse((self.ext/'state/remote_sub'
+                          /'offline-transport_mutated_packet.transport-verified.json').exists())
 
 
 REMOTE_FIXTURE = r'''
