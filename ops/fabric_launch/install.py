@@ -19,6 +19,9 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parents[2]
 PREFIXES = ('ops/fabric_launch/', 'research/worker_craft/mastermind-craft/', 'skills/mastermind-worker-bootstrap/')
+# Opt-in immutable source files only for the existing Workforce plugin publisher;
+# the pool-wrapper source closure and staged release stay byte-for-byte unchanged.
+WORKFORCE_PLUGIN_ROLE_PREFIX = 'skills/mastermind-fabric-orchestration/'
 # Include the incumbent reader's complete import-time closure. strategic_state
 # imports only stdlib until its unrelated YAML-loading operation is requested.
 EXACT_FILES = {'control_plane/__init__.py', 'control_plane/worker_craft.py',
@@ -36,7 +39,10 @@ def sha(data):
     return hashlib.sha256(data).hexdigest()
 
 
-def source_files(repository, commit):
+def source_files(repository, commit, *, include_orchestration_roles=False):
+    if type(include_orchestration_roles) is not bool:
+        raise ValueError('SOURCE_ROLE_SCOPE_INVALID')
+    prefixes = PREFIXES + ((WORKFORCE_PLUGIN_ROLE_PREFIX,) if include_orchestration_roles else ())
     if not re.fullmatch(r'[0-9a-f]{40}', commit):
         raise ValueError('SOURCE_COMMIT_INVALID')
     entries = subprocess.check_output(['git','-C',str(repository),'ls-tree','-r','-z',commit],timeout=15).split(b'\0')
@@ -45,7 +51,7 @@ def source_files(repository, commit):
         if not entry:continue
         metadata,raw_name=entry.split(b'\t',1)
         name=raw_name.decode('utf-8')
-        if name not in EXACT_FILES and not name.startswith(PREFIXES):continue
+        if name not in EXACT_FILES and not name.startswith(prefixes):continue
         mode,kind,_=metadata.split(b' ')
         if mode not in (b'100644',b'100755') or kind!=b'blob':
             raise ValueError('SOURCE_FILE_NOT_REGULAR')

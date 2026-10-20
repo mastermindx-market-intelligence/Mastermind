@@ -20,7 +20,11 @@ from ops.fabric_launch.install import source_files
 MAP={
     'research/worker_craft/mastermind-craft/':'skills/mastermind-craft/',
     'skills/mastermind-worker-bootstrap/':'skills/mastermind-worker-bootstrap/',
+    'skills/mastermind-fabric-orchestration/':'skills/mastermind-fabric-orchestration/',
 }
+# These are exactly the six reviewed role assets from the same immutable source.
+ROLE_FILES=('SKILL.md','references/meta-ceo.md','references/program-ceo.md',
+            'references/operator.md','references/worker.md','references/reviewer.md')
 
 
 def assemble(files, source_commit, *, docs=False):
@@ -37,9 +41,13 @@ def assemble(files, source_commit, *, docs=False):
     for name in ('mastermind-craft','mastermind-worker-bootstrap'):
         if 'skills/'+name+'/SKILL.md' not in result:
             raise ValueError('PLUGIN_SKILL_MISSING')
+    role_prefix='skills/mastermind-fabric-orchestration/'
+    role_names={name for name in result if name.startswith(role_prefix)}
+    if role_names!={role_prefix+name for name in ROLE_FILES}:
+        raise ValueError('PLUGIN_ORCHESTRATION_ROLE_CLOSURE_INVALID')
     variant='public-docs' if docs else 'skills-only'
     manifest={'name':'mastermind-workforce','version':'0.1.0-candidate.g'+source_commit[:12]+'.'+variant,
-              'description':'Scoped worker boot, eight Craft methods and exact context/tool/return contracts.',
+              'description':'Scoped Craft, worker boot and operator-first orchestration role guides; no execution rights.',
               'skills':'./skills/'}
     if docs:
         manifest['mcpServers']='./.mcp.json'
@@ -56,8 +64,10 @@ def assemble(files, source_commit, *, docs=False):
     },sort_keys=True)+'\n').encode()
     result['README.md']=b'''# Mastermind Workforce candidate package
 
-This is a derived distribution of the existing Mastermind Craft skill plus the
-Worker Bootstrap skill. Choose exactly one Craft role for a bounded assignment.
+This is a derived distribution of the existing Mastermind Craft, Worker Bootstrap,
+and six-file operator-first Fabric Orchestration Skills. Load only the authorized
+role reference assigned by the actual parent. This artifact carries no admission,
+worker spawning, reviewer approval, model choice or principal role identity.
 The source in BUILD.json is a candidate, not a protected CapabilityPackage.
 The package does not install itself, inherit Web connector credentials, select a
 provider/model/account, start children, or change Executive and Company policy.
@@ -92,7 +102,10 @@ def main(argv=None):
     p.add_argument('--with-public-docs',action='store_true')
     args=p.parse_args(argv)
     try:
-        files=assemble(source_files(ROOT,args.source_sha),args.source_sha,docs=args.with_public_docs)
+        files=assemble(
+            source_files(ROOT,args.source_sha,include_orchestration_roles=True),
+            args.source_sha,docs=args.with_public_docs,
+        )
         data=zip_bytes(files)
         with Path(args.output).open('xb') as f:f.write(data)
         if Path(args.output).read_bytes()!=data:raise ValueError('PLUGIN_READBACK_FAILED')
