@@ -454,7 +454,7 @@ class Reader:
             raise CurrentSourceError("chain_not_directory")
         if info.st_uid not in (0, os.getuid()):
             raise CurrentSourceError("chain_foreign_owner")
-        if (info.st_mode & 0o022) and not (info.st_mode & 0o1000 and info.st_uid == 0):
+        if (info.st_mode & 0o022) and not (info.st_mode & stat.S_ISVTX and info.st_uid == 0):
             # Classic safe-directory rule: group/world write is refused, except
             # for a root-owned sticky directory such as /tmp, whose entries stay
             # protected by the per-component ownership and leaf checks below.
