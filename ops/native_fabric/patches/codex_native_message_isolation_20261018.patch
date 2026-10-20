@@ -1,0 +1,13 @@
+diff --git a/native_remote.py b/native_remote.py
+--- a/native_remote.py
++++ b/native_remote.py
+@@ -114 +114,8 @@
+-                "-c", "features.multi_agent=false", "-c", override,
++                # The Codex app-tools and native subagent chat configuration
++                # in the attended account are NOT inherited under
++                # --ignore-user-config. Explicitly refuse independent peer
++                # spawning and direct messages for every bounded Fabric worker.
++                "-c", "features.multi_agent=false",
++                "-c", "features.multi_agent_v2.enabled=false",
++                "-c", "features.multi_agent_v2.disable_direct_message=true",
++                "-c", "agents.enabled=false", "-c", override,
