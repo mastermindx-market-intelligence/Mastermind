@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { createNativeExecutiveTransport } from "./native-executive-transport";
+import { decodeSessionContext } from "./orchestration/executive-session-command-port";
 const deferred = () => { let resolve!: (x: unknown) => void; let reject!: (x: unknown) => void;
   const promise = new Promise<unknown>((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 async function fixture() {
@@ -44,6 +45,82 @@ describe("native fixed Executive bridge", () => {
     f.notify({ generation: 4, available: true, token: "private" }); expect(f.transport.available()).toBe(false);
     f.notify({ generation: 4, available: true }); expect(f.transport.available()).toBe(false);
     f.notify({ generation: 5, available: true }); expect(f.transport.available()).toBe(true);
+  });
+  it("maps only fixed historical READ commands and never invokes a native session SEND", async () => {
+    const f = await fixture(), signal = new AbortController().signal;
+    const selection = { workRef: "WS:ALPHA", rootJobId: "JOB-1" };
+    await f.sessionTransport.context(selection, signal);
+    await f.sessionTransport.reply({ operation_key: "session-continue-"+"a".repeat(64) }, signal);
+    await f.sessionTransport.references!({
+      work_ref: selection.workRef, root_job_id: selection.rootJobId, cursor: "YWJjZA==",
+    }, signal);
+    await expect(f.sessionTransport.send({
+      target_ref: "fabric_attempt:"+"b".repeat(64),
+      operation_key: "session-continue-"+"a".repeat(64),
+      instruction: "no native SEND", stop_condition: "never",
+    },signal)).rejects.toThrow("NATIVE_SESSION_READ_ONLY");
+    expect(f.invoke.mock.calls).toEqual([
+      ["executive_auth_status"],
+      ["executive_session_context", {selection:{work_ref:"WS:ALPHA",root_job_id:"JOB-1"}}],
+      ["executive_session_reply",{operationKey:"session-continue-"+"a".repeat(64)}],
+      ["executive_session_references",{selection:{work_ref:"WS:ALPHA",root_job_id:"JOB-1"},
+        pageSize:16,cursor:"YWJjZA=="}],
+    ]);
+    expect(f.invoke.mock.calls.map(([cmd])=>cmd)).not.toContain("executive_submit");
+    expect(f.invoke.mock.calls.map(([cmd])=>cmd)).not.toContain("executive_session_send");
+  });
+  it("rejects malformed native historical READ inputs before invoking any command", async () => {
+    const f=await fixture(), signal=new AbortController().signal;
+    await expect(f.sessionTransport.context({workRef:"WS:BAD?",rootJobId:"JOB-1"},signal))
+      .rejects.toThrow("SESSION_SELECTION_INVALID");
+    await expect(f.sessionTransport.reply({operation_key:"session-continue-"+"A".repeat(64)},signal))
+      .rejects.toThrow("SESSION_OPERATION_INVALID");
+    await expect(f.sessionTransport.references!({
+      work_ref:"WS:ALPHA",root_job_id:"JOB-1",cursor:"bad/cursor",
+    },signal)).rejects.toThrow("SESSION_REFERENCES_INVALID");
+    await expect(f.sessionTransport.references!({
+      work_ref:"WS:ALPHA",root_job_id:"JOB-1",page_size:33,
+    },signal)).rejects.toThrow("SESSION_REFERENCES_INVALID");
+    expect(f.invoke.mock.calls.map(([command])=>command)).toEqual(["executive_auth_status"]);
+  });
+  it("reduces a validated native context to READ-only while preserving its original owner",async()=>{
+    const f=await fixture(),signal=new AbortController().signal;
+    const selection={workRef:"WS:ALPHA",rootJobId:"JOB-1"};
+    const raw={schema:"mastermind.os.executive.session_result.v1",
+      operation:"context",ok:true,effect:"NONE",operation_key:null,error:null,
+      data:{schema:"mastermind.os.executive.session_context.v1",
+        principal_scope:"c".repeat(64),verified_expiry:2000000000,
+        selection:{work_ref:selection.workRef,root_job_id:selection.rootJobId},
+        selection_state:"RESOLVED",target:{
+          target_ref:"fabric_attempt:"+"a".repeat(64),
+          generation:"a".repeat(24),addressable:true,kind:"fabric_attempt",
+          continuation_operation_key:"session-continue-"+"b".repeat(64),
+          work_ref:selection.workRef,root_job_id:selection.rootJobId,
+        },capabilities:{send:true,reply_read:true,stop:false},
+      }};
+    f.invoke.mockResolvedValueOnce(raw);
+    const output=await f.sessionTransport.context(selection,signal);
+    expect(decodeSessionContext(output,selection)?.capabilities).toEqual({
+      send:false,reply_read:true,stop:false,
+    });
+    expect((output as typeof raw).data.principal_scope).toBe(raw.data.principal_scope);
+    expect(raw.data.capabilities.send).toBe(true); // no server payload mutation
+    expect(f.invoke.mock.calls.map(([cmd])=>cmd)).toEqual([
+      "executive_auth_status","executive_session_context",
+    ]);
+  });
+  it("stale native historical READ is withheld after auth epoch changes",async()=>{
+    const f=await fixture(), late=deferred(),signal=new AbortController().signal;
+    f.invoke.mockReturnValueOnce(late.promise);
+    const pending=f.sessionTransport.references!({
+      work_ref:"WS:ALPHA",root_job_id:"JOB-1",
+    },signal);
+    const held=expect(pending).rejects.toThrow("EXECUTIVE_AUTH_CHANGED");
+    f.invalidate(); await held;
+    late.resolve({private:"old scope"});
+    await Promise.resolve();
+    expect(f.invoke).toHaveBeenCalledTimes(2);
+    expect(f.sessionTransport.available()).toBe(false);
   });
   it("an initially missing command leaves Executive unavailable", async () => {
     const invoke = vi.fn(async () => { throw new Error("native missing"); });
