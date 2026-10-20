@@ -96,3 +96,45 @@ projection, #1618 native bounded worker message isolation. Do not install
 or merge these together without resolving their exact control and
 runtime-admission gates. This patch is independent of Executive
 plugin backend_unavailable and does not retry or resolve it.
+
+
+## October 20 local successor reconciliation — fail-closed unknown plans
+
+An independent source review on PR #1630 identified an additional memberless
+fallback: two missing user claims could rotate a matching-workspace token when
+its plan was missing or a future unrecognized shared-workspace tier.
+This could misclassify an unknown plan as legacy Personal; no production
+cross-member token leak was observed.
+
+The original local Switcher branch already held **a separate clean successor**
+at `a744e4f8128db1074e91b4f18e16b445fab40af6`, committed 2026-10-19
+20:04 PDT, based on original `ef43d9e5734e5b2e2bf31cb808feb23bee141cd9`.
+The successor accepts memberless legacy rotation only when at least one
+validated plan is a known Personal tier and every supplied plan is Personal.
+Missing/unknown/shared plans fail closed. New Rust regressions prove no
+credential rewrite across null/unknown plans or plan transition, including
+both sync and direct refresh paths; known Personal behavior remains tested.
+A legitimate `token_refresh.rs` test fixture now explicitly identifies Personal Pro.
+
+The **same PR #1630** now carries the exact three-source patch (storage.rs,
+token_refresh.rs, types.rs), anchored to the unchanged original local base
+`5f067ef615a6a4d1f80fe4fd79f086c0beac22c3`, not a new PR or native app
+installer. Digest-sealed manifest candidate SHA is `a744e4f...`; patch SHA-256
+is `cd13b98008b66950f432f65cd2704e4626c573da39d90d3474d86de9cfdaddf7`.
+The original two-file/78-pass candidate and related descriptions above are
+**historical and superseded** by this bounded successor.
+
+Observed verification on the M2 original source checkout:
+- `cargo test --offline --locked -q`: **81 passed, 0 failed, 1 ignored**, exit 0;
+- current-repo digest/replay verifier against the unchanged original checkout:
+  `BUNDLE_DIGEST_VERIFIED=true`,
+  `EXACT_PREIMAGE_AND_POSTIMAGE_REPLAY=true`,
+  `ORIGINAL_SOURCE_UNCHANGED=true`, exit 0;
+- five provider-free Mastermind bundle regression tests: **5 passed**, exit 0;
+- original local source candidate worktree clean; installed Switcher app,
+  protected credentials, active sessions and production capacity untouched.
+
+Source validation does **not** replace independent new-head review, hosted CI,
+approved Switcher packaging/signing, same-member real-app refresh and intentional
+account-switch tests, or guarded rollback. The original root/outstanding gates
+remain intact.
