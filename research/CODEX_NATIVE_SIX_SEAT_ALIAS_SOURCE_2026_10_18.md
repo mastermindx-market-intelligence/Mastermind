@@ -246,3 +246,47 @@ DO_NOT_REDO: original #1585 native observer and #1615 inert C4 worker and
 #1618 bounded-worker message isolation remain separate accepted candidate
 work. No change to installed Macro Fabric broker, profiles, processes,
 credentials, root-controlled home or application/OS version.
+
+
+## October 20 Personal subject identity guard — source repair
+
+An independent exact-head review found that the original six-seat patch could
+select a Personal alias via \`select_account(... requested_model=...)\` even
+when a directly constructed \`AccountObservation\` had no valid
+\`account_id_sha256\`. The trusted \`project_native_account_observation\` already
+refused that case, but the public advisory selector remained callable without
+going through that projector. Missing identities must never become distinct
+model-qualified subscription candidates, including sticky-account requests.
+
+The small source-only repair to \`_model_and_realm_qualified\` excludes a
+model-requested Personal candidate when \`_subject_key\` is unavailable. Existing
+Business Premium model/member/entitlement restrictions remain unchanged.
+The no-model legacy policy remains unmodified, and two distinct valid Personal
+workspace digests remain selectable as separate subscriptions.
+
+New provider-free regression cases cover six invalid workspace values over
+all three existing selector strategies, both isolated and alongside a
+different valid Personal candidate, including sticky selection. The original
+two-Business-member workspace separation and Personal duplicate suppression
+remain covered by existing tests.
+
+Verification: a byte-matching **M2 handoff-kit baseline source snapshot** for
+the original non-Git Fabric selector was checked against the exact manifest
+preimage hashes, including \`codex_pool_policy.py\` and the native-profile
+test. The updated GitHub branch's own digest-sealed patch, tests, manifest,
+and verifier were copied to an isolated temporary bundle. The official verifier
+reported \`SOURCE_PATCH_VERIFIED=true\`,
+\`POSTIMAGE_HASHES_MATCH=true\`, \`OFFLINE_PYTEST=107 passed\`,
+\`ORIGINAL_SOURCE_UNCHANGED=true\`, exit 0. The patch and tests use
+SHA-256 \`79e295cf440e77bb97a349b8aaf1effe3041262bd82b4be3e1a58d4884b4ecf1\`
+and \`95297172ec5fbccf32206c1f1e62070a273848b820d020d0df94c0cc951041ce\`,
+respectively. Exact policy postimage SHA-256 is
+\`3350e532050fdf2130521c3fcdf0dc8c267f165004e587b0635537a2032367e3\`.
+
+These are **source-only** proofs against a byte-matching snapshot. The
+installed running Fabric selector, broker capacity and authentic subscription
+leases were NOT modified or production-proven. Full exact-head hosted CI,
+new independent source review, current installed-kit drift gate, approved
+source installation, six distinct per-seat readiness/entitlement/host claims,
+and an original-parent accepted bounded result remain mandatory. No worker
+or provider inference turn was run.
