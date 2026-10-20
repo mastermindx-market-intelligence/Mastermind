@@ -83,11 +83,13 @@ class FixtureOwner(cso.NativeInvocationOwner):
     from request JSON, and it records exactly the invocations it admitted."""
 
     def __init__(self, host, worktree, git_dir, common_dir, commit, source_paths,
-                 observer="observer-1", receiver="receiver-1", alias="fixture-host-alias"):
+                 observer="observer-1", receiver="receiver-1", alias="fixture-host-alias",
+                 custody=None):
         self.host = host
         self.worktree = worktree
         self.git_dir = git_dir
         self.common_dir = common_dir
+        self.custody = custody
         self.commit = commit
         self.source_paths = tuple(source_paths)
         self.observer = observer
@@ -100,6 +102,7 @@ class FixtureOwner(cso.NativeInvocationOwner):
     def _matches(self, view):
         return (view.host == self.host and view.worktree == self.worktree
                 and view.git_dir == self.git_dir and view.common_dir == self.common_dir
+                and view.custody == self.custody
                 and view.commit == self.commit
                 and view.source_paths == self.source_paths
                 and view.observer == self.observer
@@ -233,6 +236,43 @@ class Host(unittest.TestCase):
                             sorted(e["path"] for e in request["sources"]),
                             observer=request["observer"],
                             receiver=request["receiver"], **overrides)
+
+    def custody_request(self, repo=None, sources=None, boundary=None, **overrides):
+        """The additive resolution variant: no git_dir/common_dir, the whole
+        custody dict instead, bounded by an absolute non-root boundary that
+        strictly contains the exact worktree."""
+        spec = self.target(repo)
+        request = self.request(repo=repo, sources=sources, **overrides)
+        request.pop("git_dir")
+        request.pop("common_dir")
+        request["custody"] = {"mode": cso.CUSTODY_MODE,
+                              "boundary": self.base if boundary is None else boundary}
+        return request
+
+    def custody_owner(self, request, **overrides):
+        """An inert owner bound to the request's own custody dict; the scope
+        carries the declared boundary and mode, never preknown resolved
+        paths."""
+        return FixtureOwner(request["host"], request["worktree"], None, None,
+                            request["commit"],
+                            sorted(e["path"] for e in request["sources"]),
+                            observer=request["observer"],
+                            receiver=request["receiver"],
+                            custody=request["custody"], **overrides)
+
+    def custody_request_for(self, worktree, boundary=None, sources=None,
+                            commit=None):
+        """Custody request for an arbitrary worktree path -- including paths
+        that are not functional checkouts, whose tree must not be derived."""
+        request = self.request(sources=sources if sources is not None else [])
+        request["worktree"] = worktree
+        request.pop("git_dir")
+        request.pop("common_dir")
+        request["custody"] = {"mode": cso.CUSTODY_MODE,
+                              "boundary": self.base if boundary is None else boundary}
+        if commit is not None:
+            request["commit"] = commit
+        return request
 
     def assertRefused(self, response, reason, state="ADMITTED"):
         self.assertEqual(response["status"], "REFUSED", response)
@@ -1129,7 +1169,11 @@ class CliTests(Host):
             cso.NativeInvocationView.of(request, digest), os.getuid() + 1))
 
     def test_source_route_preserves_provider_registry_enum(self):
-        import fabric_task
+        try:
+            import fabric_task
+        except ImportError as exc:
+            self.skipTest("incumbent fabric_task dependencies unavailable: %s"
+                          % exc)
         from host_pick import MODE_TOOLS
         request = self.request(); digest = cso.validate_request(request)
         registry = {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
@@ -1197,6 +1241,853 @@ class CliTests(Host):
                 artifact_delivery.subprocess.Popen = real_popen
             self.assertEqual(summary["state"], "PUBLISHED", summary)
             self.assertEqual(summary["receipt"]["receiver"], "receiver-1")
+
+
+class CustodyResolutionTests(Host):
+    """The additive worktree_pointer_graph custody variant: finite resolution
+    inside a declared boundary, bounded proof in the response, and refusal of
+    every escape, mixed or mutated shape.  All fixtures are real Git
+    repositories and real linked worktrees created inside the owned temp
+    directory; no scan, upward walk or Git discovery ever resolves them."""
+
+    def refusing_transport(self):
+        def send(_request):
+            self.fail("a refused or unresolved request reached the transport")
+        return send
+
+    def decode(self, entry):
+        return base64.b64decode(entry["bytes_b64"], validate=True)
+
+    # -- valid resolutions -------------------------------------------------
+    def test_ordinary_repository_resolves_directory_git(self):
+        request = self.custody_request()
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertEqual(response["status"], "OBSERVED", response)
+        cso.validate_response(response)
+        self.assertEqual(response["git_dir"], self.repo + "/.git")
+        self.assertEqual(response["common_dir"], self.repo + "/.git")
+        self.assertEqual(response["custody"], request["custody"])
+        proof = response["resolution"]
+        self.assertEqual(proof["mode"], cso.CUSTODY_MODE)
+        self.assertEqual(proof["boundary"], self.base)
+        self.assertEqual(proof["git_link"],
+                         {"kind": "dir", "bytes_b64": None, "identity": None})
+        self.assertEqual(proof["commondir"], {"bytes_b64": None, "identity": None})
+        self.assertEqual(proof["gitdir_backlink"], {"bytes_b64": None, "identity": None})
+        self.assertEqual(proof["dir_ids"]["git_dir"], proof["dir_ids"]["common_dir"])
+        by_path = {item["path"]: item for item in response["files"]}
+        self.assertEqual(by_path["src/alpha.py"]["object_store"], "loose")
+        self.assertEqual(by_path["src/alpha.py"]["sha256"],
+                         self.tree["src/alpha.py"]["sha256"])
+        # Sealed to the exact request digest, which binds the whole custody
+        # dict, and to observer/root/receiver/host/commit.
+        self.assertEqual(response["receipt"]["request_sha256"],
+                         cso.validate_request(request))
+        self.assertEqual(response["receipt"]["commit"], request["commit"])
+        self.assertEqual(response["receipt"]["receiver"], "receiver-1")
+
+    def test_linked_worktree_absolute_gitfile_relative_commondir_resolves(self):
+        # A real `git worktree add` graph: absolute gitfile pointer, relative
+        # `../..` commondir pointer, absolute worktree/.git backlink.
+        self.assertTrue(self.wt_gitfile.startswith("gitdir: /"))
+        with open(os.path.join(self.wt_git_dir, "commondir")) as handle:
+            self.assertEqual(handle.read().strip(), "../..")
+        sources = [{"path": path, "blob": self.wt_tree[path]["oid"],
+                    "size": self.wt_tree[path]["size"]}
+                   for path in sorted(self.wt_tree)]
+        request = self.custody_request(repo=self.worktree, sources=sources)
+        response = self.observe(request,
+                                self.custody_owner(request),
+                                in_process_transport())
+        self.assertEqual(response["status"], "OBSERVED", response)
+        cso.validate_response(response)
+        self.assertEqual(response["git_dir"], self.wt_git_dir)
+        self.assertEqual(response["common_dir"], self.wt_common_dir)
+        proof = response["resolution"]
+        self.assertEqual(proof["git_link"]["kind"], "file")
+        self.assertEqual(self.decode(proof["git_link"]).decode(), self.wt_gitfile)
+        self.assertEqual(len(proof["git_link"]["identity"]), 8)
+        self.assertEqual(self.decode(proof["commondir"]).decode().strip(), "../..")
+        self.assertEqual(self.decode(proof["gitdir_backlink"]).decode().strip(),
+                         self.worktree + "/.git")
+        # Standard linked shape: git_dir = common/worktrees/<one component>.
+        self.assertTrue(response["git_dir"].startswith(response["common_dir"]
+                                                      + "/worktrees/"))
+        self.assertEqual(len(response["git_dir"].split("/worktrees/", 1)[1].split("/")),
+                         1)
+        stores = {item["object_store"] for item in response["files"]}
+        # Host repacks the shared store only on Linux (the qualified RLIMIT_AS
+        # path); elsewhere every object stays loose, so the expected stores
+        # follow the platform instead of assuming packed+loose everywhere.
+        self.assertEqual(stores, {"packed", "loose"}
+                         if sys.platform.startswith("linux") else {"loose"})
+
+    def test_relative_gitfile_pointer_normalizes_within_boundary(self):
+        rel_wt = os.path.join(self.base, "linked-rel")
+        run_git(self.packed_repo, "worktree", "add", "-q", rel_wt, "-b", "wt-rel")
+        expected_git_dir = os.path.join(self.packed_repo, ".git", "worktrees",
+                                        "linked-rel")
+        with open(os.path.join(rel_wt, ".git"), "w") as handle:
+            handle.write("gitdir: ../packed/.git/worktrees/linked-rel\n")
+        request = self.custody_request(repo=rel_wt)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertEqual(response["status"], "OBSERVED", response)
+        cso.validate_response(response)
+        self.assertEqual(response["git_dir"], expected_git_dir)
+        self.assertEqual(response["common_dir"], self.packed_repo + "/.git")
+        self.assertEqual(self.decode(response["resolution"]["git_link"]).decode(),
+                         "gitdir: ../packed/.git/worktrees/linked-rel\n")
+
+    # -- variant and boundary refusals, all before any read ----------------
+    def test_mixed_and_unknown_custody_variants_refused_before_read(self):
+        transport = self.refusing_transport()
+        def variant(custody, **overrides):
+            request = self.custody_request(**overrides)
+            if custody is None:
+                request.pop("custody")
+            else:
+                request["custody"] = custody
+            return request
+        mixed = self.custody_request()
+        mixed["git_dir"] = self.repo + "/.git"
+        partial = {"mode": cso.CUSTODY_MODE}
+        extra = {"mode": cso.CUSTODY_MODE, "boundary": self.base, "scope": "x"}
+        for request, reason in (
+                (mixed, "custody_variant_invalid"),
+                (variant(partial), "custody_variant_invalid"),
+                (variant(extra), "custody_variant_invalid"),
+                (variant({"mode": "declared_trust_me", "boundary": self.base}),
+                 "custody_variant_invalid"),
+                (variant({"mode": None, "boundary": self.base}),
+                 "custody_variant_invalid"),
+                (variant({"mode": cso.CUSTODY_MODE, "boundary": "relative/path"}),
+                 "custody_path_invalid")):
+            with self.subTest(reason=reason, request=sorted(request)):
+                response = cso.observe_current_source(request, None, transport)
+                self.assertRefused(response, reason, state="NOT_SEEKED")
+
+    def test_boundary_relationships_refused_before_read(self):
+        transport = self.refusing_transport()
+        cases = [(self.custody_request(boundary="/"), "custody_path_invalid"),
+                 (self.custody_request(boundary=self.repo), "custody_boundary_invalid"),
+                 (self.custody_request(boundary=self.worktree),
+                  "custody_boundary_invalid"),
+                 (self.custody_request(boundary=self.base + "/unrelated/other"),
+                  "custody_boundary_invalid"),
+                 (self.custody_request(boundary=self.base + "/" + os.path.basename(
+                     self.repo) + "/nested"), "custody_boundary_invalid")]
+        for request, reason in cases:
+            with self.subTest(reason=reason):
+                response = cso.observe_current_source(request, None, transport)
+                self.assertRefused(response, reason, state="NOT_SEEKED")
+
+    def test_scope_binds_custody_and_refuses_other_boundary(self):
+        request = self.custody_request(repo=self.worktree)
+        invocation = self.mint(request, self.custody_owner(request))
+        elsewhere = self.custody_request(
+            repo=self.worktree,
+            sources=[{"path": "docs/beta.txt"}])
+        response = cso.observe_current_source(elsewhere, invocation,
+                                              self.refusing_transport())
+        self.assertRefused(response, "admission_admission_invalid",
+                           state="ADMISSION_INVALID")
+        # The same scope never admits the explicit triple shape either.
+        response = cso.observe_current_source(self.request(repo=self.worktree),
+                                              invocation, self.refusing_transport())
+        self.assertRefused(response, "admission_admission_invalid",
+                           state="ADMISSION_INVALID")
+
+    # -- frozen custody state ----------------------------------------------
+    def test_frozen_custody_survives_request_and_property_mutation(self):
+        # The view and the minted scope freeze the declared (mode, boundary)
+        # pair: mutating the caller's live request dict -- or the mapping the
+        # property hands back -- must not move binding(), scope_digest or the
+        # admitted scope.
+        request = self.custody_request(repo=self.worktree)
+        view = cso.NativeInvocationView.of(request, cso.validate_request(request))
+        owner = self.custody_owner(request)
+        invocation = cso.NativeInvocation.mint(view, owner, os.getuid())
+        original = copy.deepcopy(request["custody"])
+        binding = view.binding()
+        scope_digest = invocation.scope_digest
+        # Mutate the caller's request dict in place, then tear it further.
+        request["custody"]["boundary"] = "/forged/elsewhere"
+        request["custody"]["mode"] = "mutated"
+        self.assertEqual(view.custody, original)
+        self.assertEqual(view.binding(), binding)
+        self.assertEqual(invocation.custody, original)
+        self.assertEqual(invocation.scope_digest, scope_digest)
+        self.assertFalse(invocation.binds_request(request))
+        request["custody"].pop("boundary")
+        self.assertEqual(view.custody, original)
+        self.assertEqual(view.binding(), binding)
+        self.assertEqual(invocation.scope_digest, scope_digest)
+        # Mutating the defensive property return is equally inert.
+        request["custody"] = dict(original)
+        returned = invocation.custody
+        returned["boundary"] = "/forged/other"
+        returned["mode"] = "other-mode"
+        self.assertEqual(invocation.custody, original)
+        self.assertEqual(view.custody, original)
+        self.assertEqual(view.binding(), binding)
+        self.assertEqual(invocation.scope_digest, scope_digest)
+        # The unmutated request still binds, so nothing else moved.
+        self.assertTrue(invocation.binds_request(request))
+
+    def test_forged_changed_boundary_cannot_publish_after_request_mutation(self):
+        # Retargeting the caller's live request dict after mint must not
+        # retarget the admitted scope: a body made fully self-consistent with
+        # the NEW boundary still refuses publication, while the honest body
+        # keeps publishing under the same scope.  The observation runs under
+        # the very invocation used for publication, so the refusal below can
+        # only come from the custody binding itself.
+        request = self.custody_request(repo=self.worktree)
+        owner = self.custody_owner(request)
+        invocation = self.mint(request, owner)
+        observed = cso.observe_current_source(request, invocation,
+                                              in_process_transport())
+        self.assertEqual(observed["status"], "OBSERVED", observed)
+        self.assertEqual(observed["admission"]["scope_digest"],
+                         invocation.scope_digest)
+        other_boundary = os.path.dirname(self.base)
+        self.assertNotEqual(other_boundary, "/")
+        self.assertTrue(self.base.startswith(other_boundary + "/"))
+        self.assertNotEqual(other_boundary, request["custody"]["boundary"])
+        request["custody"]["boundary"] = other_boundary
+        forged = copy.deepcopy(observed)
+        forged["custody"] = dict(request["custody"])
+        forged["resolution"] = copy.deepcopy(observed["resolution"])
+        forged["resolution"]["boundary"] = other_boundary
+        forged["receipt"]["response_sha256"] = cso.digest_of(
+            {k: v for k, v in forged.items() if k != "receipt"})
+        cso.validate_response(forged)
+        with tempfile.TemporaryDirectory(prefix="custody-frozen-") as dest:
+            with self.assertRaisesRegex(cso.NativeRefused,
+                                        "native_scope_caller_mismatch"):
+                cso.publish_observation(forged, dest, invocation, reserve=TestChain)
+            self.assertEqual(os.listdir(dest), [])
+        with tempfile.TemporaryDirectory(prefix="custody-honest-") as dest:
+            final = cso.publish_observation(observed, dest, invocation,
+                                            reserve=TestChain)
+            self.assertTrue(final.startswith(dest + "/"))
+            self.assertEqual(len(os.listdir(dest)), 1)
+
+    # -- pointer graph refusals -------------------------------------------
+    def test_pointer_escape_outside_boundary_refused(self):
+        outside = build_repo(self.base, "outside")
+        bound = os.path.join(self.base, "bound")
+        os.makedirs(bound, exist_ok=True)
+        run_git(outside, "worktree", "add", "-q", os.path.join(bound, "wt"),
+                "-b", "wt-out")
+        escaped_worktree = os.path.join(bound, "wt")
+        request = self.custody_request(repo=escaped_worktree, boundary=bound)
+        self.assertTrue(request["worktree"].startswith(bound + "/"))
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "custody_resolution_invalid")
+        # A lexical ../.. escape is refused by containment alone: the target
+        # does not even exist, so no walk could have produced the refusal.
+        escaped = self.custody_request(repo=escaped_worktree, boundary=bound)
+        with open(os.path.join(escaped_worktree, ".git"), "w") as handle:
+            handle.write("gitdir: ../../outside-escape/.git\n")
+        response = self.observe(escaped, self.custody_owner(escaped),
+                                in_process_transport())
+        self.assertRefused(response, "custody_resolution_invalid")
+
+    def test_relocated_separate_gitdir_refused(self):
+        relocated = os.path.join(self.base, "relocated-git")
+        worktree = os.path.join(self.base, "relocated-wt")
+        run_git(self.base, "init", "-q", "-b", "main", "--separate-git-dir",
+                relocated, worktree)
+        with open(os.path.join(worktree, ".git")) as handle:
+            self.assertTrue(handle.read().startswith("gitdir: "))
+        self.assertFalse(os.path.exists(os.path.join(relocated, "commondir")))
+        request = self.custody_request_for(worktree, commit=self.commit)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "custody_resolution_invalid")
+
+    def test_nonstandard_linked_shape_refused(self):
+        common_repo = build_repo(self.base, "shape-common")
+        shape_git = os.path.join(self.base, "shape-git")
+        os.makedirs(shape_git)
+        with open(os.path.join(shape_git, "commondir"), "w") as handle:
+            handle.write(common_repo + "/.git\n")
+        worktree = os.path.join(self.base, "shape-wt")
+        os.makedirs(worktree)
+        with open(os.path.join(worktree, ".git"), "w") as handle:
+            handle.write("gitdir: " + shape_git + "\n")
+        request = self.custody_request_for(worktree, commit=self.commit)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "custody_resolution_invalid")
+
+    def test_wrong_and_missing_backlink_refused(self):
+        backlink = os.path.join(self.wt_git_dir, "gitdir")
+        with open(backlink) as handle:
+            original = handle.read()
+        def restore():
+            with open(backlink, "w") as handle:
+                handle.write(original)
+        self.addCleanup(restore)
+        with open(backlink, "w") as handle:
+            handle.write(self.base + "/elsewhere/.git\n")
+        request = self.custody_request(repo=self.worktree)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "gitdir_backlink_mismatch")
+        os.unlink(backlink)
+        missing = self.custody_request(repo=self.worktree)
+        response = self.observe(missing, self.custody_owner(missing),
+                                in_process_transport())
+        self.assertRefused(response, "gitdir_backlink_mismatch")
+
+    def test_malformed_multiline_and_oversize_pointers_refused(self):
+        gitfile = os.path.join(self.worktree, ".git")
+        with open(gitfile) as handle:
+            original = handle.read()
+        def restore():
+            with open(gitfile, "w") as handle:
+                handle.write(original)
+        self.addCleanup(restore)
+        for payload, reason in (
+                ("gitdir: %s\nextra line\n" % self.wt_git_dir, "git_pointer_invalid"),
+                ("GITDIR: %s\n" % self.wt_git_dir, "git_pointer_invalid"),
+                ("gitdir: \n", "git_pointer_invalid"),
+                ("gitdir: " + "x" * 5000 + "\n", "size_limit")):
+            with self.subTest(reason=reason):
+                with open(gitfile, "w") as handle:
+                    handle.write(payload)
+                request = self.custody_request(repo=self.worktree)
+                response = self.observe(request, self.custody_owner(request),
+                                        in_process_transport())
+                self.assertRefused(response, reason)
+        restore()
+        commondir = os.path.join(self.wt_git_dir, "commondir")
+        with open(commondir) as handle:
+            original_common = handle.read()
+        def restore_common():
+            with open(commondir, "w") as handle:
+                handle.write(original_common)
+        self.addCleanup(restore_common)
+        with open(commondir, "w") as handle:
+            handle.write("../..\n../..\n")
+        request = self.custody_request(repo=self.worktree)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "git_pointer_invalid")
+
+    def test_symlink_git_leaf_and_component_refused(self):
+        # Symlinked worktree/.git leaf.
+        link = os.path.join(self.base, "gitfile-link")
+        os.symlink(self.wt_git_dir, link)
+        worktree = os.path.join(self.base, "link-wt")
+        os.makedirs(worktree)
+        os.symlink(link, os.path.join(worktree, ".git"))
+        request = self.custody_request_for(worktree, commit=self.commit)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "unsupported_git_link")
+        # Symlinked git-dir component inside the boundary: lexical resolution
+        # succeeds, the no-follow chain walk refuses.
+        target_repo = build_repo(self.base, "sym-target")
+        link_parent = os.path.join(self.base, "sym-link")
+        os.symlink(target_repo, link_parent)
+        sym_wt = os.path.join(self.base, "sym-wt")
+        os.makedirs(sym_wt)
+        with open(os.path.join(sym_wt, ".git"), "w") as handle:
+            handle.write("gitdir: " + link_parent + "/.git\n")
+        request = self.custody_request_for(sym_wt, commit=self.commit)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "filesystem_refused")
+        # Symlinked commondir leaf under a real linked git_dir.
+        commondir = os.path.join(self.wt_git_dir, "commondir")
+        os.rename(commondir, commondir + ".orig")
+        os.symlink(os.path.join(self.base, "elsewhere-common"), commondir)
+        def restore():
+            os.unlink(commondir)
+            os.rename(commondir + ".orig", commondir)
+        self.addCleanup(restore)
+        request = self.custody_request(repo=self.worktree)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertRefused(response, "custody_pointer_invalid")
+
+    # -- mutation across resolution and capture ---------------------------
+    def rewritten_pointer_capture(self, payload):
+        """Swap worktree/.git the moment the first object store read happens:
+        after resolution, during capture.  The graph held at resolution must
+        refuse the run; no partial bytes are returned."""
+        gitfile = os.path.join(self.worktree, ".git")
+        with open(gitfile) as handle:
+            original = handle.read()
+        real_open = os.open
+        state = {"count": 0}
+
+        def opener(path, flags, dir_fd=None):
+            if path == "objects" and dir_fd is not None:
+                state["count"] += 1
+                if state["count"] == 1:
+                    os.unlink(gitfile)
+                    with open(gitfile, "w") as handle:
+                        handle.write(payload)
+            return real_open(path, flags, dir_fd=dir_fd)
+
+        def restore():
+            if os.path.exists(gitfile):
+                with open(gitfile, "w") as handle:
+                    handle.write(original)
+        self.addCleanup(restore)
+        reader = cso.Reader(opener=opener)
+        request = self.custody_request(repo=self.worktree)
+        return request, self.custody_owner(request), lambda req: cso.canonical(
+            cso.observe_remote(req, reader))
+
+    def test_pointer_replaced_with_identical_bytes_refused(self):
+        # Same bytes, new inode and timestamps: the identity half of the
+        # retained graph still refuses the capture.
+        with open(os.path.join(self.worktree, ".git")) as handle:
+            original = handle.read()
+        request, owner, transport = self.rewritten_pointer_capture(original)
+        response = self.observe(request, owner, transport)
+        self.assertEqual(response["status"], "UNAVAILABLE", response)
+        self.assertEqual(response["reason"], "changed_during_read", response)
+        self.assertEqual(response["files"], [])
+
+    def test_pointer_changed_during_capture_refused(self):
+        request, owner, transport = self.rewritten_pointer_capture(
+            "gitdir: /nonexistent/elsewhere\n")
+        response = self.observe(request, owner, transport)
+        self.assertNotEqual(response["status"], "OBSERVED", response)
+        self.assertIn(response["reason"],
+                      ("changed_during_read", "git_pointer_mismatch"), response)
+        self.assertEqual(response["files"], [])
+
+    # -- delivered body, proof and publication -----------------------------
+    def test_delivered_body_with_changed_resolved_paths_refused(self):
+        request = self.custody_request(repo=self.worktree)
+        def send(req):
+            body = cso.observe_remote(req)
+            self.assertEqual(body["status"], "OBSERVED", body)
+            body["git_dir"] = body["common_dir"] + "/worktrees/forged"
+            body["resolution"]["git_dir"] = body["git_dir"]
+            return cso.canonical(body)
+        response = self.observe(request, self.custody_owner(request), send)
+        self.assertRefused(response, "custody_proof_invalid")
+
+    def test_delivered_body_with_changed_proof_bytes_refused(self):
+        request = self.custody_request(repo=self.worktree)
+        def send(req):
+            body = cso.observe_remote(req)
+            self.assertEqual(body["status"], "OBSERVED", body)
+            body["resolution"]["commondir"]["bytes_b64"] = base64.b64encode(
+                b"../..\n../..").decode("ascii")
+            return cso.canonical(body)
+        response = self.observe(request, self.custody_owner(request), send)
+        self.assertRefused(response, "custody_proof_invalid")
+
+    def test_local_validation_rederives_proof_from_bytes_alone(self):
+        sources = [{"path": path, "blob": self.wt_tree[path]["oid"],
+                    "size": self.wt_tree[path]["size"]}
+                   for path in sorted(self.wt_tree)]
+        request = self.custody_request(repo=self.worktree, sources=sources)
+        response = self.observe(request,
+                                self.custody_owner(request),
+                                in_process_transport())
+        self.assertEqual(response["status"], "OBSERVED", response)
+        cso.validate_resolution_proof(response["resolution"], response)
+        # A different path inside the same boundary is not accepted for being
+        # inside it: the returned bytes must re-derive the exact relationship.
+        forged = copy.deepcopy(response)
+        forged["git_dir"] = self.wt_common_dir + "/worktrees/other"
+        forged["resolution"]["git_dir"] = forged["git_dir"]
+        with self.assertRaisesRegex(cso.CurrentSourceError, "custody_proof_invalid"):
+            cso.validate_resolution_proof(forged["resolution"], forged)
+        # Broken backlink bytes.
+        forged = copy.deepcopy(response)
+        forged["resolution"]["gitdir_backlink"]["bytes_b64"] = base64.b64encode(
+            (self.base + "/elsewhere/.git\n").encode()).decode("ascii")
+        with self.assertRaisesRegex(cso.CurrentSourceError, "custody_proof_invalid"):
+            cso.validate_resolution_proof(forged["resolution"], forged)
+        # Unknown field inside the proof.
+        forged = copy.deepcopy(response)
+        forged["resolution"]["extra"] = "field"
+        with self.assertRaisesRegex(cso.CurrentSourceError, "custody_proof_invalid"):
+            cso.validate_resolution_proof(forged["resolution"], forged)
+        # Triple responses still refuse the custody fields outright, and a
+        # custody response missing its proof is refused.
+        triple = self.observe(self.request(), self.owner(), in_process_transport())
+        self.assertEqual(triple["status"], "OBSERVED", triple)
+        with_extra = copy.deepcopy(triple)
+        with_extra["resolution"] = response["resolution"]
+        with_extra["receipt"]["response_sha256"] = cso.digest_of(
+            {k: v for k, v in with_extra.items() if k != "receipt"})
+        with self.assertRaisesRegex(cso.CurrentSourceError, "response_unknown_field"):
+            cso.validate_response(with_extra)
+        without_proof = copy.deepcopy(response)
+        without_proof.pop("resolution")
+        without_proof["receipt"]["response_sha256"] = cso.digest_of(
+            {k: v for k, v in without_proof.items() if k != "receipt"})
+        with self.assertRaisesRegex(cso.CurrentSourceError, "response_unknown_field"):
+            cso.validate_response(without_proof)
+
+    def test_publication_refuses_consistent_proof_for_other_boundary(self):
+        # A fully self-consistent custody body for a DIFFERENT boundary still
+        # cannot publish: the scope binds the declared boundary, and the
+        # request digest (which binds custody) no longer matches.
+        request = self.custody_request(repo=self.worktree)
+        observed = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertEqual(observed["status"], "OBSERVED", observed)
+        # A real non-root strict ancestor of the fixtures -- never a hardcoded
+        # /tmp, since the owned temp directories can live anywhere (macOS
+        # /var/folders/..., /home/...).  Validated here so the forged body is
+        # structurally valid and the refusal below is the scope binding's own.
+        other_boundary = os.path.dirname(self.base)
+        self.assertNotEqual(other_boundary, "/")
+        self.assertTrue(self.base.startswith(other_boundary + "/"))
+        self.assertNotEqual(other_boundary, request["custody"]["boundary"])
+        forged = copy.deepcopy(observed)
+        forged["custody"] = {"mode": cso.CUSTODY_MODE, "boundary": other_boundary}
+        forged["resolution"]["boundary"] = other_boundary
+        forged["receipt"]["response_sha256"] = cso.digest_of(
+            {k: v for k, v in forged.items() if k != "receipt"})
+        invocation = self.mint(request, self.custody_owner(request))
+        with tempfile.TemporaryDirectory(prefix="custody-pub-") as dest:
+            with self.assertRaisesRegex(cso.NativeRefused,
+                                        "native_scope_caller_mismatch"):
+                cso.publish_observation(forged, dest, invocation, reserve=TestChain)
+            self.assertEqual(os.listdir(dest), [])
+        # A foreign receiver is refused at the scope boundary as well.
+        foreign = copy.deepcopy(observed)
+        foreign["receiver"] = "receiver-2"
+        foreign["receipt"]["receiver"] = "receiver-2"
+        foreign["receipt"]["response_sha256"] = cso.digest_of(
+            {k: v for k, v in foreign.items() if k != "receipt"})
+        with tempfile.TemporaryDirectory(prefix="custody-pub-") as dest:
+            with self.assertRaisesRegex(cso.NativeRefused,
+                                        "native_scope_caller_mismatch"):
+                cso.publish_observation(foreign, dest, invocation, reserve=TestChain)
+            self.assertEqual(os.listdir(dest), [])
+
+    def test_native_receipt_publishes_linked_resolution_and_refuses(self):
+        from test_current_source_observation import TestChain, inert_request_loader
+        sources = [{"path": path, "blob": self.wt_tree[path]["oid"],
+                    "size": self.wt_tree[path]["size"]}
+                   for path in sorted(self.wt_tree)]
+        request = self.custody_request(repo=self.worktree, sources=sources)
+        owner = self.custody_owner(request)
+        with tempfile.TemporaryDirectory(prefix="custody-req-") as req_dir:
+            request_path = os.path.join(req_dir, "request.json")
+            with open(request_path, "wb") as handle:
+                handle.write(cso.canonical(request))
+            with tempfile.TemporaryDirectory(prefix="custody-dest-") as dest:
+                summary = cso.native_current_source_receipt(
+                    request_path, dest, lambda digest: owner,
+                    transport=in_process_transport(), reserve=TestChain,
+                    load_request=inert_request_loader)
+                self.assertEqual(summary["state"], "PUBLISHED", summary)
+                with open(summary["destination"], "rb") as handle:
+                    stored = json.loads(handle.read().decode())
+                cso.validate_response(stored)
+                self.assertEqual(stored["custody"], request["custody"])
+                self.assertEqual(stored["git_dir"], self.wt_git_dir)
+                self.assertEqual(stored["common_dir"], self.wt_common_dir)
+                self.assertEqual(stored["receipt"]["request_sha256"],
+                                 cso.validate_request(request))
+            # A duplicate destination refuses closed before any transport.
+            with tempfile.TemporaryDirectory(prefix="custody-dest-") as dest:
+                def reserve(_path):
+                    raise cso.CurrentSourceError("duplicate_destination")
+                with self.assertRaisesRegex(cso.CurrentSourceError,
+                                            "duplicate_destination"):
+                    cso.native_current_source_receipt(
+                        request_path, dest, lambda digest: owner,
+                        transport=self.refusing_transport(), reserve=reserve,
+                        load_request=inert_request_loader)
+
+    def test_response_caps_still_apply_to_custody_variant(self):
+        request = self.custody_request(repo=self.worktree)
+        original = cso.MAX_RESPONSE
+        cso.MAX_RESPONSE = 200
+        try:
+            response = self.observe(request, self.custody_owner(request),
+                                    in_process_transport())
+        finally:
+            cso.MAX_RESPONSE = original
+        self.assertRefused(response, "response_limit")
+        self.assertEqual(response["files"], [])
+
+
+class CustodyGraphGuardTests(Host):
+    """The held-descriptor graph guard for the custody variant: the full
+    worktree/git_dir/common_dir chains and every no-follow pointer leaf are
+    held open after resolution and re-verified against the discovery graph
+    before inspect_custody, check_object_store or any object read, and again
+    after capture.  Every trigger here is a real filesystem mutation observed
+    through the Reader seams; OS identity values are never faked."""
+
+    def linked_capture(self, opener=None):
+        """Direct remote-half run over the real linked worktree with an
+        injected Reader."""
+        reader = cso.Reader() if opener is None else cso.Reader(opener=opener)
+        request = self.custody_request(repo=self.worktree)
+        return request, reader
+
+    def swap_at_first_store_open(self, mutate, record=None):
+        """An opener seam that mutates the graph the moment the first object
+        store directory is opened -- after resolution and the guard's hold,
+        during capture.  ``record`` collects every descriptor handed out."""
+        real_open = os.open
+        state = {"count": 0}
+
+        def opener(path, flags, dir_fd=None):
+            if path == "objects" and dir_fd is not None:
+                state["count"] += 1
+                if state["count"] == 1:
+                    mutate()
+            fd = real_open(path, flags, dir_fd=dir_fd)
+            if record is not None:
+                record.append(fd)
+            return fd
+
+        return opener
+
+    def test_guard_verifies_before_inspect_store_and_objects(self):
+        # Same bytes, new inode and timestamps, swapped the instant resolution
+        # returns: the guard must refuse against the discovery graph before
+        # inspect_custody runs and before a single object is read.
+        gitfile = os.path.join(self.worktree, ".git")
+        with open(gitfile) as handle:
+            original = handle.read()
+        real_resolve = cso.resolve_custody
+        real_inspect = cso.inspect_custody
+        seen = {"inspect": 0, "objects": 0}
+
+        def resolve_then_replace(reader, req):
+            result = real_resolve(reader, req)
+            os.unlink(gitfile)
+            with open(gitfile, "w") as handle:
+                handle.write(original)
+            return result
+
+        def counting_inspect(reader, req):
+            seen["inspect"] += 1
+            return real_inspect(reader, req)
+
+        def no_reads(*_args, **_kwargs):
+            seen["objects"] += 1
+            self.fail("an object read ran after the custody graph changed")
+
+        def restore():
+            with open(gitfile, "w") as handle:
+                handle.write(original)
+        self.addCleanup(restore)
+        request, transport = self.linked_capture()
+        with mock.patch.object(cso, "resolve_custody", resolve_then_replace), \
+                mock.patch.object(cso, "inspect_custody", counting_inspect), \
+                mock.patch.object(cso, "read_object", no_reads):
+            body = cso.observe_remote(request, cso.Reader())
+        self.assertEqual(body["status"], "UNAVAILABLE", body)
+        self.assertEqual(body["reason"], "changed_during_read", body)
+        self.assertEqual(body["files"], [])
+        self.assertEqual(seen, {"inspect": 0, "objects": 0})
+
+    def test_guard_verifies_again_immediately_before_objects(self):
+        # Same-byte .git replacement during capture: the held leaf identity
+        # refuses between inspect_custody and the first object read.
+        gitfile = os.path.join(self.worktree, ".git")
+        with open(gitfile) as handle:
+            original = handle.read()
+
+        def mutate():
+            os.unlink(gitfile)
+            with open(gitfile, "w") as handle:
+                handle.write(original)
+
+        def restore():
+            with open(gitfile, "w") as handle:
+                handle.write(original)
+        self.addCleanup(restore)
+        request, reader = self.linked_capture(
+            self.swap_at_first_store_open(mutate))
+        with mock.patch.object(cso, "read_object",
+                               lambda *_a, **_k: self.fail(
+                                   "object read ran on a changed graph")):
+            body = cso.observe_remote(request, reader)
+        self.assertEqual(body["status"], "UNAVAILABLE", body)
+        self.assertEqual(body["reason"], "changed_during_read", body)
+        self.assertEqual(body["files"], [])
+
+    def test_guard_catches_reverted_pointer_ctime_during_capture(self):
+        # commondir changed and reverted: the bytes match the discovery graph
+        # again, but the identity (ctime) cannot, and the held leaf refuses.
+        commondir = os.path.join(self.wt_git_dir, "commondir")
+        with open(commondir) as handle:
+            original = handle.read()
+
+        def mutate():
+            with open(commondir, "w") as handle:
+                handle.write("/nonexistent/common\n")
+            with open(commondir, "w") as handle:
+                handle.write(original)
+
+        def restore():
+            with open(commondir, "w") as handle:
+                handle.write(original)
+        self.addCleanup(restore)
+        request, reader = self.linked_capture(
+            self.swap_at_first_store_open(mutate))
+        with mock.patch.object(cso, "read_object",
+                               lambda *_a, **_k: self.fail(
+                                   "object read ran on a changed graph")):
+            body = cso.observe_remote(request, reader)
+        self.assertEqual(body["status"], "UNAVAILABLE", body)
+        self.assertEqual(body["reason"], "changed_during_read", body)
+        self.assertEqual(body["files"], [])
+
+    def test_guard_catches_ancestor_rename_restore(self):
+        # Rename an ancestor of the resolved git_dir/common_dir away and back
+        # after discovery: no terminal identity moves, so only the held FULL
+        # chain snapshot can refuse this before any object read.
+        real_resolve = cso.resolve_custody
+
+        def resolve_then_rename(reader, req):
+            result = real_resolve(reader, req)
+            os.rename(self.packed_repo, self.packed_repo + ".away")
+            os.rename(self.packed_repo + ".away", self.packed_repo)
+            return result
+
+        request = self.custody_request(repo=self.worktree)
+        with mock.patch.object(cso, "resolve_custody", resolve_then_rename), \
+                mock.patch.object(cso, "read_object",
+                                  lambda *_a, **_k: self.fail(
+                                      "object read ran on a changed graph")):
+            body = cso.observe_remote(request, cso.Reader())
+        self.assertEqual(body["status"], "UNAVAILABLE", body)
+        self.assertEqual(body["reason"], "changed_during_read", body)
+        self.assertEqual(body["files"], [])
+
+    def test_guard_refuses_leaf_made_symlink_after_discovery(self):
+        # A linked leaf that becomes a symlink between resolution and the
+        # hold is refused by the guard's own no-follow leaf discipline, still
+        # before inspect_custody or any object read.
+        commondir = os.path.join(self.wt_git_dir, "commondir")
+        os.rename(commondir, commondir + ".orig")
+        os.symlink(os.path.join(self.base, "elsewhere-common"), commondir)
+
+        def restore():
+            os.unlink(commondir)
+            os.rename(commondir + ".orig", commondir)
+        self.addCleanup(restore)
+        real_resolve = cso.resolve_custody
+        real_inspect = cso.inspect_custody
+        seen = {"inspect": 0, "objects": 0}
+
+        def resolve_then_link(reader, req):
+            result = real_resolve(reader, req)
+            os.unlink(commondir)
+            os.symlink(os.path.join(self.base, "elsewhere-common"), commondir)
+            return result
+
+        def counting_inspect(reader, req):
+            seen["inspect"] += 1
+            return real_inspect(reader, req)
+
+        request = self.custody_request(repo=self.worktree)
+        with mock.patch.object(cso, "resolve_custody", resolve_then_link), \
+                mock.patch.object(cso, "inspect_custody", counting_inspect), \
+                mock.patch.object(cso, "read_object",
+                                  lambda *_a, **_k: self.fail(
+                                      "object read ran on a changed graph")):
+            body = cso.observe_remote(request, cso.Reader())
+        self.assertEqual(body["status"], "REFUSED", body)
+        self.assertEqual(body["reason"], "custody_pointer_invalid", body)
+        self.assertEqual(body["files"], [])
+        self.assertEqual(seen, {"inspect": 0, "objects": 0})
+
+    def test_guard_descriptors_close_on_success_and_on_error(self):
+        # Every descriptor the Reader -- guard-held chains and leaves included
+        # -- handed out is closed again, both for an observed capture and for
+        # a refused one.  A loose linked worktree keeps the packed child out
+        # of this leak check.
+        loose_wt = os.path.join(self.base, "linked-loose-guard")
+        run_git(self.repo, "worktree", "add", "-q", loose_wt, "-b", "wt-guard")
+        def cleanup():
+            shutil.rmtree(loose_wt, ignore_errors=True)
+            run_git(self.repo, "worktree", "prune")
+            run_git(self.repo, "branch", "-D", "wt-guard")
+        self.addCleanup(cleanup)
+        real_open = os.open
+        opened = []
+
+        def recorder(mutate=None, state=None):
+            count = state if state is not None else {"n": 0}
+
+            def opener(path, flags, dir_fd=None):
+                if mutate is not None and path == "objects" and dir_fd is not None:
+                    count["n"] += 1
+                    if count["n"] == 1:
+                        mutate()
+                fd = real_open(path, flags, dir_fd=dir_fd)
+                opened.append(fd)
+                return fd
+
+            return opener
+
+        def assert_all_closed():
+            self.assertTrue(opened)
+            for fd in opened:
+                with self.assertRaises(OSError):
+                    os.fstat(fd)
+
+        request = self.custody_request(repo=loose_wt)
+        body = cso.observe_remote(request, cso.Reader(opener=recorder()))
+        self.assertEqual(body["status"], "OBSERVED", body)
+        assert_all_closed()
+        # Error path: replace the linked .git with other bytes during capture
+        # and confirm the held descriptors still all close.
+        gitfile = os.path.join(loose_wt, ".git")
+        with open(gitfile) as handle:
+            original = handle.read()
+
+        def mutate():
+            with open(gitfile, "w") as handle:
+                handle.write("gitdir: /nonexistent/guard\n")
+
+        opened = []
+        body = cso.observe_remote(request,
+                                  cso.Reader(opener=recorder(mutate)))
+        self.assertEqual(body["status"], "UNAVAILABLE", body)
+        self.assertEqual(body["reason"], "changed_during_read", body)
+        self.assertEqual(body["files"], [])
+        assert_all_closed()
+        with open(gitfile, "w") as handle:
+            handle.write(original)
+
+    def test_triple_mode_keeps_existing_pointer_state_behavior(self):
+        # The explicit git_dir/common_dir triple keeps its own before/after
+        # pointer behaviour and never constructs the guard.
+        def no_guard(*_args, **_kwargs):
+            self.fail("the explicit triple mode must not build a graph guard")
+        with mock.patch.object(cso, "CustodyGraphGuard", no_guard):
+            body = cso.observe_remote(self.request(), cso.Reader())
+        self.assertEqual(body["status"], "OBSERVED", body)
+        self.assertEqual([item["path"] for item in body["files"]],
+                         sorted(FILES))
+
+    def test_guard_ships_in_generated_reader(self):
+        # The generated remote program must carry and execute the guard: the
+        # linked custody path runs through it end to end.
+        self.assertIn("class CustodyGraphGuard", cso.generated_reader_source())
+        request = self.custody_request(repo=self.worktree)
+        response = self.observe(request, self.custody_owner(request),
+                                in_process_transport())
+        self.assertEqual(response["status"], "OBSERVED", response)
+        cso.validate_response(response)
 
 
 if __name__ == "__main__":

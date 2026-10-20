@@ -84,9 +84,9 @@
       "source": "source/current_failed_artifact_evidence.py"
     },
     "ext/current_source_observation.py": {
-      "bytes": 80984,
+      "bytes": 111881,
       "installed_preimage_sha256": null,
-      "sha256": "065c53c2be957551d8aeedf08712e473279c82765e7dd0e192774bbc98dd77ef",
+      "sha256": "41ff3e03db02779ae28ef458ee4611464bb0a5d7e01256922f6d93206ff157ff",
       "source": "candidate/current_source_observation.py"
     },
     "ext/fabric_client_projection.py": {
@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 71080,
+      "bytes": 71894,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "f6fc6efe6b65ca1783e32eec62e7c6a3db10e04d9cf72c62317a04b3656fa5e6",
+      "sha256": "f559e7d9b4186a013335082defe549a2ff11a4fe6689aad2e1b0f6ae328392e4",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {

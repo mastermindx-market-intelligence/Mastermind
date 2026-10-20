@@ -277,6 +277,26 @@ A request binds `schema=mastermind.fabric_current_source_request.v1`, `run_id`,
 reference only. Every field is included in the request digest. A real linked
 worktree must declare its gitdir/common-dir pointers and backlink exactly.
 
+The additive custody-resolution request variant replaces both `git_dir` and
+`common_dir` with `custody={"mode":"worktree_pointer_graph","boundary":...}`.
+The boundary is an exact absolute, non-root resource selector which strictly
+contains the selected worktree. It carries no authority beyond the caller's
+current scoped commission and tool/resource permission. Mixed or incomplete
+variants refuse. This mode reads only the selected worktree's `.git`, the
+resolved gitdir's `commondir`, and its `gitdir` backlink. Ordinary repositories
+resolve to `worktree/.git`; linked repositories must prove the standard
+`common_dir/worktrees/<id>` relationship and the backlink to the selected
+`worktree/.git` before object access. Every resolved path must remain inside
+the declared boundary and pass the existing FD, ownership, mode and no-follow
+checks. It does not search for repositories or infer custody from a host label.
+
+The returned resolution records actual custody and bounded pointer evidence,
+bound to the original request digest. The receiving composition independently
+checks the pointer relationships before publication. Pointer bytes and identities
+are revalidated around capture; a changed graph refuses without partial source
+delivery. The explicit triple variant remains supported. Neither variant proves
+current worktree cleanliness or reads an index or working source files.
+
 The receipt delivers raw commit/tree objects and selected blob bytes as base64,
 with Git identities and path membership independently revalidated locally. With
 an empty `sources` list it proves the commit and its root tree only; it is not a
@@ -303,7 +323,15 @@ For target commit `9704aa8e358d2cf8440e293a30a09a24be9038b2`, neither source
 custody nor bytes have been observed by this qualification. Existing published
 images do not require this Git route.
 
-The smallest immutable-generation delta is the three plain producer/collector
+Relative to the prior qualified current-source generation, custody resolution
+changes only `current_source_observation.py` and its native `fabric_task.py`
+owner wiring. It uses the same transport and publication route; no new command,
+host probe, registry or lifecycle is installed. Its complete 83-file closure must
+still be rebuilt and published from protected merged source, then selected with
+the existing fresh-predecessor CAS. A source PR or candidate invocation is not
+permission to install or execute that route.
+
+The smallest combined immutable-generation delta is the three plain producer/collector
 files, the additive observation module, and its narrow `fabric_task.py` and
 `artifact_delivery.py` wiring; the explicit stage/inventory includes their exact
 closure. Existing controllers keep their original immutable generation paths and

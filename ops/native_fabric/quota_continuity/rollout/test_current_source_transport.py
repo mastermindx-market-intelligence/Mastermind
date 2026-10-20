@@ -6,6 +6,7 @@ of carrying any caller-shaped command.  The "ssh" binary is mocked here by a
 local interpreter running that same generated reader; there is no network, no
 real host and no live state.
 """
+import base64
 import io
 import json
 import os
@@ -26,14 +27,24 @@ for _path in (SOURCE, CANDIDATE):
         sys.path.insert(0, _path)
 
 import test_current_source_observation as base
-from test_current_source_observation import (Host, TestChain, inert_request_loader)
+from test_current_source_observation import (Host, TestChain, inert_request_loader,
+                                             build_repo, run_git)
 # One shared module instance: the owner boundary, the invocation type and the
 # composition entry points must all come from the same loaded module.
 cso = base.cso
-import artifact_delivery
+try:
+    import artifact_delivery
+except ImportError as exc:
+    artifact_delivery = None
+    _ARTIFACT_DELIVERY_IMPORT_ERROR = exc
 
 
 class CurrentSourceTransportTests(Host):
+    def setUp(self):
+        if artifact_delivery is None:
+            self.skipTest("incumbent artifact_delivery dependencies unavailable: %s"
+                          % _ARTIFACT_DELIVERY_IMPORT_ERROR)
+
     def test_transport_dispatches_exact_generated_reader(self):
         request = self.request(repo=self.worktree)
         owner = self.owner(repo=self.worktree)
@@ -158,6 +169,135 @@ class CurrentSourceTransportTests(Host):
             cso.NativeInvocationView.of(request, digest), os.getuid()))
         self.assertIsNone(owner.transport_alias(
             cso.NativeInvocationView.of(request, digest)))
+
+
+class CustodyTransportTests(Host):
+    """The additive worktree_pointer_graph custody variant over the real
+    incumbent strict-SSH transport (ssh mocked to the local interpreter
+    running the same generated reader) and the native CLI publication path.
+    The shipped remote program stays the exact fixed generated reader; the
+    request travels on stdin only."""
+
+    def setUp(self):
+        if artifact_delivery is None:
+            self.skipTest("incumbent artifact_delivery dependencies unavailable: %s"
+                          % _ARTIFACT_DELIVERY_IMPORT_ERROR)
+
+    def mocked_ssh(self, expected_alias, request):
+        real_popen = artifact_delivery.subprocess.Popen
+
+        def spawn(argv, **kwargs):
+            self.assertEqual(argv[0], "ssh")
+            self.assertEqual(argv[1:7],
+                             ["-o", "BatchMode=yes",
+                              "-o", "StrictHostKeyChecking=yes",
+                              "-o", "ConnectTimeout=8"])
+            self.assertEqual(argv[7], expected_alias)
+            command = argv[8]
+            prefix = "python3 -I -S -c "
+            self.assertTrue(command.startswith(prefix), command[:80])
+            tokens = shlex.split(command)
+            self.assertEqual(tokens[:4], ["python3", "-I", "-S", "-c"])
+            # The remote program is exactly the fixed generated reader, the
+            # same bytes a triple-mode request receives: the custody variant
+            # rides the reviewed seam, never a caller-shaped program.
+            self.assertEqual(tokens[4], cso.generated_reader_source())
+            self.assertNotIn(cso.canonical(request).decode("ascii"), command)
+            self.assertNotIn("&&", command)
+            self.assertIsNone(kwargs.get("shell"))
+            return real_popen([sys.executable, "-I", "-S", "-c", tokens[4]],
+                              **kwargs)
+
+        return spawn
+
+    def test_transport_executes_generated_reader_for_linked_custody(self):
+        request = self.custody_request(repo=self.worktree)
+        invocation = self.mint(request, self.custody_owner(request))
+        real_popen = artifact_delivery.subprocess.Popen
+        artifact_delivery.subprocess.Popen = self.mocked_ssh("fixture-host-alias",
+                                                             request)
+        try:
+            raw = artifact_delivery.transport("fixture-host-alias", request)
+            body = cso.strict_json(raw)
+            self.assertEqual(body["status"], "OBSERVED", body)
+            response = cso.observe_current_source(
+                request, invocation,
+                lambda req: artifact_delivery.transport("fixture-host-alias", req))
+        finally:
+            artifact_delivery.subprocess.Popen = real_popen
+        self.assertEqual(response["status"], "OBSERVED", response)
+        cso.validate_response(response)
+        self.assertEqual(response["git_dir"], self.wt_git_dir)
+        self.assertEqual(response["common_dir"], self.wt_common_dir)
+        proof = response["resolution"]
+        self.assertEqual(base64.b64decode(proof["git_link"]["bytes_b64"]).decode(),
+                         self.wt_gitfile)
+        self.assertEqual(
+            base64.b64decode(proof["gitdir_backlink"]["bytes_b64"]).decode().strip(),
+            self.worktree + "/.git")
+        self.assertEqual(
+            base64.b64decode(proof["commondir"]["bytes_b64"]).decode().strip(),
+            "../..")
+        self.assertEqual(response["receipt"]["request_sha256"],
+                         cso.validate_request(request))
+
+    def test_native_cli_publishes_linked_custody_and_refuses_escape(self):
+        request = self.custody_request(repo=self.worktree)
+        registry = {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
+                                "ssh_alias": "fixture-host-alias"}}
+        factory = base.make_owner_factory(registry)
+        # Discriminating refusal fixture first: a real linked worktree whose
+        # gitfile resolves outside the declared boundary.  Building it needs
+        # plain git, so it happens before the ssh mock is installed.
+        outside = build_repo(self.base, "out-repo")
+        bound = os.path.join(self.base, "bound")
+        os.makedirs(bound, exist_ok=True)
+        run_git(outside, "worktree", "add", "-q", os.path.join(bound, "wt"),
+                "-b", "wt-out")
+        escape = self.custody_request(repo=os.path.join(bound, "wt"),
+                                      boundary=bound)
+        real_popen = artifact_delivery.subprocess.Popen
+        artifact_delivery.subprocess.Popen = self.mocked_ssh("fixture-host-alias",
+                                                             request)
+        try:
+            with tempfile.TemporaryDirectory(prefix="custody-req-") as req_dir:
+                request_path = os.path.join(req_dir, "request.json")
+                with open(request_path, "wb") as handle:
+                    handle.write(cso.canonical(request))
+                with open(os.path.join(req_dir, "escape.json"), "wb") as handle:
+                    handle.write(cso.canonical(escape))
+                with tempfile.TemporaryDirectory(prefix="custody-dest-") as dest:
+                    with mock.patch.dict(os.environ,
+                                         CODEX_THREAD_ID=request["observer"]):
+                        summary = cso.native_current_source_receipt(
+                            request_path, dest, factory, reserve=TestChain,
+                            load_request=inert_request_loader)
+                    self.assertEqual(summary["state"], "PUBLISHED", summary)
+                    with open(summary["destination"], "rb") as handle:
+                        stored = json.loads(handle.read().decode())
+                cso.validate_response(stored)
+                self.assertEqual(stored["git_dir"], self.wt_git_dir)
+                self.assertIn("resolution", stored)
+                self.assertEqual(stored["receipt"]["receiver"], "receiver-1")
+
+                # Admission succeeds, the actual generated reader refuses, and
+                # nothing is published into the reserved destination.
+                with tempfile.TemporaryDirectory(prefix="custody-dest-") as dest:
+                    with mock.patch.dict(os.environ,
+                                         CODEX_THREAD_ID=escape["observer"]):
+                        refused = cso.native_current_source_receipt(
+                            os.path.join(req_dir, "escape.json"), dest, factory,
+                            reserve=TestChain,
+                            load_request=inert_request_loader)
+                    self.assertEqual(refused["state"], "REFUSED", refused)
+                    self.assertEqual(refused["reason"], "custody_resolution_invalid",
+                                     refused)
+                    self.assertEqual(refused["admission_state"], "ADMITTED", refused)
+                    # No partial bytes: the refused observation published
+                    # nothing into the reserved destination.
+                    self.assertEqual(os.listdir(dest), [])
+        finally:
+            artifact_delivery.subprocess.Popen = real_popen
 
 
 if __name__ == "__main__":
