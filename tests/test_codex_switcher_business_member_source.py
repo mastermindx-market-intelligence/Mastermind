@@ -33,7 +33,7 @@ def test_exact_digest_bound_source_patch_is_present():
 
 def test_patch_only_changes_bounded_switcher_source_and_synthetic_tests():
     patch = PATCH.read_text()
-    assert patch.count("diff --git a/") == 2
+    assert patch.count("diff --git a/") == len(PATHS)
     for path in PATHS:
         assert f"diff --git a/{path} b/{path}" in patch
     for target in ("src-tauri/src/auth.json", "src-tauri/src/auth/accounts.json",
@@ -45,6 +45,9 @@ def test_patch_only_changes_bounded_switcher_source_and_synthetic_tests():
     assert "same_business_workspace_different_member_refuses_token_rebinding" in patch
     assert "direct_refresh_cannot_overwrite_different_business_member_credentials" in patch
     assert "same_business_workspace_same_member_preserves_single_use_rotation" in patch
+    assert "completely_missing_plan_and_member_is_not_assumed_personal" in patch
+    assert "future_unknown_plan_and_missing_member_is_not_assumed_personal" in patch
+    assert "memberless_token_cannot_change_known_personal_into_unknown_plan" in patch
 
 
 def test_tampered_patch_bytes_are_never_authority(tmp_path):
