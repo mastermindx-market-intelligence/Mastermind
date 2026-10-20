@@ -213,3 +213,27 @@ def test_real_darwin_sandbox_isolation_no_codex_or_network():
     assert receipt["candidate_invoked"] is False
     assert receipt["provider_invoked"] is False
     assert receipt["installation_changed"] is False
+
+
+def test_isolated_probe_does_not_write_bytecode_when_sandbox_fails_open(tmp_path, monkeypatch):
+    # Exercise the real probe argv with only a disposable dummy module.
+    # Omitting Sandbox here proves harmless behavior even without its denial.
+    (tmp_path / "inert_probe_fixture.py").write_text("VALUE = 7\n", encoding="ascii")
+    monkeypatch.setattr(subject, "PROBE_PYTHON", Path(sys.executable))
+
+    def run_without_sandbox(_profile, scratch, argv):
+        completed = subprocess.run(
+            argv, cwd=scratch, env=subject._env(scratch),
+            stdin=subprocess.DEVNULL, capture_output=True, text=True,
+            close_fds=True, timeout=8, check=False,
+        )
+        return completed.returncode, completed.stdout
+
+    monkeypatch.setattr(subject, "_run", run_without_sandbox)
+    code = (
+        f"import sys;sys.path.insert(0,{str(tmp_path)!r});"
+        "import inert_probe_fixture;"
+        "print('DENIED' if sys.dont_write_bytecode else 'BYTECODE_ENABLED')"
+    )
+    assert subject._probe(tmp_path / "unused.sb", tmp_path, code)
+    assert not (tmp_path / "__pycache__").exists()

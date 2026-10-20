@@ -170,8 +170,9 @@ def _run(profile: Path, scratch: Path, argv: list[str]) -> tuple[int, str]:
 
 
 def _probe(profile: Path, scratch: Path, code: str) -> bool:
+    # -I ignores PYTHONDONTWRITEBYTECODE; suppress cache writes explicitly.
     rc, stdout = _run(
-        profile, scratch, [str(PROBE_PYTHON), "-I", "-S", "-c", code]
+        profile, scratch, [str(PROBE_PYTHON), "-I", "-B", "-S", "-c", code]
     )
     return rc == 0 and stdout.strip() == "DENIED"
 
