@@ -235,6 +235,7 @@ def test_patch_evidence_binds_exact_source_and_no_other_implementation_path(tmp_
     assert hashlib.sha256(candidate.read_bytes()).hexdigest() == pins["after_sha256"]
     assert hashlib.sha256(PATCH.read_bytes()).hexdigest() == pins["patch_sha256"]
     assert m.ROLE_SHA256 == pins["role_source_sha256"]
+    assert pins["guard_sha256"] == "6c3549eb0ff4616980ce34621548d76db7f784909716963927f1442e1a502e9e"
     changed = subprocess.run(["git", "apply", "--numstat", str(PATCH)], cwd=source,
                              check=True, text=True, capture_output=True).stdout.splitlines()
     assert len(changed) == 1
@@ -476,3 +477,61 @@ def test_scoped_provider_does_not_read_unrelated_profile(tmp_path, monkeypatch, 
     assert ready["state"] == "READY"
     assert m.verify_provider_policy(home, provider, guard_source=guard)["state"] == "READY"
     assert (peer / ("config.toml" if unselected == ".codex" else "settings.json")).read_text().startswith("invalid peer")
+
+
+@pytest.mark.parametrize("cap", [None, 0, 3, 4, 12, "2", True])
+def test_codex_enabled_nondefault_capacity_refuses_before_any_selected_provider_write(
+    tmp_path, cap
+):
+    """An existing enabled native session is not silently normalized to cap1."""
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    codex = home / ".codex"
+    codex.mkdir(parents=True)
+    rows = ['model = "keep-selected-model"', "", "[agents]", "enabled = true"]
+    if cap is not None:
+        if isinstance(cap, str):
+            value = json.dumps(cap)
+        elif type(cap) is bool:
+            value = "true"
+        else:
+            value = str(cap)
+        rows.append("max_concurrent_threads_per_session = " + value)
+    config = codex / "config.toml"
+    config.write_text("\n".join(rows) + "\n")
+    original = config.read_bytes()
+    with pytest.raises(m.OrchestratorPolicyError, match="Codex native capacity differs"):
+        m.apply_provider_policy(home, "codex", guard_source=guard)
+    assert config.read_bytes() == original
+    assert not (codex / "AGENTS.md").exists()
+    assert not (codex / "hooks").exists()
+    assert not (home / ".agents").exists()
+    assert not (home / ".claude").exists()
+
+
+def test_default_all_scope_refuses_existing_enabled_cap4_pre_effect(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    codex = home / ".codex"
+    codex.mkdir(parents=True)
+    config = codex / "config.toml"
+    original = b'[agents]\nenabled = true\nmax_concurrent_threads_per_session = 4\n'
+    config.write_bytes(original)
+    with pytest.raises(m.OrchestratorPolicyError, match="Codex native capacity differs"):
+        m.apply_policy(home, guard_source=guard)
+    assert config.read_bytes() == original
+    assert not (home / ".claude").exists()
+    assert not (home / ".agents").exists()
+
+
+def test_incumbent_guard_digest_is_pinned_independently_of_role_fixture(tmp_path):
+    """The executable guard is part of the immutable reviewed release closure.
+
+    This is a source-identity test, not an installed hook trust assertion.
+    The exact #1228 guard SHA was verified directly from its Git object at
+    authoring time; canonical deployment checks the source checkout identity.
+    Hermetic CI must not require unrelated Git objects or network lookups.
+    """
+    pins = json.loads((ROOT / "patches/operator-first/source-pins.json").read_text())
+    assert pins["incumbent_head"] == "a2b4964e789b5b75ac9236f8db6f839a41813d52"
+    assert pins["guard_sha256"] == "6c3549eb0ff4616980ce34621548d76db7f784909716963927f1442e1a502e9e"
