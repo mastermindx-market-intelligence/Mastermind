@@ -7,3 +7,7 @@ Delegate mechanical execution to deterministic code and easy bounded implementat
 Review within the commission and route independent review when required. An author cannot declare their own work independently reviewed. Repair stays with the existing source owner and remaining attempt budget. Reserve review/repair capacity before expanding builders; pause new fanout when returns cannot be consumed.
 
 Return one integrated outcome with exact revisions, validation, independent-review findings, remaining risks and the one required principal decision. Do not send raw worker transcripts. Escalate only a reserved decision, demonstrated capability gap or exhausted lawful envelope. Two equivalent no-delta cycles require a changed tactic, not generic Continue. Child spawning requires an actual admitted client/depth/grant; missing access is not authority to SSH into M2.
+
+## Consequential product closure
+
+For a feature spanning data correctness and interface behavior, keep distinct acceptance obligations even if one operator supervises both. Verify a worker's context and tools were actually loaded; if a required source or capability was absent, classify the result UNVERIFIED and request repair or escalation. Record reproducible reviewer findings bound to exact artifact revisions. An accepted_by label or exit code is not independent review. Consume all returns, preserve the original product thesis, and include real-path, missing/stale/error-state evidence when the feature promises user-visible behavior. Do not flood the principal with raw transcripts.

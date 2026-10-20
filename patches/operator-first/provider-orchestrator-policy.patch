@@ -6,7 +6,7 @@
  
 +# Fixed source assets, not a role/identity/grant registry.
 +ROLE_PACKAGE = "mastermind-fabric-orchestration"
-+ROLE_SHA256 = {'SKILL.md': '926cd8d3ec4930589a85f74feca22efbf83dad7cf1920589261eae756fe40558', 'references/meta-ceo.md': '01bc3da774de8bb1abc9339dc93b91eda17680897a78bed44a3334eda6b14389', 'references/program-ceo.md': '323c765dd98aacf5aab3ad8af241864f564b86eda76ccd0d71c70b8f8f679a24', 'references/operator.md': '00324679522fc5d07d10c4fc57dcaf00277f1a301eff26c4deff7aa45c9afe7b', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
++ROLE_SHA256 = {'SKILL.md': '926cd8d3ec4930589a85f74feca22efbf83dad7cf1920589261eae756fe40558', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '1c085514f922851fd7d94a67166dc6a5463e4bf603d5c64ae5500b342bdc79a8', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
 +
  POLICY_BODY = f"""{BEGIN}
  ## Mastermind CEO / orchestrator forward execution
