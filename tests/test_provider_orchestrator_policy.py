@@ -31,7 +31,7 @@ def _seed_home(home: Path) -> None:
 [agents]
 max_concurrent_threads_per_session = 4
 default_subagent_model = "gpt-5.6-sol"
-enabled = true
+enabled = false
 
 [features]
 hooks = true
@@ -189,12 +189,12 @@ def test_apply_is_idempotent_and_backups_keep_original_content(tmp_path: Path) -
 
 
 def test_managed_policy_retains_efficiency_and_hierarchy_laws() -> None:
-    text = policy.POLICY_BODY
+    text = policy._managed_text("")
     required = (
         "accepted capability delta per root budget",
-        "Sol is the default day-to-day project executive",
-        "Do not force a ceremonial hierarchy",
-        "compact frozen mission/frontier capsule",
+        "operator owns",
+        "Omit a layer that adds only relay overhead",
+        "compact capsules",
         "FRONTIER_WITNESS",
         "Capacity is a ceiling, not a target",
         "NO_DELTA_LOOP",
@@ -296,7 +296,7 @@ Sol operating executive -> Fabric workers.
         assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
         assert "Finalization ceremony is pre-yield only." in text
         assert "Capacity is a ceiling, not a target." in text
-        assert "Sol is the default day-to-day project executive" in text
+        assert "operator owns" in text
         assert text.count(BEGIN) == text.count(END) == 1
 
 
@@ -379,7 +379,7 @@ old context law
     assert "A CEO cycle is event/phase-scoped, not tool/turn-scoped." in text
     assert "Finalization ceremony is pre-yield only." in text
     assert "Capacity is a ceiling, not a target." in text
-    assert "Sol is the default day-to-day project executive" in text
+    assert "operator owns" in text
     assert "# Existing Codex policy" in text
 
 
@@ -1132,3 +1132,20 @@ def test_verify_cannot_report_ready_after_native_isolation_is_downgraded(
     verified = verify_policy(home)
     assert verified["state"] == "DRIFT"
     assert "codex_config.native_message_isolation" in verified["issues"]
+
+
+def test_existing_enabled_cap4_is_never_silently_downgraded(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    _seed_home(home)
+    config = home / ".codex" / "config.toml"
+    before = config.read_text()
+    assert "enabled = false" in before
+    config.write_text(before.replace("enabled = false", "enabled = true"))
+    unacceptable = config.read_bytes()
+    with pytest.raises(OrchestratorPolicyError, match="Codex native capacity differs"):
+        apply_policy(home)
+    assert config.read_bytes() == unacceptable
+    assert not (home / ".codex" / "hooks").exists()
+    assert not (home / ".agents").exists()
+    assert not (home / ".claude" / "hooks").exists()
+    assert not (home / ".claude" / "skills").exists()

@@ -57,6 +57,10 @@ LEGACY_BLOCKS = (
 )
 BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 
+# Fixed source assets, not a role/identity/grant registry.
+ROLE_PACKAGE = "mastermind-fabric-orchestration"
+ROLE_SHA256 = {'SKILL.md': '2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
+
 POLICY_BODY = f"""{BEGIN}
 ## Mastermind CEO / orchestrator forward execution
 
@@ -66,31 +70,7 @@ agent count, tokens, elapsed time, tool calls, PR count, or administrative motio
 
 ### Operating shape
 
-- Sol is the default day-to-day project executive for decomposition, dispatch, ordinary repair,
-  integration, delivery, and return consumption inside the accepted charter.
-- Astra is optional strategic/meta principal capacity for architecture, materially conflicting
-  evidence, novel recovery, or strategic acceptance. Direct Astra -> routine worker fan-out is
-  exceptional for major programs rather than the default shape.
-- A qualified Fabric domain coordinator is optional only when it owns a complete bounded subsystem
-  outcome and removes real integration load. It may not exist merely to relay summaries.
-- Do not force a ceremonial hierarchy. If one principal plus bounded Fabric leaves is sufficient,
-  omit the extra COO/coordinator. Insert Sol below Astra only when Sol owns real decomposition,
-  integration, return consumption, or multiple workstreams; never use Sol as a message relay.
-- When Astra hands sustained delivery to Sol, transmit a compact frozen mission/frontier capsule and
-  exact artifact refs rather than cloning the parent transcript. Astra returns to strategic exceptions
-  and acceptance instead of shadow-executing the same worker mechanics.
-- Classify every delegated child under the current protected task-complexity/routing law. Prefer
-  deterministic execution for mechanical work, then the least-scarce admitted worker for bounded
-  labor. Frontier capacity requires a concrete FRONTIER_WITNESS; program prestige, child/reviewer
-  status, free slots, or unused premium quota are not witnesses.
-- Consequential builder output receives independent review when current law requires it. Review is
-  not permission for the reviewer to self-start repair or become a second source writer.
-- Routine independently executable labor routes through the existing Executive/Subagent Fabric.
-  Native provider children are not the routine worker pool. A native-child exception requires a
-  concrete principal-judgment or unique-native-access reason under the current provider rules.
-- Every descendant preserves the original root identity, effective grant, source/effect fences,
-  admitted depth, provider/host limits, and root budget. Never mint a new root/session to reset
-  accounting, and never treat free slots as a utilization target.
+__OPERATOR_FIRST_CORE__
 
 ### Forward-execution and burn guards
 
@@ -340,7 +320,8 @@ def _managed_text(original: str) -> str:
         raise OrchestratorPolicyError(
             "managed orchestrator policy v2 markers are malformed/duplicated"
         )
-    block = POLICY_BODY.rstrip() + "\n"
+    core = _canonical_role_files()["SKILL.md"].decode("utf-8").split("---", 2)[2].strip()
+    block = POLICY_BODY.replace("__OPERATOR_FIRST_CORE__", core).rstrip() + "\n"
     if begins == 1:
         start = text.index(BEGIN)
         finish = text.index(END, start) + len(END)
@@ -492,6 +473,16 @@ def _render_codex_config(raw: bytes) -> bytes:
     if len(starts) > 1:
         raise OrchestratorPolicyError("Codex config contains duplicate [agents] tables")
     native_reset = _native_codex_isolation(parsed)
+    if (
+        native_reset is None
+        and bool(starts)
+        and isinstance(agents, dict)
+        and agents.get("enabled") is True
+    ):
+        raise OrchestratorPolicyError(
+            "Codex native capacity differs from managed policy; "
+            "refusing to change existing provider capacity during quality rollout"
+        )
     if native_reset is not None:
         if not starts or native_reset is False:
             raise OrchestratorPolicyError(
@@ -570,7 +561,7 @@ def _render_codex_hooks(raw: bytes, guard: Path) -> bytes:
 
 def _paths(home: Path) -> dict[str, Path]:
     home = home.expanduser().resolve()
-    return {
+    paths = {
         "codex_doc": home / ".codex" / "AGENTS.md",
         "claude_doc": home / ".claude" / "CLAUDE.md",
         "codex_hooks": home / ".codex" / "hooks.json",
@@ -580,16 +571,66 @@ def _paths(home: Path) -> dict[str, Path]:
         "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
     }
 
+    for provider, directory in (("codex", ".agents"), ("claude", ".claude")):
+        for index, relative in enumerate(ROLE_SHA256):
+            paths[f"{provider}_role_{index}"] = home / directory / "skills" / ROLE_PACKAGE / relative
+    return paths
+
 
 def _canonical_guard(source: Path | None = None) -> bytes:
     path = source or Path(__file__).with_name("provider_orchestrator_guard.py")
     return _regular_bytes(path)
 
 
+def _canonical_role_files() -> dict[str, bytes]:
+    """Read a fixed reviewed instruction closure, never discover or select roles.
+
+    Presence/digest is installation evidence only. The existing launch/capability
+    owner must separately bind and attest one actual role for each Attempt.
+    """
+    source_root = Path(__file__).resolve().parents[2]
+    root = source_root / "skills" / ROLE_PACKAGE
+    rows: dict[str, bytes] = {}
+    for relative, expected in ROLE_SHA256.items():
+        path = root / relative
+        _preflight_destination(path, source_root)
+        payload = _regular_bytes(path)
+        if len(payload) > 8192 or _sha256(payload) != expected:
+            raise OrchestratorPolicyError("orchestration role source digest mismatch")
+        rows[relative] = payload
+    return rows
+
+
+def _refuse_existing_claude_native_limit_reset(raw: bytes) -> None:
+    """Do not silently downshift incumbent Claude native capacity.
+
+    Quality instruction installation does not authorize a capacity change.
+    Existing non-default caps require a separately accepted release.
+    """
+    obj = _json_object(raw, "Claude settings")
+    env = obj.get("env", {})
+    if not isinstance(env, dict):
+        raise OrchestratorPolicyError("Claude env must be an object")
+    expected = {
+        "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "2",
+        "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1",
+    }
+    if any(k in env and env[k] != v for k, v in expected.items()):
+        raise OrchestratorPolicyError(
+            "Claude native limit differs from managed policy; "
+            "refusing to change existing provider capacity during quality rollout"
+        )
+
+
 def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
     resolved_home = Path(home).expanduser().resolve()
     paths = _paths(resolved_home)
     guard = _canonical_guard(guard_source)
+    roles = _canonical_role_files()
+    _preflight_destination(paths["claude_settings"], resolved_home)
+    _refuse_existing_claude_native_limit_reset(
+        _regular_bytes(paths["claude_settings"], missing=b"{}\n")
+    )
 
     # Reject known unsafe path shapes before any managed file can change. Unexpected
     # I/O failure can still interrupt a multi-file apply and is handled separately.
@@ -623,6 +664,14 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
         ("codex_hooks", rendered["codex_hooks"]),
         ("codex_config", rendered["codex_config"]),
     ]
+    # Supporting references stay discoverable/on-demand. Only the shared core is
+    # embedded into the managed parent block; no role body is concatenated there.
+    role_operations = [
+        (f"{provider}_role_{index}", roles[relative])
+        for provider in ("codex", "claude")
+        for index, relative in enumerate(ROLE_SHA256)
+    ]
+    operations = operations[:2] + role_operations + operations[2:]
     modified: list[str] = []
     try:
         for key, payload in operations:
@@ -704,12 +753,28 @@ def _managed_hook_reference_count(raw: bytes) -> int:
     return count
 
 
-def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
+def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str = "all") -> dict[str, object]:
+    if provider not in ("all", "codex", "claude"):
+        raise OrchestratorPolicyError("provider must be all, codex or claude")
+    selected = ("codex", "claude") if provider == "all" else (provider,)
     paths = _paths(home)
     canonical = _canonical_guard(guard_source)
     issues: list[str] = []
+    roles = _canonical_role_files()
+    for enrolled_provider in selected:
+        for index, relative in enumerate(ROLE_SHA256):
+            key = f"{enrolled_provider}_role_{index}"
+            try:
+                _preflight_destination(paths[key], Path(home).expanduser().resolve())
+                installed = _regular_bytes(paths[key])
+            except OrchestratorPolicyError:
+                issues.append(f"{key}.missing_or_unsafe")
+                continue
+            if installed != roles[relative]:
+                issues.append(f"{key}.digest")
 
-    for name in ("codex_guard", "claude_guard"):
+
+    for name in (f"{p}_guard" for p in selected):
         try:
             installed = _regular_bytes(paths[name])
         except OrchestratorPolicyError:
@@ -718,7 +783,7 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
         if installed != canonical:
             issues.append(f"{name}.digest")
 
-    for name in ("codex_doc", "claude_doc"):
+    for name in (f"{p}_doc" for p in selected):
         try:
             text = _regular_bytes(paths[name]).decode("utf-8")
         except (OrchestratorPolicyError, UnicodeError):
@@ -731,66 +796,155 @@ def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, 
         ):
             issues.append(f"{name}.managed_block")
 
-    try:
-        claude_raw = _regular_bytes(paths["claude_settings"])
-        claude_value = _json_object(claude_raw, "Claude settings")
-        claude_env = claude_value.get("env")
-        if not isinstance(claude_env, dict):
-            issues.append("claude_settings.env")
-        else:
-            if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
-                issues.append("claude_settings.max_concurrent_subagents")
-            if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
-                issues.append("claude_settings.max_subagent_spawn_depth")
-        if (
-            _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
-            or _managed_hook_reference_count(claude_raw) != 1
-        ):
-            issues.append("claude_settings.pretool")
-    except OrchestratorPolicyError:
-        issues.append("claude_settings.missing")
-
-    try:
-        codex_raw = _regular_bytes(paths["codex_hooks"])
-        if (
-            _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
-            or _managed_hook_reference_count(codex_raw) != 1
-        ):
-            issues.append("codex_hooks.pretool")
-    except OrchestratorPolicyError:
-        issues.append("codex_hooks.missing")
-
-    try:
-        codex_config_raw = _regular_bytes(paths["codex_config"])
+    if "claude" in selected:
         try:
-            codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
-        except (UnicodeError, tomllib.TOMLDecodeError) as exc:
-            raise OrchestratorPolicyError("Codex config is malformed") from exc
-        codex_agents = codex_config.get("agents")
-        if not isinstance(codex_agents, dict):
-            issues.append("codex_config.agents")
-        else:
-            native_reset = _native_codex_isolation(codex_config)
-            if native_reset is False:
-                issues.append("codex_config.native_message_isolation")
-            if native_reset is not True:
-                if codex_agents.get("enabled") is not False:
-                    issues.append("codex_config.agents_enabled")
-                if codex_agents.get("max_concurrent_threads_per_session") != 1:
-                    issues.append("codex_config.max_concurrent_threads")
-    except OrchestratorPolicyError:
-        issues.append("codex_config.missing_or_invalid")
+            claude_raw = _regular_bytes(paths["claude_settings"])
+            claude_value = _json_object(claude_raw, "Claude settings")
+            claude_env = claude_value.get("env")
+            if not isinstance(claude_env, dict):
+                issues.append("claude_settings.env")
+            else:
+                if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
+                    issues.append("claude_settings.max_concurrent_subagents")
+                if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
+                    issues.append("claude_settings.max_subagent_spawn_depth")
+            if (
+                _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
+                or _managed_hook_reference_count(claude_raw) != 1
+            ):
+                issues.append("claude_settings.pretool")
+        except OrchestratorPolicyError:
+            issues.append("claude_settings.missing")
+
+    if "codex" in selected:
+        try:
+            codex_raw = _regular_bytes(paths["codex_hooks"])
+            if (
+                _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
+                or _managed_hook_reference_count(codex_raw) != 1
+            ):
+                issues.append("codex_hooks.pretool")
+        except OrchestratorPolicyError:
+            issues.append("codex_hooks.missing")
+
+        try:
+            codex_config_raw = _regular_bytes(paths["codex_config"])
+            try:
+                codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
+            except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+                raise OrchestratorPolicyError("Codex config is malformed") from exc
+            codex_agents = codex_config.get("agents")
+            if not isinstance(codex_agents, dict):
+                issues.append("codex_config.agents")
+            else:
+                native_reset = _native_codex_isolation(codex_config)
+                if native_reset is False:
+                    issues.append("codex_config.native_message_isolation")
+                if native_reset is not True:
+                    if codex_agents.get("enabled") is not False:
+                        issues.append("codex_config.agents_enabled")
+                    if codex_agents.get("max_concurrent_threads_per_session") != 1:
+                        issues.append("codex_config.max_concurrent_threads")
+        except OrchestratorPolicyError:
+            issues.append("codex_config.missing_or_invalid")
 
     return {
         "state": "READY" if not issues else "DRIFT",
         "home": str(Path(home).expanduser().resolve()),
         "issues": issues,
         "guard_sha256": _sha256(canonical),
-        "managed_files": {key: str(value) for key, value in paths.items()},
+        "role_source_sha256": dict(ROLE_SHA256),
+        "session_loading_proven": False,
+        "runtime_admission_proven": False,
+        "managed_files": {
+            key: str(value)
+            for key, value in paths.items()
+            if any(key.startswith(p + "_") for p in selected)
+        },
+        **({"provider_scope": provider} if provider != "all" else {}),
         "credentials_read": False,
         "permissions_changed": False,
         "lifecycle_created": False,
     }
+
+
+def verify_provider_policy(
+    home: Path, provider: str, *, guard_source: Path | None = None
+) -> dict[str, object]:
+    """Use the canonical verifier with one explicit provider scope."""
+    return verify_policy(home, guard_source=guard_source, provider=provider)
+
+
+def apply_provider_policy(
+    home: Path, provider: str, *, guard_source: Path | None = None
+) -> dict[str, object]:
+    """Install through the one canonical source owner into one provider scope.
+
+    This is an optional subset of apply_policy, not a separate override plane.
+    It never reads/changes native capacity or user files of the other provider.
+    """
+    if provider not in ("codex", "claude"):
+        raise OrchestratorPolicyError("provider must be codex or claude")
+    resolved_home = Path(home).expanduser().resolve()
+    paths = _paths(resolved_home)
+    selected = {k: path for k, path in paths.items() if k.startswith(provider + "_")}
+    guard = _canonical_guard(guard_source)
+    roles = _canonical_role_files()
+
+    # All destination and exact-config preconditions before a single write.
+    for path in selected.values():
+        _preflight_destination(path, resolved_home)
+    if provider == "claude":
+        original_settings = _regular_bytes(paths["claude_settings"], missing=b"{}\n")
+        _refuse_existing_claude_native_limit_reset(original_settings)
+        original_doc = _regular_bytes(paths["claude_doc"], missing=b"").decode("utf-8")
+        operations = [
+            ("claude_guard", guard),
+            ("claude_doc", _managed_text(original_doc).encode("utf-8")),
+            (
+                "claude_settings",
+                _render_claude_settings(original_settings, paths["claude_guard"]),
+            ),
+        ]
+    else:
+        original_doc = _regular_bytes(paths["codex_doc"], missing=b"").decode("utf-8")
+        original_hooks = _regular_bytes(paths["codex_hooks"], missing=b"{}\n")
+        original_config = _regular_bytes(paths["codex_config"], missing=b"")
+        operations = [
+            ("codex_guard", guard),
+            ("codex_doc", _managed_text(original_doc).encode("utf-8")),
+            ("codex_hooks", _render_codex_hooks(original_hooks, paths["codex_guard"])),
+            ("codex_config", _render_codex_config(original_config)),
+        ]
+    role_operations = [
+        (f"{provider}_role_{index}", roles[relative])
+        for index, relative in enumerate(ROLE_SHA256)
+    ]
+    operations = operations[:1] + role_operations + operations[1:]
+    modified: list[str] = []
+    try:
+        for key, payload in operations:
+            if _atomic_write(paths[key], payload):
+                modified.append(str(paths[key]))
+    except OrchestratorPolicyError as exc:
+        if modified:
+            try:
+                observed = verify_provider_policy(
+                    resolved_home, provider, guard_source=guard_source
+                )
+                verify_issues = tuple(str(item) for item in observed.get("issues", ()))
+            except Exception:
+                verify_issues = ("verify_after_partial_apply_failed",)
+            raise OrchestratorPolicyApplyIncomplete(
+                "provider-scoped policy apply stopped after partial write; "
+                "do not switch carrier or blindly replay; verify this same home",
+                modified_files=modified,
+                verify_issues=verify_issues,
+            ) from exc
+        raise
+    return verify_provider_policy(
+        resolved_home, provider, guard_source=guard_source
+    )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -798,17 +952,25 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("mode", choices=("verify", "apply"))
     parser.add_argument("--home", type=Path, default=Path.home())
     parser.add_argument("--guard-source", type=Path)
+    parser.add_argument("--provider", choices=("all", "codex", "claude"), default="all")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        result = (
-            apply_policy(args.home, guard_source=args.guard_source)
-            if args.mode == "apply"
-            else verify_policy(args.home, guard_source=args.guard_source)
-        )
+        if args.provider == "all":
+            result = (
+                apply_policy(args.home, guard_source=args.guard_source)
+                if args.mode == "apply"
+                else verify_policy(args.home, guard_source=args.guard_source)
+            )
+        else:
+            result = (
+                apply_provider_policy(args.home, args.provider, guard_source=args.guard_source)
+                if args.mode == "apply"
+                else verify_provider_policy(args.home, args.provider, guard_source=args.guard_source)
+            )
     except OrchestratorPolicyApplyIncomplete as exc:
         print(
             json.dumps(
