@@ -926,7 +926,11 @@ where
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
         match path {
-            "/os/executive/context" | "/os/executive/status" => {}
+            "/os/executive/context"
+            | "/os/executive/status"
+            | "/os/executive/session/context"
+            | "/os/executive/session/reply"
+            | "/os/executive/session/references" => {}
             "/os/executive/submit" => {
                 if !token.executive_send {
                     return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
@@ -1464,7 +1468,13 @@ mod tests {
 
     #[test]
     fn native_executive_read_only_observation_routes_dispatch() {
-        for path in ["/os/executive/context", "/os/executive/status"] {
+        for path in [
+            "/os/executive/context",
+            "/os/executive/status",
+            "/os/executive/session/context",
+            "/os/executive/session/reply",
+            "/os/executive/session/references",
+        ] {
             let state = native_executive_state("mastermind.executive.read");
             let (result, calls) = native_post_spy(&state, path);
             assert_eq!(calls, 1);
@@ -1518,10 +1528,12 @@ mod tests {
     #[test]
     fn native_executive_unknown_route_never_dispatches() {
         for scope in [EXECUTIVE_SCOPE, "mastermind.executive.read"] {
-            let state = native_executive_state(scope);
-            let (result, calls) = native_post_spy(&state, "/os/executive/not-enrolled");
-            assert_eq!(calls, 0);
-            assert_eq!(result.unwrap_err(), "REQUEST_INVALID");
+            for path in ["/os/executive/not-enrolled", "/os/executive/session/send"] {
+                let state = native_executive_state(scope);
+                let (result, calls) = native_post_spy(&state, path);
+                assert_eq!(calls, 0);
+                assert_eq!(result.unwrap_err(), "REQUEST_INVALID");
+            }
         }
     }
 
