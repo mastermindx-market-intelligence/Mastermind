@@ -267,6 +267,11 @@ class RuntimeSessionReturn:
         """
         command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
         indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        return self._native_commit_admission_from_events(event, events, indexed)
+
+    def _native_commit_admission_from_events(self, event, events, indexed):
+        """Validate detached facts with the incumbent native admission law."""
+        command = _NATIVE_COMMIT_PREFIX + event.aggregate_id
         native = [item for item in events if item.event_type == _NATIVE_COMMIT_EVENT]
         if not native and indexed is None:
             return None
@@ -303,6 +308,11 @@ class RuntimeSessionReturn:
             others = [item for item in others if item.event_id != native.event_id]
         command = _COMMIT_PREFIX + event.aggregate_id
         indexed = self.runtime.store.get_event_by_command_id(command, connection=connection)
+        return self._commit_started_from_events(event, message, others, native, indexed)
+
+    def _commit_started_from_events(self, event, message, others, native, indexed):
+        """Match already acquired/pruned aggregate facts to the exact message."""
+        command = _COMMIT_PREFIX + event.aggregate_id
         if not others and indexed is None and native is None:
             return False
         if (len(others) != 1 or indexed is None or others[0].to_dict() != indexed.to_dict()
@@ -652,7 +662,11 @@ class RuntimeSessionReturn:
             if not isinstance(operation_key, str) or _TOKEN.fullmatch(operation_key) is None:
                 raise ValueError("invalid original operation")
             read_ref = "session-reply-" + _request_key(operation_key)
-            _, value = self._stored_request(read_ref)
+            with self.runtime.observe_bounded_read() as observation:
+                _, value = observation.read_session_original_request_bounded(read_ref=read_ref)
+            # Provenance-only recovery does not require COMMIT or a live target.
+            # Closing/finalization failures withhold the reference; UNKNOWN is valid.
+            _ = observation.receipt
             if not _read_matches_original(value["principal"], identity, principal,
                     trusted_pair=self._trusted_read_pair) or value["operation_key"] != operation_key:
                 raise ValueError("foreign original operation")
@@ -668,13 +682,23 @@ class RuntimeSessionReturn:
         proves COMMIT admission only; the exact canonical reply must also be
         read and matched before any result can be returned.
         """
-        event, value = self._stored_request(read_ref)
-        events = self.runtime.store.bounded_aggregate_events(
-            event.aggregate_type, event.aggregate_id)
-        admission = self._native_commit_admission(event, events)
+        if not isinstance(read_ref, str) or _READ.fullmatch(read_ref) is None:
+            raise ValueError("invalid read reference")
+        with self.runtime.observe_bounded_read() as observation:
+            event, value, events, indexed, native_indexed = (
+                observation.read_session_reply_evidence_bounded(read_ref=read_ref))
+        # No acquired fact escapes a failed physical close/finalization. This
+        # immutable selection requires a receipt, never a SAME state assertion.
+        _ = observation.receipt
+        admission = self._native_commit_admission_from_events(event, events, native_indexed)
+        others = tuple(item for item in events if item.event_id != event.event_id
+                       and (admission is None or item.event_id != admission.event_id))
         if admission is None:
+            # Preserve the live-writer fallback. Its current target, harness,
+            # root Dialogue source and Wake reads are a separate, unqualified
+            # acquisition boundary; this immutable selection does not bound it.
             event, value, _ = self._request(read_ref)
-        return event, value, admission
+        return event, value, admission, others, indexed
 
     async def require_committed_native_reply(self, *, read_ref):
         """Internal owner read of the exact reply; grants no parent identity."""
@@ -716,7 +740,7 @@ class RuntimeSessionReturn:
     async def resolve_read(self, *, principal, read_ref):
         try:
             identity = _principal(principal)
-            event, value, admission = self._read_request(read_ref)
+            event, value, admission, others, indexed = self._read_request(read_ref)
             if not _read_matches_original(value["principal"], identity, principal,
                     trusted_pair=self._trusted_read_pair):
                 raise ValueError("foreign principal")
@@ -726,7 +750,8 @@ class RuntimeSessionReturn:
             if not isinstance(response, dict) or response.get("ok") is not True:
                 raise ValueError("carrier unavailable")
             messages, request = self._continuation_messages(value, response["result"])
-            if admission is not None and not self._commit_started(event, request):
+            if admission is not None and not self._commit_started_from_events(
+                    event, request, others, admission, indexed):
                 raise ValueError("original continuation COMMIT is unavailable")
             expected_reply_key = "asd-native-reply-" + hashlib.sha256(
                 ("mastermind.session_bridge.native_reply.v1\n" + value["operation_key"]).encode()
@@ -747,14 +772,15 @@ class RuntimeSessionReturn:
                     or any(request[k] != value["context"][k] for k in (
                         "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError("reply context changed")
-            after, after_value, after_admission = self._read_request(read_ref)
+            after, after_value, after_admission, after_others, after_indexed = self._read_request(read_ref)
             if (after.to_dict() != event.to_dict()
                     or (None if admission is None else admission.to_dict())
                     != (None if after_admission is None else after_admission.to_dict())
                     or not _read_matches_original(after_value["principal"], _principal(principal),
                         principal, trusted_pair=self._trusted_read_pair)):
                 raise ValueError("authorization changed")
-            if after_admission is not None and not self._commit_started(after, request):
+            if after_admission is not None and not self._commit_started_from_events(
+                    after, request, after_others, after_admission, after_indexed):
                 raise ValueError("original continuation COMMIT changed during read")
             return NativeReplyReadBinding(
                 authorized_principal=principal, read_ref=read_ref,

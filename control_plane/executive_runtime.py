@@ -24649,6 +24649,137 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    @staticmethod
+    def _load_session_original_request_bounded(
+        loader: _BoundedRoleResultLoader, read_ref: str,
+    ) -> tuple[Event, dict[str, Any]]:
+        """Load one original request and root through the selection's loader."""
+        from control_plane.native_continuation import (
+            _ACTOR, _EVENT, _PREFIX, _READ, _SCHEMA, _continue_key,
+            _digest, _request_key, _validate_payload,
+        )
+
+        match = _READ.fullmatch(read_ref) if isinstance(read_ref, str) else None
+        if match is None:
+            raise RuntimeReadUnavailable("invalid original read reference")
+        row = loader.execute("SELECT * FROM events WHERE command_id=?",
+                             (_PREFIX + match[1],)).fetchone()
+        event = None if row is None else _event_from_row(row)
+        if (event is None or event.event_type != _EVENT or event.actor != _ACTOR
+                or event.aggregate_type != "session_bridge_continue"
+                or event.aggregate_id != match[1]):
+            raise RuntimeReadUnavailable("original request unavailable")
+        value = event.payload
+        _validate_payload(value)
+        if (value.get("schema") != _SCHEMA or value.get("read_ref") != read_ref
+                or _request_key(value["operation_key"]) != match[1]
+                or value["request_message_key"] != _continue_key(value["operation_key"])
+                or (event.job_id, event.attempt_id, event.worker_id) != (
+                    value["job_id"], value["attempt_id"], value["worker_id"])):
+            raise RuntimeReadUnavailable("original request binding changed")
+        metadata = loader.execute(
+            "SELECT event_id,length(CAST(payload_json AS BLOB)) AS payload_bytes "
+            "FROM events WHERE job_id=? AND event_type='JOB_CREATED' "
+            "ORDER BY event_id LIMIT 2", (value["root_job_id"],),
+        ).fetchall()
+        if len(metadata) != 1 or metadata[0]["payload_bytes"] > 65536:
+            raise RuntimeReadUnavailable("original root cardinality or size changed")
+        root_row = loader.execute("SELECT * FROM events WHERE event_id=?",
+                                  (metadata[0]["event_id"],)).fetchone()
+        if root_row is None:
+            raise RuntimeReadUnavailable("original root disappeared")
+        root = _event_from_row(root_row)
+        if (root.event_id != value["root_event_id"]
+                or _digest(root.to_dict()) != value["root_event_sha256"]):
+            raise RuntimeReadUnavailable("original root changed")
+        return event, value
+
+    def read_session_original_request_bounded(
+        self, *, read_ref: str,
+    ) -> tuple[Event, dict[str, Any]]:
+        """Select immutable reference provenance without COMMIT or live state.
+
+        One loader and one VM activation bound the complete request/root join.
+        The READ owner must close this observation and obtain its finalized
+        receipt before returning the reference; UNKNOWN remains admissible.
+        """
+        self._select()
+        try:
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                return self._load_session_original_request_bounded(loader, read_ref)
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("original request VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_session_reply_evidence_bounded(
+        self, *, read_ref: str,
+    ) -> tuple[Event, dict[str, Any], tuple[Event, ...], Event | None, Event | None]:
+        """Select complete immutable reply evidence on one bounded snapshot.
+
+        This is material acquisition, not COMMIT admission or reply proof. The
+        existing READ owner validates the separate global command Events against
+        the complete aggregate and the canonical Dialogue message. Return order
+        is request, payload, aggregate, Continue COMMIT, native COMMIT. No live
+        writer, target, Wake or Dialogue source is acquired here. The caller must
+        close the observation and obtain its finalized receipt before use.
+        """
+        self._select()
+        try:
+            loader = _BoundedRoleResultLoader(self._connection)
+            self._vm_progress.activate()
+            try:
+                event, value = self._load_session_original_request_bounded(loader, read_ref)
+                # One bounded metadata row retains the complete ordered ID set
+                # without consuming 256 metadata rows and 256 full Event rows.
+                # Every selected metadata/full column shares this same loader.
+                metadata = loader.execute(
+                    "SELECT COUNT(*) AS event_count,"
+                    "COALESCE(SUM(nbytes),0) AS payload_bytes,"
+                    "json_group_array(event_id) AS event_ids_json FROM ("
+                    "SELECT event_id,length(CAST(payload_json AS BLOB)) AS nbytes "
+                    "FROM events WHERE aggregate_type=? AND aggregate_id=? "
+                    "ORDER BY sequence LIMIT 257)",
+                    (event.aggregate_type, event.aggregate_id),
+                ).fetchone()
+                if metadata["event_count"] > 256 or metadata["payload_bytes"] > 1048576:
+                    raise RuntimeReadUnavailable("original aggregate exceeds reader budget")
+                event_ids = json.loads(metadata["event_ids_json"])
+                rows = loader.execute(
+                    "SELECT * FROM events WHERE aggregate_type=? AND aggregate_id=? "
+                    "ORDER BY sequence LIMIT 256",
+                    (event.aggregate_type, event.aggregate_id),
+                ).fetchall()
+                if (len(rows) != metadata["event_count"]
+                        or [row["event_id"] for row in rows] != event_ids):
+                    raise RuntimeReadUnavailable("original aggregate changed")
+                events = tuple(_event_from_row(row) for row in rows)
+                # Preserve global exact-command lookups independently of the
+                # aggregate; an Event on a different aggregate cannot vanish.
+                indexed: list[Event | None] = []
+                for prefix in ("session-bridge-continue-commit:",
+                               "session-bridge-native-reply-commit:"):
+                    row = loader.execute("SELECT * FROM events WHERE command_id=?",
+                                         (prefix + event.aggregate_id,)).fetchone()
+                    indexed.append(None if row is None else _event_from_row(row))
+                return event, value, events, indexed[0], indexed[1]
+            except sqlite3.OperationalError as exc:
+                if self._vm_progress.tripped:
+                    raise RuntimeReadUnavailable("reply evidence VM budget exceeded") from exc
+                raise
+            finally:
+                self._vm_progress.deactivate()
+        except BaseException:
+            self._failed = True
+            raise
+
     def read_session_reply_references_bounded(
         self, *, work_ref: str, root_job_id: str | None,
         original_principals: tuple[tuple[str, ...], ...],

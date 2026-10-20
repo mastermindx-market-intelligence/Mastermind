@@ -911,3 +911,475 @@ def test_installed_private_frames_share_signed_cursor_for_control_lifetime(setup
         with pytest.raises(TypeError):
             build_runtime_session_bridge(s.runtime, **options,
                                          reference_cursor_key=invalid)
+
+
+# Exact-original READ acquisition below uses source fixtures only.  In
+# particular, direct populate() still exercises the existing live-writer
+# fallback; these tests do not turn its fake transport receipt into Runtime
+# admission or claim any installed/native-provider proof.
+def _seed_committed_exact_reply_fixture(s, *, foreign_index=None, indexed_actor=None):
+    """Seed immutable COMMIT facts, optionally one explicit indexed-only fault."""
+    from integrations.session_bridge import runtime_return as bridge
+
+    assert ((foreign_index is None and indexed_actor is None)
+            or (foreign_index in {'continue', 'native'} and type(indexed_actor) is str))
+    read_ref = populate(s)
+    event, value = s.owner._stored_request(read_ref)
+    request = next(item['message'] for item in s.service.items
+                   if item['message']['message_key'] == value['request_message_key'])
+    reply = next(item['message'] for item in s.service.items
+                 if item['message']['reply_to_message_key'] == request['message_key'])
+    native_binding = s.owner.resolve(
+        native_session_id=s.facts.provider_session_id,
+        operation_key=value['operation_key'], in_reply_to=request['message_key'])
+    continue_command = bridge._COMMIT_PREFIX + event.aggregate_id
+    native_command = bridge._NATIVE_COMMIT_PREFIX + event.aggregate_id
+    assert s.runtime.store.get_event_by_command_id(continue_command) is None
+    assert s.runtime.store.get_event_by_command_id(native_command) is None
+    continue_payload = s.owner._commit_payload(event, request)
+    native_payload = {
+        'schema': 'mastermind.session_bridge.native_reply_commit.v1',
+        'request_event_id': event.event_id,
+        'request_event_sha256': bridge._digest(event.to_dict()),
+        'message_key': reply['message_key'], 'fingerprint': reply['fingerprint'],
+        'message_sha256': bridge._digest(reply),
+        'binding_sha256': bridge._digest(dataclasses.asdict(native_binding)),
+    }
+    with s.runtime.store.transaction() as connection:
+        for kind, event_type, command, payload in (
+            ('continue', bridge._COMMIT_EVENT, continue_command, continue_payload),
+            ('native', bridge._NATIVE_COMMIT_EVENT, native_command, native_payload),
+        ):
+            s.runtime.store.append_event(
+                connection, aggregate_type=event.aggregate_type,
+                aggregate_id=('foreign-index-' + event.aggregate_id
+                              if kind == foreign_index else event.aggregate_id),
+                event_type=event_type,
+                actor=(indexed_actor if kind == foreign_index else bridge._ACTOR),
+                job_id=event.job_id,
+                attempt_id=event.attempt_id, worker_id=event.worker_id,
+                command_id=command, payload=payload)
+    # Prove the fixture really has both independently indexed facts and the
+    # ordered aggregate that the production validators must reconcile.
+    continued = s.runtime.store.get_event_by_command_id(continue_command)
+    native = s.runtime.store.get_event_by_command_id(native_command)
+    assert type(continued) is type(native) is er.Event
+    assert event.event_id < continued.event_id < native.event_id
+    assert continued.payload == continue_payload and native.payload == native_payload
+    aggregate = s.runtime.store.bounded_aggregate_events(event.aggregate_type, event.aggregate_id)
+    assert [item.to_dict() for item in aggregate] == [
+        item.to_dict() for item in (event, continued, native)
+        if item.aggregate_id == event.aggregate_id]
+    if foreign_index is None:
+        assert len(aggregate) == 3
+        assert s.owner._native_commit_admission(event, aggregate).to_dict() == native.to_dict()
+        assert s.owner._commit_started(event, request) is True
+    else:
+        foreign = continued if foreign_index == 'continue' else native
+        assert foreign.aggregate_id == 'foreign-index-' + event.aggregate_id
+        assert foreign.actor == indexed_actor and len(aggregate) == 2
+    s.service.calls.clear()
+    return read_ref
+
+
+def _capture_exact_read_ownership(monkeypatch):
+    trace = {'observations': _record_reference_observations(monkeypatch),
+             'connections': [], 'activations': [], 'loaders': [], 'selections': []}
+    connect = sqlite3.connect
+    activate = er._RuntimeReadProgressGuard.activate
+    initialize_loader = er._BoundedRoleResultLoader.__init__
+
+    def open_connection(*args, **kwargs):
+        connection = connect(*args, **kwargs)
+        path = args[0] if args else kwargs['database']
+        trace['connections'].append((path, dict(kwargs), connection))
+        return connection
+
+    def activate_guard(self):
+        trace['activations'].append(self)
+        return activate(self)
+
+    def initialize(self, *args, **kwargs):
+        initialize_loader(self, *args, **kwargs)
+        trace['loaders'].append(self)
+
+    monkeypatch.setattr(sqlite3, 'connect', open_connection)
+    monkeypatch.setattr(er._RuntimeReadProgressGuard, 'activate', activate_guard)
+    monkeypatch.setattr(er._BoundedRoleResultLoader, '__init__', initialize)
+    for kind, name in (
+        ('original', 'read_session_original_request_bounded'),
+        ('reply', 'read_session_reply_evidence_bounded'),
+    ):
+        selection = getattr(er.BoundedRuntimeReadObservation, name, None)
+        if selection is None:
+            # The old head can run the public call; it fails the actual
+            # ownership/budget assertions instead of a missing-method stub.
+            continue
+
+        def selected(self, *, read_ref, _selection=selection, _kind=kind):
+            trace['selections'].append((_kind, self))
+            return _selection(self, read_ref=read_ref)
+
+        monkeypatch.setattr(er.BoundedRuntimeReadObservation, name, selected)
+    return trace
+
+
+def _assert_exact_read_closed(trace, *, finalized=None):
+    observations = trace['observations']
+    assert observations, 'the public READ bypassed the Runtime observation owner'
+    assert len(trace['connections']) == len(trace['loaders']) == len(observations)
+    assert trace['activations'] == [item._vm_progress for item in observations]
+    assert [item for _, item in trace['selections']] == observations
+    if finalized is None:
+        finalized = len(observations)
+    for index, observation in enumerate(observations):
+        path, options, connection = trace['connections'][index]
+        assert options.get('uri') is True and 'mode=ro' in str(path)
+        assert not observation._active
+        assert observation._vm_progress.steps > 0
+        assert observation._vm_progress._removed and not observation._vm_progress._active
+        with pytest.raises(sqlite3.ProgrammingError):
+            connection.execute('SELECT 1')
+        if index < finalized:
+            assert observation.receipt.schema == er.RUNTIME_READ_OBSERVATION_SCHEMA
+            assert observation.receipt.state == 'UNKNOWN'
+            assert observation.receipt.source_identity is None
+        else:
+            with pytest.raises(er.StateConflict):
+                _ = observation.receipt
+
+
+def _call_exact_read_public(s, read_ref, entry):
+    if entry == 'reference':
+        return s.owner.resolve_operation_read_ref(
+            principal=s.projection, operation_key=s.args['operation_key'])
+    assert entry in {'read_ref', 'operation_key'}
+    arguments = ({'read_ref': read_ref} if entry == 'read_ref'
+                 else {'operation_key': s.args['operation_key']})
+    return asyncio.run(tool(s).handle(s.principal, 'session_reply_read', arguments))
+
+
+def _expect_exact_read_unavailable(s, read_ref, entry):
+    if entry == 'reference':
+        with pytest.raises(BridgeError) as error:
+            _call_exact_read_public(s, read_ref, entry)
+        assert error.value.code == 'reply_unavailable'
+    else:
+        result = _call_exact_read_public(s, read_ref, entry)
+        assert result['ok'] is False and result['error']['code'] == 'reply_unavailable'
+
+
+def _exact_fixture_rows(s, read_ref):
+    from integrations.session_bridge import runtime_return as bridge
+
+    event, value = s.owner._stored_request(read_ref)
+    with s.runtime.store.read() as connection:
+        request = dict(connection.execute(
+            'SELECT * FROM events WHERE event_id=?', (event.event_id,)).fetchone())
+        root = dict(connection.execute(
+            'SELECT * FROM events WHERE event_id=?', (value['root_event_id'],)).fetchone())
+        aggregate = [dict(row) for row in connection.execute(
+            'SELECT * FROM events WHERE aggregate_type=? AND aggregate_id=? ORDER BY sequence',
+            (event.aggregate_type, event.aggregate_id)).fetchall()]
+        indexed = [dict(connection.execute(
+            'SELECT * FROM events WHERE command_id=?', (prefix + event.aggregate_id,)
+        ).fetchone()) for prefix in (bridge._COMMIT_PREFIX, bridge._NATIVE_COMMIT_PREFIX)]
+    return {'request': request, 'root': root, 'aggregate': aggregate,
+            'continue': indexed[0], 'native': indexed[1]}
+
+
+def _exact_scalar_bytes(value):
+    # Independently count SQLite scalar material, not decoded Event JSON.
+    assert value is None or type(value) in (int, str, bytes)
+    if value is None:
+        return 0
+    return len(value) if type(value) is bytes else len(str(value).encode('utf-8'))
+
+
+def _exact_row_bytes(row):
+    return sum(_exact_scalar_bytes(value) for value in row.values())
+
+
+def test_exact_original_reference_uses_only_closed_bounded_provenance(setup, monkeypatch):
+    s = setup
+    read_ref = s.owner.bind_request(s.projection, s.args)
+    event, _ = s.owner._stored_request(read_ref)
+    ceiling = 65536
+    # An unrelated/oversized aggregate member must not turn reference-only
+    # recovery into COMMIT validation or full reply-evidence acquisition.
+    with s.runtime.store.transaction() as connection:
+        s.runtime.store.append_event(
+            connection, aggregate_type=event.aggregate_type, aggregate_id=event.aggregate_id,
+            event_type='TEST_REFERENCE_ONLY_NOISE', actor='m' * (ceiling + 1),
+            job_id=event.job_id, attempt_id=event.attempt_id, worker_id=event.worker_id,
+            command_id='test-exact-reference-only-noise', payload={'fixture': True})
+    before = events(s)
+    s.service.calls.clear()
+    with monkeypatch.context() as patch:
+        patch.setattr(er, 'BOUNDED_ROLE_RESULT_MAX_CELL_BYTES', ceiling)
+        patch.setattr(s.owner, '_request', lambda *_: pytest.fail('reference revived current writer'))
+        trace = _capture_exact_read_ownership(patch)
+        assert _call_exact_read_public(s, read_ref, 'reference') == read_ref
+        _assert_exact_read_closed(trace)
+        assert [kind for kind, _ in trace['selections']] == ['original']
+    assert not s.service.calls and events(s) == before
+
+
+@pytest.mark.parametrize('entry', ['read_ref', 'operation_key'])
+def test_exact_committed_reply_owns_before_after_acquisition_and_accepts_unknown(
+        setup, monkeypatch, entry):
+    s = setup
+    read_ref = _seed_committed_exact_reply_fixture(s)
+    before = events(s)
+    dialogue_observations = []
+    with monkeypatch.context() as patch:
+        trace = _capture_exact_read_ownership(patch)
+
+        def at_dialogue():
+            # This callback runs inside the actual fixture service coroutine.
+            # No observation may survive into either owner's awaited READ.
+            _assert_exact_read_closed(trace)
+            dialogue_observations.append(len(trace['observations']))
+
+        s.service.on_read = at_dialogue
+        try:
+            result = _call_exact_read_public(s, read_ref, entry)
+        finally:
+            s.service.on_read = None
+        assert result['ok'] is True
+        assert result['data']['read_ref'] == read_ref
+        assert result['data']['text'] == 'The bounded finding is confirmed.'
+        assert result['data']['reply_committed'] is True
+        assert result['data']['parent_consumed'] is False
+        _assert_exact_read_closed(trace)
+        kinds = [kind for kind, _ in trace['selections']]
+        assert kinds == (['reply'] * 4 if entry == 'read_ref'
+                         else ['original', 'reply', 'reply', 'reply', 'reply', 'original'])
+        assert dialogue_observations == ([1, 2, 3] if entry == 'read_ref' else [2, 3, 4])
+    assert [call['operation'] for call in s.service.calls] == ['read_thread'] * 3
+    assert events(s) == before
+
+
+@pytest.mark.parametrize('entry', ['reference', 'read_ref'])
+def test_exact_read_request_and_root_share_one_material_budget(setup, monkeypatch, entry):
+    s = setup
+    read_ref = _seed_committed_exact_reply_fixture(s)
+    rows = _exact_fixture_rows(s, read_ref)
+    request_bytes, root_bytes = (_exact_row_bytes(rows[key]) for key in ('request', 'root'))
+    root_metadata = (_exact_scalar_bytes(rows['root']['event_id'])
+                     + _exact_scalar_bytes(len(rows['root']['payload_json'].encode('utf-8'))))
+    ceiling = max(request_bytes + root_metadata, root_metadata + root_bytes) + 1
+    total = request_bytes + root_metadata + root_bytes
+    assert request_bytes < ceiling and root_metadata + root_bytes < ceiling < total
+    before = events(s)
+    convert, decoded = er._event_from_row, []
+
+    def decode(row):
+        decoded.append(row['event_id'])
+        return convert(row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(er, 'BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES', ceiling)
+        patch.setattr(er, '_event_from_row', decode)
+        trace = _capture_exact_read_ownership(patch)
+        _expect_exact_read_unavailable(s, read_ref, entry)
+        _assert_exact_read_closed(trace, finalized=0)
+        assert len(trace['loaders']) == 1
+        assert trace['loaders'][0]._total_bytes == total > ceiling
+        assert decoded == [rows['request']['event_id']]
+    assert not s.service.calls and events(s) == before
+
+
+def test_exact_reply_aggregate_and_both_global_indexes_share_material_budget(setup, monkeypatch):
+    import json
+
+    s = setup
+    read_ref = _seed_committed_exact_reply_fixture(s)
+    rows = _exact_fixture_rows(s, read_ref)
+    root_metadata = (_exact_scalar_bytes(rows['root']['event_id'])
+                     + _exact_scalar_bytes(len(rows['root']['payload_json'].encode('utf-8'))))
+    original = _exact_row_bytes(rows['request']) + root_metadata + _exact_row_bytes(rows['root'])
+    aggregate_metadata = sum(_exact_scalar_bytes(value) for value in (
+        len(rows['aggregate']),
+        sum(len(row['payload_json'].encode('utf-8')) for row in rows['aggregate']),
+        json.dumps([row['event_id'] for row in rows['aggregate']], separators=(',', ':')),
+    ))
+    aggregate = aggregate_metadata + sum(_exact_row_bytes(row) for row in rows['aggregate'])
+    continued, native = (_exact_row_bytes(rows[key]) for key in ('continue', 'native'))
+    stages = (original, aggregate, continued, native)
+    ceiling = sum(stages[:-1]) + 1
+    assert max(stages) < ceiling < sum(stages) < er.BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES
+    before = events(s)
+    convert, decoded = er._event_from_row, []
+
+    def decode(row):
+        decoded.append(row['event_id'])
+        return convert(row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(er, 'BOUNDED_ROLE_RESULT_MAX_TOTAL_BYTES', ceiling)
+        patch.setattr(er, '_event_from_row', decode)
+        trace = _capture_exact_read_ownership(patch)
+        _expect_exact_read_unavailable(s, read_ref, 'read_ref')
+        _assert_exact_read_closed(trace, finalized=0)
+        assert len(trace['loaders']) == 1
+        assert trace['loaders'][0]._total_bytes == sum(stages) > ceiling
+        # The aggregate's native Event was legitimately decoded once. Its
+        # independently indexed second materialization is refused beforehand.
+        assert decoded.count(rows['native']['event_id']) == 1
+        assert decoded.count(rows['continue']['event_id']) == 2
+    assert not s.service.calls and events(s) == before
+
+
+@pytest.mark.parametrize('entry,site', [
+    ('reference', 'request'), ('reference', 'root'),
+    ('read_ref', 'request'), ('read_ref', 'root'),
+    ('read_ref', 'aggregate'), ('read_ref', 'continue_index'), ('read_ref', 'native_index'),
+])
+def test_exact_read_bounds_selected_nonpayload_before_event_conversion(
+        request, monkeypatch, entry, site):
+    from integrations.session_bridge import runtime_return as bridge
+
+    ceiling = 65536
+    append = er.RuntimeStore.append_event
+    register = er.WorkerRegistry.register_worker
+
+    def register_metadata_class(self, worker_id, **kwargs):
+        # Event(worker_id, quota_class) retains its real foreign key. Add the
+        # fixture's metadata class through the existing registration owner,
+        # before the original setup claims its ordinary default Attempt.
+        assert kwargs['quota_classes'] == ['default']
+        return register(self, worker_id,
+                        **{**kwargs, 'quota_classes': ['default', 'm' * (ceiling + 1)]})
+
+    def append_oversized_metadata(self, connection, **kwargs):
+        selected_type = 'JOB_CREATED' if site == 'root' else bridge._EVENT
+        if kwargs.get('event_type') == selected_type:
+            kwargs = {**kwargs, 'quota_class': 'm' * (ceiling + 1)}
+        return append(self, connection, **kwargs)
+
+    # Get the incumbent fixture lazily so the root/request metadata exists at
+    # its original append. Immutable-Event triggers and schema remain intact;
+    # bind_request computes the genuine resulting root and request digests.
+    with monkeypatch.context() as fixture_patch:
+        if site in {'request', 'root'}:
+            fixture_patch.setattr(er.RuntimeStore, 'append_event', append_oversized_metadata)
+        if site == 'request':
+            fixture_patch.setattr(er.WorkerRegistry, 'register_worker', register_metadata_class)
+        s = request.getfixturevalue('setup')
+        foreign_index = ({'continue_index': 'continue', 'native_index': 'native'}.get(site))
+        read_ref = _seed_committed_exact_reply_fixture(
+            s, foreign_index=foreign_index,
+            indexed_actor=('m' * (ceiling + 1) if foreign_index is not None else None))
+    rows = _exact_fixture_rows(s, read_ref)
+    if site in {'request', 'root'}:
+        bad_id = rows[site]['event_id']
+        assert rows[site]['quota_class'] == 'm' * (ceiling + 1)
+        # The metadata is canonical, not a malformed-provenance shortcut.
+        # Ordinary caps permit the same exact public READ before lowering only
+        # the material ceiling; its result remains a fixture, never live proof.
+        positive = _call_exact_read_public(s, read_ref, entry)
+        if entry == 'reference':
+            assert positive == read_ref
+        else:
+            assert positive['ok'] is True
+        s.service.calls.clear()
+    elif site == 'aggregate':
+        original_request = rows['request']
+        with s.runtime.store.transaction() as connection:
+            s.runtime.store.append_event(
+                connection, aggregate_type=original_request['aggregate_type'],
+                aggregate_id=original_request['aggregate_id'], event_type='TEST_OVERSIZED_AGGREGATE',
+                actor='m' * (ceiling + 1), job_id=original_request['job_id'],
+                attempt_id=original_request['attempt_id'], worker_id=original_request['worker_id'],
+                command_id='test-exact-oversized-aggregate', payload={'small': True})
+            bad_id = connection.execute(
+                'SELECT event_id FROM events WHERE command_id=?',
+                ('test-exact-oversized-aggregate',)).fetchone()[0]
+    else:
+        name = 'continue' if site == 'continue_index' else 'native'
+        bad_id = rows[name]['event_id']
+        # The exact command Event was initially appended outside this
+        # aggregate. Its separately indexed material is the only bad cell.
+        assert rows[name]['aggregate_id'] != rows['request']['aggregate_id']
+        assert bad_id not in {row['event_id'] for row in rows['aggregate']}
+        assert rows[name]['command_id'].startswith(
+            bridge._COMMIT_PREFIX if name == 'continue' else bridge._NATIVE_COMMIT_PREFIX)
+    before = events(s)
+    convert, decoded = er._event_from_row, []
+
+    def decode(row):
+        decoded.append(row['event_id'])
+        return convert(row)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(er, 'BOUNDED_ROLE_RESULT_MAX_CELL_BYTES', ceiling)
+        patch.setattr(er, '_event_from_row', decode)
+        trace = _capture_exact_read_ownership(patch)
+        _expect_exact_read_unavailable(s, read_ref, entry)
+        # Refusing malformed evidence after conversion is insufficient: the
+        # selected oversized Event must never have reached Python decoding.
+        assert bad_id not in decoded
+        _assert_exact_read_closed(trace, finalized=0)
+    assert not s.service.calls and events(s) == before
+
+
+@pytest.mark.parametrize('entry', ['reference', 'read_ref'])
+def test_exact_read_exhausts_real_sqlite_vm_budget_without_result(setup, monkeypatch, entry):
+    s = setup
+    read_ref = _seed_committed_exact_reply_fixture(s)
+    before = events(s)
+    initialize = er._RuntimeReadProgressGuard.__init__
+
+    def limited_guard(self):
+        initialize(self, limit=32)
+
+    with monkeypatch.context() as patch:
+        patch.setattr(er._RuntimeReadProgressGuard, '__init__', limited_guard)
+        trace = _capture_exact_read_ownership(patch)
+        _expect_exact_read_unavailable(s, read_ref, entry)
+        _assert_exact_read_closed(trace, finalized=0)
+        [observation] = trace['observations']
+        assert observation._vm_progress.tripped
+        assert observation._vm_progress.steps == 32
+    assert not s.service.calls and events(s) == before
+
+
+@pytest.mark.parametrize('fault', ['close', 'finalize'])
+@pytest.mark.parametrize('entry,fail_at,dialogue_reads', [
+    ('reference', 1, 0), ('read_ref', 1, 0), ('read_ref', 2, 1),
+    ('operation_key', 1, 0), ('operation_key', 3, 1), ('operation_key', 6, 3),
+])
+def test_exact_read_never_releases_failed_close_or_final_receipt(
+        setup, monkeypatch, fault, entry, fail_at, dialogue_reads):
+    s = setup
+    read_ref = _seed_committed_exact_reply_fixture(s)
+    before = events(s)
+    failures = []
+    with monkeypatch.context() as patch:
+        trace = _capture_exact_read_ownership(patch)
+        if fault == 'close':
+            close = s.runtime.store._close_read_connection
+
+            def fail_close(connection):
+                close(connection)
+                failures.append(connection)
+                if len(failures) == fail_at:
+                    raise er.RuntimeReadUnavailable('fixture exact-read close failure')
+
+            patch.setattr(s.runtime.store, '_close_read_connection', fail_close)
+        else:
+            finalize = er.BoundedRuntimeReadObservation._finalize
+
+            def fail_finalize(self):
+                finalize(self)
+                failures.append(self)
+                if len(failures) == fail_at:
+                    raise er.RuntimeReadUnavailable('fixture exact-read finalization failure')
+
+            patch.setattr(er.BoundedRuntimeReadObservation, '_finalize', fail_finalize)
+        _expect_exact_read_unavailable(s, read_ref, entry)
+        assert len(failures) == len(trace['observations']) == fail_at
+        _assert_exact_read_closed(trace, finalized=fail_at - 1)
+    assert [call['operation'] for call in s.service.calls] == ['read_thread'] * dialogue_reads
+    assert events(s) == before
