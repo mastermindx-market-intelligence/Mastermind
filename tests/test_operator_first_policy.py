@@ -333,3 +333,146 @@ def test_existing_claude_capacity_not_silently_reduced(tmp_path, key, configured
     assert (home / ".claude/CLAUDE.md").read_bytes() == existing_doc
     assert not (home / ".codex/hooks/mastermind_fabric_routing_guard.py").exists()
     assert not (home / ".agents/skills/mastermind-fabric-orchestration").exists()
+
+def test_scoped_claude_profile_no_unrelated_codex(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    (home / ".claude/settings.json").write_text('{"model":"preserve","env":{}}\n')
+    result = m.apply_provider_policy(home, "claude", guard_source=guard)
+    assert result["state"] == "READY" and result["provider_scope"] == "claude"
+    assert not (home / ".codex").exists()
+    assert not (home / ".agents").exists()
+    assert json.loads((home / ".claude/settings.json").read_text())["model"] == "preserve"
+    assert all(k.startswith("claude_") for k in result["managed_files"])
+    snapshot = {k: Path(v).read_bytes() for k,v in result["managed_files"].items()}
+    assert m.apply_provider_policy(home, "claude", guard_source=guard)["state"] == "READY"
+    assert snapshot == {k: Path(v).read_bytes() for k,v in result["managed_files"].items()}
+    assert (home / ".claude/CLAUDE.md").read_text().count(m.BEGIN) == 1
+
+
+def test_scoped_codex_ignores_unrelated_claude_cap12(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    settings = home / ".claude/settings.json"
+    orig = b'{"env":{"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS":"12"}}\n'
+    settings.write_bytes(orig)
+    result = m.apply_provider_policy(home, "codex", guard_source=guard)
+    assert result["state"] == "READY"
+    assert settings.read_bytes() == orig
+    assert not (home / ".claude/skills/mastermind-fabric-orchestration").exists()
+    assert (home / ".agents/skills/mastermind-fabric-orchestration/SKILL.md").exists()
+    assert m.verify_provider_policy(home, "codex", guard_source=guard)["state"] == "READY"
+    assert m.verify_provider_policy(home, "claude", guard_source=guard)["state"] == "DRIFT"
+    assert m.verify_policy(home, guard_source=guard)["state"] == "DRIFT"
+
+
+@pytest.mark.parametrize("cap,depth", [("12", "1"), ("2", "3"), ("0", None)])
+def test_scoped_claude_capacity_refuses_pre_effect(tmp_path, cap, depth):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    (home / ".claude").mkdir(parents=True)
+    env = {"CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": cap}
+    if depth:env["CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH"] = depth
+    settings = home / ".claude/settings.json"
+    settings.write_text(json.dumps({"env":env}))
+    before = settings.read_bytes()
+    with pytest.raises(m.OrchestratorPolicyError, match="Claude native limit"):
+        m.apply_provider_policy(home, "claude", guard_source=guard)
+    assert settings.read_bytes() == before
+    assert not (home / ".claude/hooks").exists()
+    assert not (home / ".claude/skills/mastermind-fabric-orchestration").exists()
+    assert not (home / ".codex").exists()
+
+
+def test_scoped_claude_rejects_symlink_destination_before_write(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    home.mkdir()
+    external = tmp_path / "external"
+    external.mkdir()
+    (home / ".claude").symlink_to(external, target_is_directory=True)
+    with pytest.raises(m.OrchestratorPolicyError):
+        m.apply_provider_policy(home, "claude", guard_source=guard)
+    assert list(external.iterdir()) == []
+    assert not (home / ".codex").exists()
+
+
+def test_scoped_verifier_rejects_noncommand_guard_mutation(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    m.apply_provider_policy(home, "claude", guard_source=guard)
+    path = home / ".claude/settings.json"
+    data = json.loads(path.read_text())
+    rows = [h for row in data["hooks"]["PreToolUse"] for h in row["hooks"]
+            if "mastermind_fabric_routing_guard.py" in h.get("command", "")]
+    assert len(rows)==1
+    rows[0]["type"]="prompt"
+    path.write_text(json.dumps(data))
+    result=m.verify_provider_policy(home, "claude", guard_source=guard)
+    assert result["state"]=="DRIFT"
+    assert "claude_settings.pretool" in result["issues"]
+
+
+def test_scoped_partial_apply_has_exact_original_carrier_evidence(tmp_path, monkeypatch):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    orig=m._atomic_write
+    counter=[0]
+    def fail_fourth(path,payload):
+        counter[0]+=1
+        if counter[0]==4:raise m.OrchestratorPolicyError("injected failure")
+        return orig(path,payload)
+    monkeypatch.setattr(m, "_atomic_write", fail_fourth)
+    with pytest.raises(m.OrchestratorPolicyApplyIncomplete) as exc:
+        m.apply_provider_policy(home, "claude", guard_source=guard)
+    assert exc.value.modified_files
+    assert m.verify_provider_policy(home, "claude", guard_source=guard)["state"]=="DRIFT"
+    assert not (home / ".codex").exists()
+
+
+def test_scoped_cli_defaults_unchanged_both(tmp_path, capsys):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    assert m.main(["apply","--home",str(home),"--guard-source",str(guard),
+                   "--provider","claude"]) == 0
+    output=json.loads(capsys.readouterr().out)
+    assert output["provider_scope"]=="claude"
+    assert not (home / ".codex").exists()
+    assert m.main(["verify","--home",str(home),"--guard-source",str(guard),
+                   "--provider","claude"]) == 0
+    assert json.loads(capsys.readouterr().out)["state"]=="READY"
+    assert m.main(["verify","--home",str(home),"--guard-source",str(guard)]) == 1
+    assert json.loads(capsys.readouterr().out)["state"]=="DRIFT"
+
+
+def test_scoped_provider_enum_closed(tmp_path):
+    m, _, guard = load_installer(tmp_path)
+    with pytest.raises(m.OrchestratorPolicyError, match="provider"):
+        m.apply_provider_policy(tmp_path/"home", "unknown", guard_source=guard)
+    with pytest.raises(m.OrchestratorPolicyError, match="provider"):
+        m.verify_provider_policy(tmp_path/"home", "unknown", guard_source=guard)
+
+@pytest.mark.parametrize("provider,unselected", [
+    ("claude", ".codex"),
+    ("codex", ".claude"),
+])
+def test_scoped_provider_does_not_read_unrelated_profile(tmp_path, monkeypatch, provider, unselected):
+    m, _, guard = load_installer(tmp_path)
+    home = tmp_path / "home"
+    peer = home / unselected
+    peer.mkdir(parents=True)
+    # Invalid peer config would be dangerous to inspect or treat as selected.
+    (peer / ("config.toml" if unselected == ".codex" else "settings.json")).write_text(
+        "invalid peer content intentionally unreadable by scoped rollout"
+    )
+    original = m._regular_bytes
+    def forbid_peer_reads(path, *args, **kwargs):
+        assert not Path(path).is_relative_to(peer), "read from unrelated provider"
+        return original(path, *args, **kwargs)
+    monkeypatch.setattr(m, "_regular_bytes", forbid_peer_reads)
+    ready = m.apply_provider_policy(home, provider, guard_source=guard)
+    assert ready["state"] == "READY"
+    assert m.verify_provider_policy(home, provider, guard_source=guard)["state"] == "READY"
+    assert (peer / ("config.toml" if unselected == ".codex" else "settings.json")).read_text().startswith("invalid peer")

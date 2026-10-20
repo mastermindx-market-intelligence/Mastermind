@@ -145,14 +145,24 @@
      modified: list[str] = []
      try:
          for key, payload in operations:
-@@ -708,6 +747,19 @@
+@@ -704,12 +743,28 @@
+     return count
+ 
+ 
+-def verify_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, object]:
++def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str = "all") -> dict[str, object]:
++    if provider not in ("all", "codex", "claude"):
++        raise OrchestratorPolicyError("provider must be all, codex or claude")
++    selected = ("codex", "claude") if provider == "all" else (provider,)
      paths = _paths(home)
      canonical = _canonical_guard(guard_source)
      issues: list[str] = []
+-
+-    for name in ("codex_guard", "claude_guard"):
 +    roles = _canonical_role_files()
-+    for provider in ("codex", "claude"):
++    for enrolled_provider in selected:
 +        for index, relative in enumerate(ROLE_SHA256):
-+            key = f"{provider}_role_{index}"
++            key = f"{enrolled_provider}_role_{index}"
 +            try:
 +                _preflight_destination(paths[key], Path(home).expanduser().resolve())
 +                installed = _regular_bytes(paths[key])
@@ -162,16 +172,253 @@
 +            if installed != roles[relative]:
 +                issues.append(f"{key}.digest")
 +
- 
-     for name in ("codex_guard", "claude_guard"):
++
++    for name in (f"{p}_guard" for p in selected):
          try:
-@@ -786,6 +838,9 @@
+             installed = _regular_bytes(paths[name])
+         except OrchestratorPolicyError:
+@@ -718,7 +773,7 @@
+         if installed != canonical:
+             issues.append(f"{name}.digest")
+ 
+-    for name in ("codex_doc", "claude_doc"):
++    for name in (f"{p}_doc" for p in selected):
+         try:
+             text = _regular_bytes(paths[name]).decode("utf-8")
+         except (OrchestratorPolicyError, UnicodeError):
+@@ -731,66 +786,155 @@
+         ):
+             issues.append(f"{name}.managed_block")
+ 
+-    try:
+-        claude_raw = _regular_bytes(paths["claude_settings"])
+-        claude_value = _json_object(claude_raw, "Claude settings")
+-        claude_env = claude_value.get("env")
+-        if not isinstance(claude_env, dict):
+-            issues.append("claude_settings.env")
+-        else:
+-            if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
+-                issues.append("claude_settings.max_concurrent_subagents")
+-            if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
+-                issues.append("claude_settings.max_subagent_spawn_depth")
+-        if (
+-            _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
+-            or _managed_hook_reference_count(claude_raw) != 1
+-        ):
+-            issues.append("claude_settings.pretool")
+-    except OrchestratorPolicyError:
+-        issues.append("claude_settings.missing")
+-
+-    try:
+-        codex_raw = _regular_bytes(paths["codex_hooks"])
+-        if (
+-            _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
+-            or _managed_hook_reference_count(codex_raw) != 1
+-        ):
+-            issues.append("codex_hooks.pretool")
+-    except OrchestratorPolicyError:
+-        issues.append("codex_hooks.missing")
+-
+-    try:
+-        codex_config_raw = _regular_bytes(paths["codex_config"])
++    if "claude" in selected:
+         try:
+-            codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
+-        except (UnicodeError, tomllib.TOMLDecodeError) as exc:
+-            raise OrchestratorPolicyError("Codex config is malformed") from exc
+-        codex_agents = codex_config.get("agents")
+-        if not isinstance(codex_agents, dict):
+-            issues.append("codex_config.agents")
+-        else:
+-            native_reset = _native_codex_isolation(codex_config)
+-            if native_reset is False:
+-                issues.append("codex_config.native_message_isolation")
+-            if native_reset is not True:
+-                if codex_agents.get("enabled") is not False:
+-                    issues.append("codex_config.agents_enabled")
+-                if codex_agents.get("max_concurrent_threads_per_session") != 1:
+-                    issues.append("codex_config.max_concurrent_threads")
+-    except OrchestratorPolicyError:
+-        issues.append("codex_config.missing_or_invalid")
++            claude_raw = _regular_bytes(paths["claude_settings"])
++            claude_value = _json_object(claude_raw, "Claude settings")
++            claude_env = claude_value.get("env")
++            if not isinstance(claude_env, dict):
++                issues.append("claude_settings.env")
++            else:
++                if claude_env.get("CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS") != "2":
++                    issues.append("claude_settings.max_concurrent_subagents")
++                if claude_env.get("CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH") != "1":
++                    issues.append("claude_settings.max_subagent_spawn_depth")
++            if (
++                _managed_hook_count(claude_raw, paths["claude_guard"], claude=True) != 1
++                or _managed_hook_reference_count(claude_raw) != 1
++            ):
++                issues.append("claude_settings.pretool")
++        except OrchestratorPolicyError:
++            issues.append("claude_settings.missing")
++
++    if "codex" in selected:
++        try:
++            codex_raw = _regular_bytes(paths["codex_hooks"])
++            if (
++                _managed_hook_count(codex_raw, paths["codex_guard"], claude=False) != 1
++                or _managed_hook_reference_count(codex_raw) != 1
++            ):
++                issues.append("codex_hooks.pretool")
++        except OrchestratorPolicyError:
++            issues.append("codex_hooks.missing")
++
++        try:
++            codex_config_raw = _regular_bytes(paths["codex_config"])
++            try:
++                codex_config = tomllib.loads(codex_config_raw.decode("utf-8"))
++            except (UnicodeError, tomllib.TOMLDecodeError) as exc:
++                raise OrchestratorPolicyError("Codex config is malformed") from exc
++            codex_agents = codex_config.get("agents")
++            if not isinstance(codex_agents, dict):
++                issues.append("codex_config.agents")
++            else:
++                native_reset = _native_codex_isolation(codex_config)
++                if native_reset is False:
++                    issues.append("codex_config.native_message_isolation")
++                if native_reset is not True:
++                    if codex_agents.get("enabled") is not False:
++                        issues.append("codex_config.agents_enabled")
++                    if codex_agents.get("max_concurrent_threads_per_session") != 1:
++                        issues.append("codex_config.max_concurrent_threads")
++        except OrchestratorPolicyError:
++            issues.append("codex_config.missing_or_invalid")
+ 
+     return {
+         "state": "READY" if not issues else "DRIFT",
          "home": str(Path(home).expanduser().resolve()),
          "issues": issues,
          "guard_sha256": _sha256(canonical),
+-        "managed_files": {key: str(value) for key, value in paths.items()},
 +        "role_source_sha256": dict(ROLE_SHA256),
 +        "session_loading_proven": False,
 +        "runtime_admission_proven": False,
-         "managed_files": {key: str(value) for key, value in paths.items()},
++        "managed_files": {
++            key: str(value)
++            for key, value in paths.items()
++            if any(key.startswith(p + "_") for p in selected)
++        },
++        **({"provider_scope": provider} if provider != "all" else {}),
          "credentials_read": False,
          "permissions_changed": False,
+         "lifecycle_created": False,
+     }
++
++
++def verify_provider_policy(
++    home: Path, provider: str, *, guard_source: Path | None = None
++) -> dict[str, object]:
++    """Use the canonical verifier with one explicit provider scope."""
++    return verify_policy(home, guard_source=guard_source, provider=provider)
++
++
++def apply_provider_policy(
++    home: Path, provider: str, *, guard_source: Path | None = None
++) -> dict[str, object]:
++    """Install through the one canonical source owner into one provider scope.
++
++    This is an optional subset of apply_policy, not a separate override plane.
++    It never reads/changes native capacity or user files of the other provider.
++    """
++    if provider not in ("codex", "claude"):
++        raise OrchestratorPolicyError("provider must be codex or claude")
++    resolved_home = Path(home).expanduser().resolve()
++    paths = _paths(resolved_home)
++    selected = {k: path for k, path in paths.items() if k.startswith(provider + "_")}
++    guard = _canonical_guard(guard_source)
++    roles = _canonical_role_files()
++
++    # All destination and exact-config preconditions before a single write.
++    for path in selected.values():
++        _preflight_destination(path, resolved_home)
++    if provider == "claude":
++        original_settings = _regular_bytes(paths["claude_settings"], missing=b"{}\n")
++        _refuse_existing_claude_native_limit_reset(original_settings)
++        original_doc = _regular_bytes(paths["claude_doc"], missing=b"").decode("utf-8")
++        operations = [
++            ("claude_guard", guard),
++            ("claude_doc", _managed_text(original_doc).encode("utf-8")),
++            (
++                "claude_settings",
++                _render_claude_settings(original_settings, paths["claude_guard"]),
++            ),
++        ]
++    else:
++        original_doc = _regular_bytes(paths["codex_doc"], missing=b"").decode("utf-8")
++        original_hooks = _regular_bytes(paths["codex_hooks"], missing=b"{}\n")
++        original_config = _regular_bytes(paths["codex_config"], missing=b"")
++        operations = [
++            ("codex_guard", guard),
++            ("codex_doc", _managed_text(original_doc).encode("utf-8")),
++            ("codex_hooks", _render_codex_hooks(original_hooks, paths["codex_guard"])),
++            ("codex_config", _render_codex_config(original_config)),
++        ]
++    role_operations = [
++        (f"{provider}_role_{index}", roles[relative])
++        for index, relative in enumerate(ROLE_SHA256)
++    ]
++    operations = operations[:1] + role_operations + operations[1:]
++    modified: list[str] = []
++    try:
++        for key, payload in operations:
++            if _atomic_write(paths[key], payload):
++                modified.append(str(paths[key]))
++    except OrchestratorPolicyError as exc:
++        if modified:
++            try:
++                observed = verify_provider_policy(
++                    resolved_home, provider, guard_source=guard_source
++                )
++                verify_issues = tuple(str(item) for item in observed.get("issues", ()))
++            except Exception:
++                verify_issues = ("verify_after_partial_apply_failed",)
++            raise OrchestratorPolicyApplyIncomplete(
++                "provider-scoped policy apply stopped after partial write; "
++                "do not switch carrier or blindly replay; verify this same home",
++                modified_files=modified,
++                verify_issues=verify_issues,
++            ) from exc
++        raise
++    return verify_provider_policy(
++        resolved_home, provider, guard_source=guard_source
++    )
+ 
+ 
+ def _parser() -> argparse.ArgumentParser:
+@@ -798,17 +942,25 @@
+     parser.add_argument("mode", choices=("verify", "apply"))
+     parser.add_argument("--home", type=Path, default=Path.home())
+     parser.add_argument("--guard-source", type=Path)
++    parser.add_argument("--provider", choices=("all", "codex", "claude"), default="all")
+     return parser
+ 
+ 
+ def main(argv: Sequence[str] | None = None) -> int:
+     args = _parser().parse_args(argv)
+     try:
+-        result = (
+-            apply_policy(args.home, guard_source=args.guard_source)
+-            if args.mode == "apply"
+-            else verify_policy(args.home, guard_source=args.guard_source)
+-        )
++        if args.provider == "all":
++            result = (
++                apply_policy(args.home, guard_source=args.guard_source)
++                if args.mode == "apply"
++                else verify_policy(args.home, guard_source=args.guard_source)
++            )
++        else:
++            result = (
++                apply_provider_policy(args.home, args.provider, guard_source=args.guard_source)
++                if args.mode == "apply"
++                else verify_provider_policy(args.home, args.provider, guard_source=args.guard_source)
++            )
+     except OrchestratorPolicyApplyIncomplete as exc:
+         print(
+             json.dumps(
