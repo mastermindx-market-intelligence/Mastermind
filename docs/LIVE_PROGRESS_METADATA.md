@@ -12,7 +12,7 @@ An installation wishing to release progress must separately qualify and seal
 `allowed_visible_response_and_progress_metadata` through the same Content profile
 owner. The profile digest binds that decision, the original Runtime join and
 before/after access ticket still apply, and each viewer's grant independently
-filters metadata. Source support does not grant permission to update a profile.
+filters metadata items and metadata-attributable gaps. Source support does not grant permission to update a profile.
 No installed profile, client grant or deployment is changed by this source work.
 
 The first source-qualified vocabulary is Codex App Server `codex-cli 0.159.2`:
@@ -20,8 +20,15 @@ The first source-qualified vocabulary is Codex App Server `codex-cli 0.159.2`:
 | Observation | Released representation | Withheld data |
 | --- | --- | --- |
 | `turn/plan/updated` | Authored step counts by pending/inProgress/completed; explicitly non-executable | Step prose, explanation and all unknown fields |
-| Allowlisted `item/started`, `item/completed` tool categories | Fixed category and observed lifecycle; completion outcome unverified | Native item ID (hashed), command, arguments, result, paths, tool/server names and arbitrary nested fields |
+| Allowlisted `item/started`, `item/completed` tool categories | Fixed category and observed lifecycle; completion outcome unverified | Raw item identity (replaced by a hash for upserts), command, arguments, result, paths, tool/server names and arbitrary nested fields |
 | Reasoning or unsupported item type | Nothing | Entire payload |
+
+Hashes preserve stable item identity; they are not a secrecy guarantee for
+predictable native IDs. Retention budgets are shared across viewers, so metadata
+can cause visible-text eviction; the original response loss remains observable
+to a response-only viewer, while metadata parser gaps do not force its resync.
+Combined pages preserve existing source display order; local publication order
+is the update/cursor clock and is the appropriate clock for an activity timeline.
 
 These summaries use the existing bounded visible-item wire envelope and renderer.
 `completed` is an observed item lifecycle state; it does not mean a successful tool,

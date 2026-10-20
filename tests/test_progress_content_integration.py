@@ -87,3 +87,52 @@ def test_unqualified_version_and_other_collectors_cannot_enroll_progress(tmp_pat
         with pytest.raises(BrokerStateError):
             await broker._dispatch('ohf-observer-enroll', p.broker_payload())
     asyncio.run(run())
+
+
+@pytest.mark.parametrize(('outer', 'inner', 'terminal'), [
+    ('thread', None, True), (None, 'thread', True), (None, None, True),
+    ('foreign', None, False), (None, 'foreign', False), ('thread', 'foreign', False),
+])
+def test_progress_coview_keeps_existing_terminal_identity_compatibility(outer, inner, terminal):
+    p = VisibleTurnProjection()
+    key = TurnKey('a', 'e', 'g', 1, 'w', 'l', 'native')
+    plain = p.mint_grant(key)
+    p.mint_grant(key, progress_thread_id='thread')
+    params = {'turn': {'id': 'native', 'status': 'interrupted'}}
+    if outer is not None:
+        params['threadId'] = outer
+    if inner is not None:
+        params['turn']['threadId'] = inner
+    p.publish_demultiplexed(None, payload={'method': 'turn/completed', 'params': params})
+    p.publish_demultiplexed(None, payload={'method': 'item/updated', 'params': {
+        'threadId': 'thread', 'turnId': 'native', 'item': {
+            'type': 'agentMessage', 'id': 'late', 'sequence': 1, 'text': 'late'}}})
+    page = p.read(key, reader_grant=plain, cursor=None, max_items=64)
+    assert page.terminal is terminal
+    assert bool(page.items) is not terminal
+
+
+def test_metadata_parser_gaps_do_not_resync_plain_coviewer_or_erase_its_loss():
+    p = VisibleTurnProjection()
+    key = TurnKey('a', 'e', 'g', 1, 'w', 'l', 'native')
+    plain = p.mint_grant(key)
+    metadata = p.mint_grant(key, progress_thread_id='thread')
+    malformed = {'method': 'item/started', 'params': {'threadId': 'thread',
+        'turnId': 'native', 'item': {'type': 'commandExecution', 'id': 'tool'}}}
+    for _ in range(300):
+        p.publish_demultiplexed(None, payload=malformed)
+    response_page = p.read(key, reader_grant=plain, cursor=None, max_items=64)
+    assert response_page.gaps == () and not response_page.resync_required
+    progress_page = p.read(key, reader_grant=metadata, cursor=None, max_items=64)
+    assert progress_page.gaps and progress_page.resync_required
+    assert len(progress_page.gaps) <= 256
+    # A real visible-text parser loss remains visible despite metadata flooding.
+    p.publish(key, method='item/updated', params={'item': {
+        'type': 'agentMessage', 'id': 'bad-response', 'sequence': 0, 'text': None}})
+    for _ in range(300):
+        p.publish_demultiplexed(None, payload=malformed)
+    response_page = p.read(key, reader_grant=plain, cursor=None, max_items=64)
+    assert len(response_page.gaps) == 1
+    assert response_page.gaps[0].reason == 'parser_failure'
+    progress_page = p.read(key, reader_grant=metadata, cursor=None, max_items=64)
+    assert len(progress_page.gaps) <= 256
