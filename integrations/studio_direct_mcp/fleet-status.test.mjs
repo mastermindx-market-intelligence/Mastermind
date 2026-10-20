@@ -299,3 +299,96 @@ test('malformed owner output is a bounded refusal', async t => {
   assert.equal(result.structuredContent.state, 'REFUSED');
   assert.equal(result.structuredContent.code, 'FLEET_STATUS_OWNER_RESULT_INVALID');
 });
+
+
+function privateFabricStatus(account, ready = false) {
+  const row = statusRow(account, ready);
+  if (!ready) {
+    // This is the genuine stopped-tunnel shape reported by the Studio owner.
+    row.tunnel.transportTTL = null;
+    row.tunnel.maxConcurrentRequests = null;
+    row.tunnel.gatewayPort = null;
+    row.tunnel.healthPort = null;
+    row.tunnel.tunnelId = null;
+    row.tunnel.organizationId = null;
+  }
+  return row;
+}
+
+test('private Fabric seats are verified but never exposed in the 13-seat owner result', async t => {
+  const publicSeats = [
+    'admin-business', 'chatgpt1', 'chatgpt2-business', 'chatgpt2-personal',
+    'chatgpt3', 'chatgpt3-w570f6f34', 'chatgpt3-wa2a9e6f9', 'chatgpt4',
+  ];
+  const privateSeats = [
+    'fabric-c3-570f6f34', 'fabric-chatgpt3-w570f6f34',
+    'fabric-design', 'fabric-read', 'subagent-fabric-c3',
+  ];
+  const owner = ownerFor([
+    ...publicSeats.map((account) => ({ account, ready: false, error: 'owner status unavailable' })),
+    privateFabricStatus(privateSeats[0]),
+    privateFabricStatus(privateSeats[1]),
+    { account: privateSeats[2], ready: false, error: '/private/root/key/shaped diagnostic' },
+    { account: privateSeats[3], ready: false, error: 'private daemon unavailable' },
+    privateFabricStatus(privateSeats[4]),
+  ]);
+  assert.equal(owner.accountCount, 13);
+  assert.equal(owner.readyCount, 0);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, { recursive:true, force:true }));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.accountCount, publicSeats.length);
+  assert.equal(result.readyCount, 0);
+  assert.equal(result.allReady, false);
+  assert.deepEqual(result.accounts.map((row) => row.account), publicSeats);
+  const rendered = JSON.stringify(fleetStatusToolResult(result));
+  for (const secret of [...privateSeats, '/private/root/key', 'tunnel_0123456789abcdef', 'org-SensitiveInternal']) {
+    assert.equal(rendered.includes(secret), false, `private owner field leaked: ${secret}`);
+  }
+});
+
+test('private seats are included in original owner readiness consistency checks', async t => {
+  const owner = ownerFor([
+    { account:'chatgpt1', ready:false, error:'public unavailable' },
+    privateFabricStatus('fabric-c3-570f6f34', true),
+  ]);
+  assert.equal(owner.readyCount, 1);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, { recursive:true, force:true }));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.accountCount, 1);
+  assert.equal(result.readyCount, 0);
+  assert.equal(result.allReady, false);
+  assert.equal(result.accounts[0].account, 'chatgpt1');
+  const forged = { ...owner, readyCount:0 };
+  const invalid = await fixture(JSON.stringify(forged));
+  t.after(() => rm(invalid.dir, { recursive:true, force:true }));
+  await assert.rejects(() => createFleetStatus(invalid.config).status(), /FLEET_STATUS_OWNER_RESULT_INVALID/);
+});
+
+test('malformed or unknown private seat rows still fail closed', async t => {
+  const cases = [
+    ownerFor([privateFabricStatus('fabric-not-in-owner-catalog')]),
+    ownerFor([privateFabricStatus('fabric-c3-570f6f34'), privateFabricStatus('fabric-c3-570f6f34')]),
+    ownerFor([{ ...privateFabricStatus('fabric-design'), extra:'refuse' }]),
+  ];
+  const badScope = privateFabricStatus('fabric-c3-570f6f34');
+  badScope.tunnel.account = 'chatgpt1';
+  cases.push(ownerFor([badScope]));
+  const badTTL = statusRow('chatgpt1', false);
+  badTTL.tunnel.transportTTL = null;
+  cases.push(ownerFor([badTTL]));
+  const badPrivateReady = privateFabricStatus('fabric-read', true);
+  badPrivateReady.tunnel.transportTTL = null;
+  cases.push(ownerFor([badPrivateReady]));
+  for (const [n, owner] of cases.entries()) {
+    const fx = await fixture(JSON.stringify(owner));
+    t.after(() => rm(fx.dir, { recursive:true, force:true }));
+    await assert.rejects(
+      () => createFleetStatus(fx.config).status(),
+      /FLEET_STATUS_OWNER_RESULT_INVALID/,
+      `invalid private seat case ${n}`,
+    );
+  }
+});
