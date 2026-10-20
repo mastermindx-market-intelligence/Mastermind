@@ -623,6 +623,7 @@ class CodexOperatorAdapter:
     """Real stdio Codex App Server path, importable but unregistered and off."""
 
     interface_version = OPERATOR_HARNESS_INTERFACE_VERSION
+    supports_progress_metadata = True
 
     def __init__(
         self,
@@ -2270,7 +2271,11 @@ class CodexOperatorAdapter:
             self.visible_turn_projection = projection
         return projection
 
-    def mint_observer_grant(self, turn: TurnRef, *, binding=None):
+    def mint_observer_grant(self, turn: TurnRef, *, binding=None, progress_metadata=False):
+        if progress_metadata and self.expected_harness_version != "codex-cli 0.159.2":
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT, "progress metadata schema is unqualified"
+            )
         state = self._generations.get(turn.process_generation_id)
         if state is None:
             raise CodexAdapterError(
@@ -2293,7 +2298,7 @@ class CodexOperatorAdapter:
         )
         projection = self._visible_projection()
         if binding is not None:
-            return projection.enroll_observer(key, **binding)
+            return projection.enroll_observer(key, progress_thread_id=state.provider_session_id if progress_metadata else None, **binding)
         return projection.mint_grant(key)
 
     @staticmethod

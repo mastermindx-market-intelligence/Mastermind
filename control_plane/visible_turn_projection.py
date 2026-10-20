@@ -74,6 +74,7 @@ class VisibleItem:
     text: str
     byte_length: int
     publication_sequence: int
+    progress_metadata: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,6 +114,7 @@ class PrebindItem:
     state: str
     text: str
     byte_length: int
+    progress_metadata: bool = False
 
 
 @dataclass
@@ -133,6 +135,7 @@ class _Grant:
     viewer_id: str
     binding: tuple[str, str, str, str] | None = None
     state: str = "ACTIVE"
+    progress_thread_id: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -271,7 +274,7 @@ class VisibleTurnProjection:
         native_turn_id = None
         if isinstance(params, Mapping) and any(
             method == candidate
-            for candidate in ("item/updated", "item/completed")
+            for candidate in ("item/updated", "item/started", "item/completed", "turn/plan/updated")
         ):
             native_turn_id = params.get("turnId")
         elif method == "turn/completed":
@@ -358,6 +361,13 @@ class VisibleTurnProjection:
             record = self._turns.get(_identity(key.native_turn_id, "native turn"))
             if record is None or record.key != key:
                 return
+            progress_threads = {self._grants[g].progress_thread_id
+                for g in self._viewers_by_turn.get(key, ())
+                if self._grants[g].state == "ACTIVE" and self._grants[g].progress_thread_id}
+            if (progress_threads and method == "turn/completed"
+                    and (not isinstance(params, Mapping)
+                         or params.get("threadId") not in progress_threads)):
+                return
             if (
                 method == "turn/completed"
                 and isinstance(native_turn_id, str)
@@ -374,24 +384,44 @@ class VisibleTurnProjection:
                     record.next_publication_sequence,
                 )
                 return
+            if record.terminal:
+                return
             try:
                 item = _parse_visible_item(method, params)
+                if item is None and len(progress_threads) == 1:
+                    from control_plane.codex_progress_metadata import decode_progress
+                    metadata = decode_progress(method, params,
+                        thread_id=next(iter(progress_threads)), turn_id=key.native_turn_id)
+                    if metadata is not None:
+                        previous = next((v for v in record.items if v.progress_metadata
+                            and v.source_item_id == metadata.source_item_id), None)
+                        source_sequence = previous.source_sequence if previous else record.next_publication_sequence + 1
+                        summary = f"{metadata.kind}: {metadata.summary}"
+                        item = PrebindItem(metadata.source_item_id, source_sequence,
+                            metadata.state, summary, len(summary.encode("utf-8")), True)
                 if item is None:
                     return
                 self._append_locked(record, item, gap_on_bounds=True)
-            except ProjectionError:
+            except (ProjectionError, ValueError):
                 self._add_gap_locked(record, _reason("parser_failure"))
 
-    def mint_grant(self, key: TurnKey) -> str:
+    def mint_grant(self, key: TurnKey, *, progress_thread_id: str | None = None) -> str:
+        if progress_thread_id is not None:
+            _identity(progress_thread_id, "provider thread")
         with self._lock:
             existing = self._viewers_by_turn.get(key)
             if existing is None:
                 existing = set()
                 self._viewers_by_turn[key] = existing
+            if progress_thread_id is not None and any(
+                self._grants[g].progress_thread_id not in (None, progress_thread_id)
+                for g in existing
+            ):
+                raise ProjectionError("OBSERVER_CONFLICT", "provider thread changed")
             if len(existing) >= MAX_VIEWERS:
                 raise ProjectionError("OVER_BUDGET", "turn viewer budget is full")
             grant = str(uuid.uuid4())
-            self._grants[grant] = _Grant(key, grant)
+            self._grants[grant] = _Grant(key, grant, progress_thread_id=progress_thread_id)
             existing.add(grant)
             self._create_turn_locked(key)
             return grant
@@ -481,17 +511,19 @@ class VisibleTurnProjection:
                 grant = self._grants.get(handle)
             return self._observer_wire(handle, grant)
 
-    def enroll_observer(self, key, **binding):
+    def enroll_observer(self, key, *, progress_thread_id=None, **binding):
         bound = self._observer_binding(**binding)
         with self._lock:
             handle, existing = self._observer_entry(key, bound)
             if existing is not None:
+                if existing.progress_thread_id != progress_thread_id:
+                    raise ProjectionError("OBSERVER_CONFLICT", "OBSERVER_CONFLICT")
                 return self.observer_status(key, **binding)
             # Tombstones stay in the existing registry until process restart.
             # Never evict them and accidentally turn a replay into enrollment.
             if sum(g.binding is not None for g in self._grants.values()) >= 128:
                 raise ProjectionError("OVER_BUDGET", "observer operation budget is full")
-            handle = self.mint_grant(key)
+            handle = self.mint_grant(key, progress_thread_id=progress_thread_id)
             self._grants[handle] = replace(self._grants[handle], binding=bound)
             return self._observer_wire(handle, self._grants[handle])
 
@@ -576,7 +608,8 @@ class VisibleTurnProjection:
             if sequence > record.next_publication_sequence:
                 self._refuse(key, "CURSOR_OUT_OF_RANGE")
             eligible_pub = sorted(
-                (item for item in record.items if item.publication_sequence > sequence),
+                (item for item in record.items if item.publication_sequence > sequence
+                 and (not item.progress_metadata or live_grant.progress_thread_id is not None)),
                 key=lambda i: i.publication_sequence,
             )
             gaps = [
@@ -585,7 +618,7 @@ class VisibleTurnProjection:
                 if gap.to_publication_sequence > sequence
             ]
             page: tuple[VisibleItem, ...] = ()
-            last_served_pub = sequence
+            last_served_pub = sequence if eligible_pub else record.next_publication_sequence
             for index in range(min(max_items, len(eligible_pub))):
                 candidate_pub = tuple(eligible_pub[: index + 1])
                 candidate_source = tuple(
@@ -724,6 +757,10 @@ class VisibleTurnProjection:
             if gap_on_bounds:
                 self._add_gap_locked(record, "item_byte_overflow")
             return
+        if any(existing.source_item_id == item.source_item_id
+               and existing.progress_metadata != item.progress_metadata for existing in record.items):
+            self._add_gap_locked(record, "source_identity_conflict")
+            return
         replacement = None
         if item.state in {"partial", "completed"}:
             replacement = next(
@@ -731,6 +768,7 @@ class VisibleTurnProjection:
                     existing
                     for existing in reversed(record.items)
                     if existing.source_item_id == item.source_item_id
+                    and existing.progress_metadata == item.progress_metadata
                 ),
                 None,
             )
@@ -756,6 +794,7 @@ class VisibleTurnProjection:
                 item.text,
                 item.byte_length,
                 sequence,
+                item.progress_metadata,
             )
             items = tuple(
                 updated if existing is replacement else existing for existing in record.items
@@ -803,7 +842,7 @@ class VisibleTurnProjection:
                     new_record.publication_epoch,
                     new_record.key,
                     new_items,
-                    new_gaps,
+                    _bounded_gaps(new_gaps),
                     new_record.terminal,
                     new_retained,
                     sequence,
@@ -818,6 +857,7 @@ class VisibleTurnProjection:
             item.text,
             item.byte_length,
             sequence,
+            item.progress_metadata,
         )
         retained = record.retained_bytes + item.byte_length
         while len(record.items) >= MAX_ITEMS_PER_TURN and record.items:
@@ -868,7 +908,7 @@ class VisibleTurnProjection:
             record.publication_epoch,
             record.key,
             record.items,
-            (*record.gaps, GapRecord(from_sequence, to_sequence, _reason(reason))),
+            _bounded_gaps((*record.gaps, GapRecord(from_sequence, to_sequence, _reason(reason)))),
             record.terminal,
             record.retained_bytes,
             to_sequence,
@@ -878,6 +918,15 @@ class VisibleTurnProjection:
         buffer = self._prebind
         self._prebind = None
         return buffer.record(_reason(reason)) if buffer is not None else None
+
+
+def _bounded_gaps(gaps: tuple[GapRecord, ...]) -> tuple[GapRecord, ...]:
+    if len(gaps) <= MAX_ITEMS_PER_TURN:
+        return gaps
+    merged = gaps[:len(gaps) - MAX_ITEMS_PER_TURN + 1]
+    return (GapRecord(merged[0].from_publication_sequence,
+                      merged[-1].to_publication_sequence, "retained_gap"),
+            *gaps[len(merged):])
 
 
 def _parse_visible_item(method: object, params: object) -> PrebindItem | None:
