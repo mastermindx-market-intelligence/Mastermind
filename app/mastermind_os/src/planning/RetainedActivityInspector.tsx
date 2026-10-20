@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { validActivitySelection, type ActivityRead, type ActivitySelection } from "./retained-activity";
 import "./retained-activity.css";
 
@@ -36,6 +36,18 @@ export function RetainedActivityInspector({
   const chinese = locale === "zh-CN";
   const ready = validActivitySelection(selection) && !!read && !!sourceGeneration &&
     !!canRead && canRead();
+  useLayoutEffect(() => {
+    if (!ready) {
+      // No re-display of previous user's retained Events on a later
+      // regrant that accidentally reuses the same source-generation number.
+      seq.current++;
+      abort.current?.abort();
+      abort.current = null;
+      setBody(null);
+      setBodyGeneration(null);
+      setState("idle");
+    }
+  }, [ready]);
   // A prior user's rendered candidate evidence must never survive a viewer
   // revocation, source-generation change or selected Attempt switch, even in
   // the commit before React's effect clears cached state.

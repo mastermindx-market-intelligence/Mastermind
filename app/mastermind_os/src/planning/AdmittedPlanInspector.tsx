@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { validPlanSelection, type PlanRead, type PlanSelection } from "./admitted-plan";
 import { RetainedActivityInspector, type RetainedActivityReader } from "./RetainedActivityInspector";
 import { validActivitySelection } from "./retained-activity";
@@ -45,6 +45,19 @@ export function AdmittedPlanInspector({
 
   const qualified = validPlanSelection(selection);
   const ready = qualified && !!read && !!sourceGeneration && !!canRead && canRead();
+  useLayoutEffect(() => {
+    if (!ready) {
+      // Revocation is irreversible for the old acquisition. A future
+      // regrant—even if the host reuses the numeric source generation—
+      // must make a fresh authorized read before any old content reappears.
+      requestSeq.current += 1;
+      request.current?.abort();
+      request.current = null;
+      setDocument(null);
+      setDocumentGeneration(null);
+      setState("idle");
+    }
+  }, [ready]);
   // Cached plan objectives and their nested Mission/Attempt observations must
   // disappear on the *same render* as viewer revocation, source-generation
   // rotation, or root selection change; a later useEffect cleanup is too late.

@@ -148,6 +148,10 @@ describe("explicit retained activity component", () => {
     expect(screen.getByRole("button", { name: "Inspect retained activity" })).toHaveProperty("disabled", true);
 
     enrolled = true;
+    rerender(<RetainedActivityInspector
+      selection={selected} read={source} sourceGeneration={sourceGeneration} canRead={canRead} />);
+    // Revocation is sticky even if the original source fails to rotate generation.
+    expect(screen.queryByText(/candidate recorded:/)).toBeNull();
     generation++;
     rerender(<RetainedActivityInspector
       selection={selected} read={source} sourceGeneration={sourceGeneration} canRead={canRead} />);

@@ -140,6 +140,9 @@ describe("admitted plan inspector", () => {
     expect(screen.getByRole("button", { name: "Inspect plan" })).toHaveProperty("disabled", true);
 
     granted = true;
+    view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
+    // Regrant without a generation increment must not resurrect cached secrets.
+    expect(screen.queryByText("Investigate the original parent route")).toBeNull();
     generation++;
     view.rerender(<AdmittedPlanInspector selection={selection} {...props} />);
     expect(screen.queryByText("Investigate the original parent route")).toBeNull();
