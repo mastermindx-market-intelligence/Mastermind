@@ -134,6 +134,23 @@ describe("native fixed Executive bridge", () => {
         capabilities:{send:true,reply_read:true,stop:false},
       },
     };
+    const aPointer={operationKey:"session-continue-"+"b".repeat(64),
+      kind:"message" as const,targetKey:bPointer.targetKey};
+    const digestA="1e2af7babc8b2c2d41e9d42df56a01b295802954493db2fc132c3456ac969a0e";
+    const originalReply={
+      schema:"mastermind.os.executive.session_result.v1",
+      operation:"reply",ok:true,effect:"CONTINUATION_COMMITTED",
+      operation_key:aPointer.operationKey,error:null,
+      data:{schema:"mastermind.native_reply_read.v1",
+        read_ref:"session-reply-"+digestA,
+        request_ref:"session-bridge-continue:"+digestA,
+        in_reply_to:"asd-dot-continue-c81bfcc7ccadd7372a1b0d05bb610f9d147b43b9",
+        message_key:"asd-native-reply-4310b611582e4d2fa8f7053ea19490441b3e3db1",
+        fingerprint:"f".repeat(64),text:"Historical native A recovered",
+        next_step:"B remains pending",primary_ts:"1728620000.000001",
+        reply_committed:true,parent_consumed:false,operation_key:aPointer.operationKey,
+      },
+    };
     const references={schema:"mastermind.os.executive.session_result.v1",
       operation:"references",ok:true,effect:"NONE",operation_key:null,error:null,
       data:{schema:"mastermind.session_reply_references.v1",status:"COMPLETE",
@@ -141,6 +158,7 @@ describe("native fixed Executive bridge", () => {
     f.invoke.mockImplementation(async (cmd)=>{
       if(cmd==="executive_session_context")return context;
       if(cmd==="executive_session_references")return references;
+      if(cmd==="executive_session_reply")return originalReply;
       throw new Error("unexpected native command");
     });
     const host=createOsExecutiveSessionHost(f.sessionTransport,store);
@@ -151,6 +169,12 @@ describe("native fixed Executive bridge", () => {
       const signal=new AbortController().signal;
       await expect(host.binding.port.readOriginalReferences!(selection,signal))
         .resolves.toEqual(references);
+      const history=await host.binding.port.readQualifiedAnswer!(aPointer,signal);
+      expect(history.receipt.disposition).toBe("accepted");
+      expect(history.answer).toEqual({
+        text:"Historical native A recovered",nextStep:"B remains pending",
+        readRef:"session-reply-"+digestA,parentConsumed:false,
+      });
       await expect(f.sessionTransport.send({
         target_ref:bPointer.targetKey,
         operation_key:bPointer.operationKey,
@@ -160,7 +184,8 @@ describe("native fixed Executive bridge", () => {
       expect(store.clearIfEqual).not.toHaveBeenCalled();
       expect(await store.read("c".repeat(64))).toEqual(bPointer);
       expect(f.invoke.mock.calls.map(([cmd])=>cmd)).toEqual([
-        "executive_auth_status","executive_session_context","executive_session_references",
+        "executive_auth_status","executive_session_context",
+        "executive_session_references","executive_session_reply",
       ]);
     } finally { host.dispose(); }
   });
