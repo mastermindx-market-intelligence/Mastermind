@@ -1,0 +1,27 @@
+{
+  "base_master_sha": "2b3429d9aca0d539e7ac2b097a199fb86de2d329",
+  "changes": {
+    "remote_sub.sh": {
+      "candidate_git_blob_sha": "e3e11efe726c929400d2e985c4044e3861aa4a3e",
+      "candidate_sha256": "6834302e7cfd06706d825252a3d01421d224c8615d8f82f92a3e0d2650018bbc",
+      "patch_bytes": 2180,
+      "source_git_blob_sha": "051362d28807094a6970010fe9b3726bb83262a1",
+      "source_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17"
+    },
+    "remote_sub_helpers.py": {
+      "candidate_git_blob_sha": "6e99edc663f3018eab19c86d755fe4d16f5c56da",
+      "candidate_sha256": "edc53a0387609aa79d44d2c05a90e6cc25a597f814c7c82dac1f853e32b1a939",
+      "patch_bytes": 5460,
+      "source_git_blob_sha": "757a6af5a8b47968abb9024f7b8c2deb31728c18",
+      "source_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
+    }
+  },
+  "governing_repository": "mastermindx-market-intelligence/Mastermind",
+  "schema": "mastermind.fabric.canonical_result_candidate.v1",
+  "source_repo_paths": {
+    "remote_sub.sh": "ops/native_fabric/quota_continuity/source/remote_sub.sh",
+    "remote_sub_helpers.py": "ops/native_fabric/quota_continuity/source/remote_sub_helpers.py"
+  },
+  "status": "SOURCE_ONLY_NOT_INSTALLED",
+  "tests_file_sha256": "35ec20b098ae474608f635604b4061bc335a06b15538bff4a411317534682843"
+}

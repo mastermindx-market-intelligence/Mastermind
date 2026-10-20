@@ -1,0 +1,192 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -309,6 +309,23 @@
+ 
+ if [ -z "$LOCAL_OUT" ]; then
+   LOCAL_OUT="$HERE/lanes/${ID}.remote.stdout"
++fi
++
++# A newly minted Macro worker must not import a stale local output into the
++# retained result path. Refuse both original --out and canonical collisions
++# BEFORE provider leasing. Historical runs are never altered by this check.
++if [ -n "$NEW_MACRO_COMMIT" ] && [ "$DRY_RUN" -ne 1 ]; then
++  CANONICAL_RESULT_PATH="$HERE/lanes/${ID}.remote.stdout"
++  if [ -e "$LOCAL_OUT" ] || [ -L "$LOCAL_OUT" ]; then
++    RC=78
++    log "FABRIC_NEW_MACRO_OUTPUT_PREEXISTS before_lease=1"
++    exit "$RC"
++  fi
++  if [ -e "$CANONICAL_RESULT_PATH" ] || [ -L "$CANONICAL_RESULT_PATH" ]; then
++    RC=78
++    log "FABRIC_NEW_MACRO_CANONICAL_PREEXISTS before_lease=1"
++    exit "$RC"
++  fi
+ fi
+ 
+ # The optional success contract must validate newly collected bytes, never
+@@ -1120,6 +1137,23 @@
+ RSYNC_RC=0
+ log "RSYNC stdout=~/lanes/ext/$REMOTE_STDOUT out=$(basename "$LOCAL_OUT")"
+ "$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/ext/$REMOTE_STDOUT" "$LOCAL_OUT" || RSYNC_RC=$?
++# New Macro Fabric workspaces must expose their retained result at the
++# incumbent fabric_task.py canonical path, even when the original assigning
++# parent requested --out elsewhere. Keep its original file unchanged.
++# This is not acceptance or worker settlement: an unverified mirror fails
++# closed as result-unavailable, without relaunching or deleting work.
++if [ -n "$NEW_MACRO_COMMIT" ] && [ "$RC_OBSERVED" -eq 1 ] &&
++   [ "$WORKER_RC" -eq 0 ] && [ "$RSYNC_RC" -eq 0 ] &&
++   [ "$LOCAL_OUT" != "$HERE/lanes/${ID}.remote.stdout" ]; then
++  if CANONICAL_BOUND=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
++      mirror-new-macro-result "$HERE" "$ID" "$LOCAL_OUT" 2>/dev/null); then
++    log "$CANONICAL_BOUND"
++  else
++    CANONICAL_MIRROR_RC=$?
++    RSYNC_RC=76
++    log "CANONICAL_RESULT_MIRROR_FAILED helper_rc=$CANONICAL_MIRROR_RC worker_rc=$WORKER_RC"
++  fi
++fi
+ if [ "$NATIVE_MODE" -eq 1 ]; then
+   NATIVE_TERMINAL="$LOG_DIR/${ID}.native-terminal.json"
+   if "$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/ext/lanes/${ID}.native-terminal.json" "$NATIVE_TERMINAL" &&
+--- a/remote_sub_helpers.py
++++ b/remote_sub_helpers.py
+@@ -285,6 +285,131 @@
+     print(json.dumps(result, sort_keys=True))
+ 
+ 
++
++def mirror_new_macro_result():
++    """Retain a canonical read-only result for an already-completed sparse worker.
++
++    This acts only on existing controller-collected local stdout. No provider,
++    lease, host, process, acceptance, or workspace lifecycle action occurs.
++    The original --out file stays unchanged; only a new canonical file is
++    installed, atomically and exclusively, under the existing lanes directory.
++    """
++    import hashlib
++    import os
++    from pathlib import Path
++    import re
++    import stat
++    import tempfile
++
++    if len(sys.argv) != 4:
++        raise ValueError("canonical_result_arguments")
++    root_arg, run_id, output_arg = sys.argv[1:]
++    if (not os.path.isabs(root_arg)
++            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", run_id)
++            or not output_arg):
++        raise ValueError("canonical_result_identity")
++
++    root = Path(root_arg)
++    lanes = root / "lanes"
++    target = lanes / (run_id + ".remote.stdout")
++    source = Path(os.path.abspath(output_arg))
++    # The caller already used --out as the rsync target; never reinterpret
++    # that destination, and never mutate it.
++    if source == target:
++        raise ValueError("canonical_result_already_selected")
++
++    # The reader's retained-result limit is 8 MiB. Larger bytes may still be
++    # available at the original --out but must not be represented as eligible.
++    max_bytes = 8_388_608
++    srcfd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
++    dirfd = None
++    scratch_fd = None
++    scratch_path = None
++    try:
++        original = os.fstat(srcfd)
++        if (not stat.S_ISREG(original.st_mode)
++                or original.st_uid != os.getuid()
++                or original.st_nlink != 1
++                or original.st_mode & 0o022
++                or original.st_size > max_bytes):
++            raise ValueError("custom_result_not_single_owned_bounded_regular_file")
++
++        dirfd = os.open(lanes, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        directory = os.fstat(dirfd)
++        if (not stat.S_ISDIR(directory.st_mode)
++                or directory.st_uid != os.getuid()
++                or directory.st_mode & 0o022):
++            raise ValueError("canonical_directory_custody")
++
++        # A pre-existing result is never overwritten, even if it appears
++        # identical. Collision reconciliation belongs to the original parent.
++        try:
++            os.stat(target.name, dir_fd=dirfd, follow_symlinks=False)
++        except FileNotFoundError:
++            pass
++        else:
++            raise FileExistsError("canonical_result_destination_exists")
++
++        scratch_fd, scratch_path = tempfile.mkstemp(
++            prefix=".macro-result-" + run_id + "-",
++            suffix=".tmp", dir=lanes,
++        )
++        digest = hashlib.sha256()
++        count = 0
++        while True:
++            chunk = os.read(srcfd, 65536)
++            if not chunk:
++                break
++            count += len(chunk)
++            if count > max_bytes:
++                raise ValueError("custom_result_size_limit")
++            digest.update(chunk)
++            view = memoryview(chunk)
++            while view:
++                n = os.write(scratch_fd, view)
++                if n <= 0:
++                    raise OSError("canonical_result_short_write")
++                view = view[n:]
++
++        reread = os.fstat(srcfd)
++        src_lstat = os.lstat(source)
++        same = lambda a,b: (
++            a.st_dev, a.st_ino, a.st_size, a.st_mtime_ns, a.st_ctime_ns
++        ) == (
++            b.st_dev, b.st_ino, b.st_size, b.st_mtime_ns, b.st_ctime_ns
++        )
++        if (not same(reread, original) or not same(src_lstat, original)
++                or count != original.st_size):
++            raise ValueError("custom_result_changed_during_mirror")
++        os.fsync(scratch_fd)
++        os.close(scratch_fd)
++        scratch_fd = None
++
++        # link() is create-if-absent and never replaces a different result.
++        # The copy is fully written and fsynced *before* it becomes visible.
++        os.link(scratch_path, target, follow_symlinks=False)
++        os.unlink(scratch_path)
++        scratch_path = None
++        os.fsync(dirfd)
++        retained = os.stat(target.name, dir_fd=dirfd, follow_symlinks=False)
++        if (not stat.S_ISREG(retained.st_mode)
++                or retained.st_nlink != 1 or retained.st_uid != os.getuid()
++                or retained.st_size != count):
++            raise ValueError("canonical_result_postcondition")
++        print(f"CANONICAL_RESULT_BOUND bytes={count} sha256={digest.hexdigest()}")
++    finally:
++        if scratch_fd is not None:
++            os.close(scratch_fd)
++        if scratch_path is not None:
++            try:
++                os.unlink(scratch_path)
++            except FileNotFoundError:
++                pass
++        if dirfd is not None:
++            os.close(dirfd)
++        os.close(srcfd)
++
++
+ def main():
+     if len(sys.argv) < 2:
+         raise SystemExit(2)
+@@ -298,6 +423,7 @@
+         'native-window': native_window,
+         'native-settle': native_settle,
+         'validate-usage': validate_usage,
++        'mirror-new-macro-result': mirror_new_macro_result,
+     }
+     if command not in handlers:
+         raise SystemExit(2)
