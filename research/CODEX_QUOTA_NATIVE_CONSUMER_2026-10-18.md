@@ -302,3 +302,31 @@ Executive root worker provider homes are NOT_READY; M2 installed Codex
 binary bytes differ from its existing pinned worker readiness hash. No
 physical principal provisioning, credential transfer, runtime pool edit
 or live broker state changes occurred.
+
+
+## October 20 CLI model-observation bridge — successor repair
+
+PR #1585 now exposes the existing optional same-session model catalog through
+`scripts/executive_codex_account.py readiness --include-models`. The original
+quota-only `readiness` request remains the default, including
+`--previous-observation-stdin`; callers that need #1365's closed-model
+projection must opt into this exact native `model/list` read while the existing
+isolated App Server still owns the account and rate-limit samples.
+
+New provider-free CLI-through-real-probe tests cover default two-account-read
+behavior, the explicit one-model-read path, and a failed model RPC that leaves
+quota observation intact while models remain UNKNOWN. All cases assert a single
+private-process controller with successful cleanup, no provider turn or admission,
+and no exported provider error/credential data. These are deterministic mocked
+tests, not new real account, seat-entitlement, signed issuer, or worker evidence.
+Independent exact-head CI and security re-review are still required.
+
+Earlier provisional statements about absent protected Executive worker homes
+and the mutable Homebrew binary are superseded by the October 20 privileged
+root readback: all four *incumbent* service principals, homes and credentials
+were structurally valid; the approved Executive worker binary is separate
+from the attended Homebrew CLI. The Personal Pro 02 worker login was verified
+after attended device reauthorization, but its readiness receipt was missing
+and still requires separate lawful qualification. The distinct C4 principal
+and multi-seat Fabric admission remain unproven. No source-only patch or
+mocked catalog authorizes six-seat production.
