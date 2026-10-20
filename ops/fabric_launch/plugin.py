@@ -20,7 +20,17 @@ from ops.fabric_launch.install import source_files
 MAP={
     'research/worker_craft/mastermind-craft/':'skills/mastermind-craft/',
     'skills/mastermind-worker-bootstrap/':'skills/mastermind-worker-bootstrap/',
+    'skills/mastermind-fabric-orchestration/':'skills/mastermind-fabric-orchestration/',
 }
+
+ORCHESTRATION_ROLE_FILES = (
+    'SKILL.md',
+    'references/meta-ceo.md',
+    'references/program-ceo.md',
+    'references/operator.md',
+    'references/worker.md',
+    'references/reviewer.md',
+)
 
 
 def assemble(files, source_commit, *, docs=False):
@@ -37,9 +47,17 @@ def assemble(files, source_commit, *, docs=False):
     for name in ('mastermind-craft','mastermind-worker-bootstrap'):
         if 'skills/'+name+'/SKILL.md' not in result:
             raise ValueError('PLUGIN_SKILL_MISSING')
+    for role_file in ORCHESTRATION_ROLE_FILES:
+        if 'skills/mastermind-fabric-orchestration/'+role_file not in result:
+            raise ValueError('PLUGIN_SKILL_MISSING')
+    role_prefix = 'skills/mastermind-fabric-orchestration/'
+    packaged_roles = {name[len(role_prefix):] for name in result
+                      if name.startswith(role_prefix)}
+    if packaged_roles != set(ORCHESTRATION_ROLE_FILES):
+        raise ValueError('PLUGIN_ROLE_CLOSURE_INVALID')
     variant='public-docs' if docs else 'skills-only'
     manifest={'name':'mastermind-workforce','version':'0.1.0-candidate.g'+source_commit[:12]+'.'+variant,
-              'description':'Scoped worker boot, eight Craft methods and exact context/tool/return contracts.',
+              'description':'Scoped worker boot, Craft methods and pinned operator-first role instructions.',
               'skills':'./skills/'}
     if docs:
         manifest['mcpServers']='./.mcp.json'
@@ -56,11 +74,19 @@ def assemble(files, source_commit, *, docs=False):
     },sort_keys=True)+'\n').encode()
     result['README.md']=b'''# Mastermind Workforce candidate package
 
-This is a derived distribution of the existing Mastermind Craft skill plus the
-Worker Bootstrap skill. Choose exactly one Craft role for a bounded assignment.
+This derives existing Mastermind Craft, Worker Bootstrap, and the six-source-file
+Fabric Orchestration role package from ONE exact commit. For a consequential
+project, the assigned principal retains original intent and final acceptance
+while an admitted operator owns ordinary decomposition, delivery, independent
+review and bounded repair. Role files are guidance, not role authentication.
+The actual parent/role must be supplied by an accepted commission; never infer
+organizational authority from a model label or an installed Skill.
+
 The source in BUILD.json is a candidate, not a protected CapabilityPackage.
 The package does not install itself, inherit Web connector credentials, select a
 provider/model/account, start children, or change Executive and Company policy.
+Publication, account installation, fresh-session loading, Runtime admission and
+product-path acceptance are separate gates. Merging source alone proves none.
 
 The optional docs variant includes only OpenAI's public documentation MCP.
 It requires network reachability but no API token. It is not an OpenAI inference
@@ -92,7 +118,7 @@ def main(argv=None):
     p.add_argument('--with-public-docs',action='store_true')
     args=p.parse_args(argv)
     try:
-        files=assemble(source_files(ROOT,args.source_sha),args.source_sha,docs=args.with_public_docs)
+        files=assemble(source_files(ROOT,args.source_sha,include_orchestration=True),args.source_sha,docs=args.with_public_docs)
         data=zip_bytes(files)
         with Path(args.output).open('xb') as f:f.write(data)
         if Path(args.output).read_bytes()!=data:raise ValueError('PLUGIN_READBACK_FAILED')
