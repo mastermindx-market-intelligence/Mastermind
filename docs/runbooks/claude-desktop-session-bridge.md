@@ -81,11 +81,16 @@ is not installed-runtime acceptance.
 The same repair extends the **existing** `mastermind_fabric_routing_guard.py`
 used by Claude and Codex, not a second watcher or provider control plane.
 It blocks generic Desktop launches, the shared Anthropic bundle-ID route,
-raw Parall runtime launches, ambiguous `claude://` opens, and native
-`claude --desktop` use within covered Mastermind shell calls. Ordinary
-headless and resume CLI commands remain permitted. Its scope includes both
-`/Volumes/Mastermind/agent-workspaces` and the current
-`/Volumes/Mastermind 2/agent-workspaces` external SSD root.
+raw Parall runtime launches, ambiguous Claude URL-scheme opens, and native
+Claude --desktop use in covered Claude/Codex Bash PreToolUse calls
+**regardless of their working directory**. A follow-up repair moved the
+incumbent early Mastermind-scope return to AFTER this GUI-denial block.
+All unrelated Fabric/CI routing and GitHub wait policies remain
+Mastermind-workspace-scoped, including the legacy and current external
+SSD workspace roots. Ordinary headless and resume Claude CLI commands
+remain permitted. This is not an OS-wide app blocker: Codex Code Mode
+paths, native update helpers, GUI clicks and direct host actions may never
+invoke a shell hook.
 
 The reviewed source fragments are under `ops/claude_parall_isolation/`.
 The drift-checked installer operates only on the incumbent guard and the

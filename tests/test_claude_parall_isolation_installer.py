@@ -187,3 +187,37 @@ def test_unknown_previous_guard_block_refuses_before_write():
     )
     with pytest.raises(ValueError, match="unrecognized guard block"):
         rollout.render("guard", old)
+
+
+
+@pytest.mark.parametrize("cwd", ["/tmp", "/Users/chriswong/Downloads"])
+@pytest.mark.parametrize("command,blocked", [
+    ("open -a Claude", True),
+    ("env -i open -a Claude", True),
+    ("sudo -n open -a Claude", True),
+    ("nohup open -a Claude", True),
+    ("bash -lc \"bash -lc 'open -a Claude'\"", True),
+    ("claude --desktop --resume real-session", True),
+    ('claude -p "Explain the phrase open -a Claude"', False),
+    ("claude --resume real-session", False),
+    ("git push origin audit-branch", False),
+    ("gh pr checks 1653 --watch", False),
+])
+def test_gui_denial_covers_shell_tools_outside_mastermind(cwd, command, blocked):
+    installed = rollout.render("guard", legacy_source())
+    assert rollout.SCOPED_GUARD_START not in installed
+    assert rollout.GLOBAL_GUI_GUARD_START in installed
+    assert installed.index(rollout.REMAINING_SCOPE_GATE + rollout.GUARD_ANCHOR) > installed.index(
+        "    if unmanaged_desktop:"
+    )
+    namespace = {"__name__": "guard_fixture"}
+    exec(compile(installed, "guard_fixture.py", "exec"), namespace)
+    payload = {"cwd": cwd, "tool_name": "Bash", "tool_input": {"command": command}}
+    output = io.StringIO()
+    with contextlib.redirect_stdout(output):
+        try:
+            namespace["guard_bash"](payload, payload["tool_input"])
+        except SystemExit as exit_info:
+            assert exit_info.code == 0
+    denied = '"permissionDecision": "deny"' in output.getvalue()
+    assert denied is blocked, (cwd, command, output.getvalue())

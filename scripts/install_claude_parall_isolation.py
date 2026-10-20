@@ -54,6 +54,24 @@ DOC_ANCHORS = {
 }
 DOC_MARKER = "<!-- claude-parall-launch-isolation-20261019 -->"
 
+# The incumbent guard historically returned before checking non-Mastermind
+# working directories. Account-safe Desktop launch denial must run first, but
+# the unrelated Fabric/CI routing policy must remain Mastermind-scoped.
+SCOPED_GUARD_START = (
+    'def guard_bash(payload, ti):\n'
+    '    if not is_mastermind_scope(payload):\n'
+    '        return\n'
+    '    cmd = str(ti.get("command") or "")\n'
+)
+GLOBAL_GUI_GUARD_START = (
+    'def guard_bash(payload, ti):\n'
+    '    cmd = str(ti.get("command") or "")\n'
+)
+REMAINING_SCOPE_GATE = (
+    '    if not is_mastermind_scope(payload):\n'
+    '        return\n\n'
+)
+
 
 def sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -110,6 +128,19 @@ def render(kind: str, before: str) -> str:
             )
         if after.count(NEW_WORKSPACE_ROOT) != 1:
             raise ValueError("duplicate workspace-root policy")
+        if after.count(SCOPED_GUARD_START) == 1:
+            # Move only this exact known early return. Preserve all other
+            # rules, even while expanding GUI safety to every covered shell.
+            if (after.count(GUARD_ANCHOR) != 1 or
+                    after.count(REMAINING_SCOPE_GATE + GUARD_ANCHOR)):
+                raise ValueError("unknown scoped guard layout")
+            after = after.replace(SCOPED_GUARD_START, GLOBAL_GUI_GUARD_START, 1)
+            after = after.replace(
+                GUARD_ANCHOR, REMAINING_SCOPE_GATE + GUARD_ANCHOR, 1
+            )
+        elif (after.count(GLOBAL_GUI_GUARD_START) != 1 or
+              after.count(REMAINING_SCOPE_GATE + GUARD_ANCHOR) != 1):
+            raise ValueError("unrecognized host guard scope layout")
         ast.parse(after)
     return after
 
