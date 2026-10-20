@@ -262,15 +262,17 @@ def validate_request(request) -> str:
 class NativeInvocationView:
     """Immutable typed admission input handed to the native owner."""
 
-    __slots__ = ("schema", "request_sha256", "host", "worktree", "git_dir",
+    __slots__ = ("schema", "request_sha256", "run_id", "root", "host", "worktree", "git_dir",
                  "common_dir", "commit", "source_paths", "observer", "receiver",
                  "limits_digest")
 
     def __init__(self, request_sha256: str, host: str, worktree: str, git_dir: str,
                  common_dir: str, commit: str, source_paths, observer: str,
-                 receiver: str, limits_digest: str):
+                 receiver: str, limits_digest: str, run_id: str, root: str):
         object.__setattr__(self, "schema", SCHEMA_REQUEST)
         object.__setattr__(self, "request_sha256", request_sha256)
+        object.__setattr__(self, "run_id", run_id)
+        object.__setattr__(self, "root", root)
         object.__setattr__(self, "host", host)
         object.__setattr__(self, "worktree", worktree)
         object.__setattr__(self, "git_dir", git_dir)
@@ -289,7 +291,7 @@ class NativeInvocationView:
         return cls(request_sha256, request["host"], request["worktree"],
                    request["git_dir"], request["common_dir"], request["commit"],
                    [e["path"] for e in request["sources"]], request["observer"],
-                   request["receiver"], digest_of(request["limits"]))
+                   request["receiver"], digest_of(request["limits"]), request["run_id"], request["root"])
 
     def binding(self) -> str:
         return digest_of({"schema": self.schema, "request_sha256": self.request_sha256,
@@ -337,7 +339,7 @@ class NativeInvocation:
     authorizes a later read or publication.
     """
 
-    __slots__ = ("schema", "scope_digest", "request_sha256", "host", "worktree",
+    __slots__ = ("schema", "scope_digest", "request_sha256", "run_id", "root", "host", "worktree",
                  "git_dir", "common_dir", "commit", "source_paths", "observer",
                  "receiver", "invoking_uid", "issued_by", "_owner")
 
@@ -362,6 +364,8 @@ class NativeInvocation:
         scope = object.__new__(cls)
         object.__setattr__(scope, "schema", SCHEMA_INVOCATION)
         object.__setattr__(scope, "request_sha256", view.request_sha256)
+        object.__setattr__(scope, "run_id", view.run_id)
+        object.__setattr__(scope, "root", view.root)
         object.__setattr__(scope, "host", view.host)
         object.__setattr__(scope, "worktree", view.worktree)
         object.__setattr__(scope, "git_dir", view.git_dir)
@@ -388,7 +392,8 @@ class NativeInvocation:
 
     def binds_request(self, request) -> bool:
         try:
-            return (self.host == request["host"] and self.worktree == request["worktree"]
+            return (self.root == request["root"] and self.run_id == request["run_id"]
+                    and self.host == request["host"] and self.worktree == request["worktree"]
                     and self.git_dir == request["git_dir"]
                     and self.common_dir == request["common_dir"]
                     and self.commit == request["commit"]
@@ -401,6 +406,7 @@ class NativeInvocation:
     def binds_observation(self, response) -> bool:
         try:
             return (self.request_sha256 == response["request_sha256"]
+                    and self.root == response["root"] and self.run_id == response["run_id"]
                     and self.host == response["host"]
                     and self.worktree == response["worktree"]
                     and self.git_dir == response["git_dir"]
@@ -1252,6 +1258,7 @@ def _validate_remote_body(body, request, request_digest) -> None:
     files = body["files"]
     if type(files) is not list or len(files) != len(expected_paths):
         raise CurrentSourceError("remote_files_invalid")
+    remaining = request["limits"]["max_bytes_total"]
     for entry, item in zip(request["sources"], files):
         if type(item) is not dict or set(item) != FILE_KEYS:
             raise CurrentSourceError("file_unknown_field")
@@ -1272,6 +1279,7 @@ def _validate_remote_body(body, request, request_digest) -> None:
         if (type(membership) is not list or not 2 <= len(membership) <= MAX_PATH_DEPTH + 1
                 or membership[0] != {"component": "<commit>", "kind": "commit",
                                      "object_id": request["commit"]}
+                or type(membership[-1]) is not dict
                 or membership[-1].get("object_id") != item['object_id']):
             raise CurrentSourceError("remote_membership_invalid", entry["path"])
         for link in membership:
@@ -1280,12 +1288,15 @@ def _validate_remote_body(body, request, request_digest) -> None:
                     or link["kind"] not in ("commit", "tree", "blob")
                     or type(link["component"]) is not str or not link["component"]):
                 raise CurrentSourceError("remote_membership_invalid", entry["path"])
-        if type(item.get("remaining_budget")) is not int or item["remaining_budget"] < 0:
+        remaining -= item["bytes"]
+        if (remaining < 0 or type(item.get("remaining_budget")) is not int
+                or item["remaining_budget"] != remaining):
             raise CurrentSourceError("remote_budget_invalid")
     validate_git_payloads(body)
 
 
 def _skeleton(request, request_digest, state, invocation, status, reason=None):
+    request = request if type(request) is dict else {}
     response = {
         "schema": SCHEMA_OBSERVATION, "run_id": request.get("run_id"),
         "root": request.get("root"), "observer": request.get("observer"),

@@ -533,6 +533,21 @@ class ObservationTests(Host):
         with self.assertRaises(cso.CurrentSourceError):
             cso.validate_response(altered)
 
+    def test_resealed_remote_budget_is_not_accepted(self):
+        request = self.request(limits=dict(cso.DEFAULT_LIMITS, max_bytes_total=1000))
+        def send(req):
+            body = cso.observe_remote(req)
+            body["files"][-1]["remaining_budget"] = 0
+            return cso.canonical(body)
+        response = self.observe(request, self.owner(), send)
+        self.assertNotEqual(response["status"], "OBSERVED")
+        self.assertEqual(response["reason"], "remote_budget_invalid")
+
+    def test_non_mapping_request_refuses_without_read(self):
+        response = cso.observe_current_source(["invalid"])
+        self.assertEqual(response["status"], "REFUSED")
+        self.assertEqual(response["reason"], "request_invalid")
+
     def test_empty_paths_still_prove_commit_and_root_tree(self):
         request = self.request(sources=[])
         response = self.observe(request, self.owner(sources=[]))
@@ -782,6 +797,42 @@ class CapTests(Host):
             lambda req: cso.canonical(cso.observe_remote(req, reader)))
         self.assertRefused(response, "process_deadline")
 
+    @unittest.skipUnless(sys.platform.startswith("linux"), "packed reads require Linux memory limits")
+    def test_packed_child_output_bound_and_cleanup(self):
+        children = []
+        def spawn(argv, **kwargs):
+            proc = subprocess.Popen([sys.executable, "-c",
+                "import sys; sys.stdout.buffer.write(b'x' * 8388608); sys.stdout.flush()"], **kwargs)
+            children.append(proc)
+            return proc
+        reader = cso.Reader(spawn=spawn)
+        argv = [cso.select_git_binary()] + list(cso.GIT_ARGV_PREFIX) + ["cat-file", "--batch"]
+        with self.assertRaisesRegex(cso.CurrentSourceError, "process_output_limit"):
+            cso._git_batch(reader, argv, b"x\n", cso.git_environment(self.repo+"/.git"), 3)
+        self.assertTrue(children)
+        self.assertIsNotNone(children[0].poll())
+
+    def test_pack_store_refuses_symlink_and_promisor(self):
+        pack = os.path.join(self.repo, ".git", "objects", "pack")
+        name = "pack-" + "a"*40 + ".idx"
+        target = os.path.join(self.base, "unrelated")
+        with open(target, "wb") as handle:
+            handle.write(b"inert fixture")
+        os.symlink(target, os.path.join(pack, name))
+        try:
+            with self.assertRaises(cso.CurrentSourceError):
+                cso.packed_identity(cso.Reader(), self.repo + "/.git")
+        finally:
+            os.unlink(os.path.join(pack, name))
+        marker = os.path.join(pack, "pack-" + "a"*40 + ".promisor")
+        with open(marker, "wb") as handle:
+            handle.write(b"")
+        try:
+            with self.assertRaisesRegex(cso.CurrentSourceError, "unsafe_pack_store"):
+                cso.packed_identity(cso.Reader(), self.repo + "/.git")
+        finally:
+            os.unlink(marker)
+
     @unittest.skipIf(sys.platform.startswith("linux"), "Linux has qualified memory cap")
     def test_packed_child_refuses_without_qualified_memory_limit(self):
         with self.assertRaisesRegex(cso.CurrentSourceError, "packed_limits_unavailable"):
@@ -890,6 +941,20 @@ class PublicationTests(Host):
             self.assertEqual([name for name in os.listdir(dest)
                               if not name.startswith(".")],
                              [os.path.basename(final)])
+
+    def test_publication_refuses_resealed_foreign_root_and_run(self):
+        request, owner, invocation, response = self.observed()
+        for field in ("root", "run_id"):
+            altered = copy.deepcopy(response)
+            altered[field] = "foreign-value"
+            if field == "root":
+                altered["receipt"][field] = altered[field]
+            altered["receipt"]["response_sha256"] = cso.digest_of(
+                {k:v for k,v in altered.items() if k != "receipt"})
+            with tempfile.TemporaryDirectory(prefix="cso-pub-") as dest:
+                with self.assertRaisesRegex(cso.NativeRefused, "native_scope_caller_mismatch"):
+                    cso.publish_observation(altered, dest, invocation, reserve=TestChain)
+                self.assertEqual(os.listdir(dest), [])
 
     def test_publication_refuses_caller_mismatch_owner_refusal_and_tamper(self):
         request, owner, invocation, response = self.observed()
