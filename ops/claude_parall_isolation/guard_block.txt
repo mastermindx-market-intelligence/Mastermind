@@ -48,7 +48,7 @@
         ):
             return True
         if re.fullmatch(
-            r"/Applications/Claude (?:Default|Official)\.app/Contents/MacOS/[^/]+",
+            r"/Applications/Claude(?: (?:Default|Official))?\.app/Contents/MacOS/[^/]+",
             path,
         ):
             return True

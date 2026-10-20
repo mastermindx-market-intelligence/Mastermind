@@ -37,7 +37,10 @@ GUARD_START = "    # A generic Claude Desktop launch uses"
 # digest fences migration of that installed prefix: any other local edits
 # require explicit reconciliation, not replacement.
 KNOWN_INSTALLED_V1_BLOCK_SHA256 = (
-    "c8c44578bd008662f3faa0fd5c8ed7ae51f3f66118317a49a8074bba97baa169"
+    "4b12401dcd7a62755e318df00da603f13e8bb091deac0bcb4b72c760d8af38d3"
+)
+KNOWN_INSTALLED_V2_BLOCK_SHA256 = (
+    "ed05652cb4316438b48eeedf1957a62d96f96e24906dc9878d0275f04e87d82d"
 )
 LEGACY_WORKSPACE_ROOT = '        "/Volumes/Mastermind/agent-workspaces",\n'
 NEW_WORKSPACE_ROOT = '        "/Volumes/Mastermind 2/agent-workspaces",\n'
@@ -73,7 +76,10 @@ def render(kind: str, before: str) -> str:
             start = before.index(GUARD_START)
             end = before.index(GUARD_ANCHOR)
             installed_block = before[start:end]
-            if sha(installed_block.encode()) != KNOWN_INSTALLED_V1_BLOCK_SHA256:
+            if sha(installed_block.encode()) not in (
+                KNOWN_INSTALLED_V1_BLOCK_SHA256,
+                KNOWN_INSTALLED_V2_BLOCK_SHA256,
+            ):
                 raise ValueError("unrecognized guard block: preserve existing owner edits")
             after = before[:start] + block + before[end:]
         elif sha(before.encode()) == KNOWN_PRE_ISOLATION_GUARD_SHA256:
