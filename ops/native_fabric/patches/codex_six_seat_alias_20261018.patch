@@ -22,7 +22,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +    user_id_sha256: Optional[str] = None
 +    entitlement_class: Optional[str] = None
 +    qualified_models: Optional[frozenset[str]] = None
-@@ -44,0 +60,41 @@
+@@ -44,0 +60,44 @@
 +
 +
 +def _subject_key(row: AccountObservation) -> tuple[str, str, str] | None:
@@ -57,6 +57,9 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        return False
 +    if requested_model is not None and (models is None or requested_model not in models):
 +        return False
++    if (requested_model is not None and row.alias not in BUSINESS_ALIASES
++            and _subject_key(row) is None):
++        return False
 +    if row.alias not in BUSINESS_ALIASES:
 +        return True
 +    if (requested_model is None or row.entitlement_class != "business_premium_included"
@@ -64,14 +67,14 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        return False
 +    # A Business quota with no live reset horizon is not evidence of room.
 +    return row.reset_at is not None and _utc(row.reset_at) > now
-@@ -88,0 +145 @@
+@@ -88,0 +148 @@
 +    requested_model: Optional[str] = None,
-@@ -99,0 +157,4 @@
+@@ -99,0 +160,4 @@
 +    if requested_model is not None and (
 +        type(requested_model) is not str or _MODEL.fullmatch(requested_model) is None
 +    ):
 +        raise ValueError("codex_requested_model_invalid")
-@@ -104 +165,16 @@
+@@ -104 +168,16 @@
 -    eligible = [r for r in rows if _fresh_and_eligible(r, now)]
 +    eligible = [
 +        r for r in rows if _fresh_and_eligible(r, now)
@@ -89,7 +92,7 @@ diff --git a/codex_pool_policy.py b/codex_pool_policy.py
 +        r for r in eligible
 +        if (key := _subject_key(r)) is None or seen[key] == 1
 +    ]
-@@ -174,0 +251,124 @@
+@@ -174,0 +254,124 @@
 +
 +
 +
