@@ -84,6 +84,65 @@ def _write_executable(path: Path, body: str) -> None:
     path.chmod(0o755)
 
 
+def _write_python_executable(path: Path, body: str) -> None:
+    """Quote the exact interpreter and preserve the invoked alias and arguments."""
+    import shlex
+    import sys
+
+    program = path.with_name(path.name + ".py")
+    program.write_text("import sys\nsys.argv = sys.argv[1:]\n" + body, encoding="utf-8")
+    _write_executable(
+        path,
+        "#!/bin/sh\nexec " + shlex.quote(sys.executable) + " " + shlex.quote(str(program))
+        + ' "$0" "$@"\n',
+    )
+
+
+def test_python_fixture_launcher_preserves_spaced_interpreter_and_arguments(tmp_path, monkeypatch):
+    import json
+    import shlex
+    import sys
+
+    original_executable = sys.executable
+    expected_runtime = {
+        "executable": os.path.realpath(original_executable),
+        "prefix": sys.prefix,
+        "base_prefix": sys.base_prefix,
+    }
+    runtime = tmp_path / "Python runtime's path"
+    runtime.mkdir()
+    interpreter = runtime / "python3"
+    _write_executable(
+        interpreter,
+        '#!/bin/sh\nexport FAKE_INTERPRETER_EXECUTION_WITNESS="$0"\nexec '
+        + shlex.quote(original_executable) + ' "$@"\n',
+    )
+    monkeypatch.setattr(sys, "executable", str(interpreter))
+    launcher = tmp_path / "transport launcher"
+    _write_python_executable(
+        launcher,
+        'import json, os\nprint(json.dumps({'
+        '"witness": os.environ.get("FAKE_INTERPRETER_EXECUTION_WITNESS"), '
+        '"argv": sys.argv, "executable": os.path.realpath(sys.executable), '
+        '"prefix": sys.prefix, "base_prefix": sys.base_prefix}))\n',
+    )
+    alias = tmp_path / "invoked alias"
+    alias.symlink_to(launcher)
+    arguments = ["", "two words", "quote'\"value", "$HOME; $(printf forbidden) *", "--flag=value"]
+    empty_path = tmp_path / "empty-path"
+    empty_path.mkdir()
+    env = dict(os.environ, PATH=str(empty_path))
+    env.pop("FAKE_INTERPRETER_EXECUTION_WITNESS", None)
+    result = subprocess.run(
+        [str(alias), *arguments], env=env,
+        text=True, capture_output=True, check=False, timeout=10,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout) == {
+        **expected_runtime, "witness": str(interpreter), "argv": [str(alias), *arguments],
+    }
+
+
 def _fake_transport(
     tmp_path: Path, *, fail_new_release: bool
 ) -> tuple[dict[str, str], Path, str, str]:
@@ -93,7 +152,6 @@ def _fake_transport(
     The fake service's booted SHA is independent of the on-disk marker.
     """
     import shutil
-    import sys
 
     real_rsync = shutil.which("rsync")
     if real_rsync is None:
@@ -120,8 +178,8 @@ def _fake_transport(
     events = tmp_path / "restart_events"
     (tmp_path / "service_state").write_text("active")
     (tmp_path / "booted_sha").write_text(old_sha)
-    shim = fake_bin / "transport.py"
-    _write_executable(shim, "#!" + sys.executable + "\n" + r'''
+    shim = fake_bin / "transport"
+    _write_python_executable(shim, r'''
 import hashlib, json, os, pathlib, signal, subprocess, sys
 
 root = pathlib.Path(os.environ["FAKE_ROOT"]).resolve()
@@ -210,6 +268,14 @@ elif name == "systemctl":
     gate("restart"); event("restart")
     sha = (remote / ".deployed_git_sha").read_text().strip() if (remote / ".deployed_git_sha").exists() else "missing"
     with (root / "restart_events").open("a") as stream: stream.write(sha + "\n")
+    observed_paths = json.loads(os.environ.get("FAKE_RESTART_OBSERVE", "[]"))
+    if observed_paths:
+        files = {}
+        for relative_path in observed_paths:
+            path = inside((root / relative_path).resolve())
+            files[relative_path] = path.read_bytes().hex() if path.is_file() else None
+        with (root / "restart_file_observations.jsonl").open("a") as stream:
+            stream.write(json.dumps({"sha": sha, "files": files}) + "\n")
     state_path.write_text("active"); boot_path.write_text(sha)
     if sha == os.environ["FAKE_EXPECTED"] and flag("FAKE_CREATE_EXCLUDED_CACHE_ON_RESTART"):
         cache = remote / "new_package/__pycache__/x.pyc"
@@ -236,8 +302,28 @@ elif name == "curl":
 elif name == "python3":
     if args[:2] != ["-m", "portfolio.forward_evaluation"] or len(args) < 3:
         raise RuntimeError("only the fake forward CLI is admitted; no app import")
-    command = args[2]; gate(command)
+    received_root = os.environ.get("MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT", "")
+    if not received_root or not pathlib.Path(received_root).is_absolute():
+        raise RuntimeError("fake forward CLI requires a nonempty absolute release-state root")
+    release_data = pathlib.Path(received_root).resolve(strict=True)
+    if release_data != data.resolve(strict=True):
+        raise RuntimeError("fake forward CLI release-state root is not the admitted live-data root")
+    marker = release_data / "portfolio_forward_evaluation/start.json"
+    command = args[2]
     expected = os.environ["FAKE_EXPECTED"]
+    if command in {"init", "finalize"}:
+        supplied_shas = []
+        for index, value in enumerate(args[3:], start=3):
+            if value == "--deployment-sha":
+                if index + 1 >= len(args):
+                    raise RuntimeError("fake forward CLI deployment-sha has no value")
+                supplied_shas.append(args[index + 1])
+            elif value.startswith("--deployment-sha="):
+                supplied_shas.append(value.split("=", 1)[1])
+        if supplied_shas != [expected]:
+            raise RuntimeError("fake forward CLI requires exactly one expected deployment-sha")
+        deployment_sha = supplied_shas[0]
+    gate(command)
     if command == "init":
         marker.parent.mkdir(parents=True, exist_ok=True)
         if flag("FAKE_FOREIGN_INIT"):
@@ -247,7 +333,7 @@ elif name == "python3":
             payload = json.loads(marker.read_text())
             output({**payload, "initialized": False})
         else:
-            payload = {"release_state": "pending_health", "deployment_sha": expected, "evaluation_start": "2026-08-11"}
+            payload = {"release_state": "pending_health", "deployment_sha": deployment_sha, "evaluation_start": "2026-08-11"}
             marker.write_text(json.dumps(payload, sort_keys=True) + "\n")
             if flag("FAKE_LOST_INIT_REPLY"): sys.exit(255)
             output({**payload, "initialized": True})
@@ -255,7 +341,7 @@ elif name == "python3":
         if not marker.exists(): sys.exit(2)
         payload = json.loads(marker.read_text())
         if payload.get("release_state") != "active":
-            payload.update(release_state="active", health_verified_sha=expected)
+            payload.update(release_state="active", health_verified_sha=deployment_sha)
             marker.write_text(json.dumps(payload, sort_keys=True) + "\n")
         if flag("FAKE_LOST_FINALIZE_REPLY"): sys.exit(255)
         output(payload)
@@ -530,6 +616,118 @@ exit 33
     else:
         assert not version.exists()
     assert "Datadog release tag refresh failed" in result.stdout
+
+
+@pytest.mark.parametrize("onboarded", [False, True])
+@pytest.mark.parametrize("fail_new_release", [False, True])
+def test_deploy_datadog_tag_matches_target_and_restores_prior_bytes(tmp_path, onboarded, fail_new_release):
+    import json
+
+    env, events, old_sha, new_sha = _fake_transport(tmp_path, fail_new_release=fail_new_release)
+    systemd = tmp_path / "systemd"
+    version_path = "systemd/fixture.service.d/81-datadog-version.conf"
+    version = tmp_path / version_path
+    prior = f"[Service]\n# preserve prior configuration\nEnvironment=DD_VERSION={old_sha}\n".encode()
+    if onboarded:
+        version.parent.mkdir(parents=True)
+        (version.parent / "80-datadog.conf").write_text("[Service]\n")
+        version.write_bytes(prior)
+    other = systemd / "mastermind.service.d/81-datadog-version.conf"
+    other.parent.mkdir(parents=True)
+    (other.parent / "80-datadog.conf").write_text("[Service]\n")
+    other.write_bytes(b"unrelated service version\n")
+    scripts = tmp_path / "source/scripts"
+    scripts.mkdir()
+    _write_executable(scripts / "refresh_datadog_release_tag.sh",
+                      (ROOT / "scripts/refresh_datadog_release_tag.sh").read_text())
+    env.update(SYSTEMD_ROOT=str(systemd), SYSTEMCTL_BIN=str(tmp_path / "bin/systemctl"),
+               FAKE_RESTART_OBSERVE=json.dumps([version_path]))
+
+    result = _run_deploy(env)
+
+    assert result.returncode == (1 if fail_new_release else 0), result.stdout + result.stderr
+    expected_restarts = [new_sha, old_sha] if fail_new_release else [new_sha]
+    assert events.read_text().splitlines() == expected_restarts
+    reloads_and_restarts = [item["event"] for item in _transport_events(tmp_path)
+                           if item["event"] in {"daemon-reload", "restart"}]
+    per_start = ["daemon-reload", "restart"] if onboarded else ["restart"]
+    assert reloads_and_restarts == per_start * len(expected_restarts)
+    observations = [json.loads(line) for line in
+                    (tmp_path / "restart_file_observations.jsonl").read_text().splitlines()]
+    target = f"[Service]\nEnvironment=DD_VERSION={new_sha}\n".encode() if onboarded else None
+    assert observations[0] == {"sha": new_sha, "files": {version_path: target.hex() if target else None}}
+    expected_final = prior if onboarded and fail_new_release else target
+    assert (version.read_bytes() if version.exists() else None) == expected_final
+    if fail_new_release:
+        assert observations[1] == {"sha": old_sha, "files": {
+            version_path: prior.hex() if onboarded else None}}
+    assert other.read_bytes() == b"unrelated service version\n"
+
+
+@pytest.mark.parametrize("preexisting", [False, True])
+@pytest.mark.parametrize("fail_new_release", [False, True])
+def test_deploy_transfers_and_restores_reasoning_policy_files(tmp_path, preexisting, fail_new_release):
+    import json
+
+    env, events, old_sha, new_sha = _fake_transport(tmp_path, fail_new_release=fail_new_release)
+    target_files, prior_files = {}, {}
+    for package in (".claude", ".codex"):
+        source_dir = tmp_path / "source" / package / "agents"
+        source_dir.mkdir(parents=True)
+        for name, data in (("reviewer.md", b"new reviewer policy\n"), ("introduced.md", b"new policy\n")):
+            (source_dir / name).write_bytes(data)
+            relative_path = f"remote/{package}/agents/{name}"
+            target_files[relative_path] = data.hex()
+            prior_files[relative_path] = None
+        if preexisting:
+            old = tmp_path / "remote" / package / "agents/reviewer.md"
+            old.parent.mkdir(parents=True)
+            old.write_bytes(b"prior reviewer policy\n")
+            prior_files[f"remote/{package}/agents/reviewer.md"] = old.read_bytes().hex()
+    env["FAKE_RESTART_OBSERVE"] = json.dumps(sorted(target_files))
+
+    result = _run_deploy(env)
+
+    assert result.returncode == (1 if fail_new_release else 0), result.stdout + result.stderr
+    expected_restarts = [new_sha, old_sha] if fail_new_release else [new_sha]
+    assert events.read_text().splitlines() == expected_restarts
+    observations = [json.loads(line) for line in
+                    (tmp_path / "restart_file_observations.jsonl").read_text().splitlines()]
+    assert observations[0] == {"sha": new_sha, "files": target_files}
+    expected_final = prior_files if fail_new_release else target_files
+    actual = {path: (tmp_path / path).read_bytes().hex() if (tmp_path / path).is_file() else None
+              for path in target_files}
+    assert actual == expected_final
+    if fail_new_release:
+        assert observations[1] == {"sha": old_sha, "files": prior_files}
+        if not preexisting:
+            assert not (tmp_path / "remote/.claude").exists()
+            assert not (tmp_path / "remote/.codex").exists()
+
+
+@pytest.mark.parametrize("marker_state", ["missing", "pending_health"])
+def test_healthy_unchanged_code_does_not_skip_cohort_activation(tmp_path, marker_state):
+    import json
+    import shutil
+
+    env, events, _old_sha, new_sha = _fake_transport(tmp_path, fail_new_release=False)
+    shutil.copytree(tmp_path / "source", tmp_path / "remote", dirs_exist_ok=True)
+    (tmp_path / "remote/.deployed_git_sha").write_text(new_sha + "\n")
+    (tmp_path / "booted_sha").write_text(new_sha)
+    marker = tmp_path / "live-data/portfolio_forward_evaluation/start.json"
+    if marker_state == "pending_health":
+        marker.parent.mkdir(parents=True)
+        marker.write_text(json.dumps({"release_state": marker_state, "deployment_sha": new_sha,
+                                      "evaluation_start": "2026-08-11"}) + "\n")
+    result = _run_deploy(env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "deploy no-op" not in result.stdout
+    assert events.read_text().splitlines() == [new_sha]
+    state = json.loads(marker.read_text())
+    assert state["release_state"] == "active"
+    assert state["deployment_sha"] == state["health_verified_sha"] == new_sha
+    gate_events = (tmp_path / "activation_events").read_text().splitlines()
+    assert "init" in gate_events and "finalize" in gate_events
 
 
 def test_integrity_sigterm_after_copy_restores_once(tmp_path):
