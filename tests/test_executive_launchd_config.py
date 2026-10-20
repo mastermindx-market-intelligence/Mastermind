@@ -790,6 +790,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "fabric_attended_probe",
         "coo_foreground_only",
         "coo_principal_dialogue_armed",
+        # Native V2 requires explicitly sealed source and remains absent by default.
+        "native_capacity_v2",
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",

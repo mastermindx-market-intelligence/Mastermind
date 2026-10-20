@@ -73,7 +73,7 @@ class _ForegroundCustody:
 
 class MixedExecutionOwnerSupervisor:
     def __init__(self, primary: ExecutiveSupervisor,
-                 owners: Mapping[str, ExecutiveSupervisor]):
+                 owners: Mapping[str, ExecutiveSupervisor], *, initial_admission=None):
         if type(primary) is not ExecutiveSupervisor or not owners:
             raise SupervisorError("mixed composition requires existing Supervisors")
         if any(type(key) is not str or not key or type(owner) is not ExecutiveSupervisor
@@ -83,6 +83,10 @@ class MixedExecutionOwnerSupervisor:
             raise SupervisorError("mixed owners must share the exact Runtime and service instance")
         if not any(owner is primary for owner in owners.values()):
             raise SupervisorError("mixed composition must retain its original planner owner")
+        from control_plane.finite_initial_admission import FiniteInitialAdmission
+        if initial_admission is not None and type(initial_admission) is not FiniteInitialAdmission:
+            raise SupervisorError('finite initial source must be the actual typed owner')
+        self._initial_admission = initial_admission
         self.primary = primary
         self.runtime = primary.runtime
         self.instance_id = primary.instance_id
@@ -196,14 +200,19 @@ class MixedExecutionOwnerSupervisor:
             raise
 
     async def start_cycle_job(self, job_id: str, *, command_id: str):
-        operation = self._foreground(job_id)  # Before a new claim or any effect.
+        job = self.runtime.jobs.get_job(job_id)
+        initial = (self._initial_admission if job is not None and "attended_route" in job.constraints else None)
+        operation = self._foreground(job_id) if initial is None else None
         target = (self.primary._exact_target_provider(job_id)
                   if self.primary._exact_target_provider is not None else None)
         if target is not None:
             target = _require_exact_worker_target(target)
-        outcome = self.runtime.attempts.dispatch_cycle_job(
-            job_id, command_id=command_id, lease_owner=self.instance_id,
-            **({"exact_target": target} if target is not None else {}))
+        if initial is not None:
+            outcome = await initial.dispatch(self.runtime,job_id,command_id,lease_owner=self.instance_id,exact_target=target)
+        else:
+            outcome = self.runtime.attempts.dispatch_cycle_job(
+                job_id, command_id=command_id, lease_owner=self.instance_id,
+                **({"exact_target": target} if target is not None else {}))
         if outcome is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
         # In particular, a CLAIMED replay without an exact target must not
@@ -213,6 +222,8 @@ class MixedExecutionOwnerSupervisor:
             return outcome
         if outcome.lease_token is None:
             raise SupervisorError("active dispatch lost its original lease")
+        if initial is not None:
+            operation = self._foreground(job_id)
         owner = self._select(outcome.attempt)
         return await self._start(owner, job_id,
             AttemptLease(outcome.attempt, outcome.lease_token), operation, target=target)

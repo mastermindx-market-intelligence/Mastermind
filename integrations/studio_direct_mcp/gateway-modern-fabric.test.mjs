@@ -120,14 +120,14 @@ test('modern calls cannot reach unrelated tools, and catalog drift fails closed'
 });
 
 test('an effectful timeout preserves UNKNOWN and the real facade refuses replay on the next exchange', async () => {
-  const gw = await startPrivateGateway({ ...profile, requestTimeoutMs: 300,
+  const gw = await startPrivateGateway({ ...profile,
     childEnv: { FIXTURE_FACADE_TIMEOUT: 'true' } });
   let client;
   const args = { run_id: 'fixture-timeout', root_id: 'fixture-root', parent_id: 'fixture-root',
     task_class: 'mechanical', task_complexity: 'C0_MECHANICAL', work_packet: 'Disposable fixture only.' };
   try {
     client = await connect(gw);
-    await client.listTools(); // Establish stdio outside the effect deadline.
+    await client.listTools(); // Verify startup before the deliberately pending effect.
     await assert.rejects(client.callTool({ name: 'fabric_request', arguments: args }), error => {
       assert.match(error.message, /EFFECT_UNKNOWN/);
       assert.equal(error.code, -32603);
