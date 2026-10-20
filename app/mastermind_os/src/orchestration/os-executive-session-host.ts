@@ -70,11 +70,35 @@ export function createOsExecutiveSessionHost(
       submit: (pointer, intent, signal) => original.submit(pointer, intent, signal),
       readOperation: (pointer, signal) => original.readOperation(pointer, signal),
       readQualifiedAnswer: (pointer, signal) => original.readQualifiedAnswer(pointer, signal),
-      readOriginalReferences: transport.references ? (selected, signal, cursor) => {
-        const normalized = selected;
-        const args = { work_ref: normalized.workRef, root_job_id: normalized.rootJobId,
+      readOriginalReferences: transport.references ? async (selected, signal, cursor) => {
+        // This READ lives under the *same* verified Session owner as the
+        // qualified native reply. A stale/unverified or foreign selection
+        // must never start an HTTP call merely because a UI closure survives.
+        const state = handle.sessionState();
+        const owner = original.context();
+        const authGeneration = transport.authGeneration();
+        if (!state || !owner || signal.aborted ||
+            selected.workRef !== state.selection.workRef ||
+            selected.rootJobId !== state.selection.rootJobId) {
+          throw new Error("session_references_unavailable");
+        }
+        const args = { work_ref: state.selection.workRef,
+                       root_job_id: state.selection.rootJobId,
                        page_size: 16, ...(cursor ? { cursor } : {}) };
-        return transport.references!(args, signal);
+        const raw = await transport.references!(args, signal);
+        // An auth, expiry, selection, or host refresh during the await must
+        // withhold the old frame, even if the HTTP response itself succeeded.
+        const current = handle.sessionState();
+        const afterOwner = original.context();
+        if (signal.aborted || !current || !afterOwner ||
+            transport.authGeneration() !== authGeneration ||
+            afterOwner.principalScope !== owner.principalScope ||
+            afterOwner.generation !== owner.generation ||
+            current.selection.workRef !== state.selection.workRef ||
+            current.selection.rootJobId !== state.selection.rootJobId) {
+          throw new Error("session_references_unavailable");
+        }
+        return raw;
       } : undefined,
       currentTargetRef: () => {
         const state = handle.sessionState();
