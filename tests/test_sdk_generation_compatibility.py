@@ -274,7 +274,8 @@ def test_actual_options_public_query_and_parser_preserve_diagnostic_off_on_contr
                     assert first["exit"]["exit_code"] == (1 if RESULT_ERROR else None)
                 if case == "contradictory_clean_eof":
                     assert first["terminals"]["last"]["contradictory_success_with_is_error"] is True
-                    assert result["ok"] is True  # Preserve the existing outward-result rule.
+                    assert result["ok"] is False and result["error"] == "sdk_terminal_error"
+                    assert result["text"] == "fixture failure detail"
                 if case == "quota_text_only":
                     assert len(h.providers) == (2 if RESULT_ERROR else 1)
                     assert len(h.cooling) == (1 if RESULT_ERROR else 0)

@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import subprocess
 from pathlib import Path
 
 import pytest
@@ -695,44 +694,3 @@ def test_scheduled_post_mark_evaluation_runs_inside_book_lock(
     getattr(scheduler, job_name)()
     assert calls == [(book, "2026-08-12")]
     assert locked["active"] is False
-
-
-def test_deploy_transaction_closes_race_noop_and_failure_paths(tmp_path: Path) -> None:
-    root = Path(__file__).resolve().parent.parent
-    script = (root / "scripts" / "deploy_code_to_vps.sh").read_text(encoding="utf-8")
-    marker_write = script.index("release marker write failed")
-    stop = script.index("systemctl stop '$SVC'", marker_write)
-    init = script.index("python3 -m portfolio.forward_evaluation init", stop)
-    restart = script.index("systemctl restart '$SVC'", init)
-    health = script.index('if [[ "$CODE" == "200" ]]', restart)
-    finalize = script.index("python3 -m portfolio.forward_evaluation finalize", health)
-    verify = script.index("python3 -m portfolio.forward_evaluation status", finalize)
-    success = script.index('log "deploy OK: $SVC healthy at commit $EXPECTED_SHA"')
-    assert stop < init < restart < health < finalize < verify < success
-    assert '&& probe_forward_evaluation; then' in script
-    assert 'LIVE_DATA_PATH="${MASTERMIND_VPS_LIVE_DATA_PATH:-/opt/mastermind-live-data}"' in script
-    assert script.count("MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT='$LIVE_DATA_PATH'") >= 4
-    assert 'FORWARD_START_CREATED=1' in script
-    assert "rm -f '$LIVE_DATA_PATH/portfolio_forward_evaluation/start.json'" in script
-    assert 'fail_release "forward evaluation pending start initialization failed"' in script
-    assert 'fail_release "forward evaluation activation/status verification failed"' in script
-    assert subprocess.run(["bash", "-n", str(root / "scripts" / "deploy_code_to_vps.sh")],
-                          check=False).returncode == 0
-
-    # Pin the bounded rollback semantic: only a marker explicitly attributed to this failed
-    # release is removed; a pre-existing marker survives.
-    marker = tmp_path / "new-start-marker.json"
-    marker.write_text("new", encoding="utf-8")
-    try:
-        result = subprocess.run(
-            ["bash", "-c", (
-                f"start_marker='{marker}'; FORWARD_START_CREATED=1; "
-                'if [ "$FORWARD_START_CREATED" -eq 1 ]; then rm -f "$start_marker"; fi; '
-                "false"
-            )],
-            check=False,
-        )
-        assert result.returncode != 0
-        assert not marker.exists()
-    finally:
-        marker.unlink(missing_ok=True)

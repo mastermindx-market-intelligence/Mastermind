@@ -1,6 +1,8 @@
 """Finite config staging uses the real global transaction, without host effects."""
 import json
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +11,8 @@ from ops.executive_os import autonomy_control as owner
 from ops.executive_os import attended_control_staging as staging
 from tests.test_executive_autonomy_control import SHA, _inprocess_marker_host
 from tests.test_attended_worker_definition import inputs
+from tests.test_executive_fabric_composition import root_stats
+from tests.test_fabric_attended_routing import router
 
 
 def replace_fixture(path, raw):
@@ -268,3 +272,226 @@ def test_real_definition_consumer_requires_selected_installed_generation(monkeyp
         assert host.read_delta()['fabric_bindings_sha256'] == owner.sha256_bytes(artifacts['bindings.json'])
     else:
         with pytest.raises(ValueError): host.read_delta()
+
+
+# ---------------------------------------------------------------------------
+# gap-3: the staged finite composition refuses a non-bootable or TCP Control
+# Room before any marker or write, and the published composition boots.
+# ---------------------------------------------------------------------------
+
+
+def _workspace_composition(control_uid, *, room=None, drop=()):
+    """Build the closed workspace + App peer stanza shape used by the
+    installed-control boot fixture, optionally dropping any of the three
+    workspace keys for the partial-composition refusal cases.
+    """
+
+    value = {
+        'control_uid': int(control_uid),
+        'workspace_acquisition': {
+            'schema': 'mastermind.workspace_acquisition_bindings.v1',
+            'profiles': {
+                'web': {'enabled': False, 'binding': None},
+                'mac': {'enabled': False, 'binding': None},
+            },
+        },
+        'workspace_resource_policy': {
+            'schema': 'mastermind.workspace_resource_policy/v1',
+            'placeholder': True,
+        },
+        'ceo_ingress_app_peer_uid': int(control_uid) + 17,
+        'ceo_ingress_app_armed': True,
+        'ceo_ingress_app_macro_root': '/macro/anywhere',
+    }
+    if room is not None:
+        value['workspace_control_room'] = room
+    else:
+        from tests.executive_installed_control_fixture import unix_stanza
+        value['workspace_control_room'] = unix_stanza(control_uid)
+    for key in drop:
+        value.pop(key, None)
+    return value
+
+
+def _install_workspace(s, **overrides):
+    """Re-write CONTROL_CONFIG with the given overlay so the next ``stage``
+    sees those keys in ``prior.control``. Updates ``s.control`` and ``s.worker``
+    snapshots to keep the marker/config unchanged assertions correct. Removes
+    any ``drop`` keys from the existing document first so the partial composition
+    cases actually see those keys missing.
+    """
+
+    value = json.loads(s.control)
+    for key in overrides.get('drop', ()):
+        value.pop(key, None)
+    overlay = _workspace_composition(os.geteuid(), **overrides)
+    value.update(overlay)
+    replace_fixture(owner.CONTROL_CONFIG, owner.encode_config(value))
+    s.control = owner.CONTROL_CONFIG.read_bytes()
+    return overlay
+
+
+def test_staging_refuses_legacy_tcp_control_room_before_marker(installed):
+    s = installed
+    added = _install_workspace(s, room={'port': 8787})
+    worker_before = s.worker
+
+    with pytest.raises(ValueError) as excinfo:
+        stage(s)
+    message = str(excinfo.value)
+    assert 'staged Control composition cannot boot' in message
+    assert 'legacy TCP port stanza refused' in message
+    assert not s.marker.exists()
+    assert owner.CONTROL_CONFIG.read_bytes() == s.control
+    assert owner.WORKER_CONFIG.read_bytes() == worker_before
+    # The candidate must not have merged any finite delta into the on-disk
+    # control before the refusal.
+    assert 'fabric_bindings_path' not in json.loads(s.control)
+    assert 'workspace_control_room' in json.loads(s.control)
+    assert json.loads(s.control)['workspace_control_room'] == added['workspace_control_room']
+
+
+@pytest.mark.parametrize('drop', [
+    ('workspace_acquisition',),
+    ('workspace_resource_policy',),
+    ('workspace_control_room',),
+    ('ceo_ingress_app_armed',),
+])
+def test_staging_refuses_partial_workspace_composition_before_marker(installed, drop):
+    s = installed
+    added = _install_workspace(s, drop=drop)
+    worker_before = s.worker
+
+    with pytest.raises(ValueError) as excinfo:
+        stage(s)
+    message = str(excinfo.value)
+    assert 'staged Control composition cannot boot' in message
+    assert 'workspace acquisition requires' in message
+    assert not s.marker.exists()
+    assert owner.CONTROL_CONFIG.read_bytes() == s.control
+    assert owner.WORKER_CONFIG.read_bytes() == worker_before
+    on_disk = json.loads(s.control)
+    for key, value in added.items():
+        if key in drop:
+            assert key not in on_disk, f'{key} should have been dropped'
+        else:
+            assert on_disk.get(key) == value, f'{key} should have been preserved'
+
+
+def _malformed_rooms(uid):
+    from scripts import executive_os_phase1c as cli
+    return [
+        ('transport_tcp', {'transport': 'tcp',
+            'socket_path': cli._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+            'launchd_socket_name': cli._WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+            'allowed_peer_uids': [uid]}),
+        ('wrong_socket_path', {'transport': 'unix',
+            'socket_path': '/tmp/foreign-room.sock',
+            'launchd_socket_name': cli._WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+            'allowed_peer_uids': [uid]}),
+        ('stranger_peer_uid', {'transport': 'unix',
+            'socket_path': cli._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+            'launchd_socket_name': cli._WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+            'allowed_peer_uids': [uid + 7]}),
+        ('extra_port_key', {'transport': 'unix',
+            'socket_path': cli._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+            'launchd_socket_name': cli._WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+            'allowed_peer_uids': [uid],
+            'port': 8787}),
+    ]
+
+
+@pytest.mark.parametrize('label,room', _malformed_rooms(os.geteuid()))
+def test_staging_refuses_malformed_unix_room_before_marker(installed, label, room):
+    s = installed
+    worker_before = s.worker
+    _install_workspace(s, room=room)
+
+    with pytest.raises(ValueError) as excinfo:
+        stage(s)
+    message = str(excinfo.value)
+    assert ('staged Control composition cannot boot: '
+        'workspace Control Room topology refused') in message, (
+        f'{label}: {message}')
+    assert not s.marker.exists()
+    assert owner.CONTROL_CONFIG.read_bytes() == s.control
+    assert owner.WORKER_CONFIG.read_bytes() == worker_before
+
+
+def test_staging_publishes_unix_room_composition_with_only_the_finite_delta(installed, monkeypatch):
+    from scripts import executive_os_phase1c as cli
+    monkeypatch.setattr(cli, '_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET',
+        cli._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET, raising=False)
+
+    s = installed
+    added = _install_workspace(s)
+    prior_bytes = s.control
+    prior = json.loads(prior_bytes)
+
+    tx = stage(s)
+    assert tx.startswith('autonomy-')
+    assert not s.marker.exists()
+
+    published = json.loads(owner.CONTROL_CONFIG.read_bytes())
+    expected = dict(prior, **s.delta)
+    assert published == expected
+    for key in ('workspace_acquisition', 'workspace_resource_policy', 'workspace_control_room'):
+        assert published[key] == added[key]
+        assert published[key] == prior[key]
+    assert owner.WORKER_CONFIG.read_bytes() == s.worker
+
+
+
+def test_staged_candidate_boots_with_zero_tcp_listeners(monkeypatch, tmp_path, root_stats, router):
+    from tests.test_workspace_control_room_unix_socket import (
+        zero_tcp_boot,
+    )
+
+    seen: list[object] = []
+
+    def transform(raw):
+        """Split the finite delta out of the composed raw, build the prior
+        shape ``candidate()`` consumes, run ``candidate`` and the static
+        ``control_boot_smoke``, and return the merged proposed control so the
+        installed-control boot fixture writes the exact same composition the
+        staging verb would publish. The canonical workspace socket path is
+        rebound to the boot fixture's runtime path so
+        ``validate_workspace_control_room`` accepts the stanza; the same path
+        the boot fixture will later patch as well, so the two writes are
+        consistent.
+        """
+
+        from scripts import executive_os_phase1c as cli
+        from ops.executive_os import autonomy_control as owner
+        monkeypatch.setattr(cli, '_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET',
+                            raw['workspace_control_room']['socket_path'])
+        finite = staging.NATIVE_FIELDS if 'native_capacity_v2' in raw else staging.FIELDS
+        prior_control = {key: value for key, value in raw.items() if key not in finite}
+        delta = {key: raw[key] for key in finite}
+        worker = {'operator_harness_armed': False}
+        prior_bytes = owner.encode_config(prior_control)
+        worker_bytes = owner.encode_config(worker)
+        from ops.executive_os.autonomy_control import ConfigEvidence
+        prior = ConfigEvidence(
+            control_sha256=owner.sha256_bytes(prior_bytes),
+            worker_sha256=owner.sha256_bytes(worker_bytes),
+            control=prior_control,
+            worker=worker,
+            control_bytes=prior_bytes,
+            worker_bytes=worker_bytes,
+        )
+        proposed = staging.candidate(prior, delta)
+        staging.control_boot_smoke(proposed.control)
+        seen.append(set(delta))
+        return proposed.control
+
+    proof = zero_tcp_boot(tmp_path, monkeypatch, root_stats, router, transform=transform)
+
+    assert proof.room.config.port == 0
+    from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+    assert proof.room.config.origin == UNIX_CONTROL_ROOM_ORIGIN
+    assert 'WorkspaceControlRoom' in proof.requested_names
+    assert seen, 'transform did not record the split finite delta'
+    on_disk = json.loads((tmp_path / 'control.json').read_bytes())
+    for key in seen[-1]:
+        assert key in on_disk

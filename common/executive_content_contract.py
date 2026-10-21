@@ -204,7 +204,7 @@ class ContentObserverProfile:
             raise ValueError('INVALID_REQUEST')
         if any(type(v) is not str or not 1 <= len(v) <= 256 or any(ord(c)<32 for c in v) for v in value.values()):
             raise ValueError('INVALID_REQUEST')
-        if value['schema'] != 'mastermind.executive_content_profile.v1' or value['content_decision'] != 'allowed_visible_response':
+        if value['schema'] != 'mastermind.executive_content_profile.v1' or value['content_decision'] not in ('allowed_visible_response', 'allowed_visible_response_and_progress_metadata'):
             raise ValueError('ACCESS_DENIED')
         if (re.fullmatch(r'managed-window:[A-Za-z0-9][A-Za-z0-9_.-]{0,95}',value['source_ref']) is None
                 or '..' in value['source_ref'] or value['client_ref']=='oauth-client-unavailable'
@@ -229,9 +229,12 @@ class ContentObserverProfile:
         return self.from_mapping(asdict(self))
 
     def broker_payload(self):
-        return dict(attempt=self.attempt_id,epoch=self.session_epoch_id,generation=self.process_generation_id,
+        result = dict(attempt=self.attempt_id,epoch=self.session_epoch_id,generation=self.process_generation_id,
                     turn=self.local_turn_id,operation_id=self.operation_id,profile_digest=self.profile_digest,
                     permission_digest=self.permission_digest,viewer_binding_digest=self.viewer_binding_digest)
+        if self.content_decision == 'allowed_visible_response_and_progress_metadata':
+            result['release_profile'] = 'visible_response_and_progress_metadata'
+        return result
 
     def frame(self, schema):
         return dict(schema=schema,profile_digest=self.profile_digest,source_ref=self.source_ref,

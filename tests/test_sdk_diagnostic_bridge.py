@@ -152,7 +152,7 @@ class Harness:
             "fixture prompt", model="fixture-model", role="analyst", arm=arm,
             allowed_tools=[], add_dirs=[], mcp_servers={}, cwd="/fixture/workspace",
             book="autonomous", log_run=log_run, _backend_override="cli",
-            _oauth_candidates=[] if candidates is None else candidates,
+            _subscription_slots=[] if candidates is None else candidates,
         ))
 
     def diagnostics(self):
@@ -183,9 +183,10 @@ def envelope(harness):
     return rows[0]["provider_diagnostic"]
 
 
-def test_actual_handler_contradictory_terminal_keeps_legacy_result(harness):
+def test_actual_handler_contradictory_terminal_keeps_failed_result(harness):
     result = harness.run([[ResultMessage(subtype="success", is_error=True, result="contradictory answer")]])
-    assert result["ok"] is True and result["text"] == "contradictory answer"
+    assert result["ok"] is False and result["error"] == "sdk_terminal_error"
+    assert result["text"] == "contradictory answer"
     diagnostic = envelope(harness)
     assert diagnostic["terminals"]["first"]["contradictory_success_with_is_error"] is True
     assert diagnostic["observation"]["query_entered_observed"] is True
@@ -432,7 +433,7 @@ def test_actual_runlog_writes_readable_bounded_envelope_with_distinct_ascii_row_
         result="供应链" * 1000, is_error=True, subtype="error",
         errors=["收益风险" * 1000, "市场观察" * 1000],
     )]])
-    assert result["ok"] is True
+    assert result["ok"] is False and result["error"] == "sdk_terminal_error"
     rows = (tmp_path / "fixture-run.jsonl").read_bytes().splitlines(keepends=True)
     raw = next(row for row in rows if json.loads(row)["type"] == "provider_diagnostic")
     row = json.loads(raw)
