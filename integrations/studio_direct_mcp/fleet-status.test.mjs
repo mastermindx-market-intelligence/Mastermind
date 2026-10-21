@@ -103,7 +103,7 @@ test('status returns only the bounded public fleet projection', async t => {
   const fx = await fixture(JSON.stringify(owner));
   t.after(() => rm(fx.dir, {recursive:true, force:true}));
   const result = await createFleetStatus(fx.config).status();
-  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v2');
   assert.equal(result.state, 'READY');
   assert.equal(result.accountCount, 1);
   assert.equal(result.readyCount, 1);
@@ -369,14 +369,14 @@ test('private seats are included in original owner readiness consistency checks'
 
 test('malformed or unknown private seat rows still fail closed', async t => {
   const cases = [
-    ownerFor([privateFabricStatus('fabric-not-in-owner-catalog')]),
+    ownerFor([privateFabricStatus('sk-proj-secret-shaped')]),
     ownerFor([privateFabricStatus('fabric-c3-570f6f34'), privateFabricStatus('fabric-c3-570f6f34')]),
     ownerFor([{ ...privateFabricStatus('fabric-design'), extra:'refuse' }]),
   ];
   const badScope = privateFabricStatus('fabric-c3-570f6f34');
   badScope.tunnel.account = 'chatgpt1';
   cases.push(ownerFor([badScope]));
-  const badTTL = statusRow('chatgpt1', false);
+  const badTTL = statusRow('chatgpt1', true);
   badTTL.tunnel.transportTTL = null;
   cases.push(ownerFor([badTTL]));
   const badPrivateReady = privateFabricStatus('fabric-read', true);
@@ -391,4 +391,53 @@ test('malformed or unknown private seat rows still fail closed', async t => {
       `invalid private seat case ${n}`,
     );
   }
+});
+
+test('new owner-enumerated private Fabric seats remain bounded and undisclosed', async t => {
+  const owner = ownerFor([
+    statusRow('chatgpt1', true),
+    privateFabricStatus('fabric-new-worker-catalog-2027'),
+  ]);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v2');
+  assert.equal(result.scope, 'public_accounts');
+  assert.equal(result.accountCount, 1);
+  assert.equal(result.readyCount, 1);
+  assert.equal(result.publicAllReady, true);
+  assert.equal(result.allReady, false);
+  assert.equal(result.state, 'DEGRADED');
+  assert.deepEqual(result.issues, ['OWNER_FLEET_DEGRADED']);
+  assert.deepEqual(result.accounts.map(x => x.account), ['chatgpt1']);
+  assert.equal(JSON.stringify(result).includes('fabric-new-worker-catalog-2027'), false);
+});
+
+test('stopped public tunnel may omit TTL without concealing degraded owner readiness', async t => {
+  const row = statusRow('chatgpt1', false);
+  row.tunnel.transportTTL = null;
+  const fx = await fixture(JSON.stringify(ownerFor([row])));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.allReady, false);
+  assert.equal(result.publicAllReady, false);
+  assert.deepEqual(result.accounts.map(x => x.account), ['chatgpt1']);
+});
+
+test('a healthy public projection cannot report owner fleet READY when private is degraded', async t => {
+  const fx = await fixture(JSON.stringify(ownerFor([
+    statusRow('chatgpt1', true),
+    {account:'subagent-fabric-future', ready:false, error:'private unavailable'},
+  ])));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.publicAllReady, true);
+  assert.equal(result.allReady, false);
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.accountCount, 1);
+  assert.equal(result.readyCount, 1);
+  const text = JSON.stringify(fleetStatusToolResult(result));
+  assert.equal(text.includes('subagent-fabric-future'), false);
+  assert.equal(text.includes('private unavailable'), false);
 });
