@@ -4098,3 +4098,110 @@ class TestC2PersonalGitTimeoutOnly(unittest.TestCase):
                 self.assertEqual(json.loads(payload)["effect"], "NOT_APPLIED")
                 unused.assert_not_called()
             self.assertEqual(original, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+
+
+class TestSealedV2FleetGatewayManifestRoster(unittest.TestCase):
+    """Only exact already-installed V2 files and bytes gain read compatibility."""
+
+    def _manifest(self, account, names):
+        digest = "a" * 64
+        return {
+            "version": 2, "account": account,
+            "label": _label_for(account),
+            "files": {name: digest for name in names},
+            "configHash": digest, "plistHash": digest,
+            "source": "/fixture/not-live", "node": "/fixture/node",
+            "backend": "/fixture/backend", "host": "127.0.0.1",
+            "port": 45020, "nodeHash": digest, "backendHash": digest,
+            "dependencyTreeHash": digest,
+        }
+
+    def test_six_exact_v2_manifest_seals_and_closed_file_cohorts(self):
+        pins = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS
+        self.assertEqual(len(pins), 6)
+        self.assertEqual(set(pins), {
+            "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
+            "chatgpt4", "fabric-design", "fabric-read",
+        })
+        for account, (canonical, raw, names) in pins.items():
+            with self.subTest(account=account):
+                self.assertEqual(len(canonical), 64)
+                self.assertEqual(len(raw), 64)
+                self.assertNotIn(names, svc.KNOWN_MANIFEST_FILESETS)
+                specimen = self._manifest(account, names)
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value=canonical):
+                    self.assertTrue(svc._sealed_v2_fleet_gateway_predecessor(specimen, account))
+                    self.assertTrue(svc._valid_manifest(specimen, account, _label_for(account)))
+                    changed_files = dict(specimen, files={**specimen["files"], "surprise.mjs": "b"*64})
+                    self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed_files, account))
+                    changed_version = dict(specimen, version=1)
+                    self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed_version, account))
+                    changed_identity = dict(specimen, account="different-seat")
+                    self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed_identity, account))
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value="0"*64):
+                    self.assertFalse(svc._valid_manifest(specimen, account, _label_for(account)))
+
+    def test_original_manifest_bytes_required_and_no_mutation(self):
+        for account, (canonical, raw, names) in svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS.items():
+            with self.subTest(account=account), tempfile.TemporaryDirectory() as temp:
+                manifest = self._manifest(account, names)
+                path = Path(temp) / "manifest.json"
+                path.write_text(json.dumps(manifest), encoding="utf-8")
+                initial = path.read_bytes()
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value=canonical):
+                    with mock.patch.object(svc, "_sha256_file", return_value=raw):
+                        read = svc._read_manifest(path, account, _label_for(account), required=True)
+                        self.assertEqual(read, manifest)
+                    with mock.patch.object(svc, "_sha256_file", return_value="0"*64):
+                        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                            svc._read_manifest(path, account, _label_for(account), required=True)
+                self.assertEqual(path.read_bytes(), initial)
+
+    def test_unknown_accounts_and_rewritten_seals_refused(self):
+        pins = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS
+        first = next(iter(pins))
+        sample = self._manifest(first, pins[first][2])
+        for unknown in ("new-owner", "fabric-future", "arbitrary"):
+            with self.subTest(unknown=unknown):
+                value = dict(sample, account=unknown, label=_label_for(unknown))
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value=pins[first][0]):
+                    self.assertFalse(svc._valid_manifest(value, unknown, _label_for(unknown)))
+        with mock.patch.object(svc, "_canonical_json_sha256", return_value=pins[first][0]):
+            replaced = dict(sample, configHash="f"*64)
+            # A different real canonical digest fails even when key and file count match.
+            with mock.patch.object(svc, "_canonical_json_sha256", return_value="f"*64):
+                self.assertFalse(svc._valid_manifest(replaced, first, _label_for(first)))
+
+
+    def test_only_exact_historical_tailnet_argv_is_eligible(self):
+        """An original sealed Fabric plist is not an arbitrary argv allowance."""
+        for account in ("fabric-design", "fabric-read"):
+            with self.subTest(account=account):
+                base = Path("/fixture/private") / account
+                roots = {"base": base}
+                node = "/fixture/node"
+                config = str(base / "config.json")
+                expected = [node, str(base / "private-tunnel-gateway.mjs"), config]
+                historical = [node, str(base / "tailnet-gateway.mjs"), config]
+                manifest = {"files": {"tailnet-gateway.mjs": "a" * 64}}
+                helper = svc._sealed_historical_tailnet_launch_argv
+                with mock.patch.object(
+                    svc, "_sealed_v2_fleet_gateway_predecessor", return_value=True
+                ):
+                    self.assertTrue(
+                        helper(account, manifest, roots, expected, historical)
+                    )
+                    for invalid in (
+                        ["/fixture/other-node", historical[1], historical[2]],
+                        [historical[0], str(base / "other-gateway.mjs"), historical[2]],
+                        [historical[0], historical[1], "/fixture/private/other/config.json"],
+                        historical + ["--unexpected"],
+                        historical[:2],
+                    ):
+                        self.assertFalse(helper(account, manifest, roots, expected, invalid))
+                    self.assertFalse(helper("chatgpt4", manifest, roots, expected, historical))
+                    self.assertFalse(helper(account, {"files": {}}, roots, expected, historical))
+                with mock.patch.object(
+                    svc, "_sealed_v2_fleet_gateway_predecessor", return_value=False
+                ):
+                    self.assertFalse(helper(account, manifest, roots, expected, historical))
