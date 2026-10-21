@@ -235,7 +235,8 @@ def test_second_task_uses_library_but_restarts_at_common_base(tmp_path):
         first["selected_harness_artifact"]["artifact_ref"]: first["selected_harness"]})
     assert port.trials["base1"].output == b"105\n"
     assert second["selected_output"] == b"85\n"
-    assert all(ctx["prior_experience"][0] == entry for _label, ctx in port.contexts)
+    assert all(ctx["prior_experience"][0] == {**entry, "confidence": "suspected"}
+               for _label, ctx in port.contexts)
     assert entry == before and BASE["AGENTS.md"].startswith(b"Protected")
 
 
@@ -456,3 +457,35 @@ def test_prior_harness_total_bytes_have_a_shared_bound(tmp_path):
     with pytest.raises(Harness2CycleError, match="EXPERIENCE_HARNESS_TOTAL_BOUND"):
         invoke(port, experience=(a, b), resolved={"artifact:first": first, "artifact:second": second})
     assert port.calls == []
+
+
+def test_missing_legacy_confidence_is_explicitly_suspected(tmp_path):
+    port = FixturePort(tmp_path)
+    entry = _prior_entry()
+    before = copy.deepcopy(entry)
+    invoke(port, experience=(entry,), resolved={"artifact:prior-harness": BASE})
+    assert all(ctx["prior_experience"][0]["confidence"] == "suspected" for _, ctx in port.contexts)
+    assert entry == before and "confidence" not in entry
+
+
+def test_noop_kernel_never_returns_a_positive_experience_candidate(tmp_path):
+    class UnchangedPort(FixturePort):
+        def improve(self, task, label, kind, context):
+            return Proposal(copy.deepcopy(context["current_harness"]), "No change proposed.",
+                            tuple(row["run_id"] for row in context["executions"][:2]))
+    port = UnchangedPort(tmp_path)
+    result = invoke(port)
+    assert result["experience_candidate"] is None
+    assert result["improver_call_count"] == 4
+    assert result["selected_harness"] == BASE
+
+
+def test_native_execution_still_refuses_binary_instruction_inputs(tmp_path):
+    port = FixturePort(tmp_path)
+    def corrupt(label, files, context):
+        files["scripts/total.py"] = b"\xff"
+    port.proposal_mutation = corrupt
+    with pytest.raises(Harness2CycleError, match="OWNER_CALL_OR_EVIDENCE_FAILED") as caught:
+        invoke(port)
+    assert "UTF8" in str(caught.value.__cause__)
+    assert [call[1] for call in port.calls if call[0] == "execute"] == ["base1"]

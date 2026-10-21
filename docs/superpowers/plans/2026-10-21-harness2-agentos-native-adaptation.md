@@ -454,3 +454,90 @@ ordinary Cursor labor forbidden and admits only exhausted-weekly-Grok tasks with
 that exact eligible model. A future actual review must preserve those native
 checks, original root, its own identity and real retained return; the route
 preview is not a review. No categorical Cursor-labor policy is relaxed here.
+
+
+## Independent paid source review and first repair
+
+The original request `harness2-crossrepo-grok-0c820ffa-20261021` completed through
+the existing qualified Grok quota fallback at 2026-10-21T12:46Z, remote rc0,
+native terminal receipt and retained full 9,593-byte result. Native status now
+binds the original root and parent `harness2-agentos-evidence-20261021`. The
+parent read the complete review and independently reproduced its four material
+counterexamples. The report was accepted through the existing native outcome
+ledger (`accepted_by=reviewer`, VALIDATED_OUTCOME). That accepts the useful
+review deliverable, NOT the source PRs, production readiness, or a merge.
+Original controller PID49013 terminated rc0; no worker or polling daemon is
+claimed running. Its usage receipt was missing; no zero-cost or measured usage
+claim is made. Requested Grok model identity is not independent served-model
+attestation.
+
+The independent reviewer inspected core 0c820ffa, Macro c7c12096, named native
+EVAL/OHF interfaces and pinned upstream source. It found no incumbent-validity,
+cleanup or default-AgentOS corruption, but four material repairs:
+
+1. The importer rejected upstream `fell_back` even though the published method
+   can inherit a current harness after an invalid proposal and still produce a
+   complete valid selected result. The importer now validates exact unique stage
+   labels, returns `inherited_stages`, and retains the original summary as native
+   evidence. It does not retry execution, relabel fallback as improvement, accept
+   incomplete selection or suppress native effect/cleanup failure. A real CLI
+   fixture imports a complete inherited run; unknown/duplicate/malformed stage
+   lists refuse and inherited EFFECT_UNKNOWN still finalizes invalid.
+2. File identity improperly conflated raw-byte fingerprinting with native text
+   eligibility. `harness_manifest` and upstream compatibility fingerprint now
+   hash complete raw bytes, including binary assets. The native refinement
+   kernel separately applies `validate_native_harness_text` to its current
+   admitted text-only experiment surface, before executing a changed proposal.
+   This preserves existing native execution restrictions while allowing faithful
+   archival import. Binary native-edit experiments are not newly admitted.
+3. Legacy seven-field experience entries could omit confidence. Their detached
+   model-facing copy now explicitly defaults to `suspected`; provided complete
+   provenance retains its original confidence. Caller input is unchanged. A
+   confidence-free legacy record never becomes implicitly verified knowledge.
+4. The kernel itself now clears `experience_candidate` whenever the selected
+   harness equals the common baseline. The draft producer retains its independent
+   no-op check. Model reflection may still consume its accounted call, but it
+   cannot issue a positive learning candidate from an unchanged harness.
+
+Four semantic regressions failed on the prior source. An added fifth native
+text-guard regression initially had an overly specific error/count assertion;
+its corrected assertion checks the retained cause and absence of any candidate
+execution, rather than confusing a model proposal call with a rollout. Full
+core campaign after repair: **881 passed, 27.34s**. This is author verification,
+not a second independent approval; repaired source requires exact-head re-review.
+
+The minor review observations were adjudicated separately: the 32-entry
+experience ceiling is an explicit native pre-effect input bound, not silent
+truncation; the complete input and reason remain available to the caller. Native
+selector randomization deliberately uses the caller's declared seed and is not
+claimed byte-identical to upstream's task-hash shuffle. CLI graph verification
+already prints distinct `validity_status`, `reason_codes`, no-authority/promotion
+and returns incomplete for invalid runs; graph association does not mean valid
+effects or efficacy. These limits remain explicit rather than expanded here.
+
+## Verified runtime-composition conclusion
+
+The source trace and independent review agree on the real missing interface.
+CodexOperatorAdapter already has an owner-controlled `turn_input_loader` and
+`observe_raw_role_result`. The latter binds complete canonical JSON to its exact
+Attempt/session/generation/native turn, including byte length and hashes; it is
+preferable to CandidateResult.summary. It still needs actual prompt, profile,
+capability and result-owner admission, not a user-supplied callback.
+
+Protected ExecutiveOperatorSupervisor only admits plan/READ and four reviewed
+read-only profiles. The original #1315 current source c4f2dbda provides opt-in
+V3/V4 plan production but does not implement the missing nonplanner admission.
+#698 e97ef3d2 is a pure claimed read-only provider/profile resolver, also not that
+admission. Existing #1421/#1446/#1482/#1484 rich capability compositions explicitly
+retain the same gap and original owner boundaries. A similarly named open PR
+is not evidence that the required runtime path exists.
+
+The exact consumer needed is an existing-owner, parent/Attempt-bound composition
+that seals improve/select/reflect task context into admitted native Jobs, obtains
+complete RawRoleResultObservation, and separately observes/retains actual EVAL
+execution of each candidate bundle under the fixed scenario/configuration. It
+must conserve root/depth/cost limits and genuine workspace authority, retain
+missing served-model/capability/source/effect/cleanup evidence, and never use a
+planner's grant for a work role. All current production and provider holds stay
+in place. Source construction of a wrapper around run_turn cannot close this gap.
+No dummy production write or self-signed Trial was attempted.

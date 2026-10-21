@@ -23,9 +23,10 @@ def _ref(name):
     return REPO_REF_BASE + "#harness2_fixture/" + name
 
 
-def fixture(mode="agg", k=1):
+def fixture(mode="agg", k=1, extra_files=None):
     files = {"AGENTS.md": b"Read evidence before describing the result.\n",
              ".agents/skills/review/SKILL.md": b"---\ndescription: Review artifacts\n---\nInspect facts.\n"}
+    files.update(copy.deepcopy(extra_files or {}))
     scenario = build_baseline_scenario()
     config = build_baseline_configuration()
     config.pop("schema")
@@ -121,7 +122,9 @@ def test_changed_bytes_are_refused(field):
     lambda s: s.update(status="partial"),
     lambda s: s.update(errors=["failure"]),
     lambda s: s["modes"]["agg"].update(finals=[]),
-    lambda s: s["modes"]["agg"].update(fell_back=["inv1"]),
+    lambda s: s["modes"]["agg"].update(fell_back=["unknown-stage"]),
+    lambda s: s["modes"]["agg"].update(fell_back=["inv1", "inv1"]),
+    lambda s: s["modes"]["agg"].update(fell_back="inv1"),
     lambda s: s["modes"]["agg"].update(ok=False),
     lambda s: s["selections"]["agg"].update(task_id="other"),
     lambda s: s["selections"]["agg"].update(chosen_run_id="other"),
@@ -352,3 +355,55 @@ def test_cli_symlink_is_refused(tmp_path, capsys):
 def test_harness_file_directory_and_directory_case_aliases(files):
     with pytest.raises(Harness2ImportError, match="FILE_DIRECTORY_OR_CASE_ALIAS"):
         harness_manifest(files)
+
+
+def test_inherited_refinement_is_retained_not_replayed():
+    inputs, _ = fixture()
+    summary = decode_json(inputs["summary_bytes"])
+    summary["modes"]["agg"]["fell_back"] = ["inv1"]
+    inputs = rebind(inputs, "summary_bytes", json.dumps(summary).encode())
+    imported = import_selected_run(**inputs)
+    assert imported.inherited_stages == ("inv1",)
+    binding = decode_json(inputs["binding_bytes"])
+    assert dict(binding["summary"], kind="OTHER") in imported.draft["evidence"]["artifacts"]
+    assert finalize(inputs)["validity"]["status"] == "VALID"
+    assert imported.promotion == "NONE"
+
+
+def test_raw_upstream_fingerprint_preserves_binary_assets():
+    import hashlib
+    files = {"AGENTS.md": b"Read the original asset.", "assets/reference.bin": b"\x00\xff"}
+    digest = hashlib.sha1()
+    for path in sorted(files):
+        digest.update(path.encode("utf-8") + b"\0" + files[path] + b"\0")
+    assert upstream_fingerprint(files) == digest.hexdigest()[:16]
+    assert harness_manifest(files)["files"][1]["digest"] == sha256_bytes(b"\x00\xff")
+
+
+def test_cli_retains_binary_upstream_artifact_and_inheritance(tmp_path, capsys):
+    from scripts.agent_eval import cli
+    inputs, other = fixture(extra_files={"assets/reference.bin": b"\x00\xff"})
+    summary = decode_json(inputs["summary_bytes"])
+    summary["modes"]["agg"]["fell_back"] = ["inv1"]
+    inputs = rebind(inputs, "summary_bytes", json.dumps(summary).encode())
+    args, native = cli_fixture(tmp_path, inputs, other)
+    assert cli.main(args) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    run = native.resolve_run(receipt["run_id"])
+    original = decode_json(inputs["binding_bytes"])
+    assert run["procedure"]["instruction_bundle"]["digest"] == harness_digest(inputs["harness_files"])
+    assert dict(original["summary"], kind="OTHER") in run["evidence"]["artifacts"]
+    assert receipt["artifact_check"] == "BYTE_AND_IDENTITY_CHECKED_NOT_AUTHENTICATED"
+    assert receipt["promotion"] == "NONE"
+
+
+def test_inherited_refinement_cannot_hide_native_effect_uncertainty():
+    inputs, _ = fixture()
+    summary = decode_json(inputs["summary_bytes"])
+    summary["modes"]["agg"]["fell_back"] = ["inv1", "dom1", "agg1"]
+    inputs = rebind(inputs, "summary_bytes", json.dumps(summary).encode())
+    draft = decode_json(inputs["native_observation_bytes"])
+    draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:held", "reconciliation_ref": None}
+    inputs = rebind(inputs, "native_observation_bytes", canonical_json_bytes(draft))
+    assert import_selected_run(**inputs).inherited_stages == ("inv1", "dom1", "agg1")
+    assert finalize(inputs)["validity"]["status"] == "INVALID_EFFECT_UNKNOWN"

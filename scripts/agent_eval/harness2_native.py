@@ -162,10 +162,6 @@ def harness_manifest(files: Mapping[str, bytes]) -> dict:
             _require(prior is None or prior == node, "HARNESS_FILE_DIRECTORY_OR_CASE_ALIAS")
             nodes[prefix.casefold()] = node
         _require(type(raw) is bytes and len(raw) <= MAX_JSON_BYTES, "HARNESS_FILE_BYTES")
-        try:
-            raw.decode("utf-8")
-        except UnicodeDecodeError as exc:
-            raise Harness2ImportError("HARNESS_FILE_UTF8") from exc
         total += len(raw)
     _require(total <= MAX_TREE_BYTES, "HARNESS_TREE_BYTE_BOUND")
     return {"schema": TREE_SCHEMA, "files": [
@@ -176,6 +172,20 @@ def harness_manifest(files: Mapping[str, bytes]) -> dict:
 
 def harness_digest(files: Mapping[str, bytes]) -> str:
     return digest_value(harness_manifest(files))
+
+
+def validate_native_harness_text(files: Mapping[str, bytes]) -> None:
+    """Keep the native text-edit experiment surface separate from byte identity.
+
+    An imported upstream artifact may include opaque binary assets. Hashing it
+    does not grant native execution or broaden the native editable text surface.
+    """
+    harness_manifest(files)
+    for raw in files.values():
+        try:
+            raw.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise Harness2ImportError("NATIVE_HARNESS_FILE_UTF8") from exc
 
 
 def upstream_fingerprint(files: Mapping[str, bytes]) -> str:
@@ -199,6 +209,7 @@ class Harness2Import:
     native_run_id: str
     evidence_scope: str = "BYTE_AND_IDENTITY_CHECKED_NOT_AUTHENTICATED"
     promotion: str = "NONE"
+    inherited_stages: tuple[str, ...] = ()
 
 
 def import_selected_run(
@@ -257,9 +268,17 @@ def import_selected_run(
                  and type(item.get("k")) is int and item["k"] == k,
                  "MODE_TASK_BINDING_MISMATCH")
         _require(item.get("ok") is True, "MODE_NOT_COMPLETE")
-    _require(record.get("errors") == [] and record.get("fell_back") == [],
-             "REFINEMENT_ERROR_OR_FALLBACK")
+    _require(record.get("errors") == [], "REFINEMENT_ERROR")
     finals = [f"{'agg' if mode == 'agg' else 'c'}{i}" for i in range(1, k + 1)]
+    inherited = record.get("fell_back")
+    stage_labels = set(finals) | {f"{stem}{i}" for stem in ("inv", "dom") for i in range(1, k + 1)}
+    # Published invalid proposals may inherit their current harness while the
+    # selected final completes normally. Retain that evidence, never rerun it.
+    # The exact original summary remains an existing native evidence artifact.
+    _require(type(inherited) is list and len(inherited) <= 3 * k
+             and all(type(label) is str and label in stage_labels for label in inherited),
+             "REFINEMENT_INHERITANCE_INVALID")
+    _require(len(set(inherited)) == len(inherited), "REFINEMENT_INHERITANCE_DUPLICATE")
     _require(record.get("finals") == finals, "FINALS_INCOMPLETE")
     label = selection.get("chosen_label")
     _require(type(label) is str and label in finals, "SELECTION_NOT_A_FINAL")
@@ -291,7 +310,8 @@ def import_selected_run(
     result["evidence"]["artifacts"] = [existing[key] for key in sorted(existing)]
     contracts.validate_run_draft_shape(result)
     return Harness2Import(result, expected_binding_digest, binding["summary"]["digest"],
-                          tree_digest, binding["upstream_run_id"], draft["run_id"])
+                          tree_digest, binding["upstream_run_id"], draft["run_id"],
+                          inherited_stages=tuple(inherited))
 
 
 def finalize_selected_run(*, scenario: dict, configuration: dict, experiment: dict | None,

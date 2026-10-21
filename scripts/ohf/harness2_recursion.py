@@ -24,7 +24,7 @@ from typing import Any, Protocol
 
 from scripts.agent_eval import contracts, validity
 from scripts.agent_eval.harness2_native import (
-    MAX_TREE_BYTES, configuration_lock, harness_digest, sha256_bytes,
+    MAX_TREE_BYTES, configuration_lock, harness_digest, sha256_bytes, validate_native_harness_text,
 )
 from scripts.agent_eval.harness2_context import read_context_bundle
 
@@ -112,7 +112,7 @@ def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
 def _validate_proposal(value: Proposal, current: dict[str, bytes], allowed: frozenset[str],
                        evidence_ids: frozenset[str]) -> dict[str, bytes]:
     _check(type(value) is Proposal, "PROPOSAL_REQUIRED")
-    harness_digest(value.files)
+    validate_native_harness_text(value.files)
     _check(type(value.notes) is str and 0 < len(value.notes.strip()) <= 8192, "PROPOSAL_NOTES_REQUIRED")
     _check(type(value.evidence_run_ids) is tuple and 0 < len(value.evidence_run_ids) <= 128
            and all(type(v) is str and v in evidence_ids for v in value.evidence_run_ids),
@@ -189,6 +189,9 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             for ref in refs:
                 contracts.v_run_id(ref, "$.experience.source_run_ids")
             _check(len(set(refs)) == len(refs), "EXPERIENCE_RUN_REFERENCE_DUPLICATE")
+        # Legacy evidence may omit confidence; it must never become an
+        # unlabeled, implicitly trusted lesson in the improver's packet.
+        entry.setdefault("confidence", "suspected")
         artifact = entry["harness_artifact"]
         contracts.v_artifact_pair(artifact, "$.experience.harness_artifact")
         ref, digest = artifact["artifact_ref"], artifact["digest"]
@@ -202,6 +205,7 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
            "EXPERIENCE_HARNESS_INVENTORY_MISMATCH")
     total_prior_bytes = 0
     for ref, files in resolved.items():
+        validate_native_harness_text(files)
         _check(harness_digest(files) == required_harnesses[ref], "EXPERIENCE_HARNESS_BYTES_CHANGED")
         total_prior_bytes += sum(len(raw) for raw in files.values())
         _check(total_prior_bytes <= MAX_TREE_BYTES, "EXPERIENCE_HARNESS_TOTAL_BOUND")
@@ -323,6 +327,10 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             _check(trials[chosen].run["run_id"] in refs
                    and any(trials[label].run["run_id"] in refs for label in baselines),
                    "REFLECTION_BASELINE_AND_SELECTED_REQUIRED")
+        if harness_digest(trees[chosen]) == base_digest:
+            # A model may describe a lesson despite no actual harness change.
+            # Suppress it at the shared producer, not only at an optional sink.
+            reflection = None
         _check(len(trials) == 4 * k and improver_calls == needed_improvers, "RECURSION_ACCOUNTING_MISMATCH")
         return {
             "task_id": task["task_id"], "domain": task["domain"], "mode": mode, "k": k,
