@@ -1373,6 +1373,11 @@ if [ "$MODE" = go-codex ] && [ "$DRY_RUN" -eq 0 ]; then
 else
 REMOTE_INNER='umask 077 || exit; python3 "$LANE_DIRECTORY/support-releases/$SUPPORT_DIGEST/ext/remote_sub_exec.py" "$KEY" "$MODE" "$PACKET" "$REMOTE_CWD" "$MODEL"; echo $? > "$RC_FILE"'
 HOST_ENV="source $REMOTE_LANES_Q/ext/HOST_ENV.sh 2>/dev/null"
+if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
+  # Host initialization may prepend a mutable home alias. Restore only the
+  # frozen owner's interpreter precedence, preserving other host PATH order.
+  HOST_ENV="$HOST_ENV; export PATH=$REMOTE_LANES_Q/venv/bin:\$PATH"
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "<launch: $REMOTE_PACKET -> $(basename "$REMOTE_PACKET")>"

@@ -261,3 +261,22 @@ inclusion, a canonical merged generation, fresh installed check, proof-fenced
 original-case reconciliation and canonical status are still separate gates.
 No production receipt or runtime selector was changed, and neither frozen
 review has acquired a result, acceptance, replay or retry permission.
+
+## Host-initialization follow-up
+
+Independent c938 review found a post-HOST_ENV path-precedence defect in the
+ordinary plain controller. The narrow successor restores the frozen owner's
+venv/bin precedence after host initialization for readiness and launch; it
+preserves other PATH ordering and does not change legacy/nonplain behavior.
+The complete counterexample, actual-shell regressions and retained staging
+timeout are documented in PLAIN_PACKET_SAME_PATH_REPAIR_20261021.md.
+
+Only the controller changes in the 85-member production closure. The original
+checker, reconciler, adapter and all their dependency bytes remain identical to
+c938. The complete stage now has manifest
+05ae02e5dffcb625bee7ff1d64068afb85917cefce5c63b0544e4ff60123247d
+and inventory
+88aacda4793ff650b48856323bb5d8502f8d5f53911ebecd0a6c22a6f9e927ae.
+The earlier whole-head approval is not reused across the newly demonstrated
+counterexample. Independent successor review, CI, protected merge and installed
+original-case recovery remain outstanding. No live receipt or selector changed.

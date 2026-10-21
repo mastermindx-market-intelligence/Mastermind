@@ -291,6 +291,13 @@ inherit the configured-root protocol's exclusive leaves or recovery guarantees.
 Configured-root failure or publisher disagreement never selects this fallback.
 Other run shapes retain their incumbent transport contract.
 
+On both eligible ordinary branches, host initialization may prepend its own
+home-relative or host CLI paths. After sourcing the physical owner's HOST_ENV,
+the controller prepends only that frozen owner's venv/bin again before GLM
+account readiness and launch. Other host PATH entries keep their relative order.
+Legacy/nonplain initialization is unchanged. This guarantees the intended path
+precedence, not authenticated virtual-environment bytes or arbitrary host setup.
+
 The field must name an absolute physical path using ASCII letters, digits,
 `_`, `-`, `.`, and `/`, with no empty, dot, or dot-dot components. The owner must
 already provide the root plus `tmp`, `ext`, `ext/active`, `ext/lanes`, `orch`,

@@ -572,3 +572,61 @@ and fresh runtime/host qualification. No review stage is installable. No live
 host registry was enrolled, generation selected, reconciliation receipt written,
 provider worker started, held review replayed or News production acceptance
 established by this work.
+
+## Host initialization and physical interpreter precedence
+
+Independent review of c93859e4d00d7b96e2f2d0599a458ab3d759fd0f returned
+REQUEST_REPAIR for one P2 after read-only host preflight exposed the actual
+HOST_ENV PATH prepend. Both observed hosts prepend home and host interpreter
+locations after the controller's initial physical-owner path setup. A following
+bare python3 could therefore select a different interpreter. The same ordering
+exists in 2d25; its previous whole-head source approval is invalidated for
+release reuse on this point. The independently reviewed unchanged recovery,
+acquisition, schema, physical-root and collection conclusions remain applicable.
+
+The repair uses the existing eligible ordinary-plain predicate. Its shared
+HOST_ENV fragment prepends only the frozen owner's venv/bin after sourcing the
+host file, before both GLM account readiness and launch. The existing pre-source
+setup and other host PATH entries retain their relative order. Configured roots
+and unconfigured publisher owners both receive the repair; legacy/nonplain
+ordering is unchanged. This repairs interpreter-selection precedence. It does
+not authenticate virtual-environment bytes, arbitrary host initialization,
+provider identity or task acceptance.
+
+The actual-shell fixture now uses the observed PATH statement and an inert
+remote HOME. Wrong-interpreter tripwires exist in the first prepended fixture
+directory and both retargeted alias directories. They cannot invoke a provider.
+GLM account readiness now traverses the actual shell selection and a bounded
+inert interpreter spy, instead of returning a synthetic readiness value before
+shell execution. Positive assertions bind readiness and launch interpreter
+paths, account, lease, packet, physical owner, host marker and preserved PATH
+ordering.
+
+The frontier control first reproduced the defect on unchanged c938 production:
+the wrong interpreter returned 125 and readiness refused with 78 before launch.
+After the repair, seven of the eight selected actual controller cases passed.
+The last case hit the unchanged 20-second harness limit during support staging,
+before the modified HOST_ENV boundary. It passed once in isolation in 14.053
+seconds with identical source and time limits. That failed aggregate sample is
+retained, not relabeled as a green eight-case run. Across those focused results,
+both configured GLM/Qwen cases, fallback frontier/ordinary/Flash GLM, alias
+retargeting, literal special-character ownership and flat ownership qualify.
+
+The canonical builder regenerated all 85 members. Only remote_sub.sh differs
+from c938's production manifest; all 84 other production members are exact prior
+bytes. Source hashes, byte counts, Python syntax and Bash syntax were verified.
+
+| Current identity | SHA-256 |
+| --- | --- |
+| Controller | a3769da90fa3832ee5f6d2efcc98640b57b56788f2486e286d0296ebe3eaa2d7 |
+| Manifest | 05ae02e5dffcb625bee7ff1d64068afb85917cefce5c63b0544e4ff60123247d |
+| Source inventory | 88aacda4793ff650b48856323bb5d8502f8d5f53911ebecd0a6c22a6f9e927ae |
+
+Evidence: /tmp/news-1674-host-env-before-proof-20261021.json,
+ /tmp/news-1674-host-env-qualification-20261021.json,
+ /tmp/news-1674-host-env-isolated-qualification-20261021.json, and
+ /tmp/news-1674-host-env-stage-proof-20261021.json.
+Host observation read only structure and declared dependency custody; no
+credential values were returned, no host file was sourced and no provider was
+started. The review stage is not an installation. This successor still requires
+its own immutable-source review and hosted CI before protected release.

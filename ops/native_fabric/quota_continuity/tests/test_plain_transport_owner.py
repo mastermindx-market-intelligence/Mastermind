@@ -41,7 +41,7 @@ if case.startswith('physical_'):
         # another host. The controller's command and argument expansion are exact.
         if 'nohup env ' in command: command += ' wait'
         result = subprocess.run(['/bin/bash','-c',command],capture_output=True,text=True,
-                                timeout=5,env=dict(os.environ))
+                                timeout=5,env=dict(os.environ,HOME=str(root/'remote-home')))
         sys.stdout.write(result.stdout);sys.stderr.write(result.stderr)
         return result.returncode
     if name == 'scp':
@@ -147,7 +147,10 @@ if case.startswith('physical_'):
             releases=[path for path in (owner/'support-releases').iterdir() if path.is_dir()]
             assert len(releases)==1
             assert words==['python3',str(releases[0]/'ext/glm_keys.py'),'account-ready','fixture-account']
-            record('account_ready',command=command);print('1');raise SystemExit(0)
+            record('account_ready',command=command)
+            # Traverse the real shell/PATH selection; the selected fixture
+            # interpreter handles account-ready without reading credentials.
+            raise SystemExit(shell(command))
         if 'nohup env ' in command:
             record('launch',command=command)
             raise SystemExit(shell(command))
@@ -192,12 +195,17 @@ SPY = r'''
 import hashlib,json,os,sys
 from pathlib import Path
 root=Path(os.environ['DEADLINE_FIXTURE_ROOT'])
+if len(sys.argv)==4 and Path(sys.argv[1]).name=='glm_keys.py' and sys.argv[2:]==['account-ready','fixture-account']:
+    (root/'account-ready-spy.json').write_text(json.dumps({
+        'argv':sys.argv[1:],'interpreter':sys.argv[0],'path':os.environ['PATH'],
+        'host_env':os.environ.get('BOUND_HOST_ENV')},sort_keys=True))
+    print('1');raise SystemExit(0)
 if sys.argv[1:4]==['-I','-S','-c']:
     # The actual exclusive-output launcher runs under a real interpreter. Only
     # its later published-executor invocation reaches the inert worker below.
     os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
 packet=Path(os.environ['PACKET'])
-row={'argv':sys.argv[1:],'cwd':str(Path.cwd()),'packet':str(packet),
+row={'argv':sys.argv[1:],'interpreter':sys.argv[0],'cwd':str(Path.cwd()),'packet':str(packet),
      'packet_sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),
      'remote_cwd':os.environ['REMOTE_CWD'],'rc_file':os.environ['RC_FILE'],
      'owner':os.environ['REMOTE_SUB_LANES'],'host_env':os.environ.get('BOUND_HOST_ENV'),
@@ -319,6 +327,14 @@ class PhysicalOwnerController(unittest.TestCase):
             (self.owner/relative).mkdir(parents=True,mode=0o700)
         fake_home=self.root/'remote-home';fake_home.mkdir(mode=0o700)
         (fake_home/'lanes').symlink_to(self.owner,target_is_directory=True)
+        tripwire=('#!'+sys.executable+'\nimport json,os,sys\nfrom pathlib import Path\n'
+            'root=Path(os.environ["DEADLINE_FIXTURE_ROOT"])\n'
+            '(root/"wrong-interpreter-selected.json").write_text(json.dumps({"path":sys.argv[0]}))\n'
+            'raise SystemExit(125)\n')
+        # This first HOST_ENV path entry prevents a failing-source control from
+        # falling through to a real host interpreter or provider executable.
+        first_host_bin=fake_home/'.npm-global/bin';first_host_bin.mkdir(parents=True,mode=0o700)
+        harness_module.write(first_host_bin/'python3',tripwire,executable=True)
         for name in ('decoy-after-publication','decoy-before-launch'):
             decoy=self.root/name
             for relative in ('tmp','ext','venv/bin'):
@@ -328,7 +344,10 @@ class PhysicalOwnerController(unittest.TestCase):
             (decoy/'ext/lanes_offline-physical_owner.rc').write_text('99')
             (decoy/'ext/lanes_offline-physical_owner.stdout').write_text('UNRELATED OUTPUT')
             (decoy/'ext/HOST_ENV.sh').write_text('exit 125\n')
-        (self.owner/'ext/HOST_ENV.sh').write_text('export BOUND_HOST_ENV=physical\n')
+            harness_module.write(decoy/'venv/bin/python3',tripwire,executable=True)
+        (self.owner/'ext/HOST_ENV.sh').write_text(
+            'export PATH=$HOME/.npm-global/bin:$HOME/.local/bin:/opt/homebrew/bin:$HOME/lanes/venv/bin:$PATH\n'
+            'export BOUND_HOST_ENV=physical\n')
         harness_module.write(self.owner/'venv/bin/python3','#!'+sys.executable+'\n'+SPY,executable=True)
         marker="if name == 'broker':\n"
         self.assertEqual(harness_module.FIXTURE.count(marker),1)
@@ -388,6 +407,10 @@ class PhysicalOwnerController(unittest.TestCase):
         self.assertEqual(spy['host_env'],'physical')
         self.assertEqual(spy['rc_file'],str(self.owner/'ext/lanes_offline-physical_owner.rc'))
         self.assertEqual(spy['path'].split(':')[0],str(self.owner/'venv/bin'))
+        self.assertEqual(spy['interpreter'],str(self.owner/'venv/bin/python3'))
+        self.assertEqual(spy['path'].split(':')[1:5],[str(self.root/'remote-home/.npm-global/bin'),
+            str(self.root/'remote-home/.local/bin'),'/opt/homebrew/bin',str(self.root/'remote-home/lanes/venv/bin')])
+        self.assertFalse((self.root/'wrong-interpreter-selected.json').exists())
         self.assertTrue(Path(spy['argv'][0]).is_relative_to(self.owner/'support-releases'))
         self.assertEqual(Path(spy['argv'][0]).name,'remote_sub_exec.py')
         self.assertEqual(spy['argv'][1:4],['offline-physical_owner',mode,spy['packet']])
@@ -407,6 +430,12 @@ class PhysicalOwnerController(unittest.TestCase):
         self.assertEqual(stages.count('launch'),1)
         self.assertLess(stages.index('transport_read'),stages.index('launch'))
         if mode=='glm':
+            readiness=json.loads((self.root/'account-ready-spy.json').read_text())
+            self.assertEqual(readiness['interpreter'],str(self.owner/'venv/bin/python3'))
+            self.assertEqual(readiness['path'].split(':')[0],str(self.owner/'venv/bin'))
+            self.assertEqual(readiness['host_env'],'physical')
+            self.assertEqual(readiness['argv'],[str(Path(spy['argv'][0]).with_name('glm_keys.py')),
+                'account-ready','fixture-account'])
             self.assertEqual(stages.count('account_ready'),1)
             self.assertLess(stages.index('account_ready'),stages.index('launch'))
         self.assertIn('poll',stages);self.assertIn('collect',stages);self.assertIn('remote_cleanup',stages)
@@ -447,7 +476,7 @@ class PhysicalOwnerController(unittest.TestCase):
 
     def test_configured_frontier_uses_admitted_layout_through_actual_controller(self):
         self.admit_configured_owner()
-        self.assert_bound_launch(self.run_case(mode='glm',model='glm-5.3'),
+        self.assert_bound_launch(self.run_case(mode='glm',model='glm-5.3',retarget=True),
             mode='glm',model='glm-5.3',acquisition_pool='glm-frontier')
 
     def test_configured_qwen_keeps_frozen_owner_after_alias_retarget(self):
@@ -505,7 +534,7 @@ class PhysicalOwnerController(unittest.TestCase):
         self.assert_bound_launch(self.run_case())
 
     def test_glm_frontier_acquisition_reaches_bound_launch(self):
-        result=self.run_case(mode='glm',model='glm-5.3')
+        result=self.run_case(mode='glm',model='glm-5.3',retarget=True)
         self.assert_bound_launch(result,mode='glm',model='glm-5.3',acquisition_pool='glm-frontier')
 
     def test_glm_without_frontier_capability_keeps_ordinary_pool(self):

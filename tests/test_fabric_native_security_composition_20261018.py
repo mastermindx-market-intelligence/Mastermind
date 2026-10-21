@@ -34,7 +34,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # recovery and explicit acquisition correlation. All historical executor,
 # donor, quota, deadline and protected physical-root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "1c04fa2e6381a51abd1297330df77c4c26d3c3d889de20f4f9c618b8dc44dc78"
+NATIVE_MANIFEST_SHA = "05ae02e5dffcb625bee7ff1d64068afb85917cefce5c63b0544e4ff60123247d"
 
 
 def _sha(raw):
