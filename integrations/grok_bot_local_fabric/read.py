@@ -189,13 +189,29 @@ def _status(
     return value
 
 
+def _terminal_success(value: dict[str, Any]) -> bool:
+    """The incumbent successful-result eligibility tuple, never just rc=0."""
+    return (
+        value.get("state") == "TERMINAL"
+        and type(value.get("rc")) is int
+        and value.get("rc") == 0
+        and value.get("signal") == "ok"
+        and value.get("result_available") is True
+    )
+
+
 def _verified_acceptance(value: dict[str, Any]) -> bool | None:
     """Project affirmative acceptance only from the complete incumbent receipt."""
     accepted = value.get("accepted")
     by = value.get("accepted_by")
     state = value.get("acceptance_state")
     if accepted is True:
-        if type(by) is str and by in ("deterministic", "reviewer") and state == "ACCEPTED":
+        if (
+            _terminal_success(value)
+            and type(by) is str
+            and by in ("deterministic", "reviewer")
+            and state == "ACCEPTED"
+        ):
             return True
         return None
     if accepted is False:
@@ -236,13 +252,7 @@ def result(
     if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_RESULT_BYTES:
         raise Refused("RESULT_BOUND_INVALID")
     value = _status(adapter, run_id, expected_root, expected_parent)
-    if (
-        value.get("state") != "TERMINAL"
-        or type(value.get("rc")) is not int
-        or value.get("rc") != 0
-        or value.get("result_available") is not True
-        or value.get("signal") != "ok"
-    ):
+    if not _terminal_success(value):
         raise Refused("RESULT_NOT_READY")
     raw = _call(adapter, ["result", _ident(run_id), "--max-bytes", str(max_bytes)], max_bytes)
     # No authenticated Grok-specific result-recipient binding exists yet.

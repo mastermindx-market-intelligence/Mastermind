@@ -144,6 +144,25 @@ def test_contradictory_acceptance_is_not_affirmed(monkeypatch, tmp_path, changes
     assert [args[4] for args, _ in seen] == ["status", "status", "result"]
 
 
+@pytest.mark.parametrize("changes", [
+    {"state": "TERMINAL_FAILURE", "rc": 78, "signal": "prelaunch_failure", "result_available": False},
+    {"state": "EFFECT_UNKNOWN", "rc": 0, "signal": "effect_unknown"},
+    {"state": "TERMINAL", "rc": 0, "signal": "other"},
+    {"state": "TERMINAL", "rc": 0, "signal": "ok", "result_available": False},
+])
+def test_positive_acceptance_requires_successful_terminal_tuple(monkeypatch, tmp_path, changes):
+    # Even a superficially complete accepted_by+ACCEPTED tuple is unverified
+    # when the incumbent run never satisfied terminal success eligibility.
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(**changes))
+    status = client.status(adapter, RUN, ROOT, ROOT)["status"]
+    assert status["accepted"] is None
+    assert status["accepted_by"] is None
+    assert status["acceptance_state"] == "UNVERIFIED"
+    with pytest.raises(client.Refused, match="RESULT_NOT_READY"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert [args[4] for args, _ in seen] == ["status", "status"]
+
+
 def test_legitimate_unaccepted_result_is_not_false_positive(monkeypatch, tmp_path):
     adapter, _ = _capture(monkeypatch, tmp_path, status=_status(
         accepted=False, accepted_by=None, acceptance_state="NOT_ACCEPTED"
