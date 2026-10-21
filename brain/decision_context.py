@@ -12,7 +12,9 @@ from __future__ import annotations
 
 import calendar
 import copy
+import hashlib
 import json
+import re
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -570,9 +572,59 @@ def assemble(
     }
 
 
+def for_publication(published: dict[str, Any]) -> dict[str, Any]:
+    """Resolve only the immutable typed copy named by this committed publication.
+
+    A malformed new-format reference never falls back to an unrelated latest file.
+    Legacy publications retain their prior pair checks until natural replacement.
+    """
+    if "publication" not in published:
+        return _read_json(_LATEST_PATH)
+    try:
+        meta = published["publication"]
+        ref = meta["decision_context"]
+        name, digest = ref["file"], ref["sha256"]
+        seq = published["seq"]
+        if (type(seq) is not int or seq <= 0
+                or not re.fullmatch(r"[0-9a-f]{64}", digest)
+                or name != f"{seq:012d}-{digest}.json"
+                or meta.get("contract") != "market_wide_perception.v1"):
+            return {}
+        path = _ARTIFACT_DIR / name
+        if path.is_symlink():
+            return {}
+        payload = path.read_bytes()
+        if hashlib.sha256(payload).hexdigest() != digest:
+            return {}
+        value = json.loads(payload)
+        common = {key: val for key, val in meta.items() if key != "decision_context"}
+        if (not isinstance(value, dict) or value.get("schema_version") != _SCHEMA_VERSION
+                or value.get("publication") != common
+                or value.get("seq") != seq
+                or value.get("region") != published.get("region")
+                or value.get("market_asof") != published.get("asof")
+                or value.get("built_at") != published.get("built_at")):
+            return {}
+        return value
+    except (OSError, KeyError, TypeError, ValueError):
+        return {}
+
+
+def _publication_bytes() -> tuple[dict[str, Any], str | None]:
+    try:
+        payload = _MARKET_VIEW_PATH.read_bytes()
+        value = json.loads(payload)
+        if isinstance(value, dict):
+            return value, hashlib.sha256(payload).hexdigest()
+    except (OSError, ValueError):
+        pass
+    return {}, None
+
+
 def latest() -> dict[str, Any]:
-    """Read the latest published decision context, or ``{}``."""
-    return _read_json(_LATEST_PATH)
+    """Read the typed artifact selected by the existing Market View commit point."""
+    published, _ = _publication_bytes()
+    return for_publication(published)
 
 
 def _current_context(
@@ -590,14 +642,18 @@ def _current_context(
     if checked_at.tzinfo is None:
         raise ValueError("current context requires an aware clock")
     checked_at = checked_at.astimezone(timezone.utc)
-    ctx = latest()
+    published, published_hash = _publication_bytes()
+    ctx = for_publication(published)
     reasons: list[str] = []
     try:
         if ctx.get("schema_version") != _SCHEMA_VERSION:
             reasons.append("decision_context_absent_or_invalid")
         if _mv._freshness(ctx.get("market_asof"), now=checked_at)["stale"]:
             reasons.append("decision_context_expired")
-        published = _read_json(_MARKET_VIEW_PATH)
+        if (expected_publication is not None
+                and expected_publication.get("artifact_sha256") is not None
+                and expected_publication["artifact_sha256"] != published_hash):
+            reasons.append("consumer_publication_bytes_changed_during_read")
         if expected_publication is not None and any(
             expected_publication.get(key) != published.get(key)
             for key in ("asof", "built_at", "seq")
@@ -721,6 +777,9 @@ def prompt_summary(
     if "serving_freshness" in ctx:
         out["publication"] = {key: ctx.get(key) for key in ("market_asof", "built_at", "seq")}
         out["serving_freshness"] = ctx["serving_freshness"]
+        if isinstance(ctx.get("publication"), dict):
+            out["publication"]["publication_id"] = ctx["publication"].get("publication_id")
+            out["publication"]["source_identity"] = ctx["publication"].get("source_identity")
     return out
 
 

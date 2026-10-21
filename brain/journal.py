@@ -161,54 +161,27 @@ def load_pins(seat: str) -> list[dict]:
 
 # ───────────────────────────── (a) AUTO-DRAFTS ─────────────────────────────
 def _regime_context(asof: date | None) -> str:
-    """A compact regime tag for a draft (the market_view brief's posture, else the risk_state).
-
-    Best-effort, offline: reads the market_view artifact posture if present; degrades to "" so a
-    draft is never blocked on regime lookup. The AUTO-DRAFT is deterministic given the artifacts on
-    disk — it does NOT pin a live market state (charter: never pin live states in code)."""
+    """Resolution-time context only; a historical date cannot acquire today's view."""
+    if asof != date.today():
+        return ""
     try:
+        from brain import market_view
         p = _ROOT / "data" / "market_view" / "latest.json"
-        if p.exists():
-            d = json.loads(p.read_text())
-            brief = (d.get("brief") or {}) if isinstance(d, dict) else {}
-            posture = brief.get("posture_implication") or brief.get("posture")
-            if posture:
-                return str(posture)[:120]
+        published = json.loads(p.read_text())
+        projected = market_view.serving_view(published)
+        brief = projected.get("brief") or {}
+        return str(brief.get("posture_implication") or "")[:120]
     except Exception:  # noqa: BLE001
-        pass
-    return ""
+        return ""
 
 
-def _planes_at_entry(entry_iso: str) -> dict | None:
-    """The market_view planes as they read on the decision date, from that date's artifact.
-
-    L2 spec (design §1): the draft records ``planes_at_entry`` from the market_view artifact OF THAT
-    DATE when available. We look for a dated snapshot data/market_view/<date>.json first; if only the
-    single ``latest.json`` exists and its asof matches the entry date, we use that. Otherwise None
-    (P2: absent → null, never fabricated). Returns a compact {name: direction} map to keep drafts
-    small; the full artifact stays on disk."""
-    try:
-        base = _ROOT / "data" / "market_view"
-        cand = base / f"{entry_iso}.json"
-        d = None
-        if cand.exists():
-            d = json.loads(cand.read_text())
-        else:
-            latest = base / "latest.json"
-            if latest.exists():
-                lj = json.loads(latest.read_text())
-                if isinstance(lj, dict) and str(lj.get("asof") or "")[:10] == entry_iso:
-                    d = lj
-        if not isinstance(d, dict):
-            return None
-        planes = d.get("planes") or {}
-        out = {}
-        for name, rec in planes.items():
-            if isinstance(rec, dict) and rec.get("direction") is not None:
-                out[name] = rec.get("direction")
-        return out or None
-    except Exception:  # noqa: BLE001
-        return None
+def _planes_at_entry(
+    entry_iso: str, *, receipt: dict | None = None,
+    decision_timestamp: str | None = None,
+) -> dict | None:
+    """Use the original trusted input receipt; date files do not prove availability."""
+    from brain import perception_receipt
+    return perception_receipt.entry_planes(receipt, decision_timestamp=decision_timestamp)
 
 
 def _taxonomy_hint(row: dict) -> str:
@@ -274,11 +247,19 @@ def draft_resolutions(seat: str, asof: date | None = None, *, rows: list[dict] |
                 "resolved_on": asof.isoformat(),
                 "call": f"{r.get('verb') or 'call'} {str(r.get('ticker')).upper()}",
                 "thesis_at_entry": str(r.get("thesis") or r.get("summary") or "")[:400] or None,
-                "planes_at_entry": _planes_at_entry(entry_iso),
+                "planes_at_entry": _planes_at_entry(
+                    entry_iso, receipt=r.get("perception_input"),
+                    decision_timestamp=r.get("decision_timestamp"),
+                ),
+                "entry_perception": r.get("perception_input"),
+                "entry_evidence_scope": "initial_prompt_projection_only",
+                "entry_decision_id": r.get("decision_id"),
+                "entry_decision_timestamp": r.get("decision_timestamp"),
                 "outcome": outcome,
                 "grade": round(grade, 4),
                 "benchmark": r.get("benchmark") or "SPY",
                 "regime_context": _regime_context(asof),
+                "regime_context_scope": "resolution_time_only",
                 "close_reason": str(r.get("close_reason") or r.get("verb") or "resolved")[:120],
                 "taxonomy_hint": _taxonomy_hint(r) if is_bad else "",
                 "lesson_id": None,
