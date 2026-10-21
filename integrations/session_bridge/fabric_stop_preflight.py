@@ -35,7 +35,9 @@ def _directory_issue(path: Path) -> str | None:
     try:
         descriptor = os.open(path, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
         info = os.fstat(descriptor)
-        if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) != 0o700:
+        if info.st_uid != os.getuid():
+            return "state_directory_unsafe"
+        if stat.S_IMODE(info.st_mode) != 0o700:
             return "state_directory_unsafe"
     except OSError:
         return "state_directory_unavailable"
