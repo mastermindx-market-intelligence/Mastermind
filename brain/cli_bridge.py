@@ -373,6 +373,11 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
     )
 
 
+# A reported SDK terminal error is not evidence of a pre-start auth/quota failure.
+# Keep this owned outcome outside the string classifiers that authorize replay.
+_SDK_TERMINAL_ERROR = "sdk_terminal_error"
+
+
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   system: str | None = None, append_system: str | None = None,
                   allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -557,6 +562,12 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
                     **_veto_kw,
                 )
+                # The SDK observed an error terminal. A tool-capable attempt may
+                # already have effects; its answer text cannot authorize another
+                # credential attempt, including when it resembles auth/quota text.
+                if result.get("error") == _SDK_TERMINAL_ERROR:
+                    used_key_id = _key_id
+                    break
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
                 _classified = None
@@ -879,6 +890,7 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     if append_system:
         opts.append_system_prompt = append_system
     text, cost, sid, usage, used = None, None, None, None, []
+    terminal_error = False
     _think: list[dict] = []   # LOG-ONLY reasoning capture (see thinking_out)
     _round = 0                # assistant-message counter → segment "round"
 
@@ -896,6 +908,9 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     _require_provider_start(before_provider_start)
     async for msg in _sdk_query(prompt=prompt, options=opts):
         if hasattr(msg, "result"):                         # ResultMessage
+            # Preserve an explicit error even if a later terminal says success.
+            # A subtype named "success" and nonempty text cannot override it.
+            terminal_error = terminal_error or getattr(msg, "is_error", None) is True
             text = getattr(msg, "result", None) or text
             cost = getattr(msg, "total_cost_usd", None)
             sid = getattr(msg, "session_id", None)
@@ -965,9 +980,11 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text), "text": text, "model": mdl, "role": role, "armed": arm,
+    return {"ok": bool(text) and not terminal_error, "text": text,
+            "model": mdl, "role": role, "armed": arm,
             "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk"}
+            "usage": _as_dict(usage), "backend": "sdk",
+            **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
