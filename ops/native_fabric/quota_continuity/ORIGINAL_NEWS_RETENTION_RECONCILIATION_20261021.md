@@ -81,3 +81,46 @@ Do not select this source stage over the current native generation. Release must
 Required remaining gates are exact-source review and CI, applicable protected merges, composed generation qualification and selection, a fresh installed read-only check, the explicit original-case reconciliation, and canonical readback proving the original failure and no-retry/no-acceptance limits remain. Only then can the separate current-head News review and production release gates advance according to ordinary admission. Neither this source nor historical absence qualifies the unrelated repair review's later M1 transport refusal.
 
 Principal C3 performed this exact historical evidence and recovery-boundary work as `PRINCIPAL_JUDGMENT`. An independent native C3 architecture assessment identified the late-directory and acknowledgment gaps addressed here. The final read-only architecture assessment found no remaining must-fix findings in reconciliation SHA256 `0bd35e8f9256e34881fe6a47b5a9698bbf8d36cc415c110a4c6228ed1f59f0a0` and adapter SHA256 `91d93adbb2f4fa5caca9b9f04409c037721ceea67fcb819b358158ed827b9046`. That advisory is not either frozen paid review result or a formal GitHub approval. Paid-worker source reviews, actual protected release, native rollout and signed-in production News acceptance remain separate evidence requirements.
+
+## Combined source with the physical-owner repair
+
+The original recovery branch now materially composes published repair commit
+`5f9fa66158691fd1a0a1e1464f9e7a60fde7ca5c` from PR #1665 with the recovery source
+at `d7736aea141d42eea21088c31a9ab363916869be`. Both original managed branches and
+failed-review identities remain in place. This is source integration only.
+
+The production source files, manifest and inventory combined without conflict.
+The sole merge conflict was the composition test's explanatory comment and
+manifest pin. Resolution retains `EXPECTED_NATIVE_FILES = 85`, the exact
+recovery checker/reconciler/adapter bytes, and all final repair controller,
+helper and Qwen bytes. The canonical stage builder reproduces both declarations;
+all 85 hashes match. The other 80 repair-generation files are unchanged, and the
+three recovery-owned entries are exact `d7736aea` bytes.
+
+- Combined manifest SHA-256:
+  `8ac0048aa2f40a19bddb30792a64b33b61a5409d2f62b8906acc211ae0f62fe0`.
+- Combined inventory SHA-256:
+  `1dcf91f81aa49453a08f391a2bc19d61e62771e426e710977904cdab04693883`.
+- Controller:
+  `2cb93138d446c5fe7cfaf42cfa8f8e731882eb726108a0eacf2ddd6fcbef9f7f`.
+- Helper:
+  `81fff3ccc471c972d29926b2a10020ef4856d2c6585d4dc30e41633ed65a25df`.
+- Qwen:
+  `033bf388c4b3ea4cd5e4161c3c558b39a3a9d9bc80a5d7bce85b8b85a29ec1dd`.
+
+The combined source passes **41 tests**: all 28 historical-proof/reconciliation
+tests and all 13 physical-owner tests. The recovery adapter's preceding 14
+regressions and repair's preceding 12 controller/retention plus 17 credential
+regressions refer to identical component bytes. Syntax, staged and unstaged
+diff-whitespace checks also pass. No production receipt or native generation
+selection was changed by these tests.
+
+The old standalone 85-file stage and its green CI are historical qualifications.
+The combined commit requires its own exact-head CI and full independent review.
+The initial dependency description above is retained as history; source
+composition is now complete, while protected merge and rollout remain pending.
+Do not install a review stage. Release requires protected reviewed source,
+fresh current-generation and host preflight, immutable publish/verify/select,
+then the installed original-owner check and explicit reconciliation. Neither
+this composition nor a new review of its genuinely changed source alters either
+frozen historical reviewer or supplies a review result for its old subject.

@@ -29,9 +29,10 @@ DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8c
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # Observer, portable reader and original-state collector changes compose here.
 # Executor, donor, support and deadline identities remain independently pinned.
-# Original retention recovery adds two owners to the declared native closure.
+# Retention recovery composes with the protected-review candidate physical
+# owner transport/configuration correction in the explicit 85-file closure.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "13c7336b6d34a37cce4a7c99734b51e58808d787299adac00fcd96389c6981f7"
+NATIVE_MANIFEST_SHA = "8ac0048aa2f40a19bddb30792a64b33b61a5409d2f62b8906acc211ae0f62fe0"
 
 
 def _sha(raw):

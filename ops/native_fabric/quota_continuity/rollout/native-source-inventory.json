@@ -456,9 +456,9 @@
       "source": "candidate/quota_remote.py"
     },
     "ext/qwen_exec.sh": {
-      "bytes": 31246,
+      "bytes": 31736,
       "installed_preimage_sha256": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1",
-      "sha256": "34e5265f98c8fe5f413cda4775abaad43a76441ec59f4a4c10cb98aadf75bed1",
+      "sha256": "033bf388c4b3ea4cd5e4161c3c558b39a3a9d9bc80a5d7bce85b8b85a29ec1dd",
       "source": "candidate/qwen_exec.sh"
     },
     "ext/recovery_artifacts.py": {
@@ -468,9 +468,9 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 77068,
+      "bytes": 83957,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "ca28c22c060588436a593d6ba42f66ebe2be6c0093c5c68a14e9ee070788031b",
+      "sha256": "2cb93138d446c5fe7cfaf42cfa8f8e731882eb726108a0eacf2ddd6fcbef9f7f",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
@@ -480,9 +480,9 @@
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {
-      "bytes": 35115,
+      "bytes": 38536,
       "installed_preimage_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
-      "sha256": "2840d0bf548f80aed8e8b02db011dc2a38e402d26342545075d785b5cfed84ba",
+      "sha256": "81fff3ccc471c972d29926b2a10020ef4856d2c6585d4dc30e41633ed65a25df",
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
