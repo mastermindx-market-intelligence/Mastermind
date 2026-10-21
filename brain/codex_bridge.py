@@ -22,6 +22,8 @@ from typing import Any, Callable
 
 import yaml
 
+from common.redaction import sanitize_external_text
+
 _ROOT = Path(__file__).resolve().parent.parent
 _CFG = _ROOT / "config" / "agents.yml"
 
@@ -80,6 +82,9 @@ _DELEGATION_AGENT_NAMES = frozenset({
 # tool's text or a turn-level error would otherwise authorise resending the prompt to another
 # provider after a write of unknown effect.
 _WRITE_TOOL_LEAVES = frozenset({"submit_book"})
+# An explicit terminal failure remains failed regardless of exit status or later prose.
+# Keep diagnostics separate from the field that authorizes provider failover.
+TURN_FAILURE_ERROR = "codex_terminal_error"
 WRITE_TOOL_FAILURE_ERROR = (
     "codex reported a failed write tool call; its effect is unknown - reconcile the book "
     "before any resubmission"
@@ -415,7 +420,9 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
     usage: dict[str, Any] = {}
     tools: list[str] = []
     errors: list[str] = []
+    safe_errors: list[str] = []
     failed_write_tools: list[dict[str, Any]] = []
+    turn_failed = False
     for line in raw.splitlines():
         try:
             event = json.loads(line)
@@ -437,13 +444,20 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
                         err = item.get("error")
                         msg = err.get("message") if isinstance(err, dict) else err
                         failed_write_tools.append(
-                            {"tool": str(name), "error": str(msg)[:1000] if msg else None}
+                            {"tool": str(name), "error": sanitize_external_text(msg, limit=0)[:1000] if msg else None}
                         )
         elif et == "turn.completed":
             usage = event.get("usage") or usage
         elif et in {"turn.failed", "error"}:
+            # A terminal failure is authoritative even without diagnostic text,
+            # and a later completed event cannot erase it.
+            turn_failed = turn_failed or et == "turn.failed"
             msg = event.get("error") or event.get("message")
             if msg:
+                # Keep the existing nonterminal classifier input unchanged. The
+                # separate exported diagnostic sees the COMPLETE message before
+                # either bound; truncating first can hide a credential's shape.
+                safe_errors.append(sanitize_external_text(msg, limit=0)[:500])
                 errors.append(str(msg)[:500])
     return {
         "text": text,
@@ -452,6 +466,8 @@ def _parse_jsonl(raw: str) -> dict[str, Any]:
         "tools_used": tools,
         "error": "; ".join(errors)[:1000] or None,
         "failed_write_tools": failed_write_tools,
+        "turn_failed": turn_failed,
+        "terminal_error_detail": "; ".join(safe_errors)[:1000] or None,
     }
 
 
@@ -665,13 +681,21 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         error = stderr[-1000:] or f"codex exited {proc.returncode}"
     text = parsed["text"]
     failed_write_tools = parsed["failed_write_tools"]
+    turn_failed = parsed["turn_failed"]
+    terminal_error_detail = parsed["terminal_error_detail"]
+    if turn_failed and proc.returncode != 0 and not parsed["error"]:
+        # Preserve the prior tail projection, but redact the complete raw stderr
+        # first so a token straddling that boundary cannot survive.
+        terminal_error_detail = sanitize_external_text(stderr, limit=0)[-1000:] or f"codex exited {proc.returncode}"
     if failed_write_tools:
         # Fixed string on purpose; see WRITE_TOOL_FAILURE_ERROR. The tool's text stays in
         # ``failed_write_tools``; a turn-level error is deliberately not merged in here.
         error = WRITE_TOOL_FAILURE_ERROR
+    elif turn_failed:
+        error = TURN_FAILURE_ERROR
     result = {
         **base,
-        "ok": proc.returncode == 0 and bool(text) and not failed_write_tools,
+        "ok": proc.returncode == 0 and bool(text) and not failed_write_tools and not turn_failed,
         "text": text,
         "tools_used": parsed["tools_used"],
         "failed_write_tools": failed_write_tools,
@@ -679,7 +703,8 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         "session_id": parsed["session_id"],
         "usage": parsed["usage"],
         "backend": "codex",
-        "error": error if (proc.returncode != 0 or not text or failed_write_tools) else None,
+        "error": error if (proc.returncode != 0 or not text or failed_write_tools or turn_failed) else None,
+        **({"terminal_error_detail": terminal_error_detail} if turn_failed else {}),
         "latency_ms": int((time.monotonic() - started) * 1000),
     }
     if not delegation or not result["ok"]:
