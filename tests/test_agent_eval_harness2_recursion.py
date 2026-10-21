@@ -331,3 +331,57 @@ def test_model_proposal_without_bound_evidence_is_refused(tmp_path):
     with pytest.raises(Harness2CycleError, match="PROPOSAL_EVIDENCE_UNBOUND"):
         invoke(port)
     assert len(port.trials) == 1
+
+
+def _invoke_context(port, context_inputs, prior=()):
+    return run_refinement(task=TASK, common_base=BASE, expected_scenario=port.scenario,
+        baseline_configuration=port.base_configuration, prior_experience=prior,
+        allowed_edit_paths=frozenset({"scripts/total.py"}), k=1, mode="agg",
+        limits=Limits(4, 4, 7), port=port, agentos_context_inputs=context_inputs)
+
+
+def test_native_agentos_context_guides_refinement_without_dropping_higher_law(tmp_path):
+    from tests.test_agent_eval_harness2_context import inputs, bundle_fixture
+    port = FixturePort(tmp_path)
+    context_inputs = inputs()
+    cfg = copy.deepcopy(port.base_configuration)
+    cfg.pop("schema")
+    cfg.pop("configuration_digest")
+    cfg["context"]["context_packet"] = {"artifact_ref": "artifact:native-agentos-context",
+                                        "digest": context_inputs["expected_bundle_digest"]}
+    port.base_configuration = contracts.build_configuration(cfg)
+    result = _invoke_context(port, context_inputs)
+    assert result["selected_output"] == b"85\n"
+    assert result["context_bundle_digest"] == context_inputs["expected_bundle_digest"]
+    for label, context in port.contexts:
+        assert context["organizational_context"] == bundle_fixture()
+        assert context["prior_experience"][0]["confidence"] == "verified"
+        assert context["prior_experience"][0]["source_run_ids"]
+        assert context["organizational_context"]["degraded"]
+        assert context["organizational_context"]["sections"][0]["items"][0]["key"] == "DNR:NO-DUPLICATE"
+
+
+def test_context_packet_must_match_the_native_configuration_before_calls(tmp_path):
+    from tests.test_agent_eval_harness2_context import inputs
+    port = FixturePort(tmp_path)
+    with pytest.raises(Harness2CycleError, match="NATIVE_CONTEXT_PACKET_MISMATCH"):
+        _invoke_context(port, inputs())
+    assert not port.calls
+
+
+def test_agentos_context_cannot_be_combined_with_an_unbound_extra_library(tmp_path):
+    from tests.test_agent_eval_harness2_context import inputs
+    port = FixturePort(tmp_path)
+    with pytest.raises(Harness2CycleError, match="CONTEXT_LIBRARY_MUST_NOT_BE_MIXED"):
+        _invoke_context(port, inputs(), prior=({"claim": "unbound"},))
+    assert not port.calls
+
+
+def test_context_task_domain_mismatch_is_pre_effect(tmp_path):
+    from tests.test_agent_eval_harness2_context import inputs
+    port = FixturePort(tmp_path)
+    args = inputs()
+    args["task_domain"] = "other"
+    with pytest.raises(Harness2CycleError, match="CONTEXT_TASK_DOMAIN_MISMATCH"):
+        _invoke_context(port, args)
+    assert not port.calls

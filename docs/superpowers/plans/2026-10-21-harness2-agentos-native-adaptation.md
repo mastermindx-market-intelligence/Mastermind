@@ -242,3 +242,59 @@ superseded/omitted/degraded evidence, and feed only appropriate domain experienc
 to the native method. Next runtime dependency: qualify the existing native port's
 actual model/effect/session observations and run a new bounded admitted canary;
 do not reuse or alter the old sealed E1 or Outcome Learning #398 held operation.
+
+## Source-bound Agent OS consumer and cross-repository proof
+
+Macro PR #9965 (https://github.com/mastermindx-market-intelligence/macro/pull/9965),
+head `6b24d5f6de4332c0bd004a07aca7576523d26dcf`, now supplies the optional native
+`compile-context --harness-experience` projection. Four source files changed;
+12 new feature cases and 224 total compiler/schema cases passed locally. It is
+DRAFT/HOLD, not installed or merged. Its original source workspace was obtained
+through the existing `mmx-workspace` manager, operation
+`harness2-agentos-consumer-20261021`, lane web, base
+`cd90f651ea2db5a24ca46c5ded45f7e64cdbc733`. No existing Agent OS decision was
+superseded, no generated state was edited and no synthetic lesson was published
+as validated institutional knowledge.
+
+`scripts/agent_eval/harness2_context.py` consumes the actual context_bundle.v1
+bytes, expected digest, exact source generation and explicit workstream. It keeps
+the WHOLE context (higher law, workstream, all exclusions, omissions and degradation)
+while extracting typed same-domain experiences with their original confidence,
+source-run and adopted-artifact provenance. It refuses changed/malformed/conflicting
+input; future-dated lessons do not become prior experience. Old clipped prose is
+not parsed into invented complete lesson fields. No external artifact is fetched.
+
+The native refinement function now consumes that reader directly when
+`agentos_context_inputs` is supplied. It refuses a second unbound library and
+requires the complete context packet digest to match the existing native evaluation
+configuration before any port call. Higher law and missingness are not replaced
+by a persuasive lesson list. Only the existing port owns actual execution, model,
+capability grants and observation authenticity.
+
+Actual cross-repository proof executed the new Macro CLI at the published source
+against its temporary synthetic Agent OS test store, then read the unmodified
+result with the Mastermind context consumer and executed the four-rollout scripted
+native laboratory. The complete lesson was 1,400 characters (not the clipped
+excerpt), all context was preserved, the fixed arithmetic program changed from
+105 to 85, and four native fixture EVAL records resolved through the existing store.
+Context digest:
+`sha256:c578865773bdc3459a0870588a45443f803b44c7f7cb00e5bc1fc7bda2d460dd`.
+Record-set digest:
+`sha256:867b4c04494000ca40b28d88a2604f8aa797a70f06e0eb80d517f2cb3fb1fdf7`.
+This was an actual compiler/consumer/program path with SCRIPTED fixture inference,
+not a real provider run, native runtime admission, prospective efficacy test or
+authenticated live observation. The temporary test store is not production memory.
+
+Latest complete EVAL test command remains the same `tests/test_agent_eval_*.py`
+selection: **844 passed** (17.81s). This includes 24 new source-context cases and
+four additional native-method integration cases; do not add earlier overlapping
+suite counts. Macro's separate compiler/schema result is 224 passed.
+
+A second independent paid review of exact core head `1b86c212...`, child
+`harness2-1663-review-1b86c212-20261021`, failed before worker launch on the M1
+transport: `TRANSPORT_READBACK_REFUSED` / not-a-directory `lanes` / packet readback
+hash mismatch. Status stayed NOT_FOUND; no review or source edit occurred. A
+bounded read-only check found the named physical directories present but did not
+establish the cause. Preserve the readback guard; no unchanged retry or alternate
+carrier was used. This review route and the native production-port qualification
+remain actual dependencies, not accepted work.

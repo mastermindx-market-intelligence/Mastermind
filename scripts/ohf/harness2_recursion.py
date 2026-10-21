@@ -25,6 +25,7 @@ from typing import Any, Protocol
 from scripts.agent_eval import contracts, validity
 from scripts.agent_eval.canonical import digest_value
 from scripts.agent_eval.harness2_native import harness_digest, sha256_bytes
+from scripts.agent_eval.harness2_context import read_context_bundle
 
 
 class Harness2CycleError(RuntimeError):
@@ -136,7 +137,8 @@ def _validate_proposal(value: Proposal, current: dict[str, bytes], allowed: froz
 def run_refinement(*, task: dict, common_base: dict[str, bytes],
                    expected_scenario: dict, baseline_configuration: dict,
                    prior_experience: tuple[dict, ...], allowed_edit_paths: frozenset[str],
-                   k: int, mode: str, limits: Limits, port: Harness2Port) -> dict:
+                   k: int, mode: str, limits: Limits, port: Harness2Port,
+                   agentos_context_inputs: dict | None = None) -> dict:
     """One finite Propose-Probe-Compose/Select/Reflect invocation.
 
     No ground-truth score is accepted or provided to the improver/selector.
@@ -170,14 +172,32 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
     expected_ref["temporal_cutoff"] = expected_scenario["temporal"]["cutoff_at"]
     expected_lock = configuration_lock(expected_ref, baseline_configuration)
     _check(type(prior_experience) is tuple and len(prior_experience) <= 32, "EXPERIENCE_BOUND")
+    source_context = None
+    if agentos_context_inputs is not None:
+        _check(type(agentos_context_inputs) is dict and not prior_experience,
+               "CONTEXT_LIBRARY_MUST_NOT_BE_MIXED")
+        _check(agentos_context_inputs.get("task_domain") == task["domain"], "CONTEXT_TASK_DOMAIN_MISMATCH")
+        source_context = read_context_bundle(**agentos_context_inputs)
+        _check(baseline_configuration["context"]["context_packet"]["digest"] == source_context.bundle_digest,
+               "NATIVE_CONTEXT_PACKET_MISMATCH")
+        prior_experience = source_context.experience
     library = copy.deepcopy(prior_experience)
+    fields = {"discovery_ref", "source_ref", "domain", "claim", "falsifier", "so_what", "harness_artifact"}
+    provenance_fields = {"confidence", "source_run_ids", "method_source_ref"}
     for entry in library:
-        _check(type(entry) is dict and set(entry) == {"discovery_ref", "source_ref", "domain", "claim", "falsifier", "so_what", "harness_artifact"},
+        _check(type(entry) is dict and (set(entry) == fields or set(entry) == fields | provenance_fields),
                "EXPERIENCE_SHAPE")
         _check(entry["domain"] == task["domain"], "EXPERIENCE_DOMAIN_MISMATCH")
         _check(all(type(v) is str and 0 < len(v.strip()) <= 8192
-                   for key, v in entry.items() if key != "harness_artifact"), "EXPERIENCE_TEXT_BOUND")
+                   for key, v in entry.items() if key not in ("harness_artifact", "source_run_ids")), "EXPERIENCE_TEXT_BOUND")
         _check(entry["discovery_ref"].startswith("DSC:"), "EXPERIENCE_DISCOVERY_REQUIRED")
+        if provenance_fields <= set(entry):
+            _check(entry["confidence"] in ("verified", "probable", "suspected"), "EXPERIENCE_CONFIDENCE_INVALID")
+            refs = entry["source_run_ids"]
+            _check(type(refs) is list and 2 <= len(refs) <= 128, "EXPERIENCE_RUN_REFERENCE_BOUND")
+            for ref in refs:
+                contracts.v_run_id(ref, "$.experience.source_run_ids")
+            _check(len(set(refs)) == len(refs), "EXPERIENCE_RUN_REFERENCE_DUPLICATE")
         # Full adopted trees stay in their existing artifact owner. The port may
         # retrieve this exact artifact on demand; no shadow library is persisted.
         contracts.v_artifact_pair(entry["harness_artifact"], "$.experience.harness_artifact")
@@ -194,6 +214,10 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
         return copy.deepcopy({
             "current_harness": current, "common_base": base,
             "prior_experience": library,
+            # Preserve higher law, the workstream and missingness rather than
+            # replacing the native context packet with a persuasive lesson list.
+            "organizational_context": source_context.bundle if source_context else None,
+            "experience_exclusions": source_context.experience_exclusions if source_context else (),
             "executions": [{"label": label, "run_id": trials[label].run["run_id"],
                             "output": trials[label].output, "harness": trees[label],
                             "notes": notes.get(label, "")} for label in labels],
@@ -297,6 +321,8 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             "retained_native_runs": tuple(trials[label].run["run_id"] for label in trials),
             "rollout_count": len(trials), "improver_call_count": improver_calls,
             "factor_lock_digest": expected_lock, "step_notes": copy.deepcopy(notes),
+            "context_bundle_digest": source_context.bundle_digest if source_context else None,
+            "experience_exclusions": copy.deepcopy(source_context.experience_exclusions) if source_context else (),
             "experience_candidate": copy.deepcopy(reflection),
             "automatic_memory_write": False, "promotion": "NONE",
         }
