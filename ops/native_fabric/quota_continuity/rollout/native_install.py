@@ -19,6 +19,13 @@ import stat
 import sys
 import uuid
 
+# Reuse the installed Studio Direct consumer census; it is the single owner
+# of pin observation, rather than duplicating a private-account registry here.
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from ops.fabric_launch import install as studio_consumer_owner
+
 import native_generation as generation
 
 SCHEMA = "native-ingress-bootstrap.v1"
@@ -245,10 +252,29 @@ def _receipts_dir(store):
     return directory
 
 
+def _require_studio_consumer_pin(plan, expected_field):
+    """Refuse pool ingress drift against the existing bounded Studio census."""
+    if expected_field not in ("bridge", "preimage"):
+        raise ValueError("STUDIO_CONSUMER_TARGET_INVALID")
+    entry = plan["entries"]["pool"]
+    try:
+        conflicts = studio_consumer_owner.pinned_consumers(
+            entry["target"], entry[expected_field],
+        )
+    except (OSError, ValueError):
+        raise ValueError("STUDIO_CONSUMER_CENSUS_REFUSED") from None
+    if type(conflicts) is not list:
+        raise ValueError("STUDIO_CONSUMER_CENSUS_REFUSED")
+    if conflicts:
+        # Do not expose private account identities or config filenames.
+        raise ValueError("STUDIO_CONSUMER_PIN_MIGRATION_REQUIRED")
+
+
 def phase1(bundle):
     bundle, plan = read_plan(bundle)
     store = Path(plan["store"])
     with generation.publication_lock(store):
+        _require_studio_consumer_pin(plan, "bridge")
         if os.path.lexists(_receipts_dir(store) / (plan["digest"] + ".rollback.json")):
             raise ValueError("bootstrap epoch is terminal after rollback; prepare a fresh plan")
         _preimages(plan, {"pool", "task"})
@@ -258,6 +284,9 @@ def phase1(bundle):
         elif selection["generation"] != plan["initial_generation"]:
             raise ValueError("bootstrap must initially select the reviewed target release")
         _install_launcher(bundle, plan)
+        # Re-observe pins immediately before replacing the global pool CLI.
+        # Coordinated releases must separately quiesce all Studio writers.
+        _require_studio_consumer_pin(plan, "bridge")
         # Each atomic replacement is independently safe: new launches get the
         # reviewed target (which may be V1, without publishing a relocated V0);
         # older processes retain their open old inode and all flat helpers.
@@ -275,6 +304,7 @@ def rollback(bundle):
     bundle, plan = read_plan(bundle)
     store = Path(plan["store"])
     with generation.publication_lock(store):
+        _require_studio_consumer_pin(plan, "preimage")
         _preimages(plan, {"pool", "task", "remote"})
         # Restore the flat child first. An old parent will therefore never enter
         # a new flat controller as its future ingress is restored.
