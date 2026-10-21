@@ -456,9 +456,9 @@
       "source": "candidate/quota_remote.py"
     },
     "ext/qwen_exec.sh": {
-      "bytes": 31736,
+      "bytes": 43049,
       "installed_preimage_sha256": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1",
-      "sha256": "033bf388c4b3ea4cd5e4161c3c558b39a3a9d9bc80a5d7bce85b8b85a29ec1dd",
+      "sha256": "673216bbd150b7b98aebd34b784d32e7caa3e1c9d896b7a4c0192e10541e0d61",
       "source": "candidate/qwen_exec.sh"
     },
     "ext/recovery_artifacts.py": {

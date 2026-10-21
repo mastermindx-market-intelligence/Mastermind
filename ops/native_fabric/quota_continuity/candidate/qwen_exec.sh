@@ -43,6 +43,14 @@
 # total across the run. When that budget is spent it prints
 # `qwen_exec: NO_USABLE_KEY` and exits rc 75 -- the SLOT_TIMEOUT code lane2.py
 # already spills on, with nothing on stdout.
+#
+# Retained diagnostics: this wrapper adds only bounded, fixed-enum/boolean
+# observational lines on stderr (classifier provenance, projection status).
+# They never change a classifier decision, cooldown, failover, rc, loop or the
+# published stdout, never carry prompt/answer/stream/path/thread/account or
+# provider-message content, and never claim an observed HTTP status: every
+# regex match, including a structured JSON error-code field, is reported as
+# classification inference only.
 set +x
 set -eu
 # A parent-supplied credential never authorizes this run or reaches its helpers.
@@ -130,6 +138,43 @@ import os
 import sys
 from typing import IO, Optional
 
+# Bounded diagnostic vocabulary: fixed enums and booleans only. A closed reason
+# and the completed/thread/answer/failed flags are derived from the current
+# parse alone. No prompt, answer, stream, snippet, path, thread id, account or
+# provider-message content is ever emitted, and no line claims an observed HTTP
+# status: a structured stream error event is observed_structure, not HTTP
+# provenance.
+QWEN_PROJECTION_BASIS = "stream_parse"
+
+CAT_COMPLETED = "QWEN_CLOSED_COMPLETED"
+CAT_MALFORMED_EVENT = "QWEN_CLOSED_MALFORMED_EVENT"
+CAT_IO_ERROR = "QWEN_CLOSED_IO_ERROR"
+CAT_ENCODING_ERROR = "QWEN_CLOSED_ENCODING_ERROR"
+CAT_NONOBJECT_EVENT = "QWEN_CLOSED_NONOBJECT_EVENT"
+CAT_THREAD_INVALID = "QWEN_CLOSED_THREAD_INVALID"
+CAT_TURN_STATE_INVALID = "QWEN_CLOSED_TURN_STATE_INVALID"
+CAT_STREAM_ERROR_EVENT = "QWEN_CLOSED_STREAM_ERROR_EVENT"
+CAT_ITEM_INVALID = "QWEN_CLOSED_ITEM_INVALID"
+CAT_ANSWER_INVALID = "QWEN_CLOSED_ANSWER_INVALID"
+CAT_NO_THREAD = "QWEN_CLOSED_NO_THREAD"
+CAT_NOT_COMPLETED = "QWEN_CLOSED_NOT_COMPLETED"
+CAT_NO_FINAL_ANSWER = "QWEN_CLOSED_NO_FINAL_ANSWER"
+
+# Diagnostic snapshot of the most recent projection, for offline inspection
+# only. Never printed beyond the bounded stderr line built in _emit_diag.
+LAST_PROJECTION_DIAG = {
+    "closed": CAT_NOT_COMPLETED,
+    "completed": False,
+    "thread": False,
+    "answer": False,
+    "failed": False,
+    "emitted": False,
+}
+
+
+def _b(value):
+    return "true" if value else "false"
+
 
 def stream_final_jsonl(in_f: IO[str], out_f: IO[str], thread_path: str,
                        raw_path: str) -> Optional[str]:
@@ -139,65 +184,135 @@ def stream_final_jsonl(in_f: IO[str], out_f: IO[str], thread_path: str,
     Tool output and progress are never a final response, even when they contain
     terminal-looking text. No partial response is published on framing failure.
     This projection does not accept the worker's answer or truncate its content.
+
+    Signature and return contract are unchanged: the confirmed thread id is
+    returned on success and ValueError is raised when the turn cannot be
+    confirmed. The only addition is one bounded fixed-enum stderr line.
     """
     thread_id = None
     last_text = None
     completed = False
     failed = False
     started = False
-    with open(raw_path, "w", encoding="utf-8") as raw:
-        for line in in_f:
-            raw.write(line)
-            raw.flush()
-            if not line.strip():
-                continue
-            try:
-                ev = json.loads(line)
-            except json.JSONDecodeError:
-                failed = True
-                continue
-            if not isinstance(ev, dict):
-                failed = True
-                continue
-            kind = ev.get("type")
-            if kind == "thread.started":
-                tid = ev.get("thread_id")
-                if (not isinstance(tid, str) or not tid.strip()
-                        or thread_id is not None or completed):
-                    failed = True
+    first_issue = None
+
+    def note(category):
+        # First structural issue in stream order wins the closed reason.
+        nonlocal first_issue
+        if first_issue is None:
+            first_issue = category
+
+    def emit_diag():
+        # Bounded single line, fixed enums/booleans only. A diagnostic failure
+        # must never change the projection outcome, so every error is swallowed.
+        try:
+            if first_issue is not None:
+                closed = first_issue
+            elif completed and thread_id and last_text and not failed:
+                closed = CAT_COMPLETED
+            elif not thread_id:
+                closed = CAT_NO_THREAD
+            elif not completed:
+                closed = CAT_NOT_COMPLETED
+            else:
+                closed = CAT_NO_FINAL_ANSWER
+            LAST_PROJECTION_DIAG.clear()
+            LAST_PROJECTION_DIAG.update({
+                "closed": closed,
+                "completed": bool(completed),
+                "thread": thread_id is not None,
+                "answer": last_text is not None,
+                "failed": bool(failed),
+                "emitted": True,
+            })
+            diag = ("QWEN_PROJECTION_DIAG closed=%s completed=%s thread=%s"
+                    " answer=%s failed=%s basis=%s"
+                    % (closed, _b(completed), _b(thread_id is not None),
+                       _b(last_text is not None), _b(failed),
+                       QWEN_PROJECTION_BASIS))
+            sys.stderr.write(diag + "\n")
+            sys.stderr.flush()
+        except Exception:
+            pass
+
+    try:
+        with open(raw_path, "w", encoding="utf-8") as raw:
+            for line in in_f:
+                raw.write(line)
+                raw.flush()
+                if not line.strip():
                     continue
-                thread_id = tid
-                with open(thread_path + ".tmp", "w", encoding="utf-8") as target:
-                    target.write(tid + "\n")
-                os.replace(thread_path + ".tmp", thread_path)
-            elif kind == "turn.started":
-                if started or completed:
+                try:
+                    ev = json.loads(line)
+                except json.JSONDecodeError:
                     failed = True
-                started = True
-            elif kind in ("error", "turn.failed"):
-                failed = True
-            elif kind == "item.completed":
-                item = ev.get("item")
-                if not isinstance(item, dict):
-                    failed = True
+                    note(CAT_MALFORMED_EVENT)
                     continue
-                if item.get("type") == "agent_message":
-                    text = item.get("text")
-                    if not isinstance(text, str) or completed:
+                if not isinstance(ev, dict):
+                    failed = True
+                    note(CAT_NONOBJECT_EVENT)
+                    continue
+                kind = ev.get("type")
+                if kind == "thread.started":
+                    tid = ev.get("thread_id")
+                    if (not isinstance(tid, str) or not tid.strip()
+                            or thread_id is not None or completed):
                         failed = True
-                    elif item.get("phase") != "commentary":
-                        last_text = text
-            elif kind == "turn.completed":
-                if completed:
+                        note(CAT_THREAD_INVALID)
+                        continue
+                    thread_id = tid
+                    with open(thread_path + ".tmp", "w", encoding="utf-8") as target:
+                        target.write(tid + "\n")
+                    os.replace(thread_path + ".tmp", thread_path)
+                elif kind == "turn.started":
+                    if started or completed:
+                        failed = True
+                        note(CAT_TURN_STATE_INVALID)
+                    started = True
+                elif kind in ("error", "turn.failed"):
+                    # Structured stream evidence only: this is not an HTTP
+                    # status observation and is never reported as one.
                     failed = True
-                completed = True
-    if failed or not completed or not thread_id or not last_text:
-        raise ValueError("QWEN_FINAL_RESPONSE_UNCONFIRMED")
-    out_f.write(last_text)
-    if not last_text.endswith("\n"):
-        out_f.write("\n")
-    out_f.flush()
-    return thread_id
+                    note(CAT_STREAM_ERROR_EVENT)
+                elif kind == "item.completed":
+                    item = ev.get("item")
+                    if not isinstance(item, dict):
+                        failed = True
+                        note(CAT_ITEM_INVALID)
+                        continue
+                    if item.get("type") == "agent_message":
+                        text = item.get("text")
+                        if not isinstance(text, str) or completed:
+                            failed = True
+                            note(CAT_ANSWER_INVALID)
+                        elif item.get("phase") != "commentary":
+                            last_text = text
+                elif kind == "turn.completed":
+                    if completed:
+                        failed = True
+                        note(CAT_TURN_STATE_INVALID)
+                    completed = True
+        if failed or not completed or not thread_id or not last_text:
+            raise ValueError("QWEN_FINAL_RESPONSE_UNCONFIRMED")
+        out_f.write(last_text)
+        if not last_text.endswith("\n"):
+            out_f.write("\n")
+        out_f.flush()
+        return thread_id
+    except UnicodeDecodeError:
+        failed = True
+        note(CAT_MALFORMED_EVENT)
+        raise
+    except UnicodeError:
+        failed = True
+        note(CAT_ENCODING_ERROR)
+        raise
+    except OSError:
+        failed = True
+        note(CAT_IO_ERROR)
+        raise
+    finally:
+        emit_diag()
 
 
 def main(argv=None):
@@ -392,6 +507,134 @@ classify_limit() {
     return 0
   fi
   echo none
+}
+
+# ---- Retained observational classifier provenance (decision-neutral) --------
+# These helpers only describe which EXISTING classify_limit rule won and which
+# captured channel carried it. They duplicate the classify_limit patterns in
+# the same order, run after KIND is already fixed, and never change KIND, a
+# cooldown, a failover, an rc or published output. A regex match here --
+# including a structured JSON error-code field -- is classification inference
+# only: it is observed_structure, never an observed HTTP status, so every
+# provenance report carries basis=classification_inference and
+# http_observed=false.
+CLASSIFIER_RULE="none"
+CLASSIFIER_CHANNEL="none"
+CLASSIFIER_STRUCTURE="none"
+CLASSIFIER_ANSWER_MATCH="false"
+CLASSIFIER_STDERR_MATCH="false"
+CLASSIFIER_RAW_EVENT_MATCH="false"
+
+# Fixed enum: which classifier kind the winning EXISTING rule reports.
+provenance_kind_of_rule() {
+  case "$1" in
+    json_code_invalid_api_key|status_token_auth_401) echo 401 ;;
+    json_code_access_denied|status_token_auth_403) echo 403 ;;
+    rate_limit_429) echo 429 ;;
+    json_code_quota|status_token_quota_402|reconnect_quota) echo 402 ;;
+    *) echo unknown ;;
+  esac
+}
+
+# Fixed enum: the structure of the winning evidence. json_error_code marks a
+# structured error-code field; that is NOT HTTP provenance.
+provenance_structure_of_rule() {
+  case "$1" in
+    json_code_invalid_api_key|json_code_access_denied|json_code_quota)
+      echo json_error_code
+      ;;
+    status_token_auth_401|status_token_auth_403|status_token_quota_402)
+      echo status_and_token_text
+      ;;
+    rate_limit_429) echo numeric_text ;;
+    reconnect_quota) echo reconnect_text ;;
+    *) echo none ;;
+  esac
+}
+
+# Run one existing rule's exact classify_limit pattern against one file.
+provenance_rule_matches() {
+  _pr_rule="$1"
+  _pr_f="$2"
+  case "$_pr_rule" in
+    json_code_invalid_api_key)
+      grep -qiE '"(code|error_code)"[[:space:]]*:[[:space:]]*"invalid[_[:space:]-]?api[_[:space:]-]?key' "$_pr_f" ;;
+    status_token_auth_401)
+      status_with_token "$_pr_f" 401 'invalid[_[:space:]-]?api[_[:space:]-]?key|unauthorized' ;;
+    json_code_access_denied)
+      grep -qiE '"(code|error_code)"[[:space:]]*:[[:space:]]*"access[_[:space:]-]?denied' "$_pr_f" ;;
+    status_token_auth_403)
+      status_with_token "$_pr_f" 403 'access[_[:space:]-]?denied' ;;
+    rate_limit_429)
+      grep -qiE 'HTTP[[:space:]]*429|[[:space:]]429[[:space:]]|429[[:space:]]|rate limit|too many requests' "$_pr_f" ;;
+    json_code_quota)
+      grep -qiE '"(code|error_code)"[[:space:]]*:[[:space:]]*"(InsufficientQuota|insufficient_quota|QuotaExceeded|Arrearage|AccessDenied\.Unpurchased)' "$_pr_f" ;;
+    status_token_quota_402)
+      status_with_token "$_pr_f" 402 'quota|insufficient|exhausted|Arrearage' ;;
+    reconnect_quota)
+      grep -qi 'reconnect' "$_pr_f" | grep -qiE 'quota|insufficient|exhausted|Arrearage' ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+# Determine the winning rule in classify_limit order and which channel file(s)
+# carried it. Fixed per-channel match booleans retain all three sources even
+# when the compatibility channel enum is multiple. Channel enums: answer | stderr | raw_event | multiple | unknown.
+# The same evidence is reported per source channel, so an ordinary numeric 429
+# found in the projected answer text is distinguishable from the same match on
+# the provider stderr or the raw event stream. unknown covers evidence spanning
+# a channel boundary in the concatenated scan file; conservative unknown is
+# preferred over guessing. Sets CLASSIFIER_RULE/CHANNEL/STRUCTURE only.
+classify_provenance() {
+  _cp_scan="$1"
+  CLASSIFIER_RULE="none"
+  CLASSIFIER_CHANNEL="none"
+  CLASSIFIER_STRUCTURE="none"
+  CLASSIFIER_ANSWER_MATCH="false"
+  CLASSIFIER_STDERR_MATCH="false"
+  CLASSIFIER_RAW_EVENT_MATCH="false"
+  _cp_rule=""
+  for _cp_r in json_code_invalid_api_key status_token_auth_401               json_code_access_denied status_token_auth_403               rate_limit_429 json_code_quota status_token_quota_402               reconnect_quota; do
+    if provenance_rule_matches "$_cp_r" "$_cp_scan"; then
+      _cp_rule="$_cp_r"
+      break
+    fi
+  done
+  if [ -z "$_cp_rule" ]; then
+    return 0
+  fi
+  # Report the rule only when it agrees with the classifier's actual outcome;
+  # any drift is reported conservatively as unknown rather than guessed.
+  if [ "$(provenance_kind_of_rule "$_cp_rule")" != "${KIND:-}" ]; then
+    return 0
+  fi
+  _cp_hits=""
+  for _cp_pair in answer:TEXT_FILE stderr:ERR_FILE raw_event:RAW_FILE; do
+    _cp_ch="${_cp_pair%%:*}"
+    _cp_var="${_cp_pair#*:}"
+    eval "_cp_path=\"\${$_cp_var:-}\""
+    if [ -n "$_cp_path" ] && provenance_rule_matches "$_cp_rule" "$_cp_path"; then
+      case "$_cp_ch" in
+        answer) CLASSIFIER_ANSWER_MATCH="true" ;;
+        stderr) CLASSIFIER_STDERR_MATCH="true" ;;
+        raw_event) CLASSIFIER_RAW_EVENT_MATCH="true" ;;
+      esac
+      if [ -z "$_cp_hits" ]; then
+        _cp_hits="$_cp_ch"
+      else
+        _cp_hits="multiple"
+      fi
+    fi
+  done
+  if [ -z "$_cp_hits" ]; then
+    _cp_hits="unknown"
+  fi
+  CLASSIFIER_RULE="$_cp_rule"
+  CLASSIFIER_CHANNEL="$_cp_hits"
+  CLASSIFIER_STRUCTURE="$(provenance_structure_of_rule "$_cp_rule")"
+  return 0
 }
 
 # True if this run should failover (never on a clean success that merely
@@ -641,6 +884,22 @@ run_codex() {
   if [ "$_rc" -eq 0 ] && [ "${_pipeline_rc[1]}" -ne 0 ]; then
     _rc=77
   fi
+  # Retained diagnostic: fixed-enum process statuses only. This keeps the
+  # provider process rc distinct from the response-projection rc so a
+  # projection failure is never attributed to provider HTTP or vice versa.
+  _proj_rc_diag="nonzero"
+  _prov_rc_diag="nonzero"
+  if [ "${_pipeline_rc[1]}" -eq 0 ]; then
+    _proj_rc_diag="zero"
+  fi
+  if [ "${_pipeline_rc[0]}" -eq 0 ]; then
+    _prov_rc_diag="zero"
+  fi
+  if [ "$_proj_rc_diag" = "zero" ]; then
+    log "PROJECTION_DIAG outcome=ok provider_rc=$_prov_rc_diag projection_rc=zero basis=process_status" || true
+  else
+    log "PROJECTION_DIAG outcome=unconfirmed provider_rc=$_prov_rc_diag projection_rc=nonzero basis=process_status" || true
+  fi
   # Errexit stays OFF through the tail of this function and is restored by the
   # caller once RC=$? is captured. Re-enabling it here was fatal: `return "$_rc"`
   # with a non-zero status under `set -e` aborts the whole script, so a Codex run
@@ -726,6 +985,10 @@ while [ "$ATTEMPT" -lt "$MAX_KEYS" ]; do
   fi
 
   KIND="$(classify_limit "$SCAN_FILE")"
+  # Observational provenance only: runs after KIND is fixed and can never
+  # change the classification, the failover decision, the cooldown or any rc.
+  classify_provenance "$SCAN_FILE" >/dev/null 2>&1 || true
+  log "CLASSIFIER_PROVENANCE kind_reported=${KIND} rule=${CLASSIFIER_RULE} channel=${CLASSIFIER_CHANNEL} structure=${CLASSIFIER_STRUCTURE} answer_match=${CLASSIFIER_ANSWER_MATCH} stderr_match=${CLASSIFIER_STDERR_MATCH} raw_event_match=${CLASSIFIER_RAW_EVENT_MATCH} basis=classification_inference http_observed=false" || true
   if should_failover "$RC" "$KIND"; then
     case "$KIND" in
       429)
