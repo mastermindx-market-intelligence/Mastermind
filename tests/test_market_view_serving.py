@@ -406,3 +406,212 @@ def test_comparison_fields_require_their_declared_types(field, value):
     served = _project(published)
     assert served["label_vs_planes"]["confirmed"] is False
     assert served["serving_freshness"]["label_reason"] == "published_label_comparison_inconsistent"
+
+
+# The active reasoning consumers must not bypass the serving eligibility boundary.
+def _install_publication(monkeypatch, tmp_path, published):
+    from brain import decision_context as DC, pm_conviction as PM
+    view_path = tmp_path / "market_view.json"
+    context_path = tmp_path / "decision_context.json"
+    view_path.write_text(json.dumps(published))
+    monkeypatch.setattr(PM, "_MARKET_VIEW_PATH", view_path, raising=False)
+    monkeypatch.setattr(DC, "_MARKET_VIEW_PATH", view_path)
+    monkeypatch.setattr(DC, "_LATEST_PATH", context_path)
+    return view_path, context_path
+
+
+def test_shared_current_reader_withdraws_expired_confirmation(monkeypatch, tmp_path):
+    from brain import pm_conviction as PM
+    published = _published({n: _plane(asof=OLD) for n in MV._VALIDATED_PLANES}, asof=OLD)
+    view_path, _ = _install_publication(monkeypatch, tmp_path, published)
+    before = view_path.read_bytes()
+    current = PM._read_market_view(now=NOW)
+    enrichment = PM._market_view_enrichment(current)
+    assert "CONFIRM the" not in enrichment["label_vs_planes_line"]
+    assert "unavailable" in enrichment["label_vs_planes_line"]
+    assert enrichment["serving_freshness"]["current_confirmation_available"] is False
+    assert enrichment["publication"]["asof"] == OLD
+    assert all(row["status"] == "advisory" for row in enrichment["plane_summaries"])
+    assert view_path.read_bytes() == before
+
+
+def test_autonomous_brief_cannot_repeat_expired_confirmation(monkeypatch, tmp_path):
+    from bot import autonomous
+    from brain import decision_context as DC, macro_risk, pm_conviction as PM
+    published = _published({n: _plane(asof=OLD) for n in MV._VALIDATED_PLANES}, asof=OLD)
+    _install_publication(monkeypatch, tmp_path, published)
+    reader = PM._read_market_view
+    monkeypatch.setattr(PM, "_read_market_view", lambda: reader(now=NOW))
+    monkeypatch.setattr(autonomous, "_read_regime", lambda: {"quad": "Q1", "date": FRESH})
+    monkeypatch.setattr(MV._rf, "frame", lambda *a, **k: {})
+    monkeypatch.setattr(MV._rf, "cycles", lambda *a, **k: {})
+    monkeypatch.setattr(macro_risk, "risk_state", lambda *a, **k: {})
+    monkeypatch.setattr(DC, "prompt_summary", lambda *a, **k: {})
+    brief = autonomous._regime_brief()
+    assert "PERCEPTION LAYER" in brief
+    assert "confirmation unavailable" in brief
+    assert "CONFIRM the" not in brief
+    assert "does not establish recovery" in brief
+
+
+def test_current_mcp_retains_source_date_and_unavailability(monkeypatch, tmp_path):
+    import asyncio
+    from brain import bot_mcp, decision_context as DC, pm_conviction as PM
+    published = _published({n: _plane(asof=OLD) for n in MV._VALIDATED_PLANES}, asof=OLD)
+    _install_publication(monkeypatch, tmp_path, published)
+    reader = PM._read_market_view
+    monkeypatch.setattr(PM, "_read_market_view", lambda: reader(now=NOW))
+    monkeypatch.setattr(bot_mcp, "_V", tmp_path)
+    monkeypatch.setattr(DC, "prompt_summary", lambda *a, **k: {})
+    result = asyncio.run(bot_mcp.get_regime.handler({}))
+    payload = json.loads(result["content"][0]["text"])
+    view = payload["market_view"]
+    assert view["serving_freshness"]["current_confirmation_available"] is False
+    radar = next(p for p in view["plane_summaries"] if p["name"] == "risk_radar")
+    assert radar["asof"] == OLD
+    assert radar["stale"] is True
+    assert radar["status"] == "advisory"
+    assert "CONFIRM the" not in view["label_vs_planes_line"]
+
+
+def _paired_context(published):
+    from brain import decision_context as DC
+    return DC.assemble(
+        {"date": published["asof"], "quad": "Q1", "quad_name": "Goldilocks",
+         "confidence": 0.9},
+        published, neural_web={}, seq=published["seq"],
+        built_at=published["built_at"],
+    )
+
+
+def test_live_typed_summary_withdraws_expired_parallel_claims(monkeypatch, tmp_path):
+    from brain import decision_context as DC
+    published = _published({n: _plane(asof=OLD) for n in MV._VALIDATED_PLANES}, asof=OLD)
+    view_path, context_path = _install_publication(monkeypatch, tmp_path, published)
+    ctx = _paired_context(published)
+    context_path.write_text(json.dumps(ctx))
+    before = (view_path.read_bytes(), context_path.read_bytes())
+    current = DC.prompt_summary(now=NOW)
+    assert current["serving_freshness"]["current_assessment_available"] is False
+    assert current["governor"]["relationship"] == "unavailable"
+    assert current["governor"]["net_tilt"] is None
+    assert current["hard_label"] is None
+    assert current["neural_web_contexts"] is None
+    assert (view_path.read_bytes(), context_path.read_bytes()) == before
+    # Explicit artifact formatting remains point-in-time; historical records are not rewritten.
+    historical = DC.prompt_summary(ctx)
+    assert historical["governor"]["confirmed"] is True
+    assert ctx["governor"]["confirmed"] is True
+
+
+def test_live_typed_summary_preserves_fresh_intact_pair(monkeypatch, tmp_path):
+    from brain import decision_context as DC
+    published = _published()
+    _, context_path = _install_publication(monkeypatch, tmp_path, published)
+    ctx = _paired_context(published)
+    context_path.write_text(json.dumps(ctx))
+    current = DC.prompt_summary(now=NOW)
+    assert current["serving_freshness"]["current_assessment_available"] is True
+    assert current["governor"] == ctx["governor"]
+    assert current["hard_label"] == ctx["regime"]["hard_label"]
+    assert current["publication"]["seq"] == published["seq"]
+
+
+@pytest.mark.parametrize("change", ["sequence", "asof", "governor", "missing_view"])
+def test_typed_summary_refuses_unpaired_or_inconsistent_claims(monkeypatch, tmp_path, change):
+    from brain import decision_context as DC
+    published = _published()
+    view_path, context_path = _install_publication(monkeypatch, tmp_path, published)
+    ctx = _paired_context(published)
+    if change == "sequence":
+        ctx["seq"] += 1
+    elif change == "asof":
+        ctx["market_asof"] = "2026-10-16"
+    elif change == "governor":
+        ctx["governor"]["confirmed"] = False
+    else:
+        view_path.unlink()
+    context_path.write_text(json.dumps(ctx))
+    current = DC.prompt_summary(now=NOW)
+    assert current["serving_freshness"]["current_assessment_available"] is False
+    assert current["governor"]["relationship"] == "unavailable"
+    assert current["governor"]["confirmed"] is False
+    assert current["probabilistic_state"] is None
+
+
+def test_typed_summary_cannot_turn_expired_dissent_into_confirmation(monkeypatch, tmp_path):
+    from brain import decision_context as DC
+    published = _published({
+        "risk_radar": _plane("risk_off", asof=OLD),
+        "mtf_signals": _plane("risk_on"),
+    })
+    _, context_path = _install_publication(monkeypatch, tmp_path, published)
+    ctx = _paired_context(published)
+    assert ctx["governor"]["relationship"] == "unconfirmed"
+    context_path.write_text(json.dumps(ctx))
+    current = DC.prompt_summary(now=NOW)
+    assert current["governor"]["relationship"] == "unavailable"
+    assert current["governor"]["confirmed"] is False
+    assert current["governor"]["net_tilt"] is None
+
+
+def test_typed_summary_withdraws_expired_neural_context(monkeypatch, tmp_path):
+    from brain import decision_context as DC
+    published = _published()
+    _, context_path = _install_publication(monkeypatch, tmp_path, published)
+    ctx = _paired_context(published)
+    ctx["neural_web"] = {
+        "lobe_health": {"theme_rotation": {"asof": OLD, "stale": False, "age_days": 1}},
+        "health_summary": {"fresh": 1, "stale": 0, "unknown": 0},
+        "contexts": {"theme_rotation": {"leadership_state": "confirmed"}},
+    }
+    context_path.write_text(json.dumps(ctx))
+    current = DC.prompt_summary(now=NOW)
+    assert current["serving_freshness"]["current_assessment_available"] is False
+    assert current["neural_web_contexts"] is None
+    assert "neural_context_expired" in current["data_quality"]["degrade_reasons"]
+
+
+@pytest.mark.parametrize("payload", [None, "not-json", "[]", '{"schema_version": "unknown"}'])
+def test_missing_or_malformed_current_reader_is_explicitly_unavailable(monkeypatch, tmp_path, payload):
+    from brain import pm_conviction as PM
+    path = tmp_path / "view.json"
+    monkeypatch.setattr(PM, "_MARKET_VIEW_PATH", path)
+    if payload is not None:
+        path.write_text(payload)
+    view = PM._read_market_view(now=NOW)
+    enrichment = PM._market_view_enrichment(view)
+    assert "unavailable" in enrichment["label_vs_planes_line"]
+    assert enrichment["serving_freshness"]["current_confirmation_available"] is False
+    assert "release existing protection" in enrichment["market_view_brief"]["posture_implication"]
+
+
+def test_reader_generation_change_withholds_typed_context(monkeypatch, tmp_path):
+    from brain import decision_context as DC
+    published = _published()
+    _, context_path = _install_publication(monkeypatch, tmp_path, published)
+    context_path.write_text(json.dumps(_paired_context(published)))
+    earlier = {key: published[key] for key in ("asof", "seq", "built_at")}
+    earlier["seq"] -= 1
+    current = DC.prompt_summary(now=NOW, expected_publication=earlier)
+    assert current["governor"]["relationship"] == "unavailable"
+    assert "consumer_publication_changed_during_read" in current["data_quality"]["degrade_reasons"]
+
+
+@pytest.mark.parametrize("health", [
+    {}, {"theme_rotation": {"asof": FRESH, "stale": True}},
+    {"theme_rotation": {"asof": FRESH, "stale": False, "future_dated": True}},
+    {"theme_rotation": {"asof": None, "stale": False}},
+])
+def test_typed_neural_context_needs_original_fresh_eligible_health(monkeypatch, tmp_path, health):
+    from brain import decision_context as DC
+    published = _published()
+    _, context_path = _install_publication(monkeypatch, tmp_path, published)
+    ctx = _paired_context(published)
+    ctx["neural_web"] = {
+        "lobe_health": health, "contexts": {"theme_rotation": {"leadership_state": "confirmed"}},
+    }
+    context_path.write_text(json.dumps(ctx))
+    current = DC.prompt_summary(now=NOW)
+    assert current["serving_freshness"]["current_assessment_available"] is False
+    assert current["neural_web_contexts"] is None

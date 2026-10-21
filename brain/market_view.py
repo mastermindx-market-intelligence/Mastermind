@@ -1670,7 +1670,8 @@ def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> d
     Eligibility can only decrease. Expiring dissent must never manufacture a new
     consensus or higher coherence from the surviving subset. Publication clocks,
     source readings and historical disagreements remain attributable to the producer.
-    This response-only projection is not a new artifact or portfolio-policy input.
+    Current display and reasoning readers share this projection. It is not a new
+    artifact, risk-policy decision, or authorization to release existing protection.
     """
     if published.get("schema_version") != _SCHEMA_VERSION:
         raise ValueError("unsupported market view schema")
