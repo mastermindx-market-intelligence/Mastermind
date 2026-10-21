@@ -3802,7 +3802,8 @@ var fmtPctSign = function(v) {
 function renderPerformance() {
   var p = _perf;
   if (!p) return;
-  var benchmarkSymbol = p.benchmark || 'SPY';
+  var unavailable = p.error === 'performance_unavailable';
+  var benchmarkSymbol = unavailable ? '' : (p.benchmark || 'SPY');
   var benchmarkName = p.benchmark_name || benchmarkSymbol;
   var benchmarkNameZh = p.benchmark_name_zh || benchmarkName;
 
@@ -3822,16 +3823,24 @@ function renderPerformance() {
 
   // Since label
   var sinceEl = E('perf-since');
-  if (sinceEl) sinceEl.textContent = p.inception_date
-    ? t('perf.since') + ' ' + fmtDate(p.inception_date)
-    : t('perf.since_inception');
+  if (sinceEl) {
+    if (unavailable) {
+      sinceEl.innerHTML = '<span class="l-en">Performance unavailable</span>' +
+        '<span class="l-zh">业绩数据暂不可用</span>';
+    } else {
+      sinceEl.textContent = p.inception_date
+        ? t('perf.since') + ' ' + fmtDate(p.inception_date)
+        : t('perf.since_inception');
+    }
+  }
 
   // Versus the active book's own benchmark (SPY / CSI 300 / Hang Seng).
   var benchmarkLabelEl = E('perf-bench-label');
   if (benchmarkLabelEl) {
-    benchmarkLabelEl.innerHTML =
-      '<span class="l-en">vs ' + esc(benchmarkName) + '</span>' +
-      '<span class="l-zh">相对' + esc(benchmarkNameZh) + '</span>';
+    benchmarkLabelEl.innerHTML = unavailable
+      ? '<span class="l-en">benchmark unavailable</span><span class="l-zh">基准暂不可用</span>'
+      : '<span class="l-en">vs ' + esc(benchmarkName) + '</span>' +
+        '<span class="l-zh">相对' + esc(benchmarkNameZh) + '</span>';
   }
   var spyEl = E('perf-spy');
   if (spyEl) {
@@ -3859,7 +3868,7 @@ function renderPerformance() {
 
   // cash sub-label
   var cashLbl = E('perf-cash-lbl');
-  if (cashLbl && p.cash != null) {
+  if (cashLbl) {
     cashLbl.textContent = t('perf.cash_lbl') + ' ' + fmtNav(p.cash);
   }
 }
@@ -3874,10 +3883,11 @@ function renderEquityCurve() {
   var p = _perf;
   var series = (p && p.series) || [];
   var isZhEc = document.documentElement.getAttribute('data-lang') === 'zh';
+  var unavailable = !!(p && p.error === 'performance_unavailable');
   // The backend emits both the data symbol and human label; use the native index name in the UI.
-  var benchSymbol = (p && p.benchmark) || 'SPY';
-  var bench = (p && (isZhEc ? p.benchmark_name_zh : p.benchmark_name)) || benchSymbol;
-  var benchDisplay = bench === benchSymbol ? bench : bench + ' (' + benchSymbol + ')';
+  var benchSymbol = unavailable ? '' : ((p && p.benchmark) || 'SPY');
+  var bench = unavailable ? '' : ((p && (isZhEc ? p.benchmark_name_zh : p.benchmark_name)) || benchSymbol);
+  var benchDisplay = bench && bench !== benchSymbol ? bench + ' (' + benchSymbol + ')' : bench;
 
   // Update legend label with realized_since date
   var legPortEl = E('ec-leg-portfolio');
@@ -3886,16 +3896,19 @@ function renderEquityCurve() {
     legPortEl.textContent = t('ec.portfolio_live') + ' ' + rsDate + (isZhEc ? '）' : ')');
   }
   var legBenchEl = E('ec-leg-bench');
-  if (legBenchEl) legBenchEl.textContent = benchDisplay + (isZhEc ? '（$1M参考）' : ' ($1M ref)');
+  if (legBenchEl) legBenchEl.textContent = unavailable ? '—' : benchDisplay + (isZhEc ? '（$1M参考）' : ' ($1M ref)');
 
   // Range label
   var rangeEl = E('ec-range-label');
-  if (rangeEl && series.length) {
-    rangeEl.textContent = series[0].date + ' → ' + series[series.length-1].date;
+  if (rangeEl) {
+    rangeEl.textContent = series.length ? series[0].date + ' → ' + series[series.length-1].date : '';
   }
 
   if (!series.length) {
-    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+    var emptyMsg = unavailable
+      ? '<span class="l-en">Performance unavailable</span><span class="l-zh">业绩数据暂不可用</span>'
+      : t('ec.no_data');
+    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + emptyMsg + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
     return;
   }
 
