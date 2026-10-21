@@ -119,7 +119,14 @@ def install(app) -> None:
     @app.middleware("http")
     async def _resp_cache(request, call_next):
         ttl = _ttl()
-        if ttl <= 0 or request.method != "GET" or not _cacheable(request.url.path):
+        # Decision/account observation clocks must survive intact; do not replace no-store with
+        # the general dashboard cache headers or reuse an earlier book observation.
+        decision_availability = (
+            request.url.path == "/api/portfolio"
+            and request.query_params.get("view") == "decision_availability"
+        )
+        if (decision_availability or ttl <= 0 or request.method != "GET"
+                or not _cacheable(request.url.path)):
             return await call_next(request)
 
         key = _cache_key(request.url.path, request.url.query or "")

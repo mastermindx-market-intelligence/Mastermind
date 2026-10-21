@@ -2464,6 +2464,51 @@ html[data-theme="light"] body.page-mm {
 @media(max-width:760px){.mm-pf-tab .mm-pf-sub{display:none}.mm-pf-tab{padding:6px 10px}}
 
 /* ── autonomous book banner + decision log ────────────────────────────────── */
+.mm-pf-awaiting{position:relative;min-height:100px}
+.mm-pf-awaiting > *{visibility:hidden}
+.mm-pf-awaiting::after{content:attr(data-scope-message);position:absolute;top:40px;left:20px;right:20px;color:var(--muted);font-size:12px}
+.mm-eval-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.mm-eval-head h2{margin-bottom:8px}
+.mm-eval-badge{flex:none;border:1px solid var(--line);border-radius:20px;padding:3px 9px;font-size:10px;color:var(--muted)}
+.mm-eval-cutoff,.mm-eval-label{font-size:11px;color:var(--muted);line-height:1.5}
+.mm-eval-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px;margin-top:14px}
+.mm-eval-fact{min-width:0}
+.mm-eval-value{font-weight:700;font-size:16px;line-height:1.5;overflow-wrap:anywhere}
+.mm-eval-note,.mm-eval-details{font-size:11px;line-height:1.6;color:var(--muted);margin-top:12px}
+.mm-eval-failed{color:var(--warn)}
+.mm-eval-details summary{cursor:pointer}
+.mm-eval-details p{margin:8px 0}
+@media(max-width:620px){.mm-eval-grid{gap:10px}.mm-eval-value{font-size:14px}}
+.mm-da-alert{border-left:3px solid var(--warn);background:var(--panel2);padding:12px 14px;border-radius:6px;margin:10px 0 14px;line-height:1.55}
+.mm-da-alert strong{display:block;margin-bottom:3px}
+.mm-da-grid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.mm-da-card{min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:14px}
+.mm-da-card h3{font-size:11px;color:var(--muted);font-weight:700;margin:0 0 9px;text-transform:uppercase;letter-spacing:.04em}
+.mm-da-value{font-weight:750;font-size:14px;line-height:1.5;margin-bottom:6px;overflow-wrap:anywhere}
+.mm-da-detail,.mm-da-foot{font-size:11px;color:var(--muted);line-height:1.6;overflow-wrap:anywhere}
+.mm-da-detail strong{color:var(--text);font-weight:600}
+.mm-da-foot{margin-top:12px}
+.mm-da-foot summary{cursor:pointer}
+.mm-da-evidence{margin-top:14px;min-width:0;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:14px}
+.mm-da-evidence h3{margin:0 0 9px;font-size:13px;font-weight:700;color:var(--text)}
+.mm-da-evidence-table{max-width:100%;overflow-x:auto;margin-top:12px}
+.mm-da-evidence table{width:100%;min-width:760px;border-collapse:collapse;text-align:left;font-size:12px}
+.mm-da-evidence th,.mm-da-evidence td{text-align:left;padding:10px 12px;vertical-align:top;border-bottom:1px solid var(--line);overflow-wrap:anywhere}
+.mm-da-evidence th{font-size:11px;color:var(--muted);font-weight:600}
+.mm-da-evidence td:nth-child(2){white-space:nowrap}
+#decision-availability [data-provider-diagnostics="true"] th,
+#decision-availability [data-provider-diagnostics="true"] td{text-align:left;white-space:normal}
+@media(max-width:620px){
+  .mm-da-evidence table{min-width:0}
+  .mm-da-evidence thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  .mm-da-evidence tbody,.mm-da-evidence tr,.mm-da-evidence td{display:block;width:100%;box-sizing:border-box}
+  .mm-da-evidence tr{padding:8px 0;border-bottom:1px solid var(--line)}
+  .mm-da-evidence td{padding:7px 0;border:0;text-align:left;white-space:normal}
+  .mm-da-evidence td[data-label]::before{content:attr(data-label);display:block;font-size:10px;font-weight:600;color:var(--muted);margin-bottom:4px}
+}
+.mm-da-foot code{font-size:10px;overflow-wrap:anywhere}
+@media(max-width:1100px){.mm-da-grid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:620px){.mm-da-grid{grid-template-columns:minmax(0,1fr)}.mm-da-card{padding:12px}}
 .mm-auto-banner{display:flex;flex-direction:column;gap:11px}
 .mm-auto-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px 18px}
 .mm-auto-id{display:flex;align-items:center;gap:10px;flex-wrap:wrap;min-width:0}
@@ -2669,6 +2714,14 @@ html[data-theme="light"] body.page-mm {
 })();
 </script>
 
+<!-- Decision availability precedes the memo; its clocks are independent of live marks. -->
+<div class="mm-section" id="decision-availability-section" style="display:none">
+  <section class="panel span12" id="decision-availability" aria-live="polite" aria-label="Decision and account status">
+    <h2><span class="l-en">Decision and account status</span><span class="l-zh">决策与账户状态</span></h2>
+    <div class="mm-empty"><span class="l-en">Reading recorded decisions and account…</span><span class="l-zh">正在读取决策与账户记录…</span></div>
+  </section>
+</div>
+
 <!-- ── AUTONOMOUS BOOK BANNER (shown only when the autonomous portfolio is active) ── -->
 <div class="grid mm-section" id="auto-banner-sec" style="margin-top:0;display:none">
   <div class="panel span12" id="auto-banner">
@@ -2686,6 +2739,11 @@ html[data-theme="light"] body.page-mm {
               aria-controls="auto-sum" aria-expanded="false" onclick="toggleAutoThesis()"></button>
     </div>
   </div>
+</div>
+
+<!-- Evaluation observations are separate from quote-driven performance. -->
+<div class="mm-section" id="forward-evaluation-section" style="display:none">
+  <section class="panel span12" id="forward-evaluation" aria-live="polite" aria-label="Evaluation record"></section>
 </div>
 
 <!-- ── PERFORMANCE HEADER ─────────────────────────────────────────────────── -->
@@ -3713,6 +3771,10 @@ var _papersLoaded = false, _papersLoad = null;
 var _calibLoaded = false, _calibLoad = null;
 var _pendingSelfSelect = false;   // set when loaded at /self — auto-select that tab once portfolios load
 var _portfolios = [];             // [{id,name,tagline,kind,manager,status}] from /api/portfolios
+var _decisionAvailability = null; // independent persisted decision/account clocks; active regional books only
+var _forwardEvaluation = null;
+var _forwardEvaluationPending = true;
+var _decisionAvailabilityPending = true;
 var _decisions = [];              // autonomous Brain daily decision log (/api/decisions)
 var DECISION_PREVIEW_COUNT = 5, _decisionsExpanded = false;
 // run drilldown cache
@@ -6291,9 +6353,9 @@ function revealActivePortfolioTab() {
 // work automatically — every free-form Opus book that journals via /api/decisions belongs here.
 function _pfKind(id) {
   var m = (_portfolios || []).find(function(p) { return p.id === id; });
-  return m ? m.kind : (id === 'autonomous' ? 'autonomous'
-                       : (id === 'heavyweight' ? 'heavyweight'
-                       : (id === 'self_directed' ? 'self_directed' : 'gated')));
+  var initialKinds = {autonomous: 'autonomous', china: 'china_brain', hk: 'hk_brain',
+                      heavyweight: 'heavyweight', self_directed: 'self_directed'};
+  return m ? m.kind : (initialKinds[id] || 'gated');
 }
 function _isBrainBook(id) {
   var k = _pfKind(id);
@@ -6302,6 +6364,10 @@ function _isBrainBook(id) {
 
 function applyPortfolioScope() {
   var auto = _isBrainBook(_portfolio);
+  var availabilitySection = E('decision-availability-section');
+  if (availabilitySection) availabilitySection.style.display = _isAvailabilityBook(_portfolio) ? '' : 'none';
+  var evaluationSection = E('forward-evaluation-section');
+  if (evaluationSection) evaluationSection.style.display = _isAvailabilityBook(_portfolio) ? '' : 'none';
   var self = _portfolio === 'self_directed';
   var flagship = _portfolio === 'flagship';
   // The self-directed book reuses the dedicated #view-self layout: body.view-self hides every
@@ -6324,15 +6390,38 @@ function applyPortfolioScope() {
   if (!flagship && _currentView !== 'dashboard') showView('dashboard');
 }
 
+function _updateScopedPanelAvailability(pending) {
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  [['performance', _perf], ['positions', _book], ['alloc', _book],
+   ['trades', _trades], ['safety', _risk], ['rejected', _book]].forEach(function(pair) {
+    var panel = E(pair[0]); if (!panel) return;
+    panel.classList.toggle('mm-pf-awaiting', pair[1] == null);
+    panel.setAttribute('data-scope-message', pending
+      ? (isZh ? '正在读取此账本…' : 'Reading this book…')
+      : (isZh ? '此账本的数据不可用。' : 'Data unavailable for this book.'));
+  });
+}
 window.setPortfolio = function(id) {
   if (!id) return;
   clearTimeout(_liveTimer);
   _liveFetchSeq += 1;
   _liveMarks = null;
-  if (id !== _portfolio) _decisionsExpanded = false;
+  if (id !== _portfolio) {
+    _decisionsExpanded = false;
+    _book = null; _perf = null; _trades = null; _risk = null; _decisions = []; _rejected = [];
+    _decisionAvailability = null;
+    _forwardEvaluation = null;
+  }
   _portfolio = id;
+  _decisionAvailabilityPending = _isAvailabilityBook(id);
+  _forwardEvaluationPending = _isAvailabilityBook(id);
   renderPortfolioSwitch();
   applyPortfolioScope();
+  _updateScopedPanelAvailability(true);
+  _safeRender('decision-availability-switch', renderDecisionAvailability);
+  _safeRender('forward-evaluation-switch', renderForwardEvaluation);
+  _safeRender('auto-banner-switch', renderAutoBanner);
+  _safeRender('decisions-switch', renderDecisions);
   // Paint an already-visited/idle-prefetched book now, then refresh it in the background. The
   // snapshot is display-only and is always revalidated; no trading or persisted state reads it.
   var cached = _portfolioDataCache[id];
@@ -6363,10 +6452,1027 @@ async function loadPortfolios() {
   } catch (e) {}
 }
 
+// ── DECISION AVAILABILITY: display-only, per-book, independent source clocks ──
+function _isAvailabilityBook(id) {
+  return id === 'autonomous' || id === 'china' || id === 'hk';
+}
+function _daTime(value, isZh) {
+  if (!value) return isZh ? '不可用' : 'Unavailable';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value + (isZh ? '（仅日期）' : ' (date only)');
+  var time = new Date(value);
+  return isNaN(time.getTime()) ? (isZh ? '时间未验证' : 'Time unverified')
+    : time.toISOString().replace('T', ' ').replace(/\.\d{3}Z$/, ' UTC');
+}
+function _settlementPriceEvidenceHtml(d, portfolio, isZh) {
+  function say(en, zh) { return isZh ? zh : en; }
+  function object(value) { return value !== null && typeof value === 'object' && !Array.isArray(value); }
+  function text(value) { return esc(value == null ? '—' : String(value).slice(0, 160)); }
+  function count(value) { return Number.isSafeInteger(value) && value >= 0; }
+  function positive(value) { return typeof value === 'number' && Number.isFinite(value) && value > 0; }
+  function number(value, minimum) {
+    return positive(value) ? value.toLocaleString('en-US', {minimumFractionDigits: minimum || 0, maximumFractionDigits: 6}) : '—';
+  }
+  function detail(label, value) {
+    return '<div class="mm-da-detail">' + text(label) + ': <strong>' + text(value) + '</strong></div>';
+  }
+  var title = '<h3>' + say('Receipt and price evidence', '结算凭证与价格证据') + '</h3>';
+  var qualification = '<div class="mm-da-foot">' + say(
+    'Execution price quality and the fill ledger have not been checked. Market observation time was not captured.',
+    '尚未核验执行价格质量与成交账簿。未捕获市场观测时间。') + '</div>';
+  function section(label, body) {
+    return '<section class="mm-da-evidence">' + title + '<div class="mm-da-value">' + text(label) +
+      '</div>' + body + qualification + '</section>';
+  }
+  function unavailable() {
+    return section(say('Receipt inspection unavailable', '结算凭证检查不可用'), '<div class="mm-da-detail">' +
+      say('A supported receipt inspection could not be bound to this decision.',
+          '无法将支持的结算凭证检查结果绑定到此决策。') + '</div>');
+  }
+  var p = d.settlement_price_inspection, last = d.last_valid_decision, target = d.accepted_target || {};
+  var hash = /^[0-9a-f]{64}$/;
+  if (!object(p) || !object(last) || typeof last.decision_id !== 'string' ||
+      p.schema !== 'mastermind.bot.settlement_price_inspection.v1' || p.portfolio_id !== portfolio ||
+      p.decision_id !== last.decision_id || p.verification_scope !== 'receipt_preimage_and_decision_reference' ||
+      p.durable_ledger_status !== 'not_checked' || p.execution_qualification !== 'not_checked') return unavailable();
+  var linked = p.receipt_linkage === 'matched';
+  if (linked && (typeof p.transaction_id !== 'string' || !hash.test(p.transaction_id) ||
+      p.transaction_id !== target.settlement_transaction_id ||
+      typeof p.receipt_sha256 !== 'string' || !hash.test(p.receipt_sha256))) return unavailable();
+  var states = {
+    available: say('Receipt matches this decision', '凭证与此决策匹配'),
+    partial: say('Receipt inspection is incomplete', '凭证检查不完整'),
+    provisional: say('Receipt inspection is provisional', '凭证检查为暂定结果'),
+    inconsistent: say('Receipt evidence conflicts', '凭证证据存在冲突'),
+    unavailable: say('Receipt inspection unavailable', '结算凭证检查不可用')
+  };
+  if (!Object.prototype.hasOwnProperty.call(states, p.status) || (p.status === 'available' && !linked)) return unavailable();
+  var reasons = {
+    decision_unavailable: ['Originating decision is unavailable', '原始决策不可用'],
+    decision_not_recorded_settled: ['The selected decision is not recorded as settled', '所选决策尚未记录为已结算'],
+    receipt_reference_unavailable: ['The decision has no usable receipt reference', '决策缺少可用的结算凭证引用'],
+    receipt_missing: ['Referenced receipt is missing', '引用的结算凭证缺失'],
+    receipt_source_unreadable_or_invalid: ['Receipt file is unreadable or invalid', '凭证文件无法读取或无效'],
+    receipt_schema_unsupported: ['Receipt format is unsupported', '尚不支持此凭证格式'],
+    receipt_copies_disagree: ['Receipt copies disagree', '凭证副本不一致'],
+    receipt_identity_mismatch: ['Receipt identity does not match this book and transaction', '凭证身份与此账本及交易不匹配'],
+    receipt_fingerprint_unavailable: ['Receipt fingerprint could not be checked', '无法核对凭证指纹'],
+    decision_receipt_fingerprint_mismatch: ['Receipt does not match the decision reference', '凭证与决策引用不匹配'],
+    receipt_validation_failed: ['Receipt accounting preimage failed validation', '凭证中的原始会计记录未通过校验'],
+    decision_fill_vector_mismatch: ['Receipt fill references do not match the decision', '凭证成交引用与决策不匹配'],
+    decision_fill_facts_mismatch: ['Receipt fill facts do not match the decision', '凭证成交事实与决策不匹配'],
+    decision_origin_unavailable: ['Original accepted submission is unavailable', '原始已接受提交不可用'],
+    decision_identity_unavailable: ['Original decision identity could not be checked', '无法核对原始决策身份'],
+    decision_origin_mismatch: ['Receipt does not belong to the original accepted submission', '凭证不属于原始已接受提交'],
+    price_context_not_captured: ['Price context was not recorded', '未记录价格背景证据'],
+    price_context_schema_unsupported: ['Price context format is unsupported', '尚不支持此价格证据格式'],
+    price_context_capture_failed: ['Price context capture failed', '价格证据捕获失败'],
+    price_context_invalid: ['Price context does not match the receipt', '价格证据与凭证不匹配'],
+    price_context_decoder_unavailable: ['Price context decoder unavailable', '价格证据解码器不可用'],
+    price_context_decoder_failed: ['Price context could not be decoded', '无法解码价格证据'],
+    receipt_sources_changed: ['Receipt files changed during inspection', '检查期间凭证文件发生变化'],
+    active_receipt_still_present: ['Receipt still awaiting acknowledgement', '凭证仍待确认归档'],
+    book_sources_not_stable: ['Sources changed or a paper transaction is unfinished', '来源发生变化或模拟交易尚未完成'],
+    receipt_inspection_identity_mismatch: ['Receipt inspection could not be bound to this decision', '无法将凭证检查绑定到此决策'],
+    receipt_inspection_unavailable: ['Receipt inspection did not complete', '凭证检查未完成']
+  };
+  var body = '';
+  if (p.reason) {
+    var reason = Object.prototype.hasOwnProperty.call(reasons, p.reason) ? reasons[p.reason]
+      : ['Inspection details are unavailable', '检查详情不可用'];
+    body += '<div class="mm-da-detail">' + text(reason[isZh ? 1 : 0]) + '</div>';
+  }
+  if (linked && ['available', 'partial', 'provisional'].indexOf(p.status) !== -1) {
+    body += detail(say('Receipt fill rows', '凭证成交行数'), count(p.fill_count) ? p.fill_count : null) +
+      detail(say('Selected prices in receipt', '凭证所选价格数'), count(p.selected_price_count) ? p.selected_price_count : null) +
+      detail(say('Recorded settlement date', '记录结算日期'), p.settlement_asof);
+  }
+  var capture = p.price_context;
+  var currencies = {autonomous:'USD', china:'CNY', hk:'HKD'};
+  var prefixes = {autonomous:'$', china:'¥', hk:'HK$'};
+  var stable = p.status === 'available' && linked && p.context_status === 'available' &&
+    p.consistency === 'observed_stable' && p.book_consistency === 'observed_stable' &&
+    (d.consistency || {}).status === 'observed_stable' && p.receipt_location === 'acknowledged';
+  var supported = stable && object(capture) && capture.schema === 'mastermind.settlement_price_evidence.v1' &&
+    capture.currency === currencies[portfolio] && capture.execution_qualification === 'not_checked' &&
+    capture.market_observed_at === null && object(capture.quotes) && count(capture.omitted_quote_count) &&
+    count(p.selected_price_count);
+  var symbols = supported ? Object.keys(capture.quotes).sort() : [];
+  supported = supported && symbols.length <= 128 && symbols.length + capture.omitted_quote_count === p.selected_price_count;
+  if (supported) {
+    function sourceName(value) {
+      if (value == null) return say('Unrecorded source', '未记录来源');
+      return String(value).slice(0, 128).replace(/_/g, ' ');
+    }
+    function sourceBarLabel(value) {
+      if (typeof value !== 'string') return say('Unavailable', '不可用');
+      return value.slice(0, 64) + (/^\d{4}-\d{2}-\d{2}$/.test(value)
+        ? say(' (date only)', '（仅日期）') : say(' (source label)', '（来源标签）'));
+    }
+    function captureTime(value) {
+      if (typeof value !== 'string') return say('Unavailable', '不可用');
+      return /(?:Z|[+-]\d{2}:\d{2})$/.test(value) ? _daTime(value, isZh)
+        : value.slice(0, 64) + say(' (timezone unavailable)', '（时区不可用）');
+    }
+    function isPriceRead(item) {
+      return item.schema === 'mastermind.price_read.v1' || item.schema === 'mastermind.price_read.v2';
+    }
+    function fxView(item) {
+      var invalid = {limited:true, lines:[say('FX context cannot be displayed', '外汇背景证据无法显示')], clocks:[]};
+      var bindingReasons = ['not_captured', 'invalid_fx_fields', 'invalid_fx_field', 'invalid_fx_context',
+        'invalid_fx_source_binding', 'invalid_fx_status', 'fx_context_too_large', 'invalid_conversion_value',
+        'fx_operation_or_currency_mismatch', 'fx_arithmetic_mismatch'];
+      if (item.fx_observation === 'unavailable' && item.fx_rate === null &&
+          bindingReasons.indexOf(item.fx_binding_reason) !== -1) {
+        return {limited:true, lines:[say('FX evidence could not be matched to this conversion',
+          '外汇证据无法与本次换算对应')], clocks:[]};
+      }
+      var f = item.fx_rate;
+      if (item.fx_observation !== 'matched' || item.fx_binding_reason !== null || !object(f)) return invalid;
+      var fields = ['schema', 'currency', 'rate', 'consumed_as', 'source', 'symbol', 'source_path',
+        'source_bar_label', 'source_bar_label_kind', 'source_text_sha256', 'source_text_digest_basis',
+        'source_read_started_at', 'source_read_returned_at', 'cache_population_day', 'cache_day_basis',
+        'cache_state', 'cache_observed_at', 'status', 'reason', 'source_convention_qualification',
+        'market_observed_at', 'execution_qualification'];
+      var keys = Object.keys(f);
+      if (keys.length !== fields.length || keys.some(function(key) {
+        var value = f[key];
+        return fields.indexOf(key) === -1 || !(value === null ||
+          (typeof value === 'string' && value.length <= 128) ||
+          (typeof value === 'number' && Number.isFinite(value)));
+      })) return invalid;
+      if (f.schema !== 'mastermind.fx_rate_evidence.v1' || !positive(f.rate) ||
+          typeof f.currency !== 'string' || !f.currency || f.currency.length > 16 ||
+          f.consumed_as !== 'foreign_units_per_USD' || f.source_convention_qualification !== 'not_established' ||
+          f.market_observed_at !== null || f.execution_qualification !== 'not_checked' ||
+          f.cache_day_basis !== 'process_local_date' ||
+          ['population', 'hit', 'not_used'].indexOf(f.cache_state) === -1) return invalid;
+      if (!positive(item.input_price) || !positive(item.price)) return invalid;
+      var arithmetic;
+      if (item.fx_operation === 'divide' && item.currency === 'USD' && item.input_currency === f.currency) {
+        arithmetic = item.input_price / f.rate;
+      } else if (item.fx_operation === 'multiply' && item.input_currency === 'USD' && item.currency === f.currency) {
+        arithmetic = item.input_price * f.rate;
+      } else return invalid;
+      if (arithmetic !== item.price) return invalid;
+      function validDay(value) {
+        return typeof value === 'string' && /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value) &&
+          value.slice(0, 4) !== '0000' && Number.isFinite(Date.parse(value)) &&
+          new Date(value).toISOString().slice(0, 10) === value;
+      }
+      function instant(value) {
+        if (value === null) return null;
+        if (typeof value !== 'string' || value.length > 64) return NaN;
+        // The capture clock emits extended ISO timestamps at up to microsecond precision.
+        // Keep that ordering: Date.parse alone truncates a valid partial observation.
+        var parts = value.match(/^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2}):(\d{2})(?:[.,](\d{1,6}))?(Z|[+-]\d{2}:\d{2})$/);
+        if (!parts || !validDay(parts[1]) || Number(parts[2]) > 23 ||
+            Number(parts[3]) > 59 || Number(parts[4]) > 59) return NaN;
+        var zone = parts[6];
+        if (zone !== 'Z' && (Number(zone.slice(1, 3)) > 23 || Number(zone.slice(4, 6)) > 59)) return NaN;
+        var whole = Date.parse(parts[1] + 'T' + parts[2] + ':' + parts[3] + ':' + parts[4] + zone);
+        if (!Number.isFinite(whole)) return NaN;
+        return BigInt(whole) * 1000n + BigInt((parts[5] || '').padEnd(6, '0'));
+      }
+      function fxCaptureTime(value) {
+        // Display the original capture text; do not round away the evidence being explained.
+        return value.replace('T', ' ').replace(/(?:Z|\+00:00)$/, ' UTC');
+      }
+      var start = instant(f.source_read_started_at), returned = instant(f.source_read_returned_at);
+      var observed = instant(f.cache_observed_at);
+      if ([start, returned, observed].some(function(v) { return v !== null && typeof v !== 'bigint'; })) return invalid;
+      if (f.cache_population_day !== null && !validDay(f.cache_population_day)) return invalid;
+      if (f.source_bar_label !== null && (typeof f.source_bar_label !== 'string' ||
+          !f.source_bar_label || f.source_bar_label.length > 64)) return invalid;
+      if ((f.source_bar_label === null) !== (f.source_bar_label_kind === 'not_provided')) return invalid;
+      var sources = {
+        yahoo_store: ['Stored Yahoo data', 'Yahoo 已存数据'],
+        forex_snapshot: ['Recorded FX snapshot', '已记录外汇快照'],
+        static_fallback: ['Static fallback rate', '静态备用汇率'],
+        identity: ['USD identity conversion', '美元原币换算'],
+        unknown_currency_fallback: ['Fallback for an unsupported currency', '未支持币种的备用汇率'],
+        unavailable: ['Original FX source metadata unavailable', '原始外汇来源元数据不可用']
+      };
+      if (!Object.prototype.hasOwnProperty.call(sources, f.source)) return invalid;
+      var marketSource = f.source === 'yahoo_store' || f.source === 'forex_snapshot';
+      var symbolCurrency = {'CNH=X':'CNY', 'CNY=X':'CNY', 'HKD=X':'HKD', USDCNH:'CNY', USDHKD:'HKD', HKDUSD:'HKD'};
+      if (marketSource) {
+        if (!Object.prototype.hasOwnProperty.call(symbolCurrency, f.symbol) || symbolCurrency[f.symbol] !== f.currency) return invalid;
+        if (f.source === 'yahoo_store' && (['CNH=X','CNY=X','HKD=X'].indexOf(f.symbol) === -1 ||
+            f.source_path !== null || ['selected_close_index','not_provided'].indexOf(f.source_bar_label_kind) === -1)) return invalid;
+        if (f.source === 'forex_snapshot' && (['USDCNH','USDHKD','HKDUSD'].indexOf(f.symbol) === -1 ||
+            ['data/forex/latest.json','site/forexdata/latest.json'].indexOf(f.source_path) === -1 ||
+            ['pair_asof','snapshot_asof','not_provided'].indexOf(f.source_bar_label_kind) === -1)) return invalid;
+      } else if (f.symbol !== null || f.source_path !== null || f.source_bar_label !== null ||
+                 start !== null || returned !== null) return invalid;
+      if (f.source === 'identity' && (f.currency !== 'USD' || f.rate !== 1)) return invalid;
+      if (f.source === 'static_fallback' && ['CNY','HKD'].indexOf(f.currency) === -1) return invalid;
+      if (f.source === 'unknown_currency_fallback' && ['USD','CNY','HKD'].indexOf(f.currency) !== -1) return invalid;
+      if (f.source_text_sha256 !== null && (f.source !== 'forex_snapshot' ||
+          typeof f.source_text_sha256 !== 'string' || !hash.test(f.source_text_sha256) ||
+          f.source_text_digest_basis !== 'decoded_text_utf8')) return invalid;
+      if (f.source_text_sha256 === null && f.source_text_digest_basis !== null) return invalid;
+      var missing = ['source_context_unavailable','cache_context_unavailable','source_value_mismatch','source_context_invalid'];
+      var status = 'available', reason = null;
+      if (f.source === 'unavailable') {
+        if (missing.indexOf(f.reason) === -1) return invalid;
+        status = 'unavailable'; reason = f.reason;
+      } else if (f.cache_state !== 'not_used' && f.cache_population_day === null) {
+        status = 'partial'; reason = 'cache_day_unavailable';
+      } else if (observed === null) {
+        status = 'partial'; reason = 'observation_clock_unavailable';
+      } else if (marketSource && (start === null || returned === null)) {
+        status = 'partial'; reason = 'source_read_clock_unavailable';
+      } else if (marketSource && (start > returned || returned > observed)) {
+        status = 'partial'; reason = 'local_clock_regressed';
+      } else if (marketSource && f.source_bar_label === null) {
+        status = 'partial'; reason = 'source_label_unavailable';
+      } else if (f.source === 'forex_snapshot' && f.source_text_sha256 === null) {
+        status = 'partial'; reason = 'source_text_unavailable';
+      }
+      if (f.status !== status || f.reason !== reason) return invalid;
+      var view = {limited:status !== 'available', lines:[
+        say('Recorded conversion matches the captured rate', '记录的换算结果与捕获汇率相符'),
+        say('Used in this calculation as ', '本次计算使用 ') + String(f.rate) + ' ' + f.currency +
+          say(' per USD', ' / 美元'),
+        say('FX source: ', '外汇来源：') + sources[f.source][isZh ? 1 : 0] + (f.symbol ? ' · ' + f.symbol : ''),
+        status === 'available' ? say('FX source context recorded', '已记录外汇来源背景')
+          : status === 'partial' ? say('FX source context incomplete', '外汇来源背景不完整')
+          : say('Original FX source metadata unavailable', '原始外汇来源元数据不可用'),
+        say('FX cache use: ', '外汇缓存使用：') + (f.cache_state === 'hit'
+          ? say('Previously populated entry', '先前建档的缓存项') : f.cache_state === 'population'
+          ? say('Original population', '原始建档') : say('Not used', '未使用'))
+      ], clocks:[]};
+      var gaps = {
+        source_context_unavailable:['Original source context was not captured','未捕获原始来源背景'],
+        cache_context_unavailable:['Original cache source context unavailable','原始缓存来源背景不可用'],
+        source_value_mismatch:['Source metadata did not match the consumed rate','来源元数据与实际使用汇率不匹配'],
+        source_context_invalid:['Original source context invalid','原始来源背景无效'],
+        cache_day_unavailable:['Cache entry day unavailable','缓存建档日期不可用'],
+        observation_clock_unavailable:['Cache observation clock unavailable','缓存观测时钟不可用'],
+        source_read_clock_unavailable:['Original source read clock incomplete','原始来源读取时钟不完整'],
+        local_clock_regressed:['Recorded local clocks regressed','记录的本地时钟出现回退'],
+        source_label_unavailable:['Original source label unavailable','原始来源标签不可用'],
+        source_text_unavailable:['Original source text fingerprint unavailable','原始来源文本指纹不可用']
+      };
+      if (reason) view.lines.push(gaps[reason][isZh ? 1 : 0]);
+      var leg = 'FX ' + item.input_currency + ' → ' + item.currency + ' · ';
+      if (f.source_bar_label) view.clocks.push(leg + say('Original source label: ', '原始来源标签：') + sourceBarLabel(f.source_bar_label));
+      if (start !== null) view.clocks.push(leg + say('Original source read started: ', '原始来源读取开始：') + fxCaptureTime(f.source_read_started_at));
+      if (returned !== null) view.clocks.push(leg + say('Original source read returned: ', '原始来源读取返回：') + fxCaptureTime(f.source_read_returned_at));
+      if (f.cache_population_day) view.clocks.push(leg + say('Cache entry day (process-local date): ', '缓存建档日期（进程本地日期）：') + f.cache_population_day);
+      if (observed !== null) view.clocks.push(leg + say('Cache observed at capture: ', '捕获时的缓存观测时间：') + fxCaptureTime(f.cache_observed_at));
+      if (f.source_text_sha256) {
+        view.clocks.push(leg + say('Snapshot text SHA256: ', '快照文本 SHA256：') + f.source_text_sha256);
+        view.clocks.push(leg + say('Fingerprint basis: decoded source text encoded as UTF-8',
+          '指纹依据：解码后的来源文本按 UTF-8 编码'));
+      }
+      return view;
+    }
+    function contextNodes(symbol, quote) {
+      if (!object(quote) || quote.binding_status !== 'matched' || !object(quote.observation)) return null;
+      var nodes = [], current = quote.observation;
+      while (current) {
+        if (!object(current) || nodes.length > 6 || current.ticker !== symbol ||
+            current.execution_qualification !== 'not_checked' || current.market_observed_at !== null ||
+            ['mastermind.price_read.v1', 'mastermind.price_read.v2', 'mastermind.yahoo_daily_bar_evidence.v1', 'mastermind.yahoo_daily_bar_evidence.v2', 'mastermind.polygon_snapshot_evidence.v1'].indexOf(current.schema) === -1) return null;
+        if (current.schema === 'mastermind.yahoo_daily_bar_evidence.v1' && current.field !== 'Close') return null;
+        if (current.schema === 'mastermind.yahoo_daily_bar_evidence.v2' &&
+            (current.field !== 'Open' || current.cache_refresh_basis !== 'shared_close_cache')) return null;
+        if (current.schema === 'mastermind.polygon_snapshot_evidence.v1') {
+          if (current.field !== 'day.o' || current.currency !== 'USD' ||
+              current.cache_clock_basis !== 'lookup_before_request' ||
+              current.source_updated_unit !== 'not_established' ||
+              current.source_bar_label !== null || current.source_bar_label_kind !== 'not_provided') return null;
+          if (current.source_updated_raw !== null &&
+              (typeof current.source_updated_raw !== 'string' ||
+               !/^(0|[1-9][0-9]{0,19})$/.test(current.source_updated_raw))) return null;
+          if (current.payload_ticker !== null &&
+              (typeof current.payload_ticker !== 'string' ||
+               !/^[A-Za-z0-9._:-]{1,64}$/.test(current.payload_ticker))) return null;
+          var payloadStatus = current.payload_ticker === null ? 'unavailable'
+            : current.payload_ticker === symbol ? 'matched' : 'mismatch';
+          if (current.payload_ticker_status !== payloadStatus ||
+              (current.status === 'available' && (payloadStatus !== 'matched' || current.source_updated_raw === null))) return null;
+        }
+        if (!isPriceRead(current) &&
+            ['available', 'partial', 'unavailable'].indexOf(current.status) === -1) return null;
+        nodes.push(current);
+        current = current.upstream || null;
+      }
+      return nodes;
+    }
+    function quoteRow(symbol) {
+      var quote = capture.quotes[symbol];
+      if (!object(quote)) return '<tr><td>' + text(symbol) + '</td><td colspan="3">' +
+        say('Selected quote details unavailable', '所选报价详情不可用') + '</td></tr>';
+      var nodes = contextNodes(symbol, quote), path = [], clocks = [], attempts = [], fxMissing = false;
+      var contextValid = nodes !== null;
+      if (contextValid) {
+        nodes.slice().reverse().forEach(function(item) {
+          if (item.schema === 'mastermind.polygon_snapshot_evidence.v1') {
+            path.push(say('Polygon snapshot Open', 'Polygon 快照开盘价'));
+            if (item.payload_ticker_status === 'mismatch') {
+              path.push(say('Payload symbol: ', '快照证券代码：') + item.payload_ticker +
+                say(' · does not match selected ', ' · 与所选证券 ') + symbol + (isZh ? ' 不匹配' : ''));
+            } else if (item.payload_ticker_status === 'matched') {
+              path.push(say('Payload symbol matches selected ', '快照证券代码与所选证券一致：') + symbol);
+            } else path.push(say('Payload symbol unavailable', '快照证券代码不可用'));
+            if (item.status === 'partial' || item.status === 'unavailable') {
+              clocks.push((item.status === 'partial' ? say('Snapshot evidence partial', '快照证据不完整')
+                : say('Snapshot evidence unavailable', '快照证据不可用')) + (item.reason
+                  ? say(' · recorded gap: ', ' · 记录的缺口：') + sourceName(item.reason) : ''));
+            }
+            clocks.push(say('Snapshot bar date and Open event time were not established',
+              '快照价格条日期与开盘事件时间尚未确定'));
+            if (item.source_updated_raw !== null) {
+              clocks.push(say('Snapshot update (raw; unit not established): ', '快照更新时间（原始值；单位未确定）：') +
+                item.source_updated_raw);
+              clocks.push(say('Snapshot update is not the Open event time', '快照更新时间并非开盘事件时间'));
+            } else clocks.push(say('Snapshot update timestamp unavailable', '快照更新时间戳不可用'));
+            if (item.within_cache_ttl === false) clocks.push(say('Outside cache TTL at capture', '捕获时已超过缓存有效期'));
+            else if (item.within_cache_ttl === true) clocks.push(say('Within cache TTL at capture', '捕获时处于缓存有效期内'));
+            if (item.cache_anchor_at) clocks.push(say('Cache age anchor: ', '缓存年龄起点：') + captureTime(item.cache_anchor_at));
+            if (item.request_started_at) clocks.push(say('Request started: ', '请求开始：') + captureTime(item.request_started_at));
+            if (item.response_returned_at) clocks.push(say('Response returned: ', '响应返回：') + captureTime(item.response_returned_at));
+            if (typeof item.cache_age_seconds === 'number' && Number.isFinite(item.cache_age_seconds) && item.cache_age_seconds >= 0) {
+              clocks.push(say('Cache age when captured: ', '捕获时缓存年龄：') + Math.round(item.cache_age_seconds) + 's' +
+                say(' · measured from lookup before the request', ' · 从请求前的缓存查询时刻计算'));
+            }
+          } else if (item.schema === 'mastermind.yahoo_daily_bar_evidence.v1' || item.schema === 'mastermind.yahoo_daily_bar_evidence.v2') {
+            var isOpen = item.schema === 'mastermind.yahoo_daily_bar_evidence.v2';
+            path.push(isOpen ? say('Yahoo Open', 'Yahoo 开盘价') : say('Yahoo Close', 'Yahoo 收盘价'));
+            if (isOpen) clocks.push(say('Open retrieval is tracked separately from Close', '开盘价与收盘价的获取时间分别记录'));
+            if (item.status === 'partial' || item.status === 'unavailable') {
+              clocks.push((item.status === 'partial' ? say('Source timing partial', '来源时间证据不完整')
+                : say('Source timing unavailable', '来源时间不可用')) + (item.reason
+                  ? say(' · recorded gap: ', ' · 记录的缺口：') + sourceName(item.reason) : ''));
+            }
+            if (item.within_cache_ttl === false) clocks.push(say('Outside cache TTL at capture', '捕获时已超过缓存有效期'));
+            else if (item.within_cache_ttl === true) clocks.push(say('Within cache TTL at capture', '捕获时处于缓存有效期内'));
+            if (item.download_returned_at) clocks.push(say('Download returned: ', '下载返回时间：') + captureTime(item.download_returned_at));
+            if (typeof item.fetch_age_seconds === 'number' && Number.isFinite(item.fetch_age_seconds) && item.fetch_age_seconds >= 0) {
+              clocks.push(say('Fetch age when selected: ', '选择时距获取时间：') + Math.round(item.fetch_age_seconds) + 's');
+            }
+          } else {
+            if (item.input_currency && item.currency &&
+                (item.input_currency !== item.currency || item.input_price !== item.price)) {
+              path.push(String(item.input_currency).slice(0, 16) + ' ' + number(item.input_price) + ' → ' +
+                String(item.currency).slice(0, 16) + ' ' + number(item.price));
+            } else if (item.source && !item.upstream) path.push(sourceName(item.source));
+            if (item.fx_observation === 'not_captured') fxMissing = true;
+            if (item.schema === 'mastermind.price_read.v2') {
+              var displayedFx = fxView(item);
+              path = path.concat(displayedFx.lines);
+              clocks = clocks.concat(displayedFx.clocks);
+            }
+            if (Array.isArray(item.attempts)) item.attempts.slice(0, 8).forEach(function(attempt) {
+              if (object(attempt)) attempts.push(sourceName(attempt.source) + ': ' + String(attempt.outcome || '').slice(0, 64));
+            });
+          }
+          if (item.source_bar_label) clocks.push(say('Source bar label: ', '来源价格条标签：') + sourceBarLabel(item.source_bar_label));
+          if (typeof item.source_text_sha256 === 'string' && hash.test(item.source_text_sha256)) {
+            clocks.push(say('Snapshot text SHA256: ', '快照文本 SHA256：') + item.source_text_sha256);
+          }
+        });
+      }
+      var pathHtml = '<div>' + text(sourceName(quote.source)) + '</div>';
+      if (contextValid) {
+        pathHtml += path.map(function(value) { return '<div class="mm-da-detail">' + text(value) + '</div>'; }).join('');
+        if (fxMissing) pathHtml += '<div class="mm-da-detail">' + say('FX timing was not captured', '未捕获外汇换算时间') + '</div>';
+        if (attempts.length) pathHtml += '<details class="mm-da-detail"><summary>' +
+          say('Recorded source attempts', '记录的来源尝试') + '</summary>' +
+          attempts.map(function(value) { return '<div>' + text(value) + '</div>'; }).join('') + '</details>';
+      } else pathHtml += '<div class="mm-da-detail">' + say('Source context unavailable', '来源背景证据不可用') +
+        (quote.reason ? ' · ' + say('Recorded gap: ', '记录的缺口：') + text(sourceName(quote.reason)) : '') + '</div>';
+      var clockHtml = contextValid && clocks.length
+        ? clocks.map(function(value) { return '<div class="mm-da-detail">' + text(value) + '</div>'; }).join('')
+        : '<div class="mm-da-detail">' + say('Source timing unavailable', '来源时间不可用') + '</div>';
+      return '<tr><td data-label="' + say('Symbol', '证券') + '">' + text(symbol) +
+        '</td><td data-label="' + say('Selected price', '所选价格') + '">' +
+        text(positive(quote.price) ? prefixes[portfolio] + number(quote.price, 2) : null) +
+        '</td><td data-label="' + say('Source and conversion path', '来源与换算路径') + '">' + pathHtml +
+        '</td><td data-label="' + say('Source time at capture', '捕获时的来源时间') + '">' + clockHtml + '</td></tr>';
+    }
+    var expiredCount = 0, missingContextCount = 0, limitedSourceCount = 0, limitedSnapshotCount = 0, symbolMismatchCount = 0;
+    var capturedFxCount = 0, limitedFxCount = 0;
+    symbols.forEach(function(symbol) {
+      var nodes = contextNodes(symbol, capture.quotes[symbol]);
+      if (!nodes) missingContextCount++;
+      if (nodes && nodes.some(function(item) { return item.schema === 'mastermind.price_read.v2'; })) capturedFxCount++;
+      if (nodes && nodes.some(function(item) {
+        return item.schema === 'mastermind.price_read.v2' && fxView(item).limited;
+      })) limitedFxCount++;
+      if (nodes && nodes.some(function(item) {
+        return (item.schema === 'mastermind.yahoo_daily_bar_evidence.v1' ||
+          item.schema === 'mastermind.yahoo_daily_bar_evidence.v2') && item.status !== 'available';
+      })) limitedSourceCount++;
+      if (nodes && nodes.some(function(item) {
+        return item.schema === 'mastermind.polygon_snapshot_evidence.v1' &&
+          item.payload_ticker_status === 'mismatch';
+      })) symbolMismatchCount++;
+      if (nodes && nodes.some(function(item) {
+        return item.schema === 'mastermind.polygon_snapshot_evidence.v1' &&
+          item.status !== 'available' && item.payload_ticker_status !== 'mismatch';
+      })) limitedSnapshotCount++;
+      if (nodes && nodes.some(function(item) {
+        return !isPriceRead(item) && item.within_cache_ttl === false;
+      })) expiredCount++;
+    });
+    if (expiredCount) body += '<div class="mm-da-alert"><strong>' + expiredCount + say(
+      expiredCount === 1 ? ' selected quote exceeded the source cache TTL at capture.'
+        : ' selected quotes exceeded the source cache TTL at capture.',
+      ' 个所选报价在捕获时已超过来源缓存有效期。') + '</strong></div>';
+    if (missingContextCount) body += '<div class="mm-da-alert"><strong>' + missingContextCount + say(
+      missingContextCount === 1 ? ' selected quote has no retained source context.'
+        : ' selected quotes have no retained source context.',
+      ' 个所选报价缺少留存的来源背景证据。') + '</strong></div>';
+    if (limitedSourceCount) body += '<div class="mm-da-alert"><strong>' + limitedSourceCount + say(
+      limitedSourceCount === 1 ? ' selected quote has limited source timing evidence.'
+        : ' selected quotes have limited source timing evidence.',
+      ' 个所选报价的来源时间证据不完整或不可用。') + '</strong></div>';
+    if (symbolMismatchCount) body += '<div class="mm-da-alert"><strong>' + symbolMismatchCount + say(
+      symbolMismatchCount === 1 ? ' selected quote has a payload symbol mismatch.'
+        : ' selected quotes have payload symbol mismatches.',
+      ' 个所选报价的快照证券代码不匹配。') + '</strong></div>';
+    if (limitedSnapshotCount) body += '<div class="mm-da-alert"><strong>' + limitedSnapshotCount + say(
+      limitedSnapshotCount === 1 ? ' selected quote has incomplete snapshot evidence.'
+        : ' selected quotes have incomplete snapshot evidence.',
+      ' 个所选报价的快照证据不完整。') + '</strong></div>';
+    if (limitedFxCount) body += '<div class="mm-da-alert"><strong>' + limitedFxCount + say(
+      limitedFxCount === 1 ? ' selected quote has limited or undisplayable FX evidence.'
+        : ' selected quotes have limited or undisplayable FX evidence.',
+      ' 个所选报价的外汇证据不完整或无法显示。') + '</strong></div>';
+    if (capturedFxCount) body += '<div class="mm-da-foot">' + say(
+      'Rate agreement describes arithmetic only. Source quote direction and proxy suitability have not been established. FX market observation time unavailable; FX execution suitability has not been checked.',
+      '汇率对应关系仅描述算术一致性。尚未确定来源报价方向及代理汇率的适用性。外汇市场观测时间不可用；尚未核验该汇率是否适用于执行。') + '</div>';
+    var shown = symbols.slice(0, 12);
+    body += '<div class="mm-da-foot">' + text(say('Showing ', '显示 ')) + shown.length + say(' of ', ' / ') +
+      symbols.length + say(' captured quotes', ' 个已捕获报价') +
+      (capture.omitted_quote_count ? ' · ' + capture.omitted_quote_count +
+       say(' selected prices were omitted at capture', ' 个所选价格在捕获时被省略') : '') + '</div>';
+    if (shown.length) body += '<div class="mm-da-evidence-table"><table><thead><tr><th scope="col">' +
+      say('Symbol', '证券') + '</th><th scope="col">' + say('Selected price', '所选价格') +
+      '</th><th scope="col">' + say('Source and conversion path', '来源与换算路径') + '</th><th scope="col">' +
+      say('Source time at capture', '捕获时的来源时间') + '</th></tr></thead><tbody>' +
+      shown.map(quoteRow).join('') + '</tbody></table></div>';
+    body += '<div class="mm-da-foot">' + say(
+      'Each row is one selected quote. Its reads and conversions form one path; page refreshes do not refresh these source clocks.',
+      '每行代表一个所选报价。读取与换算共同组成一条路径；页面刷新不会更新这些来源时钟。') + '</div>';
+  } else if (stable) body += '<div class="mm-da-detail">' +
+    say('Price context is unavailable in this inspection.', '本次检查中的价格背景证据不可用。') + '</div>';
+  if (linked) body += '<details class="mm-da-foot"><summary>' + say('Receipt identity and check scope', '凭证身份与核验范围') +
+    '</summary>' + detail(say('Transaction', '交易'), p.transaction_id) +
+    detail(say('Decision receipt fingerprint', '决策引用的凭证指纹'), p.receipt_sha256) +
+    '<div>' + say('Checked: receipt preimage and the originating decision reference.',
+                  '已核对：凭证原始记录与原始决策引用。') + '</div></details>';
+  return section(states[p.status], body);
+}
+function _providerDiagnosticHtml(d, portfolio, isZh) {
+  if (!_isAvailabilityBook(portfolio)) return '';
+  function say(en, zh) { return isZh ? zh : en; }
+  function safe(value) { return esc(value == null ? '—' : String(value)); }
+  function count(value) { return Number.isSafeInteger(value) && value >= 0 ? value : null; }
+  function version(value) {
+    return typeof value === 'string' && /^[0-9]{1,5}(?:\.[0-9]{1,5}){1,3}(?:[-.][A-Za-z0-9]{1,12})?$/.test(value) ? value : null;
+  }
+  function flag(value) { return value === true ? say('Yes', '是') : value === false ? say('No', '否') : '—'; }
+  function detail(label, value) {
+    return '<div class="mm-da-detail">' + safe(label) + ': <strong>' + safe(value) + '</strong></div>';
+  }
+  function stamp(value) {
+    return typeof value === 'string' && value.length <= 64 && /(?:Z|[+-]\d\d:\d\d)$/.test(value)
+      && Number.isFinite(Date.parse(value)) ? Date.parse(value) : null;
+  }
+  var p = d && d.provider_diagnostic_inspection, attempt = d && d.latest_attempt;
+  var expectedRun = attempt && typeof attempt.run_id === 'string' ? attempt.run_id : null;
+  var observed = stamp(d && d.observed_at);
+  var title = '<h3>' + say('SDK observations for the recorded attempt', '本次记录尝试的 SDK 观察') + '</h3>';
+  var limits = '<div class="mm-da-foot">' + say(
+    'These are limited SDK observations. Query entry does not prove provider startup. Observed message and tool counts do not prove accepted trades or absence of effects. Attempt history remains partial.',
+    '这些仅为有限的 SDK 观察。进入查询路径不能证明提供方已经启动。观察到的消息及工具数量不能证明交易已接受，也不能证明没有实际影响。尝试历史仍不完整。') + '</div>';
+  function section(label, body) {
+    return '<section class="mm-da-evidence" data-provider-diagnostics="true">' + title +
+      '<div class="mm-da-value">' + safe(label) + '</div>' + body + limits + '</section>';
+  }
+  if (!p || p.schema !== 'mastermind.bot.provider_diagnostic_inspection.v1' ||
+      p.portfolio_id !== portfolio || p.run_id !== expectedRun ||
+      p.provider_start !== 'not_proven' || p.effect_reconciliation !== 'not_performed' ||
+      ['available', 'partial', 'unavailable', 'provisional'].indexOf(p.status) === -1) {
+    return section(say('Diagnostic evidence unavailable', '诊断证据不可用'), '');
+  }
+  var labels = {
+    available: say('Limited observations available', '有限观察可用'),
+    partial: say('Observations are incomplete', '观察不完整'),
+    unavailable: say('Diagnostic evidence unavailable', '诊断证据不可用'),
+    provisional: say('Diagnostic binding changed during the read', '读取期间诊断绑定发生变化')
+  };
+  var body = detail(say('Recorded run', '记录运行'), expectedRun);
+  var reasons = {
+    no_sdk_diagnostic_event: ['No SDK diagnostic event was recorded in this run. Capture may be absent or unavailable.', '此运行没有 SDK 诊断事件记录；捕获可能缺失或不可用。'],
+    no_attributable_sdk_observation: ['No SDK candidate observation can be attributed to this attempt.', '无法将任何 SDK 候选观察归属于本次尝试。'],
+    attempt_run_identity_unavailable: ['The attempt has no usable recorded run identity.', '本次尝试缺少可用的运行身份记录。'],
+    run_source_missing: ['The named run log is missing.', '指定运行日志缺失。'],
+    run_source_partial: ['The run log could only be read in part.', '只能读取部分运行日志。'],
+    run_source_changed_during_read: ['The run log changed during the read; candidate observations are withheld.', '读取期间运行日志发生变化；暂不展示候选观察。'],
+    decision_source_changed_during_read: ['The decision journal changed during the read; this run binding is provisional.', '读取期间决策日志发生变化；此运行绑定为暂定状态。']
+  };
+  if (Object.prototype.hasOwnProperty.call(reasons, p.reason)) body += '<div class="mm-da-detail">' + safe(reasons[p.reason][isZh ? 1 : 0]) + '</div>';
+  var legacy = p.legacy_failure_observation;
+  var legacyTime = stamp(legacy && legacy.recorded_at);
+  var legacyBannerTime = stamp(legacy && legacy.banner_recorded_at);
+  if (legacy && legacy.schema === 'mastermind.bot.recorded_failure_observation.v1' &&
+      legacy.kind === 'recorded_authentication_revoked' &&
+      legacy.source_kind === 'legacy_runlog_assistant_banner' &&
+      legacy.verification_scope === 'closed_legacy_sequence_only' &&
+      legacy.book_binding === 'selected_decision_run_reference' &&
+      legacy.candidate_identity === 'unavailable' &&
+      legacy.run_id === expectedRun && expectedRun !== null && legacy.portfolio_id === portfolio &&
+      p.role === 'deep' && p.attempt_coverage === 'partial' &&
+      p.status !== 'provisional' && p.run_binding === 'matched_recorded_run_id' &&
+      p.decision_binding_consistency === 'observed_stable' &&
+      p.source && p.source.status === 'available' &&
+      observed !== null && legacyTime !== null && legacyBannerTime !== null &&
+      legacyBannerTime <= legacyTime && legacyTime <= observed) {
+    var legacySeconds = (observed - legacyTime) / 1000;
+    var legacyAge = legacySeconds >= 3600 ? Math.floor(legacySeconds / 3600) + say(' hours', ' 小时') :
+      Math.floor(legacySeconds / 60) + say(' minutes', ' 分钟');
+    body += '<div class="mm-da-alert" data-recorded-auth-failure="true"><strong>' +
+      say('Recorded authentication failure', '已记录身份验证失败') + '</strong><div>' +
+      say('The retained attempt log reports a revoked OAuth access token.',
+        '保留的尝试日志记录了 OAuth 访问令牌已撤销。') + '</div>' +
+      detail(say('Recorded at', '记录时间'), _daTime(legacy.recorded_at, isZh)) +
+      detail(say('Age at this read', '本次读取时的时长'), legacyAge) +
+      '<div>' + say('This is a legacy log observation. Candidate and credential identity are unavailable; it does not establish the current state of other credentials.',
+        '这是旧版日志中的观察记录。候选及凭证身份不可用；不能据此判断其他凭证的当前状态。') +
+      '</div></div>';
+  }
+  if (count(p.unattributed_capture_events) > 0) body += '<div class="mm-da-alert">' +
+    safe(say('Capture failures without candidate attribution: ', '缺少候选归属的捕获失败：') + p.unattributed_capture_events) +
+    '<br>' + say('These are run-level observations; no candidate is inferred.', '这些仅归属于运行；不据此推断候选。') + '</div>';
+  var candidates = Array.isArray(p.candidates) && p.candidates.length <= 16 ? p.candidates : [];
+  var seen = new Set(), duplicates = new Set(), omitted = 0;
+  var ready = p.status === 'available' || p.status === 'partial';
+  var eligible = candidates.filter(function(c) {
+    var id = c && c.identity || {}, time = stamp(c && c.recorded_at);
+    var valid = ready && p.run_binding === 'matched_recorded_run_id' && p.role === 'deep' &&
+      expectedRun !== null && id.run_id === expectedRun && id.book === portfolio && id.role === 'deep' &&
+      count(id.candidate_ordinal) !== null && id.candidate_ordinal < Number.MAX_SAFE_INTEGER &&
+      ['available', 'partial'].indexOf(c.capture_status) !== -1 &&
+      observed !== null && time !== null && time <= observed;
+    if (!valid) { omitted += 1; return false; }
+    if (seen.has(id.candidate_ordinal)) duplicates.add(id.candidate_ordinal);
+    seen.add(id.candidate_ordinal);
+    return true;
+  }).filter(function(c) {
+    if (duplicates.has(c.identity.candidate_ordinal)) { omitted += 1; return false; }
+    return true;
+  });
+  var subtypeValues = ['success', 'succeeded', 'ok', 'completed', 'error', 'error_during_execution',
+    'error_max_turns', 'error_max_budget_usd', 'error_max_structured_output_retries'];
+  var classes = ['ResultError', 'ProcessError', 'CLINotFoundError', 'CLIConnectionError',
+    'CLIJSONDecodeError', 'MessageParseError', 'TimeoutError', 'RuntimeError',
+    'PermissionError', 'FileNotFoundError', 'CancelledError', 'KeyboardInterrupt',
+    'ProviderStartRefused'];
+  var endLabels = {exhausted: say('Stream ended', '数据流结束'), raised: say('Invocation ended with an exception', '调用因异常结束'),
+    interrupted: say('Interrupted', '已中断')};
+  function terminal(name, value) {
+    if (!value || typeof value !== 'object') return detail(name, say('Unavailable', '不可用'));
+    var subtype = subtypeValues.indexOf(value.subtype) !== -1 ? value.subtype : null;
+    var status = Number.isSafeInteger(value.api_error_status) ? value.api_error_status : null;
+    return detail(name, say('Error flag: ', '错误标记：') + flag(value.is_error)) +
+      detail(say('Recorded subtype', '记录子类型'), subtype) +
+      (status !== null ? detail(say('Recorded API status', '记录的 API 状态'), status) : '');
+  }
+  var headers = [say('Candidate and time', '候选与时间'), say('Observed counts', '观察数量'),
+    say('Invocation end and terminal', '调用结束与终端信息'), say('Capture limits', '捕获限制')];
+  var htmlRows = eligible.map(function(c) {
+    var ob = c.observation || {}, ts = c.terminals || {}, ex = c.exception || {}, end = c.exit || {};
+    var time = stamp(c.recorded_at), seconds = (observed - time) / 1000;
+    var age = seconds >= 3600 ? Math.floor(seconds / 3600) + say(' hours', ' 小时') :
+      Math.floor(seconds / 60) + say(' minutes', ' 分钟');
+    var first = ts.first, last = ts.last;
+    var contradictory = (first && first.reported_contradiction === true) ||
+      (last && last.reported_contradiction === true) || (ex.fields && ex.fields.reported_contradiction === true) ||
+      (count(ob.contradictory_terminals_observed) || 0) > 0;
+    var cells = [
+      '<strong>' + safe(say('SDK candidate ', 'SDK 候选 ') + (c.identity.candidate_ordinal + 1)) + '</strong>' +
+        detail(say('Recorded at', '记录时间'), _daTime(c.recorded_at, isZh)) +
+        detail(say('Age at this read', '本次读取时的时长'), age),
+      detail(say('SDK messages', 'SDK 消息'), count(ob.sdk_messages_observed)) +
+        detail(say('Terminal messages', '终端消息'), count(ts.count)) +
+        detail(say('Tool-use blocks', '工具使用块'), count(ob.tool_use_blocks_observed)) +
+        detail(say('Tool-result blocks', '工具结果块'), count(ob.tool_result_blocks_observed)),
+      detail(say('Invocation end', '调用结束状态'), Object.prototype.hasOwnProperty.call(endLabels, end.end_state) ? endLabels[end.end_state] : null) +
+        (Number.isSafeInteger(end.exit_code) ? detail(say('Recorded exit code', '记录退出码'), end.exit_code) : '') +
+        terminal(say('First terminal', '首个终端'), first) +
+        (count(ts.count) > 1 ? terminal(say('Last terminal', '末个终端'), last) : '') +
+        (count(ts.omitted_middle_count) > 0 ? detail(say('Middle terminal snapshots omitted', '未展示的中间终端快照'), ts.omitted_middle_count) : '') +
+        (ex.observed === true ? detail(say('Observed exception', '观察到的异常'), classes.indexOf(ex.class) !== -1 ? ex.class : null) +
+          terminal(say('Exception fields', '异常字段'), ex.fields) : ''),
+      detail(say('Capture', '捕获'), c.capture_status === 'partial' ? say('Observer failure recorded', '已记录观察失败') : say('Projection recorded', '已记录投影')) +
+        detail(say('Query entry observed', '已观察到查询入口'), flag(ob.query_entered_observed)) +
+        detail(say('Declared SDK version', '声明的 SDK 版本'), version((c.versions_declared_only || {}).sdk)) +
+        detail(say('Declared bundled CLI', '声明的内置 CLI'), version((c.versions_declared_only || {}).bundled_cli)) +
+        '<div class="mm-da-detail">' + (c.completeness === 'complete_limited_to_observed_sdk_messages' && c.status === 'available'
+          ? say('Limited to observed SDK messages.', '仅限已观察到的 SDK 消息。')
+          : say('Capture is partial, interrupted, or limited; missing detail stays unavailable.', '捕获不完整、已中断或受限；缺失详情保持不可用。')) + '</div>'
+    ];
+    if (contradictory) cells[2] = '<div class="mm-da-alert"><strong>' +
+      say('Contradictory success/error flags', '成功与错误标记相互矛盾') + '</strong></div>' + cells[2];
+    return '<tr data-sdk-candidate="' + c.identity.candidate_ordinal + '">' +
+      cells.map(function(cell, i) { return '<td data-label="' + safe(headers[i]) + '">' + cell + '</td>'; }).join('') + '</tr>';
+  }).join('');
+  if (htmlRows) body += '<div class="mm-da-evidence-table"><table><thead><tr>' +
+    headers.map(function(h) { return '<th>' + safe(h) + '</th>'; }).join('') +
+    '</tr></thead><tbody>' + htmlRows + '</tbody></table></div>';
+  if (omitted || count(p.candidate_omissions) > 0 || (Array.isArray(p.issues) && p.issues.length)) body +=
+    '<div class="mm-da-foot">' + say('Some observations or fields are missing, conflicting, unsupported, or outside the display limit.',
+      '部分观察或字段缺失、冲突、不受支持或超出展示范围。') + '</div>';
+  if (count(p.candidate_omissions) > 0) body += detail(say('Additional candidate records not shown', '未展示的其他候选记录'), p.candidate_omissions);
+  var source = p.source || {};
+  var hash = typeof source.sha256 === 'string' && /^[0-9a-f]{64}$/.test(source.sha256) ? source.sha256 : null;
+  body += '<details class="mm-da-foot"><summary>' + say('Diagnostic source and limits', '诊断来源与限制') + '</summary>' +
+    detail(say('Source fingerprint', '来源指纹'), hash) +
+    '<div>' + say('Versions, when recorded, are declarations. Free-form provider text is omitted from this view.',
+      '已记录版本仅为声明。此视图不展示提供方的自由文本。') + '</div></details>';
+  var displayLabel = ready && !eligible.length ? labels.unavailable :
+    ready && (omitted || count(p.candidate_omissions) > 0) ? labels.partial : labels[p.status];
+  return section(displayLabel, body);
+}
+
+function _decisionAvailabilityHtml(d, portfolio, isZh) {
+  function say(en, zh) { return isZh ? zh : en; }
+  function text(value) { return esc(value == null ? '—' : String(value)); }
+  function money(value) {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return '—';
+    var prefix = portfolio === 'china' ? '¥' : portfolio === 'hk' ? 'HK$' : '$';
+    return prefix + value.toLocaleString('en-US', {maximumFractionDigits: 2});
+  }
+  function percent(value) {
+    return typeof value === 'number' && Number.isFinite(value) ? (value * 100).toFixed(1) + '%' : '—';
+  }
+  function detail(label, value) {
+    return '<div class="mm-da-detail">' + text(label) + ': <strong>' + text(value) + '</strong></div>';
+  }
+  function card(label, value, body) {
+    return '<section class="mm-da-card"><h3>' + text(label) + '</h3><div class="mm-da-value">' +
+      text(value) + '</div>' + body + '</section>';
+  }
+  var head = '<h2>' + say('Decision and account status', '决策与账户状态') + '</h2>';
+  if (!d || d.portfolio_id !== portfolio || d.schema !== 'mastermind.bot.decision_availability.v1') {
+    return head + '<div class="mm-da-alert"><strong>' + say('Decision status unavailable', '决策状态不可用') +
+      '</strong>' + say('Recorded decision and account data are unavailable for this book.',
+      '此账本的决策与账户记录不可用。') + '</div>';
+  }
+  var last = d.last_valid_decision, attempt = d.latest_attempt;
+  var target = d.accepted_target || {}, pending = target.pending || {};
+  var account = d.account || {}, valuation = account.valuation || {}, recorded = account.last_recorded_nav || {};
+  var coherence = (d.consistency || {}).status;
+  var lastDate = last ? _daTime(last.ts || last.asof, isZh) : say('Unavailable', '不可用');
+  var kindLabels = {
+    accepted: say('Accepted', '已接受'),
+    accepted_with_error: say('Accepted with an attempt error', '已接受，但尝试存在错误'),
+    failed: say('Failed · no accepted decision', '失败 · 未接受决策'),
+    protective_carry: say('Protective carry recorded', '已记录保护性延续'),
+    unknown: say('Outcome unverified', '结果未验证')
+  };
+  var warning = '';
+  if (d.latest_attempt_kind === 'failed') {
+    warning = '<strong>' + say('Latest recorded decision attempt failed', '最近记录的决策尝试失败') + '</strong>' +
+      say('Last valid intent: ', '上一次有效投资意图：') + text(lastDate) + '. ' +
+      say('The accepted target and account below are observed separately; later settlement may still change holdings.',
+      '下方分别展示已接受目标与账户；后续结算仍可能改变持仓。');
+  } else if (d.latest_attempt_kind === 'accepted_with_error') {
+    warning = '<strong>' + say('An accepted target is recorded alongside an attempt error', '已接受目标，同时记录了尝试错误') +
+      '</strong>' + say('The error does not erase that target. Check its execution evidence below.',
+      '此错误不会抹去已接受目标。请查看下方执行凭证状态。');
+  } else if (d.latest_attempt_kind === 'protective_carry') {
+    warning = '<strong>' + say('Protective freeze recorded', '已记录保护性冻结') + '</strong>' +
+      say('This attempt did not accept a new target. The account and pending target remain separate observations.',
+      '本次尝试未接受新目标。账户与待执行目标仍需分别查看。');
+  } else if (!last) {
+    warning = '<strong>' + say('No valid originating decision could be established', '尚无法确认有效的原始决策') +
+      '</strong>' + say('Missing or incomplete history does not establish that the book is empty.',
+      '缺失或不完整的历史记录不能证明账户为空。');
+  }
+  if (coherence && coherence !== 'observed_stable') {
+    var coherenceNote = coherence === 'transaction_pending'
+      ? say('An unfinished paper transaction was observed; account reconciliation is provisional.',
+            '发现未完成的模拟交易；账户核对为暂定状态。')
+      : coherence === 'changed_during_read'
+      ? say('Sources changed during the read; account reconciliation is provisional.',
+            '读取期间来源发生变化；账户核对为暂定状态。')
+      : say('Account reconciliation status is unavailable.', '账户核对状态不可用。');
+    warning += (warning ? '<br>' : '') + coherenceNote;
+  }
+  if (d.history_status && d.history_status !== 'available') {
+    warning += (warning ? '<br>' : '') + say(
+      'Decision history is incomplete or unavailable; the latest attempt may be missing.',
+      '决策历史不完整或不可用；可能缺少最近的尝试。');
+  }
+  if (pending.clock_status === 'invalid') {
+    warning += (warning ? '<br>' : '') + say('Pending target timing is unverified.', '待执行目标的时间未经验证。');
+  }
+  if ((d.issues || []).indexOf('queued_decision_without_pending_target') !== -1) {
+    warning += (warning ? '<br>' : '') + say('The decision journal says queued, but no pending target was observed.',
+      '决策日志标记为排队，但未发现待执行目标。');
+  }
+  if (pending.lineage_status === 'conflict') {
+    warning += (warning ? '<br>' : '') + say(
+      'The pending target does not match the last accepted decision’s identity.',
+      '待执行目标与上一次已接受决策的身份不匹配。');
+  }
+  var execution = target.execution_evidence === 'receipt_identity_verified'
+    ? (target.fill_count === 0 ? say('Recorded no trade · identity checked', '已记录无交易 · 身份已核对')
+       : say('Recorded settlement · identity checked', '已记录结算 · 身份已核对'))
+    : target.execution_evidence === 'not_settled' ? say('Accepted · queued in decision journal', '已接受 · 决策日志标记排队')
+    : target.execution_evidence === 'unverified' ? say('Recorded execution · unverified', '执行记录 · 未验证')
+    : say('Execution evidence unavailable', '执行凭证不可用');
+  var pendingText = pending.status === 'queued' ? say('Queued target present', '存在排队目标')
+    : pending.status === 'none' ? say('No pending target file observed', '未发现待执行目标文件')
+    : say('Pending target ', '待执行目标：') + String(pending.status || 'unavailable').replace(/_/g, ' ');
+  var accountLabels = {
+    available: say('Account data available', '账户数据可用'),
+    partial: say('Account data incomplete', '账户数据不完整'),
+    missing: say('Account data missing', '账户数据缺失'),
+    invalid: say('Account data invalid', '账户数据无效'),
+    read_error: say('Account data could not be read', '无法读取账户数据'),
+    too_large: say('Account data exceeds the read limit', '账户数据超出读取范围'),
+    unavailable: say('Account data unavailable', '账户数据不可用')
+  };
+  var accountLabel = Object.prototype.hasOwnProperty.call(accountLabels, account.status)
+    ? accountLabels[account.status] : say('Account status unverified', '账户状态尚未核验');
+  var accountBody = detail(say('Cash', '现金'), money(account.cash)) +
+    detail(say('Positions', '持仓数'), account.position_count) +
+    detail(say('Value at recorded prices', '按记录价格估值'), money(valuation.nav)) +
+    detail(say('Gross / cash at those prices', '按该价格的总仓位 / 现金'), percent(valuation.gross_exposure) + ' / ' + percent(valuation.cash_weight));
+  if (valuation.price_date_from) accountBody += detail(say('Price dates', '价格日期'),
+    valuation.price_date_from + (valuation.price_date_through !== valuation.price_date_from ? ' → ' + valuation.price_date_through : ''));
+  if (valuation.status === 'unavailable') accountBody += '<div class="mm-da-detail">' +
+    say('Valuation unavailable: quantities or qualified prices are incomplete.', '估值不可用：数量或合格价格不完整。') + '</div>';
+  if (recorded.date) accountBody += detail(say('Last NAV ledger entry', '最近净值账簿记录'), money(recorded.nav) + ' · ' + recorded.date) +
+    '<div class="mm-da-detail">' + say('Historical mark; binding to the current account is unavailable.',
+    '历史估值；无法确认其与当前账户的绑定。') + '</div>';
+  accountBody += '<div class="mm-da-detail">' + say('Account effective time unavailable. Read at ',
+    '账户生效时间不可用。读取时间：') + text(_daTime(d.observed_at, isZh)) + '</div>';
+  var cards = card(say('Last valid decision', '上一次有效决策'), lastDate,
+      detail(say('Submitted holdings', '提交持仓数'), last ? last.submitted_holding_count : null) +
+      detail(say('Origin identity fields', '原始身份字段'), d.origin_lineage_status) +
+      (last && last.summary_truncated ? '<div class="mm-da-detail">' +
+        say('Memo preview truncated; inspect the decision journal for the full record.', '备忘预览已截断；请查看决策日志完整记录。') + '</div>' : '')) +
+    card(say('Latest recorded attempt', '最近记录的尝试'), attempt ? _daTime(attempt.ts || attempt.asof, isZh) : say('Unavailable', '不可用'),
+      detail(say('Outcome', '结果'), kindLabels[d.latest_attempt_kind] || kindLabels.unknown) +
+      detail(say('Recorded status', '记录状态'), attempt && String(attempt.target_status || 'unknown').replace(/_/g, ' ')) +
+      detail(say('Attempt coverage', '尝试覆盖情况'), say('Partial', '部分')) +
+      detail(say('Run', '运行'), attempt && attempt.run_id)) +
+    card(say('Accepted target and execution', '已接受目标与执行'), execution,
+      detail(say('Target gross exposure', '目标总仓位'), percent(target.gross_exposure)) +
+      detail(say('Pending state', '待执行状态'), pendingText) +
+      (pending.status === 'queued' ? detail(say('Queued at', '排队时间'), _daTime(pending.queued_at || pending.asof, isZh)) +
+        detail(say('Queue decision binding', '排队目标决策绑定'), pending.lineage_status) : '') +
+      (target.settled_asof ? detail(say('Settled date', '结算日期'), target.settled_asof) +
+        detail(say('Evidence checked', '已核对的证据'), say('Stored decision receipt/fill identity', '决策记录中的凭证与成交身份')) : '')) +
+    card(say('Persisted account', '已保存账户'), accountLabel, accountBody);
+  var sources = Object.keys(d.sources || {}).sort().map(function(key) {
+    var s = d.sources[key] || {};
+    return '<div>' + text(s.file || key) + ' · ' + text(s.status) +
+      (s.sha256 ? ' · <code>' + text(s.sha256) + '</code>' : '') + '</div>';
+  }).join('');
+  return head + (warning ? '<div class="mm-da-alert">' + warning + '</div>' : '') +
+    '<div class="mm-da-grid">' + cards + '</div>' +
+    _providerDiagnosticHtml(d, portfolio, isZh) +
+    _settlementPriceEvidenceHtml(d, portfolio, isZh) +
+    '<div class="mm-da-foot">' + say(
+      'Attempt history is partial: the daily journal may omit failed reruns. Scheduled opportunity status is unverified. Prices and page refreshes do not refresh the original decision.',
+      '尝试历史不完整：每日日志可能未保留失败的重复尝试。计划决策机会尚未验证。价格与页面刷新不会更新原始决策日期。') + '</div>' +
+    '<details class="mm-da-foot"><summary>' + say('Source coverage and identities', '来源覆盖与身份') + '</summary>' +
+    sources + detail(say('Recorded account status', '账户状态原始记录'), account.status) +
+    detail(say('Read consistency', '读取一致性'), coherence) +
+    detail(say('Qualifications', '限定说明'), (d.issues || []).join(', ') || '—') + '</details>';
+}
+function renderDecisionAvailability() {
+  var host = E('decision-availability');
+  if (!host || !_isAvailabilityBook(_portfolio)) return;
+  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  if (!_decisionAvailability && _decisionAvailabilityPending) {
+    host.innerHTML = '<h2>' + (isZh ? '决策与账户状态' : 'Decision and account status') + '</h2>' +
+      '<div class="mm-empty">' + (isZh ? '正在读取此账本的决策与账户记录…' : 'Reading this book’s recorded decisions and account…') + '</div>';
+    return;
+  }
+  host.innerHTML = _decisionAvailabilityHtml(_decisionAvailability, _portfolio, isZh);
+}
+
+// ── EVALUATION RECORD: saved observations never certify an investment horizon ──
+function _feObject(value) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+function _feDate(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
+  var stamp = new Date(value + 'T00:00:00Z');
+  return !isNaN(stamp.getTime()) && stamp.toISOString().slice(0,10) === value ? value : null;
+}
+function _feDates(value) {
+  if (!Array.isArray(value) || value.length > 4096) return null;
+  for (var i = 0; i < value.length; i++) {
+    if (!_feDate(value[i]) || (i && value[i - 1] >= value[i])) return null;
+  }
+  return value;
+}
+function _feSameDates(left, right) {
+  return left.length === right.length && left.every(function(day, i) { return day === right[i]; });
+}
+function _feCalendarView(q, snapshot, portfolio, start, count) {
+  if (!start || count === null || q.schema !== 'mastermind.portfolio_forward_evaluation.observation_qualification.v2' ||
+      (q.calendar_status !== 'available' && q.calendar_status !== 'partial') ||
+      q.calendar_count_unit !== 'selected_nav_dates_on_scheduled_cash_sessions' ||
+      !Number.isSafeInteger(q.calendar_session_count) || q.calendar_session_count < 0) return null;
+  var basis = q.date_basis, savedBasis = snapshot.nav_date_basis, projection = q.calendar_basis;
+  if (!_feObject(basis) || !_feObject(savedBasis) || !_feObject(projection) ||
+      !_feObject(snapshot.cohort) || basis.schema !== 'mastermind.portfolio_forward_evaluation.nav_date_basis.v1' ||
+      savedBasis.schema !== basis.schema || basis.book !== portfolio || savedBasis.book !== portfolio ||
+      basis.status !== q.reported_mark_count_status || basis.status !== q.calendar_status ||
+      basis.status !== savedBasis.status || basis.evaluation_start !== savedBasis.evaluation_start ||
+      basis.asof !== savedBasis.asof || basis.deployment_sha !== savedBasis.deployment_sha ||
+      typeof basis.deployment_sha !== 'string' || !/^[0-9a-f]{40}$/.test(basis.deployment_sha) ||
+      basis.evaluation_start !== start || basis.evaluation_start !== snapshot.cohort.evaluation_start ||
+      basis.asof !== snapshot.asof || basis.deployment_sha !== snapshot.cohort.deployment_sha ||
+      basis.selected_row_count !== count || savedBasis.selected_row_count !== count ||
+      basis.fingerprint !== savedBasis.fingerprint ||
+      projection.schema !== 'mastermind.portfolio_forward_evaluation.calendar_basis.v1' ||
+      projection.interpretation !== 'current_published_calendar_on_saved_nav_dates' ||
+      projection.book !== portfolio || projection.nav_date_basis_status !== basis.status ||
+      projection.nav_date_basis_fingerprint !== basis.fingerprint ||
+      q.calendar_missing_reason !== (basis.status === 'partial' ? 'partial_nav_date_basis' : null)) return null;
+  var hashes = [basis.fingerprint, projection.calendar_content_fingerprint, projection.fingerprint];
+  if (!hashes.every(function(value) { return typeof value === 'string' && /^[0-9a-f]{64}$/.test(value); })) return null;
+  var source = projection.calendar_evidence;
+  var venue = {autonomous:'US', china:'CN', hk:'HK'}[portfolio];
+  var owner = portfolio === 'autonomous' ? 'portfolio.market_calendar' : 'portfolio.china_calendar';
+  if (!_feObject(source) || source.schema !== 'mastermind.cash_session_date_evidence.v1' ||
+      source.calendar_owner !== owner || source.venue !== venue ||
+      source.scope !== 'published_static_cash_session_dates' || source.exceptional_closures !== 'listed_only' ||
+      source.rule_version !== 'monday_friday_excluding_listed_closures.v1' ||
+      source.status !== 'available' || source.missing_reason !== null ||
+      source.price_or_cutoff_qualified !== false ||
+      source.start !== start || source.end !== snapshot.asof ||
+      !_feDate(source.coverage_start) || !_feDate(source.coverage_end) ||
+      !_feDate(source.source_checked_on) || source.coverage_start > start ||
+      source.coverage_end < snapshot.asof) return null;
+  var dates = _feDates(basis.date_labels), savedDates = _feDates(savedBasis.date_labels);
+  var scheduled = _feDates(source.scheduled_dates), matched = _feDates(projection.selected_session_dates);
+  var excluded = _feDates(projection.non_session_mark_dates);
+  var unmarked = _feDates(projection.scheduled_dates_without_forward_mark);
+  if (!dates || !savedDates || !scheduled || !matched || !excluded || !unmarked ||
+      dates.length !== count || !_feSameDates(dates, savedDates) ||
+      matched.length !== q.calendar_session_count || projection.scheduled_session_count !== scheduled.length ||
+      !dates.concat(scheduled).every(function(day) { return start <= day && day <= snapshot.asof; })) return null;
+  var selectedSet = new Set(dates), scheduleSet = new Set(scheduled);
+  if (!_feSameDates(matched, dates.filter(function(day) { return scheduleSet.has(day); })) ||
+      !_feSameDates(excluded, dates.filter(function(day) { return !scheduleSet.has(day); })) ||
+      !_feSameDates(unmarked, scheduled.filter(function(day) { return !selectedSet.has(day); }))) return null;
+  return {count:matched.length, excluded:excluded, unmarked:unmarked, scheduled:scheduled.length,
+    coverageStart:source.coverage_start, coverageEnd:source.coverage_end,
+    checkedOn:source.source_checked_on};
+}
+function _forwardEvaluationHtml(data, portfolio, isZh, pending) {
+  if (!_isAvailabilityBook(portfolio)) return '';
+  function say(en, zh) { return isZh ? zh : en; }
+  function fact(label, value) {
+    return '<div class="mm-eval-fact"><div class="mm-eval-label">' + label +
+      '</div><div class="mm-eval-value">' + esc(value) + '</div></div>';
+  }
+  function dateList(dates) {
+    var text = dates.slice(0,12).join(', ');
+    if (dates.length > 12) text += say(' (first 12 of ', '（显示前12个，共') + dates.length + say(')', '个）');
+    return esc(text || say('None', '无'));
+  }
+  var title = '<h2>' + say('Evaluation record', '评估记录') + '</h2>';
+  if (pending) return title + '<div class="mm-eval-note">' +
+    say('Reading this book’s saved evaluation…', '正在读取此账本已保存的评估记录…') + '</div>';
+
+  var bound = _feObject(data) && data.schema === 'mastermind.portfolio_forward_evaluation.status.v1' &&
+    data.book === portfolio;
+  var snapshot = bound && _feObject(data.snapshot) ? data.snapshot : {};
+  var cutoff = _feDate(snapshot.asof);
+  var saved = snapshot.schema === 'mastermind.portfolio_forward_evaluation.v1' &&
+    snapshot.book === portfolio && cutoff !== null && data.latest_asof === cutoff;
+  var q = bound && _feObject(data.observation_qualification) ? data.observation_qualification : {};
+  var legacy = q.schema === 'mastermind.portfolio_forward_evaluation.observation_qualification.v1' &&
+    q.source_scope === 'stored_snapshot_only' && q.calendar_status === 'not_checked' &&
+    q.calendar_session_count === null;
+  var current = q.schema === 'mastermind.portfolio_forward_evaluation.observation_qualification.v2' &&
+    q.source_scope === 'stored_snapshot_and_current_calendar_evidence';
+  var contract = (legacy || current) && q.source_metric === 'marked_session_count' &&
+    q.count_unit === 'recorded_nav_date_labels' && q.eligible_for_session_gate === false &&
+    q.price_status === 'not_checked' && q.price_qualified_session_count === null;
+  var metric = _feObject(snapshot.metrics) && _feObject(snapshot.metrics.marked_session_count)
+    ? snapshot.metrics.marked_session_count : {};
+  var supported = bound && (data.status === 'available' || data.status === 'stale_after_error');
+  var count = saved && supported && contract && Number.isSafeInteger(q.reported_mark_count) &&
+    q.reported_mark_count >= 0 && (q.reported_mark_count_status === 'available' ||
+    q.reported_mark_count_status === 'partial') && metric.value === q.reported_mark_count &&
+    metric.status === q.reported_mark_count_status ? q.reported_mark_count : null;
+  var start = bound ? _feDate(data.evaluation_start) : null;
+  var calendar = _feCalendarView(q, snapshot, portfolio, start, count);
+  var partial = count !== null && q.reported_mark_count_status === 'partial';
+  var badge = partial ? say('Partial record', '记录不完整') : calendar ? say('Prices unverified', '价格未验证')
+    : count !== null ? say('Not yet qualified', '尚未验证') : say('Unavailable', '不可用');
+  var note = count !== null
+    ? say('Recorded dates do not establish a verified market-session sample.',
+          '记录日期数量不等于已验证的市场交易日样本。')
+    : say('A qualified saved count is unavailable for this book.', '此账本已保存记录的有效计数不可用。');
+  if (calendar) {
+    note = (calendar.excluded.length
+      ? String(calendar.excluded.length) + say(calendar.excluded.length === 1
+          ? ' recorded NAV date falls outside the published exchange schedule. '
+          : ' recorded NAV dates fall outside the published exchange schedule. ',
+                                               '个净值记录日期不属于已公布的交易日。')
+      : say('All recorded dates match the published exchange schedule. ', '所有记录日期均符合已公布的交易日历。')) +
+      say('Prices and observation cutoffs remain unverified.', '价格与观测截止时点仍未验证。');
+    if (count === 0) note = say('No selected forward NAV dates were recorded in this window. Prices and observation cutoffs remain unverified.',
+                                '此区间没有入选的前瞻净值日期记录；价格与观测截止时点仍未验证。');
+    if (partial) note = say('The recorded source is partial. ', '已记录的来源不完整。') + note;
+  } else if (current && count !== null) {
+    if (q.calendar_missing_reason === 'outside_published_calendar_coverage') {
+      note = say('The saved window is outside published calendar coverage. Prices remain unverified.',
+                 '已保存的评估区间超出已公布的交易日历覆盖范围；价格仍未验证。');
+    } else if (q.calendar_missing_reason === 'saved_nav_date_basis_unavailable') {
+      note = say('An exact NAV-date basis is unavailable for this saved record. Session and price checks remain unverified.',
+                 '此保存记录缺少可验证的净值日期依据；交易日与价格验证尚未完成。');
+    } else {
+      note = say('Calendar evidence is unavailable. The saved NAV-date count is retained.',
+                 '交易日历证据不可用；已保存的净值日期计数仍予保留。');
+    }
+  }
+  if (bound && data.status === 'stale_after_error') {
+    note = say('Latest evaluation failed. Showing the saved record. ', '最近一次评估失败。以下显示已保存记录。') + note;
+  } else if (bound && data.status === 'not_started') {
+    badge = say('Not started', '尚未开始');
+    note = say('Forward evaluation has not started for this book.', '此账本尚未开始前瞻评估。');
+  } else if (bound && data.status === 'awaiting_first_post_mark_snapshot') {
+    note = say('Waiting for the first saved evaluation record.', '尚无第一份已保存的评估记录。');
+  }
+  var dateText = saved ? say('Recorded through ', '记录截至 ') + esc(cutoff)
+    : say('Saved cutoff unavailable', '已保存记录的截止日期不可用');
+  var sourceStatus = partial ? say('Partial source', '来源不完整') : count !== null
+    ? say('Stored count available', '已保存计数可用') : say('Count unavailable', '计数不可用');
+  var calendarDetails = calendar
+    ? '<div>' + say('NAV dates outside schedule: ', '不属于交易日的净值日期：') + dateList(calendar.excluded) + '</div>' +
+      '<div>' + say('Scheduled dates without a selected forward mark: ', '没有入选前瞻净值记录的交易日：') +
+        dateList(calendar.unmarked) + '</div>' +
+      '<div>' + say('Published calendar coverage: ', '已公布的日历覆盖范围：') + esc(calendar.coverageStart) +
+        ' – ' + esc(calendar.coverageEnd) + ' · ' + say('Source checked ', '来源核对日期 ') + esc(calendar.checkedOn) + '</div>'
+    : '';
+  return '<div class="mm-eval-head">' + title + '<span class="mm-eval-badge">' + badge + '</span></div>' +
+    '<div class="mm-eval-cutoff">' + dateText + '</div>' +
+    '<div class="mm-eval-grid">' +
+      fact(say('Recorded NAV dates', '已记录净值日期'), count === null ? '—' : String(count)) +
+      fact(say('Dates matching exchange schedule', '符合交易日历的记录日期'), calendar ? String(calendar.count) : say('Unverified', '未验证')) +
+      fact(say('Price-checked sessions', '价格已验证交易日'), say('Unverified', '未验证')) + '</div>' +
+    '<div class="mm-eval-note' + (bound && data.status === 'stale_after_error' ? ' mm-eval-failed' : '') +
+      '">' + note + '</div>' +
+    '<details class="mm-eval-details"><summary>' + say('How to read this record', '如何理解此记录') + '</summary>' +
+      '<p>' + say('Schedule matching compares saved NAV dates with published cash-session dates. It does not validate prices, cutoffs, fills, independent return samples or investment skill.',
+                   '日历匹配只核对已保存的净值日期与已公布的现金市场交易日；不代表价格、截止时点、成交、独立回报样本或投资能力已经验证。') + '</p>' +
+      '<div>' + sourceStatus + (start ? ' · ' + say('Evaluation start ', '评估起点 ') + esc(start) : '') + '</div>' +
+      calendarDetails +
+      (bound ? '<a href="/api/forward-evaluation?portfolio=' + encodeURIComponent(portfolio) +
+        '" target="_blank" rel="noopener">' + say('Inspect evidence record', '查看完整证据记录') + '</a>' : '') +
+    '</details>';
+}
+function renderForwardEvaluation() {
+  var host = E('forward-evaluation');
+  if (!host) return;
+  host.innerHTML = _forwardEvaluationHtml(_forwardEvaluation, _portfolio,
+    document.documentElement.getAttribute('data-lang') === 'zh', _forwardEvaluationPending);
+}
+function _fetchForwardEvaluation(id, seq) {
+  if (!_isAvailabilityBook(id) || seq !== _pfFetchSeq || id !== _portfolio) return Promise.resolve();
+  _forwardEvaluation = null;
+  _forwardEvaluationPending = true;
+  _safeRender('forward-evaluation-loading', renderForwardEvaluation);
+  return fetch('/api/forward-evaluation?portfolio=' + encodeURIComponent(id), {cache:'no-store'})
+    .then(function(r) { return r.ok ? r.json() : null; })
+    .catch(function() { return null; })
+    .then(function(data) {
+      if (seq !== _pfFetchSeq || id !== _portfolio) return;
+      _forwardEvaluation = _feObject(data) && data.book === id &&
+        data.schema === 'mastermind.portfolio_forward_evaluation.status.v1' ? data : null;
+      _forwardEvaluationPending = false;
+      _safeRender('forward-evaluation-ready', renderForwardEvaluation);
+    });
+}
+
 // ── AUTONOMOUS BOOK: banner + daily decision log ──────────────────────────────
 function renderAutoBanner() {
   if (!_isBrainBook(_portfolio)) return;
-  var b = _book || {}, p = _perf || {};
+  var availabilityBook = _isAvailabilityBook(_portfolio);
+  var origin = _decisionAvailability && _decisionAvailability.portfolio_id === _portfolio
+    ? _decisionAvailability.last_valid_decision : null;
+  // Active-book narratives are the original accepted memo, never a refreshed account snapshot.
+  var b = availabilityBook ? (origin ? {summary: origin.summary, summary_zh: origin.summary_zh,
+    as_of: origin.asof} : {}) : (_book || {});
+  var p = availabilityBook ? {} : (_perf || {});
   var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
   var pf = (_portfolios || []).find(function(x) { return x.id === _portfolio; }) || {};
   var kind = pf.kind || _pfKind(_portfolio);
@@ -6407,7 +7513,8 @@ function renderAutoBanner() {
       : (p.benchmark_name || p.benchmark || 'SPY');
     if (relative != null) parts.push((isZh ? '相对 ' : 'vs ') + benchmarkLabel + ' ' + _fmtPctSigned(relative));
     if (b.cash != null) parts.push((isZh ? '现金 ' : 'Cash ') + pctInt(b.cash));
-    if (b.as_of) parts.push((isZh ? '截至 ' : 'as of ') + fmtDateShort(b.as_of));
+    if (b.as_of) parts.push((availabilityBook ? (isZh ? '原始决策日期 ' : 'Original decision date ')
+      : (isZh ? '截至 ' : 'as of ')) + fmtDateShort(b.as_of));
     metaEl.innerHTML = parts.map(esc).join(' <span style="opacity:.4">·</span> ');
   }
 
@@ -6415,7 +7522,9 @@ function renderAutoBanner() {
   // A narrower mobile viewport gets a tighter preview so the banner stays scannable.
   var sumEl = E('auto-sum'), moreEl = E('auto-more');
   var txt = ((isZh && b.summary_zh) ? b.summary_zh : b.summary) ||
-            (isZh ? '尚无决策——大脑首次运行后出现。' : 'No decision yet — appears after the Brain’s first run.');
+    (availabilityBook ? (isZh ? '有效决策备忘不可用。请查看上方决策与账户状态。'
+      : 'Valid decision memo unavailable. See decision and account status above.')
+      : (isZh ? '尚无决策——大脑首次运行后出现。' : 'No decision yet — appears after the Brain’s first run.'));
   if (sumEl) sumEl.textContent = txt;
   if (moreEl && sumEl) {
     _autoThesisExpanded = false;
@@ -7360,6 +8469,7 @@ function _renderScoped() {
     ['performance', renderPerformance], ['equityCurve', renderEquityCurve],
     ['allocation', renderAllocation], ['safety', renderSafety], ['positions', renderPositions],
     ['trades', renderTrades], ['rejected', renderRejected],
+    ['decisionAvailability', renderDecisionAvailability], ['forwardEvaluation', renderForwardEvaluation],
     ['autoBanner', renderAutoBanner], ['decisions', renderDecisions],
     ['sizingScorecard', renderSizingScorecard], ['footer', renderFooter], ['self', renderSelf],
   ];
@@ -7578,7 +8688,7 @@ function refreshLiveMarks() {
     });
 }
 
-function _fetchPortfolioCritical(id) {
+function _fetchPortfolioCritical(id, onAvailability) {
   var pf = '?portfolio=' + encodeURIComponent(id);
   if (id === 'self_directed') {
     return fetch('/api/self_directed', { cache: 'no-cache' })
@@ -7588,11 +8698,20 @@ function _fetchPortfolioCritical(id) {
         return { portfolio: id, self: book, cachedAt: Date.now(), complete: false };
       });
   }
-  return fetch('/api/portfolio' + pf)
-    .then(function(r) { return r.ok ? r.json() : null; })
-    .catch(function() { return null; })
-    .then(function(book) {
-      var snapshot = { portfolio: id, book: book, cachedAt: Date.now(), complete: false };
+  var availability = null;
+  var first = _isAvailabilityBook(id)
+    ? fetch('/api/portfolio' + pf + '&view=decision_availability', {cache: 'no-store'})
+        .then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; })
+    : Promise.resolve(null);
+  return first.then(function(data) {
+    availability = data && data.portfolio_id === id &&
+      data.schema === 'mastermind.bot.decision_availability.v1' ? data : null;
+    if (onAvailability) onAvailability(availability);
+    return fetch('/api/portfolio' + pf)
+      .then(function(r) { return r.ok ? r.json() : null; }).catch(function() { return null; });
+  }).then(function(book) {
+      var snapshot = { portfolio: id, book: book, decisionAvailability: availability,
+                       cachedAt: Date.now(), complete: false };
       if (book && book.account_preview) {
         snapshot.performance = Object.assign({ series: [] }, book.account_preview);
       }
@@ -7643,7 +8762,12 @@ function _fetchPortfolioSnapshot(id) {
 }
 
 function _applyPortfolioSnapshot(snapshot) {
-  if (!snapshot) return;
+  if (!snapshot || snapshot.portfolio !== _portfolio) return;
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'decisionAvailability')) {
+    _decisionAvailabilityPending = false;
+    _decisionAvailability = snapshot.decisionAvailability && snapshot.decisionAvailability.portfolio_id === _portfolio
+      ? snapshot.decisionAvailability : null;
+  }
   if (Object.prototype.hasOwnProperty.call(snapshot, 'decisions')) _decisions = snapshot.decisions || [];
   if (Object.prototype.hasOwnProperty.call(snapshot, 'book')) _book = snapshot.book;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'trades')) _trades = snapshot.trades;
@@ -7652,9 +8776,11 @@ function _applyPortfolioSnapshot(snapshot) {
   if (snapshot.self) _self = snapshot.self;
   if (snapshot.selfHistory) _selfHist = snapshot.selfHistory;
   _rejected = (_book && _book.rejected) ? _book.rejected : [];
+  _updateScopedPanelAvailability(!snapshot.complete);
 }
 
 function _paintPortfolioSnapshot(snapshot, requestLive) {
+  if (!snapshot || snapshot.portfolio !== _portfolio) return Promise.resolve();
   _applyPortfolioSnapshot(snapshot);
   _renderScoped();
   applyColl('rejected');
@@ -7753,11 +8879,18 @@ async function fetchAll(opts) {
   try {
     var requestedPortfolio = _portfolio;
 
-    // FIRST PAINT: make exactly one state request. On the one-core VPS, launching the old
-    // 15-request burst together made each otherwise-fast read wait 5–11 seconds. The active book
-    // paints first; live NAV, trades/risk, switcher metadata, and shared research hydrate in that
-    // order only after the loading bar is gone.
-    var scopedSnapshot = await _fetchPortfolioCritical(requestedPortfolio);
+    // The bounded availability read paints decision failures before the legacy quote/account
+    // request. Keep the rest sequential: a broad request burst starves the one-core origin.
+    var scopedSnapshot = await _fetchPortfolioCritical(requestedPortfolio, function(availability) {
+      if (mySeq !== _pfFetchSeq || requestedPortfolio !== _portfolio) return;
+      _decisionAvailability = availability;
+      _decisionAvailabilityPending = false;
+      _safeRender('decision-availability-first', renderDecisionAvailability);
+      _safeRender('original-decision-first', renderAutoBanner);
+      // One bounded read shares this selection token; it cannot repaint a later book.
+      // Do not wait on it before continuing the legacy account/quote path.
+      _fetchForwardEvaluation(requestedPortfolio, mySeq);
+    });
 
     if (mySeq !== _pfFetchSeq) return;
     _portfolioDataCache[requestedPortfolio] = scopedSnapshot;
@@ -7823,6 +8956,7 @@ else if (_path0 === '/desk') { _portfolio = 'flagship'; showView('desk'); }
 else if (_path0 === '/self') { _portfolio = 'self_directed'; _pendingSelfSelect = false; }
 
 applyPortfolioScope();   // root defaults to active US Brain; historical routes select Flagship explicitly
+_updateScopedPanelAvailability(true); // initial placeholders are not observed account values
 fetchAll({ showBar: true });            // initial full load (shows the loading bar)
 document.addEventListener('visibilitychange', function() {
   if (document.hidden) {

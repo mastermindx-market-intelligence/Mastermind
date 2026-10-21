@@ -1272,8 +1272,40 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
 
 
 @router.get("/api/portfolio")
-def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
+    if view == "decision_availability":
+        from app.decision_availability import read_decision_availability
+        from app.settlement_price_read import read_settlement_price_evidence
+        from app.provider_diagnostic_read import read_provider_diagnostic_evidence
+        from brain import runlog
+        from bot import decision_rows
+        from portfolio import paper_account
+
+        # Resolve strictly through the registry: _portfolio_dir has a legacy fallback to Flagship.
+        # This branch must precede every quote, fresh-account fallback, and recovery-capable read.
+        observed_at = datetime.now(timezone.utc).isoformat()
+        payload = read_decision_availability(
+            portfolio, base_dir=_portfolio_registry.data_dir(portfolio),
+            observed_at=observed_at,
+            verify_receipt=_decision_execution_receipt_verified,
+            validate_pending=paper_account.pending_target_contract_error,
+            inspect_settlement_prices=lambda row: read_settlement_price_evidence(
+                portfolio, row, base_dir=_portfolio_registry.data_dir(portfolio),
+                currency=_portfolio_registry.currency(portfolio),
+                validate_receipt=paper_account.validated_settlement_receipt_prices,
+                # Decision receipt references and transaction IDs have distinct,
+                # established Unicode serialization rules. Reuse the decision owner.
+                fingerprint_receipt=decision_rows._canonical_sha256,
+            ),
+            inspect_provider_diagnostics=lambda attempt: read_provider_diagnostic_evidence(
+                portfolio, attempt, runs_dir=runlog._RUNS_DIR, observed_at=observed_at,
+            ),
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    if view is not None:
+        return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
+                            status_code=400, headers={"Cache-Control": "no-store"})
     path = _portfolio_dir(portfolio) / "latest.json"
     if not path.exists():
         return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
