@@ -17,21 +17,28 @@ evidence are recorded on Mastermind issue #983.
 
 ## Read-only usage
 
-Call this module from a trusted source checkout on the same Mac. The adapter
-path is the exact installed Fabric adapter (not a caller-selected model binary).
+Call this module from a trusted source checkout on the same Mac. The
+incumbent adapter path and SHA-256 are **pinned in reviewed source** and are not
+caller-selectable. Drift requires an owner-qualified update instead of an
+automatic arbitrary-file or credential fallback.
 
     python3 -m integrations.grok_bot_local_fabric.read \
-      --adapter /EXACT/INSTALLED/ext/fabric_task.py \
-      status --run-id ORIGINAL_RUN_ID --root-id ORIGINAL_ROOT_ID
+      status --run-id ORIGINAL_RUN_ID --root-id ORIGINAL_ROOT_ID \
+      --parent-id ORIGINAL_PARENT_RUN_ID
 
     python3 -m integrations.grok_bot_local_fabric.read \
-      --adapter /EXACT/INSTALLED/ext/fabric_task.py \
-      result --run-id ORIGINAL_RUN_ID --root-id ORIGINAL_ROOT_ID
+      result --run-id ORIGINAL_RUN_ID --root-id ORIGINAL_ROOT_ID \
+      --parent-id ORIGINAL_PARENT_RUN_ID
+
+The client launches only the approved installed adapter with Python isolated
+flags, an allowlisted environment excluding ambient provider/API secrets, and
+a fixed working directory. The subprocess stdout is read with a bounded
+buffer, and timeout/error paths terminate the original process group.
 
 The client performs only incumbent adapter status and result calls. Returned
 status fields are closed and output is bounded. For a result, the incumbent
-status must prove an exact matching root, TERMINAL state, successful rc=0 and
-actual result availability. Unknown, pending, changed or mismatched states
+status must prove exact matching root AND immediate parent, TERMINAL state,
+integer rc=0 and actual result availability. Unknown, pending, changed or mismatched states
 fail closed. It never retries a request, starts a child or records acceptance.
 Request/result/acceptance are different lifecycle facts.
 
@@ -58,8 +65,9 @@ backend_unavailable for this session. That authenticated route remains a
 separate not-yet-proven wave under issue #983; VPS/Steward is not a dependency
 of the already-proven Mac-local manual route.
 
-Tests in tests/test_grok_bot_local_fabric_read.py cover exact identity
-correlation, read bounds, parser and backend refusals, errors, and absence of
+Tests in tests/test_grok_bot_local_fabric_read.py cover root and parent correlation,
+fixed executable/digest denial, stripped ambient auth environment, byte/time
+bounds, subprocess cleanup, parser/backend refusals and absence of
 side-effecting tool commands. Source build does not prove that the native
 desktop Bot has independently loaded this reader; production release and a
 fresh-Grok-session read proof are still required.

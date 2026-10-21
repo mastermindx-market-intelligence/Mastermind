@@ -19,6 +19,7 @@ import selectors
 import signal
 from pathlib import Path
 import re
+import stat
 import subprocess
 import sys
 import time
@@ -31,6 +32,15 @@ MAX_STATUS_BYTES = 16_384
 MAX_RESULT_BYTES = 8_192
 DEFAULT_RESULT_BYTES = 4_096
 TIMEOUT_SECONDS = 15
+# Exact installed *existing* adapter on the attended m2studio host. The
+# reviewed adapter contents are pinned; owner release drift must be qualified.
+APPROVED_ADAPTER = (
+    Path.home()
+    / ".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard"
+    / "handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py"
+)
+APPROVED_ADAPTER_SHA256 = "6695a14b953461485026cadb4583be4e961147bda749dc0ccb62357cf00e2087"
+MAX_ADAPTER_BYTES = 128_000
 STATUS_FIELDS = (
     "run_id", "root_id", "parent_run_id", "state", "rc",
     "signal", "result_available", "accepted", "accepted_by",
@@ -49,8 +59,31 @@ def _ident(value: str) -> str:
 
 
 def _adapter(path: Path) -> Path:
-    if not path.is_absolute() or path.is_symlink() or not path.is_file():
+    """Pin exact original adapter path and bytes, without creating an auth plane."""
+    if not isinstance(path, Path) or path != APPROVED_ADAPTER or not path.is_absolute():
         raise Refused("ADAPTER_UNAVAILABLE")
+    try:
+        if path.is_symlink() or path.resolve(strict=True) != path:
+            raise Refused("ADAPTER_UNAVAILABLE")
+        before = path.stat()
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_size > MAX_ADAPTER_BYTES
+            or not before.st_size
+        ):
+            raise Refused("ADAPTER_UNAVAILABLE")
+        contents = path.read_bytes()
+        after = path.stat()
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or before.st_mtime_ns != after.st_mtime_ns
+            or before.st_size != after.st_size
+            or hashlib.sha256(contents).hexdigest() != APPROVED_ADAPTER_SHA256
+        ):
+            raise Refused("ADAPTER_CHANGED")
+    except (OSError, RuntimeError):
+        raise Refused("ADAPTER_UNAVAILABLE") from None
     return path
 
 
@@ -59,7 +92,15 @@ def _run_bounded(argv: list[str], max_bytes: int) -> bytes:
     try:
         process = subprocess.Popen(
             argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, start_new_session=True,
+            stderr=subprocess.DEVNULL, start_new_session=True, cwd="/",
+            env={
+                "HOME": str(Path.home()),
+                "PATH": "/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin",
+                "LANG": "C",
+                "LC_ALL": "C",
+                "PYTHONIOENCODING": "utf-8",
+                "PYTHONDONTWRITEBYTECODE": "1",
+            },
         )
     except OSError:
         raise Refused("ADAPTER_OBSERVATION_UNAVAILABLE") from None
@@ -78,7 +119,10 @@ def _run_bounded(argv: list[str], max_bytes: int) -> bytes:
                     raise Refused("ADAPTER_OBSERVATION_UNAVAILABLE")
                 if not selector.select(timeout=min(remaining, 0.2)):
                     continue
-                chunk = os.read(fd, max_bytes + 1 - len(output))
+                try:
+                    chunk = os.read(fd, max_bytes + 1 - len(output))
+                except OSError:
+                    raise Refused("ADAPTER_OBSERVATION_UNAVAILABLE") from None
                 if not chunk:
                     break
                 output.extend(chunk)
@@ -110,14 +154,20 @@ def _run_bounded(argv: list[str], max_bytes: int) -> bytes:
 def _call(adapter: Path, args: list[str], max_bytes: int) -> bytes:
     # A fixed argument vector: no shell, environment-supplied request packet,
     # plugin credential, or arbitrary argument forwarding.
-    value = _run_bounded([sys.executable, str(_adapter(adapter)), *args], max_bytes)
+    value = _run_bounded(
+        [sys.executable, "-I", "-S", str(_adapter(adapter)), *args], max_bytes
+    )
     if len(value) > max_bytes:
         raise Refused("RESPONSE_TOO_LARGE")
     return value
 
 
-def _status(adapter: Path, run_id: str, expected_root: str) -> dict[str, Any]:
-    run_id, expected_root = _ident(run_id), _ident(expected_root)
+def _status(
+    adapter: Path, run_id: str, expected_root: str, expected_parent: str,
+) -> dict[str, Any]:
+    run_id, expected_root, expected_parent = (
+        _ident(run_id), _ident(expected_root), _ident(expected_parent)
+    )
     raw = _call(adapter, ["status", run_id], MAX_STATUS_BYTES)
     try:
         value = json.loads(raw.decode("utf-8", errors="strict"))
@@ -130,14 +180,19 @@ def _status(adapter: Path, run_id: str, expected_root: str) -> dict[str, Any]:
         or type(value.get("state")) is not str
     ):
         raise Refused("STATUS_INVALID")
-    if value["state"] != "NOT_FOUND" and value.get("root_id") != expected_root:
-        raise Refused("ROOT_NOT_VERIFIED")
-    # An early controller may have no root: never interpret that as retry permission.
+    if value["state"] != "NOT_FOUND":
+        if value.get("root_id") != expected_root:
+            raise Refused("ROOT_NOT_VERIFIED")
+        if value.get("parent_run_id") != expected_parent:
+            raise Refused("PARENT_NOT_VERIFIED")
+    # Early/unknown controller metadata is not permission to submit or retry.
     return value
 
 
-def status(adapter: Path, run_id: str, expected_root: str) -> dict[str, Any]:
-    value = _status(adapter, run_id, expected_root)
+def status(
+    adapter: Path, run_id: str, expected_root: str, expected_parent: str,
+) -> dict[str, Any]:
+    value = _status(adapter, run_id, expected_root, expected_parent)
     return {
         "schema": SCHEMA,
         "action": "status",
@@ -148,14 +203,15 @@ def status(adapter: Path, run_id: str, expected_root: str) -> dict[str, Any]:
 
 
 def result(
-    adapter: Path, run_id: str, expected_root: str,
+    adapter: Path, run_id: str, expected_root: str, expected_parent: str,
     max_bytes: int = DEFAULT_RESULT_BYTES,
 ) -> dict[str, Any]:
     if type(max_bytes) is not int or not 1 <= max_bytes <= MAX_RESULT_BYTES:
         raise Refused("RESULT_BOUND_INVALID")
-    value = _status(adapter, run_id, expected_root)
+    value = _status(adapter, run_id, expected_root, expected_parent)
     if (
         value.get("state") != "TERMINAL"
+        or type(value.get("rc")) is not int
         or value.get("rc") != 0
         or value.get("result_available") is not True
     ):
@@ -180,20 +236,23 @@ def result(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--adapter", type=Path, required=True)
     sub = parser.add_subparsers(dest="action", required=True)
     for verb in ("status", "result"):
         p = sub.add_parser(verb)
         p.add_argument("--run-id", required=True)
         p.add_argument("--root-id", required=True)
+        p.add_argument("--parent-id", required=True)
         if verb == "result":
             p.add_argument("--max-bytes", type=int, default=DEFAULT_RESULT_BYTES)
     args = parser.parse_args(argv)
     try:
         if args.action == "status":
-            response = status(args.adapter, args.run_id, args.root_id)
+            response = status(APPROVED_ADAPTER, args.run_id, args.root_id, args.parent_id)
         else:
-            response = result(args.adapter, args.run_id, args.root_id, args.max_bytes)
+            response = result(
+                APPROVED_ADAPTER, args.run_id, args.root_id,
+                args.parent_id, args.max_bytes
+            )
         print(json.dumps(response, sort_keys=True, separators=(",", ":"), ensure_ascii=True))
         return 0
     except Refused as exc:
