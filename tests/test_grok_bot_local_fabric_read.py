@@ -113,6 +113,45 @@ def test_nonterminal_or_unsuccessful_result_refused(monkeypatch, tmp_path, chang
     assert len(seen) == 1
 
 
+@pytest.mark.parametrize("bad_signal", [
+    "effect_unknown", "other", "", None, False,
+])
+def test_non_ok_terminal_signal_is_not_success(monkeypatch, tmp_path, bad_signal):
+    adapter, seen = _capture(
+        monkeypatch, tmp_path, status=_status(signal=bad_signal)
+    )
+    with pytest.raises(client.Refused, match="RESULT_NOT_READY"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert [args[4] for args, _ in seen] == ["status"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"accepted": True, "accepted_by": None},
+    {"accepted": True, "accepted_by": "unknown"},
+    {"accepted": True, "accepted_by": ["deterministic"]},
+    {"accepted": True, "acceptance_state": "UNVERIFIED"},
+    {"accepted": False, "acceptance_state": "ACCEPTED"},
+])
+def test_contradictory_acceptance_is_not_affirmed(monkeypatch, tmp_path, changes):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(**changes))
+    projection = client.status(adapter, RUN, ROOT, ROOT)["status"]
+    assert projection["accepted"] is None
+    assert projection["accepted_by"] is None
+    assert projection["acceptance_state"] == "UNVERIFIED"
+    digest = client.result(adapter, RUN, ROOT, ROOT)
+    assert digest["accepted"] is None
+    assert digest["content_exposed"] is False
+    assert [args[4] for args, _ in seen] == ["status", "status", "result"]
+
+
+def test_legitimate_unaccepted_result_is_not_false_positive(monkeypatch, tmp_path):
+    adapter, _ = _capture(monkeypatch, tmp_path, status=_status(
+        accepted=False, accepted_by=None, acceptance_state="NOT_ACCEPTED"
+    ))
+    assert client.status(adapter, RUN, ROOT, ROOT)["status"]["accepted"] is False
+    assert client.result(adapter, RUN, ROOT, ROOT)["accepted"] is False
+
+
 def test_not_found_is_observation_only(monkeypatch, tmp_path):
     adapter, seen = _capture(monkeypatch, tmp_path, status=_status(state="NOT_FOUND", root_id=None, rc=None, result_available=False))
     value = client.status(adapter, RUN, ROOT, ROOT)

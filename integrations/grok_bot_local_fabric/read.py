@@ -189,6 +189,33 @@ def _status(
     return value
 
 
+def _verified_acceptance(value: dict[str, Any]) -> bool | None:
+    """Project affirmative acceptance only from the complete incumbent receipt."""
+    accepted = value.get("accepted")
+    by = value.get("accepted_by")
+    state = value.get("acceptance_state")
+    if accepted is True:
+        if type(by) is str and by in ("deterministic", "reviewer") and state == "ACCEPTED":
+            return True
+        return None
+    if accepted is False:
+        # A contradictory positive receipt is unknown, not affirmative.
+        if state == "ACCEPTED" or (type(by) is str and by in ("deterministic", "reviewer")):
+            return None
+        return False
+    return None
+
+
+def _safe_status_fields(value: dict[str, Any]) -> dict[str, Any]:
+    projected = {k: value.get(k) for k in STATUS_FIELDS}
+    accepted = _verified_acceptance(value)
+    if accepted is None:
+        projected.update(
+            accepted=None, accepted_by=None, acceptance_state="UNVERIFIED"
+        )
+    return projected
+
+
 def status(
     adapter: Path, run_id: str, expected_root: str, expected_parent: str,
 ) -> dict[str, Any]:
@@ -198,7 +225,7 @@ def status(
         "action": "status",
         "correlation_not_authentication": True,
         "may_retry_request": False,
-        "status": {k: value.get(k) for k in STATUS_FIELDS},
+        "status": _safe_status_fields(value),
     }
 
 
@@ -214,6 +241,7 @@ def result(
         or type(value.get("rc")) is not int
         or value.get("rc") != 0
         or value.get("result_available") is not True
+        or value.get("signal") != "ok"
     ):
         raise Refused("RESULT_NOT_READY")
     raw = _call(adapter, ["result", _ident(run_id), "--max-bytes", str(max_bytes)], max_bytes)
@@ -227,7 +255,7 @@ def result(
         "run_id": run_id,
         "root_id": expected_root,
         "correlation_not_authentication": True,
-        "accepted": value.get("accepted") is True,
+        "accepted": _verified_acceptance(value),
         "result_sha256": hashlib.sha256(raw).hexdigest(),
         "result_bytes": len(raw),
         "content_exposed": False,

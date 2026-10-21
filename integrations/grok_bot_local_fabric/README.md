@@ -45,7 +45,11 @@ reviewed exact result bytes. To provide a Bot with arbitrary result content,
 the future authorized Executive principal/result-consumption path must be
 qualified instead of adding a caller-selectable show-text flag. For a result, the incumbent
 status must prove exact matching root AND immediate parent, TERMINAL state,
-integer rc=0 and actual result availability. Unknown, pending, changed or mismatched states
+integer rc=0, exact terminal `signal=ok`, and actual result availability.
+An affirmative acceptance projection additionally requires the incumbent
+`accepted_by` to be `deterministic` or `reviewer` together with
+`acceptance_state=ACCEPTED`; contradictory receipts are `UNVERIFIED`, never
+treated as accepted. Unknown, pending, changed or mismatched states
 fail closed. It never retries a request, starts a child or records acceptance.
 Request/result/acceptance are different lifecycle facts.
 
