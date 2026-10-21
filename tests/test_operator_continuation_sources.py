@@ -244,3 +244,39 @@ def test_external_refs_cannot_smuggle_provider_session_authority():
             target_attempt_id=TARGET_ID,
             refs=_refs(github_state={"provider_session_id": "opaque-session"}),
         )
+
+
+@pytest.mark.parametrize(
+    "github_state",
+    [
+        {},
+        {"head_sha": "not-a-git-id"},
+        {"repository": "mastermindx-market-intelligence/Mastermind"},
+        {"repository": "mastermindx-market-intelligence/Mastermind", "head_sha": "not-a-git-id"},
+        {"repository": "mastermindx-market-intelligence/Mastermind", "head_sha": "b" * 12},
+        {"repository": "", "head_sha": SOURCE_SHA},
+        {"repository": "Mastermind", "head_sha": SOURCE_SHA},
+        {"repository": "owner/repo/extra", "head_sha": SOURCE_SHA},
+    ],
+)
+def test_refuses_missing_or_malformed_github_identity(github_state):
+    with pytest.raises(StateConflict, match="continuation GitHub"):
+        build_current_continuation_draft(
+            _runtime(), source_attempt_id=SOURCE_ID, target_attempt_id=TARGET_ID,
+            refs=_refs(github_state=github_state),
+        )
+
+
+@pytest.mark.parametrize("head_sha", ["b" * 40, "b" * 64])
+def test_accepts_complete_git_object_identity(head_sha):
+    draft = build_current_continuation_draft(
+        _runtime(), source_attempt_id=SOURCE_ID, target_attempt_id=TARGET_ID,
+        refs=_refs(
+            github_state={
+                "repository": "mastermindx-market-intelligence/Mastermind",
+                "head_sha": head_sha,
+            },
+            source_revisions={"Mastermind": head_sha},
+        ),
+    )
+    assert draft.github_state["head_sha"] == head_sha
