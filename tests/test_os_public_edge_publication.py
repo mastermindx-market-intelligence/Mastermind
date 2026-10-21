@@ -38,7 +38,14 @@ def make_dist(app, tag):
 
 
 def fullconfig(manifest):
-    proxy = {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}]}
+    # The handler `caddy adapt` emits for the rendered OS branches; the planner now
+    # requires every branch proxy to equal it, so a bare upstream is refused.
+    proxy = {"handler": "reverse_proxy", "upstreams": [{"dial": "127.0.0.1:49152"}],
+             "headers": {"request": {
+                 "delete": ["Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                            "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP"],
+                 "set": {"Host": [HOST], "X-Forwarded-For": ["127.0.0.1"],
+                         "X-Forwarded-Proto": ["https"]}}}}
     return {"admin": {"listen": "127.0.0.1:2019"}, "apps": {
         "tls": {"automation": {"policies": [{"subjects": ["other.example.invalid"]}]}},
         "http": {"servers": {"srv0": {"listen": [":443"], "routes": [{

@@ -709,3 +709,75 @@ def test_retained_caddy_adapter_topology_with_mcp_is_accepted():
     final_wrapper = site_of(finalized)["handle"][0]["routes"][0]["handle"][0]["routes"]
     assert final_wrapper[1:] == wrapper[1:]
     assert final_wrapper[0]["match"][0]["path"] == sorted(set(GET_ROUTES) | set(asset_routes(NEW)))
+
+
+# --- Proxy handler equality on every branch (#1656 independent review, finding 2) ---
+# Matching only the upstream let a changed Host, header-strip list, rewrite or
+# transport through the planner. The whole reverse_proxy handler must equal the
+# rendered one; only /mcp presents the gateway's loopback Host.
+
+def branch_proxy(config, index):
+    return inner_of(config)[index]["handle"][-1]
+
+
+PROXY_MUTATIONS = {
+    "host-changed": lambda p: p["headers"]["request"]["set"].__setitem__("Host", ["attacker.example"]),
+    "host-doubled": lambda p: p["headers"]["request"]["set"].__setitem__("Host", [HOST, "127.0.0.1"]),
+    "forwarded-for-changed": lambda p: p["headers"]["request"]["set"].__setitem__("X-Forwarded-For", ["203.0.113.9"]),
+    "forwarded-proto-changed": lambda p: p["headers"]["request"]["set"].__setitem__("X-Forwarded-Proto", ["http"]),
+    "extra-set-header": lambda p: p["headers"]["request"]["set"].__setitem__("X-Admin", ["1"]),
+    "strip-list-trimmed": lambda p: p["headers"]["request"]["delete"].remove("CF-Connecting-IP"),
+    "strip-list-emptied": lambda p: p["headers"]["request"].__setitem__("delete", []),
+    "headers-missing": lambda p: p.pop("headers"),
+    "response-headers-added": lambda p: p["headers"].__setitem__("response", {"set": {"X-Open": ["1"]}}),
+    "rewrite-added": lambda p: p.__setitem__("rewrite", {"uri": "/os/executive/submit"}),
+    "tls-transport": lambda p: p.__setitem__("transport", {"protocol": "http", "tls": {"insecure_skip_verify": True}}),
+    "other-transport": lambda p: p.__setitem__("transport", {"protocol": "fastcgi"}),
+    "handle-response-added": lambda p: p.__setitem__("handle_response", [{"routes": []}]),
+    "load-balancing-added": lambda p: p.__setitem__("load_balancing", {"retries": 3}),
+    "upstream-option-added": lambda p: p["upstreams"][0].__setitem__("max_requests", 1),
+    "second-upstream": lambda p: p["upstreams"].append({"dial": "127.0.0.1:8443"}),
+}
+
+
+@pytest.mark.parametrize("shape,index", [
+    ("legacy", 0), ("legacy", 1), ("mcp", 0), ("mcp", 1), ("mcp", 2), ("mcp", 3),
+])
+@pytest.mark.parametrize("mutation", sorted(PROXY_MUTATIONS))
+def test_every_branch_proxy_must_equal_the_rendered_handler(shape, index, mutation):
+    live = fullconfig() if shape == "legacy" else mcp_fullconfig()
+    PROXY_MUTATIONS[mutation](branch_proxy(live, index))
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    with pytest.raises(ValueError):
+        prepare_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                       relay_port=49152)
+    with pytest.raises(ValueError):
+        final_config(fullconfig=live, current_manifest=OLD, candidate_manifest=NEW,
+                     relay_port=49152)
+
+
+@pytest.mark.parametrize("index,wrong_host", [(2, "127.0.0.1"), (3, HOST), (0, "127.0.0.1"), (1, "127.0.0.1")])
+def test_each_branch_presents_only_its_own_upstream_host(index, wrong_host):
+    live = mcp_fullconfig()
+    branch_proxy(live, index)["headers"]["request"]["set"]["Host"] = [wrong_host]
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+
+
+def test_proxy_equality_accepts_the_adapter_shape_without_a_transport():
+    live = mcp_fullconfig()
+    for index in range(4):
+        branch_proxy(live, index).pop("transport", None)
+    value = plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+                 current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)
+    assert value["relay_port"] == 49152
+
+
+def test_a_proxy_for_another_relay_port_is_refused_on_every_branch():
+    live = mcp_fullconfig(port=49153)
+    with pytest.raises(ValueError):
+        plan(old_source=OLD_SHA, new_source=NEW_SHA, fullconfig=live,
+             current_manifest=OLD, candidate_manifest=NEW, relay_port=49152)

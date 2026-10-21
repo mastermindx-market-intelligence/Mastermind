@@ -112,6 +112,32 @@ def _branch_handlers(handlers: object) -> list:
     raise ValueError("OS edge transition wrapper depth refused")
 
 
+_STRIPPED_REQUEST_HEADERS = ("Forwarded", "X-Forwarded-Host", "X-Forwarded-Port", "X-Real-IP",
+                             "CF-Connecting-IP", "EO-Connecting-IP", "EO-Client-IP")
+
+
+def _expected_proxy(relay_port: int, upstream_host: str) -> dict:
+    return {
+        "handler": "reverse_proxy",
+        "upstreams": [{"dial": f"127.0.0.1:{relay_port}"}],
+        "headers": {"request": {
+            "delete": list(_STRIPPED_REQUEST_HEADERS),
+            "set": {"Host": [upstream_host], "X-Forwarded-For": ["127.0.0.1"],
+                    "X-Forwarded-Proto": ["https"]},
+        }},
+    }
+
+
+def _proxy_matches(observed: object, relay_port: int, upstream_host: str) -> bool:
+    if type(observed) is not dict:
+        return False
+    candidate = dict(observed)
+    # The adapter emits no transport; an explicit plain-HTTP one is the same behavior.
+    if candidate.get("transport") == {"protocol": "http"}:
+        del candidate["transport"]
+    return candidate == _expected_proxy(relay_port, upstream_host)
+
+
 def _locate(fullconfig: object, current_routes: tuple[str, ...],
             relay_port: int) -> tuple:
     _relay(relay_port)
@@ -203,9 +229,11 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
                         or handlers[0] != {"handler": "request_body", "max_size": 64000}
                         or type(handlers[0].get("max_size")) is not int):
                     raise ValueError("OS edge transition observed POST route differs")
-        proxy = handlers[-1]
-        if (proxy.get("handler") != "reverse_proxy"
-                or proxy.get("upstreams") != [{"dial": f"127.0.0.1:{relay_port}"}]):
+        # Every branch's proxy must be the whole rendered handler, not merely the
+        # right upstream: a changed Host, header list, rewrite or transport would
+        # alter what the gateway sees. Only /mcp presents the gateway's loopback Host.
+        upstream_host = "127.0.0.1" if position == 3 and len(inner) == 5 else HOST
+        if not _proxy_matches(handlers[-1], relay_port, upstream_host):
             raise ValueError("OS edge transition relay upstream refused")
     if methods != {"GET", "POST"} or get_path is None:
         raise ValueError("OS edge transition branch set refused")

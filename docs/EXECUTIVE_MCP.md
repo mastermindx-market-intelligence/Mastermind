@@ -427,12 +427,21 @@ file placed under a production tree is refused as well.
   that one endpoint. It is not a workaround for the tunnel: the owner-rendered
   Caddy block (`ops/executive_os/os_public_edge.caddy.template`) exposes exactly
   GET `/.well-known/oauth-protected-resource/mcp` and POST `/mcp`, the gateway
-  remains the only authenticator (Caddy performs none), bodies stay within the
-  gateway's 64000-byte ceiling, and every other path on the host still aborts.
-  `ExecutiveControlService` still gains no TCP/HTTP. Because the gateway's token
-  verifier accepts any configured resource, the public resource must be a
-  distinct, separately registered Auth0 audience and must be reviewed for
-  audience confusion against the tunnel and OS resources before it is enabled.
+  remains the only authenticator (Caddy performs none), Caddy caps request bodies
+  at 64000 bytes (below the gateway's own 65536-byte ceiling), and every other
+  path on the host still aborts. `ExecutiveControlService` still gains no
+  TCP/HTTP.
+  **Installing the Caddy routes is not neutral.** The gateway's token verifier
+  today accepts a token minted for any configured resource (the OS audience and
+  every tunnel audience), and the primary challenge/metadata still name a tunnel
+  URL. So the moment the routes are live, an Internet client holding a token for
+  any of those audiences can reach `/mcp`, and a compliant client cannot yet
+  discover this host. Before the routes are installed on the VPS the gateway must
+  (a) accept only the public resource at `/mcp`, rejecting the OS and tunnel
+  audiences there (and rejecting the public audience on the OS read/submit
+  authenticators), (b) advertise `https://mcp.mastermind-x.com/mcp` as the
+  resource and challenge with per-host `resource_metadata`, and (c) have a
+  distinct, separately registered Auth0 API audience (a human step).
 - EXEC-MCP-A does not modify `allowed_peer_uids` or the production
   service-principal topology. A dedicated least-privilege principal for the
   tunnel-facing process is a **separate reviewed architecture decision** for the

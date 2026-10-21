@@ -111,14 +111,18 @@ existing Caddy owner loads the candidate.
 The same fixed template also carries the public MCP entrypoint on
 mcp.mastermind-x.com (Chairman decision on #1656): exactly GET
 /.well-known/oauth-protected-resource/mcp (RFC 9728 metadata) and POST /mcp
-(Streamable HTTP, body capped at the gateway's own 64000-byte ceiling), both ahead
-of the terminal abort. Caddy performs no authentication: the gateway still returns
-the 401 challenge and validates every token. /mcp is proxied with a loopback Host
-because the gateway's DNS-rebinding fence admits only loopback hosts. Staging this
-route does not make the endpoint usable: the gateway must also advertise this host
-as a protected resource and the Auth0 API audience must exist (see
-docs/EXECUTIVE_MCP.md section 8); until then a client sees a 401 whose challenge
-points at the tunnel resource, or an OAuth discovery failure.
+(Streamable HTTP, body capped by Caddy at 64000 bytes, below the gateway's own
+65536-byte ceiling), both ahead of the terminal abort. Caddy performs no
+authentication: the gateway still returns the 401 challenge and validates every
+token. /mcp is proxied with a loopback Host because the gateway's DNS-rebinding
+fence admits only loopback hosts. Staging this route does not make the endpoint
+usable, and installing it is not neutral: the gateway verifier accepts a token for
+any configured resource (OS and tunnel audiences included), so installation waits
+for the gateway to restrict /mcp to the public resource, advertise this host with
+a per-host resource_metadata challenge, and for the Auth0 API audience to exist
+(see docs/EXECUTIVE_MCP.md section 8). A Caddy-only install yields a 401 whose
+challenge points at the tunnel resource, or an OAuth discovery failure, while
+still admitting those other audiences.
 
 The intended DNS A record is mcp.mastermind-x.com → 146.190.142.17.
 Do not claim DNS/certificate/routing readiness from rendered configuration.

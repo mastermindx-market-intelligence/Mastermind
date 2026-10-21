@@ -56,6 +56,17 @@ def test_public_mcp_entrypoint_is_two_exact_branches_before_abort(noir):
     mcp_branch = config.split("handle @mcp {")[1]
     assert mcp_branch.index("max_size 64KB") < mcp_branch.index("reverse_proxy")
     assert MCP_MAX_BODY == 64000
+    # The Host counts above would also pass if the two values swapped branches, so
+    # pin each Host inside its own branch slice.
+    assert "header_up Host 127.0.0.1\n" in mcp_branch
+    assert "header_up Host mcp.mastermind-x.com\n" not in mcp_branch
+    meta_branch = config.split("handle @mcpmeta {")[1].split("@mcp {")[0]
+    assert "header_up Host mcp.mastermind-x.com\n" in meta_branch
+    assert "header_up Host 127.0.0.1\n" not in meta_branch
+    for marker, following in (("handle @get {", "@post {"), ("handle @post {", "@mcpmeta {")):
+        os_branch = config.split(marker)[1].split(following)[0]
+        assert "header_up Host mcp.mastermind-x.com\n" in os_branch
+        assert "header_up Host 127.0.0.1\n" not in os_branch
     # Order is part of the contract: both MCP branches precede the terminal abort,
     # after the original GET and POST OS branches.
     order = [config.index(marker) for marker in

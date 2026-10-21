@@ -96,7 +96,12 @@ OS_EXECUTIVE_RESOURCE = PUBLIC_ORIGIN + '/os/executive'
 
 
 def validate_os_executive_resource(raw):
-    """One opt-in OS audience; existing tunnel resources remain independent."""
+    """One opt-in OS audience; existing tunnel resources stay configured beside it.
+
+    Naming an audience here does not pin it to one endpoint: the gateway verifier
+    accepts a token for any configured resource, so per-endpoint audience
+    restriction is a separate gateway obligation (docs/EXECUTIVE_MCP.md section 8).
+    """
     enabled = raw.get('os_executive_transport', False)
     if not enabled:
         if 'os_executive_resource' in raw:
