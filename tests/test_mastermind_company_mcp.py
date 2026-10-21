@@ -683,6 +683,7 @@ def test_sdk_and_runtime_dependency_boundaries_are_exact():
         "consultation.py",
         "principal_adapter.py",
         "principal_schemas.py",
+        "product_acceptance.py",
         "native_return.py",
         "schemas.py",
         "server.py",

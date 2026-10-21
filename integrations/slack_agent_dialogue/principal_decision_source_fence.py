@@ -14,6 +14,7 @@ from integrations.mastermind_company_principal_runtime_fence import (
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import CooPrincipalDialogueCaller
 from integrations.slack_agent_dialogue.engine_v2 import DialogueContextV2
 from integrations.slack_agent_dialogue.executive_observation_client import ExecutiveDialogueObservationClient
+from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
 from integrations.slack_agent_dialogue.principal_current_reader import read_current_principal_source
 from integrations.slack_agent_dialogue.principal_pending_decision import require_unanswered_principal_decision
 
@@ -23,13 +24,13 @@ class PrincipalDecisionSource:
     caller: CooPrincipalDialogueCaller
     context: DialogueContextV2
     physical_source: PhysicalDialogueSourceIdentity
-    observation_client: ExecutiveDialogueObservationClient
+    observation_client: ExecutiveDialogueObservationClient | HostLocalDialogueObservationReader
 
     def __post_init__(self):
         if (type(self.caller) is not CooPrincipalDialogueCaller
                 or type(self.context) is not DialogueContextV2
                 or type(self.physical_source) is not PhysicalDialogueSourceIdentity
-                or type(self.observation_client) is not ExecutiveDialogueObservationClient):
+                or type(self.observation_client) not in (ExecutiveDialogueObservationClient, HostLocalDialogueObservationReader)):
             raise TypeError("exact principal source owners required")
 
 
@@ -39,6 +40,9 @@ class PrincipalDecisionSourceFence:
         if (type(source) is not PrincipalDecisionSource
                 or type(owner) is not PrincipalDialogueRuntimeCommitOwner):
             raise TypeError("exact principal decision source and commit owner required")
+        if (type(source.observation_client) is HostLocalDialogueObservationReader
+                and source.observation_client.runtime is not owner.runtime):
+            raise TypeError("host-local observation must use the COMMIT owner's Runtime")
         self.source, self.owner = source, owner
 
     async def before_commit(self, intent):

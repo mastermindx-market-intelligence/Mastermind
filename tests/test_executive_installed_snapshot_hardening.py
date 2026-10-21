@@ -1780,6 +1780,7 @@ def _proof_observations(
         "overlaps": [],
         "threads": set(),
         "object_maps": [],
+        "completed_object_maps": [],
         "inventories": [],
         "entered": set(),
         "settled": set(),
@@ -1787,7 +1788,7 @@ def _proof_observations(
 
     def _rendezvous(mine: str, theirs: str) -> None:
         state["threads"].add(threading.get_ident())
-        # The object proof enters twice (commits, then blobs); only its first
+        # The object proof enters for commits and blobs; only its first
         # entry takes part in the rendezvous.
         if announced[mine]:
             return
@@ -1806,7 +1807,9 @@ def _proof_observations(
                 raise object_failure
             mapping = args[1] if len(args) > 1 else kwargs["expected_types"]
             state["object_maps"].append(dict(mapping))
-            return real_objects(*args, **kwargs)
+            result = real_objects(*args, **kwargs)
+            state["completed_object_maps"].append(dict(mapping))
+            return result
         finally:
             state["settled"].add("objects")
 
@@ -1873,8 +1876,8 @@ def test_clean_snapshot_overlaps_full_object_closure_with_full_inventory(
     checked = [object_id for mapping in object_maps for object_id in mapping]
     assert len(checked) == len(set(checked))
     assert set(checked) == expected_commits | expected_blobs
-    assert object_maps[1] == {object_id: "blob" for object_id in expected_blobs}
-    assert set(object_maps[0]) == expected_commits
+    assert {object_id: "blob" for object_id in expected_blobs} in object_maps
+    assert {object_id: "commit" for object_id in expected_commits} in object_maps
 
     # ... and one full raw inventory, with no leaf or directory dropped.
     inventories = state["inventories"]
@@ -2015,8 +2018,12 @@ def test_clean_snapshot_inventory_failure_blocks_object_use(
             include_seal=True, snapshot_capture=captures,
         )
 
-    # The concurrent object proof still settled before the refusal surfaced.
-    assert len(state["object_maps"]) == 2
+    # Current-blob proof is the independent branch and still settles before
+    # the inventory refusal. Ancestry/history closure now runs on the inventory
+    # worker after inventory succeeds, so it must not start after this failure.
+    assert len(state["object_maps"]) == 1
+    assert state["completed_object_maps"] == state["object_maps"]
+    assert set(state["object_maps"][0].values()) == {"blob"}
     assert state["inventories"] == []
     assert captures == []
 
@@ -2067,7 +2074,7 @@ def test_clean_snapshot_overlap_cannot_resurrect_expired_deadline(
     # proof never completed, and no snapshot survived the exhausted budget.
     assert deadline < installed.time.monotonic()
     assert not any(
-        set(mapping.values()) == {"blob"} for mapping in state["object_maps"]
+        set(mapping.values()) == {"blob"} for mapping in state["completed_object_maps"]
     )
     assert captures == []
     assert state["inventories"] == []
@@ -2277,7 +2284,8 @@ def test_object_type_probe_shards_large_complete_sets_without_weakening():
         label="Macro source",
     )
 
-    assert len(calls) == 2
+    assert len(calls) == 3
+    assert max(map(len, calls)) <= 24_000
     assert {object_id for call in calls for object_id in call} == set(expected)
     assert sum(len(call) for call in calls) == len(expected)
 

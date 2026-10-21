@@ -120,6 +120,31 @@ These fields are explanatory classification evidence, not a new router, lifecycl
 ledger, placement authority or runtime schema. Existing Executive OS / Model Router / Capacity
 owners remain canonical.
 
+## 1B. Operator-first completion economics
+
+For sustained delivery, the default economical operator owns decomposition, worker commissioning,
+ordinary return adjudication, independent review, bounded repair and domain integration. Prefer
+qualified admitted GLM/Grok-class operators outside the scarce principal subscription pool when the
+whole completion cycle benefits; the operator delegates easy bounded labor rather than performing
+it all. This refines the delivery-management defaults in Sections 3 and 5, not their reserved
+principal, quality or authority responsibilities. Role and topology never manufacture a frontier
+witness. Deterministic work remains deterministic; each bounded child retains its own task fit.
+
+Sol/Opus remain program executives and exceptional specialists rather than mandatory routine
+management. Astra/Fable remain optional strategic principals. Omit any layer that adds only relay
+cost. Direct CEO -> worker remains allowed when its complete closure is cheaper or a concrete
+existing direct-work exception applies; the direct commissioning owner retains adjudication.
+The goal is accepted outcomes per conserved original-root budget including principal consumption,
+not a cheaper model doing one part while premium parents still manage every return.
+
+For substantial orchestration, load `skills/mastermind-fabric-orchestration/SKILL.md` plus only the
+assigned role from the same protected commit as this law. The existing capability/launch owners
+must separately project and prove actual per-session loading and available tools. Installation or
+instructional role selection grants no descendant, identity, native-helper, depth or budget right.
+This amendment does not change cognition-route or Pro-mode admission, provider/credential holds,
+first-lawful-tier routing, Runtime enums, quota ownership, effect reconciliation, independent review,
+source custody or release gates. All descendants conserve the original root and true parent.
+
 ## 2. Mandatory Chat-native cognition law
 
 Every meaningful Sol/model delegation must apply:

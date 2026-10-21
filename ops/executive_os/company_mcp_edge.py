@@ -354,7 +354,7 @@ def _provision(*, recover_incomplete=False):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=("provision", "recover-incomplete", "verify", "stdio", "sdk-stdio", "native-stdio", "native-sdk-stdio"))
+    parser.add_argument("command", choices=("provision", "recover-incomplete", "verify", "stdio", "sdk-stdio", "native-stdio", "native-sdk-stdio", "acceptance-stdio", "acceptance-sdk-stdio"))
     args = parser.parse_args(argv)
     if not sys.flags.isolated or not sys.dont_write_bytecode:
         raise EdgeError("edge requires isolated Python without bytecode")
@@ -368,14 +368,17 @@ def main(argv=None):
     if os.geteuid() != config["worker_uid"]:
         raise EdgeError("Company stdio requires the installed worker UID")
     python = root / "bin/python3.12"
-    if args.command in {"stdio", "native-stdio"}:
-        next_command = "native-sdk-stdio" if args.command == "native-stdio" else "sdk-stdio"
+    if args.command in {"stdio", "native-stdio", "acceptance-stdio"}:
+        next_command = {"stdio": "sdk-stdio", "native-stdio": "native-sdk-stdio",
+                        "acceptance-stdio": "acceptance-sdk-stdio"}[args.command]
         os.execve(python, [str(python), "-I", "-B", str(Path(__file__)), next_command], ENV)
     if (Path(sys.executable).absolute() != python or Path(sys.prefix) != root
             or Path(sys.base_prefix) != BASE_PYTHON.parents[1]):
         raise EdgeError("Company SDK interpreter differs")
     if args.command == "native-sdk-stdio":
         from integrations.company_consultation_host_transport import run_native_return_stdio as run_stdio
+    elif args.command == "acceptance-sdk-stdio":
+        from integrations.company_consultation_host_transport import run_product_acceptance_stdio as run_stdio
     else:
         from integrations.company_consultation_host_transport import run_company_consultation_stdio as run_stdio
     asyncio.run(run_stdio(socket_path=SOCKET, server_uid=config["control_uid"]))

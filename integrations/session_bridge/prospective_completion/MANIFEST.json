@@ -1,0 +1,24 @@
+{
+  "files": {
+    "BASE.json": "a311605c7c9815a818d4f7b280d2a3fa19043362e2838166fe2b79ab2543563a",
+    "QUALIFICATION.json": "2ad1b704332e4d176345f990744cfb99a50e510743da159749e1305bdda63a90",
+    "README.md": "3ace5bf3653b1f32583541ee0a93283ea475bce0c6aa385dab6b83fd44c4a1d5",
+    "prospective-completion.patch": "cc2b765a8b3907474a321ffc93986050a2018dfbe1542d2abffdad05f85d1918",
+    "test_prospective_completion.py": "7b946e2a46b8daeb755a8942dbd5cba50c37e7ac95287bbf9eb761335bf93ec0",
+    "checks-final.xml": "5d9370da1f3b942751ab6754218693ad4750a510e4882c76dc2320e6f048050a",
+    "candidate/fabric_task.py": "b4e3f1cb43a01746e848528038b189960e3bc6062676213c64bfda9d6b576289",
+    "candidate/remote_sub.sh": "9bf4f5317792746bbfd84e941c11e0decf5f53a2723b8023486be2cf4c0cadf5",
+    "candidate/remote_sub_exec.py": "16ade6703ce7959938c243e01ceae356cd6d70b88dcae800bf1028c3c9478366",
+    "candidate/original_delivery_collector.py": "30cce4abf8b50473906506452dd70f84cf001f5f4a030dd0c6751df108c2df15",
+    "base/fabric_task.py": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+    "base/remote_sub.sh": "e2ec7dfe2efa0680b4bf961ac73ce916adf5f1dc90e510f6c8ff6ed50e069deb",
+    "base/remote_sub_exec.py": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
+    "base/original_delivery_collector.py": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
+    "f1-old-red.xml": "000dcf38bb6537c551c0b0e02ed63c8f1fbe4ea6905c865219c206b664118853",
+    "f1-successor.xml": "6970215420c3d175990f0a7f590f9cb8189912614306ea0bc44432a77a08c59a"
+  },
+  "release_state": "UNINSTALLED_F1_FIXED_PENDING_SAME_PRINCIPAL_REVIEW",
+  "commission": "429680b2",
+  "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "predecessor": "63839212fd0732c50599edb79be8dc743b7ccb3c"
+}

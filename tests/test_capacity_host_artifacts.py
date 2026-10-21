@@ -3289,7 +3289,9 @@ def test_primary_ci_checkout_retains_full_history_for_trusted_release_identity()
             encoding="utf-8"
         )
     )
-    steps = workflow["jobs"]["test"]["steps"]
+    # Trusted history is consumed by the actual pytest workers; the fan-in
+    # `test` status job validates the matrix result and canonical coverage.
+    steps = workflow["jobs"]["pytest_shards"]["steps"]
     primary = next(
         step
         for step in steps

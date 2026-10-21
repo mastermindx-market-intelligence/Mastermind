@@ -717,6 +717,8 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
     # The accepted native-return generation remains in the default policy;
     # removing only its own additions recovers the same frozen predecessor.
     protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
+    del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
     del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
     del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
     del protected_raw["mcp_servers"]["native-return-mcp-v1"]

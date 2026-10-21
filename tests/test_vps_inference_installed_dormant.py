@@ -213,3 +213,48 @@ def test_unenrolled_staged_uid_cannot_read_existing_operation_or_submit(
     try:asyncio.run(exercise())
     finally:
         for sock in sockets.values():sock.close()
+
+
+def test_dormant_inference_and_native_capacity_staging_remain_inert(
+    tmp_path, monkeypatch,
+):
+    from control_plane.native_capacity_acquisition import NativeCapacitySource
+
+    def forbidden(*_args, **_kwargs):
+        pytest.fail("combined dormant staging attempted native acquisition")
+
+    monkeypatch.setattr(NativeCapacitySource, "from_startup", classmethod(forbidden))
+    monkeypatch.setattr(NativeCapacitySource, "acquire", forbidden)
+    uid = os.geteuid() + 31
+    # Shape-valid dormant selectors do not construct an installed source owner.
+    # The existing fixture substitutes sockets/clients and never starts Runtime.
+    cli, service, raw, sockets = compose(tmp_path, monkeypatch, {
+        "ceo_ingress_inference_peer_uid": uid,
+        "ceo_ingress_inference_armed": False,
+        "fabric_bindings_path": str(tmp_path / "bindings.json"),
+        "fabric_bindings_sha256": "a" * 64,
+        "fabric_attended_probe": {
+            "worker_config_path": str(tmp_path / "worker.json"),
+        },
+        "native_capacity_v2": {
+            "macro_release": "b" * 40,
+            "producer_sha256": "c" * 64,
+        },
+        "coo_autonomy_armed": False,
+        "coo_operator_harness_armed": False,
+        "coo_foreground_only": False,
+        "ceo_submit_armed": False,
+        "fabric_bridge_armed": False,
+    })
+    try:
+        assert service._ceo_ingress_inference_binding is None
+        assert service._attended_worker_registration is None
+        assert service.runtime is None
+        assert not Path(raw["runtime_root"]).exists()
+        assert service._ceo_ingress_app_binding is not None
+        assert service._ceo_ingress_app_binding.peer_uid == raw["ceo_ingress_app_peer_uid"]
+        assert service._ceo_ingress_socket_path == raw["ceo_ingress_socket_path"]
+        assert service._ceo_ingress_armed is False
+        assert set(sockets) == {"Operator", "CeoIngress"}
+    finally:
+        close_without_execution(service, sockets)

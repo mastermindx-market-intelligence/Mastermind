@@ -190,6 +190,17 @@ class AgentOsProductAcceptanceBasisReader:
         if not root.is_absolute():
             raise ValueError("Macro source root must be absolute")
         self._macro_root = root
+        # The installed integration owner composes its qualified collector.
+        # Core cannot import that outer transport or accept an arbitrary owner.
+        self._installed_context_owner = None
+        self._installed_context_binding = None
+
+    @staticmethod
+    def _context_binding(owner):
+        return tuple(getattr(owner, name) for name in (
+            "_source_root", "_macro_root", "_code_root", "_python",
+            "_expected_source_sha", "_allow_synthetic_fixture",
+        ))
 
     def read(
         self,
@@ -209,8 +220,23 @@ class AgentOsProductAcceptanceBasisReader:
             raise ProductAcceptanceBasisUnavailable("BASIS_BINDING_UNAVAILABLE")
         if type(execution_commission_ref) is not CommissionRef:
             raise ProductAcceptanceBasisUnavailable("BASIS_BINDING_UNAVAILABLE")
-        # The installed sealed control profile has not been qualified to read
-        # Macro/PyYAML. Do not select another interpreter or drop isolation.
+        if self._installed_context_owner is not None:
+            try:
+                if self._context_binding(self._installed_context_owner) != self._installed_context_binding:
+                    raise ProductAcceptanceBasisUnavailable("CONTEXT_OWNER_UNAVAILABLE")
+                result = self._installed_context_owner.read_product_acceptance_basis(
+                    work_ref=work_ref, execution_commission_ref=execution_commission_ref,
+                    root_objective=root_objective,
+                )
+                if self._context_binding(self._installed_context_owner) != self._installed_context_binding:
+                    raise ProductAcceptanceBasisUnavailable("CONTEXT_OWNER_UNAVAILABLE")
+                return result
+            except ProductAcceptanceBasisUnavailable:
+                raise
+            except Exception:
+                raise ProductAcceptanceBasisUnavailable("CONTEXT_OWNER_UNAVAILABLE") from None
+        # Without the explicit sealed owner, Control cannot read Macro/PyYAML.
+        # Do not select another interpreter or drop isolation on this path.
         if sys.flags.isolated or sys.flags.no_site:
             raise ProductAcceptanceBasisUnavailable("CONTEXT_RUNTIME_UNQUALIFIED")
         expected_sha = git_sha(self._macro_root)

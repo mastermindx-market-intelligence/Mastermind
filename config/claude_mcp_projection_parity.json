@@ -70,6 +70,28 @@
         }
       }
     },
+    "operator.appserver.interactive.product-acceptance.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "80b3a3eaed8bc50475c3fa21aa45cb5043d3999a401d4df84f80782864e24b57",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Product acceptance selects the Codex App Server host; this static Claude projection does not qualify that host, its receiving principal, or its Runtime admission.",
+          "status": "deferred"
+        },
+        "cli": {
+          "reason": "Product acceptance selects the Codex App Server host; this static Claude projection does not qualify that host, its receiving principal, or its Runtime admission.",
+          "status": "deferred"
+        },
+        "desktop-local": {
+          "reason": "Product acceptance selects the Codex App Server host; this static Claude projection does not qualify that host, its receiving principal, or its Runtime admission.",
+          "status": "deferred"
+        },
+        "inline-subagent": {
+          "reason": "Product acceptance selects the Codex App Server host; this static Claude projection does not qualify that host, its receiving principal, or its Runtime admission.",
+          "status": "deferred"
+        }
+      }
+    },
     "operator.appserver.interactive.v1": {
       "package_generation_digests": {},
       "profile_digest": "cd10fce1f53d01d1253e88fcf7850c0ab7928a2d9c7fc2340e3b8a1475fd324f",

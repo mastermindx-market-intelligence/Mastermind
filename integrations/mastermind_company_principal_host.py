@@ -73,6 +73,7 @@ def build_principal_company_dialogue_host(
     principal_authority_guard: Callable[..., None] | None = None,
     request_binding_resolver: DialogueBindingResolver | None = None,
     product_acceptance_macro_root: Path | None = None,
+    product_acceptance_reader: AgentOsProductAcceptanceBasisReader | None = None,
     principal_decision_source: PrincipalDecisionSource | None = None,
 ) -> PrincipalCompanyDialogueHost:
     """Compose existing H6 owners without admitting or starting a principal.
@@ -94,6 +95,11 @@ def build_principal_company_dialogue_host(
         raise ValueError(
             "product acceptance requires both its source root and assigning-parent resolver"
         )
+    if product_acceptance_reader is not None and (
+        type(product_acceptance_reader) is not AgentOsProductAcceptanceBasisReader
+        or product_acceptance_macro_root is not None
+    ):
+        raise TypeError("product acceptance requires one exact host-owned reader")
     if principal_decision_source is not None and principal_authority_guard is None:
         raise ValueError("decision source requires the receiving principal authority guard")
 
@@ -120,14 +126,15 @@ def build_principal_company_dialogue_host(
         **gateway_kwargs,
     )
     request_gateway = request_owner = None
-    if request_binding_resolver is not None:
+    if request_binding_resolver is not None or product_acceptance_reader is not None:
         request_owner = ProductAcceptanceRequestOwner(
             runtime,
-            AgentOsProductAcceptanceBasisReader(
+            product_acceptance_reader if product_acceptance_reader is not None else AgentOsProductAcceptanceBasisReader(
                 macro_root=product_acceptance_macro_root
             ),
             principal_owner=commit_owner,
         )
+    if request_binding_resolver is not None:
         request_gateway = CompanyDialogueGateway(
             request_binding_resolver,
             socket_path=path,

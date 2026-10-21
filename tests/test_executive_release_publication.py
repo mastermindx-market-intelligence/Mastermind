@@ -94,12 +94,20 @@ def harness(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
     (source / "payload.txt").write_text("reviewed release payload\n")
+    # The shared builder validates the delivered autonomy surface as well as
+    # its seal. Include inert source files so those real post-image checks run.
+    surface = source / "ops/executive_os"
+    surface.mkdir(parents=True)
+    (surface / "autonomy-control.sh").write_text("#!/bin/sh\nexit 0\n")
+    (surface / "autonomy-control.sh").chmod(0o755)
+    (surface / "autonomy_control.py").write_text("# inert fixture\n")
+    (surface / "credential_rotation_interlock.py").write_text("# inert fixture\n")
     git_env = {**os.environ, "GIT_CONFIG_GLOBAL": os.devnull, "GIT_CONFIG_NOSYSTEM": "1"}
     def git(*args):
         return subprocess.run(["git", "-c", "core.hooksPath=/dev/null", "-C", str(source), *args],
                               env=git_env, capture_output=True, text=True, check=True).stdout.strip()
     git("init", "-q")
-    git("add", "payload.txt")
+    git("add", "payload.txt", "ops")
     git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "fixture")
     sha = git("rev-parse", "HEAD")
     tree = git("rev-parse", "HEAD^{tree}")
@@ -115,18 +123,24 @@ def harness(tmp_path):
     text = INSTALL.read_text()
     helper = text.split("rename_codex_path_exclusive() {", 1)[1].split("publish_codex_path_exclusive() {", 1)[0]
     helper = "rename_codex_path_exclusive() {" + helper
-    block = text.split('if [ ! -d "$RELEASE_ROOT" ]; then', 1)[1].split('[ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ]', 1)[0]
-    block = 'if [ ! -d "$RELEASE_ROOT" ]; then' + block
+    block = text.split("# --- BEGIN shared sealed release staging ---", 1)[1].split(
+        "# --- END shared sealed release staging ---", 1
+    )[0]
     fake = shlex.quote(sys.executable) + " " + shlex.quote(str(wrapper))
     block = block.replace("/usr/sbin/chown", fake + " chown").replace("/bin/mv", fake + " mv")
     block = block.replace("/usr/bin/git", fake + " git")
     env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1", "PYTHON_BINARY": str(python_wrapper),
            "REPO_ROOT": str(ROOT), "SYSTEM_ROOT": str(system), "SOURCE_REPO": str(source),
            "EXPECTED_SHA": sha, "TREE_SHA": tree, "RELEASE_ROOT": str(canonical),
+           "SCRIPT_DIR": str(ROOT / "ops/executive_os"), "STAGE_RELEASE_ONLY": "0",
            "OS_WEB_ASSETS": ""}  # Backend-only installer default; optional path has its own harness.
     # The installer's cleanup only removes its still-owned staging pathname.
     cleanup = """trap 'if [ -n "$STAGING" ] && [ -d "$STAGING" ]; then /bin/rm -rf -- "$STAGING"; fi' EXIT\n"""
-    script = 'set -euo pipefail\nSTAGING=""\n' + helper + "\n" + cleanup + block
+    # Only root/native admission is substituted; archive, sealing, publication,
+    # existing-release verification and source post-image checks remain real.
+    admission = "\nverify_release_ancestry() { return 0; }\nrequire_native_no_acl() { return 0; }\n"
+    script = ('set -euo pipefail\nSTAGING=""\n' + helper + "\n" + cleanup + block
+              + admission + "stage_sealed_release\n")
     def run(fault=""):
         return subprocess.run(["/bin/bash", "-c", script], env={**env, "FAULT": fault},
                               capture_output=True, text=True)

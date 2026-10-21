@@ -209,16 +209,20 @@ def bounded_subprocess_runner(
     finally:
         if stdin_file is not None:
             stdin_file.close()
-    assert proc.stdout is not None and proc.stderr is not None
-    selector = selectors.DefaultSelector()
-    selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
-    selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+    # Every failure after Popen, including selector setup, read, and pipe
+    # teardown, must attempt the canonical exactly-owned process-group settlement.
+    # A returned timeout or output limit is not cleanup proof by itself.
+    selector = None
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
     total = 0
     timed_out = False
     limit_exceeded = False
-    deadline = time.monotonic() + max(0.0, float(timeout))
     try:
+        assert proc.stdout is not None and proc.stderr is not None
+        selector = selectors.DefaultSelector()
+        selector.register(proc.stdout, selectors.EVENT_READ, "stdout")
+        selector.register(proc.stderr, selectors.EVENT_READ, "stderr")
+        deadline = time.monotonic() + max(0.0, float(timeout))
         while selector.get_map():
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -244,14 +248,18 @@ def bounded_subprocess_runner(
             except subprocess.TimeoutExpired:
                 timed_out = True
     finally:
-        selector.close()
-        for pipe in (proc.stdout, proc.stderr):
-            if pipe is not None and not pipe.closed:
-                pipe.close()
-
-    # Always settle the owned process group.  This handles both timeout/overflow
-    # and a clean leader that forked a quiet descendant before exiting.
-    _terminate_owned_process_group(proc)
+        try:
+            if selector is not None:
+                selector.close()
+        finally:
+            try:
+                for pipe in (proc.stdout, proc.stderr):
+                    if pipe is not None and not pipe.closed:
+                        pipe.close()
+            finally:
+                # Cleanup belongs to this canonical runner even when a prior
+                # read/selector/close operation raised. No blind retry/fallback.
+                _terminate_owned_process_group(proc)
 
     invalid_utf8 = False
     decoded: dict[str, str] = {}

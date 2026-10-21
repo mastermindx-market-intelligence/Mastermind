@@ -1272,8 +1272,40 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
 
 
 @router.get("/api/portfolio")
-def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
+    if view == "decision_availability":
+        from app.decision_availability import read_decision_availability
+        from app.settlement_price_read import read_settlement_price_evidence
+        from app.provider_diagnostic_read import read_provider_diagnostic_evidence
+        from brain import runlog
+        from bot import decision_rows
+        from portfolio import paper_account
+
+        # Resolve strictly through the registry: _portfolio_dir has a legacy fallback to Flagship.
+        # This branch must precede every quote, fresh-account fallback, and recovery-capable read.
+        observed_at = datetime.now(timezone.utc).isoformat()
+        payload = read_decision_availability(
+            portfolio, base_dir=_portfolio_registry.data_dir(portfolio),
+            observed_at=observed_at,
+            verify_receipt=_decision_execution_receipt_verified,
+            validate_pending=paper_account.pending_target_contract_error,
+            inspect_settlement_prices=lambda row: read_settlement_price_evidence(
+                portfolio, row, base_dir=_portfolio_registry.data_dir(portfolio),
+                currency=_portfolio_registry.currency(portfolio),
+                validate_receipt=paper_account.validated_settlement_receipt_prices,
+                # Decision receipt references and transaction IDs have distinct,
+                # established Unicode serialization rules. Reuse the decision owner.
+                fingerprint_receipt=decision_rows._canonical_sha256,
+            ),
+            inspect_provider_diagnostics=lambda attempt: read_provider_diagnostic_evidence(
+                portfolio, attempt, runs_dir=runlog._RUNS_DIR, observed_at=observed_at,
+            ),
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    if view is not None:
+        return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
+                            status_code=400, headers={"Cache-Control": "no-store"})
     path = _portfolio_dir(portfolio) / "latest.json"
     if not path.exists():
         return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
@@ -1744,43 +1776,19 @@ def api_posture(book: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                              "cash_pct": None, "invested_pct": None, "error": str(exc)})
 
 
-def _enrich_rotation_pairs(view: dict) -> None:
-    """Read-only display enrichment: attach the rotation_tensor's ``top_pairs`` extract to the
-    served view so the E1.2 mirror can render the top rotation pairs. The market_view artifact's
-    rotation_tensor plane carries only ``headline_episode`` in its ``raw``; the pairs live at
-    ``rs_velocity.top_pairs`` of the tensor artifact. This mutates only the SERVED copy (never the
-    on-disk artifact, never any sizing path) and no-ops silently when the organ is absent."""
-    try:
-        planes = view.get("planes")
-        rt = planes.get("rotation_tensor") if isinstance(planes, dict) else None
-        if not isinstance(rt, dict):
-            return
-        raw = rt.get("raw")
-        if not isinstance(raw, dict) or raw.get("present") is False:
-            return
-        tpath = _data() / "market_view" / "rotation_tensor.json"
-        if not tpath.exists():
-            return
-        tensor = json.loads(tpath.read_text())
-        pairs = ((tensor.get("rs_velocity") or {}).get("top_pairs")
-                 if isinstance(tensor, dict) else None)
-        if isinstance(pairs, list):
-            raw["top_pairs"] = pairs
-    except Exception:  # noqa: BLE001 — enrichment is best-effort; never break the response
-        pass
-
-
 @router.get("/api/market_view")
 def api_market_view() -> JSONResponse:
     """The perception artifact (W-E.1 task E1.2) — the one deterministic, freshness+confidence
     stamped market view (schema market_view.v1): planes{}, net_posture_tilt, label_vs_planes,
     disagreements[], coherence, brief, budget_ref, and the rotation_tensor plane's top_pairs.
 
-    Read-only: serves data/market_view/latest.json verbatim. No behavior change — this is the
-    E1.2 HTML mirror's data source, not a sizing path. Degrades to an honest ``available:false``
+    Read-only: reassesses freshness on a copy of data/market_view/latest.json. Publication
+    clocks and historical evidence stay unchanged; expired inferences become unavailable.
+    This is a display consumer, not a producer or sizing path. Degrades to ``available:false``
     stub when the artifact is absent/unreadable (the organ built-but-not-running protects nothing
     but breaks nothing) rather than raising."""
     path = _data() / "market_view" / "latest.json"
+    freshness_headers = {"Cache-Control": "no-store"}
     try:
         if not path.exists():
             return JSONResponse(
@@ -1790,8 +1798,9 @@ def api_market_view() -> JSONResponse:
         view = json.loads(path.read_text())
         if not isinstance(view, dict):
             raise ValueError("artifact is not a JSON object")
-        _enrich_rotation_pairs(view)
-        return JSONResponse(view, headers=_NOCACHE)
+        from brain import market_view
+        view = market_view.serving_view(view)
+        return JSONResponse(view, headers=freshness_headers)
     except Exception as exc:  # noqa: BLE001 — never raise; degrade to an honest stub
         return JSONResponse(
             {"available": False, "error": str(exc)}, status_code=500, headers=_NOCACHE)

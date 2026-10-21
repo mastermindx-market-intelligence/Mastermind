@@ -511,18 +511,21 @@ def create_authenticated_research_server(
             structuredContent=data,
             isError=False,
         )
-        # The bounded final source check may have waited for a producer slot.
-        # Do not deliver a token or grant that expired during that await.
+        # Final grant I/O may cross a token or grant deadline. Decide only after
+        # that synchronous owner read and serialization; no await follows.
         try:
-            decision_time = _clock()
-            if refreshed.expires_at <= decision_time:
-                return ("AUTHENTICATION_REQUIRED", subject, report_ids,
-                        _auth_tool_error(selected, AuthError(AuthErrorCode.TOKEN_EXPIRED)))
             final_entitlement = entitlement_resolver(refreshed_projection)
             if inspect.isawaitable(final_entitlement):
                 _close_awaitable(final_entitlement)
                 final_entitlement = None
             if final_entitlement != refreshed_entitlement:
+                return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
+            decision_time = _clock()
+            if refreshed.expires_at <= decision_time:
+                return ("AUTHENTICATION_REQUIRED", subject, report_ids,
+                        _auth_tool_error(selected, AuthError(AuthErrorCode.TOKEN_EXPIRED)))
+            expires_at = getattr(final_entitlement, "expires_at", None)
+            if type(expires_at) is not int or expires_at <= decision_time:
                 return "NOT_ENTITLED", subject, report_ids, _tool_error("NOT_ENTITLED")
         except Exception:
             return "INTERNAL_ERROR", subject, report_ids, _tool_error("INTERNAL_ERROR")

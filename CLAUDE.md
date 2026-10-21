@@ -60,6 +60,12 @@ CI blocks merge/release, not independent useful work. Repair in-scope failures a
 independent work while one existing observer handles the release wait. A missing optional watcher
 blocks unattended-continuation claims, not authorized foreground work. The active assigned session
 owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+A handoff that says "original writer/parent must act" is a custody clue, not a
+dead-chat dependency. Inspect the actual PR/workspace, lease and effects; the current
+receiver executes the next permitted recovery action, while STARTed sticky work stays
+on its original carrier until lawful reconciliation. Do not claim custody by inference.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
 Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
 runtime authority, required form, new watcher or extra human approval. Existing exact grants,
 source custody, effect reconciliation, review and release controls remain in force.
@@ -76,6 +82,20 @@ Acceptance follows the assigned effect. A source-only or instruction change does
 an unrelated application deployment. An instruction rollout needs installation and fresh-load
 proof; a product/runtime change retains its required real-path proof. After each verified phase,
 save the material delta and continue the next safe ready phase in the same healthy turn.
+
+An architectural owner is not a live session. Data OS names a contract boundary, not
+an AI approver. The current assigned session resolves authorized source-contract work
+using existing interfaces instead of waiting for an unaddressable owner. Missing rights,
+actual active writers, uncertain effects and required release approvals retain their
+specific gates; no invented ownership, duplicate registry or permission bypass.
+
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
 
 ### Reciprocal dialogue and watcher invariant
 

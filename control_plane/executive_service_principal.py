@@ -861,7 +861,7 @@ def admission_status() -> dict[str, Any]:
         "predicates": (
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L755",
+                "line": "L762",
                 "what": (
                     "validate_intent admits the third, strict service schema through "
                     "the same exact-key-set fence: _SERVICE_REQUIRED_KEYS = the v1 keys "
@@ -880,7 +880,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1043",
+                "line": "L1050",
                 "what": (
                     "_provenance() stamps the typed service evidence (principal_id, "
                     "task_kind, requested_authorities, effective_authorities, "
@@ -890,7 +890,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1454",
+                "line": "L1465",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
@@ -908,7 +908,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1362",
+                    "line": "L1369",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -917,7 +917,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1100",
+                    "line": "L1107",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "
@@ -927,7 +927,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L930",
+                    "line": "L937",
                     "what": "command_id_for() derives the durable command id from the intent id",
                 },
             ),

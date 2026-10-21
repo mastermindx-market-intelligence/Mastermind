@@ -45,6 +45,16 @@ RECONCILE_REQUEST_SCHEMA = (
     "mastermind.executive_privileged_action_reconcile_not_applied_request.v1"
 )
 RECONCILIATION_SCHEMA = "mastermind.executive_privileged_action_reconciliation.v1"
+# Closed dispatch literals for the dormant forward protocol.  They mirror the
+# forward module's wire schema constants so every ordinary v1 route (action
+# dispatch, refusal path, v1 commitment reading) never imports the optional
+# forward module; that module remains the only law for its own frames.
+FORWARD_STATUS_REQUEST_SCHEMA = (
+    "mastermind.executive_incident_forward_recovery_status_request.v1"
+)
+FORWARD_ACTION_REQUEST_SCHEMA = (
+    "mastermind.executive_incident_forward_recovery_request.v1"
+)
 STATUS_TERMINAL = "TERMINAL"
 STATUS_EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
 STATUS_RECONCILED_NOT_APPLIED = "RECONCILED_NOT_APPLIED"
@@ -175,6 +185,16 @@ class ChildStartError(PrivilegedBrokerError):
 
 class ReconciledNotAppliedError(PrivilegedBrokerError):
     """The original request is durably reconciled as not applied and must not replay."""
+
+
+class ForwardHostGuardUnavailableError(PrivilegedBrokerError):
+    """The forward host-guard producer is absent or failed before reservation.
+
+    Production deliberately never composes this producer: the dormant
+    forward transition categorically refuses with this typed result rather
+    than accepting JSON, CLI or environment booleans or a saved report as
+    qualified current host observations.
+    """
 
 
 @dataclasses.dataclass(frozen=True)
@@ -1019,6 +1039,7 @@ class PrivilegedActionBroker:
         trust_validator: Callable[[PrivilegedBrokerConfig], None] = verify_production_trust,
         reconciliation_observer: Callable[[], Mapping[str, Any]] = _default_reconciliation_observer,
         release_owner: Any | None = None,
+        forward_host_guard: Any | None = None,
     ) -> None:
         self.config = config
         self.receipt_root = Path(config.receipt_root)
@@ -1027,6 +1048,13 @@ class PrivilegedActionBroker:
         self._executor = executor
         self._require_root = require_root
         self._reconciliation_observer = reconciliation_observer
+        # Production remains uncomposed while its code-bound policy is None.
+        # run_broker can select only the fixed reviewed private producer after
+        # that policy is activated in source. Expected values or a saved report
+        # are not a held context; no production interface can select a fixture.
+        if forward_host_guard is not None and not callable(forward_host_guard):
+            raise TypeError("forward host guard producer must be callable")
+        self._forward_host_guard = forward_host_guard
         if release_owner is not None:
             from control_plane.executive_release_owner import ReleaseBrokerOwner
             if type(release_owner) is not ReleaseBrokerOwner:
@@ -1048,6 +1076,11 @@ class PrivilegedActionBroker:
                 if info.st_uid != 0 or info.st_gid != 0 or not stat.S_ISDIR(info.st_mode):
                     raise BrokerTrustError(f"{label} ownership drifted")
                 os.chmod(path, 0o700)
+
+    @property
+    def require_root(self) -> bool:
+        """Whether strict root custody metadata is enforced on evidence."""
+        return self._require_root
 
     def receipt_path(self, request_id: str) -> Path:
         return self.receipt_root / f"{request_id}.json"
@@ -1170,7 +1203,7 @@ class PrivilegedActionBroker:
         _fsync_directory(self.inflight_root)
 
     def _handle_outcome(
-        self, raw_request: Mapping[str, Any], *, peer_uid: int
+        self, raw_request: Mapping[str, Any], *, peer_uid: int,
     ) -> tuple[dict[str, Any], bool]:
         if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
@@ -1827,6 +1860,70 @@ class PrivilegedActionBroker:
             "installed_release_sha": installed_release_sha,
         }
 
+    # ------------------------------------------------------------------
+    # Dormant forward-recovery dispatch (closed v2 protocol, separate from
+    # the ordinary v1 action route, which always refuses this action).
+    # ------------------------------------------------------------------
+
+    def _forward_module(self):
+        from ops.executive_os import provider_incident_forward as forward
+
+        return forward
+
+    def _handle_forward_outcome(
+        self, raw_request: Mapping[str, Any], *, peer_uid: int,
+        connection: socket.socket | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        forward = self._forward_module()
+        return forward.handle_forward_recovery(
+            self, raw_request, peer_uid=peer_uid, connection=connection
+        )
+
+    def forward_status(
+        self, raw_request: Mapping[str, Any], *, peer_uid: int
+    ) -> dict[str, Any]:
+        """Read-only forward status: derives files, never repairs them."""
+        if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        forward = self._forward_module()
+        status_request = forward.validate_forward_status_request(raw_request)
+        request_id = status_request.request_id
+        installed_release_sha = self.config.release_root.name
+
+        # Original execution history stays UNKNOWN: derive it truthfully from
+        # the unchanged original files without ever reinterpreting it.
+        if self._read_terminal_for_status(request_id) is not None:
+            original_status = STATUS_TERMINAL
+        elif self._read_reconciliation_for_status(request_id) is not None:
+            original_status = STATUS_RECONCILED_NOT_APPLIED
+        elif self._read_inflight_for_status(request_id) is not None:
+            original_status = STATUS_EFFECT_UNKNOWN
+        else:
+            original_status = STATUS_NOT_FOUND
+
+        forward_state, join = forward.forward_state(self)
+        projection: dict[str, Any] = {
+            "status": original_status,
+            "request_id": request_id,
+            "installed_release_sha": installed_release_sha,
+            "forward_state": forward_state,
+        }
+        if forward_state == "SUCCEEDED":
+            projection["forward"] = join
+        return projection
+
+    def forward_recovered_result(self) -> dict[str, Any]:
+        """Read-only retrieval of the presently established forward result.
+
+        Allowed only after validating the ENTIRE closed join with the
+        forward-in-flight guard absent.  It never reruns any step, refreshes a
+        window, performs cleanup or retries.
+        """
+        forward = self._forward_module()
+        return forward.complete_join_from_custody(self)
+
 
 WIRE_RESPONSE_SCHEMA = "mastermind.executive_privileged_action_response.v1"
 _MAX_REQUEST_BYTES = 64 * 1024
@@ -1865,6 +1962,17 @@ def get_peer_uid(peer_socket: socket.socket) -> int:
     raise PeerAuthorizationError("Unix peer credentials are unavailable")
 
 
+def _validate_adopted_listener(listener: socket.socket) -> None:
+    """Validate this broker's own FD; not cross-process or origin proof."""
+    if (listener.family != socket.AF_UNIX
+            or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM
+            or listener.getsockname() not in (
+                "/var/run/mastermind-executive/privileged.sock",
+                "/private/var/run/mastermind-executive/privileged.sock",
+            )):
+        raise BrokerTrustError("privileged adopted listener does not match the fixed socket")
+
+
 def activate_launchd_socket(name: str = _LAUNCHD_SOCKET_NAME) -> socket.socket:
     """Claim exactly one launchd-activated listener by its fixed socket key."""
     if platform.system() != "Darwin":
@@ -1895,7 +2003,12 @@ def activate_launchd_socket(name: str = _LAUNCHD_SOCKET_NAME) -> socket.socket:
             os.close(descriptor)
         raise BrokerTrustError("privileged broker requires exactly one launchd socket")
     listener = socket.socket(fileno=values[0])
-    listener.setblocking(True)
+    try:
+        _validate_adopted_listener(listener)
+        listener.setblocking(True)
+    except BaseException:
+        listener.close()
+        raise
     return listener
 
 
@@ -1947,6 +2060,48 @@ def _wire_reconciliation(
     }
 
 
+def _forward_schemas() -> tuple[str, str]:
+    """Return the closed forward wire schema literals; no module import."""
+    return FORWARD_STATUS_REQUEST_SCHEMA, FORWARD_ACTION_REQUEST_SCHEMA
+
+
+_FORWARD_ERROR_TYPES: tuple[type, ...] | None = None
+
+
+def _forward_error() -> tuple[type, ...]:
+    """Resolve the forward refusal type once; never import it for v1 frames.
+
+    With the optional forward module unavailable this returns an empty tuple,
+    so the clause matches nothing and the forward-only branches answer their
+    own typed ImportError refusal instead.  It is evaluated only after every
+    ordinary refusal class has been excluded.
+    """
+    global _FORWARD_ERROR_TYPES
+    if _FORWARD_ERROR_TYPES is None:
+        try:
+            from ops.executive_os.provider_incident_forward import ForwardRecoveryError
+        except ImportError:
+            _FORWARD_ERROR_TYPES = ()
+        else:
+            _FORWARD_ERROR_TYPES = (ForwardRecoveryError,)
+    return _FORWARD_ERROR_TYPES
+
+
+def _wire_forward_status(projection: Mapping[str, Any]) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "query": True,
+        "original_status": projection["status"],
+        "request_id": projection["request_id"],
+        "installed_release_sha": projection["installed_release_sha"],
+        "forward_state": projection["forward_state"],
+    }
+    if "forward" in projection:
+        value["forward"] = dict(projection["forward"])
+    return value
+
+
 def _send_wire(connection: socket.socket, value: Mapping[str, Any]) -> None:
     payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     connection.sendall(payload)
@@ -1967,7 +2122,10 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
                 raise PrivilegedBrokerError("privileged protocol accepts exactly one JSON frame")
             break
     duplicates = []
+    root_pairs = ()
     def release_pairs(items):
+        nonlocal root_pairs
+        root_pairs = items
         result = {}
         for key, item in items:
             if key in result:
@@ -1983,6 +2141,11 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
         raise PrivilegedBrokerError("privileged request frame must contain a mapping")
     if duplicates and value.get("schema") == "mastermind.executive_release_broker/v1":
         raise PrivilegedBrokerError("release frame has duplicate fields")
+    if duplicates and any(
+        key == "schema" and item in (FORWARD_STATUS_REQUEST_SCHEMA, FORWARD_ACTION_REQUEST_SCHEMA)
+        for key, item in root_pairs
+    ):
+        raise PrivilegedBrokerError("forward frame has duplicate fields")
     return value
 
 
@@ -2025,12 +2188,42 @@ def serve_connection(
                 connection,
                 _wire_reconciliation(reconciliation, replayed=replayed),
             )
+        elif raw.get("schema") == _forward_schemas()[0]:
+            try:
+                projection = broker.forward_status(raw, peer_uid=peer_uid)
+            except ImportError:
+                # Forward-only frame with the optional module unavailable:
+                # typed refusal, no effect, no v1 path import.
+                _send_wire(connection, _wire_error(
+                    "FORWARD_REFUSED", "forward protocol module is unavailable"
+                ))
+                return
+            except _forward_error() as exc:
+                _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
+                return
+            _send_wire(connection, _wire_forward_status(projection))
+        elif raw.get("schema") == _forward_schemas()[1]:
+            try:
+                receipt, replayed = broker._handle_forward_outcome(
+                    raw, peer_uid=peer_uid, connection=connection
+                )
+            except ImportError:
+                _send_wire(connection, _wire_error(
+                    "FORWARD_REFUSED", "forward protocol module is unavailable"
+                ))
+                return
+            except _forward_error() as exc:
+                _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
+                return
+            _send_wire(connection, _wire_success(receipt, replayed=replayed))
         else:
             receipt, replayed = broker._handle_outcome(raw, peer_uid=peer_uid)
             _send_wire(connection, _wire_success(receipt, replayed=replayed))
     except PeerAuthorizationError:
         # Do not parse or reflect an unauthorized peer's body.
         _send_wire(connection, _wire_error("PEER_UNAUTHORIZED", "kernel peer uid is not authorized"))
+    except ForwardHostGuardUnavailableError as exc:
+        _send_wire(connection, _wire_error("FORWARD_HOST_GUARD_UNAVAILABLE", str(exc)))
     except EffectUnknownError as exc:
         _send_wire(connection, _wire_error("EFFECT_UNKNOWN", str(exc)))
     except ReconciledNotAppliedError as exc:
@@ -2047,8 +2240,14 @@ def run_broker(
     activated_socket: socket.socket | None = None,
     release_owner: Any | None = None,
 ) -> None:
-    broker = (PrivilegedActionBroker(config) if release_owner is None
-              else PrivilegedActionBroker(config, release_owner=release_owner))
+    from control_plane.executive_incident_composition import _resolve_production_forward_host_guard
+    guard = _resolve_production_forward_host_guard(config)
+    composition = {}
+    if release_owner is not None:
+        composition['release_owner'] = release_owner
+    if guard is not None:
+        composition['forward_host_guard'] = guard
+    broker = PrivilegedActionBroker(config, **composition)
     listener = activated_socket if activated_socket is not None else activate_launchd_socket()
     listener.settimeout(_BROKER_IDLE_TIMEOUT_SECONDS)
     while True:
@@ -2069,6 +2268,7 @@ __all__ = [
     "BROKER_CONFIG_SCHEMA",
     "BrokerTrustError",
     "EffectUnknownError",
+    "ForwardHostGuardUnavailableError",
     "PeerAuthorizationError",
     "PrivilegedActionBroker",
     "PrivilegedBrokerConfig",

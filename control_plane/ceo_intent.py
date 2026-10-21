@@ -701,12 +701,19 @@ def _require_principal_context(intent, context, request_ref, guard) -> None:
 
 
 def _run_principal_guard(intent, guard) -> None:
-    # The future App-only ingress must supply a canonical host recheck, not a
-    # model-authored Boolean. A callback alone is NOT OAuth/peer authentication.
-    # Replays resolve first. Guard failures or non-None results have no Job effect.
+    """Recheck trusted synchronous owner facts without exposing private errors."""
+    # A host callback is not OAuth/peer authentication or model-authored authority.
     try:
-        if guard(copy.deepcopy(intent)) is not None:
-            raise ValueError()
+        if (not callable(guard) or inspect.iscoroutinefunction(guard)
+                or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
+            raise ValueError
+        result = guard(copy.deepcopy(intent))
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise ValueError
+        if result is not None:
+            raise ValueError
     except Exception:
         raise CeoIntentError("trusted principal admission refused") from None
 
@@ -1422,7 +1429,9 @@ def submit_intent(
                             ) from exc
                 else:
                     _require_principal_contract(intent)
+                def principal_commit_fence():
                     _run_principal_guard(intent, principal_admission_guard)
+
                 job = runtime.jobs.create_job(
                     intent["objective"],
                     department=intent["department"],
@@ -1451,6 +1460,8 @@ def submit_intent(
                     validation_commands=contract.get("validation_commands"),
                     command_id=command_id,
                     provenance=_provenance(intent, fingerprint, principal_request_ref=principal_request_ref),
+                    **({"_principal_commit_guard": principal_commit_fence}
+                       if intent["schema"] == INTENT_SCHEMA_PRINCIPAL else {}),
                     owner_seat="coo",
                     escalation_target="coo",
                 )

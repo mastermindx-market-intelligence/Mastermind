@@ -16,7 +16,8 @@ ROOT='01a104e6-58f8-76d3-8d99-1302a1cca072'
 BASE=os.environ.get('OBSERVATION_BASELINE')=='1'
 def load(name):
     from importlib.machinery import SourceFileLoader
-    path=HERE/(name+('.py.base' if BASE else '.py'))
+    source=Path(os.environ.get('OBSERVATION_SOURCE_DIR', str(HERE)))
+    path=source/(name+('.py.base' if BASE else '.py'))
     spec=importlib.util.spec_from_loader('test_'+name,SourceFileLoader('test_'+name,str(path)))
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module);return module
 D=load('run_observation_delivery');R=load('run_observation')

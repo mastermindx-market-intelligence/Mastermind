@@ -52,6 +52,22 @@ Do not address a dependency to an archived chat or assume it will wake. A new se
 needs actual creation and current delivery/admission before it is a receiver. Recover
 its mission from the existing durable frontier, not an imagined persistent Web parent.
 A historical author, department or owner label is not evidence of an active writer.
+If a checkpoint says "only the original writer/parent must finish", treat that as
+a custody/lineage clue, not a command to return the work to an old conversation.
+The currently commissioned receiver owns recovery: inspect the original PR/workspace,
+live writer and effects through existing owners; consume the next permitted result or
+advance an independent in-scope step. A live STARTed exact-session operation remains
+bound to its admitted receiver until lawful reconciliation, never assumed transferred.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
+
+An architectural owner is not a live session. Data OS and other system names identify
+existing contracts and implementation boundaries, not an approver to find in another
+chat. The current assigned session performs authorized source-contract work itself:
+inspect the native producer, resolve the proposed binding, document actual clocks and
+provenance, and implement/test the existing interfaces. A null owner/adoption field is
+an unresolved contract, not a command to wait. Do not invent ownership, rights, clocks,
+or a parallel registry; hold only the specific effect needing ungranted authority.
 
 This does not transfer a live lease, bypass an exact-session protocol, or clear
 EFFECT_UNKNOWN. Reconcile real active writers and pending effects through their existing
@@ -75,6 +91,22 @@ relevant source, input, dependency or acceptance requirement changes. Run the af
 checks after a real repair, not the same suite repeatedly to appear busy. Two equivalent
 no-progress cycles require a changed diagnosis, tactic or independent lane.
 
+Before reporting a blocker, identify the exact blocked action, actual missing evidence
+or permission, and a reachable resolution. This is not a new approval form: use the
+existing frontier. A department name, absent optional registry, old reviewer request,
+or unavailable worker backend is not sufficient. Technical pre-dispatch unavailability
+blocks that dispatch, not independent edits/tests. Preserve a real denial or uncertain
+effect; never use another route to evade it. Required independent review holds its
+release, not all preparation; self-review must never be relabeled independent.
+
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
+
 Pending CI blocks the gated release, not unrelated implementation or diagnosis. An
 observer request is not a running observer. Verify its successful launch and real return
 path before relying on it; never promise that a finished Web turn keeps working.
@@ -86,6 +118,33 @@ accounts, models or carriers to obtain the refused effect. Preserve human-only c
 authentication, budget, active writer, review and release protections. A permissive local
 setting is not proof that a real approval prompt can be bypassed. Diagnose ordinary
 technical failures lawfully; leave unresolved effects on their original carrier.
+
+### Establish the actual execution surface and refusal
+
+A local Codex or Claude session uses its currently permitted native shell and the
+credentials already provisioned for the assigned host. A Web connector, Studio Direct,
+Executive reader or historical department is not a prerequisite for that local path.
+Verify the intended target, credential reference and host key without exposing secrets.
+Existing credentials and Full Access settings prove neither production authorization
+nor successful authentication; the current assignment and actual controls still apply.
+
+Before declaring a platform block, identify the actual refusal evidence, originating
+surface/carrier, exact action/target, and whether dispatch occurred. Distinguish a tool
+or provider denial from a current system/developer policy restriction, a human
+instruction, model-written refusal, technical failure,
+and a handoff's report of an earlier event. Preserve a reported held effect while
+checking its evidence; do not replay it to test the report. Do not turn an unverified
+historical claim into a new platform-wide prohibition or invent a clearance receipt.
+Use non-effectful local inspection to establish the current capability and missing facts.
+
+A later direct user instruction in the current session's own instruction record may
+revise that user's earlier scope or operator assignment. A handoff's report of an
+earlier grant is a claim to verify, not a direct instruction. Such a revision cannot
+override system/developer policy, a real applicable tool/provider
+denial, human-only consent, a live writer, or EFFECT_UNKNOWN. Never switch tools,
+accounts or hosts to obtain a denied effect. When an applicable denial is established,
+name its exact supported resolution; when its applicability is unverified, say so rather
+than asserting that the current platform denied an action it never received.
 
 Acceptance follows the assigned effect: source-only work needs relevant source evidence;
 an instruction rollout needs installed-file and fresh-load evidence; a product/runtime

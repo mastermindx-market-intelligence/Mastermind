@@ -23,6 +23,9 @@ def enrolled(tmp_path, monkeypatch):
     home.mkdir(parents=True, mode=0o700)
     credential = home / realm.PROVIDER_CREDENTIAL_FILENAME
     credential.write_bytes(b"opaque-test-value")
+    # New files may inherit a temporary directory group on BSD/macOS.
+    # Keep the real metadata fixture aligned with its captured process group.
+    os.chown(credential, -1, gid)
     credential.chmod(0o600)
     binary, receipt = tmp_path / "codex", tmp_path / "receipt.json"
     binary.write_bytes(b"binary")

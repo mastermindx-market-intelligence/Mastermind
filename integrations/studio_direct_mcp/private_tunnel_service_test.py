@@ -260,6 +260,38 @@ class TestIdentity(unittest.TestCase):
 
 
 class TestStrictTunnelHealth(unittest.TestCase):
+    def test_successful_poll_timestamp_must_be_current(self):
+        now = 1_792_087_941
+        for value in (None, True, "1792087940", float("nan"), float("inf"),
+                      -float("inf"), 10**400, -(10**400), now + 1,
+                      now - 90.1, now - 91, 1_792_086_545):
+            with self.subTest(value=value):
+                poll = {"ok": True}
+                if value is not None:
+                    poll["value"] = value
+                payload = {"healthz": {"ok": True}, "readyz": {"ok": True},
+                           "control_plane_poll": poll, "result": "ok"}
+                with mock.patch.object(svc, "_run", return_value=FakeResult(
+                    0, json.dumps(payload), ""
+                )), mock.patch.object(svc.time, "time", return_value=now):
+                    self.assertEqual(svc._strict_tunnel_health(Path("/tc"), 45031),
+                                     (True, False, False))
+
+    def test_fresh_poll_age_boundary_and_local_readiness(self):
+        now = 1_792_087_941
+        for age in (0, 30, 30.5, 90):
+            for local_ready in (False, True):
+                with self.subTest(age=age, local_ready=local_ready):
+                    payload = {"healthz": {"ok": True},
+                               "readyz": {"ok": local_ready},
+                               "control_plane_poll": {"ok": True, "value": now-age},
+                               "result": "ok"}
+                    with mock.patch.object(svc, "_run", return_value=FakeResult(
+                        0, json.dumps(payload), ""
+                    )), mock.patch.object(svc.time, "time", return_value=now):
+                        self.assertEqual(svc._strict_tunnel_health(Path("/tc"), 45031),
+                                         (True, local_ready, True))
+
     def test_requires_successful_control_plane_poll(self):
         payload = {
             "healthz": {"ok": True},
@@ -294,12 +326,12 @@ class TestStrictTunnelHealth(unittest.TestCase):
         payload = {
             "healthz": {"ok": True},
             "readyz": {"ok": True},
-            "control_plane_poll": {"ok": True},
+            "control_plane_poll": {"ok": True, "value": 1_792_087_940},
             "result": "ok",
         }
         with mock.patch.object(
             svc, "_run", return_value=FakeResult(0, json.dumps(payload), "")
-        ):
+        ), mock.patch.object(svc.time, "time", return_value=1_792_087_941):
             self.assertEqual(
                 svc._strict_tunnel_health(Path("/tc"), 45031),
                 (True, True, True),

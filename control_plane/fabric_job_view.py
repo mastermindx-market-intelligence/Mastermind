@@ -2081,3 +2081,40 @@ def list_roots_v2_from_runtime(
         notes=notes,
         generation=generation,
     )
+
+
+def compose_fabric_view_v4(*, before, after, acceptance):
+    """Add an exact final receipt while preserving the entire v3 companion.
+
+    The two bounded root snapshots bracket the existing receipt reader. This
+    compares their materialized identities, not data_version numbers from two
+    different connections, and does not claim continuous write exclusion.
+    """
+    from common import product_acceptance_read_contract as contract
+    from control_plane.mission_workspace import (
+        _validate_fabric_v3_companion, _validate_result_reference_index,
+    )
+    old, new = _validate_fabric_v3_companion(before), _validate_fabric_v3_companion(after)
+    first = _validate_result_reference_index(old['result_refs'])
+    last = _validate_result_reference_index(new['result_refs'])
+    selected = contract.selection(acceptance['selection'])
+    view = contract.validate_view(acceptance, selected=selected)
+    if any(index['root_job_id'] != selected['root_job_id'] for index in (first, last)):
+        raise ValueError('selection_mismatch')
+    if view['state'] == 'ACCEPTED':
+        if (any(index['generation']['state'] != 'SAME' or index['availability'] != 'AVAILABLE'
+                or index['truncated'] for index in (first, last))
+                or not first['snapshot_digest']):
+            view = contract.unavailable(selected, 'SOURCE_UNAVAILABLE')
+        elif first['snapshot_digest'] != last['snapshot_digest']:
+            view = contract.unavailable(selected, 'RUNTIME_CHANGED')
+        else:
+            receipt = view['receipt']
+            parents = [row for row in last['refs'] if row['job_id'] == receipt['parent_job_id']]
+            subjects = [row for row in last['refs'] if row['job_id'] == receipt['subject_job_id']]
+            if (len(parents) != 1 or len(subjects) != 1
+                    or parents[0]['attempt_id'] != receipt['parent_attempt_id']
+                    or parents[0]['result_envelope_digest'] != receipt['parent_result_envelope_digest']
+                    or subjects[0]['result_envelope_digest'] != receipt['subject_result_envelope_digest']):
+                view = contract.unavailable(selected, 'RUNTIME_CHANGED')
+    return {'schema': contract.FABRIC_SCHEMA, 'fabric_view': dict(new), 'product_acceptance': view}

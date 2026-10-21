@@ -12,6 +12,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from control_plane.coo_principal_host import CooHostProvider
+from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
 from control_plane.executive_runtime import Runtime
 from control_plane.principal_dialogue_obligation import read_principal_dialogue_obligation
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
@@ -20,6 +21,7 @@ from integrations.mastermind_company_principal_host import (
 )
 from integrations.slack_agent_dialogue.company_dialogue_runtime_binding import CooPrincipalDialogueCaller
 from integrations.slack_agent_dialogue.executive_observation_client import ExecutiveDialogueObservationClient
+from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
 from integrations.slack_agent_dialogue.principal_current_reader import _wire
 from integrations.slack_agent_dialogue.principal_source_acquisition import acquire_principal_decision_source
 
@@ -33,15 +35,19 @@ def _detached(binding: DialogueBinding) -> DialogueBinding:
 @dataclass(frozen=True)
 class _AcquiredBinding:
     binding: DialogueBinding
+    guard: Callable[[], None]
 
     def resolve(self) -> DialogueBinding:
+        self.guard()
         return _detached(self.binding)
 
 
 async def build_acquired_principal_decision_host(
     *, runtime: Runtime, authority: CooHostProvider, caller: CooPrincipalDialogueCaller,
-    obligation_id: str, socket_path: Path, observation_client: ExecutiveDialogueObservationClient,
+    obligation_id: str, socket_path: Path,
+    observation_client: ExecutiveDialogueObservationClient | HostLocalDialogueObservationReader,
     receiving_request_guard: Callable[[], None],
+    product_acceptance_reader: AgentOsProductAcceptanceBasisReader | None = None,
 ) -> PrincipalCompanyDialogueHost:
     """Acquire once and select the existing fresh RULING effect composition.
 
@@ -69,6 +75,13 @@ async def build_acquired_principal_decision_host(
     )
     require_request()
 
+    def current_principal_guard():
+        require_request()
+        authority.guard_dialogue(context=caller.admission_context,
+            root_job_id=caller.root_job_id,
+            capability_profile_digest=caller.capability_profile_digest)
+        require_request()
+
     def current_source_guard(*, context, root_job_id, capability_profile_digest):
         # Runtime invokes this synchronously inside its sole COMMIT transaction.
         # ACK is only attention delivery; SOURCE_RESOLVED closes the source.
@@ -83,7 +96,9 @@ async def build_acquired_principal_decision_host(
         require_request()
 
     return build_principal_company_dialogue_host(
-        runtime=runtime, binding_resolver=_AcquiredBinding(_detached(acquired.current.binding)),
+        runtime=runtime, binding_resolver=_AcquiredBinding(
+            _detached(acquired.current.binding), current_principal_guard),
         socket_path=socket_path, principal_authority_guard=current_source_guard,
         principal_decision_source=acquired.decision_source,
+        product_acceptance_reader=product_acceptance_reader,
     )

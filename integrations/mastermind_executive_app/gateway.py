@@ -414,9 +414,9 @@ class CeoIngressClient:
         )
         if isinstance(frame, Mapping) and frame.get("schema") == APP_REQUEST_SCHEMA:
             from integrations.company_dialogue_principal_host_contract import encode_json_frame
-            from common.company_dialogue_principal_limits import (
+            from common.company_dialogue_principal_app_protocol import (
                 MAX_REQUEST_BYTES as principal_request_limit,
-                MAX_RESPONSE_BYTES as principal_response_limit,
+                MAX_APP_RESPONSE_BYTES as principal_response_limit,
             )
             try:
                 canonical_frame = encode_json_frame(dict(frame), limit=principal_request_limit)
@@ -3084,7 +3084,10 @@ class CeoIngressReadGateway:
         cls, upstream_code: str
     ) -> tuple[str, str]:
         code = "backend_unavailable"
-        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+        if upstream_code in {"output_too_large", "response_too_large"}:
+            code = "output_too_large"
+            message = "Executive reader response exceeds the installed byte limit."
+        elif upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
             message = "Executive reader is unavailable in the installed backend."
         else:
             code = "backend_refused"

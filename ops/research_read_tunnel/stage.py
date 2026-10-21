@@ -23,6 +23,7 @@ MAX_MEMBERS = 8192
 UNIT_PATH = "ops/research_read_tunnel/mastermind-research-read.service"
 LOCK_PATH = "requirements/research-read-linux-x86_64-py312.lock"
 SERVER_PATH = "scripts/mastermind_research_read_server.py"
+PRODUCER_PATH = "ops/research_producer/launch.py"
 MASTERMIND_ROOTS = ("common", "control_plane", "integrations", SERVER_PATH, LOCK_PATH)
 
 
@@ -238,9 +239,12 @@ def _citation_artifacts(source, commit, lock_sha256, parameters):
 
 def prepare_bundle(*, mastermind_source: Path, mastermind_commit: str, mastermind_tree: str,
                    macro_source: Path, macro_commit: str, macro_tree: str,
-                   macro_roots, output: Path, citation_parameters: CitationProposalParameters | None = None):
+                   macro_roots, output: Path, citation_parameters: CitationProposalParameters | None = None,
+                   include_producer: bool = False):
     """Write a NEW candidate directory; no overwrites or install effects."""
     try:
+        if type(include_producer) is not bool:
+            raise StageRefused("STAGE_PRODUCER_OPTION_REFUSED")
         qualify_source(mastermind_source, mastermind_commit, mastermind_tree)
         # The launcher must exist at the exact selected commit before staging.
         lock = _git(mastermind_source, "show", f"{mastermind_commit}:{LOCK_PATH}", binary=True)
@@ -250,7 +254,7 @@ def prepare_bundle(*, mastermind_source: Path, mastermind_commit: str, mastermin
         proposal_blobs, proposal_receipt = ({}, None) if citation_parameters is None else _citation_artifacts(
             mastermind_source, mastermind_commit, hashlib.sha256(lock).hexdigest(), citation_parameters)
         mm, mm_members = source_archive(mastermind_source, mastermind_commit,
-                                        mastermind_tree, MASTERMIND_ROOTS)
+                                        mastermind_tree, MASTERMIND_ROOTS + ((PRODUCER_PATH,) if include_producer else ()))
         macro, macro_members = source_archive(macro_source, macro_commit, macro_tree, macro_roots)
         blobs = {"mastermind-release.tar": mm, "macro-release.tar": macro,
                  "mastermind-research-read.service": unit}
@@ -298,6 +302,8 @@ def main(argv=None):
                  "macro-source", "macro-commit", "macro-tree", "output"):
         parser.add_argument("--" + name, required=True)
     parser.add_argument("--macro-root", action="append", required=True)
+    parser.add_argument("--include-producer", action="store_true",
+                        help="Include the separate producer operations launcher; no execution or admission")
     for name in ("caddy-uid", "caddy-gid", "os-relay-port"):
         parser.add_argument("--" + name, type=int)
     args = parser.parse_args(argv)
@@ -309,7 +315,8 @@ def main(argv=None):
         manifest = prepare_bundle(mastermind_source=Path(args.mastermind_source),
             mastermind_commit=args.mastermind_commit, mastermind_tree=args.mastermind_tree,
             macro_source=Path(args.macro_source), macro_commit=args.macro_commit, macro_tree=args.macro_tree,
-            macro_roots=args.macro_root, output=Path(args.output), citation_parameters=parameters)
+            macro_roots=args.macro_root, output=Path(args.output), citation_parameters=parameters,
+            include_producer=args.include_producer)
     except StageRefused as error:
         print(error.code, file=sys.stderr)
         return 2
