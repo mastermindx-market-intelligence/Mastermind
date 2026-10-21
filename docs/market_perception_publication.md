@@ -29,8 +29,8 @@ All adapters consume this captured object set at one assessment clock. Each plan
 retains its own source date. A regime date cannot refresh an old MTF observation.
 Radar, MTF and cycles must all remain eligible, present, directional and validated.
 The typed contract retains its context-market-date boundary. Its eligible voter
-set must exactly match its governor and the Market View contributors. A source
-that is fresh at capture but later than the regime date refuses publication;
+set must exactly match its governor and the Market View contributors. A required
+voting source that is fresh at capture but later than the regime date refuses publication;
 current readers also withdraw such an inconsistent legacy pair. Dates are never
 relabelled and no dissenting contributor is dropped to restore confirmation.
 An expired dissenting voter cannot disappear into a newly favorable consensus.
