@@ -297,3 +297,122 @@ def test_explicit_foreign_currency_is_not_labeled_as_native_book_performance(boo
     assert result["current_nav"] is None
     assert result["total_return_pct"] is None
     assert result["currency"] == "CNY"
+
+
+@pytest.fixture
+def engine_cache(tmp_path, monkeypatch):
+    """Use the actual pinned Macro loader, isolated to synthetic cache paths."""
+    from unittest.mock import Mock
+    from lib import config, store
+    from data_layer import yahoo_feed
+
+    root = tmp_path / "engine-cache"
+    monkeypatch.setattr(config, "data_dir", lambda: root)
+    # The control delegates to real Macro read, including _path's mkdir.
+    # Tracking calls also detects an attempted effect swallowed by fallbacks.
+    monkeypatch.setattr(store, "read", Mock(wraps=store.read))
+    monkeypatch.setattr(yahoo_feed, "_HISTORY_CACHE", {})
+    monkeypatch.setattr(yahoo_feed, "_HISTORY_TS", {})
+    denied = Mock(side_effect=forbidden)
+    for name in ("history_local", "warm", "_reset_if_stale"):
+        monkeypatch.setattr(yahoo_feed, name, denied)
+    yield root, store
+    denied.assert_not_called()
+
+
+def test_cold_benchmark_read_does_not_create_cache_directories(engine_cache, tmp_path):
+    from portfolio import paper_account
+    root, _store = engine_cache
+    before = {str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*")}
+    assert not root.exists()
+    assert paper_account._load_spy_history(504, "SPY") == []
+    assert not root.exists()
+    assert {str(path.relative_to(tmp_path)) for path in tmp_path.rglob("*")} == before
+
+
+@pytest.mark.parametrize("ticker,filename", [
+    ("SPY", "SPY.parquet"),
+    ("^HSI", "_HSI.parquet"),
+    ("GBP/USD=X", "GBP_USD_X.parquet"),
+    ("SPY A", "SPY_A.parquet"),
+])
+def test_cached_yahoo_series_matches_pinned_store(engine_cache, ticker, filename):
+    import pandas as pd
+    from portfolio import paper_account
+    root, store = engine_cache
+    path = root / "yahoo" / filename
+    path.parent.mkdir(parents=True)
+    # Unsorted string dates and a missing close exercise store sorting followed
+    # by the caller's float conversion/dropna and _load_spy_history's date/window.
+    frame = pd.DataFrame(
+        {"close": ["104", "100", None, "103"], "volume": [4, 1, 2, 3]},
+        index=pd.Index(["2026-10-09", "2026-10-01", "2026-10-07", "2026-10-08"], name="date"),
+    )
+    frame.to_parquet(path)
+    expected = store.read("yahoo", ticker)["close"].astype(float).dropna()
+    expected.index = pd.to_datetime(expected.index)
+    store.read.reset_mock()
+    before = fingerprint(root)
+    actual = paper_account._fetch_price_series(ticker, cache_only=True)
+    pd.testing.assert_series_equal(actual, expected)
+    assert paper_account._load_spy_history(2, ticker) == [
+        ("2026-10-08", 103.0), ("2026-10-09", 104.0),
+    ]
+    store.read.assert_not_called()
+    assert fingerprint(root) == before
+
+
+@pytest.mark.parametrize("yahoo_state", ["missing", "corrupt", "no_close", "empty"])
+def test_cache_only_preserves_breadth_fallback(engine_cache, yahoo_state):
+    import pandas as pd
+    from portfolio import paper_account
+    root, store = engine_cache
+    breadth_path = root / "breadth" / "_closes_cache.parquet"
+    breadth_path.parent.mkdir(parents=True)
+    expected = pd.Series([103.0, 100.0],
+                         index=pd.to_datetime(["2026-10-08", "2026-10-01"]), name="SPY")
+    expected.to_frame().to_parquet(breadth_path)
+    if yahoo_state != "missing":
+        yahoo_path = root / "yahoo" / "SPY.parquet"
+        yahoo_path.parent.mkdir()
+        if yahoo_state == "corrupt":
+            yahoo_path.write_bytes(b"not a parquet file")
+        elif yahoo_state == "no_close":
+            pd.DataFrame({"volume": [1]}, index=["2026-10-09"]).to_parquet(yahoo_path)
+        else:
+            pd.DataFrame({"close": pd.Series(dtype=float)}).to_parquet(yahoo_path)
+    before = fingerprint(root)
+    entries = {str(path.relative_to(root)) for path in root.rglob("*")}
+    actual = paper_account._fetch_price_series("SPY", cache_only=True)
+    # The existing breadth branch preserves its stored order; do not sort it
+    # as a side effect of fixing the separate Yahoo branch.
+    pd.testing.assert_series_equal(actual, expected)
+    store.read.assert_not_called()
+    assert fingerprint(root) == before
+    assert {str(path.relative_to(root)) for path in root.rglob("*")} == entries
+
+
+@pytest.mark.parametrize("ticker", ["000300.SS", "^HSI"])
+def test_cold_engine_cache_preserves_regional_memory_fallback(engine_cache, monkeypatch, ticker):
+    import pandas as pd
+    from portfolio import paper_account
+    from data_layer import yahoo_feed
+    root, store = engine_cache
+    series = pd.Series([4000.0, 4200.0], index=pd.to_datetime(["2026-10-01", "2026-10-09"]))
+    monkeypatch.setattr(yahoo_feed, "_HISTORY_CACHE", {(ticker, "2y"): series})
+    monkeypatch.setattr(yahoo_feed, "_HISTORY_TS", {(ticker, "2y"): 12.0})
+    assert paper_account._load_spy_history(504, ticker) == [
+        ("2026-10-01", 4000.0), ("2026-10-09", 4200.0),
+    ]
+    assert yahoo_feed._HISTORY_TS == {(ticker, "2y"): 12.0}
+    assert not root.exists()
+    store.read.assert_not_called()
+
+
+def test_non_cache_only_read_keeps_existing_store_delegate(engine_cache):
+    from portfolio import paper_account
+    root, store = engine_cache
+    assert paper_account._fetch_price_series("SPY") is None
+    store.read.assert_called_once_with("yahoo", "SPY")
+    # Directory creation is retained on the original, non-cache-only branch.
+    assert (root / "yahoo").is_dir()

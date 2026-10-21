@@ -1357,8 +1357,19 @@ def _fetch_price_series(ticker: str, *, cache_only: bool = False) -> "pd.Series 
     """
     try:
         import pandas as pd
-        from lib import store  # vendored macro lib
-        df = store.read("yahoo", ticker)
+        if cache_only:
+            from lib import config  # vendored macro lib
+            # Match Macro store.read's cache format without its mkdir in _path.
+            safe = ticker.replace("^", "_").replace("=", "_").replace("/", "_").replace(" ", "_")
+            cached_path = config.data_dir() / "yahoo" / f"{safe}.parquet"
+            df = None
+            if cached_path.exists():
+                df = pd.read_parquet(cached_path)
+                df.index = pd.to_datetime(df.index)
+                df = df.sort_index()
+        else:
+            from lib import store  # vendored macro lib
+            df = store.read("yahoo", ticker)
         if df is not None and "close" in df.columns and len(df) > 0:
             s = df["close"].astype(float).dropna()
             s.index = pd.to_datetime(s.index)
