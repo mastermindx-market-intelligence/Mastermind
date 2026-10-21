@@ -11,6 +11,7 @@ plane into a governor vote.
 from __future__ import annotations
 
 import calendar
+import copy
 import json
 import os
 from datetime import date, datetime, timezone
@@ -574,14 +575,135 @@ def latest() -> dict[str, Any]:
     return _read_json(_LATEST_PATH)
 
 
-def prompt_summary(ctx: dict[str, Any] | None = None) -> dict[str, Any]:
-    """Return the bounded, typed subset pushed into reasoning prompts."""
-    ctx = ctx if isinstance(ctx, dict) else latest()
+def _current_context(
+    *, now: datetime | None = None, expected_publication: dict[str, Any] | None = None
+) -> dict[str, Any]:
+    """Qualify one stored context/view pair for current reasoning, without writes.
+
+    A failed pair, expired contributor or expired included context withdraws the
+    complete typed summary. It never assembles a more favorable surviving subset.
+    Explicit historical formatting through prompt_summary(ctx) is unchanged.
+    """
+    from brain import market_view as _mv
+
+    checked_at = now if now is not None else datetime.now(tz=timezone.utc)
+    if checked_at.tzinfo is None:
+        raise ValueError("current context requires an aware clock")
+    checked_at = checked_at.astimezone(timezone.utc)
+    ctx = latest()
+    reasons: list[str] = []
+    try:
+        if ctx.get("schema_version") != _SCHEMA_VERSION:
+            reasons.append("decision_context_absent_or_invalid")
+        if _mv._freshness(ctx.get("market_asof"), now=checked_at)["stale"]:
+            reasons.append("decision_context_expired")
+        published = _read_json(_MARKET_VIEW_PATH)
+        if expected_publication is not None and any(
+            expected_publication.get(key) != published.get(key)
+            for key in ("asof", "built_at", "seq")
+        ):
+            reasons.append("consumer_publication_changed_during_read")
+        same_publication = (
+            type(ctx.get("seq")) is int and ctx["seq"] > 0
+            and type(published.get("seq")) is int and ctx["seq"] == published["seq"]
+            and ctx.get("market_asof") == published.get("asof")
+            and ctx.get("region") == published.get("region")
+        )
+        if not same_publication:
+            reasons.append("market_view_context_generation_mismatch")
+        else:
+            projected = _mv.serving_view(published, now=checked_at)
+            if not projected["serving_freshness"]["current_confirmation_available"]:
+                reasons.append("market_view_current_assessment_unavailable")
+            # Reproduce only the original pure projection to verify stored claims;
+            # never replace an inconsistent context with the reconstructed result.
+            expected = assemble({}, published, neural_web={}, seq=ctx["seq"])
+            for key in ("governor", "signals"):
+                if json.dumps(ctx.get(key), sort_keys=True, allow_nan=False) != json.dumps(
+                    expected[key], sort_keys=True, allow_nan=False
+                ):
+                    reasons.append("published_context_" + key + "_inconsistent")
+            regime = ctx.get("regime") or {}
+            hard = regime.get("hard_label") or {}
+            label = (published.get("label_vs_planes") or {}).get("label_direction")
+            if regime.get("market_asof") != ctx.get("market_asof") or hard.get("direction") != label:
+                reasons.append("published_context_regime_inconsistent")
+
+        for signal in ctx.get("signals") or []:
+            fresh = signal.get("freshness") or {}
+            if fresh.get("stale") is False and _mv._freshness(
+                fresh.get("market_asof"), now=checked_at
+            )["stale"]:
+                reasons.append("included_signal_expired")
+                break
+        neural = ctx.get("neural_web") or {}
+        if neural.get("contexts"):
+            from brain import neural_web_context as _nwc
+
+            health = neural.get("lobe_health")
+            if not isinstance(health, dict) or not health:
+                reasons.append("neural_context_freshness_unavailable")
+            else:
+                context_lobes = {
+                    "macro_weather": "macro_weather", "theme_rotation": "theme_rotation",
+                    "market_structure": "market_structure", "rates": "rates_command",
+                    "transmission": "transmission_chains", "contradictions": "contradictions",
+                }
+                for name in neural["contexts"]:
+                    row = health.get(context_lobes.get(name)) or {}
+                    if row.get("stale") is not False or row.get("future_dated"):
+                        reasons.append("neural_context_ineligible")
+                        break
+                    source_date = date.fromisoformat(str(row.get("asof") or "")[:10])
+                    age = (checked_at.date() - source_date).days
+                    if age < 0 or age > _nwc._STALE_DAYS:
+                        reasons.append("neural_context_expired")
+                        break
+    except (AttributeError, KeyError, TypeError, ValueError):
+        reasons.append("published_context_invalid")
+
+    out = copy.deepcopy(ctx)
+    out["serving_freshness"] = {
+        "checked_at": checked_at.isoformat(),
+        "current_assessment_available": not reasons,
+        "reasons": list(dict.fromkeys(reasons)),
+        "authority_note": (
+            "This is eligibility withdrawal for an existing publication. Expiry is not "
+            "recovery, a new market observation, or release of existing protection."
+        ),
+    }
+    if reasons:
+        out["regime"] = {}
+        out["neural_web"] = {}
+        out["governor"] = {
+            "relationship": "unavailable", "confirmed": False, "conflict": False,
+            "label_direction": None, "consensus_direction": None, "net_tilt": None,
+            "contributors": [], "validated_present": 0, "degraded": True,
+        }
+        out["data_quality"] = {
+            "degraded": True, "fresh": None,
+            "degrade_reasons": list(dict.fromkeys(reasons)),
+        }
+    return out
+
+
+def prompt_summary(
+    ctx: dict[str, Any] | None = None, *, now: datetime | None = None,
+    expected_publication: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Format an explicit historical context, or qualify the current stored pair.
+
+    Live readers call without ctx. Supplying ctx is a pure point-in-time formatter;
+    it does not certify that historical evidence remains current.
+    """
+    ctx = ctx if isinstance(ctx, dict) else _current_context(
+        now=now, expected_publication=expected_publication
+    )
     if not ctx:
         return {}
     regime = ctx.get("regime") or {}
     neural = ctx.get("neural_web") or {}
-    return {
+    out = {
         "schema_version": ctx.get("schema_version"),
         "market_asof": ctx.get("market_asof"),
         "hard_label": regime.get("hard_label"),
@@ -596,6 +718,10 @@ def prompt_summary(ctx: dict[str, Any] | None = None) -> dict[str, Any]:
         "neural_web_health": neural.get("health_summary"),
         "neural_web_contexts": neural.get("contexts"),
     }
+    if "serving_freshness" in ctx:
+        out["publication"] = {key: ctx.get(key) for key in ("market_asof", "built_at", "seq")}
+        out["serving_freshness"] = ctx["serving_freshness"]
+    return out
 
 
 def build(

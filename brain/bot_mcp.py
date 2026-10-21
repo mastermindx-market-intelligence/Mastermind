@@ -168,6 +168,7 @@ async def get_regime(args):
                     "name": row.get("name"),
                     "direction": row.get("direction"),
                     "status": row.get("status"),
+                    "asof": (row.get("freshness") or {}).get("asof"),
                     "stale": (row.get("freshness") or {}).get("stale"),
                     "age_sessions": (row.get("freshness") or {}).get("age_sessions"),
                 }
@@ -179,7 +180,9 @@ async def get_regime(args):
     try:
         from brain import decision_context as _dc
 
-        dc = _dc.prompt_summary()
+        dc = _dc.prompt_summary(
+            expected_publication=(out.get("market_view") or {}).get("publication")
+        )
         if dc:
             liquidity = dc.get("liquidity") or {}
             quality = liquidity.get("quality") or {}
@@ -210,6 +213,8 @@ async def get_regime(args):
                 "governor": dc.get("governor"),
                 "data_quality": dc.get("data_quality"),
                 "neural_web_health": dc.get("neural_web_health"),
+                "publication": dc.get("publication"),
+                "serving_freshness": dc.get("serving_freshness"),
             }
     except Exception:  # noqa: BLE001
         pass
