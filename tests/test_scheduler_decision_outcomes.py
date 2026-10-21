@@ -268,3 +268,122 @@ def test_first_run_ordinary_exception_does_not_replay(
     assert len(calls["evaluation"]) == (1 if failure_at == "post_mark" else 0)
     assert calls["retry"] == []
     assert result == {"target_status": "queued", "decision_effective": True}
+
+
+@pytest.mark.parametrize("book,wrapper,runner", INVOCATIONS)
+@pytest.mark.parametrize("target_status", ["queued", "executed"])
+def test_publication_write_failure_is_visible_without_rejecting_accepted_target(
+        book, wrapper, runner, target_status, isolated_scheduler, monkeypatch):
+    # All three actual runners report build_portfolio.write exceptions under
+    # write_error, after assigning the canonical target/decision status.
+    result = {"target_status": target_status, "decided": True,
+              "decision_effective": True,
+              "write_error": "fixture-only private diagnostic"}
+    before = copy.deepcopy(result)
+    finished, _events = _invoke(
+        book, wrapper, runner, result, isolated_scheduler, monkeypatch
+    )
+    assert finished["status"] == "error"
+    assert finished["severity"] == "FREEZE"
+    assert finished["extra"]["reason"] == "projection_failed"
+    assert finished["extra"]["target_status"] == target_status
+    assert "write_error" not in finished["extra"]
+    assert "error" not in finished["extra"]
+    assert result == before
+
+
+@pytest.mark.parametrize("book,wrapper,runner", INVOCATIONS)
+@pytest.mark.parametrize("finalization", [
+    {"ok": False, "skipped": "settlement_finalization_pending",
+     "receipt_retained": True,
+     "finalization_errors": ["republish:fixture-only private diagnostic"]},
+    {"ok": False, "skipped": "settlement_receipt_ack_pending",
+     "receipt_retained": True,
+     "finalization_errors": ["ack:fixture-only private diagnostic"]},
+    {"ok": False, "skipped": "settlement_finalization_pending",
+     "receipt_retained": True,
+     "finalization_errors": ["direct_settlement_receipt_identity_unavailable"]},
+], ids=["projection_failed", "ack_failed", "receipt_evidence_unavailable"])
+def test_direct_settlement_finalization_failure_reaches_scheduler_health(
+        book, wrapper, runner, finalization, isolated_scheduler, monkeypatch):
+    # These are the real producer's failure contracts. Ordinary mark/publication
+    # were deferred, so neither mark_error nor write_error covers this result.
+    result = {
+        "target_status": "executed", "decided": True, "decision_effective": True,
+        "executed": [],
+        "mark_deferred_to_settlement_receipt": True,
+        "publish_deferred_to_settlement_receipt": True,
+        "settlement_receipt_retained": True,
+        "settlement_receipt_finalization": copy.deepcopy(finalization),
+    }
+    before = copy.deepcopy(result)
+    finished, _events = _invoke(
+        book, wrapper, runner, result, isolated_scheduler, monkeypatch
+    )
+    assert finished["status"] == "error"
+    assert finished["severity"] == "FREEZE"
+    assert finished["extra"]["reason"] == "settlement_finalization_incomplete"
+    assert finished["extra"]["target_status"] == "executed"
+    assert "finalization_errors" not in finished["extra"]
+    assert "settlement_receipt_finalization" not in finished["extra"]
+    assert result == before
+
+
+@pytest.mark.parametrize("book,wrapper,runner", INVOCATIONS)
+def test_direct_settlement_acknowledged_zero_fill_remains_successful(
+        book, wrapper, runner, isolated_scheduler, monkeypatch):
+    result = {
+        "target_status": "executed", "decided": True, "decision_effective": True,
+        "executed": [],
+        "mark_deferred_to_settlement_receipt": True,
+        "publish_deferred_to_settlement_receipt": True,
+        "settlement_receipt_acknowledged": True,
+        "settlement_receipt_finalization": {
+            "ok": True, "receipt_acknowledged": True, "executed": [],
+        },
+    }
+    finished, _events = _invoke(
+        book, wrapper, runner, result, isolated_scheduler, monkeypatch
+    )
+    assert finished["status"] == "ok"
+    assert finished.get("severity") is None
+    assert finished["extra"].get("reason") is None
+    assert finished["extra"]["target_status"] == "executed"
+
+
+@pytest.mark.parametrize("finalization", [
+    {"ok": True}, {"ok": True, "receipt_acknowledged": False},
+])
+def test_direct_settlement_report_without_ack_is_incomplete(
+        finalization, isolated_scheduler):
+    scheduler, _ledger, _calls = isolated_scheduler
+    result = {"target_status": "executed", "decision_effective": True,
+              "settlement_receipt_finalization": finalization}
+    before = copy.deepcopy(result)
+    assert scheduler._brain_job_outcome(result) == (
+        "error", "FREEZE", {
+            "target_status": "executed", "reason": "settlement_finalization_incomplete",
+        },
+    )
+    assert result == before
+
+
+def test_direct_settlement_rejection_retains_existing_reason(isolated_scheduler):
+    scheduler, _ledger, _calls = isolated_scheduler
+    result = {
+        "target_status": "rejected_settlement_finalization_pending",
+        "decision_effective": False,
+        "settlement_receipt_retained": True,
+        "settlement_receipt_finalization": {
+            "ok": False, "receipt_retained": True,
+            "finalization_errors": ["fixture-only private diagnostic"],
+        },
+    }
+    before = copy.deepcopy(result)
+    assert scheduler._brain_job_outcome(result) == (
+        "warn", "FREEZE", {
+            "target_status": "rejected_settlement_finalization_pending",
+            "reason": "rejected_settlement_finalization_pending",
+        },
+    )
+    assert result == before

@@ -93,7 +93,9 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
 
     target = str(result.get("target_status") or "").strip().lower()
     extra = {"target_status": target or None}
-    if any(result.get(key) for key in ("publish_error", "decision_log_error", "mark_error")):
+    if any(result.get(key) for key in (
+        "publish_error", "write_error", "decision_log_error", "mark_error"
+    )):
         return "error", "FREEZE", {**extra, "reason": "projection_failed"}
     if result.get("cost_capped") is True:
         return "skip", "ADVISORY_ONLY", {**extra, "reason": "cost_capped"}
@@ -106,6 +108,22 @@ def _brain_job_outcome(result: object) -> tuple[str, str | None, dict]:
 
     if target in {"queued", "executed"}:
         if result.get("decision_effective") is True:
+            # Accepted execution and completed receipt projections are separate facts.
+            # No receipt is legitimate; a reported finalization must include its ACK.
+            finalization = result.get("settlement_receipt_finalization")
+            if result.get("settlement_receipt_retained") is True or (
+                "settlement_receipt_finalization" in result
+                and (
+                    not isinstance(finalization, dict)
+                    or finalization.get("ok") is not True
+                    or finalization.get("receipt_acknowledged") is not True
+                    or finalization.get("receipt_retained") is True
+                    or bool(finalization.get("finalization_errors"))
+                )
+            ):
+                return "error", "FREEZE", {
+                    **extra, "reason": "settlement_finalization_incomplete"
+                }
             return "ok", None, extra
         return "error", "FREEZE", {**extra, "reason": "inconsistent_result"}
     if target == "rejected_no_submission":
