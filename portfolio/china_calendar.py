@@ -140,6 +140,30 @@ _HKEX_HOLIDAYS: frozenset[date] = frozenset(
 )
 
 
+# HKEX CT/063/24, CT/075/25 and 2027 calendar; verified October 11, 2026.
+# One calendar authority serves both paper settlement and dashboard timing.
+_HK_EARLY_CLOSES: frozenset[date] = frozenset(
+    date.fromisoformat(value)
+    for value in (
+        "2025-01-28", "2025-12-24", "2025-12-31",
+        "2026-02-16", "2026-12-24", "2026-12-31",
+        "2027-02-05", "2027-12-24", "2027-12-31",
+    )
+)
+
+
+def is_early_close(d: date, venue: str = "CN") -> bool:
+    """Published HK half-day; mainland continuous-session behavior is unchanged."""
+    return venue == "HK" and d in _HK_EARLY_CLOSES
+
+
+def session_close_time(d: date, venue: str = "CN") -> time:
+    """Continuous-session close, excluding HK closing-auction participation."""
+    if venue == "HK":
+        return _HK_AM_CLOSE if is_early_close(d, venue) else _HK_PM_CLOSE
+    return _PM_CLOSE
+
+
 def is_holiday(d: date) -> bool:
     """True if `d` is a mainland A-share public holiday (does NOT cover weekends)."""
     return d in _HOLIDAYS
@@ -187,7 +211,8 @@ def is_open(now: datetime | None = None, venue: str = "CN") -> bool:
         return False
     t = cst.time()
     if venue == "HK":
-        return (_HK_AM_OPEN <= t < _HK_AM_CLOSE) or (_HK_PM_OPEN <= t < _HK_PM_CLOSE)
+        return (_HK_AM_OPEN <= t < _HK_AM_CLOSE) or (
+            not is_early_close(cst.date(), venue) and _HK_PM_OPEN <= t < _HK_PM_CLOSE)
     return (_AM_OPEN <= t < _AM_CLOSE) or (_PM_OPEN <= t < _PM_CLOSE)
 
 
@@ -219,7 +244,8 @@ def next_open(now: datetime | None = None, venue: str = "CN") -> datetime:
         t = cst.time()
         if t < am_open:
             return datetime.combine(today, am_open, tzinfo=CST)
-        if am_close <= t < pm_open:                   # lunch break — the next open is this afternoon
+        if am_close <= t < pm_open and not is_early_close(today, venue):
+            # A shortened HK session has no afternoon reopen.
             return datetime.combine(today, pm_open, tzinfo=CST)
     nxt = next_trading_day(today, venue=venue)
     return datetime.combine(nxt, am_open, tzinfo=CST)

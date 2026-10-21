@@ -1,0 +1,65 @@
+{
+  "operation": "bot-intelligence-renewal-20261011",
+  "base_head": "c0beed6a0c012f0a62cefbfbf1960bb8ffab6ac7",
+  "kind": "source-only research claim candidate projection and exact-retained-request reader",
+  "changed_source_files": {
+    "brain/decision_research_result.py": "43f95efd22d1308d36f2f93bd97b028e009f35dce8459c27396934567ad63552",
+    "tests/test_decision_research_result.py": "795a00c8ebdc0d4b9758f78c4d06a2536199955cf0c313f66b04184bd32c766f",
+    "tests/bot_research_claim_consumption_canary.py": "acef46adde572e5a49d570a760e4d9f99f46a0154cc5645bd2af7ec168acf0da"
+  },
+  "executed_suite": {
+    "passed": 97,
+    "failed": 1,
+    "errors": 0,
+    "skipped": 0,
+    "failed_test_identities": [
+      "tests.test_decision_research::test_zero_qualified_rows_do_not_request_a_model"
+    ],
+    "junit_sha256": "0f8eb613abb24bfcd250f048b5ba04c230e2691daa6bcab6be382e5e8c474519"
+  },
+  "composed_source_canary": {
+    "passed": 7,
+    "source_tree": "4de9a95f07633ff27bbd51f5d928acb1c3d60584",
+    "result_sha256": "cc82edf7b2c419e227e8b2d129d6b6dd7b21df3883ab02a886408a6e1e8af2da",
+    "scope": "Source-only synthetic claim consumption, not provider execution, installed auth, or Runtime direct completion"
+  },
+  "review_findings_addressed": [
+    "untrusted raw row source_id cannot choose its provenance",
+    "deterministic snapshot/domain/omission coverage retained independently of model text",
+    "giant numeric JSON is typed bounded refusal",
+    "freeze original context across await",
+    "preserve exact originally admitted request/output limit across read"
+  ],
+  "review_final_state": "NO_ACTIONABLE_DEFECT_WITHIN_FROZEN_SOURCE_AND_TRUST_BOUNDARY",
+  "production_changed": false,
+  "not_proven": [
+    "actual authenticated service installation",
+    "real provider completion",
+    "source capture",
+    "originating PM decision consumption",
+    "numeric trade authority"
+  ],
+  "reviews": {
+    "initial_review.md": {
+      "raw_source_sha256": "6eed8347111e048729c19be24019c057e4a85e26d78f8e1c3e3cfdeb5fda0ed0",
+      "published_sha256": "18d21f711eaaed1d9a69b4e2afc9d6d92712aaa397994852fbe9b0f2200a2aa8",
+      "format": "trailing markdown whitespace normalized"
+    },
+    "intermediate_review.md": {
+      "raw_source_sha256": "054f95566af0161b3592a7e650d2a068d24acdad44871d35d723f88f837afe63",
+      "published_sha256": "fd7198a947fcd7a47167bffab7a06b130270d110f8e26836bfb8f0e9bef156c5",
+      "format": "trailing markdown whitespace normalized"
+    },
+    "final_review.md": {
+      "raw_source_sha256": "6f4f9446bfa863e2ab2dc50b6fe200f626e5a41336671c6f3507cbba08c98c18",
+      "published_sha256": "43766fa151bf80e65e135ec8acd840b8fb7ffd22bbc97b0efac8c2c669856844",
+      "format": "trailing markdown whitespace normalized"
+    }
+  },
+  "reviewed_source_sha256": {
+    "brain/decision_research_result.py": "43f95efd22d1308d36f2f93bd97b028e009f35dce8459c27396934567ad63552",
+    "tests/test_decision_research_result.py": "795a00c8ebdc0d4b9758f78c4d06a2536199955cf0c313f66b04184bd32c766f",
+    "tests/bot_research_claim_consumption_canary.py": "acef46adde572e5a49d570a760e4d9f99f46a0154cc5645bd2af7ec168acf0da"
+  },
+  "review_limits": "read-only pure probes; synthetic client; not installed OAuth/worker/prod/runtime completion or billable model proof"
+}

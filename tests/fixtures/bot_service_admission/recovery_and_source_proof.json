@@ -1,0 +1,31 @@
+{
+  "operation": "bot-intelligence-renewal-20261011",
+  "source_recovery": {
+    "original_branch": "sol/vps-fabric-llm-convergence-20261001-sol-001",
+    "prior_head": "b832ee7d67f7a5060d7088dcb5a257328728f041",
+    "recovered_patch_sha256": "9ff757d2b9348f71926a6f3aacdfd49f790d70f40759f2118b388fb4fd1cead5",
+    "recovery_commit": "b1958754a0dc8b18361ddc2f9eed718d07a44482",
+    "composed_commit": "608ab814f6434317a25acf01586bb90d5c32f7f8",
+    "composed_protected_parent": "1f5befa44487ffb7ac2a0ca44ccd85c7c9da1355"
+  },
+  "tests": {
+    "original_source_passed": 136,
+    "original_source_failed": 1,
+    "composed_source_passed": 234,
+    "composed_source_failed": 1,
+    "known_failure": "test_direct_emitter_cannot_bypass_sink_guard",
+    "fixture_repair": "NOT_APPLIED"
+  },
+  "canary": {
+    "bot_head": "8c91ddb451325cde0dc647a8fa3e974bc4c95149",
+    "service_head": "608ab814f6434317a25acf01586bb90d5c32f7f8",
+    "integration_tree": "d4a4a38da6240c606d83deb944321523aa183a81",
+    "passed": 8,
+    "script_sha256": "ad5a1cd1a37647970ef401cb6c9c744471f3894be0d9dc44b7d3af1fa8fdc408",
+    "result_sha256": "c2c6eadea1978129a222d401ed3345bcf639da850a060420fde59e2e7d2bdc2f",
+    "scope": "Cross-PR source client-to-canonical-admission proof with real temporary SQLite; fixture transport and host grant; no installed auth, provider, worker or production proof"
+  },
+  "production_changed": false,
+  "provider_dispatch": false,
+  "task_aware_route_at_canary_source": "NOT_WIRED; explicitly observed routine host versus elevated application task"
+}

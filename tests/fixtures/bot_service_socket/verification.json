@@ -1,0 +1,33 @@
+{
+  "operation": "bot-intelligence-renewal-20261011",
+  "scope": "manual exact-source cross-PR canary; not standard CI, not installed OAuth or provider execution",
+  "service_original_branch_head": "da868d8aaa47ef81ec01653c82a71a4e3166e10d",
+  "bot_original_branch_head": "3328b1f7fc1ca5af7132ed9acb355de40b84c064",
+  "manual_test": "tests/integration_canary_bot_socket.py",
+  "manual_test_sha256": "d7b445b5896604e3e61a836484039971b06e13a1d92da3e2d2048dddc19c18a0",
+  "composition_source_manifest_sha256": "170378341f9bca26cc995e8876de6857ef2d387dcf3bb5f54c0692358f4cc8cc",
+  "source_file_count": 834,
+  "executed": {
+    "passed": 2,
+    "failed": 0,
+    "skipped": 0,
+    "junit_sha256": "206ce2a8a60d388e1780fda4f1cacf199572f5252265469a87a68b8a061af57a",
+    "cases": [
+      "test_original_bot_candidate_to_authenticated_socket_and_back[extract]",
+      "test_original_bot_candidate_to_authenticated_socket_and_back[compare]"
+    ]
+  },
+  "observed_behavior": [
+    "typed economical/elevated research reaches canonical Job constraints",
+    "QUEUED Job yields no research answer",
+    "synthetic terminal content-bound reference returns through actual authenticated fixture App and Unix socket",
+    "original Bot context and request are retained into cited candidate claims",
+    "candidate authority stays read-only and nonnumeric"
+  ],
+  "transport_proof": "real test-owned AF_UNIX with synthetic enrolled JWT and monkeypatched restricted peer UID",
+  "terminal_proof": "temporary fixture SQL rows; no Supervisor/worker/provider call",
+  "model_provider_execution": false,
+  "production_auth_installation": false,
+  "real_paper_trade": false,
+  "release": "HOLD"
+}

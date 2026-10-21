@@ -1,0 +1,16 @@
+{
+  "bot_head": "67d7c2a8799ddab24146ab610f22e40af8d1c355",
+  "service_head": "09719bb76d19cfd8bccb28a8759540acbafb0c81",
+  "integration_tree": "3540d69ab01a0a3bae3ffc19f10d7191c95581a9",
+  "script_path": "tests/bot_research_service_admission_canary.py",
+  "script_sha256": "911358f612f717086b52b980b9a8e5c25f538c9d5d9f3140dfa83a3a6a97db9d",
+  "result_sha256": "6b0e126e14117fd8ad1eee76e8d719f16e84495fd2e8142b5a50bee3dbfcf6e6",
+  "passed": 10,
+  "request_bytes": 26560,
+  "scope": "Cross-PR source client-to-canonical-admission proof with real temporary SQLite; fixture transport and host grant; no installed auth, provider, worker or production proof",
+  "model_routing": "v2 extraction routine and comparison elevated reach actual temporary Job constraints; existing ModelRouter reused",
+  "frontier_execution": "NOT_PROVEN; ordinary Job admission refuses frontier judgment",
+  "legacy_result_retained": "source_admission_v1.json",
+  "replayed_refused_unit_command": false,
+  "installed_or_production_changed": false
+}

@@ -1,0 +1,66 @@
+{
+  "scope": "Cross-PR source client-to-canonical-admission proof with real temporary SQLite; fixture transport and host grant; no installed auth, provider, worker or production proof",
+  "bot_head": "67d7c2a8799ddab24146ab610f22e40af8d1c355",
+  "service_head": "09719bb76d19cfd8bccb28a8759540acbafb0c81",
+  "integration_tree": "3540d69ab01a0a3bae3ffc19f10d7191c95581a9",
+  "passed": 10,
+  "cases": [
+    {
+      "case": "prepared_context_reaches_original_job_losslessly",
+      "passed": true,
+      "request_bytes": 26560,
+      "job_id": "JOB-001",
+      "snapshot_id": "sha256:e530b3928bcf7d799ca0ce50a9e48d2b29e70e5ccb1f6a27df573da8fe211dfb",
+      "context_id": "sha256:72d316c84c6be3522c0f087aad4859ac2df0b55e795edd477b64616609d3c155",
+      "dispatch": false
+    },
+    {
+      "case": "exact_duplicate_reconciles_while_disarmed_without_new_route",
+      "passed": true
+    },
+    {
+      "case": "changed_context_same_operation_cannot_overwrite_original",
+      "passed": true
+    },
+    {
+      "case": "restart_reads_original_receipt_and_refuses_unfinished_answer",
+      "passed": true
+    },
+    {
+      "case": "lost_reply_reconciles_same_durable_operation_without_resubmit",
+      "passed": true
+    },
+    {
+      "case": "provider_selector_refuses_before_transport",
+      "passed": true
+    },
+    {
+      "case": "tampered_reply_is_uncertain_and_exact_status_recovers_receipt",
+      "passed": true
+    },
+    {
+      "case": "comparison_task_survives_client_sink_and_canonical_job_route",
+      "passed": true,
+      "capability_state": "SOURCE_ADMISSION_PROVEN_NOT_PROVIDER_EXECUTED",
+      "application_risk": "elevated",
+      "service_host_risk": "elevated",
+      "qualified_tier": [
+        "standard.research"
+      ]
+    },
+    {
+      "case": "routine_task_retains_economical_first_lawful_tier",
+      "passed": true,
+      "qualified_tier": [
+        "fast.research",
+        "standard.research"
+      ],
+      "dispatch": false
+    },
+    {
+      "case": "frontier_judgment_does_not_downgrade_into_ordinary_job",
+      "passed": true,
+      "existing_governed_judgment_path": "REQUIRED_NOT_PROVEN"
+    }
+  ]
+}

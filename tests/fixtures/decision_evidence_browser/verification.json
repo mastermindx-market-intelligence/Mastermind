@@ -1,0 +1,59 @@
+{
+  "scope": "Application/API proof and separate intercepted-browser proof; no production or live-server/browser acceptance",
+  "python_result": "600 passed, 1 existing no-live-book-state skip",
+  "python_version": "3.12.13",
+  "playwright_version": "1.64.0",
+  "browser": "154.0.8037.98",
+  "browser_cases": 46,
+  "source_files": [
+    {
+      "path": "app/decision_snapshot.py",
+      "sha256": "8bab45896f914a89c8c5f0542ed237ac3e03459a69ffca1bde5046534359105a"
+    },
+    {
+      "path": "app/main.py",
+      "sha256": "0a7069b16c35aa7e4ceda2d260f81bcf00d4de7ffa4ba2adc3e06ac296a5f23b"
+    },
+    {
+      "path": "app/response_cache.py",
+      "sha256": "ec6d2b9e702e15487bcbd08ebe1f2b9ca649ebd692bf7ddfce8f68b9bae9488f"
+    },
+    {
+      "path": "app/static/decision-evidence.html",
+      "sha256": "a0a18ccd4b439520af2b9fdd5f60dad2d46f058ce76d421532fbb2d9489d8715"
+    },
+    {
+      "path": "app/static/decision-evidence.css",
+      "sha256": "638e8f58ea16286f706afa0f22903d85276dad95162643b190154629229ef65b"
+    },
+    {
+      "path": "app/static/decision-evidence.js",
+      "sha256": "91226879e8a36f8415755f937d97c16579146bd594892d763b003ce37918ca9d"
+    },
+    {
+      "path": "tests/test_decision_snapshot_api.py",
+      "sha256": "07c7cf97f564a8e141b3b0e7f11c069b6075726e0a9e6b79e020370787c0ab28"
+    },
+    {
+      "path": "tests/test_decision_snapshot_ui.py",
+      "sha256": "a2424c3594dbe70613c17c0f40ddd21be343846ef6e7727d4e886b003cbc5df0"
+    },
+    {
+      "path": "tests/decision_evidence_browser.cjs",
+      "sha256": "b1f52a780eb2c1cb59887f10f1f23e4aa74e6f9e13716d1d82078ff3b047bd5d"
+    }
+  ],
+  "screenshots": [
+    {
+      "path": "tests/fixtures/decision_evidence_browser/evidence-1440.png",
+      "sha256": "8beb67882965694a38fef21eeeeada23e80f67dd1f9a47665fca279d4aca2d05",
+      "data": "SYNTHETIC BROWSER FIXTURE"
+    },
+    {
+      "path": "tests/fixtures/decision_evidence_browser/evidence-390.png",
+      "sha256": "9bfd24e15f8e20ab611a336fdc6845036b8c875984718439b86505bc15d636b7",
+      "data": "SYNTHETIC BROWSER FIXTURE"
+    }
+  ],
+  "post_verification_change": "CSS EOF whitespace only; stripped content is byte-identical"
+}

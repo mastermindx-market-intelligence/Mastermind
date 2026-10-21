@@ -1,0 +1,176 @@
+"""Fixed-source capture safety: fixture data only, no production files or models."""
+from importlib import import_module, util
+from datetime import datetime, timezone
+from pathlib import Path
+import json
+import os
+import pytest
+
+
+def sources():
+    assert util.find_spec("portfolio.decision_snapshot_sources") is not None, "missing fixed source capture"
+    return import_module("portfolio.decision_snapshot_sources")
+
+
+def write_json(path, value, *, stamp="2026-09-15T19:59:00Z"):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(value))
+    epoch = datetime.fromisoformat(stamp.replace("Z", "+00:00")).timestamp()
+    os.utime(path, (epoch, epoch))
+
+
+@pytest.fixture
+def roots(tmp_path, monkeypatch):
+    s = sources(); repo = tmp_path / "repo"; macro = tmp_path / "macro"; repo.mkdir(); macro.mkdir()
+    monkeypatch.setattr(s, "_ROOT", repo); monkeypatch.setattr(s, "_V", macro)
+    paths = {
+        "portfolio-v3-risk-envelope-settled": "site/riskdata/risk_envelope.json",
+        "regime-latest": "data/regime/latest.json", "portfolio-v3-sector-central": "site/sectordata/sector_central.json",
+        "portfolio-v3-covariance-spine": "data/neuralweb/covariance_spine.json",
+        "portfolio-v3-factor-betas": "site/factor_betas.json", "portfolio-v3-prophet-index": "site/prophet/index.json",
+        "site-neural-web-mastermind-context": "site/neural_web_mastermind_context.json",
+        "portfolio-v3-portfolio-context": "site/portfolio_context.json",
+        "site-intelligence-by-ticker": "site/intelligence_by_ticker.json", "site-altdata-by-ticker": "site/altdata_by_ticker.json",
+        "site-news-by-ticker": "site/news_by_ticker.json",
+    }
+    monkeypatch.setattr(s.contracts, "contract", lambda key: {"path": paths[key], "owner": "macro_engine", "freshness_budget_sessions": 1, "allowed_effect": "context-only"} if key in paths else None)
+    return s, repo, macro
+
+
+def capture_all(s):
+    return s.capture_all("autonomous", decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z")
+
+
+def by_id(result):
+    return {r["source_id"]: r for r in result["sources"]}
+
+
+def test_capture_is_read_only_and_describes_all_domains(roots):
+    s, repo, macro = roots
+    write_json(repo / "data/portfolios/autonomous/account.json", {"cash": 800000, "positions": {"AAPL": {"shares": 100, "avg_cost": 180}}})
+    write_json(macro / "site/riskdata/risk_envelope.json", {"schema": "mastermind.risk_envelope/v1", "generated_at": "2026-09-15T19:55:00Z", "as_of": "2026-09-15", "data_state": "FRESH", "capital_policy": {"posture": "SELECTIVE"}})
+    before = {p: p.read_bytes() for p in repo.rglob("*") if p.is_file()}
+    result = capture_all(s); receipts = by_id(result)
+    assert receipts["book.account"]["status"] == "AVAILABLE"
+    assert receipts["macro.risk_envelope"]["known_at"] == "2026-09-15T19:55:00Z"
+    assert receipts["book.pending_target"]["status"] == "ABSENT_OPTIONAL"
+    assert len(result["sections"]) == 12
+    assert {p: p.read_bytes() for p in repo.rglob("*") if p.is_file()} == before
+    for receipt in result["sources"]: s.c.validate_source_receipt(receipt)
+    for section in result["sections"].values(): s.c.validate_section(section)
+
+
+def test_missing_required_account_is_blocked_not_empty_complete(roots):
+    s, repo, _ = roots; result = capture_all(s)
+    assert by_id(result)["book.account"]["status"] == "MISSING"
+    assert result["sections"]["book_truth"]["coverage_state"] == "BLOCKED"
+    assert list(repo.iterdir()) == []
+
+
+def test_external_mtime_never_becomes_known_at(roots):
+    s, _, macro = roots
+    write_json(macro / "site/riskdata/risk_envelope.json", {"data_state": "FRESH", "capital_policy": {"posture": "OFFENSE"}})
+    r = by_id(capture_all(s))["macro.risk_envelope"]
+    assert r["status"] == "UNQUALIFIED_CLOCK" and r["known_at"] is None
+    assert r["clock_basis"] == "UNQUALIFIED_EXTERNAL_CLOCK"
+
+
+@pytest.mark.parametrize("stamp", ["2026-09-15T20:00:01Z", "2026-09-15T20:00:00.900Z"])
+def test_future_external_data_never_enters_rows(roots, stamp):
+    s, _, macro = roots
+    write_json(macro / "site/riskdata/risk_envelope.json", {"generated_at": stamp, "data_state": "FRESH", "capital_policy": {"posture": "FORGED_FUTURE"}})
+    result = capture_all(s)
+    assert by_id(result)["macro.risk_envelope"]["status"] == "FUTURE_AT_CUTOFF"
+    assert "FORGED_FUTURE" not in json.dumps(result["sections"])
+
+
+def test_first_party_subsecond_mtime_is_compared_before_flooring(roots):
+    s, repo, _ = roots
+    write_json(repo / "data/portfolios/autonomous/account.json", {"cash": 999999, "positions": {}}, stamp="2026-09-15T20:00:00.900Z")
+    assert by_id(capture_all(s))["book.account"]["status"] == "FUTURE_AT_CUTOFF"
+
+
+def test_stale_source_cannot_claim_complete(roots):
+    s, _, macro = roots
+    write_json(macro / "site/riskdata/risk_envelope.json", {"generated_at": "2026-09-01T19:55:00Z", "as_of": "2026-09-01", "data_state": "FRESH"})
+    r = by_id(capture_all(s))["macro.risk_envelope"]
+    assert r["freshness_state"] == "STALE" and r["coverage_state"] != "COMPLETE"
+
+
+def test_missing_contract_is_invalid_without_guessing_a_path(roots, monkeypatch):
+    s, _, _ = roots; monkeypatch.setattr(s.contracts, "contract", lambda _: None)
+    result = s.capture_external_sources(held_tickers=[], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z")
+    assert all(r["status"] == "INVALID" for r in result["sources"])
+    assert all(r["error_code"] == "CONTRACT_NOT_REGISTERED" for r in result["sources"])
+
+
+def test_symlink_escape_is_invalid_and_never_parsed(roots, tmp_path):
+    s, _, macro = roots; secret = tmp_path / "outside.json"; secret.write_text('{"PRIVATE_MARKER":1}')
+    target = macro / "site/riskdata/risk_envelope.json"; target.parent.mkdir(parents=True); target.symlink_to(secret)
+    result = capture_all(s)
+    assert by_id(result)["macro.risk_envelope"]["status"] == "INVALID"
+    assert "PRIVATE_MARKER" not in json.dumps(result)
+
+
+def test_oversize_file_is_not_parsed(roots):
+    s, _, macro = roots; path = macro / "site/factor_betas.json"; path.parent.mkdir(parents=True)
+    with path.open("wb") as handle: handle.truncate(s.c.MAX_SOURCE_BYTES + 1)
+    assert by_id(capture_all(s))["macro.factor_betas"]["status"] == "OVERSIZE"
+
+
+def test_duplicate_json_keys_and_nan_are_malformed(roots):
+    s, repo, _ = roots; path = repo / "data/portfolios/autonomous/account.json"; path.parent.mkdir(parents=True)
+    for raw in ['{"cash":1,"cash":2,"positions":{}}', '{"cash":NaN,"positions":{}}']:
+        path.write_text(raw)
+        assert by_id(capture_all(s))["book.account"]["status"] == "MALFORMED"
+
+
+def test_rotation_remains_explicit_partial_dependency(roots):
+    s, _, macro = roots; write_json(macro / "site/sectordata/sector_central.json", {"generated_at": "2026-09-15T19:00:00Z", "sectors": [{"unsafe_lossy_copy": True}]})
+    result = capture_all(s)
+    assert by_id(result)["macro.sector_rotation"]["status"] == "DEPENDENCY_PARTIAL"
+    assert "unsafe_lossy_copy" not in json.dumps(result["sections"])
+
+
+def test_unknown_book_is_rejected_before_io(roots):
+    s, repo, _ = roots
+    with pytest.raises(ValueError): s.capture_all("../self_directed", decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z")
+    assert list(repo.iterdir()) == []
+
+
+def test_source_registry_uses_existing_contract_keys_not_urls():
+    s = sources()
+    assert len(s.EXTERNAL_SOURCE_SPECS) == 11
+    assert len({item.source_id for item in s.EXTERNAL_SOURCE_SPECS}) == 11
+    assert all('/' not in item.contract_key for item in s.EXTERNAL_SOURCE_SPECS)
+
+
+def test_registry_path_escape_is_invalid(roots, monkeypatch):
+    s, _, _ = roots
+    monkeypatch.setattr(s.contracts, "contract", lambda _: {"path": "../../private.json", "freshness_budget_sessions": 1})
+    assert all(r["status"] == "INVALID" for r in s.capture_external_sources(held_tickers=[], decision_cutoff="2026-09-15T20:00:00Z", recorded_at="2026-09-15T20:01:00Z")["sources"])
+
+
+def test_rights_blocked_input_never_enters_rows(roots):
+    s, _, macro = roots
+    write_json(macro / "site/riskdata/risk_envelope.json", {"generated_at": "2026-09-15T19:00:00Z", "rights_class": "BLOCKED", "capital_policy": {"posture": "DO_NOT_USE"}})
+    result = capture_all(s)
+    assert by_id(result)["macro.risk_envelope"]["status"] == "RIGHTS_BLOCKED"
+    assert "DO_NOT_USE" not in json.dumps(result["sections"])
+
+
+def test_jsonl_tail_is_bounded_and_omission_is_explicit(roots):
+    s, repo, _ = roots; path = repo / "data/portfolios/autonomous/decisions.jsonl"; path.parent.mkdir(parents=True)
+    path.write_text(''.join(json.dumps({"sequence": i}) + '\n' for i in range(105)))
+    epoch = datetime(2026, 9, 15, 19, 59, tzinfo=timezone.utc).timestamp(); os.utime(path, (epoch, epoch))
+    result = capture_all(s); r = by_id(result)["book.decisions"]
+    assert r["rows_total"] == 105 and r["rows_returned"] == 100 and r["omitted_rows"] == 5
+    assert r["coverage_state"] == "PARTIAL"
+
+
+def test_settlement_directory_is_metadata_only_not_settlement_validation(roots):
+    s, repo, _ = roots
+    write_json(repo / "data/portfolios/autonomous/settlement_receipts/one.json", {"private_fill_payload": "NOT_FOR_CONTEXT"})
+    result = capture_all(s); r = by_id(result)["book.settlement_receipts"]
+    assert r["status"] == "DEPENDENCY_PARTIAL" and r["error_code"] == "METADATA_ONLY"
+    assert "NOT_FOR_CONTEXT" not in json.dumps(result)

@@ -1,0 +1,260 @@
+{
+  "operation": "bot-intelligence-renewal-20261011",
+  "source_basis": "cbc7503536b6853ec7c35c2192abdfaccb87b561",
+  "macro_ci_source": "256c757b3c4f0ec759571c29a30a71387d0a18f8",
+  "test_scope": "DRAFT/HOLD: new manual 2-case exact-source authenticated synthetic App/Unix Job/claim canary passes; existing Bot snapshot 11 known failed and zero-evidence 1 failed remain; service 145 focused pass and broader 599 pass/1 held fixture; no provider/production execution",
+  "manifest_self_excluded": true,
+  "files": [
+    {
+      "path": "app/decision_snapshot.py",
+      "bytes": 4671,
+      "sha256": "8bab45896f914a89c8c5f0542ed237ac3e03459a69ffca1bde5046534359105a"
+    },
+    {
+      "path": "app/main.py",
+      "bytes": 34120,
+      "sha256": "0a7069b16c35aa7e4ceda2d260f81bcf00d4de7ffa4ba2adc3e06ac296a5f23b"
+    },
+    {
+      "path": "app/response_cache.py",
+      "bytes": 7405,
+      "sha256": "ec6d2b9e702e15487bcbd08ebe1f2b9ca649ebd692bf7ddfce8f68b9bae9488f"
+    },
+    {
+      "path": "app/static/decision-evidence.css",
+      "bytes": 7634,
+      "sha256": "638e8f58ea16286f706afa0f22903d85276dad95162643b190154629229ef65b"
+    },
+    {
+      "path": "app/static/decision-evidence.html",
+      "bytes": 3557,
+      "sha256": "a0a18ccd4b439520af2b9fdd5f60dad2d46f058ce76d421532fbb2d9489d8715"
+    },
+    {
+      "path": "app/static/decision-evidence.js",
+      "bytes": 10699,
+      "sha256": "91226879e8a36f8415755f937d97c16579146bd594892d763b003ce37918ca9d"
+    },
+    {
+      "path": "brain/decision_research.py",
+      "bytes": 12161,
+      "sha256": "6d63ef4c3b422c0821649916b723ae53241ef0978f1fb93966f63fab46b7e6e9"
+    },
+    {
+      "path": "brain/decision_research_result.py",
+      "bytes": 17862,
+      "sha256": "43f95efd22d1308d36f2f93bd97b028e009f35dce8459c27396934567ad63552"
+    },
+    {
+      "path": "docs/runbooks/portfolio-v3-decision-snapshot.md",
+      "bytes": 9010,
+      "sha256": "515fa21cb138319ca903a33a66425f0336f0c87c00a7dacc3c4f99cac30b88bc"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-execution.md",
+      "bytes": 17590,
+      "sha256": "a312a19246a4cd23d56728989dff1f56d3fd4a78de7433be96df5fa0598395e1"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-renewal-validation.md",
+      "bytes": 51823,
+      "sha256": "ae571e8010ce47e24e871020d67fb943ee005af3a6b83dc098ad22cdbd857087"
+    },
+    {
+      "path": "docs/superpowers/plans/2026-10-11-bot-autonomy-source-capture.acceptance.py.txt",
+      "bytes": 9450,
+      "sha256": "3993af80ecd1c78e8936bd783ce686ac91ce6ede544284b8742f69aa3238c3d7"
+    },
+    {
+      "path": "docs/superpowers/specs/2026-10-11-bot-autonomy-fabric-renewal.md",
+      "bytes": 46373,
+      "sha256": "efa98a714148edf716d033a1c0bbed9fa6a195cfae7da5395d745a71d6993d30"
+    },
+    {
+      "path": "portfolio/china_calendar.py",
+      "bytes": 14563,
+      "sha256": "e041a3441a0d32b8448ee6e2dd020a56e5f1fe0dbf04d09628f0b880b5e0e59c"
+    },
+    {
+      "path": "portfolio/decision_snapshot.py",
+      "bytes": 16635,
+      "sha256": "ccc70b3d7830e080c32f6c5e5c7fd728caa00650e1d3d55ca3ae023b7b9ebc36"
+    },
+    {
+      "path": "portfolio/decision_snapshot_contracts.py",
+      "bytes": 16698,
+      "sha256": "26253130461dd56b65bf188e9fbb820b0ac678264497c437184ab815567d8f7f"
+    },
+    {
+      "path": "portfolio/market_calendar.py",
+      "bytes": 5047,
+      "sha256": "dc67b89e6e19bc2281ed2c06e37ef0b30afbefd0d2de0a89901c4fc52bf1b055"
+    },
+    {
+      "path": "portfolio/market_sessions.py",
+      "bytes": 4644,
+      "sha256": "230266ea45adcb96938c1e0e4d7fe9af567ff7f5d364b16acf7f18ff4f95c3a9"
+    },
+    {
+      "path": "scripts/portfolio_decision_snapshot.py",
+      "bytes": 2531,
+      "sha256": "27b3f487d7cfd10adc0412ed7e910db21f386a2fa650a997afe69477a52c70ee"
+    },
+    {
+      "path": "tests/bot_research_claim_consumption_canary.py",
+      "bytes": 11483,
+      "sha256": "acef46adde572e5a49d570a760e4d9f99f46a0154cc5645bd2af7ec168acf0da"
+    },
+    {
+      "path": "tests/bot_research_service_admission_canary.py",
+      "bytes": 13738,
+      "sha256": "911358f612f717086b52b980b9a8e5c25f538c9d5d9f3140dfa83a3a6a97db9d"
+    },
+    {
+      "path": "tests/decision_evidence_browser.cjs",
+      "bytes": 9124,
+      "sha256": "b1f52a780eb2c1cb59887f10f1f23e4aa74e6f9e13716d1d82078ff3b047bd5d"
+    },
+    {
+      "path": "tests/decision_research_service_contract.py",
+      "bytes": 3255,
+      "sha256": "6cc88a5fe7c049b7617195903325a4ebe188bc684d6863b1b2bfca1651baaf24"
+    },
+    {
+      "path": "tests/fixtures/bot_renewal_adversarial_review/review.md",
+      "bytes": 6565,
+      "sha256": "ee1ad2cc1a245fd540b6b543dd13138a3196831927a7b21a71153cc51dfe2dd2"
+    },
+    {
+      "path": "tests/fixtures/bot_renewal_adversarial_review/verification.json",
+      "bytes": 1743,
+      "sha256": "efb63a707e0dba519826c8790a40868faf3f3c69fe797d278c7e7e522f550882"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/final_review.md",
+      "bytes": 2734,
+      "sha256": "43766fa151bf80e65e135ec8acd840b8fb7ffd22bbc97b0efac8c2c669856844"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/initial_review.md",
+      "bytes": 3286,
+      "sha256": "18d21f711eaaed1d9a69b4e2afc9d6d92712aaa397994852fbe9b0f2200a2aa8"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/intermediate_review.md",
+      "bytes": 3036,
+      "sha256": "fd7198a947fcd7a47167bffab7a06b130270d110f8e26836bfb8f0e9bef156c5"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/source_only_canary.json",
+      "bytes": 1331,
+      "sha256": "cc82edf7b2c419e227e8b2d129d6b6dd7b21df3883ab02a886408a6e1e8af2da"
+    },
+    {
+      "path": "tests/fixtures/bot_research_claims/verification.json",
+      "bytes": 3287,
+      "sha256": "55c009956b30bd33e0ef92efe1a1509001b4cafc0fe6f5f188dc5ba7ea7ed5d9"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/recovery_and_source_proof.json",
+      "bytes": 1557,
+      "sha256": "e98b23a0db56326d666e0e33046d6c8694c91dec4a93c2485eb9b8e431e2ca52"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/source_admission_v1.json",
+      "bytes": 1630,
+      "sha256": "c2c6eadea1978129a222d401ed3345bcf639da850a060420fde59e2e7d2bdc2f"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/source_admission_v2.json",
+      "bytes": 2141,
+      "sha256": "6b0e126e14117fd8ad1eee76e8d719f16e84495fd2e8142b5a50bee3dbfcf6e6"
+    },
+    {
+      "path": "tests/fixtures/bot_service_admission/task_aware_source_proof.json",
+      "bytes": 1022,
+      "sha256": "797ff5b7715fa91c73f5ec5b0172ff009829d42658cca1bf67befb2674971859"
+    },
+    {
+      "path": "tests/fixtures/bot_service_socket/verification.json",
+      "bytes": 1674,
+      "sha256": "b0f40bd3559dade3a99f44aec2b8cd47417503cce2cf03ecca05504af647d021"
+    },
+    {
+      "path": "tests/fixtures/decision_evidence_browser/evidence-1440.png",
+      "bytes": 203859,
+      "sha256": "8beb67882965694a38fef21eeeeada23e80f67dd1f9a47665fca279d4aca2d05"
+    },
+    {
+      "path": "tests/fixtures/decision_evidence_browser/evidence-390.png",
+      "bytes": 173040,
+      "sha256": "9bfd24e15f8e20ab611a336fdc6845036b8c875984718439b86505bc15d636b7"
+    },
+    {
+      "path": "tests/fixtures/decision_evidence_browser/result.json",
+      "bytes": 4935,
+      "sha256": "2b272eefd6518bc1cbc093489ca0084433e85a7d902a0db7a3669ea31b7df293"
+    },
+    {
+      "path": "tests/fixtures/decision_evidence_browser/verification.json",
+      "bytes": 2165,
+      "sha256": "1ee6500f1c474da855d845f47f0858456bdbe4687c3f9708073f621942e160b5"
+    },
+    {
+      "path": "tests/integration_canary_bot_socket.py",
+      "bytes": 9508,
+      "sha256": "d7b445b5896604e3e61a836484039971b06e13a1d92da3e2d2048dddc19c18a0"
+    },
+    {
+      "path": "tests/test_calendar_authority_consistency.py",
+      "bytes": 2369,
+      "sha256": "8f65a4910fb1ad0c03df584ae6641d5aa809894bcce09efd786a9dd30ed6238a"
+    },
+    {
+      "path": "tests/test_decision_research.py",
+      "bytes": 12316,
+      "sha256": "c5f279dd70d549e677f01bd8aa8e37ec4f369f8c977df16a5a6d144dbd40620f"
+    },
+    {
+      "path": "tests/test_decision_research_result.py",
+      "bytes": 15382,
+      "sha256": "795a00c8ebdc0d4b9758f78c4d06a2536199955cf0c313f66b04184bd32c766f"
+    },
+    {
+      "path": "tests/test_decision_snapshot.py",
+      "bytes": 12365,
+      "sha256": "784095a6bc3a1057670edfdfe7c965a81e6e87969f939713bba6b5a6c6ec6068"
+    },
+    {
+      "path": "tests/test_decision_snapshot_api.py",
+      "bytes": 7505,
+      "sha256": "07c7cf97f564a8e141b3b0e7f11c069b6075726e0a9e6b79e020370787c0ab28"
+    },
+    {
+      "path": "tests/test_decision_snapshot_cli.py",
+      "bytes": 4004,
+      "sha256": "4c29a7315b1975935df1c9d1ed407a2d1044374c61a6d826852a852b3dcc6e67"
+    },
+    {
+      "path": "tests/test_decision_snapshot_contracts.py",
+      "bytes": 10406,
+      "sha256": "218872ee2090d55d3aa34b2818654b8ba13e5ad61f362e314ab25f603c31b146"
+    },
+    {
+      "path": "tests/test_decision_snapshot_review_regressions.py",
+      "bytes": 6199,
+      "sha256": "55f070d8b1365f329e4064892fad6cb1fba0499667e5f272b0de4df06e2ea510"
+    },
+    {
+      "path": "tests/test_decision_snapshot_ui.py",
+      "bytes": 1556,
+      "sha256": "a2424c3594dbe70613c17c0f40ddd21be343846ef6e7727d4e886b003cbc5df0"
+    },
+    {
+      "path": "tests/test_market_calendar.py",
+      "bytes": 5356,
+      "sha256": "005cb223d506392c603101e67135c88d7f8c57db38e22bf47dda7531f2951570"
+    }
+  ],
+  "related_service_head": "b14d1c0e515778c71af291df7f7a93408a01cfbd"
+}
