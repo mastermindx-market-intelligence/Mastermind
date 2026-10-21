@@ -561,7 +561,7 @@ test('configured studio_fleet_status lists and returns the bounded public projec
     { timeout: 5000 },
   );
   assert.equal(result.isError, undefined);
-  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v1');
+  assert.equal(result.structuredContent.schema, 'mastermind.studio_fleet_status_tool.v2');
   assert.equal(result.structuredContent.state, 'DEGRADED');
   assert.equal(result.structuredContent.accountCount, 2);
   assert.equal(result.structuredContent.readyCount, 1);
