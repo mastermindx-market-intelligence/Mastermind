@@ -541,3 +541,36 @@ missing served-model/capability/source/effect/cleanup evidence, and never use a
 planner's grant for a work role. All current production and provider holds stay
 in place. Source construction of a wrapper around run_turn cannot close this gap.
 No dummy production write or self-signed Trial was attempted.
+
+
+### Re-review: baseline text-gate regression
+
+The original changed-head review `harness2-rereview-grok-3a2de988-20261021`
+completed rc0 at 12:59Z with a retained 5,370-byte report and correct original
+root/parent. It independently closed the fallback, confidence and no-op findings,
+but caught a real regression in the binary-identity repair: a source edit intended
+to check `common_base` had not matched the actual `base` variable. Consequently,
+binary H0 could reach the first port execution before a later proposal refused.
+The claimed baseline guard was not present; this is corrected evidence, not an
+accepted behavior. No real provider or production binary was executed.
+
+A new binary-H0 regression failed on 3a2, then passed after adding the actual
+`validate_native_harness_text(base)` call before any effect and a defense-in-depth
+check immediately before every `port.execute`. The test binds a real binary tree
+and matching native configuration, then asserts an explicit UTF-8 refusal with
+zero port calls and no retained trials. Raw upstream binary archival import
+remains supported; native execution eligibility remains text-only. Full EVAL
+campaign after this repair: **882 passed, 20.75s**. Re-review of this narrow
+source repair is still separately required.
+
+The 3a2 candidate was also tested at GitHub's actual current-base virtual merge
+`ae4f70644139c4d1b36151fa6ff0f0f0b74b7359` (parents protected7ab47f0b and
+3a2de988): 881 tests passed22.84s in a separately manager-acquired review
+workspace. This is integration evidence for 3a2, not for the later baseline fix.
+The 87-file protected-base delta did not change native EVAL/OHF dependencies;
+ACTIVE_EXECUTION's sole relevant change clarifies refusal provenance, which was
+read and preserves actual tool/lease/effect fences. Original procedure pin remains
+usable. The temporary review workspace was safely released via mmx-workspace
+only after removing its exactly enumerated 23 disposable Python3.14 bytecode
+files; tracked source remained unchanged, manager receipt REMOVED /
+UNCHANGED_FROM_ACQUIRED_BASE. Original source worktrees remain intact.

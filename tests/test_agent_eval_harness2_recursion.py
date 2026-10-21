@@ -489,3 +489,19 @@ def test_native_execution_still_refuses_binary_instruction_inputs(tmp_path):
         invoke(port)
     assert "UTF8" in str(caught.value.__cause__)
     assert [call[1] for call in port.calls if call[0] == "execute"] == ["base1"]
+
+
+def test_binary_common_base_refused_before_any_port_call(tmp_path):
+    from scripts.agent_eval.harness2_native import Harness2ImportError
+    port = FixturePort(tmp_path)
+    base = {**BASE, "assets/x.bin": b"\x00\xff"}
+    cfg = copy.deepcopy(port.base_configuration)
+    cfg.pop("schema"); cfg.pop("configuration_digest")
+    cfg["procedure"]["instruction_bundle"]["digest"] = harness_digest(base)
+    cfg = contracts.build_configuration(cfg)
+    with pytest.raises(Harness2ImportError, match="NATIVE_HARNESS_FILE_UTF8"):
+        run_refinement(task=TASK, common_base=base, expected_scenario=port.scenario,
+            baseline_configuration=cfg, prior_experience=(),
+            allowed_edit_paths=frozenset({"scripts/total.py"}), k=1, mode="agg",
+            limits=Limits(4, 4, 7), port=port)
+    assert port.calls == [] and port.trials == {}

@@ -152,6 +152,7 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
     # Validate even not-yet-existing allowed paths before sending any request.
     harness_digest({p: b"" for p in allowed_edit_paths})
     base = copy.deepcopy(common_base)
+    validate_native_harness_text(base)
     base_digest = harness_digest(base)
     contracts.validate_scenario_shape(expected_scenario)
     contracts.validate_configuration_shape(baseline_configuration)
@@ -237,6 +238,7 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
 
     def execute(label: str, files: dict[str, bytes]) -> None:
         _check(label not in trials and len(trials) < limits.max_rollouts, "ROLLOUT_CEILING_OR_DUPLICATE")
+        validate_native_harness_text(files)
         returned = port.execute(copy.deepcopy(task), label, copy.deepcopy(files))
         if type(returned) is Trial and type(returned.run) is dict:
             run_id = returned.run.get("run_id")
