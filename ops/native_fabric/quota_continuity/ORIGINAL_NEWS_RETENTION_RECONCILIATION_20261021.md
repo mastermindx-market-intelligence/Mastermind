@@ -127,7 +127,7 @@ then the installed original-owner check and explicit reconciliation. Neither
 this composition nor a new review of its genuinely changed source alters either
 frozen historical reviewer or supplies a review result for its old subject.
 
-## Follow-up acknowledgment and acquisition qualification
+## First acknowledgment and acquisition qualification at 1860b91
 
 The composed candidate also includes the acquisition-tag correction described in
 `PLAIN_PACKET_SAME_PATH_REPAIR_20261021.md`. That section records the final
@@ -170,3 +170,62 @@ Exact-head independent source review and CI must qualify the published follow-up
 The source holds on earlier d151/b301/5f9 bytes are not discharged by local tests.
 No rollout, original-case reconciliation, lease settlement, frozen review result
 or production News acceptance is established here.
+
+## Complete response handling after independent follow-up review
+
+Independent review of `1860b91dcad7344152ee02d554a397355550e454` closed the
+acquisition-tag P1 and successful-operation acknowledgment defect, but identified
+the same flush/shutdown gap in the `reconcile_original()` exception response.
+An actual post-creation fsync failure with closed stdout reproduced function
+return 78 followed by process exit 120. Its stderr diagnosis also omitted the
+operation's effect classification.
+
+Both successful and `UNQUALIFIED` responses now use one reconciliation-specific
+JSON/write/flush/disarm boundary. It does not change the generic `_json` helper.
+The original operation's effect state is retained in both structured and
+usable-stderr diagnostics:
+
+| Operation outcome | Healthy output | Failed output |
+| --- | --- | --- |
+| Returned success | One success response, exit 0 | Undelivered acknowledgment, `EFFECT_UNKNOWN`, exit 78 |
+| Exception after creation was attempted | `UNQUALIFIED / EFFECT_UNKNOWN`, exit 78 | Undelivered error response still `EFFECT_UNKNOWN`, exit 78 |
+| Refusal before creation | `UNQUALIFIED / NOT_APPLIED`, exit 78 | Undelivered refusal still `NOT_APPLIED`, exit 78 |
+
+The output exception never supplies the operation's effect state and never causes
+a second reconciliation invocation or success response. Receipt publication,
+historical proof, canonical status, request admission and retry/acceptance guards
+are unchanged. Failed-stream cleanup retains the bounded assumptions described
+above.
+
+The expanded actual-child matrix covers all six cells with a real buffered
+stream and a pipe closed before child launch. It asserts one actual operation,
+one completed JSON write, actual process exit, normal shutdown and unchanged
+receipt digest/identity or absence. Fresh status preserves original failure and
+no result/acceptance; a pre-creation refusal leaves the original unreconciled
+status rather than inventing reconciliation fields. Complete visible receipts
+from an interrupted fsync are assessed only by the subsequent fresh read, which
+does not claim that the failed call completed durability.
+
+The full historical-proof/reconciliation suite passes **30 tests in 2.393
+seconds** on the final adapter. The initial expanded test also exposed its own
+incorrect assumption that unreconciled status already had the receipt-specific
+`same_run_replay_allowed` field; the corrected control requires that field to
+remain absent and grants no retry permission. Its post-creation controls had
+independently reproduced the actual output defect before this source repair.
+
+Current adapter SHA-256 is
+`fd37c749d59d17c564cf4886b2184c853d1e120c5d7e3587b5c68f7267f3acdf`.
+The same 85-path closure has manifest
+`330d781f701eada35e5bf999d36e7cf46c9a0981d40023695697be4a91a250fa`
+and inventory
+`be2266fb450b95fc82482f6e8b80e5e86705d10690fa0c25417495de891de117`.
+Only the adapter differs from the previous 1860 production stage; all stage hashes
+and syntax checks pass.
+
+Evidence is retained in
+`/tmp/news-1674-combined-output-fault-before-20261021.json`,
+`/tmp/news-1674-combined-output-fault-qualified-20261021.json`, and
+`/tmp/news-1674-ack-complete-stage-proof-20261021.json`.
+This is source qualification only. The applicable immutable-source review,
+exact-head CI, protected inclusion, runtime selection and original-case
+reconciliation still require their own evidence; no live receipt was written.

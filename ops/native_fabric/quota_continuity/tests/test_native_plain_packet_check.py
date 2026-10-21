@@ -519,76 +519,103 @@ case.setUp()
 try:
     proof = case.qualify()
     receipt = reconcile.receipt_path()
+    def receipt_state():
+        return ([check.digest(receipt.read_bytes()), check.identity(receipt.lstat())]
+                if receipt.exists() else None)
     observed = {"operations": 0, "json_calls": 0, "json_completed": False}
     original_operation = reconcile.reconcile_original
     original_json = fabric_task._json
     def operation(*args):
         observed["operations"] += 1
+        if sys.argv[3] == "post_create":
+            with mock.patch.object(reconcile.os, "fsync",
+                                   side_effect=OSError("injected post-create fsync failure")):
+                return original_operation(*args)
+        if sys.argv[3] == "pre_create":
+            args = (*args[:2], "0" * 64)
         return original_operation(*args)
     def output(value):
         observed["json_calls"] += 1
         original_json(value)
         observed["json_completed"] = True
-        observed["receipt_before"] = [check.digest(receipt.read_bytes()),
-                                       check.identity(receipt.lstat())]
+        observed["response_action"] = value["action"]
+        observed["response_effect"] = value.get("effect_state")
+        observed["receipt_before"] = receipt_state()
     with mock.patch.object(reconcile, "reconcile_original", operation), \
          mock.patch.object(fabric_task, "_json", output), \
          mock.patch.object(fabric_task, "request", side_effect=AssertionError("no dispatch")):
         rc = fabric_task.main(["reconcile-plain-packet-retention", check.RUN,
             "--root", check.ROOT, "--expected-proof-sha256", proof["proof_sha256"]])
     observed["function_rc"] = rc
-    observed["receipt_after"] = [check.digest(receipt.read_bytes()),
-                                  check.identity(receipt.lstat())]
+    observed["receipt_after"] = receipt_state()
     with mock.patch.object(fabric_task, "HERE", case.here):
         observed["status"] = fabric_task.inspect_run(check.RUN)
-    observed["receipt_after_status"] = [check.digest(receipt.read_bytes()),
-                                         check.identity(receipt.lstat())]
+    observed["receipt_after_status"] = receipt_state()
     Path(sys.argv[2]).write_text(json.dumps(observed, sort_keys=True))
 finally:
     case.tearDown()
 raise SystemExit(rc)
 '''
-        for broken in (False, True):
-            with self.subTest(broken_pipe=broken):
-                proof_path = self.base / ("broken-child.json" if broken else "healthy-child.json")
-                args = [sys.executable, "-c", child, str(ROOT / "tests"), str(proof_path)]
-                if broken:
-                    read_fd, write_fd = os.pipe()
-                    os.close(read_fd)
-                    try:
-                        result = subprocess.run(args, stdout=write_fd, stderr=subprocess.PIPE,
-                                                text=True, close_fds=True, timeout=30)
-                    finally:
-                        os.close(write_fd)
-                else:
-                    result = subprocess.run(args, capture_output=True, text=True,
-                                            close_fds=True, timeout=30)
-                observed = json.loads(proof_path.read_text())
-                self.assertEqual(observed["operations"], 1)
-                self.assertEqual(observed["json_calls"], 1)
-                self.assertIs(observed["json_completed"], True)
-                self.assertEqual(observed["receipt_before"], observed["receipt_after"])
-                self.assertEqual(observed["receipt_before"], observed["receipt_after_status"])
-                status = observed["status"]
-                self.assertEqual((status["state"], status["rc"], status["signal"]),
-                                 ("TERMINAL_FAILURE", 78, "prelaunch_failure"))
-                self.assertIs(status["result_available"], False)
-                self.assertIsNone(status["accepted"])
-                self.assertEqual(status["acceptance_state"], "UNVERIFIED")
-                self.assertIs(status["same_run_replay_allowed"], False)
-                self.assertIs(status["retry_allowed"], False)
-                self.assertIn("INERT_CHILD_NORMAL_SHUTDOWN", result.stderr)
-                self.assertNotIn("NOT_APPLIED", result.stderr)
-                if broken:
-                    self.assertEqual(observed["function_rc"], 78)
-                    self.assertEqual(result.returncode, 78, result.stderr)
-                    self.assertEqual(result.stderr.count(
-                        "PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: EFFECT_UNKNOWN"), 1)
+        for phase in ("success", "post_create", "pre_create"):
+            for broken in (False, True):
+                with self.subTest(operation_phase=phase, broken_pipe=broken):
+                    proof_path = self.base / (phase + ("-broken.json" if broken else "-healthy.json"))
+                    args = [sys.executable, "-c", child, str(ROOT / "tests"),
+                            str(proof_path), phase]
+                    if broken:
+                        read_fd, write_fd = os.pipe()
+                        os.close(read_fd)
+                        try:
+                            result = subprocess.run(args, stdout=write_fd, stderr=subprocess.PIPE,
+                                                    text=True, close_fds=True, timeout=30)
+                        finally:
+                            os.close(write_fd)
+                    else:
+                        result = subprocess.run(args, capture_output=True, text=True,
+                                                close_fds=True, timeout=30)
+                    observed = json.loads(proof_path.read_text())
+                    self.assertEqual(observed["operations"], 1)
+                    self.assertEqual(observed["json_calls"], 1)
+                    self.assertIs(observed["json_completed"], True)
+                    self.assertEqual(observed["receipt_before"], observed["receipt_after"])
+                    self.assertEqual(observed["receipt_before"], observed["receipt_after_status"])
+                    if phase == "pre_create":
+                        self.assertIsNone(observed["receipt_before"])
+                    else:
+                        self.assertIsNotNone(observed["receipt_before"])
+                    status = observed["status"]
+                    self.assertEqual((status["state"], status["rc"], status["signal"]),
+                                     ("TERMINAL_FAILURE", 78, "prelaunch_failure"))
+                    self.assertIs(status["result_available"], False)
+                    self.assertIsNone(status["accepted"])
+                    self.assertEqual(status["acceptance_state"], "UNVERIFIED")
+                    if phase == "pre_create":
+                        # The unchanged unreconciled status has no receipt projection.
+                        self.assertNotIn("same_run_replay_allowed", status)
+                        self.assertIsNot(status.get("retry_allowed"), True)
+                    else:
+                        self.assertIs(status["same_run_replay_allowed"], False)
+                        self.assertIs(status["retry_allowed"], False)
+                    self.assertIn("INERT_CHILD_NORMAL_SHUTDOWN", result.stderr)
+                    effect = "NOT_APPLIED" if phase == "pre_create" else "EFFECT_UNKNOWN"
+                    expected_rc = 0 if phase == "success" and not broken else 78
+                    self.assertEqual(observed["function_rc"], expected_rc)
+                    self.assertEqual(result.returncode, expected_rc, result.stderr)
                     self.assertNotIn("Exception ignored", result.stderr)
-                else:
-                    self.assertEqual(result.returncode, 0, result.stderr)
-                    self.assertEqual(json.loads(result.stdout)["action"], "RECORDED")
-                    self.assertNotIn("RETURN_UNDELIVERED", result.stderr)
+                    if phase != "pre_create":
+                        self.assertNotIn("NOT_APPLIED", result.stderr)
+                    if phase != "success":
+                        self.assertEqual(observed["response_action"], "UNQUALIFIED")
+                        self.assertEqual(observed["response_effect"], effect)
+                        self.assertIn("PLAIN_PACKET_RECONCILIATION_UNQUALIFIED: " + effect,
+                                      result.stderr)
+                    if broken:
+                        self.assertEqual(result.stderr.count(
+                            "PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: " + effect), 1)
+                    else:
+                        self.assertEqual(json.loads(result.stdout)["action"],
+                                         "RECORDED" if phase == "success" else "UNQUALIFIED")
+                        self.assertNotIn("RETURN_UNDELIVERED", result.stderr)
 
     def test_cli_flush_failure_preserves_receipt_and_requires_fresh_status(self):
         import native_plain_packet_reconcile as reconcile

@@ -1132,6 +1132,20 @@ def _discard_failed_stdout() -> None:
                 pass
 
 
+def _plain_packet_reconciliation_response(value: object, effect_state: str) -> bool:
+    """Deliver either response without losing the operation's effect state."""
+    try:
+        _json(value)
+        sys.stdout.flush()
+    except (OSError, ValueError, TypeError) as exc:
+        _discard_failed_stdout()
+        print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: "
+              + effect_state + ": " + type(exc).__name__ + ": " + str(exc),
+              file=sys.stderr, flush=True)
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1350,24 +1364,18 @@ def main(argv: list[str] | None = None) -> int:
                 response = packet_reconcile.reconcile_original(
                     args.run_id, args.root, args.expected_proof_sha256)
             except (OSError, ValueError, TypeError, KeyError) as exc:
-                _json({"schema": packet_reconcile.SCHEMA, "action": "UNQUALIFIED",
-                    "run_id": args.run_id, "expected_root_id": args.root,
-                    "effect_state": getattr(exc, "effect_state", "NOT_APPLIED"),
-                    "retry_allowed": False, "worker_dispatch_performed": False})
-                print("PLAIN_PACKET_RECONCILIATION_UNQUALIFIED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                effect_state = getattr(exc, "effect_state", "NOT_APPLIED")
+                _plain_packet_reconciliation_response(
+                    {"schema": packet_reconcile.SCHEMA, "action": "UNQUALIFIED",
+                     "run_id": args.run_id, "expected_root_id": args.root,
+                     "effect_state": effect_state, "retry_allowed": False,
+                     "worker_dispatch_performed": False}, effect_state)
+                print("PLAIN_PACKET_RECONCILIATION_UNQUALIFIED: " + effect_state
+                      + ": " + type(exc).__name__ + ": " + str(exc),
+                      file=sys.stderr, flush=True)
                 return 78
-            try:
-                _json(response)
-                # Buffered writes must cross the acknowledgment boundary here.
-                sys.stdout.flush()
-            except (OSError, ValueError, TypeError) as exc:
-                # The operation already returned. Output failure is not a proof
-                # that publication was unapplied; settle through fresh status.
-                _discard_failed_stdout()
-                print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: EFFECT_UNKNOWN: "
-                      + type(exc).__name__ + ": " + str(exc), file=sys.stderr, flush=True)
-                return 78
-            return 0
+            # A returned operation may already have published the receipt.
+            return 0 if _plain_packet_reconciliation_response(response, "EFFECT_UNKNOWN") else 78
         if args.cmd == "check-plain-packet-retention":
             import native_plain_packet_check as packet_check
             try:

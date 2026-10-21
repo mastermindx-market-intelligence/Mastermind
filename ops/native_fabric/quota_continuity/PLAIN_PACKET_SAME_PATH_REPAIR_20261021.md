@@ -386,7 +386,7 @@ does not gain qualification. The remote
 existing versions. Artifact active-lineage remains recorded controller provenance
 with `is_authentication: false`; it is not plain active-lineage support.
 
-### Current source identities and qualification
+### Acquisition-follow-up identities at 1860b91 and qualification
 
 The canonical builder reproduces **85** entries with the same path set as b301.
 Only these four production members change in this follow-up:
@@ -454,3 +454,26 @@ runtime publication/selection, bounded host readiness, the installed original
 check and explicit reconciliation, a fresh current-head News review and actual
 signed-in News acceptance remain outstanding. Neither frozen reviewer nor the
 reported Harness2 run is replayed, reconciled or declared settled by this repair.
+
+### Complete acknowledgment-branch follow-up
+
+A subsequent independent review of `1860b91dcad7344152ee02d554a397355550e454`
+source-resolved the acquisition-tag P1 and the successful-operation output path,
+but found that the publication-exception response still bypassed flush/disarm.
+The next bounded revision changes only `fabric_task.py` in the production closure.
+All acquisition, collection, broker-observation and physical-owner bytes above
+remain identical.
+
+The complete response contract and six real-child controls are recorded in
+`ORIGINAL_NEWS_RETENTION_RECONCILIATION_20261021.md`. Current declarations are:
+
+- Adapter SHA-256:
+  `fd37c749d59d17c564cf4886b2184c853d1e120c5d7e3587b5c68f7267f3acdf`.
+- Manifest SHA-256:
+  `330d781f701eada35e5bf999d36e7cf46c9a0981d40023695697be4a91a250fa`.
+- Inventory SHA-256:
+  `be2266fb450b95fc82482f6e8b80e5e86705d10690fa0c25417495de891de117`.
+
+The canonical builder still verifies all 85 entries. The preceding identities
+and tests remain historical qualification for the first acquisition follow-up;
+new-head review and CI must qualify this final response revision before release.
