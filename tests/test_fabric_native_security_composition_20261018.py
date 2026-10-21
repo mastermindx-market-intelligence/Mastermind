@@ -30,11 +30,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 85-file closure composes protected physical-root admission with retention
-# recovery and explicit acquisition correlation. All historical executor,
-# donor, quota, deadline and protected physical-root transformations stay pinned.
+# The 85-file closure composes protected physical-root admission and canonical
+# slot diagnostics with retention recovery and explicit acquisition correlation.
+# Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "05ae02e5dffcb625bee7ff1d64068afb85917cefce5c63b0544e4ff60123247d"
+NATIVE_MANIFEST_SHA = "5503cbbfcafc5ec7a77a52cb5e35a6386cbe3c07497cb6cbbea1ea8066bf837f"
 
 
 def _sha(raw):

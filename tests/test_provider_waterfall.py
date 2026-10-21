@@ -1,5 +1,7 @@
 import asyncio
 
+import pytest
+
 
 class _SharedKeyPool:
     def __init__(self, cooling=()):
@@ -38,6 +40,203 @@ def test_provider_rungs_are_codex_first_and_respect_shared_cooling(monkeypatch):
         ("codex", "codex_account"),
         ("oauth", "claude_code_oauth_5"),
         ("oauth", "claude_code_oauth_3"),
+    ]
+
+
+def _availability_without_ranking(monkeypatch, pw):
+    """Record forbidden work even when availability catches its exception."""
+    calls = []
+
+    def forbidden(*_args, **_kwargs):
+        calls.append("ranking or ledger access")
+        raise AssertionError("availability must not consult ranking ledgers")
+
+    class Shared:
+        _oauth_pool_candidates = staticmethod(forbidden)
+        is_cooling = staticmethod(forbidden)
+        window_load = staticmethod(forbidden)
+
+    monkeypatch.setattr(pw, "_shared_modules", lambda: (Shared, Shared))
+    monkeypatch.setattr(pw, "provider_rungs", forbidden)
+    monkeypatch.setattr(pw, "_local_cooling", forbidden)
+    return calls
+
+
+def test_available_short_circuits_on_codex_without_ranking_pool(monkeypatch):
+    from brain import codex_bridge, provider_waterfall as pw
+
+    calls = _availability_without_ranking(monkeypatch, pw)
+    monkeypatch.setattr(codex_bridge, "available", lambda: True)
+    discovery_calls = []
+
+    def forbidden_discovery():
+        discovery_calls.append("oauth discovery")
+        raise AssertionError("Codex availability must short-circuit OAuth discovery")
+
+    monkeypatch.setattr(
+        pw, "_shared_availability_modules", forbidden_discovery, raising=False
+    )
+    assert pw.available() is True
+    assert calls == []
+    assert discovery_calls == []
+
+
+def test_available_oauth_path_uses_presence_and_lane_not_ranking(monkeypatch):
+    from brain import codex_bridge, provider_waterfall as pw
+
+    calls = _availability_without_ranking(monkeypatch, pw)
+    monkeypatch.setattr(codex_bridge, "available", lambda: False)
+    resolved_slots = []
+
+    class KeyPool:
+        @staticmethod
+        def discover_present_keys():
+            return ["claude_code_oauth_3", "claude_code_oauth_5"]
+
+        @staticmethod
+        def is_cooling(*_args, **_kwargs):
+            calls.append("cooling")
+            raise AssertionError("configured availability must not read cooling")
+
+        @staticmethod
+        def window_load(*_args, **_kwargs):
+            calls.append("window load")
+            raise AssertionError("configured availability must not read window load")
+
+    class Broker:
+        @staticmethod
+        def resolve(capability_id, *, lane):
+            resolved_slots.append((capability_id, lane))
+            return {
+                "allowed": capability_id == "claude_code_oauth_5",
+                "ref_name": "CLAUDE_CODE_OAUTH_TOKEN_5",
+            }
+
+    monkeypatch.setattr(
+        pw, "_shared_availability_modules", lambda: (Broker, KeyPool), raising=False
+    )
+    assert pw.available() is True
+    assert resolved_slots == [
+        ("claude_code_oauth_3", "brain-pro"),
+        ("claude_code_oauth_5", "brain-pro"),
+    ]
+    assert calls == []
+
+
+@pytest.mark.parametrize("pool_state", ["denied", "missing_ref", "empty", "discovery_error"])
+def test_available_false_without_codex_or_lane_allowed_oauth(monkeypatch, pool_state):
+    from brain import codex_bridge, provider_waterfall as pw
+
+    calls = _availability_without_ranking(monkeypatch, pw)
+    monkeypatch.setattr(codex_bridge, "available", lambda: False)
+
+    class KeyPool:
+        @staticmethod
+        def discover_present_keys():
+            if pool_state == "discovery_error":
+                raise OSError("synthetic discovery failure")
+            return [] if pool_state == "empty" else ["claude_code_oauth_3"]
+
+    class Broker:
+        @staticmethod
+        def resolve(_capability_id, *, lane):
+            assert lane == "brain-pro"
+            return {
+                "allowed": pool_state != "denied",
+                "ref_name": None if pool_state == "missing_ref" else "CLAUDE_CODE_OAUTH_TOKEN_3",
+            }
+
+    monkeypatch.setattr(
+        pw, "_shared_availability_modules", lambda: (Broker, KeyPool), raising=False
+    )
+    assert pw.available() is False
+    assert calls == []
+
+
+@pytest.mark.parametrize("codex_present", [True, False])
+def test_available_preserves_reasoning_import_prerequisite(monkeypatch, codex_present):
+    from brain import cli_bridge, codex_bridge, provider_waterfall as pw
+
+    unavailable = ImportError("synthetic missing shared execution dependency")
+
+    def missing_shared_modules():
+        raise unavailable
+
+    class KeyPool:
+        @staticmethod
+        def discover_present_keys():
+            return ["claude_code_oauth_5"]
+
+    class Broker:
+        @staticmethod
+        def resolve(_capability_id, *, lane):
+            assert lane == "brain-pro"
+            return {"allowed": True, "ref_name": "CLAUDE_CODE_OAUTH_TOKEN_5"}
+
+    provider_calls = []
+
+    async def forbidden_reason(*_args, **_kwargs):
+        provider_calls.append("provider entry")
+        raise AssertionError("a missing prerequisite must precede provider entry")
+
+    monkeypatch.setattr(pw, "_shared_modules", missing_shared_modules)
+    monkeypatch.setattr(codex_bridge, "available", lambda: codex_present)
+    monkeypatch.setattr(
+        pw, "_shared_availability_modules", lambda: (Broker, KeyPool), raising=False
+    )
+    monkeypatch.setattr(cli_bridge, "_reason", forbidden_reason)
+
+    # Exercise the existing consumer prerequisite, without entering a provider.
+    with pytest.raises(ImportError) as caught:
+        asyncio.run(pw.reason("synthetic availability boundary", role="pm"))
+    assert caught.value is unavailable
+    assert provider_calls == []
+    assert pw.available() is False
+
+
+@pytest.mark.parametrize("first_failure", ["exception", "malformed_result"])
+def test_available_skips_bad_slot_and_keeps_later_eligible_slot(monkeypatch, first_failure):
+    """Keep the real Macro discovery semantics, including all-cooling eligibility."""
+    import bot  # noqa: F401  # makes the vendored Macro engine importable
+    from engine import llm_auth
+    from engine.neuralweb import capability_broker, key_pool
+    from brain import codex_bridge, provider_waterfall as pw
+
+    resolved_slots = []
+
+    def resolve(capability_id, *, lane):
+        resolved_slots.append((capability_id, lane))
+        if capability_id == "claude_code_oauth_3":
+            if first_failure == "exception":
+                raise RuntimeError("synthetic slot resolution failure")
+            return None
+        return {"allowed": True, "ref_name": "CLAUDE_CODE_OAUTH_TOKEN_5"}
+
+    monkeypatch.setattr(codex_bridge, "available", lambda: False)
+    monkeypatch.setattr(pw, "_shared_modules", lambda: (llm_auth, key_pool))
+    monkeypatch.setattr(
+        pw,
+        "_shared_availability_modules",
+        lambda: (capability_broker, key_pool),
+        raising=False,
+    )
+    monkeypatch.setattr(
+        pw, "_local_cooling", lambda: {"claude_code_oauth_3": True, "claude_code_oauth_5": True}
+    )
+    monkeypatch.setattr(
+        key_pool, "discover_present_keys",
+        lambda: ["claude_code_oauth_3", "claude_code_oauth_5"],
+    )
+    monkeypatch.setattr(capability_broker, "resolve", resolve)
+    monkeypatch.setattr(key_pool, "is_cooling", lambda _key: True)
+    monkeypatch.setattr(key_pool, "window_load", lambda _key: 100)
+    monkeypatch.setattr(llm_auth, "_lane_weekly_ceiling_pct", lambda _lane: 100)
+    monkeypatch.setattr(llm_auth, "_weekly_pct", lambda _key: 100)
+
+    assert pw.available() is True
+    assert resolved_slots == [
+        ("claude_code_oauth_3", "brain-pro"),
+        ("claude_code_oauth_5", "brain-pro"),
     ]
 
 
