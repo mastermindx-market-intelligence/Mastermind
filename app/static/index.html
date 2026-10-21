@@ -2749,39 +2749,41 @@ html[data-theme="light"] body.page-mm {
 <!-- ── PERFORMANCE HEADER ─────────────────────────────────────────────────── -->
 <div class="mm-section">
   <div class="panel span12" id="performance" style="grid-column:span 12">
-    <h2><span class="l-en">Performance — $1M Paper Account</span><span class="l-zh">业绩 — $1M 模拟账户</span></h2>
+    <h2><span class="l-en">Performance — Simulated Account</span><span class="l-zh">业绩 — 模拟账户</span></h2>
+    <p class="mm-perf-stat-sub" id="perf-evidence" role="status" aria-live="polite"></p>
     <div class="mm-live-status" id="live-marks-status" role="status" aria-live="polite">
       <span class="dot"></span><span>Loading market clock…</span>
     </div>
     <div class="mm-perf-grid" id="perf-grid">
       <!-- NAV big number -->
       <div class="mm-perf-nav">
-        <div class="mm-perf-nav-label"><span class="l-en">Current NAV</span><span class="l-zh">当前净值</span></div>
-        <div class="mm-perf-nav-value" id="perf-nav">$1,000,000</div>
+        <div class="mm-perf-nav-label" id="perf-nav-label"><span class="l-en">NAV</span><span class="l-zh">净值</span></div>
+        <div class="mm-perf-nav-value" id="perf-nav">—</div>
       </div>
       <div class="mm-perf-divider"></div>
       <!-- Total return -->
       <div class="mm-perf-stat">
-        <div class="mm-perf-stat-label"><span class="l-en">Total Return</span><span class="l-zh">总回报</span></div>
-        <div class="mm-perf-stat-value neu" id="perf-ret">+0.00%</div>
+        <div class="mm-perf-stat-label"><span class="l-en">Change from Start</span><span class="l-zh">相对初始净值变化</span></div>
+        <div class="mm-perf-stat-value neu" id="perf-ret">—</div>
         <div class="mm-perf-stat-sub" id="perf-since"><span class="l-en">since inception</span><span class="l-zh">自成立以来</span></div>
       </div>
       <!-- versus the active book's configured benchmark -->
       <div class="mm-perf-stat">
         <div class="mm-perf-stat-label" id="perf-bench-label"><span class="l-en">vs benchmark</span><span class="l-zh">相对基准</span></div>
-        <div class="mm-perf-stat-value neu" id="perf-spy">+0.00%</div>
-        <div class="mm-perf-stat-sub"><span class="l-en">alpha vs benchmark</span><span class="l-zh">相对基准超额</span></div>
+        <div class="mm-perf-stat-value neu" id="perf-spy">—</div>
+        <div class="mm-perf-stat-sub"><span class="l-en">return difference</span><span class="l-zh">回报差</span></div>
       </div>
       <!-- Day change -->
       <div class="mm-perf-stat">
-        <div class="mm-perf-stat-label"><span class="l-en">Today</span><span class="l-zh">今日</span></div>
-        <div class="mm-perf-stat-value neu" id="perf-day">+0.00%</div>
-        <div class="mm-perf-stat-sub"><span class="l-en">day change</span><span class="l-zh">日内涨跌</span></div>
+        <div class="mm-perf-stat-label"><span class="l-en">Last observed change</span><span class="l-zh">最近记录变动</span></div>
+        <div class="mm-perf-stat-value neu" id="perf-day">—</div>
+        <div class="mm-perf-stat-sub" id="perf-day-range"><span class="l-en">between recorded observations</span><span class="l-zh">记录之间的变化</span></div>
       </div>
       <!-- Max drawdown -->
       <div class="mm-perf-stat">
-        <div class="mm-perf-stat-label"><span class="l-en">Max Drawdown</span><span class="l-zh">最大回撤</span></div>
+        <div class="mm-perf-stat-label"><span class="l-en">Recorded Drawdown</span><span class="l-zh">记录最大回撤</span></div>
         <div class="mm-perf-stat-value neu" id="perf-dd">—</div>
+        <div class="mm-perf-stat-sub" id="perf-dd-range"><span class="l-en">over recorded observations</span><span class="l-zh">已记录观察区间</span></div>
         <div class="mm-perf-stat-sub" id="perf-cash-lbl"><span class="l-en">cash: —</span><span class="l-zh">现金: —</span></div>
       </div>
     </div>
@@ -2795,12 +2797,12 @@ html[data-theme="light"] body.page-mm {
       <div class="mm-ec-legend" id="ec-legend">
         <span class="mm-ec-leg-item">
           <span class="mm-ec-leg-line" style="background:var(--up)"></span>
-          <span id="ec-leg-portfolio">Portfolio (live since —)</span>
+          <span id="ec-leg-portfolio">Portfolio (recorded since —)</span>
         </span>
         <span class="mm-ec-leg-item">
           <span class="mm-ec-leg-line" style="background:var(--muted);opacity:.55;border-top:2px dashed var(--muted);height:0;margin-top:1px"></span>
           <!-- Benchmark symbol is book-specific and set by renderEquityCurve(). -->
-          <span id="ec-leg-bench">S&amp;P 500 ($1M ref)</span>
+          <span id="ec-leg-bench">Benchmark reference</span>
         </span>
         <span class="mm-ec-range" id="ec-range-label"></span>
       </div>
@@ -3210,24 +3212,24 @@ html[data-theme="light"] body.page-mm {
 // ── i18n dictionary ──────────────────────────────────────────────────────────
 var I18N = {
   // Performance section
-  'perf.title':           { en: 'Performance — $1M Paper Account', zh: '业绩 — $1M 模拟账户' },
-  'perf.current_nav':     { en: 'Current NAV', zh: '当前净值' },
-  'perf.total_return':    { en: 'Total Return', zh: '总回报' },
+  'perf.title':           { en: 'Performance — Simulated Account', zh: '业绩 — 模拟账户' },
+  'perf.current_nav':     { en: 'NAV', zh: '净值' },
+  'perf.total_return':    { en: 'Change from Start', zh: '相对初始净值变化' },
   'perf.since_inception': { en: 'since inception', zh: '自成立以来' },
   'perf.since':           { en: 'since', zh: '自' },
   'perf.vs_spy':          { en: 'vs SPY', zh: '相对标普500' },
-  'perf.alpha_vs_bench':  { en: 'alpha vs benchmark', zh: '相对基准超额' },
-  'perf.today':           { en: 'Today', zh: '今日' },
-  'perf.day_change':      { en: 'day change', zh: '日内涨跌' },
-  'perf.max_drawdown':    { en: 'Max Drawdown', zh: '最大回撤' },
+  'perf.alpha_vs_bench':  { en: 'return difference', zh: '回报差' },
+  'perf.today':           { en: 'Last observed change', zh: '最近记录变动' },
+  'perf.day_change':      { en: 'between recorded observations', zh: '记录之间的变化' },
+  'perf.max_drawdown':    { en: 'Recorded Drawdown', zh: '记录最大回撤' },
   'perf.cash_lbl':        { en: 'cash:', zh: '现金:' },
   // Equity curve
   'ec.title':             { en: 'Equity Curve', zh: '净值曲线' },
-  'ec.portfolio_live':    { en: 'Portfolio (live since', zh: '组合（实盘自' },
-  'ec.spy_ref':           { en: 'S&P 500 ($1M ref)', zh: '标普500（$1M参考）' },
+  'ec.portfolio_live':    { en: 'Portfolio (recorded since', zh: '组合（记录始于' },
+  'ec.spy_ref':           { en: 'Benchmark reference', zh: '基准参考序列' },
   'ec.loading':           { en: 'Loading equity curve…', zh: '加载净值曲线中…' },
-  'ec.no_data':           { en: 'Live track accruing — no series data yet', zh: '实盘追踪中，暂无数据' },
-  'ec.tooltip_realized':  { en: '(realized)', zh: '（实盘）' },
+  'ec.no_data':           { en: 'No recorded performance observations available', zh: '暂无可用的业绩记录' },
+  'ec.tooltip_realized':  { en: '(recorded)', zh: '（已记录）' },
   'ec.tooltip_pre':       { en: '(pre-inception)', zh: '（成立前）' },
   'ec.nav':               { en: 'NAV:', zh: '净值:' },
   'ec.spy_lbl':           { en: 'SPY ref:', zh: '标普参考:' },
@@ -3861,12 +3863,68 @@ var fmtPctSign = function(v) {
 };
 
 // ── PERFORMANCE HEADER ────────────────────────────────────────────────────────
+function _performanceEvidenceText(p, isZh) {
+  var a = p && p.availability;
+  if (!a) return '';
+  var msg;
+  if (a.status === 'unavailable') {
+    msg = isZh ? '业绩证据不可用；未代填资金或零回报。' : 'Performance evidence unavailable; no balance or zero return has been substituted.';
+  } else if (a.valuation_basis === 'last_recorded_nav') {
+    msg = (isZh ? '最近记录净值：' : 'Last recorded NAV: ') + (a.as_of || '—') +
+      (isZh ? '。此快照未证明当前持仓估值。' : '. This snapshot does not establish the value of current holdings.');
+  } else if (a.valuation_basis === 'provided_prices') {
+    msg = isZh ? '暂定估值；所给价格尚未绑定统一有效时间。' : 'Provisional valuation; supplied prices do not establish a common effective time.';
+  } else if (a.valuation_basis === 'cash_only') {
+    msg = isZh ? '已读取纯现金账户；账户有效时间未验证。' : 'Observed cash-only account; its effective time is unverified.';
+  } else {
+    msg = isZh ? '业绩证据尚未完整。' : 'Performance evidence is incomplete.';
+  }
+  if (a.history_status !== 'available') msg += isZh ? ' 历史记录缺失或不完整。' : ' History is missing or incomplete.';
+  if (p.vs_benchmark_pct == null) msg += isZh ? ' 共同日期的基准比较不可用。' : ' A comparison over common benchmark dates is unavailable.';
+  else msg += isZh ? ' 基准使用共同日期的缓存收盘价，总回报调整未验证。' : ' Benchmark comparison uses common dates and cached closes; total-return adjustments are unverified.';
+  if (a.account_history_binding === 'book_path_only' && a.valuation_basis === 'last_recorded_nav') {
+    msg += isZh ? ' 账户与历史记录的对应关系未核对。' : ' Account-to-history reconciliation is unverified.';
+  }
+  if (p.total_return_pct != null && p.external_flow_adjustment === 'not_applied') {
+    msg += isZh ? ' 净值变化未调整外部资金流。' : ' NAV change is not adjusted for external cash flows.';
+  }
+  return msg;
+}
+
+// Close one area per contiguous observed segment. A gap never becomes a zero-valued vertex.
+function _equityAreaPath(vals, xOf, yOf, floor, start, end) {
+  var paths = [], points = [];
+  function closeSegment() {
+    if (points.length >= 2) {
+      var first = points[0], last = points[points.length-1];
+      paths.push('M' + xOf(first[0]).toFixed(1) + ' ' + floor.toFixed(1) + ' ' +
+        points.map(function(p) { return 'L' + xOf(p[0]).toFixed(1) + ' ' + yOf(p[1]).toFixed(1); }).join(' ') +
+        ' L' + xOf(last[0]).toFixed(1) + ' ' + floor.toFixed(1) + ' Z');
+    }
+    points = [];
+  }
+  for (var i = start; i <= end; i++) {
+    if (typeof vals[i] !== 'number' || !Number.isFinite(vals[i])) closeSegment();
+    else points.push([i, vals[i]]);
+  }
+  closeSegment();
+  return paths.join(' ');
+}
+
 function renderPerformance() {
-  var p = _perf;
-  if (!p) return;
-  var benchmarkSymbol = p.benchmark || 'SPY';
+  var p = _perf || {availability: {status:'unavailable', history_status:'unavailable'}};
+  var benchmarkSymbol = p.benchmark || 'Benchmark';
   var benchmarkName = p.benchmark_name || benchmarkSymbol;
   var benchmarkNameZh = p.benchmark_name_zh || benchmarkName;
+
+  var isZhPerf = document.documentElement.getAttribute('data-lang') === 'zh';
+  var evidenceEl = E('perf-evidence');
+  if (evidenceEl) evidenceEl.textContent = _performanceEvidenceText(p, isZhPerf);
+  var a = p.availability || {};
+  var navLabel = E('perf-nav-label');
+  if (navLabel) navLabel.textContent = a.valuation_basis === 'last_recorded_nav'
+    ? (isZhPerf ? '最近记录净值' : 'Last recorded NAV')
+    : (a.status === 'provisional' ? (isZhPerf ? '暂定净值' : 'Provisional NAV') : (isZhPerf ? '净值' : 'NAV'));
 
   // NAV
   var navEl = E('perf-nav');
@@ -3911,7 +3969,13 @@ function renderPerformance() {
     dayEl.className = 'mm-perf-stat-value ' + d.cls;
   }
 
-  // Max drawdown
+  var dayRangeEl = E('perf-day-range');
+  var dayWindow = p.day_change_window;
+  if (dayRangeEl) dayRangeEl.textContent = dayWindow && dayWindow.from && dayWindow.to
+    ? dayWindow.from + ' → ' + dayWindow.to
+    : (isZhPerf ? '记录之间的变化' : 'between recorded observations');
+
+  // Max drawdown over actual recorded observations only.
   var ddEl = E('perf-dd');
   if (ddEl) {
     var dd = p.max_drawdown_pct;
@@ -3919,17 +3983,22 @@ function renderPerformance() {
     ddEl.className = 'mm-perf-stat-value ' + (dd != null && Math.abs(dd) > 0.5 ? 'neg' : 'neu');
   }
 
+  var ddRangeEl = E('perf-dd-range');
+  var ddWindow = p.drawdown_window;
+  if (ddRangeEl) ddRangeEl.textContent = ddWindow && ddWindow.from && ddWindow.to
+    ? ddWindow.from + ' → ' + ddWindow.to
+    : (isZhPerf ? '已记录观察区间' : 'over recorded observations');
+
   // cash sub-label
   var cashLbl = E('perf-cash-lbl');
-  if (cashLbl && p.cash != null) {
+  if (cashLbl) {
     cashLbl.textContent = t('perf.cash_lbl') + ' ' + fmtNav(p.cash);
   }
 }
 
 // ── EQUITY CURVE ──────────────────────────────────────────────────────────────
-// Series kinds: "pre_inception" (flat $1M) and "realized" (live NAV).
-// We draw: flat $1M line for pre_inception → solid NAV line for realized.
-// No "hypothetical" / dashed segment. SPY always shows real up/down.
+// Recorded NAV is distinct from explicitly labeled pre-inception capital reference.
+// Unavailable NAV dates stay gaps; benchmark closes are a separate reference series.
 function renderEquityCurve() {
   var wrap = E('ec-wrap');
   if (!wrap) return;
@@ -3937,7 +4006,7 @@ function renderEquityCurve() {
   var series = (p && p.series) || [];
   var isZhEc = document.documentElement.getAttribute('data-lang') === 'zh';
   // The backend emits both the data symbol and human label; use the native index name in the UI.
-  var benchSymbol = (p && p.benchmark) || 'SPY';
+  var benchSymbol = (p && p.benchmark) || 'Benchmark';
   var bench = (p && (isZhEc ? p.benchmark_name_zh : p.benchmark_name)) || benchSymbol;
   var benchDisplay = bench === benchSymbol ? bench : bench + ' (' + benchSymbol + ')';
 
@@ -3948,13 +4017,11 @@ function renderEquityCurve() {
     legPortEl.textContent = t('ec.portfolio_live') + ' ' + rsDate + (isZhEc ? '）' : ')');
   }
   var legBenchEl = E('ec-leg-bench');
-  if (legBenchEl) legBenchEl.textContent = benchDisplay + (isZhEc ? '（$1M参考）' : ' ($1M ref)');
+  if (legBenchEl) legBenchEl.textContent = benchDisplay + (isZhEc ? '（参考序列）' : ' (reference series)');
 
   // Range label
   var rangeEl = E('ec-range-label');
-  if (rangeEl && series.length) {
-    rangeEl.textContent = series[0].date + ' → ' + series[series.length-1].date;
-  }
+  if (rangeEl) rangeEl.textContent = series.length ? series[0].date + ' → ' + series[series.length-1].date : '';
 
   if (!series.length) {
     wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
@@ -3963,7 +4030,7 @@ function renderEquityCurve() {
 
   // Build nav values: pre_inception points are pinned at starting_nav ($1M flat);
   // realized points use their actual nav value from the series.
-  var startNav = (p && p.starting_nav) || 1000000;
+  var startNav = p && typeof p.starting_nav === 'number' && Number.isFinite(p.starting_nav) && p.starting_nav > 0 ? p.starting_nav : null;
   var navVals = series.map(function(s) {
     // Support both the old "hypothetical" kind and the new "pre_inception" kind
     if (s.kind === 'pre_inception' || s.kind === 'hypothetical') return startNav;
@@ -3998,8 +4065,11 @@ function renderEquityCurve() {
   var realNavVals = series.map(function(s) { return s.nav; });
   // drop null / NaN points before computing the extent — a single missing nav or
   // spy_nav would otherwise poison Math.min/max into NaN and blank the whole chart
-  var allVals = realNavVals.concat(spyVals).filter(function(v) { return v != null && !isNaN(v); });
-  if (!allVals.length) allVals = [1e6];
+  var allVals = realNavVals.concat(spyVals).filter(function(v) { return typeof v === 'number' && Number.isFinite(v); });
+  if (!allVals.length) {
+    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0">' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+    return;
+  }
   var minV = Math.min.apply(null, allVals);
   var maxV = Math.max.apply(null, allVals);
   var pad = (maxV - minV) * 0.06 || 5000;
@@ -4040,8 +4110,10 @@ function renderEquityCurve() {
   if (xTickIdxs[xTickIdxs.length-1] !== n-1) xTickIdxs.push(n-1);
 
   function fmtNavShort(v) {
-    if (v >= 1e6) return _ccySym() + (v/1e6).toFixed(3) + 'M';
-    return _ccySym() + Math.round(v/1000) + 'K';
+    var scale = Math.abs(v) >= 1e6 ? 1e6 : (Math.abs(v) >= 1000 ? 1000 : 1);
+    var suffix = scale === 1e6 ? 'M' : (scale === 1000 ? 'K' : '');
+    var decimals = Math.max(0, Math.min(6, Math.ceil(-Math.log10(niceStep / scale))));
+    return _ccySym() + (v / scale).toFixed(decimals) + suffix;
   }
   function fmtDateAxis(s) {
     if (!s) return '';
@@ -4051,12 +4123,10 @@ function renderEquityCurve() {
 
   // area fill for realized portion
   var areaStart = realIdx >= 0 ? realIdx : 0;
-  var areaPath = 'M' + xOf(areaStart).toFixed(1) + ' ' + (PAD.t + IH).toFixed(1) + ' ';
-  for (var k = areaStart; k < n; k++) areaPath += 'L' + xOf(k).toFixed(1) + ' ' + yOf(navVals[k]).toFixed(1) + ' ';
-  areaPath += 'L' + xOf(n-1).toFixed(1) + ' ' + (PAD.t + IH).toFixed(1) + ' Z';
+  var areaPath = _equityAreaPath(navVals, xOf, yOf, PAD.t + IH, areaStart, n-1);
 
   // zero-line at starting nav
-  var zeroY = yOf(startNav);
+  var zeroY = startNav == null ? null : yOf(startNav);
 
   // unique defs id
   var uid = 'ec' + Date.now();
@@ -4081,7 +4151,7 @@ function renderEquityCurve() {
   });
 
   // zero / inception baseline (dashed)
-  if (zeroY >= PAD.t && zeroY <= PAD.t + IH) {
+  if (zeroY != null && zeroY >= PAD.t && zeroY <= PAD.t + IH) {
     svg += '<line x1="' + PAD.l + '" y1="' + zeroY.toFixed(1) + '" x2="' + (PAD.l + IW) + '" y2="' + zeroY.toFixed(1) + '" stroke="var(--muted)" stroke-width="1" stroke-dasharray="4 3" opacity="0.35"/>';
   }
 
@@ -4105,13 +4175,19 @@ function renderEquityCurve() {
     svg += '<path d="' + pathStr(navVals, 0, n-1) + '" fill="none" stroke="var(--up)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>';
   }
 
+  // Isolated observed points remain visible when gaps prevent a connecting line.
+  navVals.forEach(function(v, i) {
+    if (typeof v === 'number' && Number.isFinite(v) && series[i].kind === 'realized') {
+      svg += '<circle cx="' + xOf(i).toFixed(1) + '" cy="' + yOf(v).toFixed(1) + '" r="2.5" fill="var(--up)"/>';
+    }
+  });
   svg += '</g>';
 
-  // LIVE vertical marker
+  // Start of the recorded track, not a claim that its latest mark is live.
   if (realIdx >= 0 && realIdx < n) {
     var rx = xOf(realIdx).toFixed(1);
     svg += '<line x1="' + rx + '" y1="' + PAD.t + '" x2="' + rx + '" y2="' + (PAD.t + IH) + '" stroke="var(--info)" stroke-width="1.5" stroke-dasharray="3 2" opacity="0.7"/>';
-    svg += '<text x="' + (parseFloat(rx) + 4) + '" y="' + (PAD.t + 12) + '" font-size="9.5" fill="var(--info)" opacity="0.85" font-family="SF Mono,ui-monospace,Menlo,monospace">LIVE</text>';
+    svg += '<text x="' + (parseFloat(rx) + 4) + '" y="' + (PAD.t + 12) + '" font-size="9.5" fill="var(--info)" opacity="0.85" font-family="SF Mono,ui-monospace,Menlo,monospace">START</text>';
   }
 
   // x-axis ticks + labels
@@ -8645,6 +8721,9 @@ function _mergeLiveMarks(data) {
     if (!_perf) _perf = { series: [] };
     Object.assign(_perf, data.performance || {});
     _safeRender('performance-live', renderPerformance);
+    if (Object.prototype.hasOwnProperty.call(data.performance || {}, 'series')) {
+      _safeRender('equity-curve-live', renderEquityCurve);
+    }
     _safeRender('positions-live', renderPositions);
     _safeRender('auto-banner-live', renderAutoBanner);
   }
@@ -8652,9 +8731,9 @@ function _mergeLiveMarks(data) {
   if (meta) {
     meta.status = meta.status || {};
     var perf = data.performance || {};
-    if (perf.current_nav != null) meta.status.nav = perf.current_nav;
-    if (perf.total_return_pct != null) meta.status.total_return_pct = perf.total_return_pct;
-    if (perf.day_change_pct != null) meta.status.day_change_pct = perf.day_change_pct;
+    if (Object.prototype.hasOwnProperty.call(perf, 'current_nav')) meta.status.nav = perf.current_nav;
+    if (Object.prototype.hasOwnProperty.call(perf, 'total_return_pct')) meta.status.total_return_pct = perf.total_return_pct;
+    if (Object.prototype.hasOwnProperty.call(perf, 'day_change_pct')) meta.status.day_change_pct = perf.day_change_pct;
     renderPortfolioSwitch();
   }
   renderLiveMarksStatus();
@@ -8715,6 +8794,8 @@ function _fetchPortfolioCritical(id, onAvailability) {
       if (book && book.account_preview) {
         snapshot.performance = Object.assign({ series: [] }, book.account_preview);
       }
+      // Legacy account previews cannot qualify unavailable performance values.
+      if (snapshot.performance && !snapshot.performance.availability) delete snapshot.performance;
       return snapshot;
     });
 }
