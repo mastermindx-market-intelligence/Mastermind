@@ -186,8 +186,13 @@ def _immutable_write(path: Path, payload: bytes) -> None:
             handle.flush()
             os.fsync(handle.fileno())
     except FileExistsError:
-        if path.is_symlink() or path.read_bytes() != payload:
+        if path.is_symlink():
             raise PublicationRefused("immutable_publication_collision")
+        with path.open("rb") as handle:
+            if handle.read() != payload:
+                raise PublicationRefused("immutable_publication_collision")
+            # Complete visible bytes may be an orphan from a failed file sync.
+            os.fsync(handle.fileno())
     if path.read_bytes() != payload:
         raise PublicationRefused("immutable_publication_readback_failed")
 
@@ -266,7 +271,9 @@ def publish_capture(capture: dict[str, Any], *, now: datetime | None = None) -> 
         if previous_meta.get("contract") == _CONTRACT:
             previous_clock = _capture_clock(previous_meta.get("captured_at"), checked_at=checked_at)
         if previous_meta.get("source_identity") == capture["source_identity"]:
-            if previous_meta.get("contract") != _CONTRACT or not dc.for_publication(previous):
+            previous_typed = dc.for_publication(previous)
+            if (previous_meta.get("contract") != _CONTRACT or not previous_typed
+                    or not dc.governor_membership_consistent(previous_typed)):
                 raise PublicationRefused("existing_committed_pair_invalid")
             _sync_directory(dc._ARTIFACT_DIR)
             _sync_directory(mv._ARTIFACT_DIR)
@@ -298,6 +305,8 @@ def publish_capture(capture: dict[str, Any], *, now: datetime | None = None) -> 
         view = json.loads(_json_bytes(view))
         typed = dc.assemble(sources["regime"], view, neural_web={}, region="us",
                             seq=seq, built_at=view["built_at"])
+        if not dc.governor_membership_consistent(typed):
+            raise PublicationRefused("typed_governor_membership_inconsistent")
         typed["publication"] = copy.deepcopy(common)
         typed_bytes = _json_bytes(typed)
         typed_hash = _sha(typed_bytes)

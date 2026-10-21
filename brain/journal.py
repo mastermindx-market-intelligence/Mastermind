@@ -181,7 +181,9 @@ def _planes_at_entry(
 ) -> dict | None:
     """Use the original trusted input receipt; date files do not prove availability."""
     from brain import perception_receipt
-    return perception_receipt.entry_planes(receipt, decision_timestamp=decision_timestamp)
+    return perception_receipt.entry_planes(
+        receipt, decision_timestamp=decision_timestamp, entry_date=entry_iso
+    )
 
 
 def _taxonomy_hint(row: dict) -> str:
@@ -251,8 +253,8 @@ def draft_resolutions(seat: str, asof: date | None = None, *, rows: list[dict] |
                     entry_iso, receipt=r.get("perception_input"),
                     decision_timestamp=r.get("decision_timestamp"),
                 ),
-                "entry_perception": r.get("perception_input"),
-                "entry_evidence_scope": "initial_prompt_projection_only",
+                "decision_perception": r.get("perception_input"),
+                "decision_evidence_scope": "initial_prompt_projection_only",
                 "entry_decision_id": r.get("decision_id"),
                 "entry_decision_timestamp": r.get("decision_timestamp"),
                 "outcome": outcome,

@@ -509,3 +509,73 @@ def test_parent_directory_sync_failure_cannot_acknowledge_first_publication(tmp_
     with pytest.raises(OSError, match="parent-link durability"):
         P.publish_capture(_capture(), now=NOW)
     assert not MV._LATEST_PATH.exists()
+
+
+
+def _fresh_mixed_market_dates():
+    sources = _sources()
+    sources["regime"]["risk_radar"]["state"] = "calm"
+    sources["regime"]["mtf_signals"] = {
+        "asof": "2026-10-20", "signals": [{"state": "long-bias"}],
+    }
+    return sources
+
+
+def test_typed_voter_ineligible_relative_to_regime_cannot_publish_confirmation():
+    capture = _capture(_fresh_mixed_market_dates())
+    with pytest.raises(P.PublicationRefused, match="typed_governor_membership_inconsistent"):
+        P.publish_capture(capture, now=NOW)
+    assert not MV._LATEST_PATH.exists()
+
+
+def test_legacy_pair_cannot_confirm_when_typed_voter_is_not_eligible():
+    sources = _fresh_mixed_market_dates()
+    view = MV.captured_view(sources, now=NOW, prev_view=None, seq=1)
+    view = json.loads(P._json_bytes(view))
+    typed = DC.assemble(sources["regime"], view, neural_web={}, seq=1,
+                        built_at=view["built_at"])
+    assert view["label_vs_planes"]["confirmed"] is True
+    assert view["net_posture_tilt"]["n_validated"] == 3
+    mtf = next(row for row in typed["signals"] if row["name"] == "mtf_signals")
+    assert mtf["allowed_effect"] == "shrink_only"
+    assert mtf["freshness"]["stale"] is True
+    for path, value in ((MV._LATEST_PATH, view), (DC._LATEST_PATH, typed)):
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(P._json_bytes(value))
+    result = DC.prompt_summary(now=NOW)
+    assert result["serving_freshness"]["current_assessment_available"] is False
+    assert "typed_governor_membership_inconsistent" in result["serving_freshness"]["reasons"]
+    assert result["governor"]["confirmed"] is False
+
+
+
+def test_retry_synchronizes_complete_orphan_file_before_publication(monkeypatch):
+    import os
+    import stat
+    real_sync = P.os.fsync
+    orphan_inode = []
+    def fail_first_file(descriptor):
+        info = os.fstat(descriptor)
+        if stat.S_ISREG(info.st_mode) and not orphan_inode:
+            orphan_inode.append((info.st_dev, info.st_ino))
+            raise OSError("synthetic interrupted immutable-file sync")
+        real_sync(descriptor)
+    monkeypatch.setattr(P.os, "fsync", fail_first_file)
+    with pytest.raises(OSError, match="interrupted immutable-file"):
+        P.publish_capture(_capture(), now=NOW)
+    assert not MV._LATEST_PATH.exists()
+    assert len(list(DC._ARTIFACT_DIR.glob("*.json"))) == 1
+    synced_files = set()
+    def record_sync(descriptor):
+        info = os.fstat(descriptor)
+        real_sync(descriptor)
+        if stat.S_ISREG(info.st_mode):
+            synced_files.add((info.st_dev, info.st_ino))
+    real_replace = P._atomic_replace
+    def commit(path, payload):
+        if path == MV._LATEST_PATH:
+            assert orphan_inode[0] in synced_files
+        real_replace(path, payload)
+    monkeypatch.setattr(P.os, "fsync", record_sync)
+    monkeypatch.setattr(P, "_atomic_replace", commit)
+    assert P.publish_capture(_capture(), now=NOW)["status"] == "published"

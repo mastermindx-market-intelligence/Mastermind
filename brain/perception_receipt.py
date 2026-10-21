@@ -73,7 +73,7 @@ def capture_projection(projection: dict[str, Any], rendered: str) -> dict[str, A
     checked = freshness.get("checked_at") if isinstance(freshness, dict) else None
     return {
         "schema_version": _SCHEMA, "scope": _SCOPE, "reader_contract": _READER,
-        "checked_at": checked or datetime.now(timezone.utc).isoformat(),
+        "checked_at": checked,
         "projection": copied, "rendered_context": rendered,
         "supplied": bool(rendered),
     }
@@ -140,6 +140,10 @@ def valid(receipt: Any, *, decision_timestamp: str | None = None) -> bool:
             return False
         if status == "unavailable" and receipt["projection"]:
             return False
+        if status == "captured" and (
+                receipt["projection"].get("serving_freshness", {}).get("checked_at")
+                != receipt.get("checked_at")):
+            return False
         unsigned = {k: v for k, v in receipt.items() if k != "receipt_sha256"}
         if hashlib.sha256(_bytes(unsigned)).hexdigest() != receipt["receipt_sha256"]:
             return False
@@ -152,7 +156,9 @@ def valid(receipt: Any, *, decision_timestamp: str | None = None) -> bool:
         return False
 
 
-def entry_planes(receipt: Any, *, decision_timestamp: str | None) -> dict[str, str] | None:
+def entry_planes(
+    receipt: Any, *, decision_timestamp: str | None, entry_date: str | None = None
+) -> dict[str, str] | None:
     """Read original eligible observations; never infer a replacement aggregate.
 
     The complete receipt preserves unavailable aggregate status and advisory
@@ -161,6 +167,17 @@ def entry_planes(receipt: Any, *, decision_timestamp: str | None) -> dict[str, s
     if not decision_timestamp or not valid(receipt, decision_timestamp=decision_timestamp):
         return None
     if receipt["supplied"] is not True or receipt["projection_status"] != "captured":
+        return None
+    try:
+        decision_day = _time(decision_timestamp).date()
+        entry_day = date.fromisoformat(entry_date) if entry_date is not None else decision_day
+        # A later/backdated run proves its actual prompt, not the earlier entry
+        # cohort. Preserve that receipt separately without rewriting cohort dates.
+        if (decision_day != entry_day
+                or _time(receipt["checked_at"]).date() > entry_day
+                or _time(receipt["sealed_at"]).date() > entry_day):
+            return None
+    except (TypeError, ValueError):
         return None
     projection = receipt["projection"]
     if not _digest(projection.get("publication", {}).get("artifact_sha256")):
@@ -172,7 +189,7 @@ def entry_planes(receipt: Any, *, decision_timestamp: str | None) -> dict[str, s
             continue
         try:
             source_day = date.fromisoformat(str(fresh.get("asof"))[:10])
-            if source_day > _time(receipt["checked_at"]).date():
+            if source_day > min(entry_day, _time(receipt["checked_at"]).date()):
                 continue
         except (TypeError, ValueError):
             continue

@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 import pytest
 
@@ -167,23 +167,24 @@ def test_self_mirror_preserves_trusted_input_for_the_existing_journal(monkeypatc
 def test_journal_retains_original_receipt_after_later_date_file_replacement(tmp_path, monkeypatch):
     receipt = _receipt()
     timestamp = datetime.now(timezone.utc).isoformat()
+    entry_day = datetime.now(timezone.utc).date()
     monkeypatch.setattr(journal, "_JOURNAL", tmp_path / "journal")
     monkeypatch.setattr(journal, "_ROOT", tmp_path)
     latest = tmp_path / "data" / "market_view"
     latest.mkdir(parents=True)
-    (latest / "2026-10-19.json").write_text(json.dumps({
-        "asof": "2026-10-19", "planes": {"risk_radar": {"direction": "risk_on"}},
+    (latest / (entry_day.isoformat() + ".json")).write_text(json.dumps({
+        "asof": entry_day.isoformat(), "planes": {"risk_radar": {"direction": "risk_on"}},
     }))
     rows = [{
-        "date": "2026-10-19", "ticker": "SYNTH", "outcome": 0, "rel": -0.1,
+        "date": entry_day.isoformat(), "ticker": "SYNTH", "outcome": 0, "rel": -0.1,
         "verb": "hold", "perception_input": receipt, "decision_timestamp": timestamp,
         "decision_id": "original-decision",
     }]
-    assert journal.draft_resolutions("autonomous", date(2026, 10, 20), rows=rows) == 1
+    assert journal.draft_resolutions("autonomous", entry_day + timedelta(days=1), rows=rows) == 1
     draft = journal.load_drafts("autonomous")[0]
     assert draft["planes_at_entry"] == {"risk_radar": "risk_off"}
-    assert draft["entry_perception"] == receipt
-    assert draft["entry_evidence_scope"] == "initial_prompt_projection_only"
+    assert draft["decision_perception"] == receipt
+    assert draft["decision_evidence_scope"] == "initial_prompt_projection_only"
     assert draft["entry_decision_id"] == "original-decision"
     assert draft["regime_context"] == ""
     assert draft["regime_context_scope"] == "resolution_time_only"
@@ -222,3 +223,53 @@ def test_nonfinite_legacy_projection_does_not_abort_receipt_sealing():
     assert receipt["rendered_context"] == rendered
     assert receipt.get("projection_status") == "unavailable"
     assert R.entry_planes(receipt, decision_timestamp=datetime.now(timezone.utc).isoformat()) is None
+
+
+
+@pytest.mark.parametrize("clock", [None, False, 0, "", "bad-clock"])
+def test_missing_or_invalid_assessment_clock_cannot_be_minted_at_sealing(clock):
+    from brain import perception_receipt as R
+    projection = _receipt()["projection"]
+    projection["serving_freshness"]["checked_at"] = clock
+    rendered = "Synthetic section with unproven assessment clock"
+    receipt = R.seal(R.capture_projection(projection, rendered), rendered)
+    assert receipt["projection_status"] == "unavailable"
+    assert R.entry_planes(receipt, decision_timestamp=datetime.now(timezone.utc).isoformat()) is None
+
+
+def test_absent_assessment_clock_cannot_be_minted_at_sealing():
+    from brain import perception_receipt as R
+    projection = _receipt()["projection"]
+    del projection["serving_freshness"]["checked_at"]
+    rendered = "Synthetic section without assessment clock"
+    receipt = R.seal(R.capture_projection(projection, rendered), rendered)
+    assert receipt["projection_status"] == "unavailable"
+
+
+@pytest.mark.parametrize("entry_day", ["2026-10-18", "2026-10-19"])
+def test_later_decision_receipt_cannot_attest_a_backdated_journal_entry(entry_day):
+    receipt = _receipt()
+    timestamp = datetime.now(timezone.utc).isoformat()
+    assert journal._planes_at_entry(entry_day, receipt=receipt,
+                                    decision_timestamp=timestamp) is None
+
+
+
+def test_backdated_journal_keeps_receipt_only_as_decision_provenance(tmp_path, monkeypatch):
+    from brain import perception_receipt as R
+    receipt = _receipt()
+    timestamp = datetime.now(timezone.utc).isoformat()
+    entry_day = datetime.now(timezone.utc).date() - timedelta(days=1)
+    monkeypatch.setattr(journal, "_JOURNAL", tmp_path / "journal")
+    monkeypatch.setattr(journal, "_regime_context", lambda asof: "")
+    rows = [{"date": entry_day.isoformat(), "ticker": "SYNTH", "outcome": 0,
+             "rel": -0.1, "verb": "hold", "perception_input": receipt,
+             "decision_timestamp": timestamp, "decision_id": "unchanged-id"}]
+    assert journal.draft_resolutions("autonomous", entry_day + timedelta(days=2), rows=rows) == 1
+    draft = journal.load_drafts("autonomous")[0]
+    assert draft["planes_at_entry"] is None
+    assert draft["decision_perception"] == receipt
+    assert R.valid(draft["decision_perception"], decision_timestamp=timestamp)
+    assert draft["decision_evidence_scope"] == "initial_prompt_projection_only"
+    assert draft["date"] == entry_day.isoformat()
+    assert draft["entry_decision_id"] == "unchanged-id"

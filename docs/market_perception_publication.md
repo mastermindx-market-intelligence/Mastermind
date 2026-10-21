@@ -28,6 +28,11 @@ or missing required source refuses publication.
 All adapters consume this captured object set at one assessment clock. Each plane
 retains its own source date. A regime date cannot refresh an old MTF observation.
 Radar, MTF and cycles must all remain eligible, present, directional and validated.
+The typed contract retains its context-market-date boundary. Its eligible voter
+set must exactly match its governor and the Market View contributors. A source
+that is fresh at capture but later than the regime date refuses publication;
+current readers also withdraw such an inconsistent legacy pair. Dates are never
+relabelled and no dissenting contributor is dropped to restore confirmation.
 An expired dissenting voter cannot disappear into a newly favorable consensus.
 A refusal preserves the last committed pair; the serving-time reader continues
 withdrawing eligibility from that older publication as its evidence expires.
@@ -57,10 +62,11 @@ metadata without a circular hash reference.
 
 Every ancestor link needed to reach the artifact directories is synchronized,
 including links left by an interrupted setup. Both immutable artifact entries
-are then synchronized before publication. A parent-link synchronization failure
+are then synchronized before publication. Reused immutable files are individually
+synchronized too: readable orphan bytes do not prove an interrupted file sync
+completed. A parent-link synchronization failure
 prevents a new commit. The publisher checks the previous latest-file bytes again
-before the single atomic
-rename of `market_view/latest.json`, which is the commit point. Readers follow
+before the single atomic rename of `market_view/latest.json`, which is the commit point. Readers follow
 that file's named typed copy, verify its digest and shared generation metadata,
 and refuse a malformed reference. They never scan orphan prepared files or fall
 back from a bad new-format reference to `decision_context/latest.json`.
@@ -90,7 +96,8 @@ The autonomous runner records the actual current-perception projection and the
 risk section rendered into its initial prompt, then seals the receipt before
 provider dispatch. The receipt carries the final prompt hash and is retained in
 the existing decision log from the trusted runner result. Provider or
-model-submitted provenance cannot replace it.
+model-submitted provenance cannot replace it. Missing or invalid original
+assessment clocks make the projection unavailable; sealing never invents one.
 
 This scope is the initial prompt's market-perception section. It does not assert
 which later MCP observations a model obtained or how it used an input. The receipt
@@ -99,8 +106,13 @@ or a new authority service.
 
 Existing self-mirror rows carry that receipt, original decision timestamp and
 decision ID into journal drafting. Historical entry planes require a valid bound
-receipt. A later date-only file cannot establish which intraday publication a
-decision saw. Historical rows without a receipt remain unknown. Resolution-time
+receipt whose actual decision day agrees with the existing entry day. The UTC
+date check is conservative where only a date-labelled cohort is available; it
+does not infer an earlier entry from a later run. A later date-only file cannot
+establish which intraday publication a decision saw. The complete receipt stays
+in decision_perception with decision_evidence_scope set to initial_prompt_projection_only,
+even when planes_at_entry is unknown. Historical rows without a receipt remain
+unknown. Resolution-time
 context is separately labelled and is never relabelled as entry-time evidence.
 This changes attribution, not grading, existing IDs, accepted target custody or
 the established forward cohort.

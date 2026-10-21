@@ -572,6 +572,42 @@ def assemble(
     }
 
 
+def governor_membership_consistent(ctx: dict[str, Any]) -> bool:
+    """The typed governor must name exactly its own eligible directional voters.
+
+    Signal eligibility keeps the existing context-market-date boundary. A fresh
+    MV source newer than that boundary is not silently dropped or relabelled.
+    """
+    try:
+        governor = ctx["governor"]
+        contributors = governor["contributors"]
+        signals = ctx["signals"]
+        if (not isinstance(contributors, list) or not isinstance(signals, list)
+                or any(not isinstance(name, str) for name in contributors)
+                or len(set(contributors)) != len(contributors)):
+            return False
+        voters = []
+        for row in signals:
+            if row.get("allowed_effect") != "governor_vote":
+                continue
+            if (row.get("layer") != "governor"
+                    or row["availability"].get("artifact_present") is not True
+                    or row["freshness"].get("stale") is not False
+                    or row["freshness"].get("future_dated") is not False
+                    or row.get("direction") not in {"risk_on", "risk_off", "neutral"}
+                    or not isinstance(row.get("name"), str)):
+                return False
+            voters.append(row["name"])
+        return (
+            len(set(voters)) == len(voters)
+            and set(voters) == set(contributors)
+            and type(governor.get("validated_present")) is int
+            and governor["validated_present"] == len(voters)
+        )
+    except (AttributeError, KeyError, TypeError, ValueError):
+        return False
+
+
 def for_publication(published: dict[str, Any]) -> dict[str, Any]:
     """Resolve only the immutable typed copy named by this committed publication.
 
@@ -648,6 +684,8 @@ def _current_context(
     try:
         if ctx.get("schema_version") != _SCHEMA_VERSION:
             reasons.append("decision_context_absent_or_invalid")
+        if not governor_membership_consistent(ctx):
+            reasons.append("typed_governor_membership_inconsistent")
         if _mv._freshness(ctx.get("market_asof"), now=checked_at)["stale"]:
             reasons.append("decision_context_expired")
         if (expected_publication is not None
