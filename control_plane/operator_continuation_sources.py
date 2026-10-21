@@ -7,11 +7,12 @@ second memory, lifecycle, or retry plane.
 from __future__ import annotations
 
 import dataclasses
+import re
 from collections.abc import Mapping
 from typing import Any
 
 from control_plane.executive_runtime import AttemptStatus, Runtime, StateConflict
-from control_plane.operator_continuation import OperatorContinuationDraft
+from control_plane.operator_continuation import GIT_OBJECT_ID_RE, OperatorContinuationDraft
 
 
 _TERMINAL = frozenset(
@@ -32,6 +33,7 @@ _ACTIVE = frozenset(
     }
 )
 _MAX_TEXT = 512
+_REPOSITORY_RE = re.compile(r"^[^/\s]+/[^/\s]+$")
 
 
 @dataclasses.dataclass(frozen=True)
@@ -131,7 +133,7 @@ def build_current_continuation_draft(
         "checkpoint_sequence": source.checkpoint_sequence,
     }
 
-    return OperatorContinuationDraft(
+    draft = OperatorContinuationDraft(
         root_job_id=job.root_job_id or job.job_id,
         job_id=job.job_id,
         source_attempt_id=source.attempt_id,
@@ -153,6 +155,17 @@ def build_current_continuation_draft(
         known_unknowns=known_unknowns,
         source_revisions=dict(refs.source_revisions),
     )
+
+    # The contract validates bounded grammar; this source boundary owns the
+    # required Git identity. Validate the normalized draft to retain the
+    # contract's provider/credential rejection before semantic sufficiency.
+    repository = draft.github_state.get("repository")
+    if not isinstance(repository, str) or _REPOSITORY_RE.fullmatch(repository) is None:
+        raise StateConflict("continuation GitHub repository must be owner/repo")
+    head_sha = draft.github_state.get("head_sha")
+    if not isinstance(head_sha, str) or GIT_OBJECT_ID_RE.fullmatch(head_sha) is None:
+        raise StateConflict("continuation GitHub head_sha must be a full Git object id")
+    return draft
 
 
 __all__ = ["ContinuationExternalRefs", "build_current_continuation_draft"]
