@@ -33,7 +33,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # The selected 83-file closure includes the optional physical-root path and
 # separate portable-custody/root-helper exports. Each executor transformation
 # remains independently pinned; the default remote support closure stays at 37.
-NATIVE_MANIFEST_SHA = "b84534318ec5162552c034f9201d95889ad52b44ff0cc53c58533884befb3ef7"
+NATIVE_MANIFEST_SHA = "2679c2f4108bcfb142f4e120ab8c4482ca24ceb236d30da1756e89197e8b45bd"
 
 
 def _sha(raw):
