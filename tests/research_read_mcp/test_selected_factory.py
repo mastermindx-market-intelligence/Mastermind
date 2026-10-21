@@ -1,5 +1,6 @@
 """Selected launcher proof with synthetic authority and transports, never live."""
 from dataclasses import dataclass, replace
+from datetime import datetime, timezone
 import time
 
 import pytest
@@ -95,8 +96,9 @@ def test_ready_never_prepares_or_claims_success_for_foreign_envelope():
     {"refresh_interval_seconds": 0}, {"refresh_interval_seconds": True},
     {"refresh_interval_seconds": 301},
     {"max_reuse_seconds": 301}, {"corpus_byte_budget": 0},
-    {"corpus_byte_budget": 192 * 1024 * 1024 + 1},
-    {"image_admission_bytes": 768 * 1024 * 1024 + 1},
+    {"corpus_byte_budget": True}, {"corpus_byte_budget": 256 * 1024 * 1024 + 1},
+    {"image_admission_bytes": 0}, {"image_admission_bytes": True},
+    {"image_admission_bytes": 1536 * 1024 * 1024 + 1},
 ])
 def test_invalid_options_refuse_before_import_or_release_verification(change):
     options = replace(SelectedReadOptions("a" * 40, lambda: False), **change)
@@ -104,6 +106,26 @@ def test_invalid_options_refuse_before_import_or_release_verification(change):
         compose_selected_macro_service("/missing/" + "b" * 40, "b" * 40, "c" * 40,
             release_verifier=lambda *args: pytest.fail("invalid options reached verifier"),
             options=options, clock=lambda: 1700000000)
+
+
+def test_default_byte_options_are_unchanged_by_new_ceilings():
+    options = SelectedReadOptions("a" * 40, lambda: False)
+    assert options.corpus_byte_budget == 32 * 1024 * 1024
+    assert options.image_admission_bytes == 256 * 1024 * 1024
+    options.validate()
+
+
+@pytest.mark.parametrize("change", [
+    {"corpus_byte_budget": 192 * 1024 * 1024},
+    {"image_admission_bytes": 768 * 1024 * 1024},
+    {"corpus_byte_budget": 256 * 1024 * 1024},
+    {"image_admission_bytes": 1536 * 1024 * 1024},
+    {"corpus_byte_budget": 256 * 1024 * 1024,
+     "image_admission_bytes": 1536 * 1024 * 1024},
+])
+def test_exact_new_byte_caps_are_accepted(change):
+    options = replace(SelectedReadOptions("a" * 40, lambda: False), **change)
+    options.validate()
 
 
 @pytest.mark.anyio
@@ -174,3 +196,80 @@ def test_selected_factory_requires_refresh_capability_before_building_store():
     with pytest.raises(ContractViolation, match="SOURCE_UNAVAILABLE"):
         build_selected(None, None, SimpleNamespace(QualifiedReadProvider=PriorProvider),
                        store, options, lambda: 1700000000)
+
+
+@pytest.mark.parametrize("change", [
+    {"corpus_byte_budget": 256 * 1024 * 1024 + 1},
+    {"image_admission_bytes": 1536 * 1024 * 1024 + 1},
+])
+def test_byte_caps_above_new_ceilings_refuse_before_store_construction(change):
+    from types import SimpleNamespace
+    from integrations.research_read_mcp.selected_factory import build_selected
+    class CapableProvider:
+        def refresh(self):
+            pass
+    store_module = SimpleNamespace(
+        build_store=lambda: pytest.fail("over-cap options reached store construction"))
+    options = replace(SelectedReadOptions("a" * 40, lambda: True), **change)
+    with pytest.raises(ContractViolation, match="SOURCE_UNAVAILABLE"):
+        build_selected(None, None, SimpleNamespace(QualifiedReadProvider=CapableProvider),
+                       store_module, options, lambda: 1700000000)
+
+
+def test_build_selected_forwards_explicit_new_caps_to_the_existing_provider():
+    from types import SimpleNamespace
+    from integrations.research_read_mcp.selected_factory import build_selected
+
+    def writer_policy():
+        return True
+
+    def clock():
+        return 1700000000
+
+    store = object()
+    service = object()
+
+    class StubQualifiedReadProvider:
+        def __init__(self, store_arg, **kwargs):
+            self.store = store_arg
+            self.kwargs = kwargs
+
+        def refresh(self):
+            pass
+
+    reader_module = SimpleNamespace(
+        QualifiedReadProvider=StubQualifiedReadProvider,
+        GuardedRead=type("StubGuardedRead", (), {}),
+        SelectedReadUnavailable=type("StubSelectedReadUnavailable", (Exception,), {}))
+    service_module = SimpleNamespace(ServerReadContext=type("StubServerReadContext", (), {}))
+    store_module = SimpleNamespace(build_store=lambda: store)
+    forwarded = {}
+
+    def build_qualified_read_service(provider, clock=None):
+        forwarded["provider"], forwarded["clock"] = provider, clock
+        return service
+
+    runtime = SimpleNamespace(build_qualified_read_service=build_qualified_read_service)
+    options = SelectedReadOptions("a" * 40, writer_policy,
+                                  corpus_byte_budget=256 * 1024 * 1024,
+                                  image_admission_bytes=1536 * 1024 * 1024)
+
+    composition = build_selected(runtime, service_module, reader_module, store_module,
+                                 options, clock)
+
+    provider = forwarded["provider"]
+    assert isinstance(provider, StubQualifiedReadProvider)
+    assert provider.store is store
+    assert provider.kwargs["expected_producer_commit"] == "a" * 40
+    assert provider.kwargs["writer_policy"] is writer_policy
+    assert provider.kwargs["clock"] is clock
+    assert provider.kwargs["max_age_seconds"] == 3600
+    assert provider.kwargs["max_reuse_seconds"] == 300
+    assert provider.kwargs["corpus_byte_budget"] == 256 * 1024 * 1024
+    assert provider.kwargs["image_admission_bytes"] == 1536 * 1024 * 1024
+    assert forwarded["clock"]() == datetime.fromtimestamp(1700000000, timezone.utc)
+    assert composition.service is service
+    assert composition.context_type is service_module.ServerReadContext
+    assert composition._provider is provider
+    assert composition._guarded_type is reader_module.GuardedRead
+    assert composition._unavailable_type is reader_module.SelectedReadUnavailable

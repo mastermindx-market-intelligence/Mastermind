@@ -89,43 +89,48 @@ def test_actual_control_factory_selects_same_runtime_and_sealed_context(tmp_path
     from control_plane.executive_runtime import Runtime
     from integrations.company_consultation_host import CompanyConsultationHost
     from integrations.product_acceptance_request_host import ProductAcceptanceRequestHost
-    raw, options = configured(tmp_path, monkeypatch, True)
-    Path(raw['proof_source_repository']).mkdir(parents=True,exist_ok=True)
-    raw['company_consultation'] = selection()|({'product_acceptance_armed':True} if selected else {})
-    captured = {}
-    import socket
-    # Launchd activation is a fixture; no production listener is opened.
-    def activated(name):
-        if name == 'CompanyConsultation':
-            return SimpleNamespace(family=socket.AF_UNIX,
-                getsockname=lambda: raw['company_consultation']['socket_path'], getsockopt=lambda *args: 1)
-        return object()
-    monkeypatch.setattr(cli, 'activate_launchd_socket', activated)
-    monkeypatch.setattr(executive_worker_broker,'WorkerBrokerClient',lambda *a,**kw: object())
-    def service(config, **bindings):
-        captured.update(bindings)
-        return SimpleNamespace(config=config)
-    monkeypatch.setattr(cli,'ExecutiveControlService',service)
-    instance = cli._service_from_config(raw, **options)
-    runtime = Runtime.at(tmp_path/'bound-runtime')
-    calls = []
-    def bind(actual): assert actual is runtime; calls.append(actual); return actual
-    instance._namespace_custody = SimpleNamespace(bound_runtime=bind)
-    owner = captured['company_consultation_binding'].host_factory(runtime)
-    assert type(owner) is CompanyConsultationHost and owner.runtime is runtime
-    assert owner.native_return_armed is False
-    if not selected:
-        assert owner.product_acceptance_host is None and calls==[]
-        return
-    request = owner.product_acceptance_host
-    assert type(request) is ProductAcceptanceRequestHost
-    assert request.runtime is request.principal_authority.workspace.runtime is runtime
-    assert request.reader._installed_context_owner._source_root == raw['proof_source_repository']
-    assert request.reader._installed_context_owner._macro_root == raw['ceo_ingress_app_macro_root']
-    assert request.relay_socket_path == owner.relay_socket_path == cli._CANONICAL_AGENT_RELAY_SOCKET
-    assert request.armed is True and calls==[runtime]
-    # No caller frame selected a Runtime, Context source or principal.
-    assert instance.config.coo_autonomy_armed is False
+    raw, options, fake_sockets = configured(tmp_path, monkeypatch, True)
+    prior = cli.activate_launchd_socket
+    try:
+        Path(raw['proof_source_repository']).mkdir(parents=True,exist_ok=True)
+        raw['company_consultation'] = selection()|({'product_acceptance_armed':True} if selected else {})
+        captured = {}
+        import socket
+        # Launchd activation is a fixture; no production listener is opened. The Control Room name gets the fixture's AF_UNIX listener.
+        def activated(name):
+            if name == 'CompanyConsultation':
+                return SimpleNamespace(family=socket.AF_UNIX,
+                    getsockname=lambda: raw['company_consultation']['socket_path'], getsockopt=lambda *args: 1)
+            return prior(name)
+        monkeypatch.setattr(cli, 'activate_launchd_socket', activated)
+        monkeypatch.setattr(executive_worker_broker,'WorkerBrokerClient',lambda *a,**kw: object())
+        def service(config, **bindings):
+            captured.update(bindings)
+            return SimpleNamespace(config=config)
+        monkeypatch.setattr(cli,'ExecutiveControlService',service)
+        instance = cli._service_from_config(raw, **options)
+        runtime = Runtime.at(tmp_path/'bound-runtime')
+        calls = []
+        def bind(actual): assert actual is runtime; calls.append(actual); return actual
+        instance._namespace_custody = SimpleNamespace(bound_runtime=bind)
+        owner = captured['company_consultation_binding'].host_factory(runtime)
+        assert type(owner) is CompanyConsultationHost and owner.runtime is runtime
+        assert owner.native_return_armed is False
+        if not selected:
+            assert owner.product_acceptance_host is None and calls==[]
+            return
+        request = owner.product_acceptance_host
+        assert type(request) is ProductAcceptanceRequestHost
+        assert request.runtime is request.principal_authority.workspace.runtime is runtime
+        assert request.reader._installed_context_owner._source_root == raw['proof_source_repository']
+        assert request.reader._installed_context_owner._macro_root == raw['ceo_ingress_app_macro_root']
+        assert request.relay_socket_path == owner.relay_socket_path == cli._CANONICAL_AGENT_RELAY_SOCKET
+        assert request.armed is True and calls==[runtime]
+        # No caller frame selected a Runtime, Context source or principal.
+        assert instance.config.coo_autonomy_armed is False
+    finally:
+        for listener in fake_sockets.values():
+            listener.close()
 
 
 def test_company_socket_refuses_acceptance_by_default_before_peer_access(tmp_path, monkeypatch):
