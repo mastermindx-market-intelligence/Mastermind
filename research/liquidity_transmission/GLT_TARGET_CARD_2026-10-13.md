@@ -7,6 +7,11 @@ Module: `brain/liquidity_lab/target_card.py` (`BROAD_TARGET_CARD_V1`, card versi
 
 - Frozen 2026-10-13. The freeze date is supplied by the caller (`build_broad_target_card(frozen_at=...)`);
   the module reads no wall clock.
+- Freeze hash. `BROAD_TARGET_CARD_V1_SHA256 = f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537`
+  is the canonical SHA-256 of `BROAD_TARGET_CARD_V1.to_dict()` (sorted keys, no whitespace).
+  `build_broad_target_card` refuses any `frozen_at` other than 2026-10-13 under v1 and refuses a
+  build whose content hash differs, so a registry edit cannot silently yield a different card still
+  labelled `glt_broad_target_card.v1`; it must mint v2. (T13 hardening, carried from the #1444 review.)
 - `validated=False`, always. The card is an outcome ruler fixed before any outcome is read, not a result.
 - Horizons are planning roles only until T14 fixes the primary.
 - Additive. It sits beside `TARGETS` / `TARGET_BY_ID` in `brain/liquidity_lab/contracts.py`,
@@ -128,6 +133,7 @@ Supporting tests:
 - `test_unruled_asset_class_fails_closed`
 - `test_card_module_reads_no_prices_and_no_clock`
 - `test_estimator_horizons_are_the_untouched_contracts_constant`
+- `test_registry_field_drift_cannot_stay_labelled_v1`
 
 ## GAPS
 

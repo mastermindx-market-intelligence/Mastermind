@@ -1396,7 +1396,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     from tests.executive_identity_review import _reviewed_ast_dump
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            '75089f050178c8b67bf56e41a976868eb9e0ea083aee421d84e4d256249272cb'):
+            '5ff13f90499f44f04bbfba96bde1190085a9587cd1f7c742182a91618ddf4af3'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
@@ -2565,3 +2565,181 @@ def test_d8_exact_r2_retained_permissions_remain_bound_to_source():
     for changed in (source.replace("!= 0o700", "!= 0o701", 1),
                     source + "\npeer_uid = 700\n", source + "\n# unrelated byte drift\n"):
         assert scan(changed)
+
+
+# ---- Native-fabric-quota-continuity release regression controls (2026-10-18) -
+# These bounded controls establish that the exact frozen postimages of the
+# five reviewed ops/native_fabric/quota_continuity/source/ sites are admitted
+# only when the postimage matches the whole-source SHA and the path is the
+# exact reviewed path. Any other byte, token, or path restores the generic
+# D8 scanner to that site. Reserved account literals and any non-reviewed
+# identity-bearing token appended to a reviewed source are still rejected.
+
+
+_REVIEWED_QC_SITES = (
+    {
+        "path": "ops/native_fabric/quota_continuity/source/artifact_production.py",
+        "literal": "0o700",
+        "drift_replacement": "0o701",
+        "sites": 2,
+        # Exercise every reviewed token independently: line is 1-indexed,
+        # column is 0-indexed, as in the reviewed token spans.
+        "mutation_sites": ((149, 77), (170, 85)),
+    },
+    {
+        "path": "ops/native_fabric/quota_continuity/source/bailian_keys.py.preimage",
+        "literal": "429",
+        "drift_replacement": "430",
+        "sites": 1,
+        "mutation_sites": ((540, 66),),
+    },
+    {
+        "path": "ops/native_fabric/quota_continuity/source/fabric_client_projection.py",
+        "literal": "443",
+        "drift_replacement": "444",
+        "sites": 2,
+        "mutation_sites": ((72, 30), (83, 15)),
+    },
+    {
+        "path": "ops/native_fabric/quota_continuity/source/fabric_operator_owner.py",
+        "literal": "660",
+        "drift_replacement": "661",
+        "sites": 2,
+        "mutation_sites": ((242, 81), (389, 85)),
+    },
+    {
+        "path": "ops/native_fabric/quota_continuity/source/glm_host_account_readiness.py",
+        "literal": "600",
+        "drift_replacement": "601",
+        "sites": 1,
+        "mutation_sites": ((31, 18),),
+    },
+)
+
+
+def _d8_qc_scan(content, *, actual_path, postimage=True):
+    """Build the exact-shape diff that the production gate consumes."""
+    return _scan_added_identity_diff(
+        _d8_frozen_source_diff(actual_path, content),
+        source_postimages={actual_path: content} if postimage else None,
+    )
+
+
+@pytest.mark.parametrize("site", _REVIEWED_QC_SITES, ids=lambda site: site["path"])
+def test_d8_quota_continuity_exact_postimage_passes(site):
+    """Exact frozen postimage: every reviewed site scans clean."""
+    source = (ROOT / site["path"]).read_text()
+    assert _d8_qc_scan(source, actual_path=site["path"]) == []
+
+
+@pytest.mark.parametrize("site", _REVIEWED_QC_SITES, ids=lambda site: site["path"])
+def test_d8_quota_continuity_missing_postimage_exposes_every_literal(site):
+    """No source_postimage: every reviewed literal is re-exposed."""
+    source = (ROOT / site["path"]).read_text()
+    findings = _d8_qc_scan(source, actual_path=site["path"], postimage=False)
+    assert findings == [site["literal"]] * site["sites"]
+
+
+@pytest.mark.parametrize("site", _REVIEWED_QC_SITES, ids=lambda site: site["path"])
+def test_d8_quota_continuity_wrong_path_exposes_every_literal(site):
+    """Identical source bytes at an unreviewed path receive no masking."""
+    source = (ROOT / site["path"]).read_text()
+    # Preserve the original filename and all identity-bearing path words.
+    # Only the exact path binding changes; the whole-source SHA still matches.
+    other_path = "unreviewed/" + site["path"]
+    assert other_path not in REVIEWED_FILES
+    assert mask_reviewed_identity_literals(other_path, source) == source
+    findings = _d8_qc_scan(source, actual_path=other_path)
+    assert findings == [site["literal"]] * site["sites"]
+
+
+@pytest.mark.parametrize(
+    ("site", "line", "col"),
+    [pytest.param(site, line, col, id=f"{site['path']}:{line}:{col}")
+     for site in _REVIEWED_QC_SITES for line, col in site["mutation_sites"]],
+)
+def test_d8_quota_continuity_literal_mutation_is_exposed(site, line, col):
+    """A single mutated reviewed literal invalidates the pin for every site."""
+    source = (ROOT / site["path"]).read_text()
+    # Mutate exactly the byte range of one reviewed site. The whole-source
+    # SHA no longer matches the pinned digest, so the entire file is scanned
+    # again: the mutated literal is exposed and the surviving reviewed
+    # literals reappear in identity context.
+    lines = source.splitlines()
+    target = lines[line - 1]
+    end = col + len(site["literal"])
+    assert target[col:end] == site["literal"], (
+        f"reviewed site at {site['path']}:{line}:{col} "
+        f"drifted unexpectedly"
+    )
+    lines[line - 1] = target[:col] + site["drift_replacement"] + target[end:]
+    mutated = "\n".join(lines)
+    if source.endswith("\n"):
+        mutated += "\n"
+    assert mutated != source
+    findings = _d8_qc_scan(mutated, actual_path=site["path"])
+    assert site["drift_replacement"] in findings, findings
+    # Every surviving reviewed literal in this file reappears because the
+    # SHA pin no longer applies; the count is at least one less than the
+    # total reviewed sites because one has been replaced.
+    assert findings.count(site["literal"]) == site["sites"] - 1, findings
+
+
+@pytest.mark.parametrize("site", _REVIEWED_QC_SITES, ids=lambda site: site["path"])
+def test_d8_quota_continuity_arbitrary_byte_drift_invalidates_pin(site):
+    """An unrelated byte change invalidates the SHA pin: every reviewed literal re-emerges."""
+    source = (ROOT / site["path"]).read_text()
+    lines = source.splitlines()
+    # Replace one byte in a non-reviewed, non-literal line. ASCII-only
+    # find-and-replace guarantees the resulting source still tokenizes.
+    drifted = source.replace("the ", "thE ", 1)
+    assert drifted != source
+    findings = _d8_qc_scan(drifted, actual_path=site["path"])
+    # Every reviewed literal in this file becomes visible again because the
+    # whole-source SHA no longer matches the pinned digest.
+    assert findings == [site["literal"]] * site["sites"]
+
+
+@pytest.mark.parametrize("site", _REVIEWED_QC_SITES, ids=lambda site: site["path"])
+def test_d8_quota_continuity_appended_peer_uid_remains_rejected(site):
+    """An appended ``peer_uid = 777`` is still rejected on a reviewed postimage."""
+    source = (ROOT / site["path"]).read_text()
+    appended = source + "\npeer_uid = 777\n"
+    findings = _d8_qc_scan(appended, actual_path=site["path"])
+    # peer_uid is identity-bearing; the appended line is rejected.
+    assert "777" in findings
+
+
+@pytest.mark.parametrize("site", _REVIEWED_QC_SITES, ids=lambda site: site["path"])
+def test_d8_quota_continuity_appended_unrelated_drift_still_flags_lost_sha(site):
+    """An unrelated comment appended after a drift still re-exposes reviewed literals."""
+    source = (ROOT / site["path"]).read_text()
+    drifted = source.replace("the ", "thE ", 1) + "\n# unrelated byte drift\n"
+    findings = _d8_qc_scan(drifted, actual_path=site["path"])
+    assert findings == [site["literal"]] * site["sites"]
+
+
+def test_d8_quota_continuity_reviewed_sha_in_reviewed_files_table():
+    """Every released source site is registered in REVIEWED_FILES with the
+    exact frozen SHA. A drifted or removed pin would silently re-expose the
+    site to D8; the table is the audit surface."""
+    expected_sha = {
+        "ops/native_fabric/quota_continuity/source/artifact_production.py":
+            "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+        "ops/native_fabric/quota_continuity/source/bailian_keys.py.preimage":
+            "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+        "ops/native_fabric/quota_continuity/source/fabric_client_projection.py":
+            "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6",
+        "ops/native_fabric/quota_continuity/source/fabric_operator_owner.py":
+            "a9d5adfa90d081b460a6ad751a705add7ca0387e66266d9cea37eb99c8c09d04",
+        "ops/native_fabric/quota_continuity/source/glm_host_account_readiness.py":
+            "b8921960e7e46a472b536895b5a6491096627d1c8fd58ea0baf283ff34accc07",
+    }
+    for path, sha in expected_sha.items():
+        entry = REVIEWED_FILES.get(path)
+        assert entry is not None, f"{path} missing from REVIEWED_FILES"
+        assert entry["sha256"] == sha, f"{path} SHA drifted"
+        with open(ROOT / path, "rb") as raw:
+            assert hashlib.sha256(raw.read()).hexdigest() == sha, (
+                f"{path} on-disk bytes do not match its pinned SHA"
+            )

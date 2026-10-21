@@ -159,7 +159,7 @@ def _doctrine() -> dict[str, Any]:
     return {}
 
 
-def _trading_days_since(as_of: str | None) -> int | None:
+def _trading_days_since(as_of: str | None, *, today: date | None = None) -> int | None:
     """Count NYSE trading sessions strictly between *as_of* (YYYY-MM-DD) and today.
 
     Reuses the freshness()-style arithmetic but on a trading-day basis (the cycle
@@ -169,7 +169,8 @@ def _trading_days_since(as_of: str | None) -> int | None:
 
     A same-day or future asOf returns 0.  Weekends and NYSE holidays are excluded
     via portfolio.market_calendar.is_trading_day so a Friday read is not "stale" by
-    Monday.  Falls back to a calendar-weekday count if the calendar import fails.
+    Monday. Falls back to a calendar-weekday count if the calendar import fails.
+    An explicit today lets a read projection use one clock for its entire assessment.
     """
     if not as_of:
         return None
@@ -177,7 +178,7 @@ def _trading_days_since(as_of: str | None) -> int | None:
         d0 = date.fromisoformat(str(as_of))
     except (ValueError, TypeError):
         return None
-    today = datetime.now(tz=timezone.utc).date()
+    today = today if today is not None else datetime.now(tz=timezone.utc).date()
     if d0 >= today:
         return 0
     try:

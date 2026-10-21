@@ -1,0 +1,86 @@
+--- a/go_remote_run.py
++++ b/go_remote_run.py
+@@ -3,6 +3,7 @@
+ from __future__ import annotations
+ import argparse
+ import json
++import math
+ import os
+ from pathlib import Path
+ import re
+@@ -138,7 +139,8 @@
+     require(spec['lease_id'] not in active)
+ 
+ 
+-def worker_command(spec, home, cwd, capsule, max_active, load_ratio):
++def worker_command(spec, home, cwd, capsule, max_active, load_ratio, *,
++                   min_free_mem_gb=0, max_cpu_tctl_c=0, min_free_disk_gb=0):
+     # All metadata is shell-quoted. Provider/root tokens never enter argv.
+     env = {
+         'PYTHONDONTWRITEBYTECODE': '1', 'LANE_LEASED': '1',
+@@ -148,6 +150,11 @@
+         'REMOTE_SUB_CHILD_TIMEOUT': str(spec['child_timeout']),
+         'LANE_MAX_ACTIVE': str(max_active), 'LANE_MAX_LOAD_RATIO': str(load_ratio),
+         'LANE_NICE': '10',
++        # Same last-mile physical LaneLease checks as ordinary Fabric lanes;
++        # Go's different transport must not silently drop host safeguards.
++        'LANE_MIN_FREE_MEM_GB': str(min_free_mem_gb),
++        'LANE_MAX_CPU_TCTL_C': str(max_cpu_tctl_c),
++        'LANE_MIN_FREE_DISK_GB': str(min_free_disk_gb),
+     }
+     for name in ('POOL_PARENT_RUN_ID', 'POOL_TASK_CLASS', 'POOL_ESCALATION_REASON'):
+         env[name] = os.environ.get(name, '')
+@@ -171,6 +178,17 @@
+     require(type(args.child_timeout) is int and 1 <= args.child_timeout <= 240)
+     require(type(args.max_active) is int and 1 <= args.max_active <= 32)
+     require(0 < args.load_ratio <= 2)
++    # Existing callers may omit new optional flags. Remote-sub's canonical
++    # host-registry path always supplies them for enrolled production hosts.
++    mem_limit = getattr(args, 'min_free_mem_gb', 0)
++    thermal_limit = getattr(args, 'max_cpu_tctl_c', 0)
++    disk_limit = getattr(args, 'min_free_disk_gb', 0)
++    require(type(mem_limit) in (int, float) and math.isfinite(mem_limit)
++            and 0 <= mem_limit <= 256)
++    require(type(thermal_limit) in (int, float) and math.isfinite(thermal_limit)
++            and (thermal_limit == 0 or 50 <= thermal_limit <= 100))
++    require(type(disk_limit) in (int, float) and math.isfinite(disk_limit)
++            and 0 <= disk_limit <= 2048)
+     require(re.fullmatch('[0-9a-f]{64}', args.support_digest))
+     helper = None; helper_cleanup = None; worker = None; terminal = None
+     launched = False; settled = False; failure = None; rc = 78
+@@ -208,8 +226,12 @@
+         require(helper.poll() is None)
+         launched = True  # Any ambiguous SSH start preserves the lease until reconciliation.
+         worker = run_owned_process(
+-            ssh(args.ssh_alias, worker_command(spec, home, args.cwd, ready['capsule_file'],
+-                                               args.max_active, args.load_ratio)),
++            ssh(args.ssh_alias, worker_command(
++                spec, home, args.cwd, ready['capsule_file'],
++                args.max_active, args.load_ratio,
++                min_free_mem_gb=mem_limit,
++                max_cpu_tctl_c=thermal_limit,
++                min_free_disk_gb=disk_limit)),
+             timeout=args.child_timeout+15, timeout_returncode=124,
+             label=args.run_id+'-worker-ssh', receipt_path=base/(args.run_id+'.go-ssh.jsonl'))
+         Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+@@ -273,6 +295,9 @@
+     p.add_argument('--child-timeout',type=int,required=True)
+     p.add_argument('--max-active',type=int,required=True)
+     p.add_argument('--load-ratio',type=float,required=True)
++    p.add_argument('--min-free-mem-gb',type=float,default=0)
++    p.add_argument('--max-cpu-tctl-c',type=float,default=0)
++    p.add_argument('--min-free-disk-gb',type=float,default=0)
+     try: return run(p.parse_args(argv))
+     except Exception:
+         print('GO_REMOTE_RUN_REFUSED',file=sys.stderr);return 78
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -802,6 +802,8 @@
+     --host "$HOST_ARG" --ssh-alias "$SSH_ALIAS" --model "$MODEL" --cwd "$REMOTE_CWD" \
+     --support-digest "$SUPPORT_DIGEST" --child-timeout "$CHILD_TIMEOUT" \
+     --max-active "$MAX_ACTIVE" --load-ratio "$LANE_HOST_LOAD_RATIO" \
++    --min-free-mem-gb "$MIN_FREE_MEM_GB" --max-cpu-tctl-c "$MAX_CPU_TCTL_C" \
++    --min-free-disk-gb "$MIN_FREE_DISK_GB" \
+     --out "$LOCAL_OUT" --receipt "$GO_RUN_RECEIPT" || RC=$?
+   if "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" go-settled "$GO_RUN_RECEIPT" "$ID" "$ORCH_ID" "$LEASE_ID" "$POOL_ACCOUNT" "$HOST_ARG" "$MODEL"
+   then PRESERVE_LEASE=0; log "GO_SETTLED receipt=$(basename "$GO_RUN_RECEIPT")"

@@ -64,6 +64,8 @@ _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
 _PLAN_ROUTE = "/workspace/plan/current"
+_ACTIVITY_ROUTE = "/workspace/operator/activity/current"
+_ACTIVITY_QUERY_KEYS = frozenset({"work_ref", "root_job_id", "job_id", "attempt_id"})
 _MISSION_QUERY_KEYS = frozenset({"work_ref", "root_job_id"})
 _RESULT_QUERY_KEYS = frozenset(
     {"work_ref", "root_job_id", "job_id", "attempt_id", "result_envelope_digest"}
@@ -334,6 +336,12 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return None
     if operation == "result":
         return _v2_selection(query)
+    if operation == "retained_activity":
+        from common import executive_workspace_activity_contract as activity
+        try:
+            return activity.selection(dict(query))
+        except (TypeError, ValueError):
+            return None
     if operation in ("mission_v3", "admitted_plan"):
         return _mission_v3_selection(query)
     if operation == "mission_v4":
@@ -721,6 +729,12 @@ async def _dispatch_v2(
                 "schema": acceptance_contract.FRAME_SCHEMA, "operation": operation,
                 "selection": selection_value, "principal": principal_frame,
             })
+        elif operation == "retained_activity":
+            from common import executive_workspace_activity_contract as activity
+            frame = activity.validate_frame({
+                "schema": activity.FRAME_SCHEMA, "operation": activity.OPERATION,
+                "selection": activity.selection(selection_value), "principal": principal_frame,
+            })
         elif operation == "admitted_plan":
             frame = contract.validate_v3_frame({
                 "schema": contract.FRAME_SCHEMA_V3, "operation": operation,
@@ -759,7 +773,7 @@ async def _dispatch_v2(
             return _refuse_json(403, "access_denied")
     except Exception:
         return _refuse_json(403, "access_denied")
-    if operation == "admitted_plan" and isinstance(envelope, dict) and envelope.get("ok") is True:
+    if operation in ("admitted_plan", "retained_activity") and isinstance(envelope, dict) and envelope.get("ok") is True:
         body = envelope.get("result")
         if type(body) is not dict or body.get("selection") != selection_value:
             return _refuse_json(503, "source_unavailable")
@@ -876,15 +890,10 @@ def _plan_envelope_response(envelope):
                 if type(reasons) is not list or len(reasons) != 1 or envelope != contract.plan_unavailable(selected, reasons[0]):
                     return _refuse_json(503, "source_unavailable")
             else:
-                observed = body["source_observation"]
                 if (body["reason_codes"] != [] or type(body["plan"]) is not dict
-                        or body["plan"].get("root_job_id") != selected["root_job_id"]
-                        or type(observed) is not dict
-                        or set(observed) != {"schema", "state", "selection", "control_room", "runtime"}
-                        or observed["schema"] != contract.PLAN_OBSERVATION_SCHEMA
-                        or observed["state"] != "SAME" or observed["selection"] != selected
-                        or type(observed["control_room"]) is not dict or type(observed["runtime"]) is not dict):
+                        or body["plan"].get("root_job_id") != selected["root_job_id"]):
                     return _refuse_json(503, "source_unavailable")
+                contract.validate_available_plan_observation(body["source_observation"], selected)
             try:
                 contract.bounded_canonical(envelope, limit=contract.MAX_PLAN_RESPONSE_BYTES - 1)
             except (TypeError, ValueError):
@@ -897,6 +906,30 @@ def _plan_envelope_response(envelope):
 async def plan_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
     return await _dispatch_v2(request, config=config, operation="admitted_plan",
                               required_keys=_MISSION_QUERY_KEYS, response_fn=_plan_envelope_response)
+
+
+def _activity_envelope_response(envelope):
+    """Closed 16KiB App boundary; never echo raw owner or provider fields."""
+    from common import executive_workspace_activity_contract as activity
+    if type(envelope) is dict and envelope.get("ok") is True:
+        try:
+            if set(envelope) != {"ok", "result"}:
+                raise ValueError("invalid_response")
+            body = envelope["result"]
+            selected = activity.selection(body["selection"])
+            activity.validate_result(body, selected)
+            contract.bounded_canonical(envelope, limit=activity.MAX_RESPONSE_BYTES - 1)
+        except (TypeError, ValueError, KeyError):
+            return _refuse_json(503, "source_unavailable")
+    return _v2_envelope_response(envelope, operation="result")
+
+
+async def activity_current(request: Request, *, config: WorkspaceAppConfig) -> JSONResponse:
+    """One original Executive OHF Attempt, not a native machine/Fabric catalog."""
+    return await _dispatch_v2(
+        request, config=config, operation="retained_activity",
+        required_keys=_ACTIVITY_QUERY_KEYS, response_fn=_activity_envelope_response,
+    )
 
 
 class _RawPathFence:
@@ -917,6 +950,7 @@ class _RawPathFence:
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
         _PLAN_ROUTE,
+        _ACTIVITY_ROUTE,
     )
 
     def __init__(self, app: Any) -> None:
@@ -975,6 +1009,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
+    async def activity_endpoint(request: Request) -> JSONResponse:
+        return await activity_current(request, config=config)
+
     routes = [
         Route(_PROGRAMS_ROUTE, programs_endpoint, methods=["GET"]),
         Route(_WORK_ROUTE, work_endpoint, methods=["GET"]),
@@ -983,6 +1020,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
+        Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
     ]
     application = Starlette(routes=routes)
     # Never silently rewrite a trailing-slash alias onto a different route:

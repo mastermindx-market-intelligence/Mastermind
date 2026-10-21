@@ -35,9 +35,15 @@ from brain.liquidity_lab.contracts import (
     TARGET_BY_ID,
     TARGETS,
     ContractError,
+    canonical_hash,
 )
 
 CARD_VERSION = "glt_broad_target_card.v1"
+# v1 is frozen. The freeze date and the canonical content hash are part of the
+# version: a different date, or any registry edit that changes a card field, must
+# mint a new card version instead of silently yielding a different "v1".
+V1_FROZEN_AT = date(2026, 10, 13)
+BROAD_TARGET_CARD_V1_SHA256 = "f53d9296ae1556544a0d55d1a3d742bbc169138c0ae04b5a458ceb6eaf3c5537"
 RETURN_BASES = ("price", "total_return", "excess_vs_benchmark")
 DEFAULT_RETURN_BASIS = "total_return"
 QUOTE_CURRENCY = "USD"
@@ -221,8 +227,13 @@ class BroadTargetCard:
 
 
 def build_broad_target_card(*, frozen_at: date) -> BroadTargetCard:
-    """Build the card from the registry as it stands; the caller supplies the freeze date."""
+    """Build the v1 card from the registry; the caller supplies the freeze date, which v1 pins."""
     _require_date(frozen_at, "frozen_at")
+    if frozen_at != V1_FROZEN_AT:
+        raise ContractError(
+            f"{CARD_VERSION} is frozen at {V1_FROZEN_AT.isoformat()}; "
+            "a different freeze date needs a new card version"
+        )
     if not set(PLANNING_HORIZONS) <= set(HORIZONS_BDAYS):
         raise ContractError("planning horizons must be registered HORIZONS_BDAYS")
     excluded_ids = {target_id for target_id, _ in EXCLUDED}
@@ -264,7 +275,7 @@ def build_broad_target_card(*, frozen_at: date) -> BroadTargetCard:
             raise ContractError(
                 f"benchmark {entry.benchmark!r} of {entry.target_id!r} is not itself a card entry"
             )
-    return BroadTargetCard(
+    card = BroadTargetCard(
         card_version=CARD_VERSION,
         frozen_at=frozen_at,
         entries=tuple(entries),
@@ -279,9 +290,15 @@ def build_broad_target_card(*, frozen_at: date) -> BroadTargetCard:
         fx_note=FX_NOTE,
         basis_rulings=BASIS_RULINGS,
     )
+    if canonical_hash(card.to_dict()) != BROAD_TARGET_CARD_V1_SHA256:
+        raise ContractError(
+            f"{CARD_VERSION} content hash drifted from BROAD_TARGET_CARD_V1_SHA256; "
+            "a registry change needs a new card version"
+        )
+    return card
 
 
-BROAD_TARGET_CARD_V1 = build_broad_target_card(frozen_at=date(2026, 10, 13))
+BROAD_TARGET_CARD_V1 = build_broad_target_card(frozen_at=V1_FROZEN_AT)
 
 
 def validate_return_basis(
@@ -358,6 +375,7 @@ __all__ = [
     "ANCHOR_RULE",
     "BASIS_RULINGS",
     "BROAD_TARGET_CARD_V1",
+    "BROAD_TARGET_CARD_V1_SHA256",
     "CALENDAR_COVERAGE",
     "CALENDAR_OWNER",
     "CARD_VERSION",
@@ -370,6 +388,7 @@ __all__ = [
     "RETURN_BASES",
     "SESSION_CALENDAR",
     "UNDERLYING_HOLIDAY_NOTE",
+    "V1_FROZEN_AT",
     "BroadTargetCard",
     "TargetCardEntry",
     "anchor_session",
