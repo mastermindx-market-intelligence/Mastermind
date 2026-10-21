@@ -859,8 +859,16 @@ def _macro_refresh_job():
     handle = _ledger_start("macro_refresh", trigger="cron")
     try:
         from data_layer import macro_refresh
-        macro_refresh.refresh_and_check()
-        _ledger_end(handle, "ok")
+        info = macro_refresh.refresh_and_check()
+        from brain import perception_publication
+        publication = perception_publication.publish_after_refresh(info)
+        accepted = publication.get("status") in {"published", "unchanged"}
+        _ledger_end(handle, "ok" if accepted else "error")
+        if not accepted:
+            log.warning("perception publication unavailable: %s", publication.get("reason"))
+        else:
+            log.info("perception publication %s seq=%s",
+                     publication.get("status"), publication.get("seq"))
     except Exception as exc:  # noqa: BLE001 — a refresh miss must never kill the scheduler
         _ledger_end(handle, "error")
         log.warning("macro_refresh failed: %s", exc)
