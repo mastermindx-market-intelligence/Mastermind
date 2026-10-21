@@ -710,6 +710,10 @@ ALLOWED_PATHS = frozenset(
         "docs/superpowers/plans/2026-10-21-harness2-agentos-native-adaptation.md",
         "scripts/agent_eval/harness2_bridge.py",
         "tests/test_agent_eval_harness2_bridge.py",
+        # Same Chairman-authorized Harness2/1663 continuation: pure byte-bound
+        # importer plus tests. Runtime/provider/config restrictions stay intact.
+        "scripts/agent_eval/harness2_native.py",
+        "tests/test_agent_eval_harness2_native.py",
     }
 )
 

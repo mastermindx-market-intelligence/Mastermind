@@ -123,3 +123,62 @@ correct parent consumption are essential.
 
 **Do not misreport green source tests or an isolated candidate comparison as
 Harness^2 fully installed or Agent OS autonomously self-improving.**
+
+## Continuation: actual upstream/native observation composition
+
+The current Chairman continuation explicitly requests research, planning and
+implementation through completion. The original PR/branch remains the source
+carrier; its prior manually provisioned clean worktree is preserved, not
+relabelled as a managed workspace or silently re-homed. New workspace acquisition
+continues to require the installed custody owner.
+
+Important research correction: Harness2 starts each new task from H0. Its
+per-domain library influences the improver; it does not blindly deploy the prior
+task's adopted harness. Task-local experimentation, cross-task experience, and
+fleet-wide policy promotion are separate operations. The library and stage
+instructions are fixed during each task. The reference selector chooses among
+composed finals and adoption is not verified optimality.
+
+`scripts/agent_eval/harness2_native.py` now implements a real format adapter for
+upstream `core/schedule.py::_run_one_mode` at the pinned upstream source. Inputs
+are retained raw summary/native-observation/output bytes, the complete resolved
+harness-file inventory, and an independently supplied expected binding digest.
+The binding joins one selected upstream rollout to its existing native EVAL run,
+scenario and configuration. Strong SHA256 hashes bind all retained bytes;
+upstream's truncated SHA1 is used only for serialization compatibility.
+
+The adapter checks duplicates, nonfinite numbers, nesting/byte/file limits,
+source/task/mode/budget/run identity, complete finals, fallback and errors,
+canonical native shapes and exact configuration/output joins. It never follows
+`chosen_run_dir` or any upstream path. It appends provenance to the existing
+native evidence list, then uses the incumbent EVAL finalizer. An existing
+ArtifactStore handles create-only publication and conflict detection. There is
+no new store, runner, scheduler, provider route or promotion decision.
+
+Authentication remains external: matching a caller-supplied hash does not prove
+who issued it or whether supplied observations were truthful. Effect, cleanup,
+model and fresh-session observations come from the original native runner and
+are never synthesized from upstream success flags. Unknown model fields that
+violate native schema are refused, not filled with a guessed model. Invalid
+native effect/cleanup observations survive as invalid native run receipts.
+The importer covers selected completed artifacts; it does not replace native
+failure recording or provide a complete experiment's enumeration by itself.
+
+Current local check: native import tests + original bridge + existing inertness
+suite: 194 passed. This is synthetic source/contract and real native ArtifactStore
+round-trip proof, not real model execution, holdout efficacy, live admission,
+independent review or production acceptance. No provider or application was
+installed or altered.
+
+Delegation evidence: existing paid Fabric reviewer
+`harness2-1663-review-20261021-01` (same root/parent
+`harness2-agentos-evidence-20261021`) returned terminal rc1, no review, with
+`QWEN_FINAL_RESPONSE_UNCONFIRMED` and provider 429. A distinct bounded adapter
+build request `harness2-1663-adapter-build-20261021-01` first refused an optional
+unqualified continuation contract before dispatch; exact status remained NOT_FOUND.
+One bounded retry without that unsupported option returned no eligible remote
+mode: Ubuntu disk/thermal/recovery/qualification blockers. No worker source effect
+or accepted review is claimed. Direct bounded source implementation uses
+NO_ELIGIBLE_PRE_EFFECT_WORKER; required independent review remains outstanding.
+Executive v3 reader separately returned backend_unavailable before dispatch.
+Neither failure proves every provider or all runtime writes unavailable.
