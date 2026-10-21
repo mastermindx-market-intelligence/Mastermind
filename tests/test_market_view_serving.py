@@ -322,3 +322,87 @@ setImmediate(() => process.stdout.write(JSON.stringify(nodes)));
         assert "stale</span>" in body
     if case == "mixed":
         assert 'Eligible planes:</span> <span class="v"><span class="num">1</span>' in body
+
+
+
+def test_expiry_preserves_historical_defensive_floor_without_current_authority():
+    published = _published({"risk_radar": _plane("risk_off", asof=OLD)})
+    served = _project(published)
+    assert served["posture_floor_defense"] is True
+    assert served["serving_freshness"]["posture_floor_defense_scope"] == "as_published"
+    assert served["serving_freshness"]["current_posture_floor_available"] is False
+
+
+@pytest.mark.parametrize("corruption", [
+    "confirmed", "relationship", "conflict", "magnitude", "dissenting_planes", "missing",
+])
+def test_inconsistent_original_comparison_cannot_gain_confirmation(corruption):
+    published = _published()
+    if corruption == "missing":
+        published["label_vs_planes"].pop("confirmed")
+    else:
+        published["label_vs_planes"][corruption] = {
+            "confirmed": False, "relationship": "unconfirmed", "conflict": True,
+            "magnitude": 0.0, "dissenting_planes": ["risk_radar"],
+        }[corruption]
+    served = _project(published)
+    assert served["label_vs_planes"]["confirmed"] is False
+    assert served["serving_freshness"]["current_confirmation_available"] is False
+    assert served["serving_freshness"]["label_reason"] == "published_label_comparison_inconsistent"
+
+
+def test_inconsistent_published_floor_is_not_asserted_as_current():
+    published = _published()
+    published["posture_floor_defense"] = True
+    served = _project(published)
+    assert served["posture_floor_defense"] is True
+    assert served["serving_freshness"]["current_posture_floor_available"] is False
+    assert served["serving_freshness"]["label_reason"] == "published_posture_floor_inconsistent"
+
+
+@pytest.mark.parametrize("coherence", [1.0, None, float("nan"), "0.5", True])
+def test_unverifiable_original_coherence_is_withheld_not_repaired(coherence):
+    published = _published({"risk_radar": _plane("risk_off"),
+                            "mtf_signals": _plane("risk_on")})
+    assert published["coherence"] == 0.5
+    published["coherence"] = coherence
+    served = _project(published)
+    assert served["coherence"] is None
+    assert served["serving_freshness"]["coherence_reason"] == "published_coherence_inconsistent"
+
+
+def test_verified_balanced_coherence_is_preserved_until_cohort_erodes():
+    published = _published({"risk_radar": _plane("risk_off"),
+                            "mtf_signals": _plane("risk_on")})
+    assert _project(published)["coherence"] == 0.5
+    published["planes"]["risk_radar"]["freshness"]["asof"] = OLD
+    assert _project(published)["coherence"] is None
+
+
+
+def test_unknown_plane_cannot_keep_a_validation_badge():
+    published = _published()
+    published["planes"]["unknown_future_plane"] = _plane(asof=OLD, status="validated")
+    served = _project(published)
+    row = served["planes"]["unknown_future_plane"]
+    assert row["reading"] == "Published observation"
+    assert row["status"] == "advisory"
+    assert row["freshness"]["stale"] is True
+    assert "unknown_future_plane" not in served["net_posture_tilt"]["contributors"]
+
+
+
+@pytest.mark.parametrize("field", ["tilt", "n_validated"])
+def test_boolean_cannot_impersonate_a_published_numeric_aggregate(field):
+    published = _published({"risk_radar": _plane()})
+    published["net_posture_tilt"][field] = True
+    assert _project(published)["net_posture_tilt"]["direction"] is None
+
+
+@pytest.mark.parametrize("field,value", [("confirmed", 1), ("conflict", 0), ("magnitude", True)])
+def test_comparison_fields_require_their_declared_types(field, value):
+    published = _published()
+    published["label_vs_planes"][field] = value
+    served = _project(published)
+    assert served["label_vs_planes"]["confirmed"] is False
+    assert served["serving_freshness"]["label_reason"] == "published_label_comparison_inconsistent"

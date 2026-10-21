@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import copy
 import json
+import math
 import os
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -1699,7 +1700,10 @@ def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> d
         and original[name].get("status") == "validated"
         and original[name].get("direction") in (_RISK_ON, _RISK_OFF, _NEUTRAL)
     }
-    for name in PLANE_ORDER:
+    # Preserve unknown observations as advisory history; an older reader cannot
+    # validate an additional plane merely because its stored badge says so.
+    served_names = list(PLANE_ORDER) + [name for name in planes if name not in PLANE_ORDER]
+    for name in served_names:
         rec = planes.get(name)
         if not isinstance(rec, dict):
             rec = planes[name] = _absent_record("unavailable published plane")
@@ -1720,9 +1724,13 @@ def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> d
     # Validate the stored membership; never silently reconstruct a missing aggregate.
     published_tilt = published.get("net_posture_tilt")
     expected = _net_posture_tilt(original_eligible)
-    consistent = isinstance(published_tilt, dict) and all(
-        key in published_tilt and published_tilt[key] == value
-        for key, value in expected.items()
+    consistent = (
+        isinstance(published_tilt, dict)
+        and type(published_tilt.get("tilt")) in (int, float)
+        and math.isfinite(published_tilt["tilt"])
+        and type(published_tilt.get("n_validated")) is int
+        and all(key in published_tilt and published_tilt[key] == value
+                for key, value in expected.items())
     )
     reason = ("published_consensus_inconsistent" if not consistent else
               "published_consensus_inputs_expired" if lost else
@@ -1736,20 +1744,54 @@ def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> d
                    and original[name].get("direction") in (_RISK_ON, _RISK_OFF, _NEUTRAL)]
     coherence_lost = [name for name in directional
                       if planes[name]["freshness"]["stale"] or not present(planes[name])]
-    if coherence_lost:
+    expected_coherence = _coherence({name: original[name] for name in directional})
+    published_coherence = published.get("coherence")
+    coherence_consistent = (
+        "coherence" in published
+        and ((expected_coherence is None and published_coherence is None)
+             or (type(published_coherence) in (int, float)
+                 and math.isfinite(published_coherence)
+                 and published_coherence == expected_coherence))
+    )
+    coherence_reason = (
+        "published_coherence_inconsistent" if not coherence_consistent else
+        "published_coherence_inputs_expired" if coherence_lost else
+        "no_published_coherence" if published_coherence is None else None
+    )
+    if coherence_reason is not None:
         out["coherence"] = None
     # Disagreements deliberately stay as published: expiry is not conflict resolution.
     label_freshness = _freshness(published.get("asof"), now=checked_at)
     published_lvp = published.get("label_vs_planes")
     published_lvp = published_lvp if isinstance(published_lvp, dict) else {}
     published_label = published_lvp.get("label_direction")
-    label = (published_label if not label_freshness["stale"]
-             and published_label in (_RISK_ON, _RISK_OFF, _NEUTRAL) else None)
+    expected_lvp = _label_vs_planes(published_label, expected, original)
+    comparison_consistent = (
+        type(published_lvp.get("conflict")) is bool
+        and type(published_lvp.get("confirmed")) is bool
+        and type(published_lvp.get("magnitude")) in (int, float)
+        and math.isfinite(published_lvp["magnitude"])
+        and all(key in published_lvp and published_lvp[key] == value
+                for key, value in expected_lvp.items())
+    )
+    expected_floor = bool(
+        expected_lvp["conflict"] and expected_lvp["plane_consensus_direction"] == _RISK_OFF
+    )
+    floor_consistent = (
+        type(published.get("posture_floor_defense")) is bool
+        and published["posture_floor_defense"] == expected_floor
+    )
+    label_reason = (
+        "published_label_comparison_inconsistent" if not comparison_consistent else
+        "published_posture_floor_inconsistent" if not floor_consistent else
+        "published_label_expired" if label_freshness["stale"] else
+        "no_published_label" if published_label not in (_RISK_ON, _RISK_OFF, _NEUTRAL) else None
+    )
+    label = published_label if label_reason is None else None
     lvp = _label_vs_planes(label, tilt, planes)
     out["label_vs_planes"] = lvp
-    out["posture_floor_defense"] = bool(
-        lvp["conflict"] and lvp["plane_consensus_direction"] == _RISK_OFF
-    )
+    # Keep the historical boolean for compatibility. Expiry is not a release of
+    # protection; current assessment authority is explicit in serving_freshness.
 
     total = len(PLANE_ORDER)
     count_present = sum(present(planes[name]) for name in PLANE_ORDER)
@@ -1766,7 +1808,7 @@ def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> d
         (decision_coverage < 1.0, "validated_decision_plane_incomplete"),
         (reason is not None, "serving_consensus_unavailable"),
         (label is None, "serving_label_unavailable"),
-        (bool(coherence_lost), "serving_coherence_inputs_expired"),
+        (coherence_reason is not None, "serving_coherence_unavailable"),
     ):
         if condition and code not in reasons:
             reasons.append(code)
@@ -1784,6 +1826,9 @@ def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> d
     out["serving_freshness"] = {
         "checked_at": checked_at.isoformat(), "label_freshness": label_freshness,
         "current_confirmation_available": confirmation_available,
+        "current_posture_floor_available": confirmation_available,
+        "posture_floor_defense_scope": "as_published",
+        "label_reason": label_reason, "coherence_reason": coherence_reason,
         "consensus_reason": reason, "expired_contributors": lost,
         "expired_coherence_planes": coherence_lost,
         "published_label_direction": published_label,
