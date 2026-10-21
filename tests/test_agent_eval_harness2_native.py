@@ -249,3 +249,106 @@ def test_conflicting_run_cannot_replace_existing_native_receipt(tmp_path):
     with pytest.raises(ArtifactConflictError):
         native.create(finalize(changed))
     assert native.resolve_run(run["run_id"]) == run
+
+
+def cli_fixture(tmp_path, inputs, other):
+    import base64
+    root = tmp_path / "store"
+    native = store.ArtifactStore(root)
+    for document in (inputs["scenario"], inputs["configuration"], other, inputs["experiment"]):
+        native.create(document)
+    arguments = ["harness2-import", "--root", str(root),
+                 "--binding-digest", inputs["expected_binding_digest"],
+                 "--validator-id", "mastermind.test.validator.v1", "--validator-version", "1",
+                 "--validator-code-ref", REPO_REF_BASE,
+                 "--validated-at", "2026-08-26T00:00:00Z", "--created-at", "2026-08-26T00:00:00Z"]
+    for flag, key in (("binding", "binding_bytes"), ("summary", "summary_bytes"),
+                      ("native-observation", "native_observation_bytes"), ("output-artifact", "output_bytes")):
+        path = tmp_path / (flag + ".input")
+        path.write_bytes(inputs[key])
+        arguments += ["--" + flag, str(path)]
+    path = tmp_path / "files.json"
+    path.write_bytes(canonical_json_bytes({p: base64.b64encode(raw).decode("ascii")
+                                          for p, raw in inputs["harness_files"].items()}))
+    arguments += ["--harness-files", str(path)]
+    return arguments, native
+
+
+def test_cli_import_then_existing_scorer(tmp_path, capsys):
+    from scripts.agent_eval import cli
+    from uuid import uuid4
+    inputs, other = fixture()
+    args, native = cli_fixture(tmp_path, inputs, other)
+    assert cli.main(args) == 0
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["artifact_check"] == "BYTE_AND_IDENTITY_CHECKED_NOT_AUTHENTICATED"
+    assert receipt["promotion"] == receipt["runtime_authority"] == "NONE"
+    run = native.resolve_run(receipt["run_id"])
+    assert run["run_digest"] == receipt["run_digest"]
+    assert cli.main(args) == 0
+    repeat = json.loads(capsys.readouterr().out)
+    assert repeat["run_digest"] == receipt["run_digest"]
+    assert cli.main(["score-integrity", "--root", str(native.root), "--run-id", run["run_id"],
+                     "--scorer-code-ref", REPO_REF_BASE, "--created-at", "2026-08-27T00:00:00Z",
+                     "--id", "scorer-pass:" + str(uuid4())]) == 0
+    assert "EVIDENCE_CONTENT_VERIFIED" not in capsys.readouterr().out
+
+
+def test_cli_runs_in_a_real_separate_process(tmp_path):
+    import subprocess
+    import sys
+    from pathlib import Path
+    inputs, other = fixture()
+    args, native = cli_fixture(tmp_path, inputs, other)
+    root = Path(__file__).resolve().parents[1]
+    completed = subprocess.run([sys.executable, "-B", str(root / "scripts/agent_evaluation.py"), *args],
+                               cwd=root, capture_output=True, text=True, timeout=30)
+    assert completed.returncode == 0, completed.stderr
+    receipt = json.loads(completed.stdout)
+    assert native.resolve_run(receipt["run_id"])["run_digest"] == receipt["run_digest"]
+
+
+def test_cli_changed_output_no_publication(tmp_path, capsys):
+    from scripts.agent_eval import cli
+    inputs, other = fixture()
+    args, native = cli_fixture(tmp_path, inputs, other)
+    (tmp_path / "output-artifact.input").write_bytes(b"tampered")
+    assert cli.main(args) == 2
+    assert "OUTPUT_BYTES_CHANGED" in capsys.readouterr().err
+    run_id = decode_json(inputs["binding_bytes"])["native_run_id"]
+    assert native.resolve_run(run_id) is None
+
+
+def test_cli_invalid_native_effect_is_retained(tmp_path, capsys):
+    from scripts.agent_eval import cli
+    inputs, other = fixture()
+    draft = decode_json(inputs["native_observation_bytes"])
+    draft["effect"] = {"state": "EFFECT_UNKNOWN", "operation_ref": "op:held", "reconciliation_ref": None}
+    inputs = rebind(inputs, "native_observation_bytes", canonical_json_bytes(draft))
+    args, native = cli_fixture(tmp_path, inputs, other)
+    assert cli.main(args) == 1
+    receipt = json.loads(capsys.readouterr().out)
+    assert receipt["validity_status"] == "INVALID_EFFECT_UNKNOWN"
+    assert native.resolve_run(receipt["run_id"])["effect"] == draft["effect"]
+
+
+def test_cli_symlink_is_refused(tmp_path, capsys):
+    from scripts.agent_eval import cli
+    inputs, other = fixture()
+    args, native = cli_fixture(tmp_path, inputs, other)
+    source = tmp_path / "summary.input"
+    original = tmp_path / "original.input"
+    source.rename(original)
+    source.symlink_to(original)
+    assert cli.main(args) == 2
+    assert "non-symlink" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize("files", [
+    {"skills": b"file", "skills/x/SKILL.md": b"nested"},
+    {"skills/x/SKILL.md": b"nested", "skills": b"file"},
+    {"Skills/x/SKILL.md": b"a", "skills/y/SKILL.md": b"b"},
+])
+def test_harness_file_directory_and_directory_case_aliases(files):
+    with pytest.raises(Harness2ImportError, match="FILE_DIRECTORY_OR_CASE_ALIAS"):
+        harness_manifest(files)

@@ -47,10 +47,14 @@ def _digest(value: object, name: str) -> str:
 
 
 def _number(value: object, name: str, *, maximum: float = 1.0) -> float:
-    if type(value) not in (int, float) or not math.isfinite(value):
+    if type(value) not in (int, float):
         raise Harness2ComparisonError(f"{name} must be a finite number")
+    # Bound arbitrary-size integers BEFORE math.isfinite/float coercion, which
+    # otherwise raises OverflowError rather than the closed input error.
     if value < 0 or value > maximum:
         raise Harness2ComparisonError(f"{name} out of range")
+    if not math.isfinite(value):
+        raise Harness2ComparisonError(f"{name} must be a finite number")
     return float(value)
 
 
@@ -117,15 +121,19 @@ def assess(payload: Mapping) -> dict:
     mean = sum(gains) / len(gains)
     any_regression = any(
         not r["candidate"]["accepted"]
+        or r["baseline"]["violations"] > 0
         or r["candidate"]["violations"] > 0
+        or r["candidate"]["score"] < r["baseline"]["score"]
         or r["candidate"]["resource"] > 2 * max(r["baseline"]["resource"], 0.001)
         for r in ordered
     )
     enough = len(ordered) >= MIN_PAIRS
     improved = mean >= MIN_MEAN_IMPROVEMENT
-    status = ("PROPOSAL_ELIGIBLE_FOR_INDEPENDENT_REVIEW"
-              if enough and improved and not any_regression
-              else "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE")
+    # Legacy scalar input cannot establish eligibility, authentication, an actual
+    # holdout, causal improvement or a statistically supported promotion decision.
+    # Retain its heuristic only as a diagnostic for backwards input compatibility.
+    legacy_screen_passed = enough and improved and not any_regression
+    status = "UNVERIFIED_COMPARISON_DIAGNOSTIC"
     canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"),
                            ensure_ascii=True).encode("utf-8")
     return {
@@ -143,6 +151,8 @@ def assess(payload: Mapping) -> dict:
         "mean_score_delta": round(mean, 8),
         "any_policy_or_acceptance_or_resource_regression": any_regression,
         "status": status,
+        "legacy_screen_passed": legacy_screen_passed,
+        "screen_scope": "UNVERIFIED_HEURISTIC_NOT_ELIGIBILITY_OR_EFFICACY",
         "promotion": "NONE",
         "runtime_authority": "NONE",
         "automatic_agentos_write": False,

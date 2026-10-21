@@ -143,6 +143,7 @@ def harness_manifest(files: Mapping[str, bytes]) -> dict:
     _require(type(files) is dict and 0 < len(files) <= MAX_FILES, "HARNESS_FILE_BOUND")
     total = 0
     aliases: set[str] = set()
+    nodes: dict[str, tuple[str, bool]] = {}
     for path, raw in files.items():
         _bounded_text(path, "HARNESS_PATH", 512)
         parts = path.split("/")
@@ -154,6 +155,12 @@ def harness_manifest(files: Mapping[str, bytes]) -> dict:
         alias = path.casefold()
         _require(alias not in aliases, "HARNESS_PATH_ALIAS")
         aliases.add(alias)
+        for index in range(1, len(parts) + 1):
+            prefix = "/".join(parts[:index])
+            node = (prefix, index == len(parts))
+            prior = nodes.get(prefix.casefold())
+            _require(prior is None or prior == node, "HARNESS_FILE_DIRECTORY_OR_CASE_ALIAS")
+            nodes[prefix.casefold()] = node
         _require(type(raw) is bytes and len(raw) <= MAX_JSON_BYTES, "HARNESS_FILE_BYTES")
         try:
             raw.decode("utf-8")

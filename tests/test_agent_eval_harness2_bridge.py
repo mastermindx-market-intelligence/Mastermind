@@ -27,7 +27,8 @@ def fixture(n=10, gain=0.1):
 
 def test_eligible_is_only_proposal():
     r = assess(fixture())
-    assert r["status"] == "PROPOSAL_ELIGIBLE_FOR_INDEPENDENT_REVIEW"
+    assert r["status"] == "UNVERIFIED_COMPARISON_DIAGNOSTIC"
+    assert r["legacy_screen_passed"] is True
     assert r["promotion"] == "NONE"
     assert r["runtime_authority"] == "NONE"
     assert not r["automatic_agentos_write"]
@@ -35,36 +36,36 @@ def test_eligible_is_only_proposal():
 
 
 def test_insufficient_sample_refuses():
-    assert assess(fixture(n=9))["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+    assert assess(fixture(n=9))["legacy_screen_passed"] is False
 
 
 def test_nonimproving_candidate_refuses():
-    assert assess(fixture(gain=-0.1))["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+    assert assess(fixture(gain=-0.1))["legacy_screen_passed"] is False
 
 
 def test_safety_regression_refuses():
     d = fixture()
     d["observations"][1]["authority_violations"] = 1
-    assert assess(d)["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+    assert assess(d)["legacy_screen_passed"] is False
 
 
 def test_acceptance_regression_refuses():
     d = fixture()
     d["observations"][1]["accepted"] = False
-    assert assess(d)["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+    assert assess(d)["legacy_screen_passed"] is False
 
 
 def test_failed_candidate_refuses_even_when_baseline_also_fails():
     d = fixture()
     d["observations"][0]["accepted"] = False
     d["observations"][1]["accepted"] = False
-    assert assess(d)["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+    assert assess(d)["legacy_screen_passed"] is False
 
 
 def test_resource_regression_refuses():
     d = fixture()
     d["observations"][1]["resource_units"] = 100
-    assert assess(d)["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+    assert assess(d)["legacy_screen_passed"] is False
 
 
 @pytest.mark.parametrize("change", [
@@ -94,3 +95,32 @@ def test_pure_repeatable_digests_and_input_unchanged():
     original = copy.deepcopy(d)
     assert assess(d) == assess(d)
     assert d == original
+
+
+def test_even_perfect_supplied_metrics_never_establish_eligibility():
+    d = fixture(gain=0.4)
+    result = assess(d)
+    assert result["status"] == "UNVERIFIED_COMPARISON_DIAGNOSTIC"
+    assert result["screen_scope"] == "UNVERIFIED_HEURISTIC_NOT_ELIGIBILITY_OR_EFFICACY"
+    assert result["promotion"] == result["runtime_authority"] == "NONE"
+
+
+def test_contaminated_baseline_does_not_pass_legacy_screen():
+    d = fixture()
+    d["observations"][0]["authority_violations"] = 1
+    assert assess(d)["legacy_screen_passed"] is False
+
+
+def test_average_gain_cannot_hide_a_per_case_score_regression():
+    d = fixture()
+    d["observations"][1]["score"] = 0.5
+    result = assess(d)
+    assert result["mean_score_delta"] > 0
+    assert result["legacy_screen_passed"] is False
+
+
+def test_huge_integer_is_closed_input_error_not_overflow():
+    d = fixture()
+    d["observations"][0]["score"] = 10 ** 5000
+    with pytest.raises(Harness2ComparisonError, match="out of range"):
+        assess(d)

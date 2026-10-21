@@ -714,6 +714,11 @@ ALLOWED_PATHS = frozenset(
         # importer plus tests. Runtime/provider/config restrictions stay intact.
         "scripts/agent_eval/harness2_native.py",
         "tests/test_agent_eval_harness2_native.py",
+        # Same PR1663 native-method laboratory extension. The callback-based
+        # runner stays OUTSIDE the inert core; no provider/runtime import is
+        # admitted inside scripts/agent_eval and no control-plane file changes.
+        "scripts/ohf/harness2_recursion.py",
+        "tests/test_agent_eval_harness2_recursion.py",
     }
 )
 

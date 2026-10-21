@@ -182,3 +182,63 @@ or accepted review is claimed. Direct bounded source implementation uses
 NO_ELIGIBLE_PRE_EFFECT_WORKER; required independent review remains outstanding.
 Executive v3 reader separately returned backend_unavailable before dispatch.
 Neither failure proves every provider or all runtime writes unavailable.
+
+## Native method and machine-interface milestone
+
+The existing `scripts/agent_evaluation.py harness2-import` command now reads
+explicit bounded retained files, joins the existing native scenario/configuration/
+experiment through ArtifactStore, checks the upstream/native byte binding, and
+publishes a native EVAL run through the existing create-only store. The existing
+`score-integrity` command consumes that run without an alternate scorer registry.
+A real separate Python-process CLI test verifies publication and exact readback.
+Tampered inputs do not publish; a native EFFECT_UNKNOWN observation is retained
+as INVALID_EFFECT_UNKNOWN, not changed into success.
+
+`scripts/ohf/harness2_recursion.py` implements the published parallel-branch and
+sequential-refinement algorithms in native code. Each task starts at common H0;
+k baseline, 2k proposal probes and k composed probes give 4k rollouts, with 3k
+improvement calls plus reflection and, for k>1, anonymized final-output selection.
+Parallel means independent branches; actual parallel placement/concurrency belongs
+to the existing host port, not a new executor created by this function.
+
+The port must be provided by the incumbent admitted native execution owner.
+Every returned native EVAL receipt is revalidated under a comparison configuration
+sealed before the first callback. Only the exact admitted overlay paths may change.
+All root/Attempt admission, real resource accounting, sandboxing, native retention,
+provider sessions and pending-effect reconciliation remain at that owner. The
+method has no provider subprocess, account choice, queue, database, retry loop,
+persistent library or automatic deployment. A callback exception ends this finite
+invocation; an invalid/effect-unknown returned run is preserved in its error frontier.
+
+The model-facing improvement and reflection views exclude scenario/grader contracts.
+Prior Agent OS lesson references and adopted-harness artifact references are frozen
+through the task. The result contains a candidate claim, falsifier, so_what and
+supporting native run IDs, never an automatic record write or verified discovery.
+The full selected harness remains referenced through the native artifact owner.
+
+The original score-only `assess` interface is now an explicitly UNVERIFIED diagnostic.
+It no longer declares a proposal eligible from supplied scalar JSON. Its old numeric
+screen is a compatibility diagnostic, not a statistical rule, efficacy claim,
+independent review, content verification or release authority. Baseline contamination,
+per-case score regressions and huge-integer input failures are covered.
+
+Latest complete local command (current candidate bytes, before publication):
+
+    PYTHONDONTWRITEBYTECODE=1 python3 -m pytest -o addopts='' -q --tb=short tests/test_agent_eval_*.py
+
+Result: **813 passed**. This includes the existing EVAL suites, imported artifact
+composition, CLI/store/scorer tests, and 23 native recursion mechanism checks.
+One fixed, scripted laboratory test actually executes the arithmetic helper four
+times: the positive-only baseline produces 105; the corrected signed sum produces85.
+This demonstrates execution and integration of the algorithm mechanics, not model
+learning, honest holdout provenance, external-service authenticity or production
+harness efficacy. No upstream provider launcher was executed. No independent
+source review, hosted CI, merge, deployed native port or later live worker adoption
+is claimed by these local checks.
+
+Next source consumer: resolve the already-compiled Agent OS context bundle and
+adopted-harness references through their existing owners, preserve excluded/stale/
+superseded/omitted/degraded evidence, and feed only appropriate domain experience
+to the native method. Next runtime dependency: qualify the existing native port's
+actual model/effect/session observations and run a new bounded admitted canary;
+do not reuse or alter the old sealed E1 or Outcome Learning #398 held operation.
