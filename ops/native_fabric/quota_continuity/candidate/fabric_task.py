@@ -123,6 +123,25 @@ def _paths(run_id: str) -> tuple[Path, Path]:
 
 
 
+
+def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None) -> bytes:
+    """Read one coherent result observation under the current run's protocol."""
+    from remote_sub_helpers import read_macro_result
+    log_path, result_path = _paths(rid)
+    log = _bounded_regular(log_path, MAX_LOG_BYTES) if original_log is None else original_log
+    verified = read_macro_result(HERE, log_path, rid, limit, log)
+    if verified is not None:
+        return verified
+    # Intact legacy logs keep their bounded result reads.  An orphan or a
+    # partial log cannot establish which publication protocol owns the file.
+    # Recheck after the result read so a newly appended policy cannot race a
+    # legacy observation into exposing an unqualified canonical file.
+    data = _bounded_regular(result_path, limit)
+    if _bounded_regular(log_path, MAX_LOG_BYTES) != log:
+        raise FabricTaskError("result log changed during read")
+    return data
+
+
 def _acceptance_unknown(reason: str) -> dict[str, Any]:
     return {"accepted": None, "accepted_by": None, "acceptance_state": "UNVERIFIED",
             "acceptance_reason": reason, "root_id": None, "parent_run_id": None}
@@ -156,7 +175,8 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         hosts = set()
         prefix = (r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
                   r"\[remote_sub id=" + re.escape(rid) + r" host=([A-Za-z0-9_.-]+)\] (.*)")
-        for line in original_log.decode("utf-8").splitlines():
+        from remote_sub_helpers import macro_result_status_text
+        for line in macro_result_status_text(original_log, rid).splitlines():
             match = re.fullmatch(prefix, line)
             if match is None:
                 return unknown
@@ -403,8 +423,9 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         if metadata_error is not None:
             raise metadata_error
         original_log = _bounded_regular(log_path, MAX_LOG_BYTES)
-        text = original_log.decode("utf-8", errors="replace")
-    except (OSError, FabricTaskError):
+        from remote_sub_helpers import macro_result_status_text
+        text = macro_result_status_text(original_log, rid)
+    except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
         return {
             "schema": "mastermind.fabric_task_status.v1",
             "run_id": rid,
@@ -533,12 +554,10 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     result_available = False
     result_bytes = None
     try:
-        info = result_path.lstat()
-        result_available = stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode)
-        result_bytes = info.st_size if result_available else None
-    except FileNotFoundError:
-        pass
-    except OSError:
+        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log)
+        result_available = True
+        result_bytes = len(snapshot)
+    except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
         pass
 
     status = {
@@ -586,10 +605,9 @@ def read_result(run_id: str, *, max_bytes: int = DEFAULT_RESULT_BYTES) -> bytes:
     rid = validate_run_id(run_id)
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 1 <= max_bytes <= MAX_RESULT_BYTES:
         raise ValueError("invalid result byte limit")
-    _, result_path = _paths(rid)
     try:
-        return _bounded_regular(result_path, max_bytes)
-    except FileNotFoundError as exc:
+        return _result_snapshot(rid, max_bytes)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
         raise FabricTaskError("RESULT_NOT_AVAILABLE") from exc
 
 
@@ -1044,8 +1062,10 @@ def plan_accepted_macro_worktree_release(
     log_path, _ = _paths(rid)
     try:
         original = _bounded_regular(log_path, MAX_LOG_BYTES)
-        text = original.decode("utf-8", errors="strict")
-    except (OSError, UnicodeError, FabricTaskError) as exc:
+        original.decode("utf-8", errors="strict")
+        from remote_sub_helpers import macro_result_status_text
+        text = macro_result_status_text(original, rid)
+    except (OSError, ValueError, TypeError, KeyError, FabricTaskError) as exc:
         raise FabricTaskError("FABRIC_RECLAIM_ORIGINAL_LOG_UNVERIFIED") from exc
     pattern = re.compile(
         r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "

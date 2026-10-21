@@ -215,7 +215,11 @@ release_lease() {
   # Command substitutions run in a subshell. Retain an unproven local process
   # cleanup in the original log so EXIT cannot lose that custody decision.
   if [ "${COMMISSION_ACTIVE:-0}" = 1 ] && [ -n "${REMOTE_SUB_LOG_READY:-}" ] &&
-     LC_ALL=C grep -q ' CONTROLLER_PROCESS_UNPROVEN ' "$LOG_FILE" 2>/dev/null; then
+     LC_ALL=C awk -v run="$ID" -v host="$HOST_ARG" '
+       $2 == "[remote_sub" && $3 == "id=" run && $4 == "host=" host "]" &&
+       $5 == "CONTROLLER_PROCESS_UNPROVEN" { found = 1 }
+       END { exit !found }
+     ' "$LOG_FILE" 2>/dev/null; then
     PRESERVE_LEASE=1
   fi
   if [ "$PRESERVE_LEASE" = "1" ]; then
@@ -401,10 +405,17 @@ if [ "$DRY_RUN" -ne 1 ]; then
   mkdir -p "$LOG_DIR" 2>/dev/null || true
   # The existing per-run durable log is also the idempotency fence. Reserve it
   # atomically before any provider lease or remote effect can begin.
-  if "$REMOTE_SUB_PYTHON" - "$LOG_FILE" "$ID" "$HOST_ARG" "$MODE" "$MODEL" "$PACKET" "$REMOTE_CWD" "$HERE" <<'PY_RESERVE'
+  if "$REMOTE_SUB_PYTHON" - "$LOG_FILE" "$ID" "$HOST_ARG" "$MODE" "$MODEL" "$PACKET" "$REMOTE_CWD" "$HERE" "$NEW_MACRO_COMMIT" <<'PY_RESERVE'
 import os
+import re
 import sys
+from datetime import datetime, timezone
 
+if sys.argv[9] and (
+        re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,95}', sys.argv[2]) is None
+        or re.fullmatch(r'[A-Za-z0-9_.-]+', sys.argv[3]) is None):
+    print("MACRO_RESULT_RESERVATION_IDENTITY_REFUSED before_lease=1", file=sys.stderr)
+    raise SystemExit(73)
 try:
     fd = os.open(sys.argv[1], os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
 except FileExistsError:
@@ -421,7 +432,28 @@ except FileExistsError:
 except OSError as exc:
     print(f"LOG_RESERVATION_FAILED id={sys.argv[2]} errno={exc.errno} before_lease=1 before_launch=1", file=sys.stderr)
     raise SystemExit(73)
-os.close(fd)
+try:
+    if sys.argv[9]:
+        # This must be the first complete record. A crash before preparation
+        # must never make an occupied canonical name look like a legacy run.
+        now = datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ')
+        raw = (f'{now} [remote_sub id={sys.argv[2]} host={sys.argv[3]}] '
+               'MACRO_RESULT_REQUIRED schema=1\n').encode('utf-8')
+        if os.write(fd, raw) != len(raw):
+            raise OSError('macro_result_reservation_short_write')
+        os.fsync(fd)
+        parent_fd = os.open(os.path.dirname(sys.argv[1]),
+                            os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+        try:
+            os.fsync(parent_fd)
+        finally:
+            os.close(parent_fd)
+except OSError as exc:
+    print(f"LOG_RESERVATION_FAILED id={sys.argv[2]} errno={exc.errno} "
+          "before_lease=1 before_launch=1", file=sys.stderr)
+    raise SystemExit(73)
+finally:
+    os.close(fd)
 PY_RESERVE
   then
     :
@@ -440,6 +472,17 @@ PY_RESERVE
     export REMOTE_SUB_DEADLINE_PROCESS_RECEIPT
   fi
   log "RUN_RESERVED explicit=$([ -n "$RUN_ID_ARG" ] && echo 1 || echo 0)"
+  # The durable reservation already selected the Macro result contract.
+  # Qualify destinations and bind the exact policy before any provider lease;
+  # best-effort log() is insufficient for these evidence records.
+  if [ -n "$NEW_MACRO_COMMIT" ]; then
+    if ! "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" macro-result-prepare \
+        "$HERE" "$LOG_FILE" "$ID" "$HOST_ARG" "$LOCAL_OUT" >/dev/null; then
+      RC=78
+      log "MACRO_RESULT_PREPARE_REFUSED rc=78 before_lease=1"
+      exit "$RC"
+    fi
+  fi
   SCRATCH_PATHS=("$POLL_FILE")
   # Keep the original acquire response in the existing private run directory
   # for new ordinary GLM/Qwen bindings. Cleanup still owns this scratch file.
@@ -1698,11 +1741,33 @@ for _session_suffix in session-created.json session-retained.json; do
   fi
 done
 
-mkdir -p "$(dirname "$LOCAL_OUT")" 2>/dev/null || true
 RSYNC_RC=0
-log "RSYNC stdout=$REMOTE_LANE_TRANSFER/ext/$REMOTE_STDOUT out=$(basename "$LOCAL_OUT")"
-"$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/$REMOTE_STDOUT" "$LOCAL_OUT" || RSYNC_RC=$?
+MACRO_PUBLICATION_RC=0
+RSYNC_OUT="$LOCAL_OUT"
+if [ -n "$NEW_MACRO_COMMIT" ] && [ "$RC_OBSERVED" -eq 1 ] && [ "$WORKER_RC" -eq 0 ]; then
+  # Keep the private capture as a retained alias of the published inode.  Do
+  # not register it for pathname cleanup, which could delete a replacement.
+  RSYNC_OUT="$(mktemp "$HERE/lanes/.macro-capture.${ID}.XXXXXXXX")" || RSYNC_RC=$?
+else
+  # Legacy collection and nonzero/unknown worker diagnostics keep their
+  # transport behavior. Opted-in Macro diagnostics are not verified results.
+  mkdir -p "$(dirname "$LOCAL_OUT")" 2>/dev/null || true
+fi
+if [ "$RSYNC_RC" -eq 0 ]; then
+  log "RSYNC stdout=$REMOTE_LANE_TRANSFER/ext/$REMOTE_STDOUT out=$(basename "$RSYNC_OUT")"
+  "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/$REMOTE_STDOUT" "$RSYNC_OUT" || RSYNC_RC=$?
+fi
 require_bound_lane_layout_after_launch after_stdout_collection
+if [ "$RSYNC_RC" -eq 0 ] && [ -n "$NEW_MACRO_COMMIT" ] &&
+   [ "$RC_OBSERVED" -eq 1 ] && [ "$WORKER_RC" -eq 0 ]; then
+  "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" macro-result-publish \
+    "$HERE" "$LOG_FILE" "$ID" "$HOST_ARG" "$RSYNC_OUT" "$LOCAL_OUT" \
+    >/dev/null || MACRO_PUBLICATION_RC=$?
+  if [ "$MACRO_PUBLICATION_RC" -ne 0 ]; then
+    log "MACRO_RESULT_PUBLICATION_FAILED rc=$MACRO_PUBLICATION_RC worker_rc=$WORKER_RC"
+    RSYNC_RC=76
+  fi
+fi
 if [ "$NATIVE_MODE" -eq 1 ]; then
   NATIVE_TERMINAL="$LOG_DIR/${ID}.native-terminal.json"
   if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.native-terminal.json" "$NATIVE_TERMINAL" &&
@@ -1735,7 +1800,11 @@ if [ "$NATIVE_MODE" -ne 1 ] && [ "$RC_OBSERVED" -eq 1 ]; then
 fi
 
 if [ "$RSYNC_RC" -ne 0 ]; then
-  log "RSYNC_FAILED rc=$RSYNC_RC (remote rc=$WORKER_RC); remote artifacts preserved"
+  if [ "$MACRO_PUBLICATION_RC" -ne 0 ]; then
+    log "RESULT_PUBLICATION_FAILED rc=$MACRO_PUBLICATION_RC (remote rc=$WORKER_RC); local and remote artifacts preserved"
+  else
+    log "RSYNC_FAILED rc=$RSYNC_RC (remote rc=$WORKER_RC); remote artifacts preserved"
+  fi
   RESULT_FAILURE_REASON=result_unavailable
   log "RESULT_UNAVAILABLE worker_rc=$WORKER_RC rsync_rc=$RSYNC_RC"
   RC=76
