@@ -54,6 +54,13 @@ def test_acceptance_regression_refuses():
     assert assess(d)["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
 
 
+def test_failed_candidate_refuses_even_when_baseline_also_fails():
+    d = fixture()
+    d["observations"][0]["accepted"] = False
+    d["observations"][1]["accepted"] = False
+    assert assess(d)["status"] == "INSUFFICIENT_OR_REGRESSIVE_EVIDENCE"
+
+
 def test_resource_regression_refuses():
     d = fixture()
     d["observations"][1]["resource_units"] = 100

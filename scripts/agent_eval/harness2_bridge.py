@@ -116,7 +116,7 @@ def assess(payload: Mapping) -> dict:
     gains = [r["candidate"]["score"] - r["baseline"]["score"] for r in ordered]
     mean = sum(gains) / len(gains)
     any_regression = any(
-        r["baseline"]["accepted"] and not r["candidate"]["accepted"]
+        not r["candidate"]["accepted"]
         or r["candidate"]["violations"] > 0
         or r["candidate"]["resource"] > 2 * max(r["baseline"]["resource"], 0.001)
         for r in ordered

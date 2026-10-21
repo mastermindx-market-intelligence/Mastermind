@@ -705,6 +705,11 @@ ALLOWED_PATHS = frozenset(
         "evidence/CHAIRMAN_C2_RULING_AND_SELF_REVIEW.md",
         "scripts/agent_eval/harness_convergence.py",
         "tests/test_agent_eval_harness_convergence.py",
+        # Harness2 evidence-only extension: direct Chairman integration
+        # commission 2026-10-21. Exact files only; no new execution scope.
+        "docs/superpowers/plans/2026-10-21-harness2-agentos-native-adaptation.md",
+        "scripts/agent_eval/harness2_bridge.py",
+        "tests/test_agent_eval_harness2_bridge.py",
     }
 )
 
