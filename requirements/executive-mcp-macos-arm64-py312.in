@@ -4,7 +4,7 @@
 # invoke the canonical boot-packet collector here so the sealed control Python can
 # remain `-I -S -B` and SDK / site-package free. Resolver movement is a HOLD.
 mcp==1.28.1
-PyJWT[crypto]==2.13.0
+PyJWT[crypto]==2.14.0
 PyYAML==6.0.3
 httpx==0.28.1
 jsonschema==4.26.0

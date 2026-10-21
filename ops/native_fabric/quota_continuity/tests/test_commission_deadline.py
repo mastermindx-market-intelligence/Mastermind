@@ -452,12 +452,12 @@ class ControllerDeadline(unittest.TestCase):
                          + ' support='),transport_line)
         receipt=json.loads((self.ext/'state/remote_sub'
                             /'offline-plain_ok.transport-verified.json').read_text())
-        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v2')
+        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v3')
         self.assertEqual(receipt['packet_sha256'],packet_sha)
         self.assertEqual(receipt['phase'],'PRE_LAUNCH')
         binding_line=next(event for name,event in tracked if name=='LAUNCH_BINDING')
         binding=json.loads(binding_line[len('LAUNCH_BINDING '):])
-        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v2')
+        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v3')
         self.assertEqual(binding['transport']['packet_sha256'],packet_sha)
         self.assertEqual(binding['packet_sha256'],packet_sha)
         self.assertEqual(binding['acquire_response_sha256'],

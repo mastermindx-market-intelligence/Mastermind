@@ -30,6 +30,7 @@ if case.startswith('physical_'):
     alias = root / 'remote-home/lanes'
     config = json.loads((root/'physical-case.json').read_text())
     owner = Path(config['owner'])
+    configured = config.get('configured', False)
     def retarget(name):
         if alias.is_symlink(): alias.unlink()
         alias.symlink_to(root/name,target_is_directory=True)
@@ -51,6 +52,25 @@ if case.startswith('physical_'):
         raise SystemExit(0)
     if name == 'ssh':
         command=args[-1]
+        if configured and ('PY_OBSERVE_LANE_ROOT' in command or 'PY_RECHECK_LANE_ROOT' in command):
+            record('root_layout_read')
+            first,body=command.split('\n',1)
+            argv=shlex.split(first)
+            assert argv[:2]==['python3','-'] and argv[-1].startswith('<<PY_')
+            marker=argv[-1][2:]
+            assert body.endswith('\n'+marker)
+            result=subprocess.run([sys.executable,'-',*argv[2:-1]],
+                input=body[:-len('\n'+marker)],capture_output=True,text=True,timeout=5)
+            sys.stdout.write(result.stdout);sys.stderr.write(result.stderr)
+            raise SystemExit(result.returncode)
+        if configured and 'publish_remote_lane_packet' in command:
+            record('exclusive_packet')
+            argv=shlex.split(command)
+            assert argv[:4]==['python3','-I','-S','-c']
+            result=subprocess.run([sys.executable,*argv[1:]],input=sys.stdin.buffer.read(),
+                                  capture_output=True,timeout=5)
+            sys.stdout.buffer.write(result.stdout);sys.stderr.buffer.write(result.stderr)
+            raise SystemExit(result.returncode)
         if 'support_bundle.py' in command:
             record('support_publish')
             manifest_path=next((root/'ext/state/remote_sub').glob('*.support.json'))
@@ -58,15 +78,33 @@ if case.startswith('physical_'):
             digest=hashlib.sha256(json.dumps({'schema':'remote-support-code.v1','files':files},
                 sort_keys=True,separators=(',',':')).encode()).hexdigest()
             release=owner/'support-releases'/digest
-            (release/'ext').mkdir(parents=True)
-            for item,want in files.items():
-                source=root/'orch/fabric/pools.yaml' if item=='pools.yaml' else root/'ext'/item
-                raw=source.read_bytes()
-                assert hashlib.sha256(raw).hexdigest()==want
-                (release/'ext'/item).write_bytes(raw);(release/'ext'/item).chmod(0o555)
-            (release/'RELEASE.json').write_text(json.dumps({'schema':'remote-support-code.v1',
-                'digest':digest,'files':files}))
-            (release/'RELEASE.json').chmod(0o444)
+            if configured:
+                # Execute the original publisher, including its sealed state-link
+                # map; the configured transport checks that actual closure.
+                import importlib.util
+                source_dir=root/'inert-bound-source';source_dir.mkdir(mode=0o700)
+                for item,want in files.items():
+                    source=root/'orch/fabric/pools.yaml' if item=='pools.yaml' else root/'ext'/item
+                    raw=source.read_bytes()
+                    assert hashlib.sha256(raw).hexdigest()==want
+                    (source_dir/item).write_bytes(raw);(source_dir/item).chmod(0o600)
+                # The child intentionally disables user site loading. Admit only
+                # the test runner's explicit PyYAML dependency for this publisher.
+                sys.path[:0]=[str(root/'ext'),config['yaml_parent']]
+                spec=importlib.util.spec_from_file_location('inert_bound_publisher',root/'ext/support_bundle.py')
+                publisher=importlib.util.module_from_spec(spec);spec.loader.exec_module(publisher)
+                actual=publisher.publish(source_dir,owner/'ext',files)
+                assert actual==release/'ext' and len(files)==38
+            else:
+                (release/'ext').mkdir(parents=True)
+                for item,want in files.items():
+                    source=root/'orch/fabric/pools.yaml' if item=='pools.yaml' else root/'ext'/item
+                    raw=source.read_bytes()
+                    assert hashlib.sha256(raw).hexdigest()==want
+                    (release/'ext'/item).write_bytes(raw);(release/'ext'/item).chmod(0o555)
+                (release/'RELEASE.json').write_text(json.dumps({'schema':'remote-support-code.v1',
+                    'digest':digest,'files':files}))
+                (release/'RELEASE.json').chmod(0o444)
             published=str(release/'ext')+'\n'
             fault=config.get('fault')
             if fault=='packet_symlink':
@@ -81,6 +119,7 @@ if case.startswith('physical_'):
                 (release/'RELEASE.json').write_text('{}')
             elif fault=='duplicate_return': published+=published
             elif fault=='wrong_digest': published=published.replace(digest,'f'*64)
+            elif fault=='publisher_other_owner': published=published.replace(str(owner),str(root/'other-publisher-owner'))
             elif fault=='truncated_return': published=published[:-1]
             elif fault=='traversal_return': published=published.replace('/support-releases/','/../support-releases/')
             if config.get('retarget'): retarget('decoy-after-publication')
@@ -104,7 +143,8 @@ if case.startswith('physical_'):
         if 'glm_keys.py account-ready ' in command:
             # Readiness is inert here; no credential file or provider is read.
             words=shlex.split(command.rsplit('; ',1)[-1])
-            releases=list((owner/'support-releases').iterdir())
+            # The actual publisher also owns a regular publication-lock leaf.
+            releases=[path for path in (owner/'support-releases').iterdir() if path.is_dir()]
             assert len(releases)==1
             assert words==['python3',str(releases[0]/'ext/glm_keys.py'),'account-ready','fixture-account']
             record('account_ready',command=command);print('1');raise SystemExit(0)
@@ -133,9 +173,15 @@ if case.startswith('physical_'):
         # Use the actual installed rsync protocol and its own argument handling.
         # The remote shell is local and inert; no SSH/network/provider is used.
         remote=args[-2].split(':',1)[1]
-        assert remote.startswith('./ext/') and '..' not in Path(remote).parts
-        assert len([arg for arg in args if arg.startswith('--rsync-path=')])==1
-        source=owner/remote
+        assert '..' not in Path(remote).parts
+        if configured:
+            assert remote.startswith(str(owner)+'/ext/')
+            assert not any(arg.startswith('--rsync-path=') for arg in args)
+            source=Path(remote)
+        else:
+            assert remote.startswith('./ext/')
+            assert len([arg for arg in args if arg.startswith('--rsync-path=')])==1
+            source=owner/remote
         record('collect',source=str(source),rsync=config['rsync'])
         result=subprocess.run([config['rsync'],'-e',str(root/'rsync-local-shell'),*args],
                               env=dict(os.environ,PATH='/usr/bin:/bin'),timeout=5)
@@ -146,13 +192,18 @@ SPY = r'''
 import hashlib,json,os,sys
 from pathlib import Path
 root=Path(os.environ['DEADLINE_FIXTURE_ROOT'])
+if sys.argv[1:4]==['-I','-S','-c']:
+    # The actual exclusive-output launcher runs under a real interpreter. Only
+    # its later published-executor invocation reaches the inert worker below.
+    os.execv(sys.executable,[sys.executable,*sys.argv[1:]])
 packet=Path(os.environ['PACKET'])
 row={'argv':sys.argv[1:],'cwd':str(Path.cwd()),'packet':str(packet),
      'packet_sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),
      'remote_cwd':os.environ['REMOTE_CWD'],'rc_file':os.environ['RC_FILE'],
      'owner':os.environ['REMOTE_SUB_LANES'],'host_env':os.environ.get('BOUND_HOST_ENV'),
      'path':os.environ['PATH'],'physical_config':os.environ.get('REMOTE_SUB_QWEN_PHYSICAL_CONFIG'),
-     'account':os.environ.get('POOL_ACCOUNT'),'lease_id':os.environ.get('POOL_LEASE_ID')}
+     'account':os.environ.get('POOL_ACCOUNT'),'lease_id':os.environ.get('POOL_LEASE_ID'),
+     'layout':os.environ.get('REMOTE_SUB_LANE_ROOT_LAYOUT'),'directory':os.environ.get('LANE_DIRECTORY')}
 (root/'launch-spy.json').write_text(json.dumps(row,sort_keys=True))
 print('INERT PHYSICAL OWNER LAUNCH SPY: no model was executed.')
 '''
@@ -290,11 +341,34 @@ class PhysicalOwnerController(unittest.TestCase):
         for path in self.owner.rglob('*'):
             if not path.is_symlink(): path.chmod(0o700 if path.is_dir() else 0o600)
 
+    def admit_configured_owner(self):
+        parent=self.root/'admitted';parent.mkdir(mode=0o700)
+        destination=parent/'lanes'
+        self.owner.rename(destination)
+        self.owner=destination
+        alias=self.root/'remote-home/lanes';alias.unlink();alias.symlink_to(self.owner,target_is_directory=True)
+        for relative in ('ext/active','orch/fabric'):
+            (self.owner/relative).mkdir(parents=True,mode=0o700)
+        import yaml
+        self.publisher_yaml_parent=str(Path(yaml.__file__).resolve().parent.parent)
+        original_policy=self.root/'orch/fabric/pools.yaml'
+        original_policy.write_text(json.dumps({'routing':{},'pools':{'grok':{'windows':{'weekly':{}}}}})+'\n')
+        original_policy.chmod(0o600)
+        policy=self.owner/'orch/fabric/pools.yaml'
+        policy.write_bytes(original_policy.read_bytes());policy.chmod(0o600)
+        registry=self.harness.ext/'hosts.json'
+        value=json.loads(registry.read_text())
+        value['fixture']['physical_lane_root']=str(self.owner)
+        registry.write_text(json.dumps(value));registry.chmod(0o600)
+        self.configured_owner=True
+
     def run_case(self,*,retarget=False,fault=None,mode='qwen',model='qwen3.8-flash',frontier_available=True):
         if not frontier_available:
             with (self.harness.ext/'slot.py').open('a') as stream:
                 stream.write("\nCAPS.pop('glm-frontier', None)\n")
-        (self.root/'physical-case.json').write_text(json.dumps({'retarget':retarget,'fault':fault,'owner':str(self.owner),'rsync':self.rsync}))
+        (self.root/'physical-case.json').write_text(json.dumps({'retarget':retarget,'fault':fault,'owner':str(self.owner),'rsync':self.rsync,
+            'configured':getattr(self,'configured_owner',False),
+            'yaml_parent':getattr(self,'publisher_yaml_parent',None)}))
         witness=('Offline regression requires the requested GLM acquisition tuple; all carriers and the worker are inert.'
                  if mode=='glm' else None)
         return self.harness.run_controller('physical_owner',budget=18,mode=mode,model=model,
@@ -346,17 +420,66 @@ class PhysicalOwnerController(unittest.TestCase):
         self.assertEqual([name for name,_ in tracked],['RUN_RESERVED','LEASE_OK','SUPPORT_VERSION_READY',
             'TRANSPORT_VERIFIED','LAUNCH_BINDING','LAUNCH','LAUNCH_ATTEMPT'])
         receipt=json.loads((self.harness.ext/'state/remote_sub/offline-physical_owner.transport-verified.json').read_text())
-        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v2')
+        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v3')
         self.assertEqual(receipt['packet_sha256'],spy['packet_sha256'])
         self.assertEqual(receipt['acquisition_pool'],acquisition_pool)
         self.assertEqual([event for name,event in tracked if name=='LEASE_OK'],
                          ['LEASE_OK pool='+acquisition_pool])
         binding=json.loads(next(event.split(' ',1)[1] for name,event in tracked if name=='LAUNCH_BINDING'))
-        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v2')
+        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v3')
         self.assertEqual(binding['pool'],'glm' if mode=='glm' else 'bailian')
         self.assertEqual(binding['acquisition_pool'],acquisition_pool)
         self.assertEqual(binding['transport']['acquisition_pool'],acquisition_pool)
         self.assertEqual((binding['lease_id'],binding['account']),(spy['lease_id'],spy['account']))
+        self.assertEqual(spy['directory'],str(self.owner))
+        if getattr(self,'configured_owner',False):
+            self.assertEqual(receipt['lane_root'],binding['transport']['lane_root'])
+            self.assertEqual(receipt['lane_root']['binding']['path'],str(self.owner))
+            self.assertIn('exclusive_packet',stages)
+            self.assertIn('root_layout_read',stages)
+            self.assertNotIn('rsync_version',stages)
+            self.assertEqual(len(receipt['files']),38)
+        else:
+            self.assertIsNone(receipt['lane_root'])
+            self.assertIsNone(binding['transport']['lane_root'])
+            self.assertEqual(len(receipt['files']),37)
+
+
+    def test_configured_frontier_uses_admitted_layout_through_actual_controller(self):
+        self.admit_configured_owner()
+        self.assert_bound_launch(self.run_case(mode='glm',model='glm-5.3'),
+            mode='glm',model='glm-5.3',acquisition_pool='glm-frontier')
+
+    def test_configured_qwen_keeps_frozen_owner_after_alias_retarget(self):
+        self.admit_configured_owner()
+        self.assert_bound_launch(self.run_case(retarget=True))
+        self.assertEqual((self.root/'remote-home/lanes').resolve(),self.root/'decoy-before-launch')
+
+    def test_configured_publisher_disagreement_cannot_select_fallback(self):
+        self.admit_configured_owner()
+        result=self.run_case(fault='publisher_other_owner')
+        self.assertEqual(result['returncode'],78,result['stderr'])
+        self.assertIn('SUPPORT_OWNER_REGISTRY_MISMATCH',result['stderr'])
+        stages=[row['stage'] for row in result['events']]
+        self.assertIn('root_layout_read',stages)
+        self.assertIn('support_publish',stages)
+        self.assertNotIn('transport_read',stages)
+        self.assertNotIn('rsync_version',stages)
+        self.assertNotIn('launch',stages)
+        self.assertFalse((self.root/'launch-spy.json').exists())
+
+    def test_configured_unsafe_layout_refuses_without_publisher_fallback(self):
+        self.admit_configured_owner()
+        (self.owner/'ext').chmod(0o777)
+        result=self.run_case()
+        self.assertEqual(result['returncode'],78,result['stderr'])
+        self.assertIn('REMOTE_LANE_ROOT_UNQUALIFIED',result['stderr'])
+        stages=[row['stage'] for row in result['events']]
+        self.assertIn('root_layout_read',stages)
+        self.assertNotIn('support_publish',stages)
+        self.assertNotIn('rsync_version',stages)
+        self.assertNotIn('launch',stages)
+        self.assertFalse((self.root/'launch-spy.json').exists())
 
     def test_unknown_empty_or_failed_rsync_version_refuses_before_readback(self):
         for fault in ('rsync_unknown','rsync_empty','rsync_nonzero'):

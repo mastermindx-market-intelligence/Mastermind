@@ -22,17 +22,19 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
-COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
+COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
+PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
+PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
 PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f77591ebc4eb66c43d"
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# Observer, portable reader and original-state collector changes compose here.
-# Executor, donor, support and deadline identities remain independently pinned.
-# Retention recovery composes with the protected-review candidate physical
-# owner transport/configuration correction in the explicit 85-file closure.
+# The 85-file closure composes protected physical-root admission with retention
+# recovery and explicit acquisition correlation. All historical executor,
+# donor, quota, deadline and protected physical-root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "330d781f701eada35e5bf999d36e7cf46c9a0981d40023695697be4a91a250fa"
+NATIVE_MANIFEST_SHA = "1c04fa2e6381a51abd1297330df77c4c26d3c3d889de20f4f9c618b8dc44dc78"
 
 
 def _sha(raw):
@@ -65,6 +67,12 @@ def _composition(directory):
     assert _sha(DEADLINE_PATCH.read_bytes()) == DEADLINE_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(DEADLINE_PATCH))
     donor_contract._git(directory, "apply", str(DEADLINE_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PHYSICAL_ROOT_COMPOSED_SHA
+    # Extend the exact deadline-qualified executor with the independently
+    # reviewed physical-root change; do not repin the historical transformations.
+    assert _sha(PHYSICAL_ROOT_PATCH.read_bytes()) == PHYSICAL_ROOT_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PHYSICAL_ROOT_PATCH))
+    donor_contract._git(directory, "apply", str(PHYSICAL_ROOT_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed

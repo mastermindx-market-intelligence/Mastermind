@@ -1039,27 +1039,15 @@ def api_performance(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
     if _portfolio_registry.is_archived(portfolio):
         return JSONResponse(_archived_performance(portfolio))
+    from portfolio import paper_account
     try:
-        from portfolio import paper_account
-        payload = paper_account.performance(portfolio_id=portfolio,
-                                            prices=_book_marks(portfolio))
-        return JSONResponse(payload)
-    except Exception as exc:
-        # never 500 — return a safe minimal payload
-        return JSONResponse({
-            "inception_date": None,
-            "starting_nav": 1_000_000,
-            "current_nav": 1_000_000,
-            "cash": 1_000_000,
-            "invested": 0.0,
-            "total_return_pct": 0.0,
-            "vs_spy_pct": 0.0,
-            "day_change_pct": 0.0,
-            "max_drawdown_pct": 0.0,
-            "realized_since": None,
-            "series": [],
-            "note": f"Performance unavailable: {exc}",
-        })
+        # This read serves persisted performance. Intraday previews have their own
+        # quote/session endpoint; do not warm quotes or recover accounts here.
+        payload = paper_account.performance(portfolio_id=portfolio)
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    except Exception:
+        return JSONResponse(paper_account.unavailable_performance(portfolio),
+                            headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/live_marks")
@@ -1188,11 +1176,16 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                     "inception_date", "starting_nav", "current_nav", "cash", "invested",
                     "total_return_pct", "vs_benchmark_pct", "vs_spy_pct", "benchmark",
                     "benchmark_name", "benchmark_name_zh", "benchmark_as_of", "day_change_pct",
-                    "max_drawdown_pct", "realized_since",
+                    "max_drawdown_pct", "realized_since", "availability", "observed_at",
+                    "day_change_window", "drawdown_window", "return_measure",
+                    "external_flow_adjustment", "benchmark_return_basis",
+                    "benchmark_total_return_status", "benchmark_comparison_scope",
                 )
             }
             current_nav = performance.get("current_nav")
-            if current_nav and current_nav > 0:
+            if (current_nav is not None and current_nav > 0
+                    and (performance.get("availability") or {}).get("valuation_basis")
+                    in {"provided_prices", "cash_only"}):
                 for row in positions:
                     market_value = row.get("market_value")
                     if market_value is not None:
@@ -1215,7 +1208,8 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
                 },
             }
         return JSONResponse(payload, headers={"Cache-Control": "no-store"})
-    except Exception as exc:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
+    except Exception:  # noqa: BLE001 — live preview must degrade, never sink the dashboard
+        from portfolio import paper_account
         return JSONResponse({
             "schema_version": "live_marks.v1",
             "portfolio": pid,
@@ -1224,9 +1218,9 @@ def api_live_marks(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
             "session": session,
             "poll_after_seconds": 60 if session["is_open"] else session["poll_after_seconds"],
             "positions": [],
-            "performance": {},
+            "performance": paper_account.unavailable_performance(pid),
             "pricing": {"priced_positions": 0, "total_positions": 0, "complete": False},
-            "error": str(exc),
+            "error": "live_marks_unavailable",
         }, headers={"Cache-Control": "no-store"})
 
 
@@ -1272,8 +1266,40 @@ def api_risk(portfolio: str = _PRODUCT_DEFAULT_ID, recompute: bool = False) -> J
 
 
 @router.get("/api/portfolio")
-def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID) -> JSONResponse:
+def api_portfolio(portfolio: str = _PRODUCT_DEFAULT_ID, view: str | None = None) -> JSONResponse:
     portfolio = _product_portfolio_id(portfolio)
+    if view == "decision_availability":
+        from app.decision_availability import read_decision_availability
+        from app.settlement_price_read import read_settlement_price_evidence
+        from app.provider_diagnostic_read import read_provider_diagnostic_evidence
+        from brain import runlog
+        from bot import decision_rows
+        from portfolio import paper_account
+
+        # Resolve strictly through the registry: _portfolio_dir has a legacy fallback to Flagship.
+        # This branch must precede every quote, fresh-account fallback, and recovery-capable read.
+        observed_at = datetime.now(timezone.utc).isoformat()
+        payload = read_decision_availability(
+            portfolio, base_dir=_portfolio_registry.data_dir(portfolio),
+            observed_at=observed_at,
+            verify_receipt=_decision_execution_receipt_verified,
+            validate_pending=paper_account.pending_target_contract_error,
+            inspect_settlement_prices=lambda row: read_settlement_price_evidence(
+                portfolio, row, base_dir=_portfolio_registry.data_dir(portfolio),
+                currency=_portfolio_registry.currency(portfolio),
+                validate_receipt=paper_account.validated_settlement_receipt_prices,
+                # Decision receipt references and transaction IDs have distinct,
+                # established Unicode serialization rules. Reuse the decision owner.
+                fingerprint_receipt=decision_rows._canonical_sha256,
+            ),
+            inspect_provider_diagnostics=lambda attempt: read_provider_diagnostic_evidence(
+                portfolio, attempt, runs_dir=runlog._RUNS_DIR, observed_at=observed_at,
+            ),
+        )
+        return JSONResponse(payload, headers={"Cache-Control": "no-store"})
+    if view is not None:
+        return JSONResponse({"error": "unsupported_portfolio_view", "portfolio_id": portfolio},
+                            status_code=400, headers={"Cache-Control": "no-store"})
     path = _portfolio_dir(portfolio) / "latest.json"
     if not path.exists():
         return JSONResponse({"error": "no book yet", "portfolio_id": portfolio}, status_code=404)
@@ -1569,8 +1595,11 @@ def _portfolio_status(meta: dict) -> dict:
             "vs_benchmark_pct": perf.get("vs_benchmark_pct"),
             "vs_spy_pct": perf.get("vs_spy_pct"),
             "day_change_pct": perf.get("day_change_pct"),
-            "cash_pct": round((perf.get("cash") or 0) / nav * 100, 1) if nav else None,
-            "as_of": perf.get("realized_since"),
+            "cash_pct": (round(perf["cash"] / nav * 100, 1)
+                         if nav > 0 and perf.get("cash") is not None else None),
+            "performance_as_of": (perf.get("availability") or {}).get("as_of"),
+            "performance_status": (perf.get("availability") or {}).get("status"),
+            "as_of": (perf.get("availability") or {}).get("as_of"),
         })
     except Exception:
         pass

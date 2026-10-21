@@ -184,7 +184,7 @@ class Fixture:
         return ["transport-verify", str(self.log_path), str(self.receipt_path),
                 str(self.packet_pin), str(self.lease_path), str(seen), RUN_ID, HOST,
                 values["mode"], values["model"], self.support_digest, POLICY,
-                values["lease_id"], values["account"], values["acquisition_pool"]]
+                values["lease_id"], values["account"], values["acquisition_pool"], "-"]
 
     def launch_arguments(self, **overrides):
         values=dict(mode=self.mode, model=self.model, lease_id="0123456789ab",
@@ -289,7 +289,7 @@ class AcquisitionProducerCase(unittest.TestCase):
         exclusive(seen, fx.observation())
         return fx.transport_arguments(seen, **overrides)
 
-    def test_v2_producers_preserve_all_selected_pool_controls(self):
+    def test_v3_producers_preserve_all_selected_pool_controls(self):
         for mode, model, pool in (
                 ("glm", "glm-5.3", "glm-frontier"),
                 ("glm", "glm-5.3", "glm"),
@@ -303,13 +303,35 @@ class AcquisitionProducerCase(unittest.TestCase):
                 line = next(line for line in fx.log_path.read_text().splitlines()
                             if "LAUNCH_BINDING " in line)
                 binding = json.loads(line.split("LAUNCH_BINDING ", 1)[1])
-                self.assertEqual(receipt["schema"], "mastermind.transport_verification.v2")
-                self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v2")
+                self.assertEqual(receipt["schema"], "mastermind.transport_verification.v3")
+                self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v3")
                 self.assertEqual(binding["pool"], "glm" if mode == "glm" else "bailian")
                 self.assertEqual((receipt["acquisition_pool"], binding["acquisition_pool"],
                                   binding["transport"]["acquisition_pool"]), (pool, pool, pool))
+                self.assertIsNone(receipt["lane_root"])
+                self.assertIsNone(binding["transport"]["lane_root"])
                 self.assertEqual(binding["acquire_response_sha256"], sha(fx.acquire))
                 self.assertIn("LEASE_OK pool=" + pool + "\n", fx.log_path.read_text())
+
+    def test_transport_cli_requires_separate_acquisition_and_layout_arguments(self):
+        control = self.fixture()
+        self.assertEqual(control.run_helper(self.transport_args(control)).returncode, 0)
+        for operation in ("missing_layout", "missing_acquisition", "extra", "swapped"):
+            with self.subTest(operation=operation):
+                fx = self.fixture()
+                args = self.transport_args(fx)
+                if operation == "missing_layout":
+                    args.pop()
+                elif operation == "missing_acquisition":
+                    args.pop(-2)
+                elif operation == "extra":
+                    args.append("-")
+                else:
+                    args[-2], args[-1] = args[-1], args[-2]
+                result = fx.run_helper(args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(fx.receipt_path.exists())
+                self.assertNotIn("TRANSPORT_VERIFIED ", fx.log_path.read_text())
 
     def test_artifact_producer_emits_selected_tag_without_plain_receipt(self):
         for pool in ("glm-frontier", "glm"):
@@ -470,7 +492,7 @@ class PlainRepairCase(unittest.TestCase):
         self.assertEqual(receipt["acceptance"], "NOT_RECORDED")
         self.assertFalse(receipt["original_operation_mutated"])
         binding = receipt["plain_launch_binding"]
-        self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v2")
+        self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v3")
         self.assertEqual(binding["pool"], "glm")
         self.assertEqual(binding["acquisition_pool"], self.fx.acquisition_pool)
         self.assertEqual(binding["transport"]["acquisition_pool"], self.fx.acquisition_pool)
@@ -511,12 +533,24 @@ class PlainRepairCase(unittest.TestCase):
         self.fx.log_path.write_text(log)
         self.fx.refresh_binding()
 
+    def test_unbound_v3_keeps_v1_collection_and_refuses_empty_rc(self):
+        self.qualified()
+        loaded = self.collector.load_binding(self.fx.binding_path(), run_id=RUN_ID,
+                                              root=ROOT, parent=PARENT)
+        self.assertEqual(loaded[3]["schema"], "mastermind.original_plain_result_contract.v1")
+        self.assertNotIn("lane_root", loaded[3])
+        rc = self.fx.home / "lanes/ext" / ("lanes_" + RUN_ID + ".rc")
+        rc.write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "original_file_owner_mode_type_or_size"):
+            self.collect()
+
     def test_original_v1_plain_record_still_collects_under_its_original_rule(self):
         self.qualified()
         def legacy(record):
             record["schema"] = "mastermind.fabric_plain_launch_binding.v1"
             record.pop("acquisition_pool")
             record["transport"].pop("acquisition_pool")
+            record["transport"].pop("lane_root")
         self.rewrite_retained_binding(legacy, ordinary_log=True)
         receipt = self.collect()
         self.assertEqual(receipt["plain_launch_binding"]["schema"],
@@ -531,11 +565,12 @@ class PlainRepairCase(unittest.TestCase):
             record["schema"] = "mastermind.fabric_plain_launch_binding.v1"
             record.pop("acquisition_pool")
             record["transport"].pop("acquisition_pool")
+            record["transport"].pop("lane_root")
         self.rewrite_retained_binding(legacy)
         with self.assertRaisesRegex(ValueError, "plain_launch_binding_event_sequence_invalid"):
             self.collect()
 
-    def test_collector_rejects_v2_missing_unknown_or_inconsistent_tags(self):
+    def test_collector_rejects_v3_missing_unknown_or_inconsistent_tags(self):
         self.qualified()
         self.collector.load_binding(self.fx.binding_path(), run_id=RUN_ID,
                                     root=ROOT, parent=PARENT)
@@ -543,6 +578,9 @@ class PlainRepairCase(unittest.TestCase):
         mutations = (
             lambda r: r.pop("acquisition_pool"),
             lambda r: r["transport"].pop("acquisition_pool"),
+            lambda r: r["transport"].pop("lane_root"),
+            lambda r: r["transport"].update(lane_root={}),
+            lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v2"),
             lambda r: r["transport"].update(acquisition_pool="glm"),
             lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v99"),
             lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v1"),
@@ -569,7 +607,7 @@ class PlainRepairCase(unittest.TestCase):
              str(self.fx.packet_pin), str(self.fx.lease_path),
              str(self.fx.ctl / f"state/remote_sub/{RUN_ID}.observation.json"),
              RUN_ID, HOST, "glm", MODEL, self.fx.support_digest, POLICY,
-             "0123456789ab", ALIAS, self.fx.acquisition_pool])
+             "0123456789ab", ALIAS, self.fx.acquisition_pool, "-"])
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("TRANSPORT_VERIFIED", self.fx.log_path.read_text())
         with self.assertRaises(ValueError) as caught:
@@ -605,7 +643,7 @@ class PlainRepairCase(unittest.TestCase):
             ["transport-verify", str(self.fx.log_path), str(self.fx.receipt_path),
              str(self.fx.packet_pin), str(self.fx.lease_path), str(seen), RUN_ID,
              HOST, "glm", MODEL, self.fx.support_digest, POLICY,
-             "0123456789ab", ALIAS, self.fx.acquisition_pool])
+             "0123456789ab", ALIAS, self.fx.acquisition_pool, "-"])
         self.assertNotEqual(result.returncode, 0)
         log = self.fx.log_path.read_text()
         self.assertNotIn("TRANSPORT_VERIFIED", log)
@@ -626,7 +664,7 @@ class PlainRepairCase(unittest.TestCase):
             ["transport-verify", str(self.fx.log_path), str(self.fx.receipt_path),
              str(self.fx.packet_pin), str(self.fx.lease_path), str(seen), RUN_ID,
              HOST, "glm", MODEL, self.fx.support_digest, POLICY,
-             "0123456789ab", ALIAS, self.fx.acquisition_pool])
+             "0123456789ab", ALIAS, self.fx.acquisition_pool, "-"])
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("TRANSPORT_VERIFIED", self.fx.log_path.read_text())
 
@@ -827,7 +865,7 @@ class PlainRepairCase(unittest.TestCase):
         source = source.replace('$PLAIN_TRANSPORT_CHAIN_SOURCE',
                                 self.collector.delivery.remote_directory_chain_source())
         # The bound reader receives the publisher's physical lanes root.
-        arguments = ["reader", RUN_ID, self.fx.support_digest, POLICY,
+        arguments = ["reader", RUN_ID, self.fx.support_digest, POLICY, "-",
                      str(self.fx.home / "lanes")]
         prefix = ('import sys\n'
                   f'sys.argv={arguments!r}\n')

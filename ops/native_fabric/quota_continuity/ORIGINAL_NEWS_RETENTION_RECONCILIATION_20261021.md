@@ -229,3 +229,35 @@ Evidence is retained in
 This is source qualification only. The applicable immutable-source review,
 exact-head CI, protected inclusion, runtime selection and original-case
 reconciliation still require their own evidence; no live receipt was written.
+
+## Protected physical-root composition and preserved recovery boundary
+
+The source integration of prior reviewed
+2d25a583207322d0a4bc23313d4751f6d34c640b with protected
+0962f948a48957df15bb7be93bda84b4b4c6ba33 now includes the registry-bound
+physical-root protocol from PR #1675. The complete version matrix, exact stage
+identities and focused qualification records are recorded in
+PLAIN_PACKET_SAME_PATH_REPAIR_20261021.md, under "Integration with protected
+physical-root release 0962f948", and in the README.
+
+The original-case checker, reconciler and response adapter are byte-identical
+to the independently approved 2d25 source. The integrated historical-proof and
+reconciliation suite passes all 30 tests in 2.191 seconds, including all six
+healthy/failed-output cases. The canonical staged artifact-observation and
+collector-compatibility wrapper passes separately. The source closure remains
+85 explicit members with manifest
+1c04fa2e6381a51abd1297330df77c4c26d3c3d889de20f4f9c618b8dc44dc78
+and inventory
+87a9cb97c88ac841327fff9216229bf698add81ed13b6f89b3fb53e1c6bde8c1.
+
+Fresh ordinary transport producers use strict acquisition-aware v3 with an
+explicit nullable layout. Historical v1 and protected physical v2 remain their
+original contracts. These forward source changes do not rewrite the original
+News review's request, reservation, failure, return, packet, routing proof or
+generation evidence, and they do not widen this one-case recovery owner.
+
+Independent integrated-head review and hosted CI remain required. Protected
+inclusion, a canonical merged generation, fresh installed check, proof-fenced
+original-case reconciliation and canonical status are still separate gates.
+No production receipt or runtime selector was changed, and neither frozen
+review has acquired a result, acceptance, replay or retry permission.

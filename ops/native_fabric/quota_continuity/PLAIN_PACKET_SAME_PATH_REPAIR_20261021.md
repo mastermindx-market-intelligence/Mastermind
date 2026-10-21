@@ -477,3 +477,98 @@ The complete response contract and six real-child controls are recorded in
 The canonical builder still verifies all 85 entries. The preceding identities
 and tests remain historical qualification for the first acquisition follow-up;
 new-head review and CI must qualify this final response revision before release.
+
+## Integration with protected physical-root release 0962f948
+
+Protected master advanced to 0962f948a48957df15bb7be93bda84b4b4c6ba33
+(PR #1675) after the independent APPROVE_SOURCE verdict for
+2d25a583207322d0a4bc23313d4751f6d34c640b. This real two-parent source
+integration preserves both histories. The prior approval does not approve
+the integration.
+
+The protocol collision is resolved with new strict
+mastermind.transport_verification.v3 and
+mastermind.fabric_plain_launch_binding.v3 producers. Both acquisition evidence
+and an explicit nullable layout are required. Historical v1 and protected
+physical-v2 meanings remain closed and unchanged; the uninstalled acquisition-only
+v2 candidate is not admitted as another historical v2 shape. Artifact v1/v2 and
+plain result-contract v1/v2 keep their separate meanings. The README records the
+complete matrix. New producers require their v3 receipt instead of promoting old
+records by inference.
+
+Configured registry roots retain every protected layout, original-registry,
+exclusive packet/output, published-state-map, executor, one-attempt and
+collection boundary. Publisher output must agree with that frozen configured
+owner. No configured failure selects fallback. When the registry field is absent,
+the previously reviewed ordinary-plain publisher-owner path remains available
+with explicit null layout and its original limits. Physical result-contract v2,
+empty reserved RC semantics, and the 38-file remote closure are selected only by
+a validated non-null layout; default remote support remains 37 files.
+Qwen's frozen provider-configuration selection remains enabled on both eligible
+ordinary branches.
+
+The transport helper now requires separate acquisition-tag and layout arguments
+with exact arity. The generated readback requires separate layout and owner
+arguments, checks absolute owner spelling, and requires equality with the
+configured layout. Raw metadata paths, shell-encoded fragments and rsync filename
+handling stay separate. Canonical accounting pools and broker-observation checks
+are unchanged.
+
+### Integrated source qualification
+
+The actual integrated production bytes passed these focused qualifications;
+the controller and physical-root rows combine named passes across focused runs,
+rather than asserting one new broad aggregate pass:
+
+| Scope | Qualified result |
+| --- | --- |
+| Plain production, historical compatibility and closed v3 schemas | 44 tests passed |
+| Physical layout, protected-v2 compatibility and strict generated-reader arguments | 35-test suite passed, then the added reader-argument case passed |
+| Actual inert controller, publisher-owner and configuration paths | 17 original cases passed, followed by all 3 added configured-root cases |
+| Existing prelaunch/deadline ordering control with current v3 producer | 1 passed |
+| Historical proof, reconciliation and six-cell real-output matrix | 30 passed in 2.191 seconds |
+| Canonical staged artifact-observation/collector compatibility wrapper | 1 passed in 1.88 seconds |
+
+Configured controls execute the actual protected publisher and its 38-file
+state-link map. Their inert child fixture needed a valid original/stable routing
+policy and an explicit path to the runner's PyYAML dependency because child user
+site loading is disabled. Its GLM readiness fixture also distinguishes the actual
+publisher's regular lock leaf from release directories. These were fixture
+corrections, not weakened production checks. Positive controls now reach and
+prove the intended launch/refusal boundaries. Earlier failing outputs remain
+retained; they were not counted as custody qualifications.
+
+The canonical stage builder regenerated the unchanged 85-path native union.
+All member digests and byte counts match. Three inherited production members
+are exact protected 0962 bytes: artifact_delivery.py, remote_sub_exec.py and
+support_bundle.py. The checker, reconciler, adapter and Qwen wrapper remain exact
+independently reviewed 2d25 bytes.
+
+| Current stage identity | SHA-256 |
+| --- | --- |
+| Manifest | 1c04fa2e6381a51abd1297330df77c4c26d3c3d889de20f4f9c618b8dc44dc78 |
+| Source inventory | 87a9cb97c88ac841327fff9216229bf698add81ed13b6f89b3fb53e1c6bde8c1 |
+| Controller | ddd33aa64286899461d4c8e659729de3d48a05ba50e8ba4a8dcdc53eef8b7267 |
+| Helper | 5fcc80143adb8a5f547462a77a6d32d22192a6843bf6f9c5300356e1b54994d2 |
+| Collector | 263ffcd0bebb03b840f4e0cc9b4097d5445b0831026449bde68f760164f96d0a |
+| Recovery adapter | fd37c749d59d17c564cf4886b2184c853d1e120c5d7e3587b5c68f7267f3acdf |
+
+Evidence resides in the operation's private source-qualification records:
+
+- /tmp/news-1674-root-integration-stage-proof-20261021.json
+- /tmp/news-1674-integration-qualification-20261021.json
+- /tmp/news-1674-integration-targeted-qualification-20261021.json
+- /tmp/news-1674-integration-configured-qualification-20261021.json
+- /tmp/news-1674-integration-frontier-qualification-20261021.json
+- /tmp/news-1674-integration-final-wrappers-20261021.json
+
+Each records actual subprocess status and retained logs. Earlier broad local
+native/composition failures remain disclosed historical results; the unchanged
+host-local Git refusal and aggregate deadline were not converted into passes.
+
+This source integration still requires independent review of its immutable head,
+exact-head hosted CI, applicable protected merge, canonical merged-stage rebuild
+and fresh runtime/host qualification. No review stage is installable. No live
+host registry was enrolled, generation selected, reconciliation receipt written,
+provider worker started, held review replayed or News production acceptance
+established by this work.

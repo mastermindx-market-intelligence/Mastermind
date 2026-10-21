@@ -1,7 +1,9 @@
 # Mastermind Executive Ecosystem — canonical capability ledger (2026-10-17)
 
 **Programme:** Executive Ecosystem Completion (Chairman brief 2026-10-17, "FABLE CEO META — Executive
-Ecosystem Completion Mission"). **Seat:** Fable Meta-CEO, Claude session `873aabd3`. **Companion:**
+Ecosystem Completion Mission"). **Current integrator:** Astra, native root
+`01a15741-5e68-7803-8eb4-ccac74a6c04b`, assigned directly by Chris on October 21.
+**Original host-operation custody:** Fable Claude session `873aabd3`; no live operation is transferred by this assignment. **Companion:**
 `research/EXECUTIVE_ECOSYSTEM_COMPLETION_PROGRAMME_PLAN_2026-10-17.md` (lanes, commissions, acceptance
 campaign, checkpoint). **Continuity owner:** macro `agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md`.
 
@@ -10,6 +12,35 @@ at which revision, by read-only inspection on 2026-10-17 between roughly 04:00Z 
 lifecycle, registry, queue, credential, memory, retry, session, acceptance or publication authority; every
 row names the existing owner that already holds the capability. A row's state is a claim about evidence,
 never a permission. Re-running this census is DO_NOT_REDO unless a row's evidence revision changes.
+
+## Current evidence delta — October 21 integration
+
+This section updates the affected rows at protected source
+`3905e79ed7996c52a42d78838ebc9df16ed2818a`, following the Chairman's assignment of
+`EXECUTIVE_ECOSYSTEM_ASTRA_CEO_HANDOFF_2026-10-21.md` at `8dd8bebfc525d6f688d7356027f3c3279be93759`.
+The dated census and release history below remain evidence of their observations, not current execution instructions.
+Unchanged accepted checks are retained. None of these observations proves H1–H8 acceptance.
+
+| Affected rows | Current accepted observation | Remaining falsifiable obligation / effect boundary |
+| --- | --- | --- |
+| E1, E6, E7 | #1637 merged as `80f384b8f58b7ca46422d9783aa5c0613c7bf4b2` and was installed October 19. Five critical installed readiness/acceptance files match that Git source. Current Control runs as UID450/PID98032, started October 21 at 03:02:41 Vancouver; ordinary codex worker is disabled/unregistered. MCP plist remains `91c1cac5`. | Attribute the Control start to its actual operation and permitted release receiver, then reconcile current quiescence/config/seal predicates. Mixed components and a running Control are not a coherent accepted release. Do not repeat installation, migration, maintenance preparation or Gate B. |
+| E4–E6, F1 | October 19 Gate B accepted; incumbent auditor returned PASS / RELEASE_STOP. Readable autonomy receipt remains dated October 19, DISARMED with acceptance false. Root's October 20 controller41117 returned `credential_identity_changed_during_probe` before inference, without spending its canary. | The October 20 09:00 UTC deadline expired. Installed special drift recovery pins predecessor `654abd66…`, which does not match retained receipt `2bca56bc…`; another deadline alone cannot resolve this mismatch. Preserve the refusal. Qualify a lawful credential/release path before the reserved new human canary decision; no credential replacement, replay or arm is implied. |
+| E6 | Same retained80f descriptor: file byte SHA256 `15359f28e35e02e75b8b62991fad2efaeb8c11a926d0e35da72964a5c3cd08d5`; canonical JSON digest `359eac8e8a894d706e6eb547a6a3f69ccdbd884a75f10db1a5118c5e28d40ca2`. | The installed acceptance flag expects the canonical digest `359eac…`. Preserve JOB-003, terminal JOB-006 and the supersession chain. No acceptance retry is authorized by correcting this record. |
+| F4, F5, F7 | #1359 is merged (`76576d8680bb70cdb9e1cfe7016aefec0fb3286f`); Web `fabric_capabilities` succeeds through the existing facade. Existing restricted profiles select backend `386ab933…` with matching inspected manifests/source. Native adapter sequence11 selects `4f0f6055f8c03321acbbfad41675135ea6e4ac50012f8d13435acbb4c52d4fbe`; all83 selected hashes match its manifest. | Current Web worker admission/START remains unprobed. No missing facade implementation was found. Native/manual root labels are not canonical Executive Job ancestry. Qualify actual parent/admission/budget and consume retained worker bytes in that parent; neither idle Wake nor background execution is supplied by the facade. Preserve current installer custody. |
+| G3–G5, A1–A4 | `/os/` currently serves HTTP200 and a signed-out app. Readable installed gateway config still lacks OS executive transport/resource/commission/session composition. #1515 is open at `085e1624dd306d76363d861f1b29650d588b767f` with occupied staged/unstaged work. | Signed-out desktop keyboard/preview and390px browser checks passed; preview emitted zero requests. Serving the app is not authenticated command/result proof. Preserve #1515 source custody and its explicit TS18048 edit refusal. Sealed gateway composition, authentication and actual command/result consumption remain required. #1672 public edge work is a separate release boundary. |
+| G4, H3, H4 | #1362 original branch was `ca3da59a5558886d1147c4ffdfb2542a16c2ada9`. Its retained combined suite already completed:2667 tests, zero failures/errors/skips. The original staged tree is preserved; #1601/#1572 overlap was integrated without conflicts into published original PR head `dd9f1bbc61a5413b09d98edea7ff81f0f72427b1`, tree `8e409f665dd88f9388d0147264c0ca59de1c092f`. Exact-head CI remains separate from the historical suite. Current supported `session_targets` returns an empty list. | Empty targets reflect absent qualifying runtime attempts/bindings, not proof that every client is offline. Existing native chats do not automatically become Executive targets. Original changed-risk Fabric review ended rc78 `canonical_source_unreadable` before provider work; no verdict, merge held while the existing Fabric slice diagnoses admission. Complete original #1362 review/CI, then qualify an actual target and original-parent continuation; do not invent enrollment or replay historical sends. |
+| A2, C3 | #1643 merged as `e99217f2`; #1652 live-progress collector/projection merged as `b96dd69efb0588c3a678ee09ddd5408fa5a40b12`. | #1652 is default-off source acceptance only. Profile sealing, installed rollout and real provider/Web/native consumption remain. A merged PR is no longer an active writer merely because its old body says otherwise. |
+| E1, G1–G2 | One fresh supported Executive V3 state read returned `backend_unavailable`; current targets read returned `[]`. | Reader failure does not authorize enabling services or submitting work. Historical25-job/33-attempt counts remain dated and were not reasserted as a current snapshot. |
+
+Accepted integration returns are retained at
+`/Volumes/Mastermind/evidence/mmos-commission-01a15741/masterplan-{release,fabric}.md`;
+app and bridge evidence is consumed by the same original native root. The root's current checkpoint is
+`/Volumes/Mastermind/evidence/mmos-commission-01a15741/CURRENT.md` and Mastermind #1621 comment6282392406.
+That checkpoint is continuity, not a scheduler or an admission receipt.
+
+Unchanged held effects include #633 DCR, JOB-006, original Research Factory controller62193,
+the quality/legacy continuation refusal with original controller36230, #1147 HOLD, #1515's refused edit,
+and separately denied host observations. No worker or alternate reader is commissioned to obtain a refused effect.
 
 ## 0. Vocabulary
 
