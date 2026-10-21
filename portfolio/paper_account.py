@@ -501,8 +501,9 @@ def _pending_clear_transition(
     *,
     prices: dict[str, float] | None = None,
     price_sources: dict[str, str] | None = None,
+    _evidence: dict | None = None,
 ) -> dict[str, Any]:
-    """Capture the exact queued target that a successful settlement is allowed to remove."""
+    """Capture the exact queued target and optional selected-price context for recovery."""
     path = _pending_target_path(portfolio_id)
     pending_payload = _read_pending_target_payload(portfolio_id)
     settlement_prices = {
@@ -531,6 +532,25 @@ def _pending_clear_transition(
             ticker: str(price_sources.get(ticker) or "settlement_snapshot")
             for ticker in settlement_prices
         }
+    if _evidence is not None:
+        try:
+            from portfolio import price_evidence, registry
+            transition["settlement_price_evidence"] = price_evidence.settlement_snapshot(
+                settlement_prices, transition.get("settlement_price_sources"),
+                registry.currency(portfolio_id), _evidence,
+            )
+        except Exception:
+            # Evidence capture does not veto a numerically valid settlement. The
+            # failure itself stays in the same immutable transaction preimage.
+            transition["settlement_price_evidence"] = {
+                "schema": "mastermind.settlement_price_evidence.v1",
+                "currency": None,
+                "quotes": {},
+                "omitted_quote_count": len(settlement_prices),
+                "capture_error": "snapshot_failed",
+                "market_observed_at": None,
+                "execution_qualification": "not_checked",
+            }
     return transition
 
 
@@ -1440,94 +1460,201 @@ def _fetch_price_series(ticker: str, *, cache_only: bool = False) -> "pd.Series 
     return None
 
 
-def _live_price(ticker: str) -> float | None:
-    """Best live mark for a ticker, in USD.
+def _live_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Best available native quote converted to USD, with optional read provenance.
 
-    Dispatches by venue suffix:
-      * ``*.SS`` / ``*.SZ`` → the LIVE Tushare A-share close (CNY) when available, else the vendored
-                              ``chinastockdata/`` snapshot → USD
-      * ``*.HK`` / ``^HSI`` → the LIVE Yahoo close (HKD) when available, else the vendored
-                              ``hkstockdata/`` snapshot → USD
-      * else                → ``stockdata/``     (USD, incl. US-listed China ADRs)
-    The China/HK legs convert their LOCAL quote to USD via ``portfolio.fx`` so the paper account's
-    single-currency NAV stays honest (it holds all three venues at once). Live marks come from
-    Tushare for A-shares (``daily``) and Yahoo for Hong Kong; both degrade to the snapshot on any
-    miss (Tushare's ``hk_daily`` is too rate-limited to mark a multi-name HK book)."""
+    Yahoo Close is tried first for US, mainland China and HK. China also tries
+    Tushare after a missing Yahoo result. The vendored per-name snapshot is the
+    final fallback. A fresh retrieval can still contain an older source bar;
+    neither the word "live" nor this observation qualifies a price for execution.
+    """
+    from portfolio import price_evidence
+
     t = (ticker or "").upper().strip()
     if t.endswith(".SS") or t.endswith(".SZ"):
-        sub, convert = "chinastockdata", True
+        sub, convert, native_currency = "chinastockdata", True, "CNY"
     elif t.endswith(".HK") or t == "^HSI":
-        sub, convert = "hkstockdata", True
+        sub, convert, native_currency = "hkstockdata", True, "HKD"
     else:
-        sub, convert = "stockdata", False
+        sub, convert, native_currency = "stockdata", False, "USD"
 
     local: float | None = None
-    # A-shares: prefer Yahoo's native-CNY Shanghai/Shenzhen quote, which remains reachable from
-    # non-China VPS hosts; retain Tushare as the second live source. Hong Kong: Yahoo HKD close
-    # (Tushare's ``hk_daily`` is throttled to ~1 call/hr — see data_layer.yahoo_feed).
-    # Both lag-correct the vendored snapshot.
+    selected_source = None
+    upstream = None
+    source_label = None
+    source_text_sha256 = None
+    fx_context = None
+    attempts = []
+
+    def read(reader, name):
+        nonlocal selected_source, upstream
+        try:
+            if _evidence is None:
+                value, context = reader(t), None
+            else:
+                value, context = price_evidence.read_with_evidence(reader, t)
+        except Exception:
+            if _evidence is not None:
+                try:
+                    attempts.append({"source": name, "outcome": "error"})
+                except Exception:
+                    pass
+            raise
+        if value is not None:
+            selected_source, upstream = name, context
+        if _evidence is not None:
+            try:
+                attempts.append({
+                    "source": name,
+                    "outcome": "missing" if value is None else (
+                        "returned" if price_evidence.positive_number(value) is not None else "invalid_value"
+                    ),
+                })
+            except Exception:
+                pass
+        return value
+
     if t.endswith((".SS", ".SZ")):
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
         if local is None:
             try:
                 from data_layer import tushare_feed
-                local = tushare_feed.price_local(t)
+                local = read(tushare_feed.price_local, "tushare_close")
             except Exception:
                 local = None
     elif t.endswith(".HK") or t == "^HSI":
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
     else:
-        # US (bare tickers + ETFs): the LIVE Yahoo quote (USD) via yfinance — reflects TODAY's tape.
-        # The vendored stockdata snapshot is CI/EOD-lagging, so on a fast day (e.g. SMH -7%) it marks a
-        # stale price and the book NAV is wrong; the live leg fixes that. Degrades to the snapshot below.
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
-    # Fallback (and the only path when the live leg misses): the vendored per-name snapshot.
     if local is None:
+        snapshot_error = False
         try:
             p = _ROOT / "vendor" / "macro" / "site" / sub / f"{t}.json"
             if p.exists():
-                v = (json.loads(p.read_text()).get("tech") or {}).get("price")
+                raw_text = p.read_text()
+                payload = json.loads(raw_text)
+                v = (payload.get("tech") or {}).get("price")
                 if v is not None:
                     local = float(v)
+                    selected_source, upstream = "macro_snapshot", None
+                    if _evidence is not None:
+                        try:
+                            source_label = payload.get("asof")
+                            source_text_sha256 = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+                        except Exception:
+                            pass
         except Exception:
+            snapshot_error = True
             local = None
+        if _evidence is not None:
+            try:
+                attempts.append({
+                    "source": "macro_snapshot",
+                    "outcome": "error" if snapshot_error else (
+                        "missing" if local is None else (
+                            "returned" if price_evidence.positive_number(local) is not None else "invalid_value"
+                        )
+                    ),
+                })
+            except Exception:
+                pass
+
+    def observed(value):
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, value, "USD", selected_source, stage="paper_live",
+                    upstream=upstream, input_price=local, input_currency=native_currency,
+                    source_bar_label=source_label, source_bar_label_kind="snapshot_asof",
+                    source_text_sha256=source_text_sha256, attempts=attempts,
+                    fx_context=fx_context, fx_operation="divide",
+                ))
+            except Exception:
+                pass
+        return value
+
     if local is None:
-        return None
+        return observed(None)
     if convert:
         from portfolio import fx
-        return fx.to_usd(local, t)
-    return local
+        if _evidence is None:
+            return observed(fx.to_usd(local, t))
+        value, fx_context = price_evidence.read_with_evidence(fx.to_usd, local, t)
+        return observed(value)
+    return observed(local)
 
 
-def _current_price(ticker: str) -> float | None:
-    """Best available current/last-close price for a ticker: the stockdata live mark first,
-    else the last point of the engine price series (covers the leadership-sleeve ETFs)."""
-    px = _live_price(ticker)
+def _current_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Select the existing live/snapshot path, then the last engine-series point.
+
+    Optional context preserves the selected source and native/USD conversion facts.
+    Source index labels remain bar labels, and FX source timing is not certified.
+    """
+    from portfolio import price_evidence
+
+    t = (ticker or "").upper().strip()
+    if _evidence is None:
+        px, live_context = _live_price(ticker), None
+    else:
+        px, live_context = price_evidence.read_with_evidence(_live_price, ticker)
     if px and px > 0:
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, px, "USD", "live_price", stage="paper_current", upstream=live_context,
+                ))
+            except Exception:
+                pass
         return px
     s = _fetch_price_series(ticker)
     try:
         if s is not None and len(s) > 0:
             v = float(s.iloc[-1])
-            # The series stores (yahoo / breadth cache) quote in LOCAL currency; convert a China/HK
-            # name to USD so the fallback can't leak a raw CNY/HKD mark into NAV (bare US tickers pass
-            # through unchanged). Mirrors the conversion _live_price already does for the live mark.
             from portfolio import fx
-            return fx.to_usd(v, ticker)
+            if _evidence is None:
+                value, fx_context = fx.to_usd(v, ticker), None
+            else:
+                value, fx_context = price_evidence.read_with_evidence(fx.to_usd, v, ticker)
+            if _evidence is not None:
+                try:
+                    price_evidence.emit(_evidence, price_evidence.make_read(
+                        t, value, "USD", "engine_series", stage="paper_current",
+                        input_price=v, input_currency=fx.currency_of(ticker),
+                        fx_context=fx_context, fx_operation="divide",
+                        source_bar_label=s.index[-1], source_bar_label_kind="series_index",
+                        attempts=[{
+                            "source": "live_price",
+                            "outcome": "missing" if px is None else "invalid_value",
+                        }],
+                    ))
+                except Exception:
+                    pass
+            return value
     except Exception:
         pass
+    if _evidence is not None:
+        try:
+            price_evidence.emit(_evidence, price_evidence.make_read(
+                t, None, "USD", None, stage="paper_current",
+                attempts=[
+                    {"source": "live_price", "outcome": "missing" if px is None else "invalid_value"},
+                    {"source": "engine_series", "outcome": "unavailable"},
+                ],
+            ))
+        except Exception:
+            pass
     return None
 
 
@@ -3048,6 +3175,7 @@ def clear_pending_target(portfolio_id: str | None = None) -> None:
 def settle_target(prices: dict[str, float], asof: str,
                   portfolio_id: str | None = None, *,
                   _price_sources: dict[str, str] | None = None,
+                  _evidence: dict | None = None,
                   _locked: bool = False) -> dict | None:
     """If a target was queued while the market was closed, rebalance to it now (at the open marks)
     and clear it. Returns the settled target dict, or None if nothing was queued. Paper-only.
@@ -3057,6 +3185,10 @@ def settle_target(prices: dict[str, float], asof: str,
     If any positive target or intended full exit lacks a trusted price,
     ``UnpriceableExitPrices`` is raised before an account write and the pending target is retained
     for a later retry.
+
+    Optional _evidence is observation input, not numeric authority. Its bounded
+    snapshot joins the existing transaction identity and can change future IDs;
+    absent legacy input keeps the existing preimage shape. Recovery reuses it.
     """
     try:
         canonical_asof = date.fromisoformat(asof).isoformat()
@@ -3071,6 +3203,7 @@ def settle_target(prices: dict[str, float], asof: str,
                 asof,
                 portfolio_id=portfolio_id,
                 _price_sources=_price_sources,
+                _evidence=_evidence,
                 _locked=True,
             )
     preflight = preflight_pending_target(portfolio_id)
@@ -3136,7 +3269,7 @@ def settle_target(prices: dict[str, float], asof: str,
             positive_target_tickers=missing_prices["positive_target_tickers"],
         )
     followup = _pending_clear_transition(
-        portfolio_id, prices=prices, price_sources=_price_sources
+        portfolio_id, prices=prices, price_sources=_price_sources, _evidence=_evidence
     )
     rebalance(
         target,
