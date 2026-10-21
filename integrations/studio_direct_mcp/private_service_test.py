@@ -4098,3 +4098,76 @@ class TestC2PersonalGitTimeoutOnly(unittest.TestCase):
                 self.assertEqual(json.loads(payload)["effect"], "NOT_APPLIED")
                 unused.assert_not_called()
             self.assertEqual(original, (roots["manifest"].read_bytes(), roots["config"].read_bytes()))
+
+
+class TestSealedV2FleetGatewayManifestRoster(unittest.TestCase):
+    """Only exact already-installed V2 files and bytes gain read compatibility."""
+
+    def _manifest(self, account, names):
+        digest = "a" * 64
+        return {
+            "version": 2, "account": account,
+            "label": _label_for(account),
+            "files": {name: digest for name in names},
+            "configHash": digest, "plistHash": digest,
+            "source": "/fixture/not-live", "node": "/fixture/node",
+            "backend": "/fixture/backend", "host": "127.0.0.1",
+            "port": 45020, "nodeHash": digest, "backendHash": digest,
+            "dependencyTreeHash": digest,
+        }
+
+    def test_six_exact_v2_manifest_seals_and_closed_file_cohorts(self):
+        pins = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS
+        self.assertEqual(len(pins), 6)
+        self.assertEqual(set(pins), {
+            "admin-business", "chatgpt3-w570f6f34", "chatgpt3-wa2a9e6f9",
+            "chatgpt4", "fabric-design", "fabric-read",
+        })
+        for account, (canonical, raw, names) in pins.items():
+            with self.subTest(account=account):
+                self.assertEqual(len(canonical), 64)
+                self.assertEqual(len(raw), 64)
+                self.assertNotIn(names, svc.KNOWN_MANIFEST_FILESETS)
+                specimen = self._manifest(account, names)
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value=canonical):
+                    self.assertTrue(svc._sealed_v2_fleet_gateway_predecessor(specimen, account))
+                    self.assertTrue(svc._valid_manifest(specimen, account, _label_for(account)))
+                    changed_files = dict(specimen, files={**specimen["files"], "surprise.mjs": "b"*64})
+                    self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed_files, account))
+                    changed_version = dict(specimen, version=1)
+                    self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed_version, account))
+                    changed_identity = dict(specimen, account="different-seat")
+                    self.assertFalse(svc._sealed_v2_fleet_gateway_predecessor(changed_identity, account))
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value="0"*64):
+                    self.assertFalse(svc._valid_manifest(specimen, account, _label_for(account)))
+
+    def test_original_manifest_bytes_required_and_no_mutation(self):
+        for account, (canonical, raw, names) in svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS.items():
+            with self.subTest(account=account), tempfile.TemporaryDirectory() as temp:
+                manifest = self._manifest(account, names)
+                path = Path(temp) / "manifest.json"
+                path.write_text(json.dumps(manifest), encoding="utf-8")
+                initial = path.read_bytes()
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value=canonical):
+                    with mock.patch.object(svc, "_sha256_file", return_value=raw):
+                        read = svc._read_manifest(path, account, _label_for(account), required=True)
+                        self.assertEqual(read, manifest)
+                    with mock.patch.object(svc, "_sha256_file", return_value="0"*64):
+                        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                            svc._read_manifest(path, account, _label_for(account), required=True)
+                self.assertEqual(path.read_bytes(), initial)
+
+    def test_unknown_accounts_and_rewritten_seals_refused(self):
+        pins = svc.SEALED_V2_FLEET_GATEWAY_PREDECESSORS
+        first = next(iter(pins))
+        sample = self._manifest(first, pins[first][2])
+        for unknown in ("new-owner", "fabric-future", "arbitrary"):
+            with self.subTest(unknown=unknown):
+                value = dict(sample, account=unknown, label=_label_for(unknown))
+                with mock.patch.object(svc, "_canonical_json_sha256", return_value=pins[first][0]):
+                    self.assertFalse(svc._valid_manifest(value, unknown, _label_for(unknown)))
+        with mock.patch.object(svc, "_canonical_json_sha256", return_value=pins[first][0]):
+            replaced = dict(sample, configHash="f"*64)
+            # A different real canonical digest fails even when key and file count match.
+            with mock.patch.object(svc, "_canonical_json_sha256", return_value="f"*64):
+                self.assertFalse(svc._valid_manifest(replaced, first, _label_for(first)))
