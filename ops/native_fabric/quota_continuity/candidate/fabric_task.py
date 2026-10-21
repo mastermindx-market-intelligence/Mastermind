@@ -180,9 +180,11 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         keys = {"schema", "run_id", "root", "parent", "host", "mode", "requested_model",
                 "pool", "lease_id", "account", "packet_sha256", "support_digest",
                 "acquire_response_sha256", "source", "phase"}
+        if type(binding) is dict and binding.get("schema") == "mastermind.fabric_launch_binding.v2":
+            keys.add("acquisition_pool")
         if type(binding) is not dict or set(binding) != keys:
             return unknown
-        if (binding["schema"] != "mastermind.fabric_launch_binding.v1"
+        if (binding["schema"] not in {"mastermind.fabric_launch_binding.v1", "mastermind.fabric_launch_binding.v2"}
                 or binding["run_id"] != rid or binding["host"] not in hosts
                 or binding["source"] != "controller_original_acquire_return"
                 or binding["phase"] != "PRE_LAUNCH"
@@ -197,17 +199,27 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
                 return unknown
         if type(binding["lease_id"]) is not str or not re.fullmatch("[a-f0-9]{12}", binding["lease_id"]):
             return unknown
+        if binding["schema"] == "mastermind.fabric_launch_binding.v2":
+            from remote_sub_helpers import validate_acquisition_pool
+            acquisition_pool = validate_acquisition_pool(
+                binding["mode"], binding["requested_model"], binding["acquisition_pool"])
+            acquired = (f'LEASE={binding["lease_id"]} ACCOUNT={binding["account"]}').encode("ascii")
+            if binding["acquire_response_sha256"] not in {
+                    delivery.digest(acquired), delivery.digest(acquired + b"\n")}:
+                return unknown
+        else:
+            acquisition_pool = binding["pool"]
         before = events[:index]
         support = "SUPPORT_VERSION_READY digest=" + binding["support_digest"] + r" policy=[a-f0-9]{64}"
         if (sum(event == "RUN_RESERVED explicit=1" for event in before) != 1
-                or [event for event in before if event.startswith("LEASE_OK ")] != ["LEASE_OK pool=" + binding["pool"]]
+                or [event for event in before if event.startswith("LEASE_OK ")] != ["LEASE_OK pool=" + acquisition_pool]
                 or len([event for event in before if event.startswith("SUPPORT_VERSION_READY ")]) != 1
                 or not any(re.fullmatch(support, event) for event in before)
                 or any(event.startswith(("LAUNCH", "DONE", "REMOTE_DONE", "LEASE_PRESERVED")) for event in before)
                 or any(token in event for event in before for token in ("REFUSED", "FAILED", "EFFECT_UNKNOWN"))):
             return unknown
         if not (before.index("RUN_RESERVED explicit=1")
-                < before.index("LEASE_OK pool=" + binding["pool"])
+                < before.index("LEASE_OK pool=" + acquisition_pool)
                 < next(i for i, event in enumerate(before) if event.startswith("SUPPORT_VERSION_READY "))):
             return unknown
         if delivery.local_file(log_path, MAX_LOG_BYTES) != original_log:
@@ -478,6 +490,19 @@ def inspect_run(run_id: str) -> dict[str, Any]:
             state = "TERMINAL" if signal != "effect_unknown" else "EFFECT_UNKNOWN"
         elif _REMOTE_DONE_RE.search(text):
             state = "SETTLING"
+
+    if (state == "TERMINAL_FAILURE" and rc == 78 and signal == "prelaunch_failure"
+            and rid == "news-9612-exact-3a663-release-review-20261021"):
+        import native_plain_packet_reconcile as packet_reconcile
+        try:
+            verified = packet_reconcile.status_from_receipt()
+            if verified is not None:
+                return {**_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"), **verified}
+        except (OSError, ValueError, TypeError, KeyError):
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
+                "result_available": False, "result_bytes": None,
+                **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
 
     if state == "EFFECT_UNKNOWN" and rid == prestart_reconcile.RUN_ID:
         verified = prestart_reconcile.status_from_receipt()
@@ -1087,9 +1112,53 @@ def _json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
+def _discard_failed_stdout() -> None:
+    """Prevent a failed acknowledgment from flushing again to its old channel."""
+    target_fd = null_fd = None
+    try:
+        target_fd = sys.stdout.fileno()
+        null_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null_fd, target_fd)
+    except (AttributeError, OSError, TypeError, ValueError):
+        # Embedded/test streams may have no descriptor. Never assume fd 1 or
+        # sys.__stdout__ belongs to that stream, and do not close the caller's
+        # retained object merely to disarm this CLI response.
+        sys.stdout = None
+    finally:
+        if null_fd is not None and null_fd != target_fd:
+            try:
+                os.close(null_fd)
+            except OSError:
+                pass
+
+
+def _plain_packet_reconciliation_response(value: object, effect_state: str) -> bool:
+    """Deliver either response without losing the operation's effect state."""
+    try:
+        _json(value)
+        sys.stdout.flush()
+    except (OSError, ValueError, TypeError) as exc:
+        _discard_failed_stdout()
+        print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: "
+              + effect_state + ": " + type(exc).__name__ + ": " + str(exc),
+              file=sys.stderr, flush=True)
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_packet_check = sub.add_parser("check-plain-packet-retention", help="Read-only fixed original News retention proof; no reconciliation or retry")
+    p_packet_check.add_argument("run_id")
+    p_packet_check.add_argument("--root", required=True)
+
+    p_packet_reconcile = sub.add_parser("reconcile-plain-packet-retention",
+        help="Record the exact original historical failure disposition; never replay or accept")
+    p_packet_reconcile.add_argument("run_id")
+    p_packet_reconcile.add_argument("--root", required=True)
+    p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
 
     p_request = sub.add_parser("request")
     p_request.add_argument("--id", required=True)
@@ -1289,6 +1358,32 @@ def main(argv: list[str] | None = None) -> int:
             command.extend(["--path", path])
         return subprocess.run(command).returncode
     try:
+        if args.cmd == "reconcile-plain-packet-retention":
+            import native_plain_packet_reconcile as packet_reconcile
+            try:
+                response = packet_reconcile.reconcile_original(
+                    args.run_id, args.root, args.expected_proof_sha256)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                effect_state = getattr(exc, "effect_state", "NOT_APPLIED")
+                _plain_packet_reconciliation_response(
+                    {"schema": packet_reconcile.SCHEMA, "action": "UNQUALIFIED",
+                     "run_id": args.run_id, "expected_root_id": args.root,
+                     "effect_state": effect_state, "retry_allowed": False,
+                     "worker_dispatch_performed": False}, effect_state)
+                print("PLAIN_PACKET_RECONCILIATION_UNQUALIFIED: " + effect_state
+                      + ": " + type(exc).__name__ + ": " + str(exc),
+                      file=sys.stderr, flush=True)
+                return 78
+            # A returned operation may already have published the receipt.
+            return 0 if _plain_packet_reconciliation_response(response, "EFFECT_UNKNOWN") else 78
+        if args.cmd == "check-plain-packet-retention":
+            import native_plain_packet_check as packet_check
+            try:
+                _json(packet_check.check_original(args.run_id, args.root))
+                return 0
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                print("PLAIN_PACKET_CHECK_UNQUALIFIED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                return 78
         if args.cmd == "reconcile-completed":
             try:
                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))

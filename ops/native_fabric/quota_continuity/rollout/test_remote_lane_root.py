@@ -49,6 +49,7 @@ class PhysicalRootCase(unittest.TestCase):
     post_launch = plain.PlainRepairCase.post_launch
     collect = plain.PlainRepairCase.collect
     receipt_on_disk = plain.PlainRepairCase.receipt_on_disk
+    rewrite_retained_binding = plain.PlainRepairCase.rewrite_retained_binding
 
     def setUp(self):
         plain.PlainRepairCase.setUp(self)
@@ -115,14 +116,17 @@ class PhysicalRootCase(unittest.TestCase):
             RUN_ID, mode, self.physical / "tmp" / (RUN_ID + ".txt"), "~",
             self.published, self.executor_environment() if env is None else env)
 
-    def transport_reader(self):
+    def transport_reader(self, arguments=None):
         source = self.shell.split("<<'PY_VERIFY_PLAIN_TRANSPORT'\n", 1)[1].split(
             "\nPY_VERIFY_PLAIN_TRANSPORT", 1)[0]
         source = source.replace("$PLAIN_TRANSPORT_CHAIN_SOURCE",
                                 self.delivery.remote_lane_root_source())
+        if arguments is None:
+            arguments = ["reader", RUN_ID, self.fx.support_digest, POLICY,
+                         self.layout_token, str(self.physical)]
         prefix = ("import pwd, types, sys\n"
                   f"pwd.getpwuid=lambda uid: types.SimpleNamespace(pw_dir={str(self.fx.home)!r})\n"
-                  f"sys.argv={['reader', RUN_ID, self.fx.support_digest, POLICY, self.layout_token]!r}\n")
+                  f"sys.argv={arguments!r}\n")
         return subprocess.run([sys.executable, "-I", "-S", "-c", prefix + source],
                               capture_output=True, text=True, timeout=15)
 
@@ -140,7 +144,7 @@ class PhysicalRootCase(unittest.TestCase):
             "transport-verify", str(self.fx.log_path), str(self.fx.receipt_path),
             str(self.fx.packet_pin), str(self.fx.lease_path), str(seen), RUN_ID,
             HOST, "glm", MODEL, self.fx.support_digest, POLICY, "0123456789ab",
-            ALIAS, self.layout_token])
+            ALIAS, self.fx.acquisition_pool, self.layout_token])
 
     def qualified(self):
         result = self.verify_transport()
@@ -148,7 +152,8 @@ class PhysicalRootCase(unittest.TestCase):
         result = self.fx.run_helper([
             "launch-binding", str(self.fx.log_path), str(self.fx.packet_pin),
             str(self.fx.lease_path), RUN_ID, ROOT, PARENT, HOST, "glm", MODEL,
-            self.fx.support_digest, "0123456789ab", ALIAS, str(self.fx.receipt_path)])
+            self.fx.support_digest, "0123456789ab", ALIAS, str(self.fx.receipt_path),
+            self.fx.acquisition_pool])
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         row = json.loads(result.stdout)
         self.post_launch()
@@ -164,7 +169,25 @@ class PhysicalRootCase(unittest.TestCase):
         alias.symlink_to(decoy, target_is_directory=True)
         self.published.chmod(0o555)
 
-    def test_actual_v2_transport_binding_generated_collection_and_readback(self):
+    def test_transport_reader_requires_separate_layout_and_matching_owner(self):
+        control = self.transport_reader()
+        self.assertEqual(control.returncode, 0, control.stderr)
+        arguments = ["reader", RUN_ID, self.fx.support_digest, POLICY,
+                     self.layout_token, str(self.physical)]
+        bad_arguments = (
+            arguments[:-1],
+            arguments + ["ignored"],
+            arguments[:4] + [arguments[5], arguments[4]],
+            arguments[:5] + [str(self.physical.parent / "different-owner")],
+            arguments[:5] + ["relative-owner"],
+        )
+        for args in bad_arguments:
+            with self.subTest(arguments=args):
+                result = self.transport_reader(args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(result.stdout, "")
+
+    def test_actual_v3_transport_binding_generated_collection_and_readback(self):
         row = self.qualified()
         receipt = self.collect()
         self.assertEqual(receipt["state"], "COMPLETE")
@@ -172,13 +195,90 @@ class PhysicalRootCase(unittest.TestCase):
         self.assertEqual(receipt["acceptance"], "NOT_RECORDED")
         self.assertFalse(receipt["original_operation_mutated"])
         binding = receipt["plain_launch_binding"]
-        self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v2")
+        self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v3")
         self.assertEqual(binding["binding_sha256"], row["binding_sha256"])
         self.assertEqual(binding["transport"]["lane_root"], self.layout)
         for flag in ("producer_root_authenticated", "producer_packet_consumption_attested",
                      "served_model_and_historical_physical_host_authenticated"):
             self.assertFalse(receipt["plain_provenance"][flag])
         self.assertEqual(self.receipt_on_disk()[1], STDOUT)
+
+    @staticmethod
+    def historical_v2(record):
+        record["schema"] = "mastermind.fabric_plain_launch_binding.v2"
+        record.pop("acquisition_pool")
+        record["transport"].pop("acquisition_pool")
+
+    def test_protected_v2_collects_under_original_layout_and_pool_rule(self):
+        self.qualified()
+        self.rewrite_retained_binding(self.historical_v2, ordinary_log=True)
+        receipt = self.collect()
+        self.assertEqual(receipt["plain_launch_binding"]["schema"],
+                         "mastermind.fabric_plain_launch_binding.v2")
+        self.assertEqual(receipt["plain_launch_binding"]["transport"]["lane_root"], self.layout)
+        self.assertNotIn("acquisition_pool", receipt["plain_launch_binding"])
+        self.assertEqual(self.receipt_on_disk()[1], STDOUT)
+        request = json.loads((Path(self.fx.destination) / "read-request.json").read_bytes())
+        self.assertEqual(request["contract"]["schema"],
+                         "mastermind.original_plain_result_contract.v2")
+        self.assertEqual(request["contract"]["lane_root"], self.layout)
+        self.assertEqual(receipt["acceptance"], "NOT_RECORDED")
+
+    def test_protected_v2_does_not_gain_frontier_qualification(self):
+        self.qualified()
+        self.rewrite_retained_binding(self.historical_v2)
+        with self.assertRaisesRegex(ValueError, "plain_launch_binding_event_sequence_invalid"):
+            self.collect()
+        self.assertFalse(Path(self.fx.destination).exists())
+
+    def test_protected_v2_refuses_acquisition_fields_and_missing_or_null_layout(self):
+        self.qualified()
+        self.rewrite_retained_binding(self.historical_v2, ordinary_log=True)
+        self.collector.load_binding(self.fx.binding_path(), run_id=RUN_ID, root=ROOT, parent=PARENT)
+        original = self.fx.log_path.read_text()
+        changes = (
+            lambda r: r.update(acquisition_pool="glm"),
+            lambda r: r["transport"].update(acquisition_pool="glm"),
+            lambda r: r["transport"].pop("lane_root"),
+            lambda r: r["transport"].update(lane_root=None),
+            lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v1"),
+        )
+        for number, change in enumerate(changes):
+            with self.subTest(number=number):
+                self.fx.log_path.write_text(original)
+                self.rewrite_retained_binding(change)
+                with self.assertRaises(ValueError):
+                    self.collect()
+                self.assertFalse(Path(self.fx.destination).exists())
+
+    def test_bound_v3_requires_layout_and_exact_original_event_suffix(self):
+        self.qualified()
+        self.collector.load_binding(self.fx.binding_path(), run_id=RUN_ID, root=ROOT, parent=PARENT)
+        original = self.fx.log_path.read_text()
+        for number, change in enumerate((
+                lambda r: r["transport"].pop("lane_root"),
+                lambda r: r["transport"].update(lane_root=None),
+                lambda r: r["transport"].update(lane_root={}),
+                lambda r: r["transport"].update(acquisition_pool="glm"))):
+            with self.subTest(number=number):
+                self.fx.log_path.write_text(original)
+                self.rewrite_retained_binding(change)
+                with self.assertRaises(ValueError):
+                    self.collect()
+                self.assertFalse(Path(self.fx.destination).exists())
+
+    def test_new_binding_cannot_promote_a_protected_v2_transport_receipt(self):
+        result = self.verify_transport()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        receipt = json.loads(self.fx.receipt_path.read_bytes())
+        self.assertEqual(receipt["schema"], "mastermind.transport_verification.v3")
+        receipt["schema"] = "mastermind.transport_verification.v2"
+        receipt.pop("acquisition_pool")
+        self.fx.receipt_path.write_text(json.dumps(receipt))
+        result = self.fx.run_helper(self.fx.launch_arguments())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("launch_binding_transport_unconfirmed", result.stderr)
+        self.assertNotIn("LAUNCH_BINDING ", self.fx.log_path.read_text())
 
     def test_legacy_home_alias_retarget_does_not_redirect_bound_paths(self):
         decoy = Path(self._stack.name) / "unrelated-home-lanes"
@@ -598,7 +698,8 @@ class PhysicalRootCase(unittest.TestCase):
             "ADMISSION_WAIT_SECS": "20", "ADMISSION_RETRY_SECS": "2", "DRY_RUN": "0",
             "ADMISSION_FILE": str(self.fx.ctl / "admission"), "COMMISSION_ACTIVE": "0",
             "RC_OBSERVED": "0", "NATIVE_MODE": "0", "ID": RUN_ID, "HOST_ARG": HOST,
-            "REMOTE_LANE_ROOT_EXPR": str(self.physical), "REMOTE_LANE_TRANSFER": str(self.physical),
+            "REMOTE_LANES_Q": shlex.quote(str(self.physical)), "REMOTE_LANE_TRANSFER": str(self.physical),
+            "QWEN_PHYSICAL_CONFIG": "0",
             "REMOTE_STDOUT": "lanes_" + RUN_ID + ".stdout", "REMOTE_RC": "lanes_" + RUN_ID + ".rc",
             "REMOTE_CWD": "~", "MODEL": MODEL, "LANE_ROOT_LAYOUT_TOKEN": self.layout_token,
             "LANE_ROOT_PACKET_SHA": sha(PACKET), "SUPPORT_DIGEST": self.fx.support_digest,
@@ -687,10 +788,10 @@ printf 'UNEXPECTED_WORKER_LAUNCH\n'
 
     def actual_poll(self):
         line = next(line for line in self.shell.splitlines()
-                    if '"if [ -f \\"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_RC\\"' in line)
+                    if '"if [ -f $REMOTE_LANES_Q/ext/$REMOTE_RC' in line)
         expression = line.strip().split(' > "$POLL_FILE"', 1)[0]
         values = {"REMOTE_PHYSICAL_ROOT": str(self.physical),
-                  "REMOTE_LANE_ROOT_EXPR": str(self.physical),
+                  "REMOTE_LANES_Q": shlex.quote(str(self.physical)),
                   "REMOTE_RC": "lanes_" + RUN_ID + ".rc"}
         script = "\n".join(k + "=" + shlex.quote(v) for k, v in values.items())
         script += "\ncommand=" + expression + '\nbash -c "$command"\n'

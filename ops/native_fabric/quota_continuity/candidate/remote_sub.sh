@@ -471,11 +471,83 @@ try:
         raise SystemExit('PLAIN_PACKET_SOURCE_CHANGED')
 finally:
     os.close(fd)
-# The original request owner may already have retained this exact input path.
-# Reuse only that same private, single-link inode; never accept an unrelated
-# existing destination merely because its contents happen to match.
+# Recheck each original reservation after the complete packet/provenance read.
+provenance_files = []
+def original_identity(value):
+    return (value.st_dev, value.st_ino, value.st_uid, value.st_mode,
+            value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+# The native fabric_task adapter already freezes this exact packet before
+# routing, with a unique request and launch reservation. Never O_EXCL-create
+# its same inode again. Require both original reservations and their digests;
+# an arbitrary existing packet must still fail closed.
 if os.path.abspath(source) == os.path.abspath(retained):
+    import json, re
+    root_id = os.environ.get('POOL_ORCHESTRATOR_ID')
+    parent_id = os.environ.get('POOL_PARENT_RUN_ID')
+    if any(type(value) is not str or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', value) is None
+           for value in (root_id, parent_id)):
+        raise SystemExit('PRE_RETAINED_PACKET_LINEAGE_INVALID')
+    suffix = '.request.packet'
+    name = os.path.basename(retained)
+    if (stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+        raise SystemExit('PRE_RETAINED_PACKET_CUSTODY_INVALID')
     expected = info
+    if not name.endswith(suffix) or len(name) <= len(suffix):
+        raise SystemExit('PRE_RETAINED_PACKET_ID_INVALID')
+    run_id = name[:-len(suffix)]
+    directory = os.path.dirname(retained)
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate request field')
+            result[key] = value
+        return result
+    def read_original_json(filename):
+        path = os.path.join(directory, filename)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            observed = os.fstat(descriptor)
+            if (not stat.S_ISREG(observed.st_mode)
+                    or observed.st_uid != os.getuid()
+                    or stat.S_IMODE(observed.st_mode) != 0o600
+                    or observed.st_nlink != 1
+                    or not 0 < observed.st_size <= 32768):
+                raise SystemExit('PRE_RETAINED_REQUEST_SOURCE_UNQUALIFIED')
+            contents = os.read(descriptor, 32769)
+            if (len(contents) != observed.st_size
+                    or original_identity(observed) != original_identity(os.fstat(descriptor))
+                    or original_identity(observed) != original_identity(os.stat(path, follow_symlinks=False))):
+                raise SystemExit('PRE_RETAINED_REQUEST_SOURCE_CHANGED')
+        finally:
+            os.close(descriptor)
+        try:
+            parsed = json.loads(contents, object_pairs_hook=unique_fields)
+        except (ValueError, UnicodeDecodeError):
+            raise SystemExit('PRE_RETAINED_REQUEST_INVALID')
+        if type(parsed) is not dict:
+            raise SystemExit('PRE_RETAINED_REQUEST_INVALID')
+        provenance_files.append((path, original_identity(observed)))
+        return parsed, contents
+    request, request_bytes = read_original_json(run_id + '.request.json')
+    launch, _ = read_original_json(run_id + '.request-launch.json')
+    data_sha = hashlib.sha256(data).hexdigest()
+    if (request.get('schema') != 'mastermind.fabric_request_artifact.v1'
+            or request.get('run_id') != run_id
+            or request.get('packet') != name
+            or type(request.get('packet_bytes')) is not int
+            or request.get('packet_bytes') != len(data)
+            or request.get('packet_sha256') != data_sha
+            or launch.get('schema') != 'mastermind.fabric_request_launch.v1'
+            or launch.get('run_id') != run_id
+            or launch.get('state') != 'LAUNCH_ATTEMPT_RESERVED'
+            or launch.get('packet_sha256') != data_sha
+            or launch.get('request_sha256') != hashlib.sha256(request_bytes).hexdigest()
+            or launch.get('root_id') != request.get('root_id')
+            or launch.get('parent_run_id') != request.get('parent_run_id')
+            or request.get('root_id') != root_id
+            or request.get('parent_run_id') != parent_id):
+        raise SystemExit('PRE_RETAINED_PACKET_PROVENANCE_INVALID')
 else:
     out = os.open(retained, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
@@ -485,6 +557,8 @@ else:
         expected = os.fstat(out)
     finally:
         os.close(out)
+# Re-open without following symlinks, bind the same inode through the final
+# path observation, and reject replacement, races, hardlinks and public modes.
 check = os.open(retained, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
 try:
     current = os.fstat(check)
@@ -505,6 +579,9 @@ try:
         raise SystemExit('PLAIN_PACKET_RETENTION_UNVERIFIED')
 finally:
     os.close(check)
+for path, original in provenance_files:
+    if original_identity(os.stat(path, follow_symlinks=False)) != original:
+        raise SystemExit('PRE_RETAINED_REQUEST_SOURCE_CHANGED')
 PY_RETAIN_PLAIN_PACKET
     [ "$?" -eq 0 ] || { RC=78; log "PLAIN_PACKET_RETENTION_REFUSED rc=$RC before_lease=1"; exit "$RC"; }
     PLAIN_PACKET_RETAINED="$LOG_DIR/${ID}.request.packet"
@@ -954,15 +1031,27 @@ if [ -n "$ACQUIRE_POOL" ]; then
   fi
 fi
 
-# Freeze the controller-selected path. No caller environment or publisher output
-# supplies it, and the legacy home alias is never resolved into new authority.
-REMOTE_LANE_ROOT_EXPR='$HOME/lanes'
+# Keep configured admission separate from the unconfigured ordinary fallback.
+# Only the original registry supplies a bound root; publisher output cannot
+# replace that path or its observed layout. A fallback owner grants no admission.
+REMOTE_LANES_Q='"$HOME/lanes"'
 REMOTE_LANE_TRANSFER='~/lanes'
 if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
-  REMOTE_LANE_ROOT_EXPR="$REMOTE_PHYSICAL_ROOT"
+  REMOTE_LANES_Q="$REMOTE_PHYSICAL_ROOT"
   REMOTE_LANE_TRANSFER="$REMOTE_PHYSICAL_ROOT"
 fi
-RPATH="export PATH=$REMOTE_LANE_ROOT_EXPR/venv/bin:\$HOME/.local/bin:/opt/homebrew/bin:\$PATH"
+REMOTE_RSYNC_ROOT="$REMOTE_LANE_TRANSFER"
+RSYNC_OWNER_ARGS=()
+PLAIN_PHYSICAL_OWNER=0
+QWEN_PHYSICAL_CONFIG=0
+if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
+   { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
+   [ -n "${POOL_PARENT_RUN_ID:-}" ] && [ -n "$LEASE_ID" ] &&
+   [ -n "$PLAIN_PACKET_RETAINED" ]; then
+  PLAIN_PHYSICAL_OWNER=1
+  if [ "$MODE" = qwen ]; then QWEN_PHYSICAL_CONFIG=1; fi
+fi
+RPATH="export PATH=$REMOTE_LANES_Q/venv/bin:\$HOME/.local/bin:/opt/homebrew/bin:\$PATH"
 REMOTE_PACKET="$REMOTE_LANE_TRANSFER/tmp/$ID.txt"
 REMOTE_STDOUT="lanes_$ID.stdout"
 REMOTE_RC="lanes_$ID.rc"
@@ -1053,7 +1142,7 @@ run_scp() {
   fi
   # Per-run upload directory is new; existing published code is never overwritten.
   commission_run support-mkdir "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-    "mkdir -p \"$REMOTE_LANE_ROOT_EXPR/support-releases\" && mkdir \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.support-src\"" || return $?
+    "mkdir -p $REMOTE_LANES_Q/support-releases && mkdir $REMOTE_LANES_Q/tmp/${ID}.support-src" || return $?
   _src=()
   for _f in "${SUPPORT_FILES[@]}"; do [ "$_f" = pools.yaml ] || _src+=("$HERE/$_f"); done
   commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$HERE/support_bundle.py" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
@@ -1063,9 +1152,42 @@ run_scp() {
   # exact semantic compatibility without replacing policy under active workers.
   # Physical admission rechecks under the original lock before marker creation.
   check_bound_lane_layout || { log "REMOTE_LANE_ROOT_REFUSED before_publish=1"; return 78; }
+  SUPPORT_PUBLICATION=$(mktemp "$LOG_DIR/${ID}.support-publication.XXXXXX") || return 78
+  TEMP_FILES+=("$SUPPORT_PUBLICATION")
   commission_run support-publish "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-    "$RPATH; python3 \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.support-src/support_bundle.py\" \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.support-src\" \"$REMOTE_LANE_ROOT_EXPR/ext\" \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.support-src/manifest.json\" && test -f \"$REMOTE_LANE_ROOT_EXPR/support-releases/${SUPPORT_DIGEST}/ext/remote_sub_exec.py\"" \
-    || { log "SUPPORT_PUBLICATION_REFUSED"; return 75; }
+    "$RPATH; python3 $REMOTE_LANES_Q/tmp/${ID}.support-src/support_bundle.py $REMOTE_LANES_Q/tmp/${ID}.support-src $REMOTE_LANES_Q/ext $REMOTE_LANES_Q/tmp/${ID}.support-src/manifest.json && test -f $REMOTE_LANES_Q/support-releases/${SUPPORT_DIGEST}/ext/remote_sub_exec.py" \
+    > "$SUPPORT_PUBLICATION" || { log "SUPPORT_PUBLICATION_REFUSED"; return 75; }
+  if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
+    PUBLISHED_LANES_Q=$(commission_run support-binding "$REMOTE_SUB_PYTHON" \
+      "$HERE/remote_sub_helpers.py" support-root-shell "$SUPPORT_PUBLICATION" "$SUPPORT_DIGEST") || {
+        log "SUPPORT_OWNER_BINDING_REFUSED before_launch=1"; return 78;
+      }
+    if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
+      # Configured admission remains authoritative. Publication can only agree;
+      # it cannot replace the selected registry path or its observed identities.
+      [ "$PUBLISHED_LANES_Q" = "$REMOTE_LANES_Q" ] || {
+        log "SUPPORT_OWNER_REGISTRY_MISMATCH before_launch=1"; return 78;
+      }
+    else
+      # Preserve the existing unconfigured ordinary publisher-bound flow. This
+      # supplies no registry admission and no retained physical-layout evidence.
+      REMOTE_LANES_Q="$PUBLISHED_LANES_Q"
+      RSYNC_VERSION_FILE=$(mktemp "$LOG_DIR/${ID}.rsync-version.XXXXXX") || return 78
+      TEMP_FILES+=("$RSYNC_VERSION_FILE")
+      commission_run rsync-version "$RSYNC_CMD" --version > "$RSYNC_VERSION_FILE" || {
+        log "RSYNC_DIALECT_READ_REFUSED before_launch=1"; return 78;
+      }
+      RSYNC_OWNER_COMMAND=$(commission_run rsync-binding "$REMOTE_SUB_PYTHON" \
+        "$HERE/remote_sub_helpers.py" support-rsync-command "$SUPPORT_PUBLICATION" \
+        "$SUPPORT_DIGEST" "$RSYNC_VERSION_FILE" "$REMOTE_LANES_Q") || {
+          log "RSYNC_DIALECT_BINDING_REFUSED before_launch=1"; return 78;
+        }
+      REMOTE_RSYNC_ROOT=.
+      RSYNC_OWNER_ARGS=(--rsync-path="$RSYNC_OWNER_COMMAND")
+    fi
+    readonly REMOTE_LANES_Q REMOTE_RSYNC_ROOT RSYNC_OWNER_ARGS
+  fi
+  cat "$SUPPORT_PUBLICATION" || return 78
   log "SUPPORT_VERSION_READY digest=$SUPPORT_DIGEST policy=$POLICY_SHA"
   return 0
 }
@@ -1136,11 +1258,9 @@ fi
 # a controller observation, never authentication; it changes no worker-facing
 # task bytes. A pending, missing, truncated, unknown-field or failed readback
 # refuses the launch and the binding exactly like a failed ack.
-if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
-   { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
-   [ -n "${POOL_PARENT_RUN_ID:-}" ] && [ -n "$LEASE_ID" ] &&
-   [ -n "$PLAIN_PACKET_RETAINED" ]; then
-  TRANSPORT_OBSERVATION="$(mktemp "${TMPDIR:-/tmp}/remote_sub_transport.XXXXXX")" || exit 78
+RPATH="export PATH=$REMOTE_LANES_Q/venv/bin:\$HOME/.local/bin:/opt/homebrew/bin:\$PATH"
+if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
+  TRANSPORT_OBSERVATION="$(mktemp "$LOG_DIR/${ID}.transport-observation.XXXXXX")" || exit 78
   TEMP_FILES+=("$TRANSPORT_OBSERVATION")
   TRANSPORT_CHAIN_COMMAND=custody-chain-source
   if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
@@ -1148,10 +1268,12 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
   fi
   PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" "$TRANSPORT_CHAIN_COMMAND") || exit 78
   commission_run transport-read "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-    "python3 - '$ID' '$SUPPORT_DIGEST' '$POLICY_SHA' '$LANE_ROOT_LAYOUT_TOKEN' <<'PY_VERIFY_PLAIN_TRANSPORT'
+    "python3 - '$ID' '$SUPPORT_DIGEST' '$POLICY_SHA' '$LANE_ROOT_LAYOUT_TOKEN' $REMOTE_LANES_Q <<'PY_VERIFY_PLAIN_TRANSPORT'
 import base64, hashlib, json, os, pwd, stat, sys
 from pathlib import Path
 $PLAIN_TRANSPORT_CHAIN_SOURCE
+if len(sys.argv) != 6:
+    raise ValueError('transport_observation_arguments_invalid')
 run, support, policy = sys.argv[1:4]
 chains = {}; held = []
 def identity(info):
@@ -1176,12 +1298,15 @@ def read_regular(path, limit):
         raise ValueError('transport_observation_file_changed')
     return data
 lane_layout = None
-lane_root = Path(pwd.getpwuid(os.getuid()).pw_dir) / 'lanes'
-if len(sys.argv) > 4 and sys.argv[4] != '-':
+lane_root = Path(sys.argv[5])
+if not lane_root.is_absolute():
+    raise ValueError('transport_observation_owner_invalid')
+if sys.argv[4] != '-':
     lane_layout = validate_remote_lane_layout(json.loads(base64.b64decode(
         sys.argv[4], altchars=b'-_', validate=True)))
     observe_remote_lane_layout(lane_layout['binding'], lane_layout)
-    lane_root = Path(lane_layout['binding']['path'])
+    if lane_layout['binding']['path'] != str(lane_root):
+        raise ValueError('transport_observation_owner_mismatch')
 packet = read_regular(lane_root / 'tmp' / (run + '.txt'), 2 * 1024 * 1024)
 release = lane_root / 'support-releases' / support
 meta = json.loads(read_regular(release / 'RELEASE.json', 65536).decode('utf-8'))
@@ -1219,7 +1344,7 @@ PY_VERIFY_PLAIN_TRANSPORT" > "$TRANSPORT_OBSERVATION" || {
   commission_run transport-verify "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" transport-verify \
     "$LOG_FILE" "$TRANSPORT_RECEIPT" "$PLAIN_PACKET_RETAINED" "$LEASE_OUTPUT_FILE" \
     "$TRANSPORT_OBSERVATION" "$ID" "$HOST_ARG" "$MODE" "$MODEL" \
-    "$SUPPORT_DIGEST" "$POLICY_SHA" "$LEASE_ID" "${POOL_ACCOUNT:-}" "$LANE_ROOT_LAYOUT_TOKEN" \
+    "$SUPPORT_DIGEST" "$POLICY_SHA" "$LEASE_ID" "${POOL_ACCOUNT:-}" "$LEASE_POOL" "$LANE_ROOT_LAYOUT_TOKEN" \
     >/dev/null || {
       RC=78; log "TRANSPORT_VERIFICATION_REFUSED rc=$RC before_launch=1"; exit "$RC";
     }
@@ -1247,12 +1372,17 @@ if [ "$MODE" = go-codex ] && [ "$DRY_RUN" -eq 0 ]; then
   fi
 else
 REMOTE_INNER='umask 077 || exit; python3 "$LANE_DIRECTORY/support-releases/$SUPPORT_DIGEST/ext/remote_sub_exec.py" "$KEY" "$MODE" "$PACKET" "$REMOTE_CWD" "$MODEL"; echo $? > "$RC_FILE"'
-HOST_ENV="source \"$REMOTE_LANE_ROOT_EXPR/ext/HOST_ENV.sh\" 2>/dev/null"
+HOST_ENV="source $REMOTE_LANES_Q/ext/HOST_ENV.sh 2>/dev/null"
+if [ "$PLAIN_PHYSICAL_OWNER" -eq 1 ]; then
+  # Host initialization may prepend a mutable home alias. Restore only the
+  # frozen owner's interpreter precedence, preserving other host PATH order.
+  HOST_ENV="$HOST_ENV; export PATH=$REMOTE_LANES_Q/venv/bin:\$PATH"
+fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "<launch: $REMOTE_PACKET -> $(basename "$REMOTE_PACKET")>"
   show_args "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" "test -f \"$REMOTE_RC\" && cat \"$REMOTE_RC\" (poll ${POLL_SECS}s)"
-  show_args "$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/$REMOTE_STDOUT" "<out:$(basename "$LOCAL_OUT")>"
+  show_args "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/$REMOTE_STDOUT" "<out:$(basename "$LOCAL_OUT")>"
   show_args "<ledger>" append --pool "$LEDGER_POOL" --task-class "remote-$MODE" --rc 0 --signal ok
   RC=0
   exit "$RC"
@@ -1268,7 +1398,7 @@ if [ "$MODE" = "glm" ]; then
   GLM_ACCOUNT_READY=""
   GLM_ACCOUNT_READ_RC=0
   GLM_ACCOUNT_READY=$(commission_run account-ready "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-    "$RPATH; $HOST_ENV; python3 \"$REMOTE_LANE_ROOT_EXPR/support-releases/$SUPPORT_DIGEST/ext/glm_keys.py\" account-ready $GLM_ACCOUNT_QUOTED" \
+    "$RPATH; $HOST_ENV; python3 $REMOTE_LANES_Q/support-releases/$SUPPORT_DIGEST/ext/glm_keys.py account-ready $GLM_ACCOUNT_QUOTED" \
     2>/dev/null) || GLM_ACCOUNT_READ_RC=$?
   if [ "$GLM_ACCOUNT_READ_RC" -ne 0 ] || [ "$GLM_ACCOUNT_READY" != "1" ]; then
     RC=78; log "GLM_EXACT_ACCOUNT_READINESS_REFUSED read_rc=$GLM_ACCOUNT_READ_RC rc=$RC"; exit "$RC";
@@ -1299,8 +1429,8 @@ if [ "$MODE" = "glm-codex" ]; then
     GLM_CAP_SHA=$(commission_run capability-hash "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" glm-cap-sha "$GLM_CAP_LOCAL"
     ) || { RC=78; log "GLM_CAPABILITY_HASH_FAILED"; exit "$RC"; }
     GLM_CAP_TRANSFER_RC=0
-    commission_command capability-upload "$GLM_CAP_LOCAL" "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS"       "set -eu; d=\"$REMOTE_LANE_ROOT_EXPR/tmp\"; t=\"\$d/${ID}.glm-cap.json\"; [ -d \"\$d\" ] && [ ! -L \"\$d\" ]; [ ! -e \"\$t\" ] && [ ! -L \"\$t\" ]; umask 077; x=\$(mktemp \"\$d/${ID}.glm-cap.tmp.XXXXXX\"); trap 'rm -f \"\$x\"' EXIT HUP INT TERM; cat > \"\$x\"; chmod 600 \"\$x\"; n=\$(wc -c < \"\$x\" | tr -d ' '); [ \"\$n\" -ge 1 ] && [ \"\$n\" -le 16384 ]; mv \"\$x\" \"\$t\"; trap - EXIT HUP INT TERM" || GLM_CAP_TRANSFER_RC=$?
-    GLM_CAP_REMOTE_META=$(commission_run capability-readback "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       "python3 - \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.glm-cap.json\" <<'PY_GLM_REMOTE_META'
+    commission_command capability-upload "$GLM_CAP_LOCAL" "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS"       "set -eu; d=$REMOTE_LANES_Q/tmp; t=\"\$d/${ID}.glm-cap.json\"; [ -d \"\$d\" ] && [ ! -L \"\$d\" ]; [ ! -e \"\$t\" ] && [ ! -L \"\$t\" ]; umask 077; x=\$(mktemp \"\$d/${ID}.glm-cap.tmp.XXXXXX\"); trap 'rm -f \"\$x\"' EXIT HUP INT TERM; cat > \"\$x\"; chmod 600 \"\$x\"; n=\$(wc -c < \"\$x\" | tr -d ' '); [ \"\$n\" -ge 1 ] && [ \"\$n\" -le 16384 ]; mv \"\$x\" \"\$t\"; trap - EXIT HUP INT TERM" || GLM_CAP_TRANSFER_RC=$?
+    GLM_CAP_REMOTE_META=$(commission_run capability-readback "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=8 "$SSH_ALIAS"       "python3 - $REMOTE_LANES_Q/tmp/${ID}.glm-cap.json <<'PY_GLM_REMOTE_META'
 import hashlib, os, stat, sys
 p=sys.argv[1]
 s=os.lstat(p)
@@ -1341,7 +1471,7 @@ if [ "$OPERATOR_CHILD_BUDGET" != "0" ]; then
   OPERATOR_CAP_REMOTE="lanes/tmp/${ID}.operator-cap.json"
   OPERATOR_CAP_SHA=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" glm-cap-sha "$OPERATOR_CAP_LOCAL") || exit 78
   OPERATOR_CAP_READBACK=$("$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-    "python3 \"$REMOTE_LANE_ROOT_EXPR/support-releases/$SUPPORT_DIGEST/ext/fabric_operator_client.py\" receive '$ID'" \
+    "python3 $REMOTE_LANES_Q/support-releases/$SUPPORT_DIGEST/ext/fabric_operator_client.py receive '$ID'" \
     < "$OPERATOR_CAP_LOCAL") || { RC=78; log "OPERATOR_CAPABILITY_TRANSFER_UNVERIFIED"; exit "$RC"; }
   [ "$OPERATOR_CAP_READBACK" = "$OPERATOR_CAP_SHA" ] || { RC=78; log "OPERATOR_CAPABILITY_DIGEST_UNVERIFIED"; exit "$RC"; }
   OPERATOR_ENV="FABRIC_OPERATOR_CAPSULE='$OPERATOR_CAP_REMOTE'"
@@ -1417,7 +1547,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
   commission_run launch-binding "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" launch-binding \
     "$LOG_FILE" "$BINDING_PACKET" "$LEASE_OUTPUT_FILE" "$ID" "$ROUTING_ROOT" \
     "$POOL_PARENT_RUN_ID" "$HOST_ARG" "$MODE" "$MODEL" "$SUPPORT_DIGEST" \
-    "$LEASE_ID" "$ACCOUNT_ARG" "$BINDING_TRANSPORT_RECEIPT" >&2 || {
+    "$LEASE_ID" "$ACCOUNT_ARG" "$BINDING_TRANSPORT_RECEIPT" "$LEASE_POOL" >&2 || {
       RC=78; log "LAUNCH_BINDING_UNCONFIRMED rc=$RC before_launch=1"; exit "$RC";
     }
 fi
@@ -1462,7 +1592,7 @@ while true; do
   fi
   # Rebuild at every actual attempt. The receiving process anchors this
   # duration to its own monotonic clock before its preparation/admission.
-  LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd \"$REMOTE_LANE_ROOT_EXPR/ext\" || exit; $REMOTE_OUTPUT_SETUP || exit; LANE_DIRECTORY=\"$REMOTE_LANE_ROOT_EXPR\" KEY='$ID' MODE='$MODE' PACKET=\"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.txt\" REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=\"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_RC\" nohup env $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV $COMMISSION_REMOTE_ENV REMOTE_SUB_LANE_ROOT_LAYOUT='$LANE_ROOT_LAYOUT_TOKEN' REMOTE_SUB_LANE_PACKET_SHA256='$LANE_ROOT_PACKET_SHA' SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' FABRIC_CPU_SCOPE_QUOTA_PCT='$CPU_SCOPE_QUOTA' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' $REMOTE_LAUNCH_EXEC </dev/null $REMOTE_OUTPUT_REDIRECT &"
+  LAUNCH_REMOTE="$NATIVE_TIMING_PREFIX $RPATH; $HOST_ENV; $NATIVE_TIMING_AFTER_ENV umask 077 || exit; cd $REMOTE_LANES_Q/ext || exit; $REMOTE_OUTPUT_SETUP || exit; LANE_DIRECTORY=$REMOTE_LANES_Q KEY='$ID' MODE='$MODE' PACKET=$REMOTE_LANES_Q/tmp/${ID}.txt REMOTE_CWD='$REMOTE_CWD' MODEL='$MODEL' RC_FILE=$REMOTE_LANES_Q/ext/$REMOTE_RC nohup env REMOTE_SUB_LANES=$REMOTE_LANES_Q REMOTE_SUB_QWEN_PHYSICAL_CONFIG=$QWEN_PHYSICAL_CONFIG $NATIVE_TIMING_ENV $ROUTING_ENV $OPERATOR_ENV $COMMISSION_REMOTE_ENV REMOTE_SUB_LANE_ROOT_LAYOUT='$LANE_ROOT_LAYOUT_TOKEN' REMOTE_SUB_LANE_PACKET_SHA256='$LANE_ROOT_PACKET_SHA' SUPPORT_DIGEST='$SUPPORT_DIGEST' PYTHONDONTWRITEBYTECODE=1 LANE_LEASED=1 POOL_ACCOUNT='$ACCOUNT_ARG' POOL_LEASE_ID='$LEASE_ID' REMOTE_SUB_RUN_ID='$ID' LANE_REMOTE_HOST='$HOST_ARG' NATIVE_LEASE_ISSUED='$NATIVE_LEASE_ISSUED' NATIVE_LEASE_DEADLINE='$NATIVE_LEASE_DEADLINE' LANE_MAX_ACTIVE='$MAX_ACTIVE' LANE_MIN_FREE_MEM_GB='$MIN_FREE_MEM_GB' LANE_MAX_CPU_TCTL_C='$MAX_CPU_TCTL_C' LANE_MIN_FREE_DISK_GB='$MIN_FREE_DISK_GB' FABRIC_NEW_MACRO_COMMIT='$NEW_MACRO_COMMIT' FABRIC_CPU_SCOPE_QUOTA_PCT='$CPU_SCOPE_QUOTA' LANE_MAX_LOAD_RATIO='$LANE_HOST_LOAD_RATIO' LANE_NICE=10 REMOTE_SUB_CHILD_TIMEOUT='$CHILD_TIMEOUT' $REMOTE_LAUNCH_EXEC </dev/null $REMOTE_OUTPUT_REDIRECT &"
   log "LAUNCH stdout=$REMOTE_STDOUT rc_file=ext/$REMOTE_RC cwd=$REMOTE_CWD"
   launch_attempt=$((launch_attempt + 1))
   log "LAUNCH_ATTEMPT attempt=$launch_attempt"
@@ -1497,7 +1627,7 @@ while true; do
     log "POLL $poll_count/$MAX_SECS elapsed=$elapsed file=$REMOTE_LANE_TRANSFER/ext/$REMOTE_RC"
     poll_rc=0
     commission_run poll "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-          "if [ -f \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_RC\" ]; then if [ '$REMOTE_PHYSICAL_ROOT' != '-' ] && [ ! -s \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_RC\" ]; then printf '%s\n' '__REMOTE_SUB_PENDING__'; else cat \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_RC\"; fi; else printf '%s\n' '__REMOTE_SUB_PENDING__'; fi" > "$POLL_FILE" || poll_rc=$?
+          "if [ -f $REMOTE_LANES_Q/ext/$REMOTE_RC ]; then if [ '$REMOTE_PHYSICAL_ROOT' != '-' ] && [ ! -s $REMOTE_LANES_Q/ext/$REMOTE_RC ]; then printf '%s\n' '__REMOTE_SUB_PENDING__'; else cat $REMOTE_LANES_Q/ext/$REMOTE_RC; fi; else printf '%s\n' '__REMOTE_SUB_PENDING__'; fi" > "$POLL_FILE" || poll_rc=$?
     if [ "$poll_rc" -eq 0 ]; then
       POLL_VALUE="$(cat "$POLL_FILE" 2>/dev/null || true)"
       if [[ "$POLL_VALUE" =~ ^[0-9]+$ ]]; then
@@ -1532,7 +1662,7 @@ while true; do
   if [ "$RETRYABLE_ADMISSION_MODE" -eq 1 ] && [ "$RC" -eq 75 ] && [ "$ADMISSION_WAIT_SECS" -gt 0 ]; then
     admission_read_rc=0
     commission_run admission-read "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "if grep -Fq 'REMOTE_SUB_ADMISSION_REFUSED ' \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_STDOUT\" 2>/dev/null && grep -Fq 'active_lane_limit_reached' \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_STDOUT\" 2>/dev/null; then tail -c 4096 \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_STDOUT\"; else exit 1; fi" \
+      "if grep -Fq 'REMOTE_SUB_ADMISSION_REFUSED ' $REMOTE_LANES_Q/ext/$REMOTE_STDOUT 2>/dev/null && grep -Fq 'active_lane_limit_reached' $REMOTE_LANES_Q/ext/$REMOTE_STDOUT 2>/dev/null; then tail -c 4096 $REMOTE_LANES_Q/ext/$REMOTE_STDOUT; else exit 1; fi" \
       > "$ADMISSION_FILE" || admission_read_rc=$?
     if [ "$admission_read_rc" -eq 0 ] && grep -Fq "active_lane_limit_reached" "$ADMISSION_FILE" 2>/dev/null; then
       if [ -z "$ADMISSION_WAIT_STARTED_SECONDS" ]; then ADMISSION_WAIT_STARTED_SECONDS=$SECONDS; fi
@@ -1559,8 +1689,8 @@ WORKER_RC="$RC"
 # original host. Receipt presence never settles execution or authorizes replay.
 for _session_suffix in session-created.json session-retained.json; do
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "test -f \"$REMOTE_LANE_ROOT_EXPR/ext/lanes/${ID}.${_session_suffix}\"" >/dev/null 2>&1; then
-    if "$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/lanes/${ID}.${_session_suffix}" "$LOG_DIR/${ID}.${_session_suffix}"; then
+      "test -f $REMOTE_LANES_Q/ext/lanes/${ID}.${_session_suffix}" >/dev/null 2>&1; then
+    if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.${_session_suffix}" "$LOG_DIR/${ID}.${_session_suffix}"; then
       log "SESSION_INDEX_SAVED file=${ID}.${_session_suffix}"
     else
       log "SESSION_INDEX_COPY_FAILED remote_index_retained=1"
@@ -1571,11 +1701,11 @@ done
 mkdir -p "$(dirname "$LOCAL_OUT")" 2>/dev/null || true
 RSYNC_RC=0
 log "RSYNC stdout=$REMOTE_LANE_TRANSFER/ext/$REMOTE_STDOUT out=$(basename "$LOCAL_OUT")"
-"$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/$REMOTE_STDOUT" "$LOCAL_OUT" || RSYNC_RC=$?
+"$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/$REMOTE_STDOUT" "$LOCAL_OUT" || RSYNC_RC=$?
 require_bound_lane_layout_after_launch after_stdout_collection
 if [ "$NATIVE_MODE" -eq 1 ]; then
   NATIVE_TERMINAL="$LOG_DIR/${ID}.native-terminal.json"
-  if "$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/lanes/${ID}.native-terminal.json" "$NATIVE_TERMINAL" &&
+  if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.native-terminal.json" "$NATIVE_TERMINAL" &&
      "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" native-settle "$NATIVE_TERMINAL" "$HERE" "$ID" "$ORCH_ID" "$LEASE_ID" "$POOL_ACCOUNT" "$HOST_ARG" "$MODE" "$MODEL" "$RC"
   then PRESERVE_LEASE=0; log "NATIVE_SETTLED receipt=$(basename "$NATIVE_TERMINAL")"
   else PRESERVE_LEASE=1; log "NATIVE_EFFECT_UNKNOWN same_carrier_reconciliation_required=1"
@@ -1620,8 +1750,8 @@ else
   USAGE_SAVED=0
   PROVIDER_SAVED=0
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "test -f \"$REMOTE_LANE_ROOT_EXPR/ext/lanes/${ID}.process.jsonl\"" >/dev/null 2>&1; then
-    if "$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/lanes/${ID}.process.jsonl" "$LOCAL_PROCESS_RECEIPT"; then
+      "test -f $REMOTE_LANES_Q/ext/lanes/${ID}.process.jsonl" >/dev/null 2>&1; then
+    if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.process.jsonl" "$LOCAL_PROCESS_RECEIPT"; then
       RECEIPT_SAVED=1
       log "PROCESS_RECEIPT_SAVED file=$(basename "$LOCAL_PROCESS_RECEIPT")"
     else
@@ -1629,8 +1759,8 @@ else
     fi
   fi
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "test -f \"$REMOTE_LANE_ROOT_EXPR/ext/lanes/${ID}.usage.json\"" >/dev/null 2>&1; then
-    if "$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/lanes/${ID}.usage.json" "$LOCAL_USAGE_RECEIPT"; then
+      "test -f $REMOTE_LANES_Q/ext/lanes/${ID}.usage.json" >/dev/null 2>&1; then
+    if "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.usage.json" "$LOCAL_USAGE_RECEIPT"; then
       USAGE_SAVED=1
       log "USAGE_RECEIPT_SAVED file=$(basename "$LOCAL_USAGE_RECEIPT")"
     else
@@ -1642,8 +1772,8 @@ else
   USAGE_TOKEN_ARGS=()
   if [ "$RECEIPT_SAVED" -eq 1 ] && [ -n "$LEASE_ID" ]; then
     if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-        "test -f \"$REMOTE_LANE_ROOT_EXPR/ext/lanes/${ID}.provider.json\"" >/dev/null 2>&1 &&
-       "$RSYNC_CMD" -aq "$SSH_ALIAS:$REMOTE_LANE_TRANSFER/ext/lanes/${ID}.provider.json" "$LOCAL_PROVIDER_RECEIPT"; then
+        "test -f $REMOTE_LANES_Q/ext/lanes/${ID}.provider.json" >/dev/null 2>&1 &&
+       "$RSYNC_CMD" ${RSYNC_OWNER_ARGS[@]+"${RSYNC_OWNER_ARGS[@]}"} -aq "$SSH_ALIAS:$REMOTE_RSYNC_ROOT/ext/lanes/${ID}.provider.json" "$LOCAL_PROVIDER_RECEIPT"; then
       if broker observe-provider --lease-id "$LEASE_ID" --root-id "$ORCH_ID" --run-id "$ID" \
           --outcome "$LOCAL_PROVIDER_RECEIPT" --process "$LOCAL_PROCESS_RECEIPT" > "$LOG_DIR/${ID}.provider-observed.json"; then
         PROVIDER_SAVED=1
@@ -1680,11 +1810,11 @@ else
   fi
   require_bound_lane_layout_after_launch before_cleanup
   CLEAN_RECEIPT=''
-  [ "$RECEIPT_SAVED" -eq 1 ] && CLEAN_RECEIPT=" \"$REMOTE_LANE_ROOT_EXPR/ext/lanes/${ID}.process.jsonl\""
+  [ "$RECEIPT_SAVED" -eq 1 ] && CLEAN_RECEIPT=" $REMOTE_LANES_Q/ext/lanes/${ID}.process.jsonl"
   CLEAN_USAGE=''
-  [ "$USAGE_SAVED" -eq 1 ] && CLEAN_USAGE=" \"$REMOTE_LANE_ROOT_EXPR/ext/lanes/${ID}.usage.json\""
+  [ "$USAGE_SAVED" -eq 1 ] && CLEAN_USAGE=" $REMOTE_LANES_Q/ext/lanes/${ID}.usage.json"
   if "$SSH_CMD" -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
-      "rm -f \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.txt\" \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_RC\" \"$REMOTE_LANE_ROOT_EXPR/ext/$REMOTE_STDOUT\"$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- \"$REMOTE_LANE_ROOT_EXPR/tmp/${ID}.support-src\""; then
+      "rm -f $REMOTE_LANES_Q/tmp/${ID}.txt $REMOTE_LANES_Q/ext/$REMOTE_RC $REMOTE_LANES_Q/ext/$REMOTE_STDOUT$CLEAN_RECEIPT$CLEAN_USAGE && rm -rf -- $REMOTE_LANES_Q/tmp/${ID}.support-src"; then
     log "REMOTE_CLEANED transport=1 receipt_saved=$RECEIPT_SAVED usage_saved=$USAGE_SAVED"
   else
     log "REMOTE_CLEANUP_FAILED; completed work remains reconciled"

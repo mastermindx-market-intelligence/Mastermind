@@ -251,9 +251,8 @@ def validate_usage():
 
 
 TRANSPORT_OBSERVATION_SCHEMA = 'mastermind.transport_observation.v1'
-TRANSPORT_RECEIPT_SCHEMA = 'mastermind.transport_verification.v1'
+TRANSPORT_RECEIPT_SCHEMA = 'mastermind.transport_verification.v3'
 TRANSPORT_OBSERVATION_V2 = 'mastermind.transport_observation.v2'
-TRANSPORT_RECEIPT_V2 = 'mastermind.transport_verification.v2'
 TRANSPORT_STAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z\Z')
 # Controller observations only. None of these events authenticates anything;
 # they are the retained, ordered narration the read-only collector re-reads.
@@ -263,6 +262,23 @@ TRACKED_EVENT_NAMES = ('RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
 FORBIDDEN_LOG_MARKERS = ('REFUSED', 'FAILED', 'EFFECT_UNKNOWN', 'UNPROVEN',
                          'LEASE_PRESERVED')
 ACQUIRE_RESPONSE = re.compile(rb'LEASE=([a-f0-9]{12}) ACCOUNT=([A-Za-z0-9_.:-]{1,128})\n?')
+
+
+def validate_acquisition_pool(mode, model, acquisition_pool):
+    """Validate the selected tag, never infer a canonical broker-row pool.
+
+    The original controller selects this tag and passes its retained LEASE_POOL.
+    GLM-5.3 may use ordinary glm when no frontier partition was available.
+    Historical readers validate the bound tuple without consulting current CAPS.
+    """
+    if type(model) is not str or type(acquisition_pool) is not str:
+        raise ValueError('acquisition_pool_scope')
+    allowed = {'bailian'} if mode == 'qwen' else {'glm'} if mode == 'glm' else set()
+    if mode == 'glm' and model == 'glm-5.3':
+        allowed.add('glm-frontier')
+    if acquisition_pool not in allowed:
+        raise ValueError('acquisition_pool_scope')
+    return acquisition_pool
 
 
 def _tracked_events(events):
@@ -439,7 +455,7 @@ def lane_root_log_suffix(layout):
 def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
                      observation_path, *, run_id, host, mode, model,
                      support_digest, policy_sha256, launch_lease_id,
-                     launch_account, lane_layout=None):
+                     launch_account, acquisition_pool, lane_layout=None):
     """Verify the transported packet and published support before any launch.
 
     Fixed read-only controller observation over the incumbent SSH transport:
@@ -466,6 +482,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
             or type(policy_sha256) is not str
             or not re.fullmatch('[a-f0-9]{64}', policy_sha256)):
         raise ValueError('transport_verification_scope')
+    validate_acquisition_pool(mode, model, acquisition_pool)
     packet = delivery.local_file(Path(packet_path), 2 * 1024 * 1024)
     packet_sha = hashlib.sha256(packet).hexdigest()
     acquired = delivery.local_file(Path(lease_output_path), 1024)
@@ -510,8 +527,9 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     if observed_digest != support_digest:
         raise ValueError('transport_verification_generation_mismatch')
     record = {
-        'schema': TRANSPORT_RECEIPT_SCHEMA if lane_layout is None else TRANSPORT_RECEIPT_V2,
+        'schema': TRANSPORT_RECEIPT_SCHEMA,
         'run_id': run_id, 'host': host, 'mode': mode, 'requested_model': model,
+        'acquisition_pool': acquisition_pool,
         'packet_sha256': packet_sha, 'support_digest': support_digest,
         'policy_sha256': policy_sha256, 'files': files,
         'lease_id': lease_id, 'account': account,
@@ -519,8 +537,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
         'phase': 'PRE_LAUNCH',
         'verified_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ'),
     }
-    if lane_layout is not None:
-        record['lane_root'] = lane_layout
+    record['lane_root'] = lane_layout
     log = Path(log_path)
     if log.name != run_id + '.log':
         raise ValueError('transport_verification_log_name')
@@ -532,7 +549,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
             if ([name for name, _ in tracked] != ['RUN_RESERVED', 'LEASE_OK',
                                                   'SUPPORT_VERSION_READY']
                     or tracked[0][1] != 'RUN_RESERVED explicit=1'
-                    or tracked[1][1] != 'LEASE_OK pool=' + {'glm': 'glm', 'qwen': 'bailian'}[mode]
+                    or tracked[1][1] != 'LEASE_OK pool=' + acquisition_pool
                     or not re.fullmatch('SUPPORT_VERSION_READY digest=' + support_digest
                                         + r' policy=[a-f0-9]{64}', tracked[2][1])
                     or any(marker in event for event in events
@@ -571,6 +588,75 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     print(payload)
 
 
+def published_support_root(raw, support_digest):
+    """Parse the incumbent publisher's one physical-path line, never shell code.
+
+    The selected SSH carrier and source owner supply this observation. It grants
+    no admission or authentication. Strict remote custody and content readback
+    must still pass before the same root is used for a new ordinary launch.
+    """
+    from pathlib import PurePosixPath
+    if (type(raw) is not bytes or not 1 < len(raw) <= 4096
+            or not raw.endswith(b'\n')
+            or type(support_digest) is not str
+            or re.fullmatch('[a-f0-9]{64}', support_digest) is None):
+        raise ValueError('support_publication_binding_shape')
+    value = raw[:-1].decode('utf-8', errors='strict')
+    # A colon cannot be represented as one literal entry in the required PATH
+    # prefix, even when shell quoting is correct. Refuse that owner spelling.
+    if (not value.startswith('/') or value.startswith('//') or ':' in value
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+        raise ValueError('support_publication_binding_path')
+    path = PurePosixPath(value)
+    if (str(path) != value or '..' in path.parts
+            or len(path.parts) < 5
+            or path.parts[-3:] != ('support-releases', support_digest, 'ext')):
+        raise ValueError('support_publication_binding_scope')
+    owner = path.parents[2]
+    if str(owner) == '/':
+        raise ValueError('support_publication_binding_owner')
+    return str(owner)
+
+
+def support_root_shell():
+    import shlex
+    from pathlib import Path
+    import artifact_delivery as delivery
+    raw = delivery.local_file(Path(sys.argv[1]), 4096)
+    print(shlex.quote(published_support_root(raw, sys.argv[2])))
+
+
+def rsync_owner_command(owner, version):
+    """Choose only the two qualified local rsync command-quoting dialects."""
+    import shlex
+    if (type(version) is not bytes or not 1 < len(version) <= 16384
+            or not version.endswith(b'\n')):
+        raise ValueError('rsync_version_shape')
+    lines = version.decode('utf-8', errors='strict').splitlines()
+    if not lines or any('\x00' in line for line in lines):
+        raise ValueError('rsync_version_shape')
+    upstream = re.compile(r'rsync +version +[0-9]+\.[0-9]+\.[0-9]+ +protocol version +[0-9]+')
+    opened = re.compile(r'openrsync: protocol version [0-9]+')
+    identities = [line for line in lines if upstream.fullmatch(line) or opened.fullmatch(line)]
+    if len(identities) != 1 or identities[0] != lines[0]:
+        raise ValueError('rsync_version_unqualified')
+    command = 'cd ' + shlex.quote(owner) + ' && exec rsync'
+    # openrsync parses --rsync-path into argv before SSH joins it; upstream
+    # rsync preserves this command text. Keep normal rsync argument protections.
+    return shlex.quote(command) if opened.fullmatch(lines[0]) else command
+
+
+def support_rsync_command():
+    import shlex
+    from pathlib import Path
+    import artifact_delivery as delivery
+    owner = published_support_root(delivery.local_file(Path(sys.argv[1]), 4096), sys.argv[2])
+    if shlex.quote(owner) != sys.argv[4]:
+        raise ValueError('support_publication_binding_changed')
+    version = delivery.local_file(Path(sys.argv[3]), 16384)
+    print(rsync_owner_command(owner, version))
+
+
 def lane_root_source():
     # Root-bound transport needs the additional binding and layout validators.
     import artifact_delivery as delivery
@@ -586,7 +672,8 @@ def custody_chain_source():
 
 def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                           root, parent, host, mode, model, support_digest,
-                          launch_lease_id, launch_account, transport_receipt=None):
+                          launch_lease_id, launch_account, acquisition_pool,
+                          transport_receipt=None):
     """Retain the existing acquire return before a NEW artifact worker starts.
 
     Correlation evidence only: no authentication, new admission, settlement,
@@ -657,7 +744,9 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
     lease_id, account = (x.decode('ascii') for x in match.groups())
     if lease_id != launch_lease_id or account != launch_account:
         raise ValueError('launch_binding_launch_mismatch')
+    # Keep the accounting/provider family separate from the selected tag.
     pool = {'glm': 'glm', 'qwen': 'bailian'}[mode]
+    validate_acquisition_pool(mode, model, acquisition_pool)
     packet_sha = hashlib.sha256(packet).hexdigest()
     transport = None
     lane_layout = None
@@ -671,21 +760,20 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
         receipt = json.loads(delivery.local_file(Path(transport_receipt), 65536)
                              .decode('utf-8'))
         receipt_files = receipt.get('files') if type(receipt) is dict else None
-        v2 = type(receipt) is dict and receipt.get('schema') == TRANSPORT_RECEIPT_V2
         receipt_fields = {'schema', 'run_id', 'host', 'mode', 'requested_model',
                           'packet_sha256', 'support_digest', 'policy_sha256', 'files',
                           'lease_id', 'account', 'acquire_response_sha256', 'phase',
-                          'verified_at'}
-        if v2:
-            receipt_fields.add('lane_root')
-            lane_layout = delivery.validate_remote_lane_layout(receipt.get('lane_root'))
+                          'verified_at', 'acquisition_pool', 'lane_root'}
+        if type(receipt) is dict and receipt.get('lane_root') is not None:
+            lane_layout = delivery.validate_remote_lane_layout(receipt['lane_root'])
             if lane_layout['binding']['host'] != host:
                 raise ValueError('launch_binding_lane_root_mismatch')
         if (type(receipt) is not dict
-                or receipt.get('schema') != (TRANSPORT_RECEIPT_V2 if v2 else TRANSPORT_RECEIPT_SCHEMA)
+                or receipt.get('schema') != TRANSPORT_RECEIPT_SCHEMA
                 or set(receipt) != receipt_fields
                 or receipt['run_id'] != run_id or receipt['host'] != host
                 or receipt['mode'] != mode or receipt['requested_model'] != model
+                or receipt['acquisition_pool'] != acquisition_pool
                 or receipt['packet_sha256'] != packet_sha
                 or receipt['support_digest'] != support_digest
                 or type(receipt['policy_sha256']) is not str
@@ -706,7 +794,8 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                     sort_keys=True, separators=(',', ':')).encode()).hexdigest()
                 != support_digest):
             raise ValueError('launch_binding_transport_unconfirmed')
-        transport = {'packet_sha256': receipt['packet_sha256'],
+        transport = {'acquisition_pool': receipt['acquisition_pool'],
+                     'packet_sha256': receipt['packet_sha256'],
                      'support_digest': receipt['support_digest'],
                      'policy_sha256': receipt['policy_sha256'],
                      'files': receipt_files,
@@ -715,14 +804,13 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                      'acquire_response_sha256': receipt['acquire_response_sha256'],
                      'phase': receipt['phase'],
                      'verified_at': receipt['verified_at']}
-        if lane_layout is not None:
-            transport['lane_root'] = lane_layout
+        transport['lane_root'] = lane_layout
     record = {
-        'schema': ('mastermind.fabric_launch_binding.v1' if contract is not None
-                   else ('mastermind.fabric_plain_launch_binding.v1' if lane_layout is None
-                         else 'mastermind.fabric_plain_launch_binding.v2')),
+        'schema': ('mastermind.fabric_launch_binding.v2' if contract is not None
+                   else 'mastermind.fabric_plain_launch_binding.v3'),
         'run_id': run_id, 'root': root, 'parent': parent, 'host': host,
         'mode': mode, 'requested_model': model, 'pool': pool,
+        'acquisition_pool': acquisition_pool,
         'lease_id': lease_id, 'account': account,
         'packet_sha256': packet_sha,
         'support_digest': support_digest,
@@ -748,7 +836,7 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                         != ['RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
                             'TRANSPORT_VERIFIED']
                         or tracked[0][1] != 'RUN_RESERVED explicit=1'
-                        or tracked[1][1] != 'LEASE_OK pool=' + pool
+                        or tracked[1][1] != 'LEASE_OK pool=' + acquisition_pool
                         or not re.fullmatch('SUPPORT_VERSION_READY digest='
                                             + support_digest + r' policy=[a-f0-9]{64}',
                                             tracked[2][1])
@@ -764,7 +852,7 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                                for marker in FORBIDDEN_LOG_MARKERS)):
                     raise ValueError('launch_binding_not_fresh_prelaunch')
             elif (sum(e == 'RUN_RESERVED explicit=1' for e in events) != 1
-                    or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool=' + pool]
+                    or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool=' + acquisition_pool]
                     or len([e for e in events if e.startswith('SUPPORT_VERSION_READY ')]) != 1
                     or not any(re.fullmatch(
                         'SUPPORT_VERSION_READY digest=' + support_digest + r' policy=[a-f0-9]{64}', e) for e in events)
@@ -793,26 +881,27 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
 def launch_binding():
     import json
     (log, packet, acquired, run, root, parent, host, mode, model, support,
-     launch_lease_id, launch_account, receipt) = sys.argv[1:14]
+     launch_lease_id, launch_account, receipt, acquisition_pool) = sys.argv[1:]
     result = record_launch_binding(log, packet, acquired, run_id=run, root=root,
                                   parent=parent, host=host, mode=mode,
                                   model=model, support_digest=support,
                                   launch_lease_id=launch_lease_id, launch_account=launch_account,
+                                  acquisition_pool=acquisition_pool,
                                   transport_receipt=None if receipt == '-' else receipt)
     print(json.dumps(result, sort_keys=True))
 
 
 def transport_verification():
-    if len(sys.argv) not in (14, 15):
+    if len(sys.argv) != 16:
         raise ValueError('transport_verification_arguments_invalid')
     (log, receipt, packet, acquired, observation, run, host, mode, model,
-     support, policy, lease_id, account) = sys.argv[1:14]
+     support, policy, lease_id, account, acquisition_pool, layout_token) = sys.argv[1:]
     transport_verify(log, receipt, packet, acquired, observation, run_id=run,
                      host=host, mode=mode, model=model, support_digest=support,
                      policy_sha256=policy, launch_lease_id=lease_id,
-                     launch_account=account,
-                     lane_layout=(decode_lane_root_token(sys.argv[14], layout=True)
-                                  if len(sys.argv) == 15 and sys.argv[14] != '-' else None))
+                     launch_account=account, acquisition_pool=acquisition_pool,
+                     lane_layout=(decode_lane_root_token(layout_token, layout=True)
+                                  if layout_token != '-' else None))
 
 
 def main():
@@ -825,6 +914,8 @@ def main():
         'deadline-command': deadline_command,
         'controller-source-sha': controller_source_sha,
         'support-meta': support_meta,
+        'support-root-shell': support_root_shell,
+        'support-rsync-command': support_rsync_command,
         'transport-verify': transport_verification,
         'launch-binding': launch_binding,
         'custody-chain-source': custody_chain_source,
