@@ -41,6 +41,18 @@ LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS = 8
 C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256 = (
     "b6f511fc7d9c263914af0490ea0912c127979c85a0a3740e4834e12f716ee8fc"
 )
+# Exact historical on-host manifest digests, recorded per public seat.
+# A rewritten 8-concurrency manifest is not admitted. New stages stay at 4.
+LEGACY_EIGHT_TUNNEL_MANIFEST_SHA256 = {
+    "admin-business": "c7cfae3f955144a12c4e6f611b459329c554d4a871f86d977efe2ef2f83ed827",
+    "chatgpt1": "cfcd0578efe7a0a851ad48da6c9f6652f5ff95d4d81a226529c58ffab53cfdee",
+    "chatgpt2-business": C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256,
+    "chatgpt2-personal": "2e65e5f610a44a7717fccf34aee57df98a3689c115ec3b5073b71c71ada3e522",
+    "chatgpt3": "b3fb25f4df0638a511ccfdf5c6d3427c6c814e07dd83dcba1615056efddcfb04",
+    "chatgpt3-w570f6f34": "8b7b908da1374d9c0cc50fc12917bf9c08f1cb65b0c6480560c996a5b39b178e",
+    "chatgpt3-wa2a9e6f9": "bdb8e6fe6d099a606caaa76e0807df410cbb0f143cba13ddc620d5ea9c3399ac",
+    "chatgpt4": "a86e709d5db144b0d7b6804d3d0155afb3017290e56819085c7bca21bb285d4e",
+}
 CONTROL_PLANE_BASE_URL = "https://api.openai.com"
 # A historical successful poll is not evidence of a connected transport.
 # Allow two 30-second polls plus scheduling slack; never extend this on reads.
@@ -432,7 +444,7 @@ def _valid_manifest(data, account: str, label: str) -> bool:
         return False
     concurrency = data.get("maxConcurrentRequests")
     if concurrency != MAX_CONCURRENT_REQUESTS and not (
-        account == "chatgpt2-business"
+        account in LEGACY_EIGHT_TUNNEL_MANIFEST_SHA256
         and data.get("version") == 1
         and concurrency == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
     ):
@@ -472,7 +484,7 @@ def _read_manifest(
     if not _valid_manifest(data, account, label):
         raise SystemExit("corrupt tunnel manifest")
     if (data.get("maxConcurrentRequests") == LEGACY_C2_BUSINESS_MAX_CONCURRENT_REQUESTS
-            and _sha256_file(manifest_path) != C2_BUSINESS_LEGACY_TUNNEL_MANIFEST_SHA256):
+            and _sha256_file(manifest_path) != LEGACY_EIGHT_TUNNEL_MANIFEST_SHA256.get(account)):
         raise SystemExit("corrupt tunnel manifest")
     return data
 
