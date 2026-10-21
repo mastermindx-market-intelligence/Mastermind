@@ -67,6 +67,18 @@ bounded call history/status/readback when available. If the refused call is prov
 the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
 do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
 
+Establish refusal provenance before projecting it onto another session. Identify the actual
+tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state.
+A handoff's claim, an assistant's own refusal, a human-imposed scope restriction, and a current
+tool denial are different evidence. Preserve the named held effect while checking the record;
+never replay it to discover whether the earlier refusal was real. An unverified historical
+claim is not proof of a current platform-wide restriction or a requirement for an invented
+clearance receipt. Permitted non-effectful local inspection may establish the current surface.
+A later direct human instruction can revise human-imposed scope, but cannot clear an applicable
+system/developer restriction, real tool/provider denial, live lease or EFFECT_UNKNOWN. Local
+Codex/Claude native tools do not require optional Web/Studio Direct/Executive connectivity;
+they remain subject to their actual grants and all applicable effect fences.
+
 EFFECT_NONE is not retry permission. The first explicit safety or permission denial ends retry for
 that action. Do not rephrase it or change tools, carriers, accounts, models or providers to get the
 denied effect through. An unclear refusal reason is not evidence of a technical fault; establish the
