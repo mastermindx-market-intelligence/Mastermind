@@ -4171,3 +4171,37 @@ class TestSealedV2FleetGatewayManifestRoster(unittest.TestCase):
             # A different real canonical digest fails even when key and file count match.
             with mock.patch.object(svc, "_canonical_json_sha256", return_value="f"*64):
                 self.assertFalse(svc._valid_manifest(replaced, first, _label_for(first)))
+
+
+    def test_only_exact_historical_tailnet_argv_is_eligible(self):
+        """An original sealed Fabric plist is not an arbitrary argv allowance."""
+        for account in ("fabric-design", "fabric-read"):
+            with self.subTest(account=account):
+                base = Path("/fixture/private") / account
+                roots = {"base": base}
+                node = "/fixture/node"
+                config = str(base / "config.json")
+                expected = [node, str(base / "private-tunnel-gateway.mjs"), config]
+                historical = [node, str(base / "tailnet-gateway.mjs"), config]
+                manifest = {"files": {"tailnet-gateway.mjs": "a" * 64}}
+                helper = svc._sealed_historical_tailnet_launch_argv
+                with mock.patch.object(
+                    svc, "_sealed_v2_fleet_gateway_predecessor", return_value=True
+                ):
+                    self.assertTrue(
+                        helper(account, manifest, roots, expected, historical)
+                    )
+                    for invalid in (
+                        ["/fixture/other-node", historical[1], historical[2]],
+                        [historical[0], str(base / "other-gateway.mjs"), historical[2]],
+                        [historical[0], historical[1], "/fixture/private/other/config.json"],
+                        historical + ["--unexpected"],
+                        historical[:2],
+                    ):
+                        self.assertFalse(helper(account, manifest, roots, expected, invalid))
+                    self.assertFalse(helper("chatgpt4", manifest, roots, expected, historical))
+                    self.assertFalse(helper(account, {"files": {}}, roots, expected, historical))
+                with mock.patch.object(
+                    svc, "_sealed_v2_fleet_gateway_predecessor", return_value=False
+                ):
+                    self.assertFalse(helper(account, manifest, roots, expected, historical))
