@@ -271,7 +271,7 @@ def test_route_never_splices_current_rotation_into_a_publication(tmp_path, monke
 def test_page_renderer_keeps_expired_evidence_unavailable(case):
     # Execute the shipped renderer with synthetic API data. This verifies output
     # semantics independently of a browser login; it is not a visual browser test.
-    import re
+    from html.parser import HTMLParser
     import shutil
     import subprocess
     from pathlib import Path
@@ -288,7 +288,32 @@ def test_page_renderer_keeps_expired_evidence_unavailable(case):
         published = _published()
     served = _project(published)
     html = (Path(__file__).resolve().parents[1] / "app/static/market_view.html").read_text()
-    script = re.findall(r"<script[^>]*>(.*?)</script>", html, re.S)[-1]
+    class InlineScripts(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.active = False
+            self.parts = []
+            self.scripts = []
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "script":
+                self.active = not any(name == "src" for name, _ in attrs)
+                self.parts = []
+
+        def handle_data(self, data):
+            if self.active:
+                self.parts.append(data)
+
+        def handle_endtag(self, tag):
+            if tag == "script" and self.active:
+                self.scripts.append("".join(self.parts))
+                self.active = False
+
+    parser = InlineScripts()
+    parser.feed(html)
+    parser.close()
+    assert parser.scripts, "The shipped page has no inline renderer"
+    script = parser.scripts[-1]
     harness = """
 const vm = require('node:vm');
 const fs = require('node:fs');
