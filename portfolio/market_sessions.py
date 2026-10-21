@@ -14,32 +14,12 @@ open (including the China/HK afternoon reopen after lunch).
 from __future__ import annotations
 
 import math
-from datetime import date, datetime, time
+from datetime import datetime, time
 from typing import Any
 from zoneinfo import ZoneInfo
 
 _OPEN_POLL_SECONDS = 120
 _WAKE_BUFFER_SECONDS = 5
-
-# Published shortened cash sessions. These belong to the dashboard scheduling
-# layer so stale quotes are not polled after an exchange's early close.
-# Sources: NYSE Holidays & Trading Hours; HKEX securities-market circulars.
-_US_EARLY_CLOSES = frozenset(
-    date.fromisoformat(value)
-    for value in (
-        "2025-07-03", "2025-11-28", "2025-12-24",
-        "2026-11-27", "2026-12-24",
-        "2027-11-26",
-    )
-)
-_HK_EARLY_CLOSES = frozenset(
-    date.fromisoformat(value)
-    for value in (
-        "2025-01-28", "2025-12-24", "2025-12-31",
-        "2026-02-16", "2026-12-24", "2026-12-31",
-        "2027-02-05", "2027-12-24", "2027-12-31",
-    )
-)
 
 
 def venue_for_portfolio(portfolio_id: str | None) -> str:
@@ -96,26 +76,14 @@ def status_for_portfolio(portfolio_id: str | None = None,
         timezone_name = "Asia/Hong_Kong" if venue == "HK" else "Asia/Shanghai"
 
     next_open = datetime.fromisoformat(raw["next_open"]).astimezone(zone)
-    early_close = (
-        (venue == "US" and local_now.date() in _US_EARLY_CLOSES)
-        or (venue == "HK" and local_now.date() in _HK_EARLY_CLOSES)
-    )
-    close_time = (
-        (time(13, 0) if early_close else time(16, 0)) if venue == "US"
-        else (time(12, 0) if early_close else time(16, 0)) if venue == "HK"
-        else time(15, 0)
-    )
-    open_now = bool(raw["open"]) and not (
-        early_close and local_now.time() >= close_time)
+    session_kwargs = {} if venue == "US" else {"venue": venue}
+    early_close = calendar.is_early_close(local_now.date(), **session_kwargs)
+    close_time = calendar.session_close(local_now.date(), **session_kwargs)
+    open_now = bool(raw["open"])
     if open_now:
         state = "open"
     elif early_close and bool(raw["trading_day"]) and local_now.time() >= close_time:
         state = "early_close"
-        # HK's underlying two-session calendar sees 12:00–13:00 as lunch and
-        # would otherwise schedule a wake at 13:00 on a no-afternoon-session day.
-        if venue == "HK":
-            following = calendar.next_trading_day(local_now.date(), venue="HK")
-            next_open = datetime.combine(following, time(9, 30), tzinfo=zone)
     else:
         state = _closed_state(
             local_now=local_now,

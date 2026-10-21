@@ -1,0 +1,144 @@
+diff --git a/remote_sub_exec.py b/remote_sub_exec.py
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -624,6 +624,68 @@
+     return str(destination)
+ 
+ 
++def _bound_lane_packet(key, mode, packet_path, cwd, here, env):
++    """Recheck the v2 transport's physical layout before any worker invocation.
++
++    The controller alone selects this tuple from the existing host registry.
++    This check does not turn correlation metadata into authentication.
++    """
++    token = env.get('REMOTE_SUB_LANE_ROOT_LAYOUT')
++    if token in (None, '-'):
++        return None
++    import base64
++    import artifact_delivery as delivery
++    import artifact_reader
++    if (type(token) is not str or len(token) > 16384
++            or not re.fullmatch(r'[A-Za-z0-9_-]+={0,2}', token)
++            or mode not in {'glm', 'qwen'} or cwd != '~'
++            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', key)
++            or not env.get('POOL_ORCHESTRATOR_ID') or not env.get('POOL_PARENT_RUN_ID')
++            or env.get('FABRIC_NEW_MACRO_COMMIT')
++            or env.get('FABRIC_CPU_SCOPE_QUOTA_PCT')
++            or env.get('FABRIC_OPERATOR_CAPSULE') or env.get('FABRIC_OPERATOR_CAPABILITY')
++            or env.get('FABRIC_OPERATOR_CHILD_ID')
++            or env.get('FABRIC_OPERATOR_PRELEASE_CONTINUATION')
++            or env.get('FABRIC_OPERATOR_POST_SUPPORT_CONTINUATION')):
++        raise ValueError('REMOTE_SUB_LANE_ROOT_SCOPE_REFUSED')
++    layout = delivery.validate_remote_lane_layout(artifact_reader.strict_json(
++        base64.b64decode(token, altchars=b'-_', validate=True)))
++    binding = layout['binding']
++    if binding['host'] != env.get('LANE_REMOTE_HOST'):
++        raise ValueError('REMOTE_SUB_LANE_ROOT_HOST_REFUSED')
++    lane_root = Path(binding['path'])
++    support = env.get('SUPPORT_DIGEST', '')
++    if (not re.fullmatch(r'[a-f0-9]{64}', support)
++            or packet_path != lane_root / 'tmp' / (key + '.txt')
++            or here != lane_root / 'support-releases' / support / 'ext'):
++        raise ValueError('REMOTE_SUB_LANE_ROOT_PATH_REFUSED')
++    delivery.observe_remote_lane_layout(binding, layout)
++    packet = delivery.strict_remote_lane_file(packet_path, 2 * 1024 * 1024)
++    expected = env.get('REMOTE_SUB_LANE_PACKET_SHA256', '')
++    if (not re.fullmatch(r'[a-f0-9]{64}', expected)
++            or hashlib.sha256(packet).hexdigest() != expected
++            or packet.startswith(b'FABRIC_ARTIFACT_REQUEST_V1 ')):
++        raise ValueError('REMOTE_SUB_LANE_ROOT_PACKET_REFUSED')
++    meta = artifact_reader.strict_json(delivery.strict_remote_lane_file(
++        here.parent / 'RELEASE.json', 65536, mode=0o444))
++    files = meta.get('files') if type(meta) is dict else None
++    if (type(files) is not dict or not 1 <= len(files) <= 256
++            or meta.get('digest') != support
++            or hashlib.sha256(json.dumps({'schema': 'remote-support-code.v1', 'files': files},
++                sort_keys=True, separators=(',', ':')).encode()).hexdigest() != support):
++        raise ValueError('REMOTE_SUB_LANE_ROOT_SUPPORT_REFUSED')
++    delivery.verify_remote_lane_release(layout, support, meta)
++    for name, wanted in files.items():
++        if (type(name) is not str or not name or Path(name).name != name
++                or type(wanted) is not str or not re.fullmatch(r'[a-f0-9]{64}', wanted)
++                or hashlib.sha256(delivery.strict_remote_lane_file(
++                    here / name, 2 * 1024 * 1024, mode=0o555)).hexdigest() != wanted):
++            raise ValueError('REMOTE_SUB_LANE_ROOT_SUPPORT_REFUSED')
++    delivery.verify_remote_lane_release(layout, support, meta)
++    delivery.observe_remote_lane_layout(binding, layout)
++    return layout, packet
++
++
+ def _execute(argv: list[str], state: dict) -> int:
+     if len(argv) != 6:
+         return _fail(
+@@ -643,10 +705,15 @@
+             None, int(commission_budget), now_ns=state['entered_monotonic_ns'])
+     here = Path(__file__).resolve().parent
+     packet_path = Path(packet)
++    try:
++        bound_packet = _bound_lane_packet(key, mode, packet_path, cwd, here, os.environ)
++    except (OSError, ValueError, TypeError, KeyError, RecursionError):
++        return _fail("REMOTE_SUB_LANE_ROOT_REFUSED before_worker=1", 78)
+     if not packet_path.is_file():
+         return _fail("REMOTE_SUB_PACKET_MISSING", 2)
+     try:
+-        prompt = packet_path.read_text(encoding="utf-8")
++        prompt = (bound_packet[1].decode("utf-8") if bound_packet is not None
++                  else packet_path.read_text(encoding="utf-8"))
+     except OSError:
+         return _fail("REMOTE_SUB_PACKET_UNREADABLE", 2)
+ 
+@@ -689,7 +756,9 @@
+ 
+     config = load_runtime_config(os.environ, cpu_count=os.cpu_count() or 1)
+     install_signal_cleanup()
+-    active_dir = here / "active"
++    state_ext = (Path(bound_packet[0]["binding"]["path"]) / "ext"
++                 if bound_packet is not None else here)
++    active_dir = state_ext / "active"
+     try:
+         lease = LaneLease.acquire(
+             active_dir,
+@@ -717,15 +786,16 @@
+ 
+     # Prompt bytes must not consume the operating system's per-argument limit.
+     # The already-delivered file stays inside the existing per-run transport.
++    packet_for_worker = packet_path if bound_packet is not None else packet_path.resolve()
+     if mode in ("glm", "minimax", "qwen"):
+-        command = ["bash", str(here / "sub.sh"), "--prompt-file", mode, str(packet_path.resolve()), cwd]
++        command = ["bash", str(here / "sub.sh"), "--prompt-file", mode, str(packet_for_worker), cwd]
+     else:
+         command = ["bash", str(here / "sub.sh"), mode, prompt, cwd]
+     if model:
+         command.append(model)
+     if mode in native_remote.MODES:
+         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
+-    lanes_dir = here / "lanes"
++    lanes_dir = state_ext / "lanes"
+     child_env = dict(os.environ)
+     if 'commission_deadline_ns' in state:
+         # This envelope belongs to this executor, not to worker-created tasks.
+@@ -747,7 +817,7 @@
+         if timeout <= 0:
+             lease.release()
+             return _fail("native_remote_lease_expired", 78)
+-    receipt = here / "lanes" / f"{key}.process.jsonl"
++    receipt = lanes_dir / f"{key}.process.jsonl"
+     diagnostic_reader = None
+     if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
+         from fabric_operator_diagnostics import collect
+@@ -756,6 +826,15 @@
+         with lease, ExitStack() as artifact_stack:
+             artifact_owner = (artifact_stack.enter_context(artifact_production.NewDirectory(artifact_contract))
+                               if artifact_contract is not None else None)
++            if bound_packet is not None:
++                try:
++                    current_packet = _bound_lane_packet(
++                        key, mode, packet_path, '~', here, child_env)
++                    if current_packet != bound_packet:
++                        raise ValueError('REMOTE_SUB_LANE_ROOT_PACKET_CHANGED')
++                except (OSError, ValueError, TypeError, KeyError, RecursionError):
++                    lease.hold_for_reconciliation('remote_lane_root_changed')
++                    return _fail("REMOTE_SUB_LANE_ROOT_REFUSED after_admission=1", 76)
+             # Physical admission + original provider lease already succeeded.
+             # Mint only this explicitly NEW, pinned workspace before worker START.
+             try:

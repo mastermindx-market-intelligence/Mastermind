@@ -252,6 +252,8 @@ def validate_usage():
 
 TRANSPORT_OBSERVATION_SCHEMA = 'mastermind.transport_observation.v1'
 TRANSPORT_RECEIPT_SCHEMA = 'mastermind.transport_verification.v1'
+TRANSPORT_OBSERVATION_V2 = 'mastermind.transport_observation.v2'
+TRANSPORT_RECEIPT_V2 = 'mastermind.transport_verification.v2'
 TRANSPORT_STAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z\Z')
 # Controller observations only. None of these events authenticates anything;
 # they are the retained, ordered narration the read-only collector re-reads.
@@ -322,10 +324,122 @@ def _publish_log_line(log_name, dir_fd, fd, chain, before, identity, raw, append
         raise ValueError('launch_binding_publication_unconfirmed')
 
 
+def decode_lane_root_token(token, *, layout=False):
+    import base64
+    import artifact_delivery as delivery
+    import artifact_reader
+    if (type(token) is not str or not 1 <= len(token) <= 16384
+            or not re.fullmatch(r'[A-Za-z0-9_-]+={0,2}', token)):
+        raise ValueError('remote_lane_root_token_invalid')
+    value = artifact_reader.strict_json(base64.b64decode(
+        token, altchars=b'-_', validate=True))
+    validator = (delivery.validate_remote_lane_layout if layout
+                 else delivery.validate_remote_lane_root)
+    return validator(value)
+
+
+def lane_root_current():
+    """Compare with the existing original registry; never enroll a path."""
+    import artifact_delivery as delivery
+    import artifact_reader
+    from pathlib import Path
+    registry, host, token = sys.argv[1:]
+    expected = decode_lane_root_token(token)
+    current = artifact_reader.strict_json(delivery.local_file(Path(registry)))
+    actual = delivery.configured_remote_lane_root(host, current.get(host))
+    if actual != expected:
+        raise ValueError('remote_lane_root_registry_changed')
+    print('REMOTE_LANE_ROOT_CURRENT')
+
+
+def lane_root_observation():
+    """Validate the actual pre-upload read against the selected host tuple."""
+    import base64
+    import json
+    import artifact_delivery as delivery
+    import artifact_reader
+    from pathlib import Path
+    token, path = sys.argv[1:]
+    expected = decode_lane_root_token(token)
+    layout = delivery.validate_remote_lane_layout(
+        artifact_reader.strict_json(delivery.local_file(Path(path), 65536)))
+    if layout['binding'] != expected:
+        raise ValueError('remote_lane_root_observation_mismatch')
+    print(base64.urlsafe_b64encode(json.dumps(
+        layout, sort_keys=True, separators=(',', ':')).encode()).decode())
+
+
+def lane_root_packet_command():
+    """Encode a fixed exclusive packet writer for the existing SSH carrier."""
+    import inspect
+    import shlex
+    import artifact_delivery as delivery
+    layout_token, run_id = sys.argv[1:]
+    decode_lane_root_token(layout_token, layout=True)
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', run_id):
+        raise ValueError('remote_lane_packet_run_invalid')
+    source = ('import base64, hashlib, json, os, stat, sys\nfrom pathlib import Path\n'
+              + delivery.remote_lane_root_source() + '\n\n'
+              + inspect.getsource(delivery.require_remote_lane_output_absence) + '\n\n'
+              + inspect.getsource(delivery.publish_remote_lane_packet)
+              + '\nlayout = validate_remote_lane_layout(json.loads(base64.b64decode('
+                'sys.argv[1], altchars=b"-_", validate=True)))\n'
+                'raw = sys.stdin.buffer.read(2 * 1024 * 1024 + 1)\n'
+                'publish_remote_lane_packet(layout, sys.argv[2], raw)\n'
+                'print("REMOTE_LANE_PACKET_RETAINED sha256=" + hashlib.sha256(raw).hexdigest())\n')
+    print('python3 -I -S -c ' + shlex.quote(source) + ' '
+          + shlex.quote(layout_token) + ' ' + shlex.quote(run_id))
+
+
+def lane_root_launch_command():
+    """Encode the fixed one-attempt entry with exclusive stdout/RC custody."""
+    import inspect
+    import shlex
+    import artifact_delivery as delivery
+    layout_token, run_id = sys.argv[1:]
+    decode_lane_root_token(layout_token, layout=True)
+    if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', run_id):
+        raise ValueError('remote_lane_launch_run_invalid')
+    inner = ('umask 077 || exit; python3 "$LANE_DIRECTORY/support-releases/'
+             '$SUPPORT_DIGEST/ext/remote_sub_exec.py" "$KEY" "$MODE" "$PACKET" '
+             '"$REMOTE_CWD" "$MODEL"; code=$?; printf "%s\\n" "$code" >&3')
+    source = ('import base64, json, os, stat, sys\nfrom pathlib import Path\n'
+              + delivery.remote_lane_root_source() + '\n\n'
+              + inspect.getsource(delivery.require_remote_lane_output_absence) + '\n\n'
+              + inspect.getsource(delivery.open_remote_lane_outputs)
+              + '\nlayout = validate_remote_lane_layout(json.loads(base64.b64decode('
+                'sys.argv[1], altchars=b"-_", validate=True)))\n'
+                'stdout_fd, rc_fd = open_remote_lane_outputs(layout, sys.argv[2])\n'
+                'os.dup2(stdout_fd, 1, inheritable=True)\n'
+                'os.dup2(stdout_fd, 2, inheritable=True)\n'
+                'if stdout_fd not in (1, 2): os.close(stdout_fd)\n'
+                'os.dup2(rc_fd, 3, inheritable=True)\n'
+                'if rc_fd != 3: os.close(rc_fd)\n'
+                'os.execv("/bin/bash", ["bash", "-c", ' + repr(inner) + '])\n')
+    print('python3 -I -S -c ' + shlex.quote(source) + ' '
+          + shlex.quote(layout_token) + ' ' + shlex.quote(run_id))
+
+
+def lane_root_local_scope():
+    """The local-host shortcut cannot silently bypass a configured-root gate."""
+    import artifact_delivery as delivery
+    import artifact_reader
+    from pathlib import Path
+    registry, host = sys.argv[1:]
+    value = artifact_reader.strict_json(delivery.local_file(Path(registry)))
+    entry = value.get(host) if type(value) is dict else None
+    if type(entry) is dict and 'physical_lane_root' in entry:
+        raise ValueError('remote_lane_root_local_host_unsupported')
+
+
+def lane_root_log_suffix(layout):
+    return '' if layout is None else ' lane_root=' + layout['sha256']
+
+
 def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
                      observation_path, *, run_id, host, mode, model,
                      support_digest, policy_sha256, launch_lease_id,
-                     launch_account):
+                     launch_account, lane_layout=None):
     """Verify the transported packet and published support before any launch.
 
     Fixed read-only controller observation over the incumbent SSH transport:
@@ -363,11 +477,20 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
         raise ValueError('transport_verification_acquire_mismatch')
     observation = json.loads(delivery.local_file(Path(observation_path), 65536)
                              .decode('utf-8'))
+    if lane_layout is not None:
+        delivery.validate_remote_lane_layout(lane_layout)
+        if lane_layout['binding']['host'] != host:
+            raise ValueError('transport_verification_lane_root_mismatch')
     files = observation.get('files') if type(observation) is dict else None
+    observation_fields = {'schema', 'run_id', 'packet_bytes', 'packet_sha256',
+                          'support_digest', 'policy_sha256', 'files'}
+    if lane_layout is not None:
+        observation_fields.add('lane_root')
     if (type(observation) is not dict
-            or set(observation) != {'schema', 'run_id', 'packet_bytes', 'packet_sha256',
-                                    'support_digest', 'policy_sha256', 'files'}
-            or observation['schema'] != TRANSPORT_OBSERVATION_SCHEMA
+            or set(observation) != observation_fields
+            or observation['schema'] != (TRANSPORT_OBSERVATION_SCHEMA if lane_layout is None
+                                         else TRANSPORT_OBSERVATION_V2)
+            or observation.get('lane_root') != lane_layout
             or observation['run_id'] != run_id
             or type(observation['packet_bytes']) is not int
             or observation['packet_bytes'] != len(packet)
@@ -387,7 +510,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     if observed_digest != support_digest:
         raise ValueError('transport_verification_generation_mismatch')
     record = {
-        'schema': TRANSPORT_RECEIPT_SCHEMA,
+        'schema': TRANSPORT_RECEIPT_SCHEMA if lane_layout is None else TRANSPORT_RECEIPT_V2,
         'run_id': run_id, 'host': host, 'mode': mode, 'requested_model': model,
         'packet_sha256': packet_sha, 'support_digest': support_digest,
         'policy_sha256': policy_sha256, 'files': files,
@@ -396,6 +519,8 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
         'phase': 'PRE_LAUNCH',
         'verified_at': datetime.now(timezone.utc).strftime('%Y-%m-%dT%H:%MZ'),
     }
+    if lane_layout is not None:
+        record['lane_root'] = lane_layout
     log = Path(log_path)
     if log.name != run_id + '.log':
         raise ValueError('transport_verification_log_name')
@@ -426,7 +551,8 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
                     + ' policy=' + policy_sha256
                     + ' lease=' + lease_id
                     + ' account=' + account
-                    + ' acquire=' + record['acquire_response_sha256'])
+                    + ' acquire=' + record['acquire_response_sha256']
+                    + lane_root_log_suffix(lane_layout))
             appended = (f"{record['verified_at']} [remote_sub id={run_id} host={host}] "
                         + line + '\n').encode()
             _publish_log_line(log.name, chain.fd, fd, chain, before, identity, raw,
@@ -443,6 +569,12 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     finally:
         os.close(fd)
     print(payload)
+
+
+def lane_root_source():
+    # Root-bound transport needs the additional binding and layout validators.
+    import artifact_delivery as delivery
+    print(delivery.remote_lane_root_source())
 
 
 def custody_chain_source():
@@ -528,6 +660,7 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
     pool = {'glm': 'glm', 'qwen': 'bailian'}[mode]
     packet_sha = hashlib.sha256(packet).hexdigest()
     transport = None
+    lane_layout = None
     if contract is None:
         # A NEW plain record binds the ACTUAL transport verification receipt,
         # not merely the SUPPORT_VERSION_READY publication line. Missing,
@@ -538,14 +671,19 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
         receipt = json.loads(delivery.local_file(Path(transport_receipt), 65536)
                              .decode('utf-8'))
         receipt_files = receipt.get('files') if type(receipt) is dict else None
+        v2 = type(receipt) is dict and receipt.get('schema') == TRANSPORT_RECEIPT_V2
+        receipt_fields = {'schema', 'run_id', 'host', 'mode', 'requested_model',
+                          'packet_sha256', 'support_digest', 'policy_sha256', 'files',
+                          'lease_id', 'account', 'acquire_response_sha256', 'phase',
+                          'verified_at'}
+        if v2:
+            receipt_fields.add('lane_root')
+            lane_layout = delivery.validate_remote_lane_layout(receipt.get('lane_root'))
+            if lane_layout['binding']['host'] != host:
+                raise ValueError('launch_binding_lane_root_mismatch')
         if (type(receipt) is not dict
-                or receipt.get('schema') != TRANSPORT_RECEIPT_SCHEMA
-                or set(receipt) != {'schema', 'run_id', 'host', 'mode',
-                                    'requested_model', 'packet_sha256',
-                                    'support_digest', 'policy_sha256', 'files',
-                                    'lease_id', 'account',
-                                    'acquire_response_sha256', 'phase',
-                                    'verified_at'}
+                or receipt.get('schema') != (TRANSPORT_RECEIPT_V2 if v2 else TRANSPORT_RECEIPT_SCHEMA)
+                or set(receipt) != receipt_fields
                 or receipt['run_id'] != run_id or receipt['host'] != host
                 or receipt['mode'] != mode or receipt['requested_model'] != model
                 or receipt['packet_sha256'] != packet_sha
@@ -577,9 +715,12 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                      'acquire_response_sha256': receipt['acquire_response_sha256'],
                      'phase': receipt['phase'],
                      'verified_at': receipt['verified_at']}
+        if lane_layout is not None:
+            transport['lane_root'] = lane_layout
     record = {
         'schema': ('mastermind.fabric_launch_binding.v1' if contract is not None
-                   else 'mastermind.fabric_plain_launch_binding.v1'),
+                   else ('mastermind.fabric_plain_launch_binding.v1' if lane_layout is None
+                         else 'mastermind.fabric_plain_launch_binding.v2')),
         'run_id': run_id, 'root': root, 'parent': parent, 'host': host,
         'mode': mode, 'requested_model': model, 'pool': pool,
         'lease_id': lease_id, 'account': account,
@@ -617,7 +758,8 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                             + ' policy=' + transport['policy_sha256']
                             + ' lease=' + lease_id
                             + ' account=' + account
-                            + ' acquire=' + record['acquire_response_sha256'])
+                            + ' acquire=' + record['acquire_response_sha256']
+                            + lane_root_log_suffix(lane_layout))
                         or any(marker in event for event in events
                                for marker in FORBIDDEN_LOG_MARKERS)):
                     raise ValueError('launch_binding_not_fresh_prelaunch')
@@ -661,12 +803,16 @@ def launch_binding():
 
 
 def transport_verification():
+    if len(sys.argv) not in (14, 15):
+        raise ValueError('transport_verification_arguments_invalid')
     (log, receipt, packet, acquired, observation, run, host, mode, model,
      support, policy, lease_id, account) = sys.argv[1:14]
     transport_verify(log, receipt, packet, acquired, observation, run_id=run,
                      host=host, mode=mode, model=model, support_digest=support,
                      policy_sha256=policy, launch_lease_id=lease_id,
-                     launch_account=account)
+                     launch_account=account,
+                     lane_layout=(decode_lane_root_token(sys.argv[14], layout=True)
+                                  if len(sys.argv) == 15 and sys.argv[14] != '-' else None))
 
 
 def main():
@@ -682,6 +828,12 @@ def main():
         'transport-verify': transport_verification,
         'launch-binding': launch_binding,
         'custody-chain-source': custody_chain_source,
+        'lane-root-source': lane_root_source,
+        'lane-root-current': lane_root_current,
+        'lane-root-observation': lane_root_observation,
+        'lane-root-packet-command': lane_root_packet_command,
+        'lane-root-launch-command': lane_root_launch_command,
+        'lane-root-local-scope': lane_root_local_scope,
         'go-settled': go_settled,
         'glm-cap-sha': glm_cap_sha,
         'routing-env': routing_env,
