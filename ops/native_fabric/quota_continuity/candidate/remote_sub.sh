@@ -1034,7 +1034,9 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
    { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
    [ -n "${POOL_PARENT_RUN_ID:-}" ] && [ -n "$LEASE_ID" ] &&
    [ -n "$PLAIN_PACKET_RETAINED" ]; then
-  TRANSPORT_OBSERVATION="$(mktemp "${TMPDIR:-/tmp}/remote_sub_transport.XXXXXX")" || exit 78
+  # macOS /tmp is a symlink. The no-follow verifier needs the existing
+  # owner-controlled run directory, not an OS-global temporary directory.
+  TRANSPORT_OBSERVATION="$(mktemp "$LOG_DIR/${ID}.transport-observation.XXXXXX")" || exit 78
   TEMP_FILES+=("$TRANSPORT_OBSERVATION")
   PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" custody-chain-source) || exit 78
   commission_run transport-read "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
