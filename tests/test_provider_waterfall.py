@@ -96,7 +96,7 @@ def test_codex_quota_failure_falls_back_to_selected_oauth_slot(monkeypatch):
     assert out["text"] == "claude"
     assert out["provider"] == "oauth"
     assert calls[0]["_backend_override"] == "codex"
-    assert calls[1]["_oauth_candidates"][0]["key_id"] == "claude_code_oauth_5"
+    assert calls[1]["_subscription_slots"][0]["key_id"] == "claude_code_oauth_5"
     assert [a["provider"] for a in out["provider_attempts"]] == ["codex", "oauth"]
 
 

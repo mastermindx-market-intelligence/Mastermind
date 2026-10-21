@@ -137,7 +137,7 @@ def control_paths(monkeypatch):
         ]
         return asyncio.run(cli_bridge._reason(
             "Synthetic veto test", **common, _backend_override="cli",
-            _oauth_candidates=candidates if lane == "sdk-rotation" else candidates[:1],
+            _subscription_slots=candidates if lane == "sdk-rotation" else candidates[:1],
         ))
 
     return execute, observed

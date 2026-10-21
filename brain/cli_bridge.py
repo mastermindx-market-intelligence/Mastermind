@@ -393,9 +393,14 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   seat: str | None = None,
                   record_book: str | None = None,
                   _backend_override: str | None = None,
-                  _oauth_candidates: list[dict] | None = None,
+                  _subscription_slots: list[dict] | None = None,
                   before_provider_start: Callable[[], None] | None = None) -> dict:
-    """Internal dispatcher with explicit provider overrides for the shared pool."""
+    """Internal dispatcher with explicit provider overrides for the shared pool.
+
+    ``_subscription_slots`` contains slot IDs, environment-variable names and
+    optional cooling metadata. Credential values are resolved separately when
+    constructing the selected transport environment.
+    """
     _veto_kw = ({"before_provider_start": before_provider_start}
                 if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
@@ -535,8 +540,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     try:
         from brain import key_rotor as _kr
         _pool = (
-            list(_oauth_candidates)
-            if _oauth_candidates is not None
+            list(_subscription_slots)
+            if _subscription_slots is not None
             else _kr.candidates()
         )
     except Exception:

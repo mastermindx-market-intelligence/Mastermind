@@ -182,7 +182,7 @@ async def reason(prompt: str, **kwargs) -> dict:
                 prompt,
                 **kwargs,
                 _backend_override="cli",
-                _oauth_candidates=[candidate],
+                _subscription_slots=[candidate],
             )
 
         result["provider"] = rung["provider"]

@@ -98,7 +98,7 @@ class RunBindingHarness:
             "Synthetic local-run provenance test", model="synthetic-model",
             role=role, arm=arm, allowed_tools=[], add_dirs=[], mcp_servers={},
             cwd=str(self.root), book=book, log_run=log_run,
-            _backend_override="cli", _oauth_candidates=CANDIDATES if candidates is None else candidates,
+            _backend_override="cli", _subscription_slots=CANDIDATES if candidates is None else candidates,
             before_provider_start=guard,
         )
 
