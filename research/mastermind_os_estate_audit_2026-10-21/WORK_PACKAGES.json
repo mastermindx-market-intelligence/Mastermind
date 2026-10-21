@@ -1,0 +1,2141 @@
+{
+  "schema": "mastermind_os_audit.planning_work_packages.v1",
+  "prepared_date": "2026-10-21",
+  "kind": "STATIC_PLANNING_REFERENCES_NOT_QUEUE",
+  "final_material_refresh_pin": "2151a89f7ea3a340ec04932cbcfdf6a838df79b1",
+  "material_refresh_reference": "FINAL_SOURCE_REFRESH.md",
+  "execution_authority": false,
+  "source_pins": {
+    "mastermindx-market-intelligence/Mastermind": "d010b161386853586198a43f9ea9f535bbebb377",
+    "mastermindx-market-intelligence/macro": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f"
+  },
+  "existing_programme": "WS:EXECUTIVE-ECOSYSTEM-COMPLETION",
+  "dependency_meaning": "Prerequisites for acceptance or effectful execution. Safe disjoint source/test preparation may proceed earlier only where current source law and explicit packet gates permit. MAS-66 implementation retains its real MAS-64 gate.",
+  "work_packages": [
+    {
+      "id": "WP-01",
+      "title": "Bind the existing programme and its actual frontier",
+      "owner": "Fable",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Fable",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [],
+      "proposed_write_paths": [
+        "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+        "agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md"
+      ],
+      "incumbent_carriers": [
+        "Existing programme and original #1621 commission"
+      ],
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S08"
+      ],
+      "outcome": "One accountable mission with preserved original intent, owners, effects and explicit completion scope.",
+      "work": "Read current compatible law, canonical workstream and exact latest owner checkpoints. Resolve live assignment/custody and material source changes. Distinguish core milestone from full adopted R2 scope. Explicitly decide adoption of1256 product obligations, including its five-working-day campaign. Establish six Opus accountability domains without assuming simultaneous admission.",
+      "acceptance": [
+        "Original roots and carriers preserved; current next action named",
+        "Every adopted obligation has an owner or explicit scope decision",
+        "No lifecycle or queue created by the planning references"
+      ],
+      "reserved_judgment": "Fable owns scope, strategy, cross-domain authority and original-intent acceptance.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-02",
+      "title": "Reconstruct the per-component installed and accepted map",
+      "owner": "O1",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [],
+      "incumbent_carriers": [
+        "#1637 comment6282675941",
+        "#1621 comment6282392406",
+        "#1542 comment6309217010",
+        "#1236 comment6244269407"
+      ],
+      "source_ids": [
+        "S07",
+        "S08",
+        "S09",
+        "S22"
+      ],
+      "outcome": "Control, MCP, local adapter, plugin, app and edge generations cannot be confused.",
+      "work": "Read actual selected/installed/accepted artifacts through existing owners. Preserve reported Control80f versus MCP91c1 distinction and Claude plugin0.2.0 installed proof. Record source SHA, artifact digest, selected config identity, receipt freshness, role arms, owner and observation time for each component.",
+      "acceptance": [
+        "Every component has observed or explicitly unknown state",
+        "No whole-host conclusion from a failed optional connector",
+        "Read-only reconciliation reveals no credential content"
+      ],
+      "reserved_judgment": "Opus decides evidence conflicts and exact recovery boundaries.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Read-only owner queries and non-secret evidence comparison; no readiness renewal, restart, canary or configuration write.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-03",
+      "title": "Reconcile the original readiness identity-change event",
+      "owner": "O1",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-02"
+      ],
+      "proposed_write_paths": [
+        "ops/executive_os",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1637 original R1 lineage",
+        "JOB-003"
+      ],
+      "source_ids": [
+        "S07",
+        "S08"
+      ],
+      "outcome": "A legitimate next readiness action is identified for the original retained release.",
+      "work": "Inspect the original exit65 receipt, issuer generation and custody around changed mtime/ctime. Establish what is known about credential identity/content continuity and the writer without disclosing secrets. Use current owner recovery law; do not assume rotation, content equality or harmless metadata touch.",
+      "acceptance": [
+        "Original descriptor/readiness/GateB identities conserved",
+        "Actual failure cause and permissible recovery or precise gate recorded",
+        "Zero blind canary, identity-check weakening or replacement root"
+      ],
+      "reserved_judgment": "Opus/Fable handle issuer identity, source/effect uncertainty and privileged sequencing.",
+      "external_gates": "Applicable actual denials and unresolved effects must be reconciled on the original operation. A historical denial claim is attributed until its receipt/applicability is established.",
+      "permitted_effect_class": "Non-effectful diagnosis first. Any later recovery effect is a separate exact owner action with current authority; this packet is not a grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-04",
+      "title": "Complete current V5 acceptance on retained lineage",
+      "owner": "O1",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-03"
+      ],
+      "proposed_write_paths": [
+        "ops/executive_os",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1637 release80f384b8",
+        "JOB-003"
+      ],
+      "source_ids": [
+        "S07",
+        "S08",
+        "S11"
+      ],
+      "outcome": "Current installed V5 acceptance is proved without replaying accepted preparation.",
+      "work": "After legitimate readiness prerequisites are met, perform only the still-owed original acceptance through the existing release owner. Reuse accepted prepare/install/GateB; preserve receipt expiry and effect reconciliation. Keep production arming distinct from acceptance.",
+      "acceptance": [
+        "Current source/installed/config/receipt identities match",
+        "Required current-V5 acceptance PASS is mandatory before dependent promotion; failure artifact returns FAIL/BLOCKED and does not satisfy this prerequisite",
+        "No duplicate job/reservation/canary and no unrequested arm"
+      ],
+      "reserved_judgment": "O1 owns host/release action; O6 independently judges consequential proof.",
+      "external_gates": "WP-03 permissible recovery, actual host/role grant and current readiness. No substitute tool/account after an applicable refusal.",
+      "permitted_effect_class": "Exact readiness/acceptance owner effects only when actually admitted; otherwise continue unrelated source lanes.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-05",
+      "title": "Release coherent Executive and OS transport composition",
+      "owner": "O1",
+      "stage": 2,
+      "priority": "P0",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-04",
+        "WP-15",
+        "WP-16",
+        "WP-30"
+      ],
+      "proposed_write_paths": [
+        "ops/executive_os",
+        "control_plane",
+        "integrations/executive_mcp"
+      ],
+      "incumbent_carriers": [
+        "#1473",
+        "#1542",
+        "#1515",
+        "merged #1637"
+      ],
+      "source_ids": [
+        "S09",
+        "S15",
+        "S16",
+        "S17",
+        "S22",
+        "S23"
+      ],
+      "outcome": "A reviewed installed generation exposes the intended OS/session and role-specific transport.",
+      "work": "Compose the reviewed candidate with existing CeoIngress, Workspace App and HostedControlRoom owners. Install through the existing release owner, including required OS resource/commission and sealed publication configuration. Preserve separate COO policy/adapter compatibility. Do not create a new socket proxy or cache authority.",
+      "acceptance": [
+        "Installed artifacts and selected policies match accepted source",
+        "Real authenticated producer accessible to intended OS consumer",
+        "Foreign role/tool leakage refused and rollback path tested"
+      ],
+      "reserved_judgment": "O1/O5 decide release compatibility; O3 owns the consuming app.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Review and source preparation first; actual install/config/restart only through the established release owner and applicable current grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-06",
+      "title": "Recover the existing public OS edge",
+      "owner": "O1",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-02"
+      ],
+      "proposed_write_paths": [],
+      "incumbent_carriers": [
+        "#1621 exact public-edge checkpoint",
+        "existing public-launch owner"
+      ],
+      "source_ids": [
+        "S08",
+        "S23"
+      ],
+      "outcome": "The intended authenticated public /os route works through its actual owner.",
+      "work": "Reconcile checkpoint-reported525 and missing Caddy route with current evidence. Establish exact edge owner and actual access. Preserve any original denied/unknown operation. Repair only the existing route under its applicable grant and verify external TLS/auth/application behavior.",
+      "acceptance": [
+        "External response and authenticated OS journey observed, not inferred from loopback200",
+        "Exact routing owner and selected config recorded",
+        "No credential copying, wider allowlist or alternate bypass"
+      ],
+      "reserved_judgment": "Opus handles edge ownership and refusal provenance.",
+      "external_gates": "Actual route owner/current access must be established. Prior SSH refusal is a recorded claim; an applicable actual denial remains binding.",
+      "permitted_effect_class": "Current external reads first; bounded route change only under existing authorized edge ownership.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-07",
+      "title": "Adjudicate one hierarchy and physical-schema composition",
+      "owner": "O2",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-01",
+        "WP-02"
+      ],
+      "proposed_write_paths": [
+        "control_plane/executive_runtime.py",
+        "control_plane/executive_backup.py",
+        "scripts/executive_os_migrate.py",
+        "control_plane/executive_coo_policy.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1327",
+        "#1600",
+        "#1482"
+      ],
+      "source_ids": [
+        "S10",
+        "S11",
+        "S12",
+        "S13"
+      ],
+      "outcome": "One compatible successor graph/schema and migration order are accepted for implementation.",
+      "work": "Compare all overlapping candidate diffs against current protected source. Name the single migration-six meaning, schema conservation, backup/restore contract, downgrade/rollback behavior and root budget semantics. Assign one integration writer for the common runtime/migration/test files. Keep current-V5 acceptance as the promotion prerequisite.",
+      "acceptance": [
+        "No competing V5-to-V6 definitions remain",
+        "True hierarchy depth and parent/root/grant behavior specified",
+        "Independent architecture review addresses existing #1482 composition"
+      ],
+      "reserved_judgment": "Fable/Opus reserve schema, lifecycle and budget invariants; Fabric may produce disjoint evidence and test cases.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-08",
+      "title": "Integrate and qualify the chosen graph/schema successor",
+      "owner": "O2",
+      "stage": 2,
+      "priority": "P0",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-07",
+        "WP-04"
+      ],
+      "proposed_write_paths": [
+        "control_plane/executive_runtime.py",
+        "control_plane/executive_backup.py",
+        "scripts/executive_os_migrate.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1327",
+        "#1600",
+        "#1482 retained integration carrier"
+      ],
+      "source_ids": [
+        "S10",
+        "S11",
+        "S12",
+        "S13"
+      ],
+      "outcome": "The accepted migration design has exact-source proof and an owner-approved release path.",
+      "work": "Use the retained carrier and one writer to integrate the chosen changes. Delegate focused migration, backup/restore, schema compatibility and negative tests to separate bounded workers. O1 owns installation, accepted upgrade and rollback; source CI does not arm hierarchy.",
+      "acceptance": [
+        "Old state preserved through migration and restore",
+        "Foreign parents/stale generations/incompatible schema refuse",
+        "Exact reviewed head, current tests and installed acceptance distinguished"
+      ],
+      "reserved_judgment": "O2 owns integration and any destructive schema decision; workers do not pick a new lifecycle.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-09",
+      "title": "Prove admitted Fable\u2013Opus\u2013Fabric accounting",
+      "owner": "O2",
+      "stage": 2,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-08",
+        "WP-05",
+        "WP-30"
+      ],
+      "proposed_write_paths": [
+        "control_plane/executive_coo_policy.py",
+        "control_plane/executive_runtime.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "Existing Executive/Fabric hierarchy owners"
+      ],
+      "source_ids": [
+        "S10",
+        "S11",
+        "S12",
+        "S22"
+      ],
+      "outcome": "The requested organizational hierarchy has a genuine supported execution mapping.",
+      "work": "Bind a real original root, immediate parents and attenuated grants through actual admitted routes. Account for coordinators, workers, reviewers and repair. Prove pressure handling and settlement without multiplying allowance. Until accepted, keep other work within supported shallow bindings.",
+      "acceptance": [
+        "Actual nested admission and root conservation observed",
+        "Stale/foreign parent and exhausted allowance refuse without effects",
+        "No titles-as-parentage, replacement roots or assumed free slots"
+      ],
+      "reserved_judgment": "Fable/Opus judge organizational-to-runtime mapping; accounting is deterministic.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Small real admitted proof only under existing assignment/grant, with original identities and finite allowance.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-10",
+      "title": "Qualify selected capacity, pools and host identities",
+      "owner": "O2",
+      "stage": 1,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-02",
+        "WP-30"
+      ],
+      "proposed_write_paths": [
+        "config/executive_physical_resources.json",
+        "config/executive_worker_routes.json",
+        "control_plane/native_capacity_v2.py",
+        "ops/executive_os/provider_worker_slots.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1644",
+        "#1365",
+        "#1441",
+        "#1443",
+        "#1585",
+        "#1602 and Macro9583",
+        "#1615"
+      ],
+      "source_ids": [
+        "S10",
+        "S12",
+        "S22"
+      ],
+      "outcome": "Each actually used route has current identity, eligibility, physical limits and freshness evidence.",
+      "work": "Inspect chosen pool/account/host through its existing owner. Separate Executive source flags from native Fabric eligibility and quota. Preserve existing homes when an unprivileged probe cannot see them. Qualify memory/disk/thermal/heavy-phase and shared-account concurrency guards; select only currently needed routes.",
+      "acceptance": [
+        "Unknown/expired/inaccessible data never becomes zero, healthy or absent",
+        "Actual granted limits conserved under pressure",
+        "Per-route result identifies harness/model/account/host without secrets"
+      ],
+      "reserved_judgment": "O2 reserves admission policy/economics; Fable owns genuinely new account/provider commitments.",
+      "external_gates": "Physical source defaults are UNQUALIFIED; actual selected host/role qualification is required. Additional accounts are conditional, not assumed.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-11",
+      "title": "Finish full retained-result collection and lineage",
+      "owner": "O2",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "control_plane",
+        "integrations",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1536",
+        "#1566",
+        "#1435",
+        "merged #1661 retention repair"
+      ],
+      "source_ids": [
+        "S05",
+        "S19"
+      ],
+      "outcome": "A parent/reviewer can recover the exact complete original result despite paging/display limits.",
+      "work": "Resolve existing collector/gateway/lineage candidates under their incumbent custody. Consume merged1661 same-path packet-retention repair rather than rebuilding it; qualify any needed immutable rollout through its existing owner without taking over the original News operation. Separate UI truncation from retained bytes. Require contiguous pages, stable digest, exact original run and complete terminal result. Never rerun work to replace lost pages.",
+      "acceptance": [
+        "Long result reconstructed byte-for-byte with stable digest",
+        "Missing/reordered/mismatched page prevents acceptance",
+        "Original run/parent lineage survives display cap and reload"
+      ],
+      "reserved_judgment": "O2 owns collector contract; difficult identity ambiguity returns to Opus.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-12",
+      "title": "Prove quota continuity, cancellation and lease cleanup",
+      "owner": "O2",
+      "stage": 3,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-10",
+        "WP-11"
+      ],
+      "proposed_write_paths": [
+        "ops/native_fabric/quota_continuity",
+        "control_plane",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1365",
+        "#1441",
+        "#1443 and existing quota owner"
+      ],
+      "source_ids": [
+        "S10",
+        "S22"
+      ],
+      "outcome": "Capacity refusal and cancellation preserve original effects, budget and actual lease settlement.",
+      "work": "Use qualified isolated cases to exercise pre-task capacity rejection and at-most-three existing continuity attempts. Prove cleanup and release before successor; test auth/billing/scope failures do not become quota fallback. For mid-task uncertainty, reconcile the original run and prohibit replay.",
+      "acceptance": [
+        "No concurrent successor before original lease release",
+        "Mid-task unknown effect never fails over",
+        "Cancellation distinguishes requested/acknowledged/effect-known states"
+      ],
+      "reserved_judgment": "Opus decides any ambiguous-effect reconciliation; workers execute bounded falsifiers.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Controlled admitted failure cases; do not kill unrelated production workers or spend live accounts merely for demonstration.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-13",
+      "title": "Bind Fabric catalog, status and lineage producers",
+      "owner": "O2",
+      "stage": 3,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-05",
+        "WP-10",
+        "WP-11"
+      ],
+      "proposed_write_paths": [
+        "control_plane",
+        "integrations/executive_mcp",
+        "app/mastermind_os/src/host.ts",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1426",
+        "#1435",
+        "merged #1359 and #1411"
+      ],
+      "source_ids": [
+        "S05",
+        "S19"
+      ],
+      "outcome": "Authenticated OS discovery/status/results come from the real existing Fabric owner.",
+      "work": "Extend the existing facade/owner contract for discoverable runs and complete authorized lineage. Prove actual producer-root binding, audience filtering, freshness and terminal artifact inspection. Coordinate shared host.ts with O3; no new run registry or polling authority.",
+      "acceptance": [
+        "Real authorized run appears with truthful status and original lineage",
+        "Foreign audience denied and stale/missing producer explicit",
+        "Complete result inspection uses WP-11 retained bytes"
+      ],
+      "reserved_judgment": "O2/O3 freeze producer/consumer contract; independent worker may implement each disjoint side.",
+      "external_gates": "Basic catalog/status uses the currently accepted selected producer. Nested-lineage extension requires WP-09 accepted graph, but basic discovery must not be globally blocked on that extension.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-14",
+      "title": "Recover incumbent UI branches, reviews and shared-file custody",
+      "owner": "O3",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src/App.tsx",
+        "app/mastermind_os/src/host.ts",
+        "app/mastermind_os/src"
+      ],
+      "incumbent_carriers": [
+        "#1473",
+        "#1542",
+        "#1515",
+        "#1425",
+        "#1426",
+        "#1435"
+      ],
+      "source_ids": [
+        "S09",
+        "S15",
+        "S16",
+        "S17",
+        "S18",
+        "S19"
+      ],
+      "outcome": "One safe integration frontier preserves active work and actual review obligations.",
+      "work": "Read exact heads, live review decisions, source writer/lease and dirty work. Raw REST showed #1425/#1426/#1515 dirty at audit. Allocate App.tsx/host.ts/auth/native integration to one writer; give workers disjoint files or prepared patches. Preserve #1515 unexplained staged-index effect.",
+      "acceptance": [
+        "No overwritten worker work or duplicate source carrier",
+        "Each current review is adjudicated by its incumbent or valid owner",
+        "Changed head invalidates only affected evidence"
+      ],
+      "reserved_judgment": "O3 resolves source custody and integration; unresolved effects escalate.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-15",
+      "title": "Finish original Office and Runtime review carriers",
+      "owner": "O3",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-14"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src/meta-ceo",
+        "app/mastermind_os/src/host.ts",
+        "control_plane",
+        "integrations"
+      ],
+      "incumbent_carriers": [
+        "#1473",
+        "#1542"
+      ],
+      "source_ids": [
+        "S09",
+        "S15",
+        "S16"
+      ],
+      "outcome": "The existing original-answer implementation is review-accepted at an exact integrated head.",
+      "work": "Address the real #1473 CHANGES_REQUESTED disposition and existing #1542 original consumer requirements. Reuse valid reported composition proof, do not simply rerun1709 frontend/37Rust tests. Rebase/resolve changed source once and obtain current review plus required CI.",
+      "acceptance": [
+        "Incumbent review disposition is explicitly satisfied",
+        "ResponseA after reload while unrelatedB pending requires zero repeat SEND",
+        "Source proof and installed proof remain separate"
+      ],
+      "reserved_judgment": "O3 owns difficult conversation semantics and original review reconciliation.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-16",
+      "title": "Complete original Control Room source composition",
+      "owner": "O3",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-14",
+        "WP-02"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src",
+        "control_plane",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1515",
+        "merged #1637"
+      ],
+      "source_ids": [
+        "S17",
+        "S23"
+      ],
+      "outcome": "Control Room uses the accepted existing app/auth/socket owner chain.",
+      "work": "Reconcile original dirty work, staged-index custody and reported refusal applicability before writes. Resolve actual TS18048 and other required current failures within allowed scope. Compose the same HostedControlRoom/ServerConfig through Workspace/CeoIngress and AF_UNIX source already merged.",
+      "acceptance": [
+        "Concrete type failure and required tests resolved on owned exact head",
+        "Existing authenticated owner chain preserved",
+        "No descriptor guard bypass or new socket/cache authority"
+      ],
+      "reserved_judgment": "Opus reserves source/effect/refusal reconciliation; after that bounded eligible fixes can go to Fabric.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-17",
+      "title": "Prove the installed authenticated office consumer",
+      "owner": "O3",
+      "stage": 3,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-05",
+        "WP-06",
+        "WP-13",
+        "WP-15",
+        "WP-16"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src",
+        "app/mastermind_os/src-tauri",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1473",
+        "#1542",
+        "#1515 existing consumer carrier"
+      ],
+      "source_ids": [
+        "S09",
+        "S15",
+        "S16",
+        "S17",
+        "S23"
+      ],
+      "outcome": "The Chairman uses a real authenticated office, receives the original answer and can recover after interruption.",
+      "work": "Exercise actual web/native auth and selected installed transport. Submit a legitimate bounded task, observe actual execution, inspect retained result, reload and continue. Preserve accepted request identity across possible committed response loss; verify unrelated pending work stays distinct.",
+      "acceptance": [
+        "No fixtures or manual message relay for essential path",
+        "Original-parent consumption observed separately from UI rendering",
+        "Lost response causes reconciliation, not duplicate SEND/root"
+      ],
+      "reserved_judgment": "O3/O5 own hard auth/consumer integration; O6 independently observes.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Real bounded end-to-end proof only under current commissioned intent and exact installed route.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-18",
+      "title": "Finish Fleet and Capacity consumer",
+      "owner": "O3",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-10",
+        "WP-14"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src",
+        "app/mastermind_os/src/host.ts"
+      ],
+      "incumbent_carriers": [
+        "#1425"
+      ],
+      "source_ids": [
+        "S18"
+      ],
+      "outcome": "Fleet is useful and truthful about health, eligibility, freshness and limits.",
+      "work": "Integrate the existing dirty candidate with actual Capacity/Fleet producers. Show selected host/model/account facts and resource pressure without inferring global health from missing data. Provide useful stale/unavailable/error actions and avoid presenting UNQUALIFIED defaults as a healthy empty fleet.",
+      "acceptance": [
+        "Real producer data flows to usable UI",
+        "Stale/inaccessible/unknown differ from zero/offline",
+        "Resource guards and audience filtering visible and enforced"
+      ],
+      "reserved_judgment": "O3/O2 resolve contract; Fabric completes bounded UI and producer tests.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-19",
+      "title": "Complete Knowledge, ordinary decisions and conversation actions",
+      "owner": "O3",
+      "stage": 3,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-14",
+        "WP-30"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src/knowledge/Knowledge.tsx",
+        "app/mastermind_os/src/inbox/Inbox.tsx",
+        "app/mastermind_os/src/conversations",
+        "app/mastermind_os/src/App.tsx",
+        "app/mastermind_os/src/host.ts"
+      ],
+      "incumbent_carriers": [
+        "Existing product contract owner; do not revive rejected H1A Workstream Workroom"
+      ],
+      "source_ids": [
+        "S24",
+        "S03",
+        "S14"
+      ],
+      "outcome": "The Chairman can open evidence, answer an owned decision and complete a real addressed conversation.",
+      "work": "Wire Knowledge onOpenSource through the existing authorized source route. Obtain/implement the actual Inbox decision contract and originating worker consumption. Distinguish generic note editing from selected-session continuation and complete only the intended supported addressed flow. Keep one shared-file integration writer.",
+      "acceptance": [
+        "Source opens original pinned evidence with access rules",
+        "Decision returns to correct origin and materially advances work",
+        "No UI-only answered state or unsent note mislabeled conversation"
+      ],
+      "reserved_judgment": "O3/Fable/O5 reserve interaction and decision-owner semantics; Fabric implements frozen bounded contracts.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-20",
+      "title": "Qualify live plans, progress and tool observations",
+      "owner": "O3",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-14",
+        "WP-13"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src",
+        "control_plane",
+        "integrations"
+      ],
+      "incumbent_carriers": [
+        "merged #1652",
+        "#1621 live-progress source-only checkpoint"
+      ],
+      "source_ids": [
+        "S08",
+        "S24"
+      ],
+      "outcome": "Visible plans and progress reflect actual qualified execution with clear provenance.",
+      "work": "Consume accepted default-off source, install/bind the intended provider observation route through its owner and prove web/native presentation. Distinguish declared plan, observed tool activity and accepted result. Do not animate fictional progress or enable flags without the selected-route contract.",
+      "acceptance": [
+        "Actual tool/run events correlate to original mission",
+        "Missing/stale/partial observations explicit",
+        "Plan correction does not turn old actions into current intent"
+      ],
+      "reserved_judgment": "O3/O2 own event meaning and freshness; Fabric builds bounded consumer wiring.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-21",
+      "title": "Verify product quality on real web and native",
+      "owner": "O3",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-17",
+        "WP-18",
+        "WP-19",
+        "WP-20",
+        "WP-33"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src",
+        "app/mastermind_os/src-tauri",
+        "docs/design"
+      ],
+      "incumbent_carriers": [
+        "Existing product acceptance and Paper identity"
+      ],
+      "source_ids": [
+        "S24",
+        "S03"
+      ],
+      "outcome": "The product is understandable and usable through its full intended journeys.",
+      "work": "Run real browser/native journeys, keyboard/focus/accessibility checks, narrow/wide layouts, loading/empty/stale/error states, supported themes/languages, console/network health, auth expiry/logout and deep links. Preserve the existing design identity; an unavailable Paper source is an explicit gap.",
+      "acceptance": [
+        "User sees current work, decisions and trusted result without reading raw receipts",
+        "Critical journeys pass in real intended clients",
+        "Material usability/error defects repaired and independently verified"
+      ],
+      "reserved_judgment": "Opus owns product judgment and difficult design/native changes; Fabric performs bounded design/code/test work.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-22",
+      "title": "Deliver signed native distribution and tested updater",
+      "owner": "O3",
+      "stage": 5,
+      "priority": "P1",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-21",
+        "WP-31",
+        "WP-33"
+      ],
+      "proposed_write_paths": [
+        "app/mastermind_os/src-tauri",
+        ".github/workflows/mastermind-os.yml",
+        "docs/runbooks/mastermind-os-macos-release.md",
+        "docs/runbooks/mastermind-os-update-signatures.md"
+      ],
+      "incumbent_carriers": [
+        "Existing native release/signing owner"
+      ],
+      "source_ids": [
+        "S24"
+      ],
+      "outcome": "A real user can install, update and recover a trusted supported release.",
+      "work": "Establish immutable version/channel/key/update manifest through existing owners. Build/sign/notarize supported Mac release; test clean install, PKCE recovery and update. Exercise wrong signature/key/hash/version, interruption and rollback. Unsigned --no-sign CI and offline verifier are preparation only.",
+      "acceptance": [
+        "Signed/notarized distributable and installation proof",
+        "Tampered or incompatible update rejected",
+        "Interrupted update and rollback recover without losing authorized continuity"
+      ],
+      "reserved_judgment": "O3/O1 own signing/release and security-sensitive recovery; no secrets in task artifacts.",
+      "external_gates": "Actual signing/distribution identity and existing release grant; no purchase or account enrollment implied.",
+      "permitted_effect_class": "Source preparation and verification first; signing/publication/install only through established release authority.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-23",
+      "title": "Fix the confirmed latest-handoff selector",
+      "owner": "O4",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "scripts/agentos.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "Macro existing Agent OS compiler owner"
+      ],
+      "source_ids": [
+        "S14",
+        "S04"
+      ],
+      "outcome": "A cold successor selects the chronologically correct handoff deterministically.",
+      "work": "Reproduce the two real Oct19 suffixed filenames with pinned selector logic. Opus chooses explicit time/tie/ambiguity semantics compatible with existing schema. Implement the smallest selector repair and focused tests; verify the full compile consumer in an isolated checkout. Do not rewrite historical records to conceal selection failure.",
+      "acceptance": [
+        "Later acceptance-failed record selected for supplied same-day case",
+        "Same-date ties/missing/invalid timestamps have explicit deterministic or ambiguity behavior",
+        "Full compiler output and omission ledger agree, with no canonical mutation during test"
+      ],
+      "reserved_judgment": "O4 owns chronology semantics; bounded source implementation and falsifiers belong in Fabric.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-24",
+      "title": "Reconcile current canonical continuity and stale projections",
+      "owner": "O4",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-02",
+        "WP-23"
+      ],
+      "proposed_write_paths": [
+        "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+        "agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md",
+        "agentos/workstreams/WS-AGENT-EVAL-FABRIC.md",
+        "agentos/handoffs"
+      ],
+      "incumbent_carriers": [
+        "Existing Macro workstreams and current cumulative handoff"
+      ],
+      "source_ids": [
+        "S01",
+        "S04",
+        "S07",
+        "S08",
+        "S21"
+      ],
+      "outcome": "Fresh sessions recover the same correct next action without duplicating completed work.",
+      "work": "Update only stale owner facts with exact evidence: Control80f/readiness event, Office generation, Context adoption, #692 merged structural proof and held original operations. Preserve AgentOSV1 DONE and broader Linear InProgress scopes. Use normal canonical review/validation; no copied memory mirror.",
+      "acceptance": [
+        "One current next action per affected workstream",
+        "Cold successor recovers owner/effect/accepted/remaining state",
+        "Projection corrections do not claim new product completion"
+      ],
+      "reserved_judgment": "O4 resolves canonical meaning; O6 checks no stale fact was promoted to current live proof.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-25",
+      "title": "Qualify Context Fabric service and authenticated composition",
+      "owner": "O4",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-30",
+        "WP-24"
+      ],
+      "proposed_write_paths": [
+        "integrations/context_mcp/app.py",
+        "integrations/context_mcp/port.py",
+        "control_plane/context_resolver.py",
+        "control_plane/session_truth_live_acquire.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "merged #1490; #1216 superseded; existing Context owners"
+      ],
+      "source_ids": [
+        "S06",
+        "S20"
+      ],
+      "outcome": "The merged Context service has real authorized owners and a useful consumer.",
+      "work": "Compose the inert MCP/service with approved handlers, audience/project binding, canonical sources and actual consumer auth. Reuse merged stack rather than older adopted component drafts. Prove freshness, correction, unavailable sources and private-context denial through real serialization and consumer use.",
+      "acceptance": [
+        "Authorized task receives useful current context with provenance",
+        "Foreign audience/project denied and missing sources reported",
+        "No second context store, lifecycle or source-of-truth registry"
+      ],
+      "reserved_judgment": "O4/O5 own source rights and service composition; Fabric implements decomposed bounded gaps.",
+      "external_gates": "Qualify each actual selected source/handler/consumer through its current owner. Only an Executive-backed path requiring current V5/transport acceptance depends on WP-04/WP-05; independently authorized Context composition can progress without that global gate.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-26",
+      "title": "Complete compiler, Atlas coverage and context-limit semantics",
+      "owner": "O4",
+      "stage": 1,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-23",
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "scripts/agentos.py",
+        "control_plane/project_atlas.py",
+        "control_plane/context_resolver.py",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "Existing Macro compiler and merged Context Atlas"
+      ],
+      "source_ids": [
+        "S14",
+        "S20",
+        "S21"
+      ],
+      "outcome": "Context includes the needed knowledge and respects the actual delivery contract.",
+      "work": "Evaluate discovery/artifact/broader-decision coverage and source ordering against the existing compiler contract. Add JS/TS Atlas support where the product requires it; current protected Atlas supports Python/Markdown. Distinguish requested target from permitted reported mandatory overrun and a consumer hard ceiling. Make omission/correction reasoning inspectable.",
+      "acceptance": [
+        "Relevant decisions/discoveries/procedures included or explicit omission",
+        "Mandatory overrun is declared and hard delivery overflow handled safely",
+        "Source correction/deletion and mixed-language indexing tested on real fixtures"
+      ],
+      "reserved_judgment": "O4 reserves selection/omission policy; Fabric implements bounded parser/compiler changes.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-27",
+      "title": "Finish original native context adoption and cold recovery",
+      "owner": "O4",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-25",
+        "WP-26",
+        "WP-31"
+      ],
+      "proposed_write_paths": [
+        "integrations",
+        "skills",
+        "agentos/handoffs",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1589",
+        "original #1273 and #1307",
+        "Macro #9575"
+      ],
+      "source_ids": [
+        "S20"
+      ],
+      "outcome": "Intended native sessions consume the accepted current context package and recover correctly.",
+      "work": "Preserve installed Skills0.2.1 and successful bound pilot/fresh recall. Reconcile original #1307 EFFECT_UNKNOWN and #1273 writer release before continuing retained candidate. Qualify fresh load, complete procedure reading, task resolution, corrections and canonical cold successor recovery. Do not infer global hook adoption from discovery.",
+      "acceptance": [
+        "Original effects/carriers reconciled without replacement",
+        "Fresh intended native session loads exact package and correct task context",
+        "Unbound/ambiguous task refuses invention; interruptions preserve owner and next action"
+      ],
+      "reserved_judgment": "O4 handles original effect ambiguity; O5 owns native identity/auth.",
+      "external_gates": "Original uncertain effects and source custody resolved. M1 inference401 uses normal legitimate account login; no copied credentials.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-28",
+      "title": "Run the eight-family Context benchmark",
+      "owner": "O4",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-25",
+        "WP-26",
+        "WP-27"
+      ],
+      "proposed_write_paths": [
+        "control_plane/context_fabric_evaluation.py",
+        "tests",
+        "research"
+      ],
+      "incumbent_carriers": [
+        "Existing Context Fabric benchmark owner"
+      ],
+      "source_ids": [
+        "S06",
+        "S20"
+      ],
+      "outcome": "Retrieval/context value is measured against the declared matched benchmark.",
+      "work": "Use existing eight-family rubric, frozen cases/ground truth, matched baseline/candidate and exact source/time/provider/runner bindings. Include ambiguity, stale/conflicting/missing sources, recall/precision, budget and useful task outcome. Preserve raw evidence and uncertainty; do not optimize only token savings.",
+      "acceptance": [
+        "All eight declared families run or specific supported scope decision recorded",
+        "Matched comparison reproducible with provenance and missingness",
+        "No aggregate pass hides critical audience/correction/recovery failure"
+      ],
+      "reserved_judgment": "O4/O6 reserve evaluation validity and threshold decisions; Fabric collects bounded evidence.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-29",
+      "title": "Complete semantic portfolio projection through existing app actor",
+      "owner": "O4",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-24"
+      ],
+      "proposed_write_paths": [
+        "scripts/linear_portfolio_plan.py",
+        "ops/linear_projector",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "MAS-64",
+        "MAS-66",
+        "merged Macro6634 P0 and Mastermind218 CRED0"
+      ],
+      "source_ids": [
+        "S04",
+        "S21"
+      ],
+      "outcome": "Agent OS project meaning projects safely to Linear without a duplicate GitHub mirror.",
+      "work": "First reconcile actual dedicated app inventory and complete MAS64 admin/enrollment/canary under its exact boundary. Only then begin MAS66 projects-only adapter implementation. Preserve managed-block markers and manual content, exact WS/object binding, optimistic reread, idempotence, uncertain-response reconciliation and typed dry-run outcomes.",
+      "acceptance": [
+        "Dedicated app actor, workspace/team/scope and no-secret receipt proved",
+        "Noop/conflict/malformed-block/partial-apply cases pass",
+        "Real portfolio dry-run reviewed; first live apply separately decided"
+      ],
+      "reserved_judgment": "Human workspace admin owns actual app ceremony if required; O4 owns semantic mapping; no inferred project from PR title.",
+      "external_gates": "MAS64 actual app actor and isolated canary before P1 implementation. P0/CRED0 already protected. No employee credentials, issue/comment/diff writes or scheduler implied.",
+      "permitted_effect_class": "Contract preparation permitted; app ceremony and isolated canary only under actual admin authority; P1 default dry-run; production apply not included automatically.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-30",
+      "title": "Qualify principal roles and native Project Chat feasibility early",
+      "owner": "O5",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "research/mastermind_os",
+        "integrations/claude_executive_mcp",
+        "docs/runbooks/claude-executive-mcp-client.md"
+      ],
+      "incumbent_carriers": [
+        "R2 Stage0A/0B/0C",
+        "#1236",
+        "existing principal and decision-seam owners"
+      ],
+      "source_ids": [
+        "S03",
+        "S22"
+      ],
+      "outcome": "Fable knows which office/native routes actually support the intended authority and user experience.",
+      "work": "Qualify principal conversation, mandate/decision ownership, exact native account/project/mode/context/result/continuation and permitted actions before later implementation. Separate eligibility from readiness and enrollment. Preserve native Project Chat as distinct adopted capability; held feasibility leaves full programme open even if core work proceeds.",
+      "acceptance": [
+        "Explicit evidence-backed eligibility verdict for each intended route",
+        "No CEO intent.submit scope borrowed for COO/Fable",
+        "No fictional SixDots/Secretary enrollment or substitute chat silently accepted"
+      ],
+      "reserved_judgment": "Fable owns R2 scope/strategy; Opus owns hard role/native feasibility.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Read-only/current authorized feasibility first; new account consent or OAuth enrollment remains its real owner action.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-31",
+      "title": "Release and adopt the accepted Workforce/Claude package",
+      "owner": "O5",
+      "stage": 1,
+      "priority": "P0",
+      "execution_mode": "Fabric-led",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "skills/mastermind-fabric-orchestration",
+        "integrations/claude_executive_plugin",
+        "ops/fabric_launch",
+        "docs/CLAUDE_CAPABILITY_HARDENING_2026-10-04.md"
+      ],
+      "incumbent_carriers": [
+        "#1650",
+        "#1421 collision",
+        "merged #1228/#1643/#1240/#955/#962",
+        "#1236"
+      ],
+      "source_ids": [
+        "S22"
+      ],
+      "outcome": "Intended Fable/Opus/native surfaces load the exact accepted instructions and behave accordingly.",
+      "work": "Build immutable package via existing plugin owner from accepted source. Preserve M2 plugin0.2.0 cache proof; qualify fresh load rather than treating it absent. Reconcile overlap in ops/fabric_launch/install.py. Prove correct role methods, actual paid Fabric delegation and independent review behavior per surface.",
+      "acceptance": [
+        "Manifest/version/file identities recorded and fresh session loads them",
+        "Source policy and behavioral adoption distinguished",
+        "Claude H1-H7 obligations tracked, not closed by plugin listing"
+      ],
+      "reserved_judgment": "O5 decides compatibility and behavior; Fabric performs packaging/manifests/fresh-load checks.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-32",
+      "title": "Finish coherent COO backend/adapter and normal native auth",
+      "owner": "O5",
+      "stage": 2,
+      "priority": "P0",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-04",
+        "WP-05",
+        "WP-30",
+        "WP-31"
+      ],
+      "proposed_write_paths": [
+        "integrations/claude_executive_mcp",
+        "control_plane",
+        "ops/executive_os",
+        "docs/runbooks/claude-executive-mcp-client.md"
+      ],
+      "incumbent_carriers": [
+        "#1236 comment6244269407",
+        "existing Auth0/native-client owner"
+      ],
+      "source_ids": [
+        "S22",
+        "S09"
+      ],
+      "outcome": "Native Fable/Opus uses its intended authenticated role and correctly bounded tools.",
+      "work": "After accepted coherent backend/policy route exists, qualify matching local adapter, HTTPS sign-in, issuer/resource/callback and actual PKCE/public-client semantics. Use legitimate existing account/admin ceremony where required. Prove role-correct reads/catalog and separately authorized mission effects; do not swap new adapter into legacy91c1 alone.",
+      "acceptance": [
+        "Real client authenticated on intended COO route",
+        "CEO tool/scope leakage rejected",
+        "Fresh session and expiry/re-auth behavior prove actual capability, not transport reachability"
+      ],
+      "reserved_judgment": "O5/O1 handle privileged auth/release composition; no secret extraction or scope shortcut.",
+      "external_gates": "Actual native-client enrollment grant/admin ceremony and coherent accepted backend. Plugin installed proof alone is insufficient.",
+      "permitted_effect_class": "Only authorized normal authentication and exact scoped canary; no production scope escalation implied.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-33",
+      "title": "Prove original native reply, continuation and parent consumption",
+      "owner": "O5",
+      "stage": 3,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-32",
+        "WP-11",
+        "WP-31"
+      ],
+      "proposed_write_paths": [
+        "control_plane/native_continuation.py",
+        "integrations",
+        "ops/native_fabric",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1362 including #1594",
+        "existing Dialogue/Wake/RuntimeBinding owners"
+      ],
+      "source_ids": [
+        "S22",
+        "S15",
+        "S16"
+      ],
+      "outcome": "Original native parent receives, consumes and continues from the correct retained result.",
+      "work": "Finish existing correlation/profile/installation candidate, preserving native identity and original recipient. Use a real bounded worker result; prove active continuation and canonical consumption. Keep idle wake and Desktop/Executive writer binding as separate capabilities. Preserve accepted historical MiniMaxStop result without overclaiming.",
+      "acceptance": [
+        "Exact original parent/run/result correlation and actual consumption",
+        "Duplicate/stale/foreign return refused or idempotently reconciled",
+        "Foreground delivery never labeled idle wake"
+      ],
+      "reserved_judgment": "O5 reserves identity/continuation semantics; Fabric implements disjoint adapters/tests.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-34",
+      "title": "Qualify persistent-session recovery and idle wake where required",
+      "owner": "O5",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-33",
+        "WP-09"
+      ],
+      "proposed_write_paths": [
+        "control_plane",
+        "integrations",
+        "ops/native_fabric",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "#1367",
+        "existing Wake/session binding owners"
+      ],
+      "source_ids": [
+        "S22",
+        "S03"
+      ],
+      "outcome": "Ended or replaced intended sessions recover obligations through qualified existing owners.",
+      "work": "Resolve held persistent recovery candidate and exact idle/foreground boundaries. Prove supported parent wake, session replacement, revoked identity and stale watcher handling. Use existing event/dialogue owners; do not turn a Web turn into a daemon or use a new queue to mask missing capability.",
+      "acceptance": [
+        "Actual supported idle wake observed or capability remains explicit open",
+        "Same obligation/effects preserved after session loss",
+        "Terminal child watchers close without deleting valid parent/sibling watches"
+      ],
+      "reserved_judgment": "Opus/Fable handle session identity, retained effects and supported scope decisions.",
+      "external_gates": "Current route must advertise/qualify the capability. Audit-visible Web Fabric advertised no native parent wake/background execution.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-35",
+      "title": "Complete adopted R2 multi-programme and eligible native office",
+      "owner": "O5",
+      "stage": 5,
+      "priority": "P1",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-09",
+        "WP-30",
+        "WP-33",
+        "WP-21"
+      ],
+      "proposed_write_paths": [
+        "research/mastermind_os",
+        "integrations",
+        "skills",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "R2 staged office plan and existing native eligibility owners"
+      ],
+      "source_ids": [
+        "S03",
+        "S22"
+      ],
+      "outcome": "The broader office supports required native Project Chat and multiple useful programmes.",
+      "work": "Consume Stage0 feasibility verdicts, complete qualified native Chat integration and concurrent programme/decision flow, then expand only eligible intended Dots/accounts. Secretary is an interaction adapter when needed, not the default decision relay. Separate account/model/session/quota/permission proof and retain blocked full-vision obligations.",
+      "acceptance": [
+        "Real native Project/account/mode/context/result/continuation loop",
+        "Concurrent programmes retain correct intent, owner and budget",
+        "All adopted Dot/Secretary obligations proven or explicitly decided by actual scope owner"
+      ],
+      "reserved_judgment": "Fable owns full-vision acceptance, account/interaction strategy and material scope decisions.",
+      "external_gates": "New account/provider consent is not implied by architecture adoption. Do not declare full R2 complete from core office proof.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-36",
+      "title": "Resolve evaluation design and stale evidence claims",
+      "owner": "O6",
+      "stage": 0,
+      "priority": "P1",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "agentos/workstreams/WS-AGENT-EVAL-FABRIC.md",
+        "research",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "AgentEval E1",
+        "merged #692",
+        "held #398 OL-V1"
+      ],
+      "source_ids": [
+        "S20",
+        "S21"
+      ],
+      "outcome": "Future learning experiments have valid prospective runner/provider/host semantics.",
+      "work": "Reconcile stale draft label for merged692 while preserving its limited two-finalized-run structural binding claim. Surface sealed historical E1 provider/model versus named runner mismatch to Fable for a prospective ruling. Preserve solved Macro grounding and existing readiness gates; no retroactive relabeling.",
+      "acceptance": [
+        "Prospective experiment decision records actual runner/provider/host and comparison",
+        "Structural proof not presented as origin/causality or benefit",
+        "Original #398 readiness/one READ-A0 boundary remains explicit"
+      ],
+      "reserved_judgment": "Fable/O6 own experiment validity and causal claims; Fabric may verify bounded evidence.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-37",
+      "title": "Freeze independent original-intent acceptance",
+      "owner": "O6",
+      "stage": 0,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-01"
+      ],
+      "proposed_write_paths": [
+        "research",
+        "docs/design"
+      ],
+      "incumbent_carriers": [
+        "Existing H1-H8 campaign and product/R2 acceptance"
+      ],
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03"
+      ],
+      "outcome": "The whole programme is judged by one connected consumer/evidence contract.",
+      "work": "Adopt ACCEPTANCE_MATRIX.md against current intent, preserving H1-H8 identities and both reliability windows. Select independent reviewers and real useful pilot outcome. Define admissible evidence levels, critical negative controls and proof retention; no new pass-only scorecard.",
+      "acceptance": [
+        "Every adopted must-have maps to consumer, producer, exact revision and evidence",
+        "Author/reviewer independence established",
+        "Core versus full completion labels cannot be confused"
+      ],
+      "reserved_judgment": "O6 independently challenges; Fable retains final original-intent decision.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-38",
+      "title": "Close the first real Chairman-to-outcome campaign",
+      "owner": "O6",
+      "stage": 3,
+      "priority": "P0",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-09",
+        "WP-12",
+        "WP-17",
+        "WP-19",
+        "WP-24",
+        "WP-33",
+        "WP-37"
+      ],
+      "proposed_write_paths": [
+        "research",
+        "docs/evidence"
+      ],
+      "incumbent_carriers": [
+        "Original programme H1-H8"
+      ],
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S09"
+      ],
+      "outcome": "One genuinely useful integrated programme works, including interruptions and correction.",
+      "work": "Exercise H1 with at least two meaningful governed children including an Executive-Fabric bridged child; H2 direct codex-01 simple task or explicit owner-approved scope mapping; H3 reviewed return; H4 lost submission response; H5 authority/custody refusal; H6 bounded failure/repair; H7 intent correction; H8 real app consumer. Preserve one connected trace, exact identities and actual parent consumption.",
+      "acceptance": [
+        "Useful product outcome with real paid-worker execution and independent review",
+        "Recovery/correction preserve original root and effects",
+        "No fixtures, hidden manual relay or unrelated receipts substitute essential integration"
+      ],
+      "reserved_judgment": "O6 owns independent verdict, Fable accepts original intent; direct actors remain distinct from reviewers.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Use legitimate bounded tasks and controlled failures; no unrelated production disruption.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-39",
+      "title": "Complete staged evaluation, learning and prospective value",
+      "owner": "O6",
+      "stage": 4,
+      "priority": "P1",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-36",
+        "WP-38"
+      ],
+      "proposed_write_paths": [
+        "research",
+        "tests",
+        "agentos/workstreams/WS-AGENT-EVAL-FABRIC.md"
+      ],
+      "incumbent_carriers": [
+        "#398 OL-V1 and shared readiness owner"
+      ],
+      "source_ids": [
+        "S20",
+        "S21"
+      ],
+      "outcome": "Existing C2 paired evidence, D1 learning episode, F1 candidate distillation and G1 prospective value are completed within their separate actual gates.",
+      "work": "Decompose into four bounded owner assignments: C2 approved matched experiments under the WP-36 prospective runner/provider ruling; D1 existing OL-V1 readiness then exactly-one READ/A0 compose-only admission, followed only when separately authorized by sealed expectation and legitimate canary effect/readback/restore; F1 evidence-backed candidate distillation; G1 a later real task with owner-accepted useful improvement. Measure cost, review/repair, latency and attribution. READ/A0 alone cannot close D1 or the adopted learning programme.",
+      "acceptance": [
+        "C2 approved matched runs and D1 real sealed episode independently evaluated with exact provenance",
+        "Any actual canary effect/readback/restore has its own existing effect owner and grant; none is inferred from READ/A0",
+        "F1 candidate knowledge is reviewed and G1 later useful improvement observed, or a prospective actual-owner scope decision leaves the obligation explicitly accounted for",
+        "No broad causal/host-origin claim or autonomous learned-routing promotion"
+      ],
+      "reserved_judgment": "Fable/O6 reserve experimental adoption, causal claims and routing-policy decisions.",
+      "external_gates": "Original readiness/assignment, prospective E1 ruling and separate C2/D1/F1/G1 gates. Untouched READ/A0 admission is the present first step, not a blanket effect grant. No experiment is commissioned by this audit.",
+      "permitted_effect_class": "Begin with the exact authorized READ/A0 admission; any later canary effect/readback/restore requires its actual effect owner and specific current grant. No trading effect or autonomous learned-policy rollout is implied.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-40",
+      "title": "Prove portability, restore and M2 independence",
+      "owner": "O1",
+      "stage": 5,
+      "priority": "P1",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-22",
+        "WP-27",
+        "WP-34"
+      ],
+      "proposed_write_paths": [
+        "ops/executive_os",
+        "app/mastermind_os",
+        "docs/runbooks",
+        "tests"
+      ],
+      "incumbent_carriers": [
+        "Existing OS production plan portability target"
+      ],
+      "source_ids": [
+        "S01",
+        "S03",
+        "S24"
+      ],
+      "outcome": "The office survives its intended host failure/replacement without conflicting writers.",
+      "work": "Use staging or a controlled supported exercise for native reinstall, backup/restore, release rollback and M2-off/Linux-VPS continuity where adopted. Prove one authoritative lifecycle writer, preserved secrets boundaries, correct active host binding and actual client reconnect. Do not confuse loopback reachability with operational portability.",
+      "acceptance": [
+        "Recovery restores correct original state and owner without duplicate effects",
+        "Intended supported alternative host actually works",
+        "RTO/RPO observed and limitations recorded, not invented targets"
+      ],
+      "reserved_judgment": "O1/O5 own host authority and recovery; O6 independently validates.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Controlled authorized recovery drill with non-destructive plan and proven rollback; no arbitrary production shutdown.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-41",
+      "title": "Adjudicate estate readiness before natural-time observation",
+      "owner": "O6",
+      "stage": 6,
+      "priority": "P0",
+      "execution_mode": "Opus-reserved",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-18",
+        "WP-20",
+        "WP-22",
+        "WP-28",
+        "WP-29",
+        "WP-35",
+        "WP-39",
+        "WP-40",
+        "WP-38"
+      ],
+      "proposed_write_paths": [
+        "research",
+        "docs/evidence"
+      ],
+      "incumbent_carriers": [
+        "Existing capability ledger E/F/G/A/C/H"
+      ],
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03"
+      ],
+      "outcome": "The adopted estate is ready to enter its actual observation windows, with no hidden source-only capability.",
+      "work": "Run remaining functional/recovery ACCEPTANCE_MATRIX discriminators on the exact accepted composed release. Reuse valid proof and refresh affected cases only. Resolve adopted scope through its actual owner and retain open real gates. This is pre-observation readiness: natural-time obligations remain UNEXECUTED until WP-42 and full programme acceptance remains pending.",
+      "acceptance": [
+        "Adopted functional/recovery obligations have connected consumer proof",
+        "Observation prerequisites and open time-dependent cases explicitly recorded",
+        "Independent readiness verdict names limitations and scope decisions without full-completion claim"
+      ],
+      "reserved_judgment": "Fable owns final scope/strategy and original-intent acceptance; O6 owns evidence challenge.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-42",
+      "title": "Complete actual product and R2 observation windows",
+      "owner": "O6",
+      "stage": 6,
+      "priority": "P1",
+      "execution_mode": "Owner-controlled",
+      "complexity": "C2_COMPLEX_BOUNDED",
+      "dependencies": [
+        "WP-41"
+      ],
+      "proposed_write_paths": [
+        "research",
+        "docs/evidence"
+      ],
+      "incumbent_carriers": [
+        "Five-working-day product campaign",
+        "Seven-day R2 campaign"
+      ],
+      "source_ids": [
+        "S03",
+        "S24"
+      ],
+      "outcome": "Natural-time reliability and usefulness are observed, not synthesized from fast tests.",
+      "work": "Start only when the respective accepted installed prerequisites are ready. Preserve both five consecutive working days and seven-day observation; share observations only when both contracts allow. Track accepted-outcome cost, human attention, recovery, wrong/duplicate effects and support load through existing event/observer owners.",
+      "acceptance": [
+        "Actual elapsed qualifying windows and useful daily tasks recorded",
+        "Material incident repaired and affected window/rerun decision explicit",
+        "O6 issues the final independent integrated verdict after the real windows, before Fable closeout",
+        "No reasoning-session sleep loop or fictional compressed evidence"
+      ],
+      "reserved_judgment": "O6 interprets evidence; Fable decides scope/acceptance with actual observation.",
+      "external_gates": "Elapsed time is a real dependency. An authorized existing observer owns waits and original-parent return.",
+      "permitted_effect_class": "Existing scoped observation and ordinary authorized use; no new monitoring service or arbitrary recurring automation.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    },
+    {
+      "id": "WP-43",
+      "title": "Close the programme and hand over maintenance",
+      "owner": "Fable",
+      "stage": 6,
+      "priority": "P0",
+      "execution_mode": "Fable",
+      "complexity": "C3_FRONTIER_JUDGMENT",
+      "dependencies": [
+        "WP-42"
+      ],
+      "proposed_write_paths": [
+        "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+        "agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md",
+        "agentos/handoffs",
+        "docs/runbooks"
+      ],
+      "incumbent_carriers": [
+        "Existing canonical owners and original programme"
+      ],
+      "source_ids": [
+        "S01",
+        "S02",
+        "S03",
+        "S04"
+      ],
+      "outcome": "The Chairman receives a complete usable product and a durable operating/maintenance handoff.",
+      "work": "Accept against original intent, update existing current records/ledger and eligible projections, retain exact proof and known limitations, name maintenance/release/recovery owners and rollback/runbooks. Close terminal child dialogue/watchers without disturbing ongoing parent/siblings. Do not archive a must-have as done to simplify the portfolio.",
+      "acceptance": [
+        "Post-observation O6 verdict, Fable original-intent acceptance and support/recovery proof retained",
+        "Canonical owner state agrees with actual delivered scope",
+        "All terminal child obligations settled, no hidden uncertain effects"
+      ],
+      "reserved_judgment": "Fable makes the final product decision; administrative recording may be bounded Fabric work.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
+      "status": "PLANNING_ONLY_NOT_ADMITTED",
+      "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
+      "runtime_binding": {
+        "assignment_ref": null,
+        "root_id": null,
+        "parent_id": null,
+        "run_id": null,
+        "workspace_ref": null,
+        "host_ref": null,
+        "grant_ref": null
+      },
+      "budget": "Unbound. Set finite task/elapsed allowance and reserve reviewer, repair and integration capacity from the real current grant before dispatch."
+    }
+  ]
+}
