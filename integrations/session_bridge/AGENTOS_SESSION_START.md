@@ -49,6 +49,8 @@ This is a review template, not an installer. Preserve other definitions and exis
 
 The protocol basis is the official [Codex hooks documentation](https://learn.chatgpt.com/docs/hooks), checked 2026-10-21: `SessionStart` accepts `hookSpecificOutput.additionalContext`; matching `compact` hooks run before the next root-model request, including automatic mid-turn compaction. This supports the proposed ingress contract; it is not installed-version proof for a particular seat.
 
+Installed protocol evidence (2026-10-21): ordinary standalone generation from `codex-cli 0.163.0` exposes `SessionStart`; the generated handler contract says `additionalContextLimit: 0` disables spilling. The inspected artifacts were `v2/ConfiguredHookHandler.ts` (SHA-256 `b52a77fa08ea3695ad128f5d184c7b464bbf4dd66e93850434c0b8e3f02322e1`) and `v2/ConfigRequirementsReadResponse.json` (SHA-256 `dd95f94ca4f89b87f63151c570c1b16a771cda9bb17445d6650a633eb55a9f05`). These artifacts provide protocol evidence only; native loading, trust, context delivery and model use require the separate attended check below.
+
 ## Acceptance evidence
 
 Source tests must prove exact-workspace exclusion, exact-workstream selection, retention of all owner bytes and accounting, fresh reads on repeated compaction, output caps, sanitized errors, no uncertain retry, and absence of fabricated execution receipts. The existing owner/process suites cover the subprocess boundary and settlement.

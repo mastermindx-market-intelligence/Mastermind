@@ -68,7 +68,10 @@ def session_start_context(event, *, workspace_root, workstream, owner_root=OWNER
         return {}
     try:
         owner = _directory(owner_root)
-        raw, observation = reader(workstream, budget, owner_root=owner)
+        raw, observation = reader(
+            workstream, budget,
+            owner_root=owner,
+        )
         validate_bundle(raw, workstream)
         if (type(observation) is not dict
                 or observation.get("workstream") != workstream
