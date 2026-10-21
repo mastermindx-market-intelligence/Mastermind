@@ -87,12 +87,20 @@ CODEX_HOME_DIR="$HERE/../codex_bailian"
 # This switches config location only: it does not select an account or bypass
 # the existing broker/slot/economic provider gates.
 if [ "${LANE_LEASED:-0}" = "1" ]; then
-  CODEX_HOME_DIR="$HOME/lanes/codex_bailian"
+  # The ordinary controller binds its published physical owner explicitly.
+  # Its release-relative provider link is already verified by support_bundle;
+  # do not select configuration again through a retargetable ~/lanes alias.
+  # Other routes retain their existing host-owned configuration selection.
+  if [ "${REMOTE_SUB_QWEN_PHYSICAL_CONFIG:-0}" != "1" ]; then
+    CODEX_HOME_DIR="$HOME/lanes/codex_bailian"
+  fi
   [ -f "$CODEX_HOME_DIR/config.toml" ] || {
     echo "QWEN_REMOTE_PROVIDER_CONFIG_MISSING" >&2
     exit 78
   }
 fi
+# Selection is consumed here; it grants no authority to a provider/tool child.
+unset REMOTE_SUB_QWEN_PHYSICAL_CONFIG
 export CODEX_HOME="$CODEX_HOME_DIR"
 
 if [ ! -f "$PROMPT_FILE" ]; then

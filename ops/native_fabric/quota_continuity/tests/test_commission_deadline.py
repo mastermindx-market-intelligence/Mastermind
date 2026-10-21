@@ -146,7 +146,17 @@ elif name == 'ssh':
         print('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}')
         raise SystemExit(0)
     if 'support_bundle.py' in command:
-        record('support_publish'); raise SystemExit(0)
+        record('support_publish')
+        manifests = list((root/'ext/state/remote_sub').glob('*.support.json'))
+        if len(manifests) != 1: raise SystemExit('fixture_manifest_missing')
+        files = json.loads(manifests[0].read_text())
+        digest = hashlib.sha256(json.dumps({'schema':'remote-support-code.v1','files':files},
+            sort_keys=True,separators=(',',':')).encode()).hexdigest()
+        # Match the incumbent publisher's physical path-line contract. These
+        # deadline cases still use their explicitly inert readback above; the
+        # separate physical-owner suite executes the real strict readback body.
+        print(root/'physical-owner'/'support-releases'/digest/'ext')
+        raise SystemExit(0)
     if 'mkdir -p ~/lanes/tmp ' in command:
         record('setup')
         if case == 'slow_setup': time.sleep(10)
@@ -163,6 +173,8 @@ elif name == 'scp':
     if case == 'retry_ambiguous' and count('scp')==1: time.sleep(1.2)
     raise SystemExit(0)
 elif name == 'rsync':
+    if args == ['--version']:
+        print('rsync  version 3.2.7  protocol version 31');raise SystemExit(0)
     record('collect')
     Path(args[-1]).write_text('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}\n')
     raise SystemExit(0)

@@ -445,6 +445,75 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     print(payload)
 
 
+def published_support_root(raw, support_digest):
+    """Parse the incumbent publisher's one physical-path line, never shell code.
+
+    The selected SSH carrier and source owner supply this observation. It grants
+    no admission or authentication. Strict remote custody and content readback
+    must still pass before the same root is used for a new ordinary launch.
+    """
+    from pathlib import PurePosixPath
+    if (type(raw) is not bytes or not 1 < len(raw) <= 4096
+            or not raw.endswith(b'\n')
+            or type(support_digest) is not str
+            or re.fullmatch('[a-f0-9]{64}', support_digest) is None):
+        raise ValueError('support_publication_binding_shape')
+    value = raw[:-1].decode('utf-8', errors='strict')
+    # A colon cannot be represented as one literal entry in the required PATH
+    # prefix, even when shell quoting is correct. Refuse that owner spelling.
+    if (not value.startswith('/') or value.startswith('//') or ':' in value
+            or any(ord(character) < 32 or ord(character) == 127 for character in value)):
+        raise ValueError('support_publication_binding_path')
+    path = PurePosixPath(value)
+    if (str(path) != value or '..' in path.parts
+            or len(path.parts) < 5
+            or path.parts[-3:] != ('support-releases', support_digest, 'ext')):
+        raise ValueError('support_publication_binding_scope')
+    owner = path.parents[2]
+    if str(owner) == '/':
+        raise ValueError('support_publication_binding_owner')
+    return str(owner)
+
+
+def support_root_shell():
+    import shlex
+    from pathlib import Path
+    import artifact_delivery as delivery
+    raw = delivery.local_file(Path(sys.argv[1]), 4096)
+    print(shlex.quote(published_support_root(raw, sys.argv[2])))
+
+
+def rsync_owner_command(owner, version):
+    """Choose only the two qualified local rsync command-quoting dialects."""
+    import shlex
+    if (type(version) is not bytes or not 1 < len(version) <= 16384
+            or not version.endswith(b'\n')):
+        raise ValueError('rsync_version_shape')
+    lines = version.decode('utf-8', errors='strict').splitlines()
+    if not lines or any('\x00' in line for line in lines):
+        raise ValueError('rsync_version_shape')
+    upstream = re.compile(r'rsync +version +[0-9]+\.[0-9]+\.[0-9]+ +protocol version +[0-9]+')
+    opened = re.compile(r'openrsync: protocol version [0-9]+')
+    identities = [line for line in lines if upstream.fullmatch(line) or opened.fullmatch(line)]
+    if len(identities) != 1 or identities[0] != lines[0]:
+        raise ValueError('rsync_version_unqualified')
+    command = 'cd ' + shlex.quote(owner) + ' && exec rsync'
+    # openrsync parses --rsync-path into argv before SSH joins it; upstream
+    # rsync preserves this command text. Keep normal rsync argument protections.
+    return shlex.quote(command) if opened.fullmatch(lines[0]) else command
+
+
+def support_rsync_command():
+    import shlex
+    from pathlib import Path
+    import artifact_delivery as delivery
+    owner = published_support_root(delivery.local_file(Path(sys.argv[1]), 4096), sys.argv[2])
+    if shlex.quote(owner) != sys.argv[4]:
+        raise ValueError('support_publication_binding_changed')
+    version = delivery.local_file(Path(sys.argv[3]), 16384)
+    print(rsync_owner_command(owner, version))
+
+
 def custody_chain_source():
     # Export the incumbent strict reader; never weaken native owner mapping or
     # duplicate its directory-custody rules in the inline transport readback.
@@ -679,6 +748,8 @@ def main():
         'deadline-command': deadline_command,
         'controller-source-sha': controller_source_sha,
         'support-meta': support_meta,
+        'support-root-shell': support_root_shell,
+        'support-rsync-command': support_rsync_command,
         'transport-verify': transport_verification,
         'launch-binding': launch_binding,
         'custody-chain-source': custody_chain_source,

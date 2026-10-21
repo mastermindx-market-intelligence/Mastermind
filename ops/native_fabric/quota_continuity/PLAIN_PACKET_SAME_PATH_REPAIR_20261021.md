@@ -1,5 +1,9 @@
 # Plain packet same-path retention repair
 
+This document retains the successive source qualifications. The final physical
+publisher-owner follow-up below is the current proposed contract for PR #1665;
+earlier identities and test results are preserved as history.
+
 ## Named consumer and observed defect
 
 Macro News Dashboard PR #9612 requires independent review of immutable source
@@ -185,3 +189,148 @@ not modified. Original News reviewer `news-9612-exact-3a663-release-review-20261
 remains terminal with no accepted result and no retry authority. No supported
 historical reconciliation edge has yet been qualified for that failure; this
 source repair grants neither same-run replay nor a replacement News review.
+
+## Physical publisher-owner binding — final follow-up in PR #1665
+
+### Original transport evidence and scope
+
+The paid review of immutable head
+`73eefe48d3ca0acf56fbcf6a015c90ba54492ac2`,
+run `news-1665-73eefe48-source-review-20261021` under the original News root,
+failed with `TRANSPORT_READBACK_REFUSED rc=1 before_launch=1`.
+Its original controller receipts show successful setup, packet/support uploads
+and support publication, then a strict directory-reader failure:
+`NotADirectoryError: lanes`. There is no launch-binding or launch process row.
+This does not by itself prove complete effect absence or lease settlement.
+
+The unchanged publisher already returns a resolved physical release path. Its
+observed stdout named
+`/Volumes/STORAGE/Offloaded/m1-20260917/lanes/support-releases/3d98030cf7f7b11336b43105591e618e9bfc8c39272b978a03b4d5e7029a56a7/ext`.
+The old controller discarded that return and reconstructed the readback path
+through the home-directory `lanes` alias, which the strict reader correctly
+refused. The source correction belongs to that controller path binding.
+
+Original evidence remains immutable: packet SHA-256
+`e589b278572636d78d4c1cee4549beece5fe20636dea048e8db10a9bf2999733`
+(15,367 bytes); controller-process SHA-256
+`60f5ecd886cd9d49ceb188899593d687723789bbebe417d1e230f65a11adc086`;
+log SHA-256
+`3ffa9683a4995b01e3f6361103b09081a8ef16f04a364811b32ba55ed4dc5bbc`.
+The observed launch bound installed helper `d3a019db...`, not the new candidate.
+The broker acquire return was not retained, and its exact lease settlement is
+unestablished. The failed review stays frozen with no result or retry authority.
+
+### Forward source correction
+
+For a newly admitted, parented ordinary plain GLM/Qwen run, the controller now
+captures the complete publisher return in an original-state-directory private
+temporary file. The helper requires one bounded UTF-8 newline-terminated
+absolute normalized path, the exact support digest and final `ext` component.
+Traversal, duplicate/noisy/truncated output, controls, a root owner and colon
+spellings are refused. Colon cannot be a literal single entry in the required
+PATH prefix. This parser supplies path data, never executable shell input or
+admission authority.
+
+The physical owner is quoted once and fixed through strict readback, executor
+selection, host environment, launch cwd, retained packet/control paths, polling,
+collection and cleanup. Requested task `REMOTE_CWD` is unchanged. The existing
+`DirectoryChain`, receipt v1 schemas, lease/account and launch-binding gates
+remain unchanged. There is no generic symlink-following exception or alias
+fallback after binding.
+
+Qwen previously replaced its release-relative provider configuration with the
+home alias on every leased call. Only the new bound Qwen route now retains
+`$HERE/../codex_bailian`; the incumbent publisher already binds and verifies
+that link. A literal controller-owned scalar distinguishes this route, is
+explicitly zero on other paths, and is consumed/unset before the provider child.
+The exact leased account, credential owner and private per-run config/session
+copy remain unchanged. GLM's existing release-relative configuration home is
+unchanged.
+
+Collection uses `--rsync-path` to enter the same fixed quoted physical owner
+with `cd ... && exec rsync`, then requests ordinary relative artifact names.
+Default rsync argument and sender checks stay enabled. Actual local protocol
+tests found that upstream rsync 3.2.7 preserves the command text while Studio's
+openrsync (protocol 29, 2.6.9 compatible) removes an extra quotation layer.
+The same local rsync executable therefore supplies bounded private whole-output
+version evidence through the existing commission deadline. Exactly one known
+identity on the first line selects the tested quoting convention; openrsync
+receives one additional quote around the complete command. Unknown, empty,
+ambiguous, malformed or failed version observations refuse before launch.
+This is dialect selection, not binary authentication. No alternative executable,
+network probe or `--old-args` downgrade is used.
+
+Legacy modes retain their existing paths. Every optional array expansion uses
+the existing Bash 3.2/`set -u` compatible guarded convention.
+
+### Qualification and limitations
+
+- Exact old `73eefe48` controller bytes
+  (`737744a8f04d6d6331d9aa541dfa2d0b40bf6360a8d36ef53dea958527d36767`)
+  reproduce strict readback refusal with zero worker launches in the private
+  fixture.
+- **13 new tests pass**. The actual controller and strict reader exercise flat
+  owners, symlinked home aliases, alias retargeting after publication and before
+  launch, unsafe packet/parent/code evidence, malformed publication, and
+  unqualified rsync versions. Transfer uses the actual installed rsync protocol
+  through an inert local remote shell. Paths include spaces, apostrophe and
+  shell-substitution-looking text; decoy artifacts remain untouched.
+- The actual Qwen selection and private copy path consumes owner A's harmless
+  configuration after the legacy alias points at B. Marker absent/zero preserves
+  legacy B selection. Its private file is mode 0600, exact fixture account is
+  preserved, and the marker does not enter the provider child.
+- Separate actual openrsync and rsync 3.2.7 protocol controls pass literal
+  apostrophe/space/`$()`/backtick owner paths and refuse a missing owner without
+  creating a destination. No real SSH host, model, provider or lease is used.
+- **12 existing controller/retention tests pass** on the final source, including
+  the unchanged original timing budgets. The 13 custody and 35 provenance
+  falsifiers remain included. **17 existing credential-custody tests pass** with
+  the final unchanged Qwen wrapper bytes.
+- All **83** staged files match their declarations. Relative to `73eefe48`,
+  only `remote_sub.sh`, `remote_sub_helpers.py` and `qwen_exec.sh` change executable
+  identity; the other 80 files and installed preimages are unchanged. Bash
+  syntax, Python syntax and diff-whitespace checks pass.
+
+Failed interim controls are retained. Before the final corrections, two real
+openrsync cases failed at collection because the first implementation lost a
+quotation layer. A concurrent 29-test existing-regression run had three failures:
+legacy empty-array collection plus two host timing/admission failures. The final
+guarded array and sequential 12-test run pass without relaxing timing or custody.
+Earlier wider local qualification failures documented above remain historical;
+this focused result does not assert that every wider local suite has passed.
+
+The physical binding defeats home-alias retargeting. It does not claim protection
+against a trusted owner replacing the physical ancestor between phases.
+Host-owned `HOST_ENV`, legitimate credential-config overrides and executable
+resolution still require bounded nonsecret qualification during the actual
+rollout. No `HOME`, `GLM_CONFIG`, credential or profile owner is remapped here.
+
+### Frozen source identities and release obligations
+
+- Controller SHA-256:
+  `2cb93138d446c5fe7cfaf42cfa8f8e731882eb726108a0eacf2ddd6fcbef9f7f`.
+- Helper SHA-256:
+  `81fff3ccc471c972d29926b2a10020ef4856d2c6585d4dc30e41633ed65a25df`.
+- Qwen wrapper SHA-256:
+  `033bf388c4b3ea4cd5e4161c3c558b39a3a9d9bc80a5d7bce85b8b85a29ec1dd`.
+- Manifest SHA-256:
+  `1ac452a986ba33f1d238d8874956451b6a9fc04fe0cbcc1da1db70110498bb2d`.
+- Inventory SHA-256:
+  `a59c69e88dc537213e3f80bfcbcdb3c5f662f5513401db96ec39ddc92804a32a`.
+
+Principal architecture/security review found no remaining concrete must-fix in
+these final bytes. It is source advice, not a replacement result from the held
+paid reviewer and not a formal GitHub approval. New-head CI and applicable
+independent review remain required before protected merge.
+
+This PR stays on operation `news-review-packet-retention-20261021` and its
+original managed workspace/branch. Do not use the concurrently published
+standalone transport branch as a replacement carrier for this combined source.
+No native generation was installed or selected by this qualification.
+
+Recovery PR #1674 separately proposes the exact original News failure's
+supported reconciliation owner. Its generation must compose with this protected
+repair before any rollout; neither standalone review stage is install authority.
+Neither held review is replayed, renamed, re-homed or declared accepted here.
+News PR #9612's exact integrated head and actual signed-in production acceptance
+remain separate release obligations.
