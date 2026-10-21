@@ -479,6 +479,19 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         elif _REMOTE_DONE_RE.search(text):
             state = "SETTLING"
 
+    if (state == "TERMINAL_FAILURE" and rc == 78 and signal == "prelaunch_failure"
+            and rid == "news-9612-exact-3a663-release-review-20261021"):
+        import native_plain_packet_reconcile as packet_reconcile
+        try:
+            verified = packet_reconcile.status_from_receipt()
+            if verified is not None:
+                return {**_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"), **verified}
+        except (OSError, ValueError, TypeError, KeyError):
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
+                "result_available": False, "result_bytes": None,
+                **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+
     if state == "EFFECT_UNKNOWN" and rid == prestart_reconcile.RUN_ID:
         verified = prestart_reconcile.status_from_receipt()
         if verified is not None:
@@ -1091,6 +1104,16 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
 
+    p_packet_check = sub.add_parser("check-plain-packet-retention", help="Read-only fixed original News retention proof; no reconciliation or retry")
+    p_packet_check.add_argument("run_id")
+    p_packet_check.add_argument("--root", required=True)
+
+    p_packet_reconcile = sub.add_parser("reconcile-plain-packet-retention",
+        help="Record the exact original historical failure disposition; never replay or accept")
+    p_packet_reconcile.add_argument("run_id")
+    p_packet_reconcile.add_argument("--root", required=True)
+    p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
+
     p_request = sub.add_parser("request")
     p_request.add_argument("--id", required=True)
     p_request.add_argument("--class", dest="task_class", required=True)
@@ -1289,6 +1312,35 @@ def main(argv: list[str] | None = None) -> int:
             command.extend(["--path", path])
         return subprocess.run(command).returncode
     try:
+        if args.cmd == "reconcile-plain-packet-retention":
+            import native_plain_packet_reconcile as packet_reconcile
+            try:
+                response = packet_reconcile.reconcile_original(
+                    args.run_id, args.root, args.expected_proof_sha256)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                _json({"schema": packet_reconcile.SCHEMA, "action": "UNQUALIFIED",
+                    "run_id": args.run_id, "expected_root_id": args.root,
+                    "effect_state": getattr(exc, "effect_state", "NOT_APPLIED"),
+                    "retry_allowed": False, "worker_dispatch_performed": False})
+                print("PLAIN_PACKET_RECONCILIATION_UNQUALIFIED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                return 78
+            try:
+                _json(response)
+            except (OSError, ValueError, TypeError) as exc:
+                # The operation already returned. Output failure is not a proof
+                # that publication was unapplied; settle through fresh status.
+                print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: EFFECT_UNKNOWN: "
+                      + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                return 78
+            return 0
+        if args.cmd == "check-plain-packet-retention":
+            import native_plain_packet_check as packet_check
+            try:
+                _json(packet_check.check_original(args.run_id, args.root))
+                return 0
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                print("PLAIN_PACKET_CHECK_UNQUALIFIED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                return 78
         if args.cmd == "reconcile-completed":
             try:
                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))
