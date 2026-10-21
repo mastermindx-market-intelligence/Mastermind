@@ -83,6 +83,9 @@ if name == 'broker':
         wait = float(args[args.index('--wait')+1])
         wire_deadline = args[args.index('--deadline-ns')+1] if '--deadline-ns' in args else None
         record('acquire', requested_wait_seconds=wait, wire_deadline_ns=wire_deadline,
+               acquisition_pool=args[args.index('--pool')+1],
+               requested_model=args[args.index('--model')+1],
+               task_class=args[args.index('--task-class')+1],
                inherited_remaining_seconds=os.environ.get('POOL_COMMISSION_REMAINING_SECONDS'))
         if case == 'deny':
             time.sleep(min(wait, float(os.environ['POOL_COMMISSION_REMAINING_SECONDS'])+2))
@@ -179,7 +182,7 @@ elif name == 'rsync':
     Path(args[-1]).write_text('REMOTE_SUB_ADMISSION_REFUSED {"reasons":["active_lane_limit_reached"]}\n')
     raise SystemExit(0)
 elif name == 'ledger':
-    record('ledger'); raise SystemExit(0)
+    record('ledger',pool=args[args.index('--pool')+1] if '--pool' in args else None); raise SystemExit(0)
 record('forbidden', command=name)
 raise SystemExit(125)
 '''
@@ -318,7 +321,7 @@ class ControllerDeadline(unittest.TestCase):
         write(self.bin/'fixture-python','#!'+sys.executable+'\n'+PYTHON_FIXTURE,executable=True)
 
     def run_controller(self,case,budget=4,broker_delay=0,mode='minimax',model='fixture-model',
-                       allow_prelease_refusal=False):
+                       allow_prelease_refusal=False,escalation_reason=None):
         origin=time.monotonic_ns()+int(budget*1_000_000_000)
         env={'PATH':str(self.bin)+':/usr/bin:/bin','LANG':'C','LC_ALL':'C',
              'PYTHONDONTWRITEBYTECODE':'1','PYTHONNOUSERSITE':'1','TMPDIR':str(self.tmp),
@@ -334,6 +337,8 @@ class ControllerDeadline(unittest.TestCase):
              'POOL_TASK_COMPLEXITY':'C0_MECHANICAL',
              'POOL_COMMISSION_REMAINING_SECONDS':str(int(budget)),
              'POOL_COMMISSION_DEADLINE_NS':str(origin)}
+        if escalation_reason is not None:
+            env['POOL_ESCALATION_REASON']=escalation_reason
         command=['/bin/bash',str(self.ext/'remote_sub.sh'),'fixture',mode,str(self.packet),'~',
                  model,'--run-id','offline-'+case]
         started=time.monotonic()
@@ -447,12 +452,12 @@ class ControllerDeadline(unittest.TestCase):
                          + ' support='),transport_line)
         receipt=json.loads((self.ext/'state/remote_sub'
                             /'offline-plain_ok.transport-verified.json').read_text())
-        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v1')
+        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v2')
         self.assertEqual(receipt['packet_sha256'],packet_sha)
         self.assertEqual(receipt['phase'],'PRE_LAUNCH')
         binding_line=next(event for name,event in tracked if name=='LAUNCH_BINDING')
         binding=json.loads(binding_line[len('LAUNCH_BINDING '):])
-        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v1')
+        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v2')
         self.assertEqual(binding['transport']['packet_sha256'],packet_sha)
         self.assertEqual(binding['packet_sha256'],packet_sha)
         self.assertEqual(binding['acquire_response_sha256'],

@@ -32,7 +32,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # Retention recovery composes with the protected-review candidate physical
 # owner transport/configuration correction in the explicit 85-file closure.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "8ac0048aa2f40a19bddb30792a64b33b61a5409d2f62b8906acc211ae0f62fe0"
+NATIVE_MANIFEST_SHA = "99796b477384551ad013cd245abbe0f9fac91a21d1c163636e705325e6922bc8"
 
 
 def _sha(raw):

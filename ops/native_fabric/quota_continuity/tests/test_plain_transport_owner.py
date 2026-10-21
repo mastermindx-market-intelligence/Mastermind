@@ -101,6 +101,13 @@ if case.startswith('physical_'):
             sys.stdout.write(result.stdout);sys.stderr.write(result.stderr)
             if config.get('retarget'): retarget('decoy-before-launch')
             raise SystemExit(result.returncode)
+        if 'glm_keys.py account-ready ' in command:
+            # Readiness is inert here; no credential file or provider is read.
+            words=shlex.split(command.rsplit('; ',1)[-1])
+            releases=list((owner/'support-releases').iterdir())
+            assert len(releases)==1
+            assert words==['python3',str(releases[0]/'ext/glm_keys.py'),'account-ready','fixture-account']
+            record('account_ready',command=command);print('1');raise SystemExit(0)
         if 'nohup env ' in command:
             record('launch',command=command)
             raise SystemExit(shell(command))
@@ -144,7 +151,8 @@ row={'argv':sys.argv[1:],'cwd':str(Path.cwd()),'packet':str(packet),
      'packet_sha256':hashlib.sha256(packet.read_bytes()).hexdigest(),
      'remote_cwd':os.environ['REMOTE_CWD'],'rc_file':os.environ['RC_FILE'],
      'owner':os.environ['REMOTE_SUB_LANES'],'host_env':os.environ.get('BOUND_HOST_ENV'),
-     'path':os.environ['PATH'],'physical_config':os.environ.get('REMOTE_SUB_QWEN_PHYSICAL_CONFIG')}
+     'path':os.environ['PATH'],'physical_config':os.environ.get('REMOTE_SUB_QWEN_PHYSICAL_CONFIG'),
+     'account':os.environ.get('POOL_ACCOUNT'),'lease_id':os.environ.get('POOL_LEASE_ID')}
 (root/'launch-spy.json').write_text(json.dumps(row,sort_keys=True))
 print('INERT PHYSICAL OWNER LAUNCH SPY: no model was executed.')
 '''
@@ -282,11 +290,17 @@ class PhysicalOwnerController(unittest.TestCase):
         for path in self.owner.rglob('*'):
             if not path.is_symlink(): path.chmod(0o700 if path.is_dir() else 0o600)
 
-    def run_case(self,*,retarget=False,fault=None):
+    def run_case(self,*,retarget=False,fault=None,mode='qwen',model='qwen3.8-flash',frontier_available=True):
+        if not frontier_available:
+            with (self.harness.ext/'slot.py').open('a') as stream:
+                stream.write("\nCAPS.pop('glm-frontier', None)\n")
         (self.root/'physical-case.json').write_text(json.dumps({'retarget':retarget,'fault':fault,'owner':str(self.owner),'rsync':self.rsync}))
-        return self.harness.run_controller('physical_owner',budget=18,mode='qwen',model='qwen3.8-flash')
+        witness=('Offline regression requires the requested GLM acquisition tuple; all carriers and the worker are inert.'
+                 if mode=='glm' else None)
+        return self.harness.run_controller('physical_owner',budget=18,mode=mode,model=model,
+                                           escalation_reason=witness)
 
-    def assert_bound_launch(self,result):
+    def assert_bound_launch(self,result,*,mode='qwen',model='qwen3.8-flash',acquisition_pool='bailian'):
         diagnostic=result['stderr']
         output=self.owner/'ext/lanes_offline-physical_owner.stdout'
         if output.exists(): diagnostic+='\nINERT REMOTE OUTPUT: '+output.read_text()[:2000]
@@ -295,18 +309,32 @@ class PhysicalOwnerController(unittest.TestCase):
         self.assertEqual(spy['cwd'],str(self.owner/'ext'))
         self.assertEqual(spy['packet'],str(self.owner/'tmp/offline-physical_owner.txt'))
         self.assertEqual(spy['owner'],str(self.owner))
-        self.assertEqual(spy['physical_config'],'1')
+        self.assertEqual(spy['physical_config'],'1' if mode=='qwen' else '0')
         self.assertEqual(spy['remote_cwd'],'~')
         self.assertEqual(spy['host_env'],'physical')
         self.assertEqual(spy['rc_file'],str(self.owner/'ext/lanes_offline-physical_owner.rc'))
         self.assertEqual(spy['path'].split(':')[0],str(self.owner/'venv/bin'))
         self.assertTrue(Path(spy['argv'][0]).is_relative_to(self.owner/'support-releases'))
         self.assertEqual(Path(spy['argv'][0]).name,'remote_sub_exec.py')
-        self.assertEqual(spy['argv'][1:4],['offline-physical_owner','qwen',spy['packet']])
+        self.assertEqual(spy['argv'][1:4],['offline-physical_owner',mode,spy['packet']])
+        self.assertEqual(spy['argv'][-1],model)
+        self.assertEqual(spy['account'],'fixture-account')
+        self.assertEqual(spy['lease_id'],'0123456789ab')
+        acquired=[row for row in result['events'] if row['stage']=='acquire']
+        self.assertEqual(len(acquired),1)
+        self.assertEqual(acquired[0]['acquisition_pool'],acquisition_pool)
+        self.assertEqual(acquired[0]['requested_model'],model)
+        self.assertEqual(acquired[0]['task_class'],'remote-'+mode)
+        ledger=[row for row in result['events'] if row['stage']=='ledger']
+        self.assertEqual(len(ledger),1)
+        self.assertEqual(ledger[0]['pool'],'glm' if mode=='glm' else 'bailian')
         self.assertEqual(spy['packet_sha256'],hashlib.sha256(self.harness.packet.read_bytes()).hexdigest())
         stages=[row['stage'] for row in result['events']]
         self.assertEqual(stages.count('launch'),1)
         self.assertLess(stages.index('transport_read'),stages.index('launch'))
+        if mode=='glm':
+            self.assertEqual(stages.count('account_ready'),1)
+            self.assertLess(stages.index('account_ready'),stages.index('launch'))
         self.assertIn('poll',stages);self.assertIn('collect',stages);self.assertIn('remote_cleanup',stages)
         self.assertFalse((self.owner/'tmp/offline-physical_owner.txt').exists())
         for name in ('decoy-after-publication','decoy-before-launch'):
@@ -318,8 +346,17 @@ class PhysicalOwnerController(unittest.TestCase):
         self.assertEqual([name for name,_ in tracked],['RUN_RESERVED','LEASE_OK','SUPPORT_VERSION_READY',
             'TRANSPORT_VERIFIED','LAUNCH_BINDING','LAUNCH','LAUNCH_ATTEMPT'])
         receipt=json.loads((self.harness.ext/'state/remote_sub/offline-physical_owner.transport-verified.json').read_text())
-        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v1')
+        self.assertEqual(receipt['schema'],'mastermind.transport_verification.v2')
         self.assertEqual(receipt['packet_sha256'],spy['packet_sha256'])
+        self.assertEqual(receipt['acquisition_pool'],acquisition_pool)
+        self.assertEqual([event for name,event in tracked if name=='LEASE_OK'],
+                         ['LEASE_OK pool='+acquisition_pool])
+        binding=json.loads(next(event.split(' ',1)[1] for name,event in tracked if name=='LAUNCH_BINDING'))
+        self.assertEqual(binding['schema'],'mastermind.fabric_plain_launch_binding.v2')
+        self.assertEqual(binding['pool'],'glm' if mode=='glm' else 'bailian')
+        self.assertEqual(binding['acquisition_pool'],acquisition_pool)
+        self.assertEqual(binding['transport']['acquisition_pool'],acquisition_pool)
+        self.assertEqual((binding['lease_id'],binding['account']),(spy['lease_id'],spy['account']))
 
     def test_unknown_empty_or_failed_rsync_version_refuses_before_readback(self):
         for fault in ('rsync_unknown','rsync_empty','rsync_nonzero'):
@@ -343,6 +380,18 @@ class PhysicalOwnerController(unittest.TestCase):
         self.owner.rename(alias)
         self.owner=alias
         self.assert_bound_launch(self.run_case())
+
+    def test_glm_frontier_acquisition_reaches_bound_launch(self):
+        result=self.run_case(mode='glm',model='glm-5.3')
+        self.assert_bound_launch(result,mode='glm',model='glm-5.3',acquisition_pool='glm-frontier')
+
+    def test_glm_without_frontier_capability_keeps_ordinary_pool(self):
+        result=self.run_case(mode='glm',model='glm-5.3',frontier_available=False)
+        self.assert_bound_launch(result,mode='glm',model='glm-5.3',acquisition_pool='glm')
+
+    def test_glm_flash_keeps_ordinary_acquisition_pool(self):
+        result=self.run_case(mode='glm',model='glm-5.3-flash')
+        self.assert_bound_launch(result,mode='glm',model='glm-5.3-flash',acquisition_pool='glm')
 
     def test_physical_binding_runs_real_reader_and_inert_shell(self):
         self.assert_bound_launch(self.run_case())

@@ -1213,7 +1213,7 @@ PY_VERIFY_PLAIN_TRANSPORT" > "$TRANSPORT_OBSERVATION" || {
   commission_run transport-verify "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" transport-verify \
     "$LOG_FILE" "$TRANSPORT_RECEIPT" "$PLAIN_PACKET_RETAINED" "$LEASE_OUTPUT_FILE" \
     "$TRANSPORT_OBSERVATION" "$ID" "$HOST_ARG" "$MODE" "$MODEL" \
-    "$SUPPORT_DIGEST" "$POLICY_SHA" "$LEASE_ID" "${POOL_ACCOUNT:-}" \
+    "$SUPPORT_DIGEST" "$POLICY_SHA" "$LEASE_ID" "${POOL_ACCOUNT:-}" "$LEASE_POOL" \
     >/dev/null || {
       RC=78; log "TRANSPORT_VERIFICATION_REFUSED rc=$RC before_launch=1"; exit "$RC";
     }
@@ -1400,7 +1400,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
   commission_run launch-binding "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" launch-binding \
     "$LOG_FILE" "$BINDING_PACKET" "$LEASE_OUTPUT_FILE" "$ID" "$ROUTING_ROOT" \
     "$POOL_PARENT_RUN_ID" "$HOST_ARG" "$MODE" "$MODEL" "$SUPPORT_DIGEST" \
-    "$LEASE_ID" "$ACCOUNT_ARG" "$BINDING_TRANSPORT_RECEIPT" >&2 || {
+    "$LEASE_ID" "$ACCOUNT_ARG" "$BINDING_TRANSPORT_RECEIPT" "$LEASE_POOL" >&2 || {
       RC=78; log "LAUNCH_BINDING_UNCONFIRMED rc=$RC before_launch=1"; exit "$RC";
     }
 fi

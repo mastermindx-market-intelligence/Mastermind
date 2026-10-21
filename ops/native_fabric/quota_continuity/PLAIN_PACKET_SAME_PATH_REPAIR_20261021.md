@@ -1,8 +1,9 @@
 # Plain packet same-path retention repair
 
-This document retains the successive source qualifications. The final physical
-publisher-owner follow-up below is the current proposed contract for PR #1665;
-earlier identities and test results are preserved as history.
+This document retains successive source qualifications, including the original
+PR #1665 physical publisher-owner correction. The final section records the
+acquisition-tag correction in composed PR #1674. Earlier source identities and
+test results remain historical evidence for their named bytes.
 
 ## Named consumer and observed defect
 
@@ -334,3 +335,122 @@ repair before any rollout; neither standalone review stage is install authority.
 Neither held review is replayed, renamed, re-homed or declared accepted here.
 News PR #9612's exact integrated head and actual signed-in production acceptance
 remain separate release obligations.
+
+## Acquisition-tag correction in the composed PR #1674 source
+
+The independent combined-source review and the Harness2 consumer report identified
+a deterministic mismatch in `5f9fa661`, `d15190f6` and `b30168a8`: the actual
+controller selects `glm-frontier` for an eligible `glm-5.3` request, but downstream
+checks require the logical `glm` tag. Those earlier source approvals are superseded
+by **REQUEST_REPAIR** for this finding. The current correction requires its own
+published-head review and CI; earlier green CI does not qualify these changed bytes.
+
+### Selection ownership and versioned evidence
+
+The controller passes its already frozen `LEASE_POOL` into both producer helpers.
+New records use `mastermind.transport_verification.v2`,
+`mastermind.fabric_plain_launch_binding.v2` and
+`mastermind.fabric_launch_binding.v2`, with explicit `acquisition_pool`.
+A missing helper argument refuses; readers do not recompute the original selection
+from current capabilities or infer a missing tag from the requested model.
+
+| Mode and otherwise-admitted model | Permitted acquisition tag | Logical binding and ledger pool |
+| --- | --- | --- |
+| `glm`, exact `glm-5.3` | `glm-frontier` or `glm` | `glm` |
+| `glm`, another admitted GLM model | `glm` | `glm` |
+| `qwen`, an admitted Qwen model | `bailian` | `bailian` |
+
+These tuple checks grant no routing or model admission. Existing routing, economic
+policy and lineage checks still run before acquisition. The broker response still
+contains only `LEASE` and `ACCOUNT`; the acquisition tag is controller correlation,
+not an attestation of the canonical broker pool. Runtime provider aliases are
+configuration-owned, so source alone does not guarantee their canonical result.
+
+`binding.pool`, ledger accounting and broker wire bytes remain unchanged.
+Artifact observation still requires exact equality with the actual retained
+broker row's pool. A valid frontier tag does not make a broker row with pool
+`glm-frontier` equivalent to the logical `glm` binding.
+
+The new tag is bound to the unique original acquisition event, original
+lease/account response digest and applicable packet/support identities. Plain
+records cross-bind their nested transport view. The artifact collector now uses
+a frontier tag only after strict v2 original-binding validation; it does not use
+a generic allow-list to relax the old common launch check. Unknown schemas,
+wrong closed field sets, contradictory tags, malformed records and reordered,
+duplicated, truncated or failed control evidence refuse.
+
+Valid v1 evidence keeps its exact original event rules. It is not rewritten,
+upgraded or supplied with inferred fields; an old frontier-mismatched v1 record
+does not gain qualification. The remote
+`mastermind.transport_observation.v1` and outer collection receipt stay at their
+existing versions. Artifact active-lineage remains recorded controller provenance
+with `is_authentication: false`; it is not plain active-lineage support.
+
+### Current source identities and qualification
+
+The canonical builder reproduces **85** entries with the same path set as b301.
+Only these four production members change in this follow-up:
+
+| Member under `ext/` | SHA-256 |
+| --- | --- |
+| `fabric_task.py` | `24fea6ca2c3d73b976c517d05aa1a07698f4320778616170d5a599d8f4bca1e3` |
+| `original_delivery_collector.py` | `9aa8eb37180f9ec54d4bb7f2d617327122ae7dfb3a3cd14933c2b412345b9ba7` |
+| `remote_sub.sh` | `fb83c14c846f0346f7838761e26c2095c4dd2b9b6af9b8c79f7f097b49412460` |
+| `remote_sub_helpers.py` | `16e34b0cc00c61e63ee862bd3608807e2c8756315f0660a34a80feae9a886c6f` |
+
+- Native manifest SHA-256:
+  `99796b477384551ad013cd245abbe0f9fac91a21d1c163636e705325e6922bc8`.
+- Native source inventory SHA-256:
+  `944cef119671b4ba84064f3b29976941794763dcd7e766002882068548527f17`.
+- Actual-controller frontier, no-frontier fallback, Flash and Qwen controls:
+  **4 passed**, 47.011 seconds. Each exercises the real controller/helper path
+  through one inert launch and preserves the logical ledger pool. The red
+  frontier control first reproduced `transport_verification_log_not_prelaunch`
+  after supplying the existing required bounded-complexity policy witness.
+- `python3 -m unittest test_plain_original_delivery -v` from `rollout/`:
+  **42 passed**, 18.567 seconds. This includes actual plain and artifact producer
+  emission, plain collection/readback, exact v1 compatibility, and independently
+  changed tag, model, account, lease, field-set and event-order refusals.
+- `python3 -m pytest -o addopts= -q tests/test_fabric_native_artifact_observation.py`:
+  **1 wrapper passed**, 1.91 seconds. It builds the current stage and runs artifact
+  lineage/observation plus the original collector compatibility script. The v2
+  controls keep the broker pool `glm` and reject incompatible broker rows.
+- Reconciliation acknowledgment and historical-proof suite:
+  **30 passed**; details are in
+  `ORIGINAL_NEWS_RETENTION_RECONCILIATION_20261021.md`.
+- All 85 stage hashes, Python syntax, Bash syntax and diff whitespace pass.
+  The exact published commit, independent verdict and CI association are recorded
+  in the PR checkpoint after source publication.
+
+Evidence files on the source owner include
+`/tmp/news-1674-acquisition-controller-20261021.{json,log}`,
+`/tmp/news-1674-acquisition-targets-final-20261021.json` and
+`/tmp/news-1674-acquisition-final-stage-proof-20261021.json`.
+
+The wider local three-module run remains **not green**: 35 passed and 35 failed
+in 326.58 seconds. Its full rollout gate passed. The native-owner aggregate hit
+the unchanged 240-second wrapper timeout; 33 composition cases met the already
+documented strict Git stderr refusal. A direct read-only probe reproduced the
+sparse-index-expansion advisory on both installed Git binaries. Neither Git
+custody nor application deadlines were relaxed. The remaining failure was a
+historical collector fixture whose expected raw `OSError` predated the current
+`LocalBindingRefused` wrapper. That fixture now uses private physical ancestry
+and asserts the typed refusal with its original `OSError` cause; the final staged
+wrapper above passes. The failed broad-run log is retained at
+`/tmp/news-1674-acquisition-final-gate-20261021.log`. Required exact-head CI remains
+a separate gate.
+
+### Inherited collection and release limits
+
+The foreground controller uses the qualified physical publication owner.
+The separate later `--collect-existing` reader still derives its remote paths
+from account home and `lanes`, using strict `DirectoryChain` checks; it does not
+consume the controller's earlier physical-owner variable. A symlink component can
+therefore still cause later collection to refuse. This correction neither relaxes
+that check nor qualifies that recovery route on such a host.
+
+This section records source qualification only. Protected inclusion, immutable
+runtime publication/selection, bounded host readiness, the installed original
+check and explicit reconciliation, a fresh current-head News review and actual
+signed-in News acceptance remain outstanding. Neither frozen reviewer nor the
+reported Harness2 run is replayed, reconciled or declared settled by this repair.

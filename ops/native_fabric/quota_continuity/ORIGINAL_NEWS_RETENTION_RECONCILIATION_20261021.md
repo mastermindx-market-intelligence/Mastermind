@@ -58,7 +58,9 @@ The Studio facade's general outer `execution_absence_proven: false` behavior is 
 
 ### Interrupted publication and acknowledgment
 
-A failure before receipt creation is attempted is `NOT_APPLIED`. Once creation is attempted, any publication or retained-descriptor cleanup exception is `EFFECT_UNKNOWN`. This conservative scope includes exclusive-create races, short writes, fsync failures, readback failures, identity changes and context cleanup. Failure to emit an already successful operation's response also reports an undelivered acknowledgment with `EFFECT_UNKNOWN`; it cannot be relabeled `NOT_APPLIED`.
+A failure before receipt creation is attempted is `NOT_APPLIED`. Once creation is attempted, any publication or retained-descriptor cleanup exception is `EFFECT_UNKNOWN`. This conservative scope includes exclusive-create races, short writes, fsync failures, readback failures, identity changes and context cleanup.
+
+After the operation returns, successful response delivery requires JSON serialization, the stdout write and an explicit stdout flush to complete inside the response-delivery handler. A buffered write alone does not establish delivery. Failure is `RETURN_UNDELIVERED` with `EFFECT_UNKNOWN`; it cannot be relabeled `NOT_APPLIED` or followed by another success response. Failed stdout is disarmed before returning so ordinary interpreter shutdown does not retry delivery to that channel. This does not undo a receipt that may already exist. Fresh canonical status remains the supported way to establish the currently visible receipt and original evidence.
 
 A subsequent fresh read through the same canonical status owner may settle a complete, exact, currently safe receipt together with freshly validated original evidence. That later observation does not prove that the earlier failed call completed fsync, readback, acknowledgment delivery or durable storage. A partial or changed receipt never qualifies. A same-byte replacement can correctly cause the original writer's inode fence to refuse while a later independent reader qualifies the currently visible receipt under the same contract. No blind mutation retry or extra journal is introduced.
 
@@ -124,3 +126,47 @@ fresh current-generation and host preflight, immutable publish/verify/select,
 then the installed original-owner check and explicit reconciliation. Neither
 this composition nor a new review of its genuinely changed source alters either
 frozen historical reviewer or supplies a review result for its old subject.
+
+## Follow-up acknowledgment and acquisition qualification
+
+The composed candidate also includes the acquisition-tag correction described in
+`PLAIN_PACKET_SAME_PATH_REPAIR_20261021.md`. That section records the final
+85-file manifest, inventory and changed-member identities. Earlier hashes and
+test results above remain evidence for their named historical bytes.
+
+The success-response boundary now includes an explicit stdout flush. A real
+closed-pipe subprocess demonstrated that catching the flush failure alone is
+insufficient: `main()` returned 78, but Python retried buffered output during
+shutdown and the process exited 120. The failure handler now disarms the failed
+stdout channel before returning. For a descriptor-backed stream it redirects that
+descriptor to the null device; for a stream without a usable descriptor it clears
+the current stdout reference without closing the caller's retained object or
+assuming another descriptor belongs to it. This is best-effort failed-stream
+cleanup, not another reconciliation or another success response. The real-pipe
+qualification assumes usable stderr and does not guarantee arbitrary simultaneous
+standard-stream or OS cleanup failures.
+
+The final `test_native_plain_packet_check` suite passes **30 tests in 3.611
+seconds**. The real subprocess regression first failed with the observed
+`120 != 78`, then passed with this cleanup. It proves both healthy and broken
+stdout controls, one actual reconciliation call, one completed real JSON write,
+normal interpreter shutdown, preserved receipt digest and full identity, and fresh
+status retaining failure 78, no result, unverified acceptance, no replay and no
+retry. The existing no-fileno flush-failure control keeps its retained stream
+inspectable and receipt unchanged.
+
+The evidence records are
+`/tmp/news-1674-stdout-child-before-20261021.json` and
+`/tmp/news-1674-stdout-disarm-qualified-20261021.json`.
+No live original receipt was created by these tests. Test allowlist substitutions
+exist only within disposable fixtures and leave production case constants intact.
+
+The artifact-observation CI wrapper now invokes the original collector
+compatibility script against the explicitly built staged `ext` path. This makes
+current consumer and preserved historical evidence checks part of the same
+required source gate. The historical proposal source is unchanged.
+
+Exact-head independent source review and CI must qualify the published follow-up.
+The source holds on earlier d151/b301/5f9 bytes are not discharged by local tests.
+No rollout, original-case reconciliation, lease settlement, frozen review result
+or production News acceptance is established here.

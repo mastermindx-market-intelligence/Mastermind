@@ -120,6 +120,7 @@ PLAIN_SCOPES.update({'mm-l0-price-metadata-review-20261015-01a1333c-v1': {'desti
                                                       'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
 BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
 PLAIN_BINDING_SCHEMA = 'mastermind.fabric_plain_launch_binding.v1'
+PLAIN_BINDING_SCHEMA_V2 = 'mastermind.fabric_plain_launch_binding.v2'
 RECEIPT_SCHEMA = 'mastermind.original_delivery_receipt.v1'
 MAX_STDOUT = 8 * 1024 * 1024
 MAX_RESPONSE = 14 * 1024 * 1024
@@ -206,10 +207,39 @@ def tracked_control_events(events):
     return tracked
 
 
+def plain_acquisition_pool(record, *, collected=False):
+    """Read an explicitly versioned observation; never upgrade legacy evidence."""
+    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
+            'lease_id','account','packet_sha256','support_digest',
+            'acquire_response_sha256','source','phase','transport'}
+    if type(record) is not dict:
+        raise ValueError('plain_launch_binding_invalid')
+    if record.get('schema') == PLAIN_BINDING_SCHEMA_V2:
+        fields.add('acquisition_pool')
+    elif record.get('schema') != PLAIN_BINDING_SCHEMA:
+        raise ValueError('plain_launch_binding_invalid')
+    if collected:
+        fields.add('binding_sha256')
+    if set(record) != fields:
+        raise ValueError('plain_launch_binding_invalid')
+    if record['schema'] == PLAIN_BINDING_SCHEMA:
+        return record['pool']
+    from remote_sub_helpers import validate_acquisition_pool
+    return validate_acquisition_pool(record['mode'], record['requested_model'],
+                                     record['acquisition_pool'])
+
+
 def validate_plain_transport(record):
     """Strict bounded shape and cross-binding of the transport receipt view."""
     transport=record.get('transport') if type(record) is dict else None
-    if (type(transport) is not dict or set(transport)!=PLAIN_TRANSPORT_FIELDS
+    fields=set(PLAIN_TRANSPORT_FIELDS)
+    if type(record) is dict and record.get('schema') == PLAIN_BINDING_SCHEMA_V2:
+        fields.add('acquisition_pool')
+    elif type(record) is not dict or record.get('schema') != PLAIN_BINDING_SCHEMA:
+        raise ValueError('plain_launch_binding_invalid')
+    if (type(transport) is not dict or set(transport)!=fields
+            or (record['schema'] == PLAIN_BINDING_SCHEMA_V2
+                and transport['acquisition_pool'] != record['acquisition_pool'])
             or transport['packet_sha256']!=record['packet_sha256']
             or transport['support_digest']!=record['support_digest']
             or transport['lease_id']!=record['lease_id']
@@ -266,12 +296,8 @@ def retained_plain_binding(events, value, source):
             raise ValueError('plain_launch_binding_event_sequence_invalid')
         return None
     record=reader.strict_json(records[0].encode('utf-8'))
-    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
-            'lease_id','account','packet_sha256','support_digest',
-            'acquire_response_sha256','source','phase','transport'}
-    if (type(record) is not dict or set(record)!=fields
-            or record['schema']!=PLAIN_BINDING_SCHEMA
-            or record['source']!='controller_original_acquire_return'
+    acquisition_pool=plain_acquisition_pool(record)
+    if (record['source']!='controller_original_acquire_return'
             or record['phase']!='PRE_LAUNCH'
             or any(record[k]!=value[k] for k in ('run_id','root','parent','host','mode','requested_model'))
             or record['mode'] not in production.ORDINARY_MODES
@@ -291,7 +317,7 @@ def retained_plain_binding(events, value, source):
         raise ValueError('plain_launch_binding_acquire_unverified')
     expected=[
         'RUN_RESERVED explicit=1',
-        'LEASE_OK pool='+record['pool'],
+        'LEASE_OK pool='+acquisition_pool,
         'SUPPORT_VERSION_READY digest='+record['support_digest']
             +' policy='+transport['policy_sha256'],
         'TRANSPORT_VERIFIED packet='+record['packet_sha256']
@@ -309,6 +335,76 @@ def retained_plain_binding(events, value, source):
         raise ValueError('plain_launch_binding_event_sequence_invalid')
     record['binding_sha256']=sha(records[0].encode('utf-8'))
     return record
+
+
+def retained_artifact_acquisition_pool(events, value, source, contract):
+    """Use a v2 tag only after validating its original artifact binding.
+
+    Untagged v1/no-binding evidence keeps the incumbent logical-pool rule.
+    This is controller correlation, not broker, acceptance or retry authority.
+    """
+    v1='mastermind.fabric_launch_binding.v1'
+    v2='mastermind.fabric_launch_binding.v2'
+    payloads=[event[len('LAUNCH_BINDING '):] for event in events
+              if event.startswith('LAUNCH_BINDING ')]
+    if not payloads:
+        return None
+    records=[reader.strict_json(payload.encode('utf-8')) for payload in payloads]
+    if all(type(record) is dict and record.get('schema') == v1
+           and 'acquisition_pool' not in record for record in records):
+        return None
+    if len(records) != 1:
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    record=records[0]
+    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
+            'acquisition_pool','lease_id','account','packet_sha256','support_digest',
+            'acquire_response_sha256','source','phase'}
+    if (type(record) is not dict or set(record) != fields
+            or any(type(item) is not str for item in record.values())
+            or record['schema'] != v2
+            or record['source'] != 'controller_original_acquire_return'
+            or record['phase'] != 'PRE_LAUNCH'
+            or record['mode'] not in {'glm','qwen'}
+            or record['pool'] != {'glm':'glm','qwen':'bailian'}[record['mode']]
+            or any(record[key] != value[key] for key in
+                   ('run_id','root','parent','host','mode','requested_model'))
+            or any(not IDENT.fullmatch(record[key]) for key in
+                   ('run_id','root','parent','host','requested_model'))
+            or not re.fullmatch(r'[a-f0-9]{12}',record['lease_id'])
+            or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',record['account'])
+            or any(not HEX.fullmatch(record[key]) for key in
+                   ('packet_sha256','support_digest','acquire_response_sha256'))):
+        raise ValueError('artifact_launch_binding_invalid')
+    from remote_sub_helpers import validate_acquisition_pool
+    validate_acquisition_pool(record['mode'],record['requested_model'],
+                              record['acquisition_pool'])
+    if record['packet_sha256'] != sha(source['packet']):
+        raise ValueError('artifact_launch_binding_packet_mismatch')
+    if record['support_digest'] != contract['support_digest']:
+        raise ValueError('artifact_launch_binding_support_mismatch')
+    acquired=(f'LEASE={record["lease_id"]} ACCOUNT={record["account"]}').encode('ascii')
+    if record['acquire_response_sha256'] not in {sha(acquired),sha(acquired+b'\n')}:
+        raise ValueError('artifact_launch_binding_acquire_unverified')
+    if (not source['log'].endswith(b'\n')
+            or len(source['log'].decode('utf-8').splitlines()) != len(events)):
+        raise ValueError('artifact_launch_binding_log_truncated_or_foreign')
+    support=[event for event in events if event.startswith('SUPPORT_VERSION_READY ')]
+    if (len(support) != 1 or not re.fullmatch('SUPPORT_VERSION_READY digest='
+            + record['support_digest'] + r' policy=[a-f0-9]{64}',support[0])):
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    expected=['RUN_RESERVED explicit=1','LEASE_OK pool='+record['acquisition_pool'],
+              support[0],'LAUNCH_BINDING '+payloads[0],
+              f"LAUNCH stdout=lanes_{record['run_id']}.stdout"
+              + f" rc_file=ext/lanes_{record['run_id']}.rc cwd=~",
+              'LAUNCH_ATTEMPT attempt=1']
+    if [event for _,event in tracked_control_events(events)] != expected:
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    before_launch=events[:events.index(expected[4])]
+    if (any(marker in event for event in before_launch for marker in FORBIDDEN_LOG_MARKERS)
+            or any(event.startswith(('DONE','REMOTE_DONE','LEASE_PRESERVED'))
+                   for event in before_launch)):
+        raise ValueError('artifact_launch_binding_forbidden_event')
+    return record['acquisition_pool']
 
 
 def load_binding(path, *, run_id, root, parent):
@@ -415,12 +511,19 @@ def load_binding(path, *, run_id, root, parent):
         # Historical scopes keep their exact evidence set; a retained prelaunch
         # binding never qualifies older missing evidence.
         raise ValueError('plain_launch_binding_unexpected')
+    expected_acquisition_pool={'glm':'glm','qwen':'bailian','minimax':'minimax'}[value['mode']]
+    if plain_binding is not None:
+        expected_acquisition_pool=plain_acquisition_pool(plain_binding, collected=True)
+    elif plain is None and contract.get('schema') != PLAIN_SCHEMA:
+        observed=retained_artifact_acquisition_pool(events,value,source,contract)
+        if observed is not None:
+            expected_acquisition_pool=observed
     launches=[e for e in events if e.startswith('LAUNCH ')]
     support=[e for e in events if e.startswith('SUPPORT_VERSION_READY ')]
     if (launches != [f'LAUNCH stdout=lanes_{run_id}.stdout rc_file=ext/lanes_{run_id}.rc cwd=~']
             or [e for e in events if e.startswith('LAUNCH_ATTEMPT ')] != ['LAUNCH_ATTEMPT attempt=1']
             or len(support)!=1 or not re.fullmatch('SUPPORT_VERSION_READY digest='+contract['support_digest']+r' policy=[a-f0-9]{64}',support[0])
-            or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool='+{'glm':'glm','qwen':'bailian','minimax':'minimax'}[value['mode']]]):
+            or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool='+expected_acquisition_pool]):
         raise ValueError('original_launch_evidence_unqualified')
     delivery.assert_capsule_family(run_id)
     registry_raw=delivery.local_file(HERE/'hosts.json')
@@ -774,8 +877,8 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
         # New producer-bound plain group. Scope comes from the receipt's
         # retained record plus the caller's verified root/parent; no local
         # PLAIN_SCOPES entry is consulted.
-        if (record.get('schema')!=PLAIN_BINDING_SCHEMA
-                or record.get('source')!='controller_original_acquire_return'
+        plain_acquisition_pool(record, collected=True)
+        if (record.get('source')!='controller_original_acquire_return'
                 or record.get('phase')!='PRE_LAUNCH'
                 or any(record.get(k)!=v for k,v in {
                     'run_id':run_id,'root':root,'parent':parent,

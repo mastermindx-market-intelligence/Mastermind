@@ -251,7 +251,7 @@ def validate_usage():
 
 
 TRANSPORT_OBSERVATION_SCHEMA = 'mastermind.transport_observation.v1'
-TRANSPORT_RECEIPT_SCHEMA = 'mastermind.transport_verification.v1'
+TRANSPORT_RECEIPT_SCHEMA = 'mastermind.transport_verification.v2'
 TRANSPORT_STAMP = re.compile(r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z\Z')
 # Controller observations only. None of these events authenticates anything;
 # they are the retained, ordered narration the read-only collector re-reads.
@@ -261,6 +261,23 @@ TRACKED_EVENT_NAMES = ('RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
 FORBIDDEN_LOG_MARKERS = ('REFUSED', 'FAILED', 'EFFECT_UNKNOWN', 'UNPROVEN',
                          'LEASE_PRESERVED')
 ACQUIRE_RESPONSE = re.compile(rb'LEASE=([a-f0-9]{12}) ACCOUNT=([A-Za-z0-9_.:-]{1,128})\n?')
+
+
+def validate_acquisition_pool(mode, model, acquisition_pool):
+    """Validate the selected tag, never infer a canonical broker-row pool.
+
+    The original controller selects this tag and passes its retained LEASE_POOL.
+    GLM-5.3 may use ordinary glm when no frontier partition was available.
+    Historical readers validate the bound tuple without consulting current CAPS.
+    """
+    if type(model) is not str or type(acquisition_pool) is not str:
+        raise ValueError('acquisition_pool_scope')
+    allowed = {'bailian'} if mode == 'qwen' else {'glm'} if mode == 'glm' else set()
+    if mode == 'glm' and model == 'glm-5.3':
+        allowed.add('glm-frontier')
+    if acquisition_pool not in allowed:
+        raise ValueError('acquisition_pool_scope')
+    return acquisition_pool
 
 
 def _tracked_events(events):
@@ -325,7 +342,7 @@ def _publish_log_line(log_name, dir_fd, fd, chain, before, identity, raw, append
 def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
                      observation_path, *, run_id, host, mode, model,
                      support_digest, policy_sha256, launch_lease_id,
-                     launch_account):
+                     launch_account, acquisition_pool):
     """Verify the transported packet and published support before any launch.
 
     Fixed read-only controller observation over the incumbent SSH transport:
@@ -352,6 +369,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
             or type(policy_sha256) is not str
             or not re.fullmatch('[a-f0-9]{64}', policy_sha256)):
         raise ValueError('transport_verification_scope')
+    validate_acquisition_pool(mode, model, acquisition_pool)
     packet = delivery.local_file(Path(packet_path), 2 * 1024 * 1024)
     packet_sha = hashlib.sha256(packet).hexdigest()
     acquired = delivery.local_file(Path(lease_output_path), 1024)
@@ -389,6 +407,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     record = {
         'schema': TRANSPORT_RECEIPT_SCHEMA,
         'run_id': run_id, 'host': host, 'mode': mode, 'requested_model': model,
+        'acquisition_pool': acquisition_pool,
         'packet_sha256': packet_sha, 'support_digest': support_digest,
         'policy_sha256': policy_sha256, 'files': files,
         'lease_id': lease_id, 'account': account,
@@ -407,7 +426,7 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
             if ([name for name, _ in tracked] != ['RUN_RESERVED', 'LEASE_OK',
                                                   'SUPPORT_VERSION_READY']
                     or tracked[0][1] != 'RUN_RESERVED explicit=1'
-                    or tracked[1][1] != 'LEASE_OK pool=' + {'glm': 'glm', 'qwen': 'bailian'}[mode]
+                    or tracked[1][1] != 'LEASE_OK pool=' + acquisition_pool
                     or not re.fullmatch('SUPPORT_VERSION_READY digest=' + support_digest
                                         + r' policy=[a-f0-9]{64}', tracked[2][1])
                     or any(marker in event for event in events
@@ -523,7 +542,8 @@ def custody_chain_source():
 
 def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                           root, parent, host, mode, model, support_digest,
-                          launch_lease_id, launch_account, transport_receipt=None):
+                          launch_lease_id, launch_account, acquisition_pool,
+                          transport_receipt=None):
     """Retain the existing acquire return before a NEW artifact worker starts.
 
     Correlation evidence only: no authentication, new admission, settlement,
@@ -594,7 +614,9 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
     lease_id, account = (x.decode('ascii') for x in match.groups())
     if lease_id != launch_lease_id or account != launch_account:
         raise ValueError('launch_binding_launch_mismatch')
+    # Keep the accounting/provider family separate from the selected tag.
     pool = {'glm': 'glm', 'qwen': 'bailian'}[mode]
+    validate_acquisition_pool(mode, model, acquisition_pool)
     packet_sha = hashlib.sha256(packet).hexdigest()
     transport = None
     if contract is None:
@@ -610,13 +632,14 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
         if (type(receipt) is not dict
                 or receipt.get('schema') != TRANSPORT_RECEIPT_SCHEMA
                 or set(receipt) != {'schema', 'run_id', 'host', 'mode',
-                                    'requested_model', 'packet_sha256',
+                                    'requested_model', 'acquisition_pool', 'packet_sha256',
                                     'support_digest', 'policy_sha256', 'files',
                                     'lease_id', 'account',
                                     'acquire_response_sha256', 'phase',
                                     'verified_at'}
                 or receipt['run_id'] != run_id or receipt['host'] != host
                 or receipt['mode'] != mode or receipt['requested_model'] != model
+                or receipt['acquisition_pool'] != acquisition_pool
                 or receipt['packet_sha256'] != packet_sha
                 or receipt['support_digest'] != support_digest
                 or type(receipt['policy_sha256']) is not str
@@ -637,7 +660,8 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                     sort_keys=True, separators=(',', ':')).encode()).hexdigest()
                 != support_digest):
             raise ValueError('launch_binding_transport_unconfirmed')
-        transport = {'packet_sha256': receipt['packet_sha256'],
+        transport = {'acquisition_pool': receipt['acquisition_pool'],
+                     'packet_sha256': receipt['packet_sha256'],
                      'support_digest': receipt['support_digest'],
                      'policy_sha256': receipt['policy_sha256'],
                      'files': receipt_files,
@@ -647,10 +671,11 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                      'phase': receipt['phase'],
                      'verified_at': receipt['verified_at']}
     record = {
-        'schema': ('mastermind.fabric_launch_binding.v1' if contract is not None
-                   else 'mastermind.fabric_plain_launch_binding.v1'),
+        'schema': ('mastermind.fabric_launch_binding.v2' if contract is not None
+                   else 'mastermind.fabric_plain_launch_binding.v2'),
         'run_id': run_id, 'root': root, 'parent': parent, 'host': host,
         'mode': mode, 'requested_model': model, 'pool': pool,
+        'acquisition_pool': acquisition_pool,
         'lease_id': lease_id, 'account': account,
         'packet_sha256': packet_sha,
         'support_digest': support_digest,
@@ -676,7 +701,7 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                         != ['RUN_RESERVED', 'LEASE_OK', 'SUPPORT_VERSION_READY',
                             'TRANSPORT_VERIFIED']
                         or tracked[0][1] != 'RUN_RESERVED explicit=1'
-                        or tracked[1][1] != 'LEASE_OK pool=' + pool
+                        or tracked[1][1] != 'LEASE_OK pool=' + acquisition_pool
                         or not re.fullmatch('SUPPORT_VERSION_READY digest='
                                             + support_digest + r' policy=[a-f0-9]{64}',
                                             tracked[2][1])
@@ -691,7 +716,7 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
                                for marker in FORBIDDEN_LOG_MARKERS)):
                     raise ValueError('launch_binding_not_fresh_prelaunch')
             elif (sum(e == 'RUN_RESERVED explicit=1' for e in events) != 1
-                    or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool=' + pool]
+                    or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool=' + acquisition_pool]
                     or len([e for e in events if e.startswith('SUPPORT_VERSION_READY ')]) != 1
                     or not any(re.fullmatch(
                         'SUPPORT_VERSION_READY digest=' + support_digest + r' policy=[a-f0-9]{64}', e) for e in events)
@@ -720,22 +745,23 @@ def record_launch_binding(log_path, packet_path, lease_output_path, *, run_id,
 def launch_binding():
     import json
     (log, packet, acquired, run, root, parent, host, mode, model, support,
-     launch_lease_id, launch_account, receipt) = sys.argv[1:14]
+     launch_lease_id, launch_account, receipt, acquisition_pool) = sys.argv[1:]
     result = record_launch_binding(log, packet, acquired, run_id=run, root=root,
                                   parent=parent, host=host, mode=mode,
                                   model=model, support_digest=support,
                                   launch_lease_id=launch_lease_id, launch_account=launch_account,
+                                  acquisition_pool=acquisition_pool,
                                   transport_receipt=None if receipt == '-' else receipt)
     print(json.dumps(result, sort_keys=True))
 
 
 def transport_verification():
     (log, receipt, packet, acquired, observation, run, host, mode, model,
-     support, policy, lease_id, account) = sys.argv[1:14]
+     support, policy, lease_id, account, acquisition_pool) = sys.argv[1:]
     transport_verify(log, receipt, packet, acquired, observation, run_id=run,
                      host=host, mode=mode, model=model, support_digest=support,
                      policy_sha256=policy, launch_lease_id=lease_id,
-                     launch_account=account)
+                     launch_account=account, acquisition_pool=acquisition_pool)
 
 
 def main():

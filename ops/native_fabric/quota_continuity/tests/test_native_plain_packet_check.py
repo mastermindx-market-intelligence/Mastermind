@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -500,6 +501,135 @@ class HistoricalCheckTests(unittest.TestCase):
         status = reconcile.status_from_receipt()
         self.assertEqual(status["state"], "TERMINAL_FAILURE")
         self.assertIs(status["retry_allowed"], False)
+
+    def test_real_cli_stdout_shutdown_preserves_failure_code_and_receipt(self):
+        child = r'''
+import atexit, json, os, sys
+from pathlib import Path
+from unittest import mock
+sys.path.insert(0, sys.argv[1])
+from test_native_plain_packet_check import HistoricalCheckTests, check
+import native_plain_packet_reconcile as reconcile
+import fabric_task
+# Keep the real JSON write buffered so the closed pipe fails at explicit flush.
+sys.stdout = open(1, "w", encoding="utf-8", buffering=1024 * 1024, closefd=False)
+atexit.register(lambda: os.write(2, b"INERT_CHILD_NORMAL_SHUTDOWN\n"))
+case = HistoricalCheckTests()
+case.setUp()
+try:
+    proof = case.qualify()
+    receipt = reconcile.receipt_path()
+    observed = {"operations": 0, "json_calls": 0, "json_completed": False}
+    original_operation = reconcile.reconcile_original
+    original_json = fabric_task._json
+    def operation(*args):
+        observed["operations"] += 1
+        return original_operation(*args)
+    def output(value):
+        observed["json_calls"] += 1
+        original_json(value)
+        observed["json_completed"] = True
+        observed["receipt_before"] = [check.digest(receipt.read_bytes()),
+                                       check.identity(receipt.lstat())]
+    with mock.patch.object(reconcile, "reconcile_original", operation), \
+         mock.patch.object(fabric_task, "_json", output), \
+         mock.patch.object(fabric_task, "request", side_effect=AssertionError("no dispatch")):
+        rc = fabric_task.main(["reconcile-plain-packet-retention", check.RUN,
+            "--root", check.ROOT, "--expected-proof-sha256", proof["proof_sha256"]])
+    observed["function_rc"] = rc
+    observed["receipt_after"] = [check.digest(receipt.read_bytes()),
+                                  check.identity(receipt.lstat())]
+    with mock.patch.object(fabric_task, "HERE", case.here):
+        observed["status"] = fabric_task.inspect_run(check.RUN)
+    observed["receipt_after_status"] = [check.digest(receipt.read_bytes()),
+                                         check.identity(receipt.lstat())]
+    Path(sys.argv[2]).write_text(json.dumps(observed, sort_keys=True))
+finally:
+    case.tearDown()
+raise SystemExit(rc)
+'''
+        for broken in (False, True):
+            with self.subTest(broken_pipe=broken):
+                proof_path = self.base / ("broken-child.json" if broken else "healthy-child.json")
+                args = [sys.executable, "-c", child, str(ROOT / "tests"), str(proof_path)]
+                if broken:
+                    read_fd, write_fd = os.pipe()
+                    os.close(read_fd)
+                    try:
+                        result = subprocess.run(args, stdout=write_fd, stderr=subprocess.PIPE,
+                                                text=True, close_fds=True, timeout=30)
+                    finally:
+                        os.close(write_fd)
+                else:
+                    result = subprocess.run(args, capture_output=True, text=True,
+                                            close_fds=True, timeout=30)
+                observed = json.loads(proof_path.read_text())
+                self.assertEqual(observed["operations"], 1)
+                self.assertEqual(observed["json_calls"], 1)
+                self.assertIs(observed["json_completed"], True)
+                self.assertEqual(observed["receipt_before"], observed["receipt_after"])
+                self.assertEqual(observed["receipt_before"], observed["receipt_after_status"])
+                status = observed["status"]
+                self.assertEqual((status["state"], status["rc"], status["signal"]),
+                                 ("TERMINAL_FAILURE", 78, "prelaunch_failure"))
+                self.assertIs(status["result_available"], False)
+                self.assertIsNone(status["accepted"])
+                self.assertEqual(status["acceptance_state"], "UNVERIFIED")
+                self.assertIs(status["same_run_replay_allowed"], False)
+                self.assertIs(status["retry_allowed"], False)
+                self.assertIn("INERT_CHILD_NORMAL_SHUTDOWN", result.stderr)
+                self.assertNotIn("NOT_APPLIED", result.stderr)
+                if broken:
+                    self.assertEqual(observed["function_rc"], 78)
+                    self.assertEqual(result.returncode, 78, result.stderr)
+                    self.assertEqual(result.stderr.count(
+                        "PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: EFFECT_UNKNOWN"), 1)
+                    self.assertNotIn("Exception ignored", result.stderr)
+                else:
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    self.assertEqual(json.loads(result.stdout)["action"], "RECORDED")
+                    self.assertNotIn("RETURN_UNDELIVERED", result.stderr)
+
+    def test_cli_flush_failure_preserves_receipt_and_requires_fresh_status(self):
+        import native_plain_packet_reconcile as reconcile
+        import fabric_task
+        proof = self.qualify()
+        p = reconcile.receipt_path()
+        class FailedFlush(io.StringIO):
+            def __init__(self):
+                super().__init__()
+                self.flush_calls = 0
+                self.receipt_before_failure = None
+            def flush(self):
+                self.flush_calls += 1
+                self.receipt_before_failure = (p.read_bytes(), check.identity(p.lstat()))
+                raise BrokenPipeError("injected buffered acknowledgment flush failure")
+        stdout = FailedFlush()
+        with contextlib.redirect_stdout(stdout), \
+             contextlib.redirect_stderr(io.StringIO()) as stderr:
+            rc = fabric_task.main(["reconcile-plain-packet-retention", check.RUN,
+                "--root", check.ROOT, "--expected-proof-sha256", proof["proof_sha256"]])
+        self.assertFalse(stdout.closed)
+        self.assertEqual(json.loads(stdout.getvalue())["action"], "RECORDED")
+        self.assertEqual(rc, 78)
+        self.assertEqual(stdout.flush_calls, 1)
+        self.assertIn("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: EFFECT_UNKNOWN",
+                      stderr.getvalue())
+        self.assertNotIn("NOT_APPLIED", stdout.getvalue() + stderr.getvalue())
+        self.assertIsNotNone(stdout.receipt_before_failure)
+        self.assertEqual(stdout.receipt_before_failure,
+                         (p.read_bytes(), check.identity(p.lstat())))
+        with mock.patch.object(fabric_task, "HERE", self.here):
+            status = fabric_task.inspect_run(check.RUN)
+        self.assertEqual((status["state"], status["rc"], status["signal"]),
+                         ("TERMINAL_FAILURE", 78, "prelaunch_failure"))
+        self.assertIs(status["result_available"], False)
+        self.assertIsNone(status["accepted"])
+        self.assertEqual(status["acceptance_state"], "UNVERIFIED")
+        self.assertIs(status["same_run_replay_allowed"], False)
+        self.assertIs(status["retry_allowed"], False)
+        self.assertEqual(stdout.receipt_before_failure,
+                         (p.read_bytes(), check.identity(p.lstat())))
 
     def test_evidence_change_after_creation_never_reports_reconciled(self):
         import native_plain_packet_reconcile as reconcile

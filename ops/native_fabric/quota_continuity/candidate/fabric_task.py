@@ -180,9 +180,11 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         keys = {"schema", "run_id", "root", "parent", "host", "mode", "requested_model",
                 "pool", "lease_id", "account", "packet_sha256", "support_digest",
                 "acquire_response_sha256", "source", "phase"}
+        if type(binding) is dict and binding.get("schema") == "mastermind.fabric_launch_binding.v2":
+            keys.add("acquisition_pool")
         if type(binding) is not dict or set(binding) != keys:
             return unknown
-        if (binding["schema"] != "mastermind.fabric_launch_binding.v1"
+        if (binding["schema"] not in {"mastermind.fabric_launch_binding.v1", "mastermind.fabric_launch_binding.v2"}
                 or binding["run_id"] != rid or binding["host"] not in hosts
                 or binding["source"] != "controller_original_acquire_return"
                 or binding["phase"] != "PRE_LAUNCH"
@@ -197,17 +199,27 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
                 return unknown
         if type(binding["lease_id"]) is not str or not re.fullmatch("[a-f0-9]{12}", binding["lease_id"]):
             return unknown
+        if binding["schema"] == "mastermind.fabric_launch_binding.v2":
+            from remote_sub_helpers import validate_acquisition_pool
+            acquisition_pool = validate_acquisition_pool(
+                binding["mode"], binding["requested_model"], binding["acquisition_pool"])
+            acquired = (f'LEASE={binding["lease_id"]} ACCOUNT={binding["account"]}').encode("ascii")
+            if binding["acquire_response_sha256"] not in {
+                    delivery.digest(acquired), delivery.digest(acquired + b"\n")}:
+                return unknown
+        else:
+            acquisition_pool = binding["pool"]
         before = events[:index]
         support = "SUPPORT_VERSION_READY digest=" + binding["support_digest"] + r" policy=[a-f0-9]{64}"
         if (sum(event == "RUN_RESERVED explicit=1" for event in before) != 1
-                or [event for event in before if event.startswith("LEASE_OK ")] != ["LEASE_OK pool=" + binding["pool"]]
+                or [event for event in before if event.startswith("LEASE_OK ")] != ["LEASE_OK pool=" + acquisition_pool]
                 or len([event for event in before if event.startswith("SUPPORT_VERSION_READY ")]) != 1
                 or not any(re.fullmatch(support, event) for event in before)
                 or any(event.startswith(("LAUNCH", "DONE", "REMOTE_DONE", "LEASE_PRESERVED")) for event in before)
                 or any(token in event for event in before for token in ("REFUSED", "FAILED", "EFFECT_UNKNOWN"))):
             return unknown
         if not (before.index("RUN_RESERVED explicit=1")
-                < before.index("LEASE_OK pool=" + binding["pool"])
+                < before.index("LEASE_OK pool=" + acquisition_pool)
                 < next(i for i, event in enumerate(before) if event.startswith("SUPPORT_VERSION_READY "))):
             return unknown
         if delivery.local_file(log_path, MAX_LOG_BYTES) != original_log:
@@ -1100,6 +1112,26 @@ def _json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
+def _discard_failed_stdout() -> None:
+    """Prevent a failed acknowledgment from flushing again to its old channel."""
+    target_fd = null_fd = None
+    try:
+        target_fd = sys.stdout.fileno()
+        null_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null_fd, target_fd)
+    except (AttributeError, OSError, TypeError, ValueError):
+        # Embedded/test streams may have no descriptor. Never assume fd 1 or
+        # sys.__stdout__ belongs to that stream, and do not close the caller's
+        # retained object merely to disarm this CLI response.
+        sys.stdout = None
+    finally:
+        if null_fd is not None and null_fd != target_fd:
+            try:
+                os.close(null_fd)
+            except OSError:
+                pass
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1326,11 +1358,14 @@ def main(argv: list[str] | None = None) -> int:
                 return 78
             try:
                 _json(response)
+                # Buffered writes must cross the acknowledgment boundary here.
+                sys.stdout.flush()
             except (OSError, ValueError, TypeError) as exc:
                 # The operation already returned. Output failure is not a proof
                 # that publication was unapplied; settle through fresh status.
+                _discard_failed_stdout()
                 print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: EFFECT_UNKNOWN: "
-                      + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                      + type(exc).__name__ + ": " + str(exc), file=sys.stderr, flush=True)
                 return 78
             return 0
         if args.cmd == "check-plain-packet-retention":
