@@ -382,3 +382,144 @@ def test_book_default_still_settles(sd) -> None:
     # call book() with market open and no read_only flag — settlement must fire
     sd.book(prices={"AAPL": 100.0}, market_open=True)
     assert len(sd._load_pending()) == 0          # order consumed by settlement
+
+
+# Overnight 24/5 paper LIMIT path; entirely separate from regular next-open orders.
+
+def _overnight_bbo(**overrides):
+    q = {"executable": True, "status": "realtime_boats",
+         "bid": 99.9, "ask": 100.1, "bid_size": 250, "ask_size": 250,
+         "quoted_at": "2026-10-09T02:00:00+00:00"}
+    q.update(overrides)
+    return q
+
+
+def test_overnight_clock_boundaries():
+    from portfolio import market_clock as mc
+    assert mc.is_overnight(datetime(2026, 10, 8, 20, 0))
+    assert mc.is_overnight(datetime(2026, 10, 9, 3, 59))
+    assert not mc.is_overnight(datetime(2026, 10, 9, 4, 0))
+    assert not mc.is_overnight(datetime(2026, 10, 9, 20, 0))
+    assert not mc.is_overnight(datetime(2026, 10, 10, 22))
+    assert mc.is_overnight(datetime(2026, 10, 11, 20, 0))
+    assert mc.status(datetime(2026, 10, 11, 20, 0))["session"] == "overnight"
+    assert mc.status(datetime(2026, 10, 11, 20, 0))["is_open"] is False
+    assert not mc.is_overnight(datetime(2026, 12, 24, 22))  # Christmas Fri
+    assert mc.is_overnight(datetime(2026, 11, 1, 21))  # EST after DST switch
+
+
+def test_overnight_market_limit_buy_sell_existing_account(sd, monkeypatch):
+    from data_layer import overnight_equities as oq
+    monkeypatch.setattr(oq, "latest", lambda *a, **kw: _overnight_bbo())
+    when = datetime(2026, 10, 8, 22, 15)
+    r = sd.place_order("AAPL", "buy", 10, session="overnight", limit_price=100.2, now=when)
+    assert r["ok"] and r["status"] == "filled" and r["paper_only"]
+    assert r["fill"]["price"] == 100.1 and r["fill"]["session"] == "overnight"
+    assert r["fill"]["limit_price"] == 100.2 and sd._load_pending() == []
+    assert sd._load_account()["positions"]["AAPL"]["shares"] == 10
+    s = sd.place_order("AAPL", "sell", 4, session="overnight", limit_price=99.8, now=when)
+    assert s["ok"] and s["fill"]["price"] == 99.9
+    assert sd._load_account()["positions"]["AAPL"]["shares"] == 6
+    assert len(sd._load_fills()) == 2
+
+
+def test_overnight_indicative_quote_rejected_no_ledger_change(sd, monkeypatch):
+    from data_layer import overnight_equities as oq
+    monkeypatch.setattr(oq, "latest",
+                        lambda *a, **kw: _overnight_bbo(executable=False, status="indicative"))
+    r = sd.place_order("AAPL", "buy", 2, session="overnight", limit_price=101,
+                       now=datetime(2026, 10, 8, 22))
+    assert not r["ok"] and r["quote_status"] == "indicative"
+    assert sd._load_fills() == [] and sd._load_pending() == []
+    assert sd._load_account()["positions"] == {}
+
+
+def test_overnight_nonmarketable_limit_never_queues_regular_market(sd, monkeypatch):
+    from data_layer import overnight_equities as oq
+    monkeypatch.setattr(oq, "latest", lambda *a, **kw: _overnight_bbo())
+    r = sd.place_order("AAPL", "buy", 2, session="overnight", limit_price=99,
+                       now=datetime(2026, 10, 8, 22))
+    assert not r["ok"] and r["status"] == "not_marketable"
+    assert sd._load_pending() == [] and sd._load_fills() == []
+    assert sd.settle_pending(market_open=True, prices={"AAPL": 100.0}) == []
+
+
+@pytest.mark.parametrize("limit", [None, 0, -1, float("inf"), float("nan")])
+def test_overnight_invalid_limit_rejected_without_feed(sd, monkeypatch, limit):
+    from data_layer import overnight_equities as oq
+    monkeypatch.setattr(oq, "latest", lambda *a, **kw: pytest.fail("feed must not be queried"))
+    r = sd.place_order("AAPL", "buy", 2, session="overnight", limit_price=limit,
+                       now=datetime(2026, 10, 8, 22))
+    assert not r["ok"] and sd._load_pending() == []
+
+
+def test_overnight_closed_and_thin_quote_rejected(sd, monkeypatch):
+    from data_layer import overnight_equities as oq
+    monkeypatch.setattr(oq, "latest", lambda *a, **kw: _overnight_bbo(ask_size=1))
+    assert not sd.place_order("AAPL", "buy", 2, session="overnight", limit_price=101,
+                              now=datetime(2026, 10, 9, 20))["ok"]
+    r = sd.place_order("AAPL", "buy", 2, session="overnight", limit_price=101,
+                       now=datetime(2026, 10, 8, 22))
+    assert not r["ok"] and r["status"] == "liquidity_limit"
+    assert sd._load_fills() == []
+
+
+def test_overnight_long_only_and_cash_guards(sd, monkeypatch):
+    from data_layer import overnight_equities as oq
+    monkeypatch.setattr(oq, "latest",
+                        lambda *a, **kw: _overnight_bbo(ask_size=100000))
+    when = datetime(2026, 10, 8, 22)
+    assert not sd.place_order("AAPL", "buy", 10001, session="overnight",
+                              limit_price=101, now=when)["ok"]
+    assert not sd.place_order("AAPL", "sell", 1, session="overnight",
+                              limit_price=99, now=when)["ok"]
+    assert sd._load_fills() == []
+
+
+def test_legacy_regular_closed_orders_still_queue(sd):
+    assert sd.place_order("AAPL", "buy", 2, market_open=False)["status"] == "pending"
+    assert sd._load_pending()[0]["ticker"] == "AAPL"
+
+
+def test_real_tiingo_boats_paper_order_reuses_self_directed_ledger(sd, monkeypatch):
+    """No broker order is ever sent; the authenticated Tiingo GET backs a paper fill."""
+    from datetime import timezone
+    from data_layer import overnight_equities as oq
+    monkeypatch.setenv("TIINGO_API_KEY", "test_private_tiingo")
+    monkeypatch.setenv("MASTERMIND_TIINGO_BOATS_DISPLAY_AUTHORIZED", "1")
+    monkeypatch.setenv("MASTERMIND_TIINGO_BOATS_NONDISPLAY_AUTHORIZED", "1")
+    monkeypatch.setenv("MASTERMIND_OVERNIGHT_PAPER_FILLS_ENABLED", "1")
+    called = []
+
+    class FakeResponse:
+        status_code = 200
+
+        def json(self):
+            return [{
+                "ticker": "AAPL",
+                "quoteTimestamp": datetime.now(timezone.utc).isoformat(),
+                "bidPrice": 99.9, "askPrice": 100.1,
+                "bidSize": 20, "askSize": 30,
+            }]
+
+    def get(url, headers=None, timeout=None):
+        called.append((url, timeout))
+        assert "test_private_tiingo" not in url
+        assert headers == {
+            "Authorization": "Token test_private_tiingo",
+            "Accept": "application/json",
+        }
+        return FakeResponse()
+
+    monkeypatch.setattr(oq.requests, "get", get)
+    result = sd.place_order(
+        "AAPL", "buy", 10, session="overnight", limit_price=100.20,
+        now=datetime(2026, 10, 8, 22))
+    assert result["ok"] and result["status"] == "filled"
+    assert result["fill"]["price"] == 100.1
+    assert result["fill"]["quote_source"] == "tiingo_boats"
+    assert result["fill"]["paper_only"]
+    assert sd._load_pending() == []
+    assert sd._load_account()["positions"]["AAPL"]["shares"] == 10
+    assert len(sd._load_fills()) == 1
+    assert called == [("https://api.tiingo.com/boats/aapl", 4)]

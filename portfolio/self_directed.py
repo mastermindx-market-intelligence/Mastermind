@@ -329,9 +329,71 @@ def settle_pending(*, now: datetime | None = None, market_open: bool | None = No
 # the public order API
 # ---------------------------------------------------------------------------
 
+def _place_overnight_order(ticker: str, side: str, shares: float | None,
+                           notional: float | None, limit_price: float | None,
+                           now: datetime | None) -> dict:
+    """Marketable-only, explicitly requested PAPER limit at a fresh eligible BOATS BBO.
+
+    No standing orders are created: an unmarketable limit is REJECTED, never
+    converted into a next-open market order. Thin/stale/indicative quotes cannot fill.
+    """
+    from portfolio import market_clock
+    if not market_clock.is_overnight(now):
+        return {"ok": False, "error": "overnight market closed (8 PM–4 AM ET Sun–Fri)"}
+    try:
+        limit = float(limit_price)
+        if not math.isfinite(limit) or limit <= 0:
+            raise ValueError("nonpositive limit")
+    except (TypeError, ValueError, OverflowError):
+        return {"ok": False, "error": "overnight orders require a positive finite limit_price"}
+    from data_layer import overnight_equities
+    quote = overnight_equities.latest(
+        ticker, include_eligibility=True, purpose="execution")
+    if not quote.get("executable"):
+        return {
+            "ok": False, "error": "overnight paper fill unavailable: "
+            + str(quote.get("status") or "feed_or_eligibility_unavailable"),
+            "quote_status": quote.get("status"),
+        }
+    # A BUY simulates lifting the ask; a SELL simulates hitting the bid.
+    px = quote["ask"] if side == "buy" else quote["bid"]
+    if (side == "buy" and px > limit) or (side == "sell" and px < limit):
+        return {"ok": False, "status": "not_marketable",
+                "error": "limit not marketable at the current overnight bid/ask; no order queued"}
+    size = quote["ask_size"] if side == "buy" else quote["bid_size"]
+    req = shares if shares is not None else notional / px
+    if req > size:
+        return {"ok": False, "status": "liquidity_limit",
+                "error": "requested shares exceed displayed overnight quote size; no simulated fill"}
+    state = _load_account()
+    if side == "buy" and state["cash"] < req * px:
+        return {"ok": False, "error": "insufficient cash for the full overnight order"}
+    if side == "sell" and (state.get("positions", {}).get(ticker) or {}).get("shares", 0) < req:
+        return {"ok": False, "error": "insufficient shares for the full overnight order"}
+    et = now or market_clock.now_et()
+    fill = _apply_fill(state, ticker, side, req, px, et.date().isoformat())
+    if not fill:
+        return {"ok": False, "error": "overnight order could not be filled"}
+    fill.update({
+        "order_id": _gen_order_id(ticker),
+        "session": "overnight",
+        "order_type": "limit",
+        "limit_price": round(limit, 4),
+        "quote_source": "tiingo_boats",
+        "quote_time": quote["quoted_at"],
+        "executed_at": _now_iso(),
+        "paper_only": True,
+    })
+    _save_account(state)
+    _append_fill(fill)
+    return {"ok": True, "status": "filled", "fill": fill,
+            "cash_after": round(state["cash"], 2), "paper_only": True}
+
+
 def place_order(ticker: str, side: str, shares: float | None = None, *,
                 notional: float | None = None, price: float | None = None,
-                now: datetime | None = None, market_open: bool | None = None) -> dict:
+                now: datetime | None = None, market_open: bool | None = None,
+                session: str = "regular", limit_price: float | None = None) -> dict:
     """Place a single buy/sell, sized by SHARES or by a DOLLAR amount (`notional` → shares
     at the fill price). Pass exactly one. Returns one of:
       {ok:True, status:'filled', fill:{...}, cash_after}     — executed at market now
@@ -344,8 +406,8 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
     def _pos(v):
         try:
             v = float(v)
-            return v if v > 0 else None
-        except (TypeError, ValueError):
+            return v if math.isfinite(v) and v > 0 else None
+        except (TypeError, ValueError, OverflowError):
             return None
     sh = _pos(shares)
     nt = _pos(notional)
@@ -356,6 +418,14 @@ def place_order(ticker: str, side: str, shares: float | None = None, *,
         return {"ok": False, "error": "side must be 'buy' or 'sell'"}
     if sh is None and nt is None:
         return {"ok": False, "error": "shares or dollar amount must be positive"}
+    if session not in ("regular", "overnight"):
+        return {"ok": False, "error": "unsupported trading session"}
+    if session == "overnight":
+        if sh is not None and nt is not None:
+            return {"ok": False, "error": "overnight orders require either shares or notional, not both"}
+        return _place_overnight_order(ticker, side, sh, nt, limit_price, now)
+    if limit_price is not None:
+        return {"ok": False, "error": "limit_price is only supported for overnight paper orders"}
 
     if market_open is None:
         market_open = _market_open(now)
@@ -609,8 +679,18 @@ def quote_info(ticker: str) -> dict:
             name = det.get("name") or ""
     except Exception:
         pass
-    return {"ticker": ticker, "price": _current_price(ticker), "name": name,
-            "market": _market_status()}
+    market = _market_status()
+    regular_mark = _current_price(ticker)
+    info = {"ticker": ticker, "price": regular_mark, "name": name,
+            "market": market, "price_source": "regular_or_last_known"}
+    if market.get("session") == "overnight":
+        from data_layer import overnight_equities
+        overnight = overnight_equities.latest(ticker, include_eligibility=True)
+        info["overnight"] = overnight
+        if overnight.get("fresh") and overnight.get("mid"):
+            info["price"] = overnight["mid"]
+            info["price_source"] = "tiingo_boats_bbo_mid"
+    return info
 
 
 def book(*, prices: dict[str, float] | None = None, now: datetime | None = None,
@@ -755,6 +835,11 @@ def history(*, prices: dict[str, float] | None = None, now: datetime | None = No
             "exit_price": None, "realized_pnl": None, "realized_pct": None,
             "unrealized_pnl": None, "unrealized_pct": None,
             "queued": bool(f.get("queued")), "still_open": False, "open_shares": None,
+            "session": f.get("session", "regular"),
+            "limit_price": f.get("limit_price"),
+            "quote_source": f.get("quote_source"),
+            "quote_time": f.get("quote_time"),
+            "executed_at": f.get("executed_at"),
         }
         if side == "buy":
             lots[tk].append([shares, px, row])
