@@ -413,6 +413,29 @@ class ControllerDeadline(unittest.TestCase):
         self.assertEqual(stages.count('launch'),1,result['stderr'])
         self.assertLess(stages.index('transport_read'),stages.index('launch'))
 
+    def test_plain_wrapper_retained_packet_reuses_exact_private_source(self):
+        # fabric_task.py has already durably retained this path before invoking
+        # the real native Bash controller. Retention must not re-create it.
+        retained=self.ext/'state/remote_sub'/'offline-plain_ok.request.packet'
+        retained.parent.mkdir(parents=True)
+        retained.write_bytes(self.packet.read_bytes())
+        retained.chmod(0o600)
+        self.packet=retained
+        before=retained.stat()
+        digest=hashlib.sha256(retained.read_bytes()).hexdigest()
+        result=self.run_controller('plain_ok',budget=8,mode='qwen',model='qwen3.8-flash')
+        self.assertEqual(result['returncode'],0,result['stderr'])
+        after=retained.stat()
+        self.assertEqual((before.st_dev,before.st_ino,before.st_mtime_ns),
+                         (after.st_dev,after.st_ino,after.st_mtime_ns))
+        self.assertEqual(hashlib.sha256(retained.read_bytes()).hexdigest(),digest)
+        stages=[row['stage'] for row in result['events']]
+        self.assertEqual(stages.count('acquire'),1)
+        self.assertEqual(stages.count('launch'),1)
+        self.assertLess(stages.index('transport_read'),stages.index('launch'))
+        receipt=json.loads((retained.parent/'offline-plain_ok.transport-verified.json').read_text())
+        self.assertEqual(receipt['packet_sha256'],digest)
+
     def test_mutated_remote_packet_refuses_launch_and_binding(self):
         result=self.run_controller('transport_mutated_packet',budget=8,
                                    mode='qwen',model='qwen3.8-flash')
@@ -592,3 +615,94 @@ class FullCliDeadline(unittest.TestCase):
 
 if __name__=='__main__':
     unittest.main(verbosity=2)
+
+
+
+class PlainPacketRetention(unittest.TestCase):
+    """Exercise the candidate's actual retention block without a live controller."""
+
+    def test_same_path_private_custody_and_exclusive_destination_matrix(self):
+        source=(ROOT/'candidate/remote_sub.sh').read_text()
+        marker="<<'PY_RETAIN_PLAIN_PACKET'\n"
+        self.assertEqual(source.count(marker),1)
+        block=source.split(marker,1)[1].split('\nPY_RETAIN_PLAIN_PACKET',1)[0]
+        cases={
+            'fresh_private':True,
+            'fresh_public_source':True,
+            'same_private':True,
+            'same_public_refused':False,
+            'same_hardlink_refused':False,
+            'same_symlink_refused':False,
+            'different_existing_equal_refused':False,
+            'different_existing_foreign_refused':False,
+            'destination_symlink_refused':False,
+            'empty_source_refused':False,
+            'oversized_source_refused':False,
+            'same_inode_replacement_refused':False,
+            'same_content_change_refused':False,
+        }
+        payload=b'INERT packet-retention fixture; no worker task\n'
+        with tempfile.TemporaryDirectory(prefix='plain-retain-') as temporary:
+            for case,expected_success in cases.items():
+                with self.subTest(case=case):
+                    directory=Path(temporary)/case
+                    directory.mkdir()
+                    incoming=directory/'source.packet'
+                    retained=directory/'run.request.packet'
+                    incoming.write_bytes(payload)
+                    incoming.chmod(0o600)
+                    if case.startswith('same_'):
+                        incoming.unlink()
+                        incoming=retained
+                        incoming.write_bytes(payload)
+                        incoming.chmod(0o600)
+                    if case=='fresh_public_source':
+                        incoming.chmod(0o644)
+                    elif case=='same_public_refused':
+                        incoming.chmod(0o644)
+                    elif case=='same_hardlink_refused':
+                        os.link(incoming,directory/'another-link')
+                    elif case=='same_symlink_refused':
+                        incoming.rename(directory/'actual.packet')
+                        incoming.symlink_to(directory/'actual.packet')
+                    elif case=='different_existing_equal_refused':
+                        retained.write_bytes(payload)
+                        retained.chmod(0o600)
+                    elif case=='different_existing_foreign_refused':
+                        retained.write_bytes(b'another retained packet\n')
+                        retained.chmod(0o600)
+                    elif case=='destination_symlink_refused':
+                        retained.symlink_to(incoming)
+                    elif case=='empty_source_refused':
+                        incoming.write_bytes(b'')
+                    elif case=='oversized_source_refused':
+                        incoming.write_bytes(b'x'*(2*1024*1024+1))
+                    code=block
+                    faulted=case in ('same_inode_replacement_refused','same_content_change_refused')
+                    if faulted:
+                        # Deterministic adversarial mutation after the real source
+                        # read. Product code remains byte-identical otherwise.
+                        point='finally:\n    os.close(fd)\n'
+                        self.assertEqual(code.count(point),1)
+                        if case=='same_inode_replacement_refused':
+                            fault="os.rename(source,source+'.saved'); open(source,'wb').write(data); os.chmod(source,0o600)\n"
+                        else:
+                            fault="with open(source,'wb') as changed: changed.write(b'changed after source read')\n"
+                        code=code.replace(point,point+fault,1)
+                    def inventory():
+                        return {p.name:(hashlib.sha256(p.read_bytes()).hexdigest(),
+                                        p.stat().st_ino,p.stat().st_mtime_ns)
+                                for p in directory.iterdir() if p.is_file()}
+                    before=inventory()
+                    result=subprocess.run([sys.executable,'-c',code,str(incoming),str(retained)],
+                                          stdin=subprocess.DEVNULL,capture_output=True,text=True,timeout=10)
+                    self.assertEqual(result.returncode==0,expected_success,result.stderr)
+                    if not faulted and (not expected_success or case=='same_private'):
+                        self.assertEqual(inventory(),before)
+                    if expected_success:
+                        self.assertEqual(retained.read_bytes(),payload)
+                        self.assertEqual(retained.stat().st_mode & 0o777,0o600)
+                    elif case=='same_inode_replacement_refused':
+                        self.assertIn('PLAIN_PACKET_RETENTION_CHANGED',result.stderr)
+                    elif case=='same_content_change_refused':
+                        self.assertIn('PLAIN_PACKET_RETENTION_',result.stderr)
