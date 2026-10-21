@@ -379,7 +379,7 @@ def lane_root_packet_command():
     if not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', run_id):
         raise ValueError('remote_lane_packet_run_invalid')
     source = ('import base64, hashlib, json, os, stat, sys\nfrom pathlib import Path\n'
-              + delivery.remote_directory_chain_source() + '\n\n'
+              + delivery.remote_lane_root_source() + '\n\n'
               + inspect.getsource(delivery.require_remote_lane_output_absence) + '\n\n'
               + inspect.getsource(delivery.publish_remote_lane_packet)
               + '\nlayout = validate_remote_lane_layout(json.loads(base64.b64decode('
@@ -404,7 +404,7 @@ def lane_root_launch_command():
              '$SUPPORT_DIGEST/ext/remote_sub_exec.py" "$KEY" "$MODE" "$PACKET" '
              '"$REMOTE_CWD" "$MODEL"; code=$?; printf "%s\\n" "$code" >&3')
     source = ('import base64, json, os, stat, sys\nfrom pathlib import Path\n'
-              + delivery.remote_directory_chain_source() + '\n\n'
+              + delivery.remote_lane_root_source() + '\n\n'
               + inspect.getsource(delivery.require_remote_lane_output_absence) + '\n\n'
               + inspect.getsource(delivery.open_remote_lane_outputs)
               + '\nlayout = validate_remote_lane_layout(json.loads(base64.b64decode('
@@ -569,6 +569,12 @@ def transport_verify(log_path, receipt_path, packet_path, lease_output_path,
     finally:
         os.close(fd)
     print(payload)
+
+
+def lane_root_source():
+    # Root-bound transport needs the additional binding and layout validators.
+    import artifact_delivery as delivery
+    print(delivery.remote_lane_root_source())
 
 
 def custody_chain_source():
@@ -822,6 +828,7 @@ def main():
         'transport-verify': transport_verification,
         'launch-binding': launch_binding,
         'custody-chain-source': custody_chain_source,
+        'lane-root-source': lane_root_source,
         'lane-root-current': lane_root_current,
         'lane-root-observation': lane_root_observation,
         'lane-root-packet-command': lane_root_packet_command,

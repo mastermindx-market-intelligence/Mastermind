@@ -119,7 +119,7 @@ class PhysicalRootCase(unittest.TestCase):
         source = self.shell.split("<<'PY_VERIFY_PLAIN_TRANSPORT'\n", 1)[1].split(
             "\nPY_VERIFY_PLAIN_TRANSPORT", 1)[0]
         source = source.replace("$PLAIN_TRANSPORT_CHAIN_SOURCE",
-                                self.delivery.remote_directory_chain_source())
+                                self.delivery.remote_lane_root_source())
         prefix = ("import pwd, types, sys\n"
                   f"pwd.getpwuid=lambda uid: types.SimpleNamespace(pw_dir={str(self.fx.home)!r})\n"
                   f"sys.argv={['reader', RUN_ID, self.fx.support_digest, POLICY, self.layout_token]!r}\n")
@@ -644,7 +644,7 @@ class PhysicalRootCase(unittest.TestCase):
         setup = {
             "REMOTE_PHYSICAL_ROOT": str(self.physical), "SSH_CMD": str(ssh),
             "SSH_ALIAS": ALIAS, "LANE_ROOT_LAYOUT_TOKEN": self.layout_token,
-            "PLAIN_TRANSPORT_CHAIN_SOURCE": self.delivery.remote_directory_chain_source(),
+            "PLAIN_TRANSPORT_CHAIN_SOURCE": self.delivery.remote_lane_root_source(),
             "HERE": str(self.fx.ctl), "REMOTE_SUB_PYTHON": sys.executable,
             "COMMISSION_ACTIVE": "1", "PRESERVE_LEASE": "0", "RC": "0"}
         script = "set -u\n" + "\n".join(k + "=" + shlex.quote(v) for k, v in setup.items()) + "\n"

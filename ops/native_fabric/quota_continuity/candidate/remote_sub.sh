@@ -970,7 +970,7 @@ REMOTE_RC="lanes_$ID.rc"
 if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
   LANE_ROOT_OBSERVATION=$(mktemp "$LOG_DIR/$ID.lane-root.XXXXXX") || exit 78
   TEMP_FILES+=("$LANE_ROOT_OBSERVATION")
-  PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" custody-chain-source) || exit 78
+  PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" lane-root-source) || exit 78
   commission_run lane-root-read "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
     "python3 - '$LANE_ROOT_TOKEN' <<'PY_OBSERVE_LANE_ROOT'
 import base64, json, os, stat, sys
@@ -1142,7 +1142,11 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
    [ -n "$PLAIN_PACKET_RETAINED" ]; then
   TRANSPORT_OBSERVATION="$(mktemp "${TMPDIR:-/tmp}/remote_sub_transport.XXXXXX")" || exit 78
   TEMP_FILES+=("$TRANSPORT_OBSERVATION")
-  PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" custody-chain-source) || exit 78
+  TRANSPORT_CHAIN_COMMAND=custody-chain-source
+  if [ "$REMOTE_PHYSICAL_ROOT" != "-" ]; then
+    TRANSPORT_CHAIN_COMMAND=lane-root-source
+  fi
+  PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" "$TRANSPORT_CHAIN_COMMAND") || exit 78
   commission_run transport-read "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
     "python3 - '$ID' '$SUPPORT_DIGEST' '$POLICY_SHA' '$LANE_ROOT_LAYOUT_TOKEN' <<'PY_VERIFY_PLAIN_TRANSPORT'
 import base64, hashlib, json, os, pwd, stat, sys

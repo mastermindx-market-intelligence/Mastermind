@@ -1330,7 +1330,13 @@ def remote_directory_chain_source():
     local_adapter = "            path = owner_path(path, HERE)"
     if source.count(local_adapter) != 1:
         raise ValueError("remote_directory_chain_source_changed")
-    return (source.replace(local_adapter, "            path = Path(path)", 1)
+    return source.replace(local_adapter, "            path = Path(path)", 1)
+
+
+def remote_lane_root_source():
+    """Add physical-root validation to the unchanged portable custody export."""
+    import inspect
+    return (remote_directory_chain_source()
             + "\n\n" + inspect.getsource(validate_remote_lane_root)
             + "\n\n" + inspect.getsource(validate_remote_lane_layout)
             + "\n\n" + inspect.getsource(observe_remote_lane_layout)
