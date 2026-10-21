@@ -158,6 +158,10 @@ const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
 // Validate the full owner enumeration, but disclose only the public subset.
 const PRIVATE_OWNER_ACCOUNT = /^(?:fabric|subagent-fabric)-[a-z0-9][a-z0-9-]{0,62}$/;
+// Accept the incumbent owner's future valid account labels without treating
+// new identities as public or silently qualifying their readiness. Unknown
+// labels remain opaque and explicitly force a degraded result.
+const OWNER_ACCOUNT_LABEL = /^[a-z0-9](?:[a-z0-9._-]{0,63})?$/;
 const MAX_OWNER_ACCOUNTS = 64;
 const MAX_OWNER_ERROR_CHARS = 4096;
 
@@ -204,8 +208,7 @@ function expectNullableBoundedString(value, maxChars, pattern = null) {
 }
 
 function expectOwnerAccount(value) {
-  if (typeof value !== 'string' || value.length > 80
-      || (!PUBLIC_ACCOUNTS.has(value) && !PRIVATE_OWNER_ACCOUNT.test(value))) invalidOwner();
+  if (typeof value !== 'string' || !OWNER_ACCOUNT_LABEL.test(value)) invalidOwner();
   return value;
 }
 
@@ -540,12 +543,18 @@ function validateAndProjectOwnerResult(value) {
 
   const accounts = verified.filter((row) => PUBLIC_ACCOUNTS.has(row.account));
   const visibleReadyCount = accounts.filter((row) => row.ready).length;
+  // New owner-managed account identities must never be exposed or assumed
+  // qualified by this narrower public projection. Preserve the owner truth,
+  // but withhold READY until the account's privacy/scope classification is reviewed.
+  const ownerRosterClassified = verified.every((row) =>
+    PUBLIC_ACCOUNTS.has(row.account) || PRIVATE_OWNER_ACCOUNT.test(row.account));
   return {
     scope: 'public_accounts',
     accountCount: accounts.length,
     readyCount: visibleReadyCount,
     publicAllReady: accounts.length > 0 && visibleReadyCount === accounts.length,
     allReady: ownerAllReady,
+    ownerRosterClassified,
     accounts,
   };
 }
@@ -590,11 +599,13 @@ export function createFleetStatus(rawConfig) {
       }
       return {
         schema: RESULT_SCHEMA,
-        state: projection.allReady && !fabricIssue ? 'READY' : 'DEGRADED',
+        state: projection.allReady && projection.ownerRosterClassified && !fabricIssue
+          ? 'READY' : 'DEGRADED',
         ...projection,
         physicalFleet,
         issues: [
           ...(projection.allReady ? [] : ['OWNER_FLEET_DEGRADED']),
+          ...(projection.ownerRosterClassified ? [] : ['FLEET_STATUS_OWNER_ROSTER_UNCLASSIFIED']),
           ...(fabricIssue ? [fabricIssue] : []),
         ],
       };
