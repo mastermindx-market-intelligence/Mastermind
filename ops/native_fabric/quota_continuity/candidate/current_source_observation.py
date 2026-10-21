@@ -33,6 +33,28 @@ proving the read.  Scope and boundaries:
   after the reads.  Objects are read only from the declared common object
   store; alternate and promisor (partial-clone) stores are refused, which is
   what makes lazy fetch impossible rather than merely disabled.
+* One additive, mutually exclusive request variant resolves the custody
+  graph instead of declaring it: the request omits git_dir and common_dir
+  and carries ``custody = {"mode": "worktree_pointer_graph",
+  "boundary": <absolute non-root path>}``.  The boundary is a scoped
+  resource selector the existing native owner consumes -- never an
+  authority, credential or authentication.  Resolution is finite: the
+  exact selected worktree/.git is classified with the same no-follow
+  Reader discipline, an ordinary directory resolves to
+  ``git_dir = common_dir = <worktree>/.git``, a regular gitfile must
+  resolve inside the boundary to the standard linked shape
+  ``<common>/worktrees/<one component>`` whose ``commondir`` stays inside
+  the boundary and whose ``gitdir`` backlink is exactly
+  ``<worktree>/.git``; relocated separate git dirs are refused.  No scan,
+  no guessed path, no upward walk, no shell or Git discovery and no
+  environment census ever runs.  The pointer leaf and directory
+  identities and bytes are held and re-verified across the whole capture,
+  so replacement by identical bytes or a changed-then-reverted pointer
+  fails.  The response carries the resolved paths plus a bounded proof
+  (exact pointer bytes, graph shape, identity snapshot) sealed under the
+  same request digest; delivery-side validation re-derives the path
+  relationship, boundary and backlink from that proof alone before
+  acceptance or publication.
 * Git reads are raw object reads only: commit, tree and blob.  Every object
   is verified by its own SHA-1 over the Git ``<type> <len>\\0`` header plus
   bytes, and the requested path is proven by tree membership against the
@@ -81,6 +103,9 @@ SCHEMA_OBSERVATION = "mastermind.fabric_current_source_observation.v1"
 SCHEMA_INVOCATION = "mastermind.fabric_current_source_invocation.v1"
 SCHEMA_SUMMARY = "mastermind.fabric_current_source_receipt_summary.v1"
 SCHEMA_RECEIPT = "mastermind.fabric_current_source_receipt.v1"
+# The single additive custody variant: resolved worktree pointer graph inside
+# a declared boundary, instead of an explicit git_dir/common_dir triple.
+CUSTODY_MODE = "worktree_pointer_graph"
 
 MAX_REQUEST = 65536
 MAX_RESPONSE = 1500000
@@ -220,15 +245,47 @@ def _validate_source_entries(entries):
     return seen
 
 
+def validate_custody_variant(custody):
+    """Closed-world custody variant: exactly ``mode`` and ``boundary``, the
+    fixed resolution mode, and an absolute non-root boundary.  The boundary is
+    a scoped resource selector consumed by the existing native owner; it is
+    never an authority, credential or authentication.  Returns the boundary
+    components."""
+    if (type(custody) is not dict or set(custody) != {"mode", "boundary"}
+            or custody["mode"] != CUSTODY_MODE):
+        raise CurrentSourceError("custody_variant_invalid")
+    return validate_absolute_custody(custody["boundary"])
+
+
+def require_boundary_contains(boundary_parts, inner_parts):
+    """Strict lexical containment at a component boundary: the inner path lies
+    below the boundary -- never equal to it and never the root."""
+    if (len(inner_parts) <= len(boundary_parts)
+            or inner_parts[:len(boundary_parts)] != boundary_parts):
+        raise CurrentSourceError("custody_boundary_invalid")
+
+
 def validate_request(request) -> str:
-    """Closed-world request validation; bind every field, including references."""
+    """Closed-world request validation; bind every field, including references.
+
+    Exactly one custody shape is accepted: the explicit git_dir/common_dir
+    triple, or the custody variant that omits both and carries the whole
+    custody dict.  Partial, mixed and unknown variants are refused before any
+    read.  ``digest_of`` binds the entire custody dict into the request
+    digest."""
     if type(request) is not dict:
         raise CurrentSourceError("request_invalid")
     allowed = {"schema", "run_id", "root", "observer", "receiver", "host",
-               "worktree", "git_dir", "common_dir", "commit", "sources",
-               "limits", "historical"}
+               "worktree", "git_dir", "common_dir", "custody", "commit",
+               "sources", "limits", "historical"}
     keys = set(request)
-    if not keys <= allowed or not keys >= (allowed - {"historical"}):
+    if "custody" in keys:
+        if keys & {"git_dir", "common_dir"}:
+            raise CurrentSourceError("custody_variant_invalid")
+        required = allowed - {"historical", "git_dir", "common_dir"}
+    else:
+        required = allowed - {"historical", "custody"}
+    if not keys <= allowed or not keys >= required:
         raise CurrentSourceError("request_unknown_field",
                                  ",".join(sorted(keys ^ (allowed & keys))))
     if request.get("schema") != SCHEMA_REQUEST:
@@ -243,8 +300,12 @@ def validate_request(request) -> str:
     if not _is_str(request["commit"], SHA1):
         raise CurrentSourceError("commit_digest_invalid")
     validate_absolute_custody(request["worktree"])
-    validate_absolute_custody(request["git_dir"])
-    validate_absolute_custody(request["common_dir"])
+    if "custody" in request:
+        require_boundary_contains(validate_custody_variant(request["custody"]),
+                                  validate_absolute_custody(request["worktree"]))
+    else:
+        validate_absolute_custody(request["git_dir"])
+        validate_absolute_custody(request["common_dir"])
     source_paths = _validate_source_entries(request["sources"])
     limits = request["limits"]
     if type(limits) is not dict or set(limits) != set(LIMIT_KEYS):
@@ -261,16 +322,37 @@ def validate_request(request) -> str:
     return digest_of(request)
 
 
+def _freeze_custody(custody):
+    """Frozen admitted-custody state: the exact ``(mode, boundary)`` pair of
+    the resolution variant, or ``None`` for the explicit triple.  The
+    caller's mutable request dict is never retained, so no later mutation of
+    that dict can retarget a minted view, scope or binding."""
+    if custody is None:
+        return None
+    if type(custody) is dict and set(custody) == {"mode", "boundary"}:
+        return (custody["mode"], custody["boundary"])
+    raise CurrentSourceError("custody_variant_invalid")
+
+
 class NativeInvocationView:
-    """Immutable typed admission input handed to the native owner."""
+    """Immutable typed admission input handed to the native owner.
+
+    The whole custody dict of the resolution variant is bound here instead of
+    preknown resolved paths: the scope declares the boundary and mode, and the
+    resolved paths are proven later from the bounded response proof.  Only the
+    frozen ``(mode, boundary)`` pair of that dict is retained; ``custody``
+    hands back a fresh defensive copy, so mutating the original request
+    mapping -- or the returned mapping -- never changes ``binding()``, an
+    already-minted scope or any admitted binding."""
 
     __slots__ = ("schema", "request_sha256", "run_id", "root", "host", "worktree", "git_dir",
-                 "common_dir", "commit", "source_paths", "observer", "receiver",
+                 "common_dir", "_custody", "commit", "source_paths", "observer", "receiver",
                  "limits_digest")
 
     def __init__(self, request_sha256: str, host: str, worktree: str, git_dir: str,
                  common_dir: str, commit: str, source_paths, observer: str,
-                 receiver: str, limits_digest: str, run_id: str, root: str):
+                 receiver: str, limits_digest: str, run_id: str, root: str,
+                 custody=None):
         object.__setattr__(self, "schema", SCHEMA_REQUEST)
         object.__setattr__(self, "request_sha256", request_sha256)
         object.__setattr__(self, "run_id", run_id)
@@ -279,6 +361,7 @@ class NativeInvocationView:
         object.__setattr__(self, "worktree", worktree)
         object.__setattr__(self, "git_dir", git_dir)
         object.__setattr__(self, "common_dir", common_dir)
+        object.__setattr__(self, "_custody", _freeze_custody(custody))
         object.__setattr__(self, "commit", commit)
         object.__setattr__(self, "source_paths", tuple(source_paths))
         object.__setattr__(self, "observer", observer)
@@ -288,17 +371,26 @@ class NativeInvocationView:
     def __setattr__(self, name, value):
         raise CurrentSourceError("admission_view_immutable")
 
+    @property
+    def custody(self):
+        """Defensive copy of the frozen custody variant, or ``None``."""
+        return (None if self._custody is None
+                else {"mode": self._custody[0], "boundary": self._custody[1]})
+
     @classmethod
     def of(cls, request, request_sha256: str) -> "NativeInvocationView":
         return cls(request_sha256, request["host"], request["worktree"],
-                   request["git_dir"], request["common_dir"], request["commit"],
+                   request.get("git_dir"), request.get("common_dir"),
+                   request["commit"],
                    [e["path"] for e in request["sources"]], request["observer"],
-                   request["receiver"], digest_of(request["limits"]), request["run_id"], request["root"])
+                   request["receiver"], digest_of(request["limits"]), request["run_id"],
+                   request["root"], request.get("custody"))
 
     def binding(self) -> str:
         return digest_of({"schema": self.schema, "request_sha256": self.request_sha256,
                           "host": self.host, "worktree": self.worktree,
                           "git_dir": self.git_dir, "common_dir": self.common_dir,
+                          "custody": self.custody,
                           "commit": self.commit, "source_paths": list(self.source_paths),
                           "observer": self.observer, "receiver": self.receiver,
                           "limits_digest": self.limits_digest})
@@ -339,14 +431,26 @@ class NativeInvocation:
     uid, the original observer correlation, the registry host and the declared
     custody.  The scope is revocable through its owner; a revoked scope never
     authorizes a later read or publication.
+
+    The declared custody is frozen at mint as the ``(mode, boundary)`` pair
+    taken from the view's own frozen state; ``custody`` is a fresh defensive
+    copy, so a caller mutating the original request dict -- or the returned
+    mapping -- after mint never changes ``scope_digest`` or retargets the
+    admitted scope.
     """
 
     __slots__ = ("schema", "scope_digest", "request_sha256", "run_id", "root", "host", "worktree",
-                 "git_dir", "common_dir", "commit", "source_paths", "observer",
+                 "git_dir", "common_dir", "_custody", "commit", "source_paths", "observer",
                  "receiver", "invoking_uid", "issued_by", "_owner")
 
     def __setattr__(self, name, value):
         raise CurrentSourceError("invocation_immutable")
+
+    @property
+    def custody(self):
+        """Defensive copy of the frozen custody variant, or ``None``."""
+        return (None if self._custody is None
+                else {"mode": self._custody[0], "boundary": self._custody[1]})
 
     @classmethod
     def mint(cls, view: NativeInvocationView, owner: NativeInvocationOwner,
@@ -372,6 +476,8 @@ class NativeInvocation:
         object.__setattr__(scope, "worktree", view.worktree)
         object.__setattr__(scope, "git_dir", view.git_dir)
         object.__setattr__(scope, "common_dir", view.common_dir)
+        # The view's own frozen pair is shared, never the caller's dict.
+        object.__setattr__(scope, "_custody", view._custody)
         object.__setattr__(scope, "commit", view.commit)
         object.__setattr__(scope, "source_paths", view.source_paths)
         object.__setattr__(scope, "observer", view.observer)
@@ -385,7 +491,8 @@ class NativeInvocation:
         object.__setattr__(scope, "scope_digest", digest_of(
             {"schema": SCHEMA_INVOCATION, "request_sha256": view.request_sha256,
              "host": view.host, "worktree": view.worktree, "git_dir": view.git_dir,
-             "common_dir": view.common_dir, "commit": view.commit,
+             "common_dir": view.common_dir, "custody": view.custody,
+             "commit": view.commit,
              "source_paths": list(view.source_paths), "observer": view.observer,
              "receiver": view.receiver, "invoking_uid": invoking_uid,
              "issued_by": scope.issued_by, "nonce": nonce}))
@@ -396,8 +503,9 @@ class NativeInvocation:
         try:
             return (self.root == request["root"] and self.run_id == request["run_id"]
                     and self.host == request["host"] and self.worktree == request["worktree"]
-                    and self.git_dir == request["git_dir"]
-                    and self.common_dir == request["common_dir"]
+                    and self.git_dir == request.get("git_dir")
+                    and self.common_dir == request.get("common_dir")
+                    and self.custody == request.get("custody")
                     and self.commit == request["commit"]
                     and self.observer == request["observer"]
                     and self.source_paths == tuple(e["path"] for e in request["sources"])
@@ -407,6 +515,21 @@ class NativeInvocation:
 
     def binds_observation(self, response) -> bool:
         try:
+            if self.custody is not None:
+                # The scope binds the declared boundary and mode, not preknown
+                # resolved paths; the response's resolved paths and proof are
+                # independently re-derived here before any publication.
+                return (self.request_sha256 == response["request_sha256"]
+                        and self.root == response["root"]
+                        and self.run_id == response["run_id"]
+                        and self.host == response["host"]
+                        and response.get("custody") == self.custody
+                        and self.worktree == response["worktree"]
+                        and self.commit == response["commit"]
+                        and self.observer == response["observer"]
+                        and self.source_paths == tuple(i["path"] for i in response["files"])
+                        and self.receiver == response["receiver"]
+                        and _resolution_binds(response))
             return (self.request_sha256 == response["request_sha256"]
                     and self.root == response["root"] and self.run_id == response["run_id"]
                     and self.host == response["host"]
@@ -610,10 +733,21 @@ def _gitfile_target(raw: bytes) -> str:
     return text
 
 
-def _classify_git_link(reader: Reader, wt_parts, gd_parts):
+def _pointer_lines(raw: bytes, what: str) -> str:
+    """Single-line pointer payload (``commondir``/``gitdir``): multiline or
+    empty content is malformed, never lexically resolved."""
+    text = _pointer_text(raw)
+    if "\n" in text or "\r" in text or not text:
+        raise CurrentSourceError("git_pointer_invalid", what)
+    return text
+
+
+def _classify_git_link(reader: Reader, wt_parts, gd_parts=None):
     """Classify worktree/.git without following it: a real directory (ordinary
     repository) or an exact regular ``gitdir:`` pointer (linked worktree or
-    relocated gitdir).  Anything else is refused."""
+    relocated gitdir).  Anything else is refused.  With ``gd_parts`` the
+    pointer target must equal that declared git_dir; resolution mode passes
+    None and derives the target itself."""
     fds, _edges = reader.walk_chain(wt_parts)
     try:
         try:
@@ -636,7 +770,8 @@ def _classify_git_link(reader: Reader, wt_parts, gd_parts):
     finally:
         for fd in reversed(fds):
             os.close(fd)
-    if _resolve_pointer(_gitfile_target(raw), wt_parts) != "/" + "/".join(gd_parts):
+    if gd_parts is not None and _resolve_pointer(
+            _gitfile_target(raw), wt_parts) != "/" + "/".join(gd_parts):
         raise CurrentSourceError("git_pointer_mismatch")
     return ("file", None, raw)
 
@@ -721,6 +856,297 @@ def inspect_custody(reader: Reader, request) -> dict:
     # refused on the store that is actually read.
     check_object_store(reader, cd)
     return state
+
+
+def _pointer_leaf_state(reader: Reader, dir_parts, name: str):
+    """Exact regular pointer leaf under a qualified chain: ``(bytes,
+    identity)`` or None when absent.  Symlinks, unsafe modes, foreign owners,
+    hardlinks and oversize payloads are refused by the Reader discipline; no
+    new IO path is introduced."""
+    fds, _edges = reader.walk_chain(dir_parts)
+    try:
+        try:
+            info = os.stat(name, dir_fd=fds[-1], follow_symlinks=False)
+        except FileNotFoundError:
+            return None
+        except OSError as exc:
+            raise CurrentSourceError("custody_invalid", str(exc)) from exc
+        if not stat.S_ISREG(info.st_mode):
+            raise CurrentSourceError("custody_pointer_invalid", name)
+        return reader.read_leaf(fds, name, MAX_POINTER_BYTES), identity(info)
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def _chain_snapshot(reader: Reader, parts):
+    """Full identity snapshot of one qualified chain: the terminal identity
+    plus the identity of every walked directory edge.  A snapshot of the whole
+    chain, not just the terminal stat, is what makes an ancestor rename+restore
+    -- which changes the renamed directory and its parent but no terminal --
+    refuse the capture."""
+    fds, edges = reader.walk_chain(parts)
+    try:
+        return (identity(os.fstat(fds[-1])),
+                tuple(identity(info) for _part, info in edges))
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def _chain_identity(reader: Reader, parts):
+    """Full identity of a qualified chain terminal, held for the graph
+    snapshot and re-verified after the capture."""
+    return _chain_snapshot(reader, parts)[0]
+
+
+def custody_graph_state(reader: Reader, wt_parts, gd_parts, cd_parts) -> dict:
+    """Retained graph snapshot: worktree/.git classification, pointer leaf
+    bytes with their identities, and the full identity snapshot -- terminal
+    plus every walked directory edge -- of the worktree, git_dir and common
+    chains.  Compared before and after the whole capture, so replacement by
+    identical bytes, a changed-then-reverted pointer or an ancestor
+    rename+restore is refused."""
+    kind, dir_id, raw = _classify_git_link(reader, wt_parts, gd_parts)
+    leaf = None if kind == "dir" else _pointer_leaf_state(reader, wt_parts, ".git")
+    snapshots = tuple(_chain_snapshot(reader, parts)
+                      for parts in (wt_parts, gd_parts, cd_parts))
+    return {"git": (kind, dir_id, raw), "leaf": leaf,
+            "commondir": _pointer_leaf_state(reader, gd_parts, "commondir"),
+            "gitdir": _pointer_leaf_state(reader, gd_parts, "gitdir"),
+            "dirs": tuple(snapshot[0] for snapshot in snapshots),
+            "edges": tuple(snapshot[1] for snapshot in snapshots)}
+
+
+class CustodyGraphGuard:
+    """Held-descriptor custody graph guard for the resolution variant.
+
+    After the finite resolution has produced the discovery graph, every
+    directory of the worktree, git_dir and common_dir chains and every
+    no-follow regular pointer leaf -- the exact ``.git`` gitfile when the link
+    is a file, plus the linked ``commondir``/``gitdir`` leaves -- is held open
+    through the existing Reader primitives.  ``verify`` re-derives the whole
+    held graph, full chain edges included rather than a terminal stat alone,
+    and compares it to the discovery snapshot, so an ancestor rename+restore,
+    a same-byte leaf replacement, a changed-then-reverted pointer (new ctime)
+    or a leaf that became a symlink, foreign, group-writable or hardlinked
+    refuses before any object read.  Absent ordinary pointers must remain
+    absent.  Every owned descriptor closes exactly once on every outcome.
+    """
+
+    def __init__(self, reader: Reader, graph: dict, wt_parts, gd_parts, cd_parts):
+        self._reader = reader
+        self._graph = graph
+        kind = graph["git"][0]
+        self._chains = (tuple(wt_parts), tuple(gd_parts), tuple(cd_parts))
+        self._leaves = []
+        if kind == "file":
+            self._leaves.append((0, ".git", graph["leaf"]))
+        self._leaves.append((1, "commondir", graph["commondir"]))
+        self._leaves.append((1, "gitdir", graph["gitdir"]))
+        self._fds = []
+        self._held = []
+        self._leaf_fds = []
+        self._closed = False
+
+    def hold(self):
+        """Open and hold every custody chain and pointer leaf.  Descriptors
+        are recorded as they are taken, so a refused hold still closes exactly
+        what it opened."""
+        for parts in self._chains:
+            fds, edges = self._reader.walk_chain(parts)
+            self._fds.extend(fds)
+            self._held.append((fds, edges))
+        for index, name, initial in self._leaves:
+            self._hold_leaf(index, name, initial)
+        return self
+
+    def _hold_leaf(self, chain_index, name, initial):
+        fds, _edges = self._held[chain_index]
+        try:
+            info = os.stat(name, dir_fd=fds[-1], follow_symlinks=False)
+        except FileNotFoundError:
+            if initial is not None:
+                raise CurrentSourceError("changed_during_read")
+            self._leaf_fds.append((chain_index, name, None))
+            return
+        except OSError as exc:
+            raise CurrentSourceError("custody_invalid", str(exc)) from exc
+        if initial is None:
+            # An absent ordinary pointer must remain absent.
+            raise CurrentSourceError("changed_during_read")
+        if not stat.S_ISREG(info.st_mode):
+            raise CurrentSourceError("custody_pointer_invalid", name)
+        try:
+            fd = self._reader._opener(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                                      dir_fd=fds[-1])
+        except OSError as exc:
+            raise CurrentSourceError("filesystem_refused", str(exc)) from exc
+        self._fds.append(fd)
+        try:
+            held = os.fstat(fd)
+        except OSError as exc:
+            raise CurrentSourceError("filesystem_refused", str(exc)) from exc
+        self._reader._check_leaf(held)
+        if identity(held) != initial[1]:
+            raise CurrentSourceError("changed_during_read")
+        self._leaf_fds.append((chain_index, name, fd))
+
+    def verify(self):
+        """Re-verify the full held graph against the discovery snapshot: every
+        held directory edge and terminal through ``_reverify_chain``, every
+        held leaf identity and bounded bytes through ``read_leaf``."""
+        if self._closed:
+            raise CurrentSourceError("custody_guard_closed")
+        for index, (chain, initial_edges) in enumerate(zip(self._held,
+                                                           self._graph["edges"])):
+            fds, edges = chain
+            self._reader._reverify_chain(fds, edges)
+            if (tuple(identity(info) for _part, info in edges) != initial_edges
+                    or identity(os.fstat(fds[-1])) != self._graph["dirs"][index]):
+                raise CurrentSourceError("changed_during_read")
+        for chain_index, name, fd in self._leaf_fds:
+            initial = self._leaf_initial(chain_index, name)
+            fds, _edges = self._held[chain_index]
+            try:
+                info = os.stat(name, dir_fd=fds[-1], follow_symlinks=False)
+                missing = False
+            except FileNotFoundError:
+                missing = True
+            except OSError as exc:
+                raise CurrentSourceError("filesystem_refused", str(exc)) from exc
+            if missing:
+                # An absent ordinary pointer must remain absent.
+                if fd is not None:
+                    raise CurrentSourceError("changed_during_read")
+                continue
+            if fd is None:
+                # Absent must stay absent; anything now there is a change.
+                raise CurrentSourceError("changed_during_read")
+            if (identity(info) != initial[1]
+                    or identity(os.fstat(fd)) != initial[1]):
+                raise CurrentSourceError("changed_during_read")
+            if self._reader.read_leaf(fds, name, MAX_POINTER_BYTES) != initial[0]:
+                raise CurrentSourceError("changed_during_read")
+
+    def _leaf_initial(self, chain_index, name):
+        for index, leaf_name, initial in self._leaves:
+            if index == chain_index and leaf_name == name:
+                return initial
+        raise CurrentSourceError("custody_guard_unknown_leaf", name)
+
+    def close(self):
+        """Close every descriptor this guard owns; safe to call twice."""
+        if self._closed:
+            return
+        self._closed = True
+        for fd in reversed(self._fds):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self._fds = []
+        self._held = []
+        self._leaf_fds = []
+
+
+def _resolved_within(boundary_parts, parts):
+    """A *derived* path must land strictly inside the declared boundary; an
+    escape is a resolution failure, not merely a bad declaration."""
+    if (len(parts) <= len(boundary_parts)
+            or parts[:len(boundary_parts)] != boundary_parts):
+        raise CurrentSourceError("custody_resolution_invalid", "boundary_escape")
+
+
+def resolve_custody(reader: Reader, request):
+    """Finite resolution of the custody variant: inspect the exact selected
+    worktree/.git with strict Reader checks only and derive git_dir and
+    common_dir inside the declared boundary, before any object store or object
+    read.  An ordinary real directory resolves to
+    ``git_dir = common_dir = <worktree>/.git``; a regular gitfile must resolve
+    inside the boundary to the standard linked shape
+    ``<common>/worktrees/<one component>`` with ``commondir`` inside the
+    boundary and an exact ``<worktree>/.git`` backlink; a relocated separate
+    git dir is refused.  There is no scan, no guessed path, no upward walk, no
+    shell or Git discovery and no environment probe.  Returns
+    ``(git_dir, common_dir, proof, graph)``."""
+    custody = request["custody"]
+    wt_parts = validate_absolute_custody(request["worktree"])
+    boundary_parts = validate_custody_variant(custody)
+    require_boundary_contains(boundary_parts, wt_parts)
+    kind, dir_id, raw = _classify_git_link(reader, wt_parts)
+    commondir_state = backlink_state = None
+    if kind == "dir":
+        git_parts = wt_parts + [".git"]
+        for name in ("commondir", "gitdir"):
+            # An ordinary .git carries no linked-worktree pointers; one that
+            # does is a nonstandard shape, never silently adopted.
+            if _pointer_leaf_state(reader, git_parts, name) is not None:
+                raise CurrentSourceError("custody_resolution_invalid", name)
+    else:
+        git_parts = validate_absolute_custody(
+            _resolve_pointer(_gitfile_target(raw), wt_parts))
+        _resolved_within(boundary_parts, git_parts)
+        commondir_state = _pointer_leaf_state(reader, git_parts, "commondir")
+        if commondir_state is None:
+            # Relocated nonlinked separate-git-dir: nothing here resolves it.
+            raise CurrentSourceError("custody_resolution_invalid", "relocated")
+        common_parts = validate_absolute_custody(
+            _resolve_pointer(_pointer_lines(commondir_state[0], "commondir"),
+                             git_parts))
+        _resolved_within(boundary_parts, common_parts)
+        if (git_parts[:len(common_parts)] != common_parts
+                or len(git_parts) != len(common_parts) + 2
+                or git_parts[len(common_parts)] != "worktrees"
+                or not CUSTODY_COMPONENT.fullmatch(git_parts[-1])):
+            raise CurrentSourceError("custody_resolution_invalid", "linked_shape")
+        backlink_state = _pointer_leaf_state(reader, git_parts, "gitdir")
+        if (backlink_state is None
+                or _resolve_pointer(_pointer_lines(backlink_state[0], "gitdir"),
+                                    git_parts)
+                != "/" + "/".join(wt_parts) + "/.git"):
+            raise CurrentSourceError("gitdir_backlink_mismatch")
+    git_dir = "/" + "/".join(git_parts)
+    common_dir = git_dir if kind == "dir" else "/" + "/".join(common_parts)
+    snapshots = tuple(_chain_snapshot(reader, parts) for parts in
+                      (wt_parts, git_parts,
+                       git_parts if kind == "dir" else common_parts))
+    graph = {"git": (kind, dir_id, raw),
+             "leaf": None if kind == "dir" else _pointer_leaf_state(reader, wt_parts, ".git"),
+             "commondir": commondir_state, "gitdir": backlink_state,
+             "dirs": tuple(snapshot[0] for snapshot in snapshots),
+             "edges": tuple(snapshot[1] for snapshot in snapshots)}
+    proof = resolution_proof(request, graph, git_dir, common_dir)
+    return git_dir, common_dir, proof, graph
+
+
+def resolution_proof(request, graph, git_dir: str, common_dir: str) -> dict:
+    """Bounded proof of the resolved graph: exact finite pointer bytes plus the
+    graph shape and identity snapshot.  Shipped only for the custody variant
+    and sealed with the rest of the response body."""
+    kind, dir_id, raw = graph["git"]
+    leaf = graph["leaf"]
+
+    def entry(state):
+        if state is None:
+            return {"bytes_b64": None, "identity": None}
+        pointer, info = state
+        return {"bytes_b64": base64.b64encode(pointer).decode("ascii"),
+                "identity": list(info)}
+
+    return {"mode": request["custody"]["mode"],
+            "boundary": request["custody"]["boundary"],
+            "worktree": request["worktree"], "git_dir": git_dir,
+            "common_dir": common_dir,
+            "git_link": {"kind": kind,
+                         "bytes_b64": None if raw is None else
+                         base64.b64encode(raw).decode("ascii"),
+                         "identity": None if leaf is None else list(leaf[1])},
+            "commondir": entry(graph["commondir"]),
+            "gitdir_backlink": entry(graph["gitdir"]),
+            "dir_ids": {"worktree": list(graph["dirs"][0]),
+                        "git_dir": list(graph["dirs"][1]),
+                        "common_dir": list(graph["dirs"][2])}}
 
 
 def custody_identity(paths):
@@ -1057,20 +1483,46 @@ def observe_remote(request, reader=None) -> dict:
         request_digest = validate_request(request)
     except CurrentSourceError as exc:
         return _remote_refusal(request, None, exc.reason)
+    guard = None
     try:
         wt = validate_absolute_custody(request["worktree"])
-        gd = validate_absolute_custody(request["git_dir"])
-        cd = validate_absolute_custody(request["common_dir"])
-        inspect_custody(reader, request)
+        resolution = None
+        if "custody" in request:
+            # Resolved graph first, then the full existing triple proof against
+            # the resolved paths -- boundary and linked-shape checks happen
+            # before any object store or object read.
+            git_dir, common_dir, resolution, graph = resolve_custody(reader, request)
+            gd = validate_absolute_custody(git_dir)
+            cd = validate_absolute_custody(common_dir)
+            # Finite paths are resolved first; then the whole graph is held
+            # open and compared to the discovery snapshot BEFORE
+            # inspect_custody, check_object_store or any object read.
+            guard = CustodyGraphGuard(reader, graph, wt, gd, cd)
+            guard.hold()
+            guard.verify()
+            inspect_custody(reader, {"worktree": request["worktree"],
+                                     "git_dir": git_dir, "common_dir": common_dir})
+        else:
+            gd = validate_absolute_custody(request["git_dir"])
+            cd = validate_absolute_custody(request["common_dir"])
+            inspect_custody(reader, request)
         worktree_path = "/" + "/".join(wt)
         git_path = "/" + "/".join(gd)
         common_path = "/" + "/".join(cd)
-        before = (custody_identity([worktree_path, git_path, common_path]),
-                  pointer_state(reader, wt, gd))
+        if resolution is not None:
+            before = (custody_identity([worktree_path, git_path, common_path]), graph)
+        else:
+            before = (custody_identity([worktree_path, git_path, common_path]),
+                      pointer_state(reader, wt, gd))
         limits = request["limits"]
         deadline = limits["deadline_ms"] / 1000.0
         reader.deadline = time.monotonic() + deadline
         reader.git_proofs = {}
+        if guard is not None:
+            # Immediately before the first object read: the full held chains
+            # and every held pointer leaf must still match the discovery
+            # graph, or nothing at all is read.
+            guard.verify()
         commit_raw, _ = read_object(reader, cd, common_path, request['commit'],
                                     'commit', MAX_COMMIT_BYTES, deadline)
         root_tree = parse_commit(commit_raw)
@@ -1096,14 +1548,25 @@ def observe_remote(request, reader=None) -> dict:
                           "object_id": membership[-1]["object_id"],
                           "object_store": store, "membership": membership,
                           "remaining_budget": remaining})
-        if (custody_identity([worktree_path, git_path, common_path]) != before[0]
-                or pointer_state(reader, wt, gd) != before[1]):
+        if resolution is not None:
+            # After capture: the held graph is re-verified before the retained
+            # snapshot comparison, so a mutation during the object reads never
+            # yields source payload.
+            guard.verify()
+            after = (custody_identity([worktree_path, git_path, common_path]),
+                     custody_graph_state(reader, wt, gd, cd))
+        else:
+            after = (custody_identity([worktree_path, git_path, common_path]),
+                     pointer_state(reader, wt, gd))
+        if after != before:
             raise CurrentSourceError("changed_during_read")
         body = {"schema": SCHEMA_OBSERVATION, "run_id": request["run_id"],
                 "root": request["root"], "observer": request["observer"],
                 "receiver": request["receiver"], "host": request["host"],
-                "worktree": request["worktree"], "git_dir": request["git_dir"],
-                "common_dir": request["common_dir"], "commit": request["commit"],
+                "worktree": request["worktree"],
+                "git_dir": request.get("git_dir", git_path),
+                "common_dir": request.get("common_dir", common_path),
+                "commit": request["commit"],
                 "request_sha256": request_digest, "status": "OBSERVED",
                 "reason": None, "files": files, "limits": dict(limits),
                 "git_objects": [{'object_id': oid, 'kind': kind, 'bytes': len(raw),
@@ -1111,6 +1574,11 @@ def observe_remote(request, reader=None) -> dict:
                     for oid, (kind, raw) in sorted(reader.git_proofs.items())],
                 "commitments": {"schema": SCHEMA_RECEIPT,
                                 "no_claims": list(NO_CLAIMS)}}
+        if resolution is not None:
+            # Resolved actual paths plus the bounded graph proof, sealed with
+            # the body under the exact request digest.
+            body["custody"] = request["custody"]
+            body["resolution"] = resolution
         if len(canonical(body)) > MAX_RESPONSE:
             return _remote_refusal(request, request_digest, "response_limit")
         return body
@@ -1118,6 +1586,11 @@ def observe_remote(request, reader=None) -> dict:
         return _remote_refusal(request, request_digest,
                                exc.reason, "UNAVAILABLE"
                                if exc.reason == "changed_during_read" else "REFUSED")
+    finally:
+        # Every outcome -- observed, refused or mutated graph -- releases the
+        # held custody descriptors.
+        if guard is not None:
+            guard.close()
 
 
 def _remote_refusal(request, request_digest, reason, status="REFUSED") -> dict:
@@ -1141,6 +1614,12 @@ def _remote_refusal(request, request_digest, reason, status="REFUSED") -> dict:
 BODY_KEYS = {"schema", "run_id", "root", "observer", "receiver", "host", "worktree",
              "git_dir", "common_dir", "commit", "request_sha256", "status", "reason",
              "files", "git_objects", "limits", "commitments"}
+CUSTODY_BODY_KEYS = BODY_KEYS | {"custody", "resolution"}
+RESOLUTION_KEYS = {"mode", "boundary", "worktree", "git_dir", "common_dir",
+                   "git_link", "commondir", "gitdir_backlink", "dir_ids"}
+GIT_LINK_KEYS = {"kind", "bytes_b64", "identity"}
+POINTER_KEYS = {"bytes_b64", "identity"}
+DIR_ID_KEYS = {"worktree", "git_dir", "common_dir"}
 ADMISSION_KEYS = {"state", "scope_digest", "issued_by"}
 RECEIPT_KEYS = {"schema", "response_sha256", "request_sha256", "admission_state",
                 "scope_digest", "observer", "receiver", "root", "commit", "no_claims"}
@@ -1165,6 +1644,14 @@ def _admit(request, request_digest, invocation):
     if not invocation.confirm_active():
         return None, "ADMISSION_REVOKED"
     return invocation, "ADMITTED"
+
+
+def _identity_list(value) -> bool:
+    # identity() is the fixed 8-field snapshot: (dev, ino, size, mtime_ns,
+    # ctime_ns, mode, uid, nlink).
+    return (type(value) is list and len(value) == 8
+            and all(type(item) is int and not isinstance(item, bool) and item >= 0
+                    for item in value))
 
 
 def _incumbent_transport(alias: str):
@@ -1238,19 +1725,121 @@ def validate_git_payloads(document):
         raise CurrentSourceError('unexpected_git_proof')
 
 
+def _proof_pointer(entry, parts, expected: str, what: str) -> None:
+    """Decode one returned pointer entry and re-derive its exact resolved
+    target from the finite bytes alone."""
+    if (type(entry) is not dict or set(entry) != POINTER_KEYS
+            or type(entry["bytes_b64"]) is not str
+            or not _identity_list(entry["identity"])):
+        raise CurrentSourceError("custody_proof_invalid", what)
+    try:
+        raw = base64.b64decode(entry["bytes_b64"], validate=True)
+        resolved = _resolve_pointer(_pointer_lines(raw, what), parts)
+    except (ValueError, CurrentSourceError):
+        raise CurrentSourceError("custody_proof_invalid", what) from None
+    if len(raw) > MAX_POINTER_BYTES or resolved != expected:
+        raise CurrentSourceError("custody_proof_invalid", what)
+
+
+def validate_resolution_proof(resolution, response) -> None:
+    """Independent delivery-side validation of the custody variant's bounded
+    proof: re-derive the resolved git_dir from the returned gitfile bytes, the
+    common_dir from the returned commondir bytes and the exact
+    ``<worktree>/.git`` backlink, then re-prove the boundary relationship and
+    the standard linked shape.  No resolved path is accepted merely for lying
+    inside the boundary.  Pure: no filesystem reads."""
+    if type(resolution) is not dict or set(resolution) != RESOLUTION_KEYS:
+        raise CurrentSourceError("custody_proof_invalid")
+    custody = response["custody"]
+    if (resolution["mode"] != custody["mode"]
+            or resolution["boundary"] != custody["boundary"]
+            or resolution["worktree"] != response["worktree"]
+            or resolution["git_dir"] != response["git_dir"]
+            or resolution["common_dir"] != response["common_dir"]):
+        raise CurrentSourceError("custody_proof_invalid")
+    boundary = validate_absolute_custody(resolution["boundary"])
+    wt = validate_absolute_custody(resolution["worktree"])
+    gd = validate_absolute_custody(resolution["git_dir"])
+    cd = validate_absolute_custody(resolution["common_dir"])
+    require_boundary_contains(boundary, wt)
+    require_boundary_contains(boundary, gd)
+    require_boundary_contains(boundary, cd)
+    link = resolution["git_link"]
+    if (type(link) is not dict or set(link) != GIT_LINK_KEYS
+            or link["kind"] not in ("dir", "file")):
+        raise CurrentSourceError("custody_proof_invalid", "git_link")
+    if (type(resolution["dir_ids"]) is not dict
+            or set(resolution["dir_ids"]) != DIR_ID_KEYS
+            or not all(_identity_list(resolution["dir_ids"][key])
+                       for key in DIR_ID_KEYS)):
+        raise CurrentSourceError("custody_proof_invalid", "dir_ids")
+    if link["kind"] == "dir":
+        absent = {"bytes_b64": None, "identity": None}
+        if (link["bytes_b64"] is not None or link["identity"] is not None
+                or resolution["commondir"] != absent
+                or resolution["gitdir_backlink"] != absent
+                or resolution["git_dir"] != resolution["worktree"] + "/.git"
+                or resolution["common_dir"] != resolution["git_dir"]):
+            raise CurrentSourceError("custody_proof_invalid", "ordinary")
+        return
+    if type(link["bytes_b64"]) is not str or not _identity_list(link["identity"]):
+        raise CurrentSourceError("custody_proof_invalid", "gitfile")
+    try:
+        raw = base64.b64decode(link["bytes_b64"], validate=True)
+        target = _resolve_pointer(_gitfile_target(raw), wt)
+    except (ValueError, CurrentSourceError):
+        raise CurrentSourceError("custody_proof_invalid", "gitfile") from None
+    if len(raw) > MAX_POINTER_BYTES or target != resolution["git_dir"]:
+        raise CurrentSourceError("custody_proof_invalid", "gitfile_target")
+    _proof_pointer(resolution["commondir"], gd, resolution["common_dir"], "commondir")
+    _proof_pointer(resolution["gitdir_backlink"], gd,
+                   resolution["worktree"] + "/.git", "gitdir_backlink")
+    if (gd[:len(cd)] != cd or len(gd) != len(cd) + 2
+            or gd[len(cd)] != "worktrees"
+            or not CUSTODY_COMPONENT.fullmatch(gd[-1])):
+        raise CurrentSourceError("custody_proof_invalid", "linked_shape")
+
+
+def _resolution_binds(response) -> bool:
+    """Scope-binding form of the proof check: the declared boundary and mode
+    are held by the scope; the returned resolved paths and proof must re-derive
+    exactly.  Any inconsistency refuses the binding."""
+    try:
+        validate_resolution_proof(response["resolution"], response)
+    except (CurrentSourceError, KeyError, TypeError, ValueError):
+        return False
+    return True
+
+
 def _validate_remote_body(body, request, request_digest) -> None:
     """Closed-world validation of one remote reader body against the exact
     qualified request: echo binding, digest, files, limits, commitments."""
-    if type(body) is not dict or set(body) != BODY_KEYS:
+    custody_mode = "custody" in request
+    expected = CUSTODY_BODY_KEYS if custody_mode else BODY_KEYS
+    if type(body) is not dict or set(body) not in (BODY_KEYS, expected):
         raise CurrentSourceError("remote_body_invalid")
     if body["schema"] != SCHEMA_OBSERVATION:
         raise CurrentSourceError("schema_mismatch")
     if body["status"] != "OBSERVED":
+        # A closed refusal body surfaces its own reason; an OBSERVED custody
+        # body must carry the full custody shape (checked below).
         raise CurrentSourceError(str(body["reason"]) or "remote_refused")
+    if set(body) != expected:
+        raise CurrentSourceError("remote_body_invalid")
     for key in ("run_id", "root", "observer", "receiver", "host", "worktree",
-                "git_dir", "common_dir", "commit"):
+                "commit"):
         if body[key] != request[key]:
             raise CurrentSourceError("remote_echo_mismatch", key)
+    if custody_mode:
+        if body["custody"] != request["custody"]:
+            raise CurrentSourceError("remote_echo_mismatch", "custody")
+        validate_absolute_custody(body["git_dir"])
+        validate_absolute_custody(body["common_dir"])
+        validate_resolution_proof(body["resolution"], body)
+    else:
+        for key in ("git_dir", "common_dir"):
+            if body[key] != request[key]:
+                raise CurrentSourceError("remote_echo_mismatch", key)
     if body["request_sha256"] != request_digest:
         raise CurrentSourceError("remote_request_digest_mismatch")
     if body["limits"] != request["limits"]:
@@ -1378,8 +1967,12 @@ def observe_current_source(request, invocation=None, transport=None) -> dict:
 
 def validate_response(response) -> None:
     """Pure delivery-side validation: closed keys, exact receipt re-hash,
-    explicit negative commitments.  No reads, no admission, no mutation."""
-    if type(response) is not dict or set(response) != RESPONSE_KEYS:
+    explicit negative commitments.  No reads, no admission, no mutation.  For
+    the custody variant the resolved paths and bounded proof are independently
+    re-derived from the returned pointer bytes."""
+    custody_mode = "custody" in response
+    allowed = CUSTODY_BODY_KEYS if custody_mode else BODY_KEYS
+    if type(response) is not dict or set(response) != allowed | {"admission", "receipt"}:
         raise CurrentSourceError("response_unknown_field")
     if response["schema"] != SCHEMA_OBSERVATION:
         raise CurrentSourceError("schema_mismatch")
@@ -1389,8 +1982,16 @@ def validate_response(response) -> None:
     if not _is_str(response["host"], HOST) or not _is_str(response["commit"], SHA1):
         raise CurrentSourceError("identity_invalid", "host_or_commit")
     validate_absolute_custody(response["worktree"])
-    validate_absolute_custody(response["git_dir"])
-    validate_absolute_custody(response["common_dir"])
+    if custody_mode:
+        require_boundary_contains(
+            validate_custody_variant(response["custody"]),
+            validate_absolute_custody(response["worktree"]))
+        validate_absolute_custody(response["git_dir"])
+        validate_absolute_custody(response["common_dir"])
+        validate_resolution_proof(response["resolution"], response)
+    else:
+        validate_absolute_custody(response["git_dir"])
+        validate_absolute_custody(response["common_dir"])
     if not _is_str(response["request_sha256"], SHA256):
         raise CurrentSourceError("digest_invalid", "request_sha256")
     admission = response["admission"]
@@ -1595,6 +2196,7 @@ GENERATED_IMPORTS = ("import base64\nimport errno\nimport hashlib\nimport json\n
                      "import zlib\nimport time\n")
 
 REMOTE_CONSTANTS = ("SCHEMA_REQUEST", "SCHEMA_OBSERVATION", "SCHEMA_RECEIPT",
+                    "CUSTODY_MODE",
                     "MAX_REQUEST", "MAX_RESPONSE", "MAX_SOURCES", "MAX_FILE_BYTES",
                     "MAX_BYTES_TOTAL", "MAX_COMMIT_BYTES", "MAX_TREE_BYTES",
                     "MAX_POINTER_BYTES", "MAX_PATH_DEPTH", "IDENTITY", "HOST",
@@ -1605,10 +2207,14 @@ REMOTE_CONSTANTS = ("SCHEMA_REQUEST", "SCHEMA_OBSERVATION", "SCHEMA_RECEIPT",
 REMOTE_SOURCE = ("CurrentSourceError", "canonical", "strict_json", "digest_of",
                  "identity", "_is_str", "validate_absolute_custody",
                  "validate_relative_path", "_validate_source_entries",
+                 "validate_custody_variant", "require_boundary_contains",
                  "validate_request", "Reader", "read_pointer", "_pointer_text",
+                 "_pointer_lines",
                  "_resolve_pointer", "_gitfile_target", "_classify_git_link",
-                 "_chain_terminal_identity",
+                 "_chain_terminal_identity", "_chain_identity", "_chain_snapshot",
+                 "_pointer_leaf_state", "custody_graph_state", "CustodyGraphGuard",
                  "check_object_store", "pointer_state", "inspect_custody",
+                 "_resolved_within", "resolve_custody", "resolution_proof",
                  "custody_identity", "select_git_binary", "git_environment",
                  "_git_limits", "_git_batch", "_verify_object", "_loose_state", "_read_loose",
                  "packed_identity",

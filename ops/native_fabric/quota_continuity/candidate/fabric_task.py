@@ -934,8 +934,22 @@ def _current_source_owner_factory(registry):
                     or os.environ.get('CODEX_THREAD_ID') != view.observer
                     or view.observer == view.receiver
                     or not isinstance(view.worktree, str)
-                    or not view.worktree.startswith("/")
-                    or not isinstance(view.git_dir, str)
+                    or not view.worktree.startswith("/")):
+                return False
+            if view.custody is not None:
+                # Resolution variant: the whole custody dict is the scoped
+                # resource selector this owner consumes.  Exactly the closed
+                # union validation applies -- the boundary must be absolute,
+                # non-root and strictly contain the declared worktree; it is a
+                # selector, never an authority or label-as-proof.
+                try:
+                    observation.require_boundary_contains(
+                        observation.validate_custody_variant(view.custody),
+                        observation.validate_absolute_custody(view.worktree))
+                except observation.CurrentSourceError:
+                    return False
+                return self._entry(view) is not None
+            if (not isinstance(view.git_dir, str)
                     or not view.git_dir.startswith("/")
                     or not isinstance(view.common_dir, str)
                     or not view.common_dir.startswith("/")):
