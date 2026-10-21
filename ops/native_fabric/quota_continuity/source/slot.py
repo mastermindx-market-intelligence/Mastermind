@@ -22,7 +22,6 @@ pool can never disarm another. See ``_minimax_safe_pool_slug``,
 import os
 import fcntl, math, os, signal, socket, subprocess, sys, threading, time
 from dataclasses import dataclass
-from enum import Enum
 import hashlib
 import json
 import re
@@ -100,52 +99,6 @@ MINIMAX_ACTIVATION_GATES = (
     "real_canary_passed",
     "usage_policy_satisfied",
 )
-
-
-class CanonicalSourceSubreason(str, Enum):
-    """Closed, non-secret observations behind canonical-source refusal.
-
-    This is diagnostic-only: admission continues to use the historical
-    ``canonical_source_unreadable`` reason.  Values deliberately describe a
-    failed fixed-source observation, never a path, Git stderr, environment, or
-    credential value.
-    """
-
-    UNSUPPORTED_POOL_BINDING = "unsupported_pool_binding"
-    LEGACY_CHECKOUT_ABSENT = "legacy_checkout_absent"
-    LEGACY_CHECKOUT_GIT_FAILURE = "legacy_checkout_git_failure"
-    LEGACY_CHECKOUT_WRONG_PIN = "legacy_checkout_wrong_pin"
-    LEGACY_SOURCE_UNREADABLE = "legacy_source_unreadable"
-    OBJECT_ROOT_INVALID = "object_root_invalid"
-    OBJECT_ROOT_MISSING = "object_root_missing"
-    OBJECT_ROOT_CONFIG_OR_PROMISOR = "object_root_config_or_promisor"
-    OBJECT_ROOT_READ_FAILURE = "object_root_read_failure"
-    PINNED_COMMIT_UNAVAILABLE = "pinned_commit_unavailable"
-    BLOB_MISSING = "blob_missing"
-    BLOB_TOO_LARGE = "blob_too_large"
-    BLOB_INVALID_UTF8 = "blob_invalid_utf8"
-    BINDING_JSON_MALFORMED = "binding_json_malformed"
-    BINDING_DOCUMENT_MALFORMED = "binding_document_malformed"
-    BINDING_ACTIVATION_GATES_INVALID = "binding_activation_gates_invalid"
-    BINDING_ID_INCONSISTENT = "binding_id_inconsistent"
-
-
-# Per refusal evaluation only.  _pool_cap intentionally calls
-# _pool_refusal_reason before main calls it again; resetting at each public
-# refusal evaluation prevents the first observation from leaking into the
-# second decision or a later invocation.
-_canonical_source_subreason = None
-
-
-def _reset_canonical_source_subreason():
-    global _canonical_source_subreason
-    _canonical_source_subreason = None
-
-
-def _record_canonical_source_subreason(subreason):
-    global _canonical_source_subreason
-    if _canonical_source_subreason is None:
-        _canonical_source_subreason = subreason
 
 # Owner-issued admission inputs (Chairman key rotation 2026-09-14). Both files are
 # written by the credential OWNER, never by a lane, and both are bound to the CURRENT
@@ -315,12 +268,7 @@ def _minimax_canonical_source(path):
     credential read, source execution, replacement ref, or network fetch occurs.
     """
     if "MINIMAX_GIT_OBJECT_ROOT" not in os.environ:
-        source = _minimax_file(path)
-        if source is None:
-            _record_canonical_source_subreason(
-                CanonicalSourceSubreason.LEGACY_SOURCE_UNREADABLE
-            )
-        return source
+        return _minimax_file(path)
     root = os.environ["MINIMAX_GIT_OBJECT_ROOT"]
     allowed = {
         REVIEWED_REALM_PATH: "control_plane/codex_provider_realm.py",
@@ -328,10 +276,8 @@ def _minimax_canonical_source(path):
     }
     relative = allowed.get(path)
     if not root or not os.path.isabs(root) or relative is None:
-        _record_canonical_source_subreason(CanonicalSourceSubreason.OBJECT_ROOT_INVALID)
         return None
     if not re.fullmatch(r"[0-9a-f]{40}", MINIMAX_COMMIT):
-        _record_canonical_source_subreason(CanonicalSourceSubreason.PINNED_COMMIT_UNAVAILABLE)
         return None
     # A minimal environment drops inherited Git directory/config/object overrides.
     env = {
@@ -351,34 +297,21 @@ def _minimax_canonical_source(path):
                               timeout=5, check=False)
     try:
         if not os.path.isdir(root):
-            _record_canonical_source_subreason(CanonicalSourceSubreason.OBJECT_ROOT_MISSING)
             return None
         # Reject partial/promisor repositories as well as disabling lazy fetch:
         # older Git versions may not recognize GIT_NO_LAZY_FETCH.
         config = run("config", "--includes", "--get-regexp",
                      r"^(extensions\.partialclone|remote\..*\.(promisor|partialclonefilter))$")
         if config.returncode not in (0, 1) or config.stdout:
-            _record_canonical_source_subreason(
-                CanonicalSourceSubreason.OBJECT_ROOT_CONFIG_OR_PROMISOR
-            )
             return None
         kind = run("cat-file", "-t", MINIMAX_COMMIT)
         if kind.returncode != 0 or kind.stdout.strip() != b"commit":
-            _record_canonical_source_subreason(CanonicalSourceSubreason.PINNED_COMMIT_UNAVAILABLE)
             return None
         blob = run("cat-file", "blob", MINIMAX_COMMIT + ":" + relative)
-        if blob.returncode != 0:
-            _record_canonical_source_subreason(CanonicalSourceSubreason.BLOB_MISSING)
-            return None
-        if len(blob.stdout) > 4 * 1024 * 1024:
-            _record_canonical_source_subreason(CanonicalSourceSubreason.BLOB_TOO_LARGE)
+        if blob.returncode != 0 or len(blob.stdout) > 4 * 1024 * 1024:
             return None
         return blob.stdout.decode("utf-8")
-    except UnicodeError:
-        _record_canonical_source_subreason(CanonicalSourceSubreason.BLOB_INVALID_UTF8)
-        return None
-    except (OSError, subprocess.SubprocessError):
-        _record_canonical_source_subreason(CanonicalSourceSubreason.OBJECT_ROOT_READ_FAILURE)
+    except (OSError, UnicodeError, subprocess.SubprocessError):
         return None
 
 
@@ -413,11 +346,9 @@ def _canonical_minimax_binding(pool):
     try:
         document = json.loads(source)
     except ValueError:
-        _record_canonical_source_subreason(CanonicalSourceSubreason.BINDING_JSON_MALFORMED)
         return None
     bindings = document.get("bindings") if isinstance(document, dict) else None
     if not isinstance(bindings, dict):
-        _record_canonical_source_subreason(CanonicalSourceSubreason.BINDING_DOCUMENT_MALFORMED)
         return None
     matches = []
     for binding_id, row in bindings.items():
@@ -426,9 +357,6 @@ def _canonical_minimax_binding(pool):
         if binding_id in MINIMAX_BINDING_IDS.values():
             gates = row.get("activation_gates")
             if not isinstance(gates, list) or tuple(gates) != MINIMAX_ACTIVATION_GATES:
-                _record_canonical_source_subreason(
-                    CanonicalSourceSubreason.BINDING_ACTIVATION_GATES_INVALID
-                )
                 return None
             matches.append((binding_id, row))
     wanted = MINIMAX_BINDING_IDS.get(pool)
@@ -466,7 +394,6 @@ def _minimax_commit_matches():
     try:
         git_dir = os.path.join(MINIMAX_CHECKOUT_ROOT, ".git")
         if not os.path.exists(git_dir):
-            _record_canonical_source_subreason(CanonicalSourceSubreason.LEGACY_CHECKOUT_ABSENT)
             return False
         proc = subprocess.run(
             ["git", "-C", MINIMAX_CHECKOUT_ROOT, "rev-parse", "HEAD"],
@@ -476,15 +403,8 @@ def _minimax_commit_matches():
             timeout=5,
             check=False,
         )
-        if proc.returncode != 0:
-            _record_canonical_source_subreason(CanonicalSourceSubreason.LEGACY_CHECKOUT_GIT_FAILURE)
-            return False
-        if proc.stdout.strip() != MINIMAX_COMMIT:
-            _record_canonical_source_subreason(CanonicalSourceSubreason.LEGACY_CHECKOUT_WRONG_PIN)
-            return False
-        return True
+        return proc.returncode == 0 and proc.stdout.strip() == MINIMAX_COMMIT
     except (OSError, subprocess.SubprocessError):
-        _record_canonical_source_subreason(CanonicalSourceSubreason.LEGACY_CHECKOUT_GIT_FAILURE)
         return False
 
 
@@ -676,11 +596,9 @@ def _is_minimax_pool(pool):
 
 
 def _pool_refusal_reason(pool):
-    _reset_canonical_source_subreason()
     if not _is_minimax_pool(pool):
         return None
     if pool not in MINIMAX_BINDING_IDS:
-        _record_canonical_source_subreason(CanonicalSourceSubreason.UNSUPPORTED_POOL_BINDING)
         return "canonical_source_unreadable"
     if "MINIMAX_GIT_OBJECT_ROOT" not in os.environ and not _minimax_commit_matches():
         return "canonical_source_unreadable"
@@ -704,7 +622,6 @@ def _pool_refusal_reason(pool):
         return "canonical_source_unreadable"
     binding_id, row = binding
     if binding_id != MINIMAX_BINDING_IDS[pool]:
-        _record_canonical_source_subreason(CanonicalSourceSubreason.BINDING_ID_INCONSISTENT)
         return "canonical_source_unreadable"
     if not _minimax_harness_matches(pool, binding_id, row):
         return "harness_mismatch"
@@ -1324,16 +1241,6 @@ def main(argv=None):
         refusal = _pool_refusal_reason(pool) or "realm_unreviewed"
         print("slot.py: pool=%s admission_denied reason=%s" % (pool, refusal),
               file=sys.stderr)
-        if (
-            refusal == "canonical_source_unreadable"
-            and _canonical_source_subreason is not None
-        ):
-            print(
-                "slot.py: pool=%s canonical_source_subreason=%s" % (
-                    pool, _canonical_source_subreason.value
-                ),
-                file=sys.stderr,
-            )
         _pool_ledger_refusal(pool, refusal)
         return 78
 

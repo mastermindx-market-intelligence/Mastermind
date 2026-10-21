@@ -9,12 +9,15 @@ import unittest
 from unittest import mock
 
 
-SOURCE = Path(__file__).resolve().parents[1] / "ops/native_fabric/quota_continuity/source"
+NATIVE = Path(__file__).resolve().parents[1] / "ops/native_fabric/quota_continuity"
+CANDIDATE = NATIVE / "candidate"
+SOURCE = NATIVE / "source"
 _ORIGINAL_SYS_PATH = list(sys.path)
 try:
-    if str(SOURCE) not in sys.path:
-        sys.path.insert(0, str(SOURCE))
-    SPEC = importlib.util.spec_from_file_location("slot_source_diagnostic_test", SOURCE / "slot.py")
+    for path in (SOURCE, CANDIDATE):
+        if str(path) not in sys.path:
+            sys.path.insert(0, str(path))
+    SPEC = importlib.util.spec_from_file_location("slot_source_diagnostic_test", CANDIDATE / "slot.py")
     slot = importlib.util.module_from_spec(SPEC)
     sys.modules[SPEC.name] = slot
     SPEC.loader.exec_module(slot)
