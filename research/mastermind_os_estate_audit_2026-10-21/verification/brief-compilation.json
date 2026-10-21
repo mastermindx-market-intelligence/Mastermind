@@ -7,48 +7,48 @@
       "input": "opus/O1-executive-runtime.brief.json",
       "output": "opus/O1-executive-runtime.md",
       "compiler_returncode": 0,
-      "input_sha256": "5ca73b7ce6962a6cc14fe62c2143af1f98fccef792e9b94880ad9610aac36651",
-      "output_sha256": "da96af50675a847a7363b828ad44923f09b06e684d03979b872684b5e258ac49",
+      "input_sha256": "165f238823248e9fcede00564fcb242f1d0f1e7e1c7855d38369f71281f8b871",
+      "output_sha256": "9351f2eeb4710dc1729c1c9049df95f76e2634d852789e1a08f53feea30ddbdd",
       "execution_authority": false
     },
     {
       "input": "opus/O2-fabric-capacity.brief.json",
       "output": "opus/O2-fabric-capacity.md",
       "compiler_returncode": 0,
-      "input_sha256": "e0c04f0cef2f0441a97b38204da75bc3d7a56d1b80b7debbff173eb6afd4832a",
-      "output_sha256": "9bd1c67665c678ececa6d75df177c174d2604f21c553273f5990f801d9ccdf4b",
+      "input_sha256": "4fa8cad2ec04126e29cbeb60fdd5771f91cc7e2049414541f7ce3cc0b153d5e1",
+      "output_sha256": "baef0b78e63c6631ee28a24b01fd224c415744b64a1809ceff29acd88cfd585d",
       "execution_authority": false
     },
     {
       "input": "opus/O3-product-release.brief.json",
       "output": "opus/O3-product-release.md",
       "compiler_returncode": 0,
-      "input_sha256": "d853a11607d28016caf655fc8fc7034568c770cdc595a4ffe3c92c8219ddacca",
-      "output_sha256": "04f7412b396bddedf676428bf8cf89c05238ad3a31cfdefb7a8a8aa7b9960684",
+      "input_sha256": "39c73dd734d1dd9dcdcfed215a096910d869b747def7eaefcb1edb88fd2b0d1e",
+      "output_sha256": "00a9bf82b9d1d35886f495febb9888a2eb7eaab1be9c3a7a4fcf1252762b93c6",
       "execution_authority": false
     },
     {
       "input": "opus/O4-agent-context.brief.json",
       "output": "opus/O4-agent-context.md",
       "compiler_returncode": 0,
-      "input_sha256": "4f5e063278ed5a79ace54eead7e4bc7fa9b6d2ef7620ecf496abfaa9f579e7f8",
-      "output_sha256": "3f54cf4f80da261e011a18002e5b544722c5855aeaa7120de004833d93abb934",
+      "input_sha256": "67adfee8caff28542df1a0c313ed2a3f87375f076bcf58bd139dd135c09377cf",
+      "output_sha256": "33639425c83e93b80a11fbe46b2a2ff545479ee8877ef874d5068291ac8c3806",
       "execution_authority": false
     },
     {
       "input": "opus/O5-principal-native.brief.json",
       "output": "opus/O5-principal-native.md",
       "compiler_returncode": 0,
-      "input_sha256": "9903922f49dc439fd28a608a7ef4a18fbd37334272b710ece9b1a8e2f18152a9",
-      "output_sha256": "aae4e7e29188d33c0980c255abade7eb2332fbd896be7a3475442f6c83916f07",
+      "input_sha256": "976e64e5bd39af712dcf12dae9f5615488cc21b6ffacd0e5a81884b517792995",
+      "output_sha256": "3d8be89711d8c773c687d7d4f9a35fc59ff4f79ac78f6e0121348f91f0cb0424",
       "execution_authority": false
     },
     {
       "input": "opus/O6-acceptance-learning.brief.json",
       "output": "opus/O6-acceptance-learning.md",
       "compiler_returncode": 0,
-      "input_sha256": "e23dae7d56dbb2e0f35a1c789e2a0e293336f572a4d329f7cba5f39d1d3043c2",
-      "output_sha256": "50919bf5a9b924b6d6cf95ca9dc8b4140d1767568dc1f3177c4aa978e9032308",
+      "input_sha256": "a5084cae7d5dfc21b439974ff2588fd0f7b3e5e17858ebabe83d7943dc63384f",
+      "output_sha256": "c802f143791c7f55dd0b1f0542f86092b8e1a0fad7274d0ebf57bbb7f03ab00d",
       "execution_authority": false
     },
     {

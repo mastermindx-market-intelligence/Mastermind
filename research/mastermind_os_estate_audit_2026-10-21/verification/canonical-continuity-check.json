@@ -1,0 +1,79 @@
+{
+  "checked_at_utc": "2026-10-21T12:30:14.949818+00:00",
+  "status": "PASS_SCOPED_FIXTURE",
+  "base_commit": "1482371dd9055fc84583110272a86bf367b3c24d",
+  "target_path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+  "command": [
+    "/opt/codex/runtimes/codex-primary-runtime/dependencies/python/bin/python",
+    "-B",
+    "scripts/agentos.py",
+    "validate",
+    "--paths",
+    "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md"
+  ],
+  "working_directory": "/workspace/scratch/873a4ae04a09/audit-work/canonical-continuity/fixture",
+  "exit_code": 0,
+  "stdout": "agentos: 1 records (1 workstreams, 0 decisions, 0 discoveries, 0 handoffs) \u2014 0 error(s), 0 warning(s)\n",
+  "stderr": "",
+  "scope": {
+    "named_records_judged": 1,
+    "fixture_workstreams": [
+      "CHAIRMAN-CONTROL-ROOM",
+      "EXECUTIVE-AUTONOMY-V1-CLOSURE",
+      "EXECUTIVE-CAPACITY-FABRIC",
+      "EXECUTIVE-ECOSYSTEM-COMPLETION"
+    ],
+    "fixture_transitive_workstream_dependency_closure_complete": true,
+    "program_registry": "exact current source included",
+    "validator": "exact current source, unmodified",
+    "mode": "path-scoped validate, not --strict and not whole repository"
+  },
+  "checks": {
+    "original_bytes_preserved_as_candidate_prefix": true,
+    "frontmatter_unchanged": true,
+    "source_blob_matches": {
+      "scripts/agentos.py": {
+        "expected_git_blob": "09fc525df0ecf082cd3320e6d4b4fb7eff77ae02",
+        "actual_git_blob": "09fc525df0ecf082cd3320e6d4b4fb7eff77ae02",
+        "match": true
+      },
+      "config/mastermind_programs.yml": {
+        "expected_git_blob": "6e7a6ff907bb9c9c559365acee0f609604f61c3c",
+        "actual_git_blob": "6e7a6ff907bb9c9c559365acee0f609604f61c3c",
+        "match": true
+      },
+      "agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md": {
+        "expected_git_blob": "0df28e6f8dcccc8401924b08c48c63de582a0f7f",
+        "actual_git_blob": "0df28e6f8dcccc8401924b08c48c63de582a0f7f",
+        "match": true
+      },
+      "agentos/workstreams/WS-EXECUTIVE-CAPACITY-FABRIC.md": {
+        "expected_git_blob": "641d8bb0c9d88cc540ed42b3a1aebcb2e2242dfa",
+        "actual_git_blob": "641d8bb0c9d88cc540ed42b3a1aebcb2e2242dfa",
+        "match": true
+      },
+      "agentos/workstreams/WS-CHAIRMAN-CONTROL-ROOM.md": {
+        "expected_git_blob": "15664946e1da595fc0fd4a4e4ec8bc71ef2ea829",
+        "actual_git_blob": "15664946e1da595fc0fd4a4e4ec8bc71ef2ea829",
+        "match": true
+      }
+    },
+    "original_sha256": "f5b258459f1fa6d3a5d4c16ab939f72ae73bd09455ba47820207999804a9a53b",
+    "candidate_sha256": "2a923dc00f1eb782cd52743080756cdf450adced124576aa79a316f1c18145d8",
+    "original_git_blob": "2d2230aed639d986938efddff206b077e55be851",
+    "candidate_git_blob": "a43ac70945c3740df2717f6923a9432d27da5ac6",
+    "diff_sha256": "366ac7eadaf78531eb9c21b809cacadc3c2290f5613f22d5dd52402d9dcbd2c3"
+  },
+  "limitations": [
+    "Only the named existing workstream was judged; this is not a whole-Macro validation or CI result.",
+    "The fixture contains its complete transitive workstream dependency closure, but does not reproduce the full decisions, discoveries, handoffs, ownership or active-build store. Dependency records themselves are outside the named validation scope.",
+    "No strict seat snapshot or PR-currency validation was requested; current carrier metadata was read separately.",
+    "Validation does not establish prose truth, source custody, live occupancy, runtime liveness, instruction loading, artifact consumer behavior, release acceptance or permission.",
+    "The append preserves the current runtime frontier without independently adjudicating differing dated host observations.",
+    "No remote record was written, no claim or new programme/handoff/discovery was created, and no Fable or worker was dispatched."
+  ],
+  "proposal_url": "https://github.com/mastermindx-market-intelligence/macro/pull/9988",
+  "proposal_head": "bd274a3e2f3365a6883c5b4f33d3855b112b1f5d",
+  "published_readback": "Exact byte match with locally validated append-only candidate.",
+  "protected_state_changed": false
+}

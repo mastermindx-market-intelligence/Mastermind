@@ -59,7 +59,7 @@ checks['owner_counts']={o:sum(w['owner']==o for w in work) for o in ['Fable','O1
 
 registry=(BASE/'SOURCE_REGISTER.md').read_text()
 source_ids=set(re.findall(r'^## (S\d{2})\b',registry,re.M))
-require(source_ids=={f'S{i:02}' for i in range(1,26)},'source register IDs incomplete')
+require(source_ids=={f'S{i:02}' for i in range(1,27)},'source register IDs incomplete')
 for w in work:
     require(set(w['source_ids'])<=source_ids,'unresolved source ID '+w['id'])
 checks['source_id_count']=len(source_ids)

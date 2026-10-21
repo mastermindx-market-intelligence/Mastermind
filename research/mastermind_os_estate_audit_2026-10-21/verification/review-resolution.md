@@ -19,3 +19,10 @@ All material planning findings were addressed:
 The final source-refresh work was performed by the root auditor after the separate review. `FINAL_SOURCE_REFRESH.md` records its exact evidence and limits. No new permission, installation, runtime acceptance, retry or original-operation transfer is inferred.
 
 The package validation checks structural consistency, current authoring hashes, source-path presence and the isolated selector counterexample. It does not substitute for future implementation security review, native qualification or actual product acceptance.
+
+
+## Final material-refresh review
+
+A separate reasoning reviewer re-read the changed current-facing documents and affected work packages after the final source refresh. Verdict: PASS, no necessary blocker. Reviewed distinctions include incumbent Astra integration/original-parent returns before Fable collaboration or takeover; attributed Control-running versus acceptance/arm; canonical descriptor versus file digest; original1362 review hold without automatic retry/failover; public MCP1672 separate from internal OS; existing656/1289/1673/1676 composition with synthetic PREPARE distinct from launch/ACK/native proof; accepted source/integrity distinct from fresh native behavior; and preserved updater custody. This review used the source evidence already obtained; it made no host call or external mutation.
+
+Package validation now covers43 work packages,7 compiled briefs,26 source IDs and32 unique exact source references. A passing document/brief check is not OS execution or acceptance.

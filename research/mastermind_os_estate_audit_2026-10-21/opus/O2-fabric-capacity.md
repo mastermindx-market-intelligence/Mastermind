@@ -135,7 +135,7 @@ writing repeated status documents.
   ],
   "inputs": [
     "O2: Fabric hierarchy, capacity and economics. Read MASTERPLAN.md, WORK_PACKAGES.md and ACCEPTANCE_MATRIX.md.",
-    "Read FINAL_SOURCE_REFRESH.md: protected2151a89f includes merged1662 refusal-provenance law and merged1661 retention repair. Initial audit pins remain historical evidence; no installation follows from these merges.",
+    "Read FINAL_SOURCE_REFRESH.md: Mastermind7ab47f0b includes merged1662 refusal law,1661 retention repair and1664/1666/1669 native diagnostics/recovery; Macro1482371d adds9967 continuity source and a newer incumbent Astra/frontier report. Preserve accepted source, original custody and the actual current Fable takeover boundary; source merges are not installation or behavior proof.",
     "Assigned planning references: WP-07, WP-08, WP-09, WP-10, WP-11, WP-12, WP-13. These are not lifecycle identifiers.",
     "Read the exact current incumbent carriers and evidence in PLAN_AND_PR_CROSSWALK.md/SOURCE_REGISTER.md; keep existing reviewers and writers.",
     "Reserve the single schema/root-budget decision for Opus/Fable. Use economical Fabric labor for bounded changes and negative tests. Never turn configured maxima into free slots or mid-task uncertainty into provider failover."

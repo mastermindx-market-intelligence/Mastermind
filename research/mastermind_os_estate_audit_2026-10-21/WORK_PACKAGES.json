@@ -2,7 +2,7 @@
   "schema": "mastermind_os_audit.planning_work_packages.v1",
   "prepared_date": "2026-10-21",
   "kind": "STATIC_PLANNING_REFERENCES_NOT_QUEUE",
-  "final_material_refresh_pin": "2151a89f7ea3a340ec04932cbcfdf6a838df79b1",
+  "final_material_refresh_pin": "7ab47f0b62d9a22ff16a13f6b99b96b681874a93",
   "material_refresh_reference": "FINAL_SOURCE_REFRESH.md",
   "execution_authority": false,
   "source_pins": {
@@ -32,10 +32,11 @@
         "S01",
         "S02",
         "S03",
-        "S08"
+        "S08",
+        "S26"
       ],
       "outcome": "One accountable mission with preserved original intent, owners, effects and explicit completion scope.",
-      "work": "Read current compatible law, canonical workstream and exact latest owner checkpoints. Resolve live assignment/custody and material source changes. Distinguish core milestone from full adopted R2 scope. Explicitly decide adoption of1256 product obligations, including its five-working-day campaign. Establish six Opus accountability domains without assuming simultaneous admission.",
+      "work": "Read current compatible law, canonical workstream and exact latest owner checkpoints. The October21 canonical refresh names an incumbent Astra integration assignment and four Sol coordinators; reconcile actual current ownership and explicit Fable takeover before commissioning overlapping work. A historical claim does not prove live occupancy. Resolve original host-operation custody and material source changes. Distinguish core milestone from full adopted R2 scope. Explicitly decide adoption of1256 product obligations, including its five-working-day campaign. Establish six Opus accountability domains without assuming simultaneous admission.",
       "acceptance": [
         "Original roots and carriers preserved; current next action named",
         "Every adopted obligation has an owner or explicit scope decision",
@@ -79,10 +80,11 @@
         "S07",
         "S08",
         "S09",
-        "S22"
+        "S22",
+        "S26"
       ],
       "outcome": "Control, MCP, local adapter, plugin, app and edge generations cannot be confused.",
-      "work": "Read actual selected/installed/accepted artifacts through existing owners. Preserve reported Control80f versus MCP91c1 distinction and Claude plugin0.2.0 installed proof. Record source SHA, artifact digest, selected config identity, receipt freshness, role arms, owner and observation time for each component.",
+      "work": "Read actual selected/installed/accepted artifacts through existing owners. Preserve reported Control80f versus MCP91c1 distinction and Claude plugin0.2.0 installed proof. The latest October21 canonical source reports Control enabled/running since10:02:41UTC with its start requestID unknown; the October19 DISARMED receipt is dated, and no fresh acceptance/arm is claimed. Reconcile actual current service/start/arm facts before effects rather than repeating the older STOPPED label. Record source SHA, artifact digest, selected config identity, receipt freshness, role arms, owner and observation time for each component.",
       "acceptance": [
         "Every component has observed or explicitly unknown state",
         "No whole-host conclusion from a failed optional connector",
@@ -125,10 +127,11 @@
       ],
       "source_ids": [
         "S07",
-        "S08"
+        "S08",
+        "S26"
       ],
       "outcome": "A legitimate next readiness action is identified for the original retained release.",
-      "work": "Inspect the original exit65 receipt, issuer generation and custody around changed mtime/ctime. Establish what is known about credential identity/content continuity and the writer without disclosing secrets. Use current owner recovery law; do not assume rotation, content equality or harmless metadata touch.",
+      "work": "Inspect the original exit65 receipt, issuer generation and custody around changed mtime/ctime, plus attribution of the later reported Control start. The latest workstream says retained readiness2bca56bc does not match installed drift predecessor654abd66; verify that exact relationship through the current owner. Establish what is known about credential identity/content continuity and the writer without disclosing secrets. A new deadline alone is not a repair. Use current owner recovery law; do not assume rotation, content equality or harmless metadata touch.",
       "acceptance": [
         "Original descriptor/readiness/GateB identities conserved",
         "Actual failure cause and permissible recovery or precise gate recorded",
@@ -172,10 +175,11 @@
       "source_ids": [
         "S07",
         "S08",
-        "S11"
+        "S11",
+        "S26"
       ],
       "outcome": "Current installed V5 acceptance is proved without replaying accepted preparation.",
-      "work": "After legitimate readiness prerequisites are met, perform only the still-owed original acceptance through the existing release owner. Reuse accepted prepare/install/GateB; preserve receipt expiry and effect reconciliation. Keep production arming distinct from acceptance.",
+      "work": "After legitimate readiness prerequisites and the retained explicitly reserved new human canary decision are resolved, perform only the still-owed original acceptance through the existing release owner. Reuse accepted prepare/install/GateB; preserve receipt expiry and effect reconciliation. Use canonical descriptor digest359eac8e, not descriptor-file byte hash15359f28, after exact owner verification. Keep production arming distinct from acceptance.",
       "acceptance": [
         "Current source/installed/config/receipt identities match",
         "Required current-V5 acceptance PASS is mandatory before dependent promotion; failure artifact returns FAIL/BLOCKED and does not satisfy this prerequisite",
@@ -228,10 +232,11 @@
         "S16",
         "S17",
         "S22",
-        "S23"
+        "S23",
+        "S26"
       ],
       "outcome": "A reviewed installed generation exposes the intended OS/session and role-specific transport.",
-      "work": "Compose the reviewed candidate with existing CeoIngress, Workspace App and HostedControlRoom owners. Install through the existing release owner, including required OS resource/commission and sealed publication configuration. Preserve separate COO policy/adapter compatibility. Do not create a new socket proxy or cache authority.",
+      "work": "Compose the reviewed candidate with existing CeoIngress, Workspace App and HostedControlRoom owners. Install through the existing release owner, including required OS resource/commission and sealed publication configuration. Preserve separate COO policy/adapter compatibility. Do not create a new socket proxy or cache authority. Public MCP1672 audience/metadata and its sealed host/VPS prerequisites are a separate held route, not a global dependency of the internal OS consumer.",
       "acceptance": [
         "Installed artifacts and selected policies match accepted source",
         "Real authenticated producer accessible to intended OS consumer",
@@ -271,10 +276,11 @@
       ],
       "source_ids": [
         "S08",
-        "S23"
+        "S23",
+        "S26"
       ],
       "outcome": "The intended authenticated public /os route works through its actual owner.",
-      "work": "Reconcile checkpoint-reported525 and missing Caddy route with current evidence. Establish exact edge owner and actual access. Preserve any original denied/unknown operation. Repair only the existing route under its applicable grant and verify external TLS/auth/application behavior.",
+      "work": "Reconcile the older checkpoint-reported525/missing Caddy route with the newer October21 canonical report of successful signed-out desktop/390px browser behavior and zero preview requests. The latter is not authenticated H8 or a direct observation by this audit. Establish exact edge owner and actual current access; repair only if current evidence still shows a defect. Preserve any original denied/unknown operation and verify external TLS/auth/application behavior. Do not install public MCP1672 Caddy routes as an OS-edge repair: resource-specific gateway audiences, sealed host config, actual Auth0 audience grant and reviewed VPS change have their own gates.",
       "acceptance": [
         "External response and authenticated OS journey observed, not inferred from loopback200",
         "Exact routing owner and selected config recorded",
@@ -531,10 +537,11 @@
       ],
       "source_ids": [
         "S05",
-        "S19"
+        "S19",
+        "S26"
       ],
       "outcome": "A parent/reviewer can recover the exact complete original result despite paging/display limits.",
-      "work": "Resolve existing collector/gateway/lineage candidates under their incumbent custody. Consume merged1661 same-path packet-retention repair rather than rebuilding it; qualify any needed immutable rollout through its existing owner without taking over the original News operation. Separate UI truncation from retained bytes. Require contiguous pages, stable digest, exact original run and complete terminal result. Never rerun work to replace lost pages.",
+      "work": "Resolve existing collector/gateway/lineage candidates under their incumbent custody. Consume merged1661 same-path packet-retention repair rather than rebuilding it; qualify any needed immutable rollout through its existing owner without taking over the original News operation. Separate UI truncation from retained bytes. Require contiguous pages, stable digest, exact original run and complete terminal result. Never rerun work to replace lost pages. Preserve the1362 exact-head review operation that returned canonical_source_unreadable before provider work; no verdict, automatic retry or provider failover follows. Diagnose its original host-source capability through the incumbent owner.",
       "acceptance": [
         "Long result reconstructed byte-for-byte with stable digest",
         "Missing/reordered/mismatched page prevents acceptance",
@@ -631,10 +638,11 @@
       ],
       "source_ids": [
         "S05",
-        "S19"
+        "S19",
+        "S26"
       ],
       "outcome": "Authenticated OS discovery/status/results come from the real existing Fabric owner.",
-      "work": "Extend the existing facade/owner contract for discoverable runs and complete authorized lineage. Prove actual producer-root binding, audience filtering, freshness and terminal artifact inspection. Coordinate shared host.ts with O3; no new run registry or polling authority.",
+      "work": "Extend the existing facade/owner contract for discoverable runs and complete authorized lineage. Prove actual producer-root binding, audience filtering, freshness and terminal artifact inspection. Coordinate shared host.ts with O3; no new run registry or polling authority. The latest canonical source reports1359 facade reachability and83 sequence11 adapter files matching their manifest. Reuse that bounded observation; it does not prove admission or original-parent consumption.",
       "acceptance": [
         "Real authorized run appears with truthful status and original lineage",
         "Foreign audience denied and stale/missing producer explicit",
@@ -686,10 +694,11 @@
         "S16",
         "S17",
         "S18",
-        "S19"
+        "S19",
+        "S26"
       ],
       "outcome": "One safe integration frontier preserves active work and actual review obligations.",
-      "work": "Read exact heads, live review decisions, source writer/lease and dirty work. Raw REST showed #1425/#1426/#1515 dirty at audit. Allocate App.tsx/host.ts/auth/native integration to one writer; give workers disjoint files or prepared patches. Preserve #1515 unexplained staged-index effect.",
+      "work": "Read exact heads, live review decisions, source writer/lease and dirty work. Raw REST showed #1425/#1426/#1515 dirty at audit. Allocate App.tsx/host.ts/auth/native integration to one writer; give workers disjoint files or prepared patches. Preserve #1515 unexplained staged-index effect. Reconcile original Macro9941/9340 updater custody before touching native distribution paths.",
       "acceptance": [
         "No overwritten worker work or duplicate source carrier",
         "Each current review is adjudicated by its incumbent or valid owner",
@@ -838,10 +847,11 @@
         "S15",
         "S16",
         "S17",
-        "S23"
+        "S23",
+        "S26"
       ],
       "outcome": "The Chairman uses a real authenticated office, receives the original answer and can recover after interruption.",
-      "work": "Exercise actual web/native auth and selected installed transport. Submit a legitimate bounded task, observe actual execution, inspect retained result, reload and continue. Preserve accepted request identity across possible committed response loss; verify unrelated pending work stays distinct.",
+      "work": "Exercise actual web/native auth and selected installed transport. Submit a legitimate bounded task, observe actual execution, inspect retained result, reload and continue. Preserve accepted request identity across possible committed response loss; verify unrelated pending work stays distinct. Reuse the later reported signed-out desktop/keyboard/390px and zero-preview-request proof within its scope; authenticated H8 and actual original-parent result consumption remain. Public MCP1672 is separate unless this exact consumer requires it.",
       "acceptance": [
         "No fixtures or manual message relay for essential path",
         "Original-parent consumption observed separately from UI rendering",
@@ -1031,10 +1041,11 @@
       ],
       "source_ids": [
         "S24",
-        "S03"
+        "S03",
+        "S26"
       ],
       "outcome": "The product is understandable and usable through its full intended journeys.",
-      "work": "Run real browser/native journeys, keyboard/focus/accessibility checks, narrow/wide layouts, loading/empty/stale/error states, supported themes/languages, console/network health, auth expiry/logout and deep links. Preserve the existing design identity; an unavailable Paper source is an explicit gap.",
+      "work": "Run real browser/native journeys, keyboard/focus/accessibility checks, narrow/wide layouts, loading/empty/stale/error states, supported themes/languages, console/network health, auth expiry/logout and deep links. Preserve the existing design identity; an unavailable Paper source is an explicit gap. Reuse unchanged signed-out layout/keyboard evidence reported in the October21 canonical delta; qualify remaining authenticated and native paths without rerunning evidence merely for recency.",
       "acceptance": [
         "User sees current work, decisions and trusted result without reading raw receipts",
         "Critical journeys pass in real intended clients",
@@ -1076,13 +1087,16 @@
         "docs/runbooks/mastermind-os-update-signatures.md"
       ],
       "incumbent_carriers": [
-        "Existing native release/signing owner"
+        "Existing native release/signing owner",
+        "Macro #9941",
+        "Macro #9340"
       ],
       "source_ids": [
-        "S24"
+        "S24",
+        "S26"
       ],
       "outcome": "A real user can install, update and recover a trusted supported release.",
-      "work": "Establish immutable version/channel/key/update manifest through existing owners. Build/sign/notarize supported Mac release; test clean install, PKCE recovery and update. Exercise wrong signature/key/hash/version, interruption and rollback. Unsigned --no-sign CI and offline verifier are preparation only.",
+      "work": "Establish immutable version/channel/key/update manifest through existing owners. Build/sign/notarize supported Mac release; test clean install, PKCE recovery and update. Exercise wrong signature/key/hash/version, interruption and rollback. Unsigned --no-sign CI and offline verifier are preparation only. Preserve Macro9941/9340 updater writer/effect custody and accepted work before commissioning any overlapping implementation.",
       "acceptance": [
         "Signed/notarized distributable and installation proof",
         "Tampered or incompatible update rejected",
@@ -1175,10 +1189,11 @@
         "S04",
         "S07",
         "S08",
-        "S21"
+        "S21",
+        "S26"
       ],
       "outcome": "Fresh sessions recover the same correct next action without duplicating completed work.",
-      "work": "Update only stale owner facts with exact evidence: Control80f/readiness event, Office generation, Context adoption, #692 merged structural proof and held original operations. Preserve AgentOSV1 DONE and broader Linear InProgress scopes. Use normal canonical review/validation; no copied memory mirror.",
+      "work": "Update only stale owner facts with exact evidence: Control80f/readiness event, Office generation, Context adoption, #692 merged structural proof and held original operations. Preserve AgentOSV1 DONE and broader Linear InProgress scopes. Use normal canonical review/validation; no copied memory mirror. Consume the already-updated October21 ecosystem frontier at Macro1482371 rather than reapplying stale corrections. Reconcile remaining W0-W2 awaiting-CI wording in WS:ORCHESTRATOR-PROJECT-CONTINUITY against merged1664/1666/9967; source completion does not close its native W3/W4 obligations.",
       "acceptance": [
         "One current next action per affected workstream",
         "Cold successor recovers owner/effect/accepted/remaining state",
@@ -1273,10 +1288,11 @@
       "source_ids": [
         "S14",
         "S20",
-        "S21"
+        "S21",
+        "S26"
       ],
       "outcome": "Context includes the needed knowledge and respects the actual delivery contract.",
-      "work": "Evaluate discovery/artifact/broader-decision coverage and source ordering against the existing compiler contract. Add JS/TS Atlas support where the product requires it; current protected Atlas supports Python/Markdown. Distinguish requested target from permitted reported mandatory overrun and a consumer hard ceiling. Make omission/correction reasoning inspectable.",
+      "work": "Evaluate discovery/artifact/broader-decision coverage and source ordering against the existing compiler contract. Add JS/TS Atlas support where the product requires it; current protected Atlas supports Python/Markdown. Distinguish requested target from permitted reported mandatory overrun and a consumer hard ceiling. Make omission/correction reasoning inspectable. Preserve merged Macro9967 four-reader exact-per-path history optimization. It changes no content-selection rule and does not fix the selector; do not rebuild it or increase concurrency/limits to erase the retained latency/settlement observation.",
       "acceptance": [
         "Relevant decisions/discoveries/procedures included or explicit omission",
         "Mandatory overrun is declared and hard delivery overflow handled safely",
@@ -1320,20 +1336,24 @@
       "incumbent_carriers": [
         "#1589",
         "original #1273 and #1307",
-        "Macro #9575"
+        "Macro #9575",
+        "merged #1666 and Macro #9967",
+        "WS:ORCHESTRATOR-PROJECT-CONTINUITY W1-W2"
       ],
       "source_ids": [
-        "S20"
+        "S20",
+        "S26"
       ],
       "outcome": "Intended native sessions consume the accepted current context package and recover correctly.",
-      "work": "Preserve installed Skills0.2.1 and successful bound pilot/fresh recall. Reconcile original #1307 EFFECT_UNKNOWN and #1273 writer release before continuing retained candidate. Qualify fresh load, complete procedure reading, task resolution, corrections and canonical cold successor recovery. Do not infer global hook adoption from discovery.",
+      "work": "Preserve installed Skills0.2.1 and successful bound pilot/fresh recall. Reconcile original #1307 EFFECT_UNKNOWN and #1273 writer release before continuing that retained candidate. Reuse merged1666 exact-workspace/explicit-workstream SessionStart and merged Macro9967 compiler/records; do not rebuild them or infer global adoption. Advance the intended checkout through its owner and reconcile the retained configured-owner timeout/process-settlement observation. Qualify native review/trust, startup and compaction/resume delivery, complete32-KiB output or explicit withholding, sibling exclusion and model-visible recovery of current decisions, constraints, accepted work and next action. Preserve original1589/1273/1307 until overlap or supersession is explicitly resolved.",
       "acceptance": [
         "Original effects/carriers reconciled without replacement",
         "Fresh intended native session loads exact package and correct task context",
-        "Unbound/ambiguous task refuses invention; interruptions preserve owner and next action"
+        "Unbound/ambiguous task refuses invention; interruptions preserve owner and next action",
+        "Controlled native session uses a changed current decision and continues the justified phase without another user instruction; fork/new-session orientation never transfers parent custody"
       ],
       "reserved_judgment": "O4 handles original effect ambiguity; O5 owns native identity/auth.",
-      "external_gates": "Original uncertain effects and source custody resolved. M1 inference401 uses normal legitimate account login; no copied credentials.",
+      "external_gates": "Original uncertain effects and source custody resolved for their exact operations. The narrow1666 direct Agent OS canary may proceed independently when its own installation/owner prerequisites are ready; full WP27 acceptance still requires25/26/31, and Executive-backed continuation requires current Executive evidence. M1 inference401 uses normal legitimate account login; no copied credentials.",
       "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
       "status": "PLANNING_ONLY_NOT_ADMITTED",
       "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
@@ -1513,13 +1533,15 @@
         "#1650",
         "#1421 collision",
         "merged #1228/#1643/#1240/#955/#962",
-        "#1236"
+        "#1236",
+        "merged #1664/#1666/#1669 and Macro #9967"
       ],
       "source_ids": [
-        "S22"
+        "S22",
+        "S26"
       ],
       "outcome": "Intended Fable/Opus/native surfaces load the exact accepted instructions and behave accordingly.",
-      "work": "Build immutable package via existing plugin owner from accepted source. Preserve M2 plugin0.2.0 cache proof; qualify fresh load rather than treating it absent. Reconcile overlap in ops/fabric_launch/install.py. Prove correct role methods, actual paid Fabric delegation and independent review behavior per surface.",
+      "work": "Build immutable package via existing plugin owner from accepted source. Preserve M2 plugin0.2.0 cache proof; qualify fresh load rather than treating it absent. Reconcile overlap in ops/fabric_launch/install.py. Include merged1664 Stop diagnostic,1666 scoped recovery adapter and the Macro9967 attended definition where applicable, preserving immutable identities/settings and normal native review/trust. Reuse1669 on-demand instruction completeness where guidance appears missing: retain selected-chain coverage, omitted bytes and effective native config separately from fresh behavior. Static runtime_verified:false is neither authority nor a startup gate; preserve legitimate local adaptations and unrelated controls. Recover the original private-adapter disclosure refusal/scope only for that held action. Prove correct role methods, actual paid Fabric delegation and independent review behavior per surface. The newer canonical report that all83 sequence11 adapter files match their manifest is bounded integrity evidence, not fresh instruction loading, Fable/Opus role admission or actual native tool behavior.",
       "acceptance": [
         "Manifest/version/file identities recorded and fresh session loads them",
         "Source policy and behavioral adoption distinguished",
@@ -1612,23 +1634,28 @@
         "tests"
       ],
       "incumbent_carriers": [
-        "#1362 including #1594",
+        "#1362 including #1594; latest dd9f1bbc review HOLD",
+        "merged #1664",
+        "WS:ORCHESTRATOR-PROJECT-CONTINUITY W0/W3/W4",
+        "#656/#1289/#1673/#1676",
         "existing Dialogue/Wake/RuntimeBinding owners"
       ],
       "source_ids": [
         "S22",
         "S15",
-        "S16"
+        "S16",
+        "S26"
       ],
       "outcome": "Original native parent receives, consumes and continues from the correct retained result.",
-      "work": "Finish existing correlation/profile/installation candidate, preserving native identity and original recipient. Use a real bounded worker result; prove active continuation and canonical consumption. Keep idle wake and Desktop/Executive writer binding as separate capabilities. Preserve accepted historical MiniMaxStop result without overclaiming.",
+      "work": "Finish existing correlation/profile/installation candidate, preserving native identity and original recipient. Current1362 dd9f1bbc is source-published with green exact-head CI but independent review held after canonical_source_unreadable; recover that original host-source capability and review operation, without replacement/provider failover. Before relying on Codex Stop return, use merged1664 read-only preflight on the actual hook file and intended parent/mode, reconcile adapter/helper drift through its owner, then obtain native review/trust and real retained-result delivery. Reuse656/1289/1673/1676 semantic-continuation source composition;385 synthetic cases establish release-gated PREPARE with an already RUNNING successor, not launch admission, ACK or native acceptance. Preserve requested-changes and production HOLD. Prove authentic owner acquisition, active continuation and canonical original-parent consumption with a real bounded result. Keep idle wake separate and preserve accepted historical MiniMaxStop proof within its scope.",
       "acceptance": [
         "Exact original parent/run/result correlation and actual consumption",
         "Duplicate/stale/foreign return refused or idempotently reconciled",
-        "Foreground delivery never labeled idle wake"
+        "Foreground delivery never labeled idle wake",
+        "Static preflight, native loading, delivery and consumption carry separate evidence; exit0 is not native acceptance and an unrelated historical binding failure does not block ordinary foreground work"
       ],
       "reserved_judgment": "O5 reserves identity/continuation semantics; Fabric implements disjoint adapters/tests.",
-      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch.",
+      "external_gates": "Current assignment, exact source custody and route must be resolved before dispatch. Source/review-admission diagnosis can begin at Stage0 through its original owner; later native/effect acceptance still requires the listed prerequisites.",
       "permitted_effect_class": "Source changes and focused verification only; installation or external effects require their existing owner and applicable grant.",
       "status": "PLANNING_ONLY_NOT_ADMITTED",
       "independent_review": "O6 or another qualified actor who did not author the consequential change; existing incumbent review rights remain.",
@@ -1864,10 +1891,11 @@
         "S01",
         "S02",
         "S03",
-        "S09"
+        "S09",
+        "S26"
       ],
       "outcome": "One genuinely useful integrated programme works, including interruptions and correction.",
-      "work": "Exercise H1 with at least two meaningful governed children including an Executive-Fabric bridged child; H2 direct codex-01 simple task or explicit owner-approved scope mapping; H3 reviewed return; H4 lost submission response; H5 authority/custody refusal; H6 bounded failure/repair; H7 intent correction; H8 real app consumer. Preserve one connected trace, exact identities and actual parent consumption.",
+      "work": "Exercise H1 with at least two meaningful governed children including an Executive-Fabric bridged child; H2 direct codex-01 simple task or explicit owner-approved scope mapping; H3 reviewed return; H4 lost submission response; H5 authority/custody refusal; H6 bounded failure/repair; H7 intent correction; H8 real app consumer. Preserve one connected trace, exact identities and actual parent consumption. Incumbent Astra/Sol returns remain addressed to their actual original root/parent. Reuse shared platform/product proof within its scope; prove Fable/Opus role assignment, binding and actual admitted execution separately, without retargeting old results.",
       "acceptance": [
         "Useful product outcome with real paid-worker execution and independent review",
         "Recovery/correction preserve original root and effects",
@@ -1962,10 +1990,11 @@
       "source_ids": [
         "S01",
         "S03",
-        "S24"
+        "S24",
+        "S26"
       ],
       "outcome": "The office survives its intended host failure/replacement without conflicting writers.",
-      "work": "Use staging or a controlled supported exercise for native reinstall, backup/restore, release rollback and M2-off/Linux-VPS continuity where adopted. Prove one authoritative lifecycle writer, preserved secrets boundaries, correct active host binding and actual client reconnect. Do not confuse loopback reachability with operational portability.",
+      "work": "Use staging or a controlled supported exercise for native reinstall, backup/restore, release rollback and M2-off/Linux-VPS continuity where adopted. Prove one authoritative lifecycle writer, preserved secrets boundaries, correct active host binding and actual client reconnect. Do not confuse loopback reachability with operational portability. Keep existing1147 VPS Fabric admission and the DR promotion ceremony as their separately held original carriers; no new failover writer or inferred deploy permission.",
       "acceptance": [
         "Recovery restores correct original state and owner without duplicate effects",
         "Intended supported alternative host actually works",

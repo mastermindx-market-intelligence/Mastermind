@@ -76,11 +76,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** One accountable mission with preserved original intent, owners, effects and explicit completion scope.
 
-**Work:** Read current compatible law, canonical workstream and exact latest owner checkpoints. Resolve live assignment/custody and material source changes. Distinguish core milestone from full adopted R2 scope. Explicitly decide adoption of1256 product obligations, including its five-working-day campaign. Establish six Opus accountability domains without assuming simultaneous admission.
+**Work:** Read current compatible law, canonical workstream and exact latest owner checkpoints. The October21 canonical refresh names an incumbent Astra integration assignment and four Sol coordinators; reconcile actual current ownership and explicit Fable takeover before commissioning overlapping work. A historical claim does not prove live occupancy. Resolve original host-operation custody and material source changes. Distinguish core milestone from full adopted R2 scope. Explicitly decide adoption of1256 product obligations, including its five-working-day campaign. Establish six Opus accountability domains without assuming simultaneous admission.
 
 **Depends on:** Current mission assignment. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** Existing programme and original #1621 commission. **Sources:** S01, S02, S03, S08.
+**Retained carriers:** Existing programme and original #1621 commission. **Sources:** S01, S02, S03, S08, S26.
 
 **Proposed path areas:** `agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md`, `agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md`
 
@@ -102,11 +102,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Control, MCP, local adapter, plugin, app and edge generations cannot be confused.
 
-**Work:** Read actual selected/installed/accepted artifacts through existing owners. Preserve reported Control80f versus MCP91c1 distinction and Claude plugin0.2.0 installed proof. Record source SHA, artifact digest, selected config identity, receipt freshness, role arms, owner and observation time for each component.
+**Work:** Read actual selected/installed/accepted artifacts through existing owners. Preserve reported Control80f versus MCP91c1 distinction and Claude plugin0.2.0 installed proof. The latest October21 canonical source reports Control enabled/running since10:02:41UTC with its start requestID unknown; the October19 DISARMED receipt is dated, and no fresh acceptance/arm is claimed. Reconcile actual current service/start/arm facts before effects rather than repeating the older STOPPED label. Record source SHA, artifact digest, selected config identity, receipt freshness, role arms, owner and observation time for each component.
 
 **Depends on:** WP-01. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** #1637 comment6282675941; #1621 comment6282392406; #1542 comment6309217010; #1236 comment6244269407. **Sources:** S07, S08, S09, S22.
+**Retained carriers:** #1637 comment6282675941; #1621 comment6282392406; #1542 comment6309217010; #1236 comment6244269407. **Sources:** S07, S08, S09, S22, S26.
 
 **Proposed path areas:** Read-only owner evidence; no source write proposed.
 
@@ -128,11 +128,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** A legitimate next readiness action is identified for the original retained release.
 
-**Work:** Inspect the original exit65 receipt, issuer generation and custody around changed mtime/ctime. Establish what is known about credential identity/content continuity and the writer without disclosing secrets. Use current owner recovery law; do not assume rotation, content equality or harmless metadata touch.
+**Work:** Inspect the original exit65 receipt, issuer generation and custody around changed mtime/ctime, plus attribution of the later reported Control start. The latest workstream says retained readiness2bca56bc does not match installed drift predecessor654abd66; verify that exact relationship through the current owner. Establish what is known about credential identity/content continuity and the writer without disclosing secrets. A new deadline alone is not a repair. Use current owner recovery law; do not assume rotation, content equality or harmless metadata touch.
 
 **Depends on:** WP-02. **External gates:** Applicable actual denials and unresolved effects must be reconciled on the original operation. A historical denial claim is attributed until its receipt/applicability is established.
 
-**Retained carriers:** #1637 original R1 lineage; JOB-003. **Sources:** S07, S08.
+**Retained carriers:** #1637 original R1 lineage; JOB-003. **Sources:** S07, S08, S26.
 
 **Proposed path areas:** `ops/executive_os`, `tests`
 
@@ -154,11 +154,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Current installed V5 acceptance is proved without replaying accepted preparation.
 
-**Work:** After legitimate readiness prerequisites are met, perform only the still-owed original acceptance through the existing release owner. Reuse accepted prepare/install/GateB; preserve receipt expiry and effect reconciliation. Keep production arming distinct from acceptance.
+**Work:** After legitimate readiness prerequisites and the retained explicitly reserved new human canary decision are resolved, perform only the still-owed original acceptance through the existing release owner. Reuse accepted prepare/install/GateB; preserve receipt expiry and effect reconciliation. Use canonical descriptor digest359eac8e, not descriptor-file byte hash15359f28, after exact owner verification. Keep production arming distinct from acceptance.
 
 **Depends on:** WP-03. **External gates:** WP-03 permissible recovery, actual host/role grant and current readiness. No substitute tool/account after an applicable refusal.
 
-**Retained carriers:** #1637 release80f384b8; JOB-003. **Sources:** S07, S08, S11.
+**Retained carriers:** #1637 release80f384b8; JOB-003. **Sources:** S07, S08, S11, S26.
 
 **Proposed path areas:** `ops/executive_os`, `tests`
 
@@ -180,11 +180,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** A reviewed installed generation exposes the intended OS/session and role-specific transport.
 
-**Work:** Compose the reviewed candidate with existing CeoIngress, Workspace App and HostedControlRoom owners. Install through the existing release owner, including required OS resource/commission and sealed publication configuration. Preserve separate COO policy/adapter compatibility. Do not create a new socket proxy or cache authority.
+**Work:** Compose the reviewed candidate with existing CeoIngress, Workspace App and HostedControlRoom owners. Install through the existing release owner, including required OS resource/commission and sealed publication configuration. Preserve separate COO policy/adapter compatibility. Do not create a new socket proxy or cache authority. Public MCP1672 audience/metadata and its sealed host/VPS prerequisites are a separate held route, not a global dependency of the internal OS consumer.
 
 **Depends on:** WP-04, WP-15, WP-16, WP-30. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** #1473; #1542; #1515; merged #1637. **Sources:** S09, S15, S16, S17, S22, S23.
+**Retained carriers:** #1473; #1542; #1515; merged #1637. **Sources:** S09, S15, S16, S17, S22, S23, S26.
 
 **Proposed path areas:** `ops/executive_os`, `control_plane`, `integrations/executive_mcp`
 
@@ -206,11 +206,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** The intended authenticated public /os route works through its actual owner.
 
-**Work:** Reconcile checkpoint-reported525 and missing Caddy route with current evidence. Establish exact edge owner and actual access. Preserve any original denied/unknown operation. Repair only the existing route under its applicable grant and verify external TLS/auth/application behavior.
+**Work:** Reconcile the older checkpoint-reported525/missing Caddy route with the newer October21 canonical report of successful signed-out desktop/390px browser behavior and zero preview requests. The latter is not authenticated H8 or a direct observation by this audit. Establish exact edge owner and actual current access; repair only if current evidence still shows a defect. Preserve any original denied/unknown operation and verify external TLS/auth/application behavior. Do not install public MCP1672 Caddy routes as an OS-edge repair: resource-specific gateway audiences, sealed host config, actual Auth0 audience grant and reviewed VPS change have their own gates.
 
 **Depends on:** WP-02. **External gates:** Actual route owner/current access must be established. Prior SSH refusal is a recorded claim; an applicable actual denial remains binding.
 
-**Retained carriers:** #1621 exact public-edge checkpoint; existing public-launch owner. **Sources:** S08, S23.
+**Retained carriers:** #1621 exact public-edge checkpoint; existing public-launch owner. **Sources:** S08, S23, S26.
 
 **Proposed path areas:** Read-only owner evidence; no source write proposed.
 
@@ -336,11 +336,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** A parent/reviewer can recover the exact complete original result despite paging/display limits.
 
-**Work:** Resolve existing collector/gateway/lineage candidates under their incumbent custody. Consume merged1661 same-path packet-retention repair rather than rebuilding it; qualify any needed immutable rollout through its existing owner without taking over the original News operation. Separate UI truncation from retained bytes. Require contiguous pages, stable digest, exact original run and complete terminal result. Never rerun work to replace lost pages.
+**Work:** Resolve existing collector/gateway/lineage candidates under their incumbent custody. Consume merged1661 same-path packet-retention repair rather than rebuilding it; qualify any needed immutable rollout through its existing owner without taking over the original News operation. Separate UI truncation from retained bytes. Require contiguous pages, stable digest, exact original run and complete terminal result. Never rerun work to replace lost pages. Preserve the1362 exact-head review operation that returned canonical_source_unreadable before provider work; no verdict, automatic retry or provider failover follows. Diagnose its original host-source capability through the incumbent owner.
 
 **Depends on:** WP-01. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** #1536; #1566; #1435; merged #1661 retention repair. **Sources:** S05, S19.
+**Retained carriers:** #1536; #1566; #1435; merged #1661 retention repair. **Sources:** S05, S19, S26.
 
 **Proposed path areas:** `control_plane`, `integrations`, `tests`
 
@@ -388,11 +388,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Authenticated OS discovery/status/results come from the real existing Fabric owner.
 
-**Work:** Extend the existing facade/owner contract for discoverable runs and complete authorized lineage. Prove actual producer-root binding, audience filtering, freshness and terminal artifact inspection. Coordinate shared host.ts with O3; no new run registry or polling authority.
+**Work:** Extend the existing facade/owner contract for discoverable runs and complete authorized lineage. Prove actual producer-root binding, audience filtering, freshness and terminal artifact inspection. Coordinate shared host.ts with O3; no new run registry or polling authority. The latest canonical source reports1359 facade reachability and83 sequence11 adapter files matching their manifest. Reuse that bounded observation; it does not prove admission or original-parent consumption.
 
 **Depends on:** WP-05, WP-10, WP-11. **External gates:** Basic catalog/status uses the currently accepted selected producer. Nested-lineage extension requires WP-09 accepted graph, but basic discovery must not be globally blocked on that extension.
 
-**Retained carriers:** #1426; #1435; merged #1359 and #1411. **Sources:** S05, S19.
+**Retained carriers:** #1426; #1435; merged #1359 and #1411. **Sources:** S05, S19, S26.
 
 **Proposed path areas:** `control_plane`, `integrations/executive_mcp`, `app/mastermind_os/src/host.ts`, `tests`
 
@@ -414,11 +414,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** One safe integration frontier preserves active work and actual review obligations.
 
-**Work:** Read exact heads, live review decisions, source writer/lease and dirty work. Raw REST showed #1425/#1426/#1515 dirty at audit. Allocate App.tsx/host.ts/auth/native integration to one writer; give workers disjoint files or prepared patches. Preserve #1515 unexplained staged-index effect.
+**Work:** Read exact heads, live review decisions, source writer/lease and dirty work. Raw REST showed #1425/#1426/#1515 dirty at audit. Allocate App.tsx/host.ts/auth/native integration to one writer; give workers disjoint files or prepared patches. Preserve #1515 unexplained staged-index effect. Reconcile original Macro9941/9340 updater custody before touching native distribution paths.
 
 **Depends on:** WP-01. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** #1473; #1542; #1515; #1425; #1426; #1435. **Sources:** S09, S15, S16, S17, S18, S19.
+**Retained carriers:** #1473; #1542; #1515; #1425; #1426; #1435. **Sources:** S09, S15, S16, S17, S18, S19, S26.
 
 **Proposed path areas:** `app/mastermind_os/src/App.tsx`, `app/mastermind_os/src/host.ts`, `app/mastermind_os/src`
 
@@ -492,11 +492,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** The Chairman uses a real authenticated office, receives the original answer and can recover after interruption.
 
-**Work:** Exercise actual web/native auth and selected installed transport. Submit a legitimate bounded task, observe actual execution, inspect retained result, reload and continue. Preserve accepted request identity across possible committed response loss; verify unrelated pending work stays distinct.
+**Work:** Exercise actual web/native auth and selected installed transport. Submit a legitimate bounded task, observe actual execution, inspect retained result, reload and continue. Preserve accepted request identity across possible committed response loss; verify unrelated pending work stays distinct. Reuse the later reported signed-out desktop/keyboard/390px and zero-preview-request proof within its scope; authenticated H8 and actual original-parent result consumption remain. Public MCP1672 is separate unless this exact consumer requires it.
 
 **Depends on:** WP-05, WP-06, WP-13, WP-15, WP-16. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** #1473; #1542; #1515 existing consumer carrier. **Sources:** S09, S15, S16, S17, S23.
+**Retained carriers:** #1473; #1542; #1515 existing consumer carrier. **Sources:** S09, S15, S16, S17, S23, S26.
 
 **Proposed path areas:** `app/mastermind_os/src`, `app/mastermind_os/src-tauri`, `tests`
 
@@ -596,11 +596,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** The product is understandable and usable through its full intended journeys.
 
-**Work:** Run real browser/native journeys, keyboard/focus/accessibility checks, narrow/wide layouts, loading/empty/stale/error states, supported themes/languages, console/network health, auth expiry/logout and deep links. Preserve the existing design identity; an unavailable Paper source is an explicit gap.
+**Work:** Run real browser/native journeys, keyboard/focus/accessibility checks, narrow/wide layouts, loading/empty/stale/error states, supported themes/languages, console/network health, auth expiry/logout and deep links. Preserve the existing design identity; an unavailable Paper source is an explicit gap. Reuse unchanged signed-out layout/keyboard evidence reported in the October21 canonical delta; qualify remaining authenticated and native paths without rerunning evidence merely for recency.
 
 **Depends on:** WP-17, WP-18, WP-19, WP-20, WP-33. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** Existing product acceptance and Paper identity. **Sources:** S24, S03.
+**Retained carriers:** Existing product acceptance and Paper identity. **Sources:** S24, S03, S26.
 
 **Proposed path areas:** `app/mastermind_os/src`, `app/mastermind_os/src-tauri`, `docs/design`
 
@@ -622,11 +622,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** A real user can install, update and recover a trusted supported release.
 
-**Work:** Establish immutable version/channel/key/update manifest through existing owners. Build/sign/notarize supported Mac release; test clean install, PKCE recovery and update. Exercise wrong signature/key/hash/version, interruption and rollback. Unsigned --no-sign CI and offline verifier are preparation only.
+**Work:** Establish immutable version/channel/key/update manifest through existing owners. Build/sign/notarize supported Mac release; test clean install, PKCE recovery and update. Exercise wrong signature/key/hash/version, interruption and rollback. Unsigned --no-sign CI and offline verifier are preparation only. Preserve Macro9941/9340 updater writer/effect custody and accepted work before commissioning any overlapping implementation.
 
 **Depends on:** WP-21, WP-31, WP-33. **External gates:** Actual signing/distribution identity and existing release grant; no purchase or account enrollment implied.
 
-**Retained carriers:** Existing native release/signing owner. **Sources:** S24.
+**Retained carriers:** Existing native release/signing owner; Macro #9941; Macro #9340. **Sources:** S24, S26.
 
 **Proposed path areas:** `app/mastermind_os/src-tauri`, `.github/workflows/mastermind-os.yml`, `docs/runbooks/mastermind-os-macos-release.md`, `docs/runbooks/mastermind-os-update-signatures.md`
 
@@ -674,11 +674,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Fresh sessions recover the same correct next action without duplicating completed work.
 
-**Work:** Update only stale owner facts with exact evidence: Control80f/readiness event, Office generation, Context adoption, #692 merged structural proof and held original operations. Preserve AgentOSV1 DONE and broader Linear InProgress scopes. Use normal canonical review/validation; no copied memory mirror.
+**Work:** Update only stale owner facts with exact evidence: Control80f/readiness event, Office generation, Context adoption, #692 merged structural proof and held original operations. Preserve AgentOSV1 DONE and broader Linear InProgress scopes. Use normal canonical review/validation; no copied memory mirror. Consume the already-updated October21 ecosystem frontier at Macro1482371 rather than reapplying stale corrections. Reconcile remaining W0-W2 awaiting-CI wording in WS:ORCHESTRATOR-PROJECT-CONTINUITY against merged1664/1666/9967; source completion does not close its native W3/W4 obligations.
 
 **Depends on:** WP-02, WP-23. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** Existing Macro workstreams and current cumulative handoff. **Sources:** S01, S04, S07, S08, S21.
+**Retained carriers:** Existing Macro workstreams and current cumulative handoff. **Sources:** S01, S04, S07, S08, S21, S26.
 
 **Proposed path areas:** `agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md`, `agentos/workstreams/WS-EXECUTIVE-AUTONOMY-V1-CLOSURE.md`, `agentos/workstreams/WS-AGENT-EVAL-FABRIC.md`, `agentos/handoffs`
 
@@ -726,11 +726,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Context includes the needed knowledge and respects the actual delivery contract.
 
-**Work:** Evaluate discovery/artifact/broader-decision coverage and source ordering against the existing compiler contract. Add JS/TS Atlas support where the product requires it; current protected Atlas supports Python/Markdown. Distinguish requested target from permitted reported mandatory overrun and a consumer hard ceiling. Make omission/correction reasoning inspectable.
+**Work:** Evaluate discovery/artifact/broader-decision coverage and source ordering against the existing compiler contract. Add JS/TS Atlas support where the product requires it; current protected Atlas supports Python/Markdown. Distinguish requested target from permitted reported mandatory overrun and a consumer hard ceiling. Make omission/correction reasoning inspectable. Preserve merged Macro9967 four-reader exact-per-path history optimization. It changes no content-selection rule and does not fix the selector; do not rebuild it or increase concurrency/limits to erase the retained latency/settlement observation.
 
 **Depends on:** WP-23, WP-01. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** Existing Macro compiler and merged Context Atlas. **Sources:** S14, S20, S21.
+**Retained carriers:** Existing Macro compiler and merged Context Atlas. **Sources:** S14, S20, S21, S26.
 
 **Proposed path areas:** `scripts/agentos.py`, `control_plane/project_atlas.py`, `control_plane/context_resolver.py`, `tests`
 
@@ -752,11 +752,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Intended native sessions consume the accepted current context package and recover correctly.
 
-**Work:** Preserve installed Skills0.2.1 and successful bound pilot/fresh recall. Reconcile original #1307 EFFECT_UNKNOWN and #1273 writer release before continuing retained candidate. Qualify fresh load, complete procedure reading, task resolution, corrections and canonical cold successor recovery. Do not infer global hook adoption from discovery.
+**Work:** Preserve installed Skills0.2.1 and successful bound pilot/fresh recall. Reconcile original #1307 EFFECT_UNKNOWN and #1273 writer release before continuing that retained candidate. Reuse merged1666 exact-workspace/explicit-workstream SessionStart and merged Macro9967 compiler/records; do not rebuild them or infer global adoption. Advance the intended checkout through its owner and reconcile the retained configured-owner timeout/process-settlement observation. Qualify native review/trust, startup and compaction/resume delivery, complete32-KiB output or explicit withholding, sibling exclusion and model-visible recovery of current decisions, constraints, accepted work and next action. Preserve original1589/1273/1307 until overlap or supersession is explicitly resolved.
 
-**Depends on:** WP-25, WP-26, WP-31. **External gates:** Original uncertain effects and source custody resolved. M1 inference401 uses normal legitimate account login; no copied credentials.
+**Depends on:** WP-25, WP-26, WP-31. **External gates:** Original uncertain effects and source custody resolved for their exact operations. The narrow1666 direct Agent OS canary may proceed independently when its own installation/owner prerequisites are ready; full WP27 acceptance still requires25/26/31, and Executive-backed continuation requires current Executive evidence. M1 inference401 uses normal legitimate account login; no copied credentials.
 
-**Retained carriers:** #1589; original #1273 and #1307; Macro #9575. **Sources:** S20.
+**Retained carriers:** #1589; original #1273 and #1307; Macro #9575; merged #1666 and Macro #9967; WS:ORCHESTRATOR-PROJECT-CONTINUITY W1-W2. **Sources:** S20, S26.
 
 **Proposed path areas:** `integrations`, `skills`, `agentos/handoffs`, `tests`
 
@@ -765,6 +765,7 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 - Original effects/carriers reconciled without replacement
 - Fresh intended native session loads exact package and correct task context
 - Unbound/ambiguous task refuses invention; interruptions preserve owner and next action
+- Controlled native session uses a changed current decision and continues the justified phase without another user instruction; fork/new-session orientation never transfers parent custody
 
 **Reserved judgment:** O4 handles original effect ambiguity; O5 owns native identity/auth.
 
@@ -856,11 +857,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Intended Fable/Opus/native surfaces load the exact accepted instructions and behave accordingly.
 
-**Work:** Build immutable package via existing plugin owner from accepted source. Preserve M2 plugin0.2.0 cache proof; qualify fresh load rather than treating it absent. Reconcile overlap in ops/fabric_launch/install.py. Prove correct role methods, actual paid Fabric delegation and independent review behavior per surface.
+**Work:** Build immutable package via existing plugin owner from accepted source. Preserve M2 plugin0.2.0 cache proof; qualify fresh load rather than treating it absent. Reconcile overlap in ops/fabric_launch/install.py. Include merged1664 Stop diagnostic,1666 scoped recovery adapter and the Macro9967 attended definition where applicable, preserving immutable identities/settings and normal native review/trust. Reuse1669 on-demand instruction completeness where guidance appears missing: retain selected-chain coverage, omitted bytes and effective native config separately from fresh behavior. Static runtime_verified:false is neither authority nor a startup gate; preserve legitimate local adaptations and unrelated controls. Recover the original private-adapter disclosure refusal/scope only for that held action. Prove correct role methods, actual paid Fabric delegation and independent review behavior per surface. The newer canonical report that all83 sequence11 adapter files match their manifest is bounded integrity evidence, not fresh instruction loading, Fable/Opus role admission or actual native tool behavior.
 
 **Depends on:** WP-01. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** #1650; #1421 collision; merged #1228/#1643/#1240/#955/#962; #1236. **Sources:** S22.
+**Retained carriers:** #1650; #1421 collision; merged #1228/#1643/#1240/#955/#962; #1236; merged #1664/#1666/#1669 and Macro #9967. **Sources:** S22, S26.
 
 **Proposed path areas:** `skills/mastermind-fabric-orchestration`, `integrations/claude_executive_plugin`, `ops/fabric_launch`, `docs/CLAUDE_CAPABILITY_HARDENING_2026-10-04.md`
 
@@ -908,11 +909,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** Original native parent receives, consumes and continues from the correct retained result.
 
-**Work:** Finish existing correlation/profile/installation candidate, preserving native identity and original recipient. Use a real bounded worker result; prove active continuation and canonical consumption. Keep idle wake and Desktop/Executive writer binding as separate capabilities. Preserve accepted historical MiniMaxStop result without overclaiming.
+**Work:** Finish existing correlation/profile/installation candidate, preserving native identity and original recipient. Current1362 dd9f1bbc is source-published with green exact-head CI but independent review held after canonical_source_unreadable; recover that original host-source capability and review operation, without replacement/provider failover. Before relying on Codex Stop return, use merged1664 read-only preflight on the actual hook file and intended parent/mode, reconcile adapter/helper drift through its owner, then obtain native review/trust and real retained-result delivery. Reuse656/1289/1673/1676 semantic-continuation source composition;385 synthetic cases establish release-gated PREPARE with an already RUNNING successor, not launch admission, ACK or native acceptance. Preserve requested-changes and production HOLD. Prove authentic owner acquisition, active continuation and canonical original-parent consumption with a real bounded result. Keep idle wake separate and preserve accepted historical MiniMaxStop proof within its scope.
 
-**Depends on:** WP-32, WP-11, WP-31. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
+**Depends on:** WP-32, WP-11, WP-31. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch. Source/review-admission diagnosis can begin at Stage0 through its original owner; later native/effect acceptance still requires the listed prerequisites.
 
-**Retained carriers:** #1362 including #1594; existing Dialogue/Wake/RuntimeBinding owners. **Sources:** S22, S15, S16.
+**Retained carriers:** #1362 including #1594; latest dd9f1bbc review HOLD; merged #1664; WS:ORCHESTRATOR-PROJECT-CONTINUITY W0/W3/W4; #656/#1289/#1673/#1676; existing Dialogue/Wake/RuntimeBinding owners. **Sources:** S22, S15, S16, S26.
 
 **Proposed path areas:** `control_plane/native_continuation.py`, `integrations`, `ops/native_fabric`, `tests`
 
@@ -921,6 +922,7 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 - Exact original parent/run/result correlation and actual consumption
 - Duplicate/stale/foreign return refused or idempotently reconciled
 - Foreground delivery never labeled idle wake
+- Static preflight, native loading, delivery and consumption carry separate evidence; exit0 is not native acceptance and an unrelated historical binding failure does not block ordinary foreground work
 
 **Reserved judgment:** O5 reserves identity/continuation semantics; Fabric implements disjoint adapters/tests.
 
@@ -1038,11 +1040,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** One genuinely useful integrated programme works, including interruptions and correction.
 
-**Work:** Exercise H1 with at least two meaningful governed children including an Executive-Fabric bridged child; H2 direct codex-01 simple task or explicit owner-approved scope mapping; H3 reviewed return; H4 lost submission response; H5 authority/custody refusal; H6 bounded failure/repair; H7 intent correction; H8 real app consumer. Preserve one connected trace, exact identities and actual parent consumption.
+**Work:** Exercise H1 with at least two meaningful governed children including an Executive-Fabric bridged child; H2 direct codex-01 simple task or explicit owner-approved scope mapping; H3 reviewed return; H4 lost submission response; H5 authority/custody refusal; H6 bounded failure/repair; H7 intent correction; H8 real app consumer. Preserve one connected trace, exact identities and actual parent consumption. Incumbent Astra/Sol returns remain addressed to their actual original root/parent. Reuse shared platform/product proof within its scope; prove Fable/Opus role assignment, binding and actual admitted execution separately, without retargeting old results.
 
 **Depends on:** WP-09, WP-12, WP-17, WP-19, WP-24, WP-33, WP-37. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** Original programme H1-H8. **Sources:** S01, S02, S03, S09.
+**Retained carriers:** Original programme H1-H8. **Sources:** S01, S02, S03, S09, S26.
 
 **Proposed path areas:** `research`, `docs/evidence`
 
@@ -1091,11 +1093,11 @@ WP-30 native Project Chat feasibility starts at Stage 0. Its full adoption/scale
 
 **Outcome:** The office survives its intended host failure/replacement without conflicting writers.
 
-**Work:** Use staging or a controlled supported exercise for native reinstall, backup/restore, release rollback and M2-off/Linux-VPS continuity where adopted. Prove one authoritative lifecycle writer, preserved secrets boundaries, correct active host binding and actual client reconnect. Do not confuse loopback reachability with operational portability.
+**Work:** Use staging or a controlled supported exercise for native reinstall, backup/restore, release rollback and M2-off/Linux-VPS continuity where adopted. Prove one authoritative lifecycle writer, preserved secrets boundaries, correct active host binding and actual client reconnect. Do not confuse loopback reachability with operational portability. Keep existing1147 VPS Fabric admission and the DR promotion ceremony as their separately held original carriers; no new failover writer or inferred deploy permission.
 
 **Depends on:** WP-22, WP-27, WP-34. **External gates:** Current assignment, exact source custody and route must be resolved before dispatch.
 
-**Retained carriers:** Existing OS production plan portability target. **Sources:** S01, S03, S24.
+**Retained carriers:** Existing OS production plan portability target. **Sources:** S01, S03, S24, S26.
 
 **Proposed path areas:** `ops/executive_os`, `app/mastermind_os`, `docs/runbooks`, `tests`
 

@@ -25,3 +25,8 @@ The current workstream separately retains the acceptance failure, and newer Octo
 ## Scope of testing
 
 No large implementation suite was rerun, no worker was admitted, no readiness canary was consumed, no external message was sent and no production service was changed by this audit. Existing test counts in the domain memos remain attributed to their named original revisions. Current Executive state reading and Studio discovery failed before useful host state; Fabric capability discovery succeeded but worker admission/start remained unprobed.
+
+
+## Canonical continuity proposal
+
+`canonical-continuity-check.json` records the actual path-scoped validation of Macro draft PR9988. The current unmodified Agent OS validator ran in an isolated fixture with its actual registry and three transitive workstream dependencies. One proposed existing-workstream append passed with zero errors/warnings; every prior workstream byte and all frontmatter were preserved. The published candidate was read back exactly. This is not whole-repository validation, hosted CI, a merged canonical update, a source-custody transfer or runtime proof.

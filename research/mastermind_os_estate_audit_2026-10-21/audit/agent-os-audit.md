@@ -1,6 +1,6 @@
-# Agent OS, Context Fabric, and organizational learning audit
+> Historical domain snapshot: read ../FINAL_SOURCE_REFRESH.md and ../SOURCE_REGISTER.md S26 before using current-state claims. Later source/commission deltas supersede affected descriptions; original reports retain their dates and scope.
 
-> Retained domain-audit snapshot. The [final material refresh](../FINAL_SOURCE_REFRESH.md) supersedes earlier open-state descriptions of1662 and1661; all host facts retain their named observation times.
+# Agent OS, Context Fabric, and organizational learning audit
 
 **Audit date:** 2026-10-21. **Mode:** read-only estate census, source reconciliation, and completion planning. No company records, PRs, credentials, runtime services, worker commissions, or external messages were changed. The only execution was an isolated local reproduction of a handoff selector using pinned source and two already-published records.
 

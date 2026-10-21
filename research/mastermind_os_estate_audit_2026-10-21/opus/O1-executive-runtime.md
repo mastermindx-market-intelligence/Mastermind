@@ -135,7 +135,7 @@ writing repeated status documents.
   ],
   "inputs": [
     "O1: Executive release and runtime. Read MASTERPLAN.md, WORK_PACKAGES.md and ACCEPTANCE_MATRIX.md.",
-    "Read FINAL_SOURCE_REFRESH.md: protected2151a89f includes merged1662 refusal-provenance law and merged1661 retention repair. Initial audit pins remain historical evidence; no installation follows from these merges.",
+    "Read FINAL_SOURCE_REFRESH.md: Mastermind7ab47f0b includes merged1662 refusal law,1661 retention repair and1664/1666/1669 native diagnostics/recovery; Macro1482371d adds9967 continuity source and a newer incumbent Astra/frontier report. Preserve accepted source, original custody and the actual current Fable takeover boundary; source merges are not installation or behavior proof.",
     "Assigned planning references: WP-02, WP-03, WP-04, WP-05, WP-06, WP-40. These are not lifecycle identifiers.",
     "Read the exact current incumbent carriers and evidence in PLAN_AND_PR_CROSSWALK.md/SOURCE_REGISTER.md; keep existing reviewers and writers.",
     "Reconcile original receipt/custody first; preserve JOB-003 and accepted prepare/install/GateB. Use existing release and edge owners; production arms stay separate. Actual applicable denial/EFFECT_UNKNOWN stays with its original operation."
@@ -187,6 +187,11 @@ writing repeated status documents.
       "commit": "d010b161386853586198a43f9ea9f535bbebb377",
       "path": "research/EXECUTIVE_ECOSYSTEM_COMPLETION_PROGRAMME_PLAN_2026-10-17.md",
       "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "commit": "1482371dd9055fc84583110272a86bf367b3c24d",
+      "path": "agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md",
+      "repository": "mastermindx-market-intelligence/macro"
     }
   ],
   "stop_conditions": [

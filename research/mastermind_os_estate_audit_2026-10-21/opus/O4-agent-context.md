@@ -135,7 +135,7 @@ writing repeated status documents.
   ],
   "inputs": [
     "O4: Agent OS, context and continuity. Read MASTERPLAN.md, WORK_PACKAGES.md and ACCEPTANCE_MATRIX.md.",
-    "Read FINAL_SOURCE_REFRESH.md: protected2151a89f includes merged1662 refusal-provenance law and merged1661 retention repair. Initial audit pins remain historical evidence; no installation follows from these merges.",
+    "Read FINAL_SOURCE_REFRESH.md: Mastermind7ab47f0b includes merged1662 refusal law,1661 retention repair and1664/1666/1669 native diagnostics/recovery; Macro1482371d adds9967 continuity source and a newer incumbent Astra/frontier report. Preserve accepted source, original custody and the actual current Fable takeover boundary; source merges are not installation or behavior proof.",
     "Assigned planning references: WP-23, WP-24, WP-25, WP-26, WP-27, WP-28, WP-29. These are not lifecycle identifiers.",
     "Read the exact current incumbent carriers and evidence in PLAN_AND_PR_CROSSWALK.md/SOURCE_REGISTER.md; keep existing reviewers and writers.",
     "Choose explicit chronology/ambiguity semantics before Fabric fix. Preserve1490 adoption, V1acceptance, original1589/1273/1307 effects and MAS64-before-MAS66 implementation. Distinguish compiler target overrun from hard consumer limit."
@@ -203,6 +203,16 @@ writing repeated status documents.
     {
       "commit": "b9b0759af6b8f347a7d729e3b13b8925857c5f8f",
       "path": "agentos/workstreams/WS-AGENT-OS.md",
+      "repository": "mastermindx-market-intelligence/macro"
+    },
+    {
+      "commit": "7ab47f0b62d9a22ff16a13f6b99b96b681874a93",
+      "path": "integrations/session_bridge/AGENTOS_SESSION_START.md",
+      "repository": "mastermindx-market-intelligence/Mastermind"
+    },
+    {
+      "commit": "1c99ae69ad45eda700f74337485669ee7a692e5b",
+      "path": "research/ORCHESTRATOR_PROJECT_CONTINUITY_IMPLEMENTATION.md",
       "repository": "mastermindx-market-intelligence/macro"
     }
   ],

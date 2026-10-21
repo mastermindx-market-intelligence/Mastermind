@@ -58,9 +58,9 @@
       "O5": 6,
       "O6": 6
     },
-    "source_id_count": 25,
+    "source_id_count": 26,
     "compiled_briefs": 7,
-    "verified_brief_source_paths": 27,
+    "verified_brief_source_paths": 32,
     "selector_counterexample": "CONFIRMED: earlier record selected; not a fixed-implementation pass",
     "local_markdown_links": "all file targets resolve"
   },

@@ -7,6 +7,8 @@ This matrix keeps the October 17 programme's **H1–H8** and **E-1–E-8** ident
 
 **Evidence baseline:** Mastermind protected `d010b161386853586198a43f9ea9f535bbebb377`; Macro canonical `b9b0759af6b8f347a7d729e3b13b8925857c5f8f`. Newer exact owner checkpoints correct dated plan facts, while open source candidates remain candidates. All live cases here begin **UNEXECUTED in this campaign**. Retained source tests and earlier host receipts may be reused within their actual scope; they do not pre-fill an integrated live PASS.
 
+**Current ownership and source refresh:** `FINAL_SOURCE_REFRESH.md` / S26 preserve the later Astra integration and original Fable host-operation custody. Existing Astra/Sol returns must reach their actual original root/parent. Their real evidence can qualify shared platform/product behavior within its scope, including H1/H3/T03; it does not prove the proposed Fable/Opus roles have been assigned, bound or admitted. Those role claims require their own real execution. Merged #1664/#1666/#1669 and Macro #9967 establish bounded source preparation; static coverage, native trust/loading, real recovery, semantic PREPARE/ACK and original-parent consumption retain separate proof. The latest source-reported Control start is not a fresh acceptance/arm receipt.
+
 ## 1. What each completion claim requires
 
 | Claim / gate | Required evidence | What remains outside that claim |
