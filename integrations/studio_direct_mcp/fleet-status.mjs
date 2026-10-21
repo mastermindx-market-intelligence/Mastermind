@@ -7,15 +7,16 @@ import { promisify } from 'node:util';
 const execFileAsync = promisify(execFile);
 const SHA256 = /^[0-9a-f]{64}$/;
 const OWNER_SCHEMA = 'mastermind.studio_direct_fleet_status.v1';
-const RESULT_SCHEMA = 'mastermind.studio_fleet_status_tool.v1';
+const RESULT_SCHEMA = 'mastermind.studio_fleet_status_tool.v2';
 const MAX_OUTPUT_BYTES = 256 * 1024;
 
 export const STUDIO_FLEET_STATUS_TOOL = Object.freeze({
   name: 'studio_fleet_status',
   title: 'Studio Fleet Status',
   description:
-    'Reads aggregate Studio Direct gateway and tunnel status through the installed Studio Direct owner. ' +
-    'This action is read-only: it does not start, stop, restart, create, delete, or rebind any service, tunnel, app, or credential.',
+    'Reads the installed Studio Direct owner. The account rows and counts cover only the public seat view; ' +
+    'state and allReady reflect every owner seat, including undisclosed private Fabric seats, so a partial view cannot report full-fleet readiness. ' +
+    'This action is read-only and cannot start, stop, restart, create, delete, or rebind any service, tunnel, app, or credential.',
   inputSchema: {
     type: 'object',
     properties: {},
@@ -84,16 +85,10 @@ const PUBLIC_ACCOUNTS = new Set([
 const PUBLIC_TRANSPORT_TTL = '5h';
 const TUNNEL_ID = /^tunnel_[0-9a-f]{32}$/;
 const ORGANIZATION_ID = /^org-[A-Za-z0-9]+$/;
-// The current owner has these exact additional private Fabric seats.
-// Validate all seats, but disclose only the already-public account subset.
-const PRIVATE_FABRIC_ACCOUNTS = new Set([
-  'fabric-c3-570f6f34',
-  'fabric-chatgpt3-w570f6f34',
-  'fabric-design',
-  'fabric-read',
-  'subagent-fabric-c3',
-]);
-const MAX_OWNER_ACCOUNTS = PUBLIC_ACCOUNTS.size + PRIVATE_FABRIC_ACCOUNTS.size;
+// Owner enumerates the installed private seats dynamically. Accept only the
+// owner-provided Fabric namespace; never disclose its identities or count.
+const PRIVATE_OWNER_ACCOUNT = /^(?:fabric|subagent-fabric)-[a-z0-9][a-z0-9-]{0,62}$/;
+const MAX_OWNER_ACCOUNTS = 64;
 const MAX_OWNER_ERROR_CHARS = 4096;
 
 function invalidOwner() {
@@ -139,8 +134,8 @@ function expectNullableBoundedString(value, maxChars, pattern = null) {
 }
 
 function expectOwnerAccount(value) {
-  if (typeof value !== 'string'
-      || (!PUBLIC_ACCOUNTS.has(value) && !PRIVATE_FABRIC_ACCOUNTS.has(value))) invalidOwner();
+  if (typeof value !== 'string' || value.length > 80
+      || (!PUBLIC_ACCOUNTS.has(value) && !PRIVATE_OWNER_ACCOUNT.test(value))) invalidOwner();
   return value;
 }
 
@@ -218,10 +213,10 @@ function projectStatusRow(row) {
   if (managedAliasRunning) invalidOwner();
   const pollReady = expectBoolean(row.tunnel.controlPlanePollReady);
   const transportTTL = row.tunnel.transportTTL;
-  // Stopped private tunnels legitimately have no TTL; public ones do not
-  // get this exception. A ready private tunnel must still report 5h.
+  // A stopped tunnel of any public/private seat can report no transport TTL.
+  // An active tunnel may not omit the configured 5h TTL.
   if (transportTTL !== PUBLIC_TRANSPORT_TTL
-      && !(PRIVATE_FABRIC_ACCOUNTS.has(account) && transportTTL === null && !ready)) {
+      && !(transportTTL === null && !tunnelRunning && !transportReady)) {
     invalidOwner();
   }
   const maxConcurrentRequests = row.tunnel.maxConcurrentRequests === null
@@ -307,9 +302,12 @@ function validateAndProjectOwnerResult(value) {
   const accounts = verified.filter((row) => PUBLIC_ACCOUNTS.has(row.account));
   const visibleReadyCount = accounts.filter((row) => row.ready).length;
   return {
+    scope: 'public_accounts',
     accountCount: accounts.length,
     readyCount: visibleReadyCount,
-    allReady: accounts.length > 0 && visibleReadyCount === accounts.length,
+    publicAllReady: accounts.length > 0 && visibleReadyCount === accounts.length,
+    // Keep allReady true only when the entire incumbent owner fleet is healthy.
+    allReady: ownerAllReady,
     accounts,
   };
 }
@@ -344,6 +342,7 @@ export function createFleetStatus(rawConfig) {
         schema: RESULT_SCHEMA,
         state: projection.allReady ? 'READY' : 'DEGRADED',
         ...projection,
+        issues: projection.allReady ? [] : ['OWNER_FLEET_DEGRADED'],
       };
     },
   });
