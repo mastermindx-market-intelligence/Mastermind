@@ -254,6 +254,63 @@ Publication, independent review, protected merge, installed native bytes, facade
 restart and an observed native canary are separate gates. This source checkpoint
 alone is not a production installation or proof of automatic native-parent wake.
 
+## Quality of an original collected artifact return
+
+Collected source quality belongs to the existing `pool_ledger` verdict owner.
+It is separate from runtime acceptance. The owner uses its existing ledger lock
+to publish one fixed `state/remote_sub/<run>.collection-quality.json` attestation
+for an ordinary authenticated artifact collection. The canonical terminal ledger
+receives no new event. Retained old readers and writers therefore keep their
+ordinary terminal, outcome, acceptance and statistics behavior, and a later true
+terminal publication for the same original run remains possible.
+
+The fixed original-operation path is the uniqueness boundary across collection
+destinations. Exact repeated input and adjudication are idempotent; another
+receipt, destination, source binding, byte digest or verdict conflicts. The
+attestation carries bounded metadata and explicit `PASS`, `FAIL` or `PARTIAL`
+source quality. It carries no copied worker output, new terminal result or
+`accepted_by` runtime acceptance. Unconfirmed publication is retained for the
+same owner's readback rather than overwritten or blindly retried.
+
+The original native root invokes this owner with the unchanged original parent.
+Native identity and optional environment-label agreement are correlation checks;
+they do not authenticate a caller or replace the current external native/tool
+authorization. A child or foreign invocation cannot substitute root labels for
+that scope. Historical plaintext returns and missing original producer evidence
+remain outside this capability.
+
+A settlement assessment keeps collected delivery, worker terminal capture,
+source quality, canonical terminal publication, controller return, broker lease
+and remote host lane separate. A successful terminal row precedes controller
+cleanup and proves publication only. An exact released broker snapshot proves
+only that broker component. Ordinary `LaneLease.release` currently emits no
+durable normal-release proof, so host-lane and aggregate settlement remain
+`UNKNOWN` without that owner evidence. Expired leases, absent processes, elapsed
+time and quality `PASS` cannot fill this gap. The assessment grants no lifecycle,
+acceptance, retry or lease-release authority.
+
+These source interfaces require the normal protected merge and immutable native
+generation publication/selection before use. Source qualification does not
+install the route, authorize a live collection or retrospectively settle a run.
+
+The proposed task-entrypoint commands are `quality-record <run>` with
+`--root`, `--parent`, `--binding`, `--collection`, `--receipt-sha256` and
+`--adjudication`, and read-only `quality-inspect <run>` and
+`settlement-assessment <run>` with the same original `--root` and `--parent`.
+These names describe the source interface; their presence here does not prove
+the installed entrypoint supports them. Invoke the existing native task
+entrypoint only after the complete merged generation has been qualified and
+selected through its owner. Running candidate code directly against a live
+target is not that release path.
+
+The owned adjudication file has schema
+`mastermind.collection_quality_adjudication.v1`. It explicitly binds the
+original run/root/parent, receipt SHA-256, stdout SHA-256 and byte count, every
+receipt file, every artifact, verdict, adjudicator role, reason and evidence
+reference. Copy the exact verified file metadata into the adjudication; do not
+omit a blob or infer a positive verdict from worker rc0. `deterministic` and
+`reviewer` describe the actual basis of the source-quality judgment.
+
 ## Contention handoff and commission deadlines
 
 An eligible foreground commission can continue after a broker-confirmed pre-lease capacity refusal as well as the existing provider-confirmed pre-task rejection. This closes the race in which routing selected a pool before another run placed its shared allowance on cooldown. Under its existing lock, the broker requires every relevant configured account to be otherwise enabled and covered by a valid active recorded capacity cooldown. It grants no lease to that acquire. Disabled or parked accounts, independent usable accounts, non-capacity failures, expired cooldowns, and busy half-open probes do not qualify this handoff.

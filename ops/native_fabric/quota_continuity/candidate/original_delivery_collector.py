@@ -918,4 +918,429 @@ def main(argv=None):
         return 75
 
 
+
+# ---------------------------------------------------------------------------
+# Candidate overlay: collected-source quality qualification (collector side).
+#
+# A small bounded helper that composes the existing owners only — the exact
+# owned receipt bytes, read_collection, load_binding with the retained
+# packet/log/support sources through the incumbent producer validator, and the
+# retained read-request/read-response chunks revalidated through
+# validate_response over a held DirectoryChain. Ordinary producer-
+# authenticated glm/qwen artifact contracts only: plain scopes, plain
+# retained-launch bindings and historical exception scopes are refused.
+#
+# RETAINED DESCRIPTORS: retained_collection_quality composes the incumbent
+# DirectoryChain/read_local_at strict nofollow owner mechanics into one
+# context manager that keeps every directory chain AND every actual input
+# regular file descriptor open through qualification AND publication. Held:
+# the collection receipt, every retained collection file (request, binding
+# copy, response chunks, stdout chunks, process capture, returncode, every
+# artifact), the source binding file, the original packet/log/support sources,
+# and the owned closed adjudication file. reverify() re-proves identity,
+# mode, ownership and exact content — not just a path — before and after the
+# sidecar link: replacing a file with identical bytes still refuses (inode
+# identity), substituting a symlink or another path refuses (O_NOFOLLOW open
+# plus name/identity comparison), and in-place mutation refuses (re-read
+# digest). The owner's own sidecar write in the same state directory is not a
+# change: directory chains are revalidated by held edge identity, never by
+# directory mtime. Existing IO owners do all reading — there is no second
+# general reader, no scan, and no runtime IO reader — and every descriptor
+# and chain is closed on every path.
+#
+# The original-caller guard runs BEFORE any input read or write: the
+# CODEX_THREAD_ID label must agree with the independently caller-asserted
+# original root of the ORIGINAL invocation; POOL_ORCHESTRATOR_ID and
+# POOL_PARENT_RUN_ID are optional correlation labels that are refused on any
+# mismatch when present but never required when absent — the legitimate
+# native shell carries POOL_ORCHESTRATOR_ID unset. Child, vanished-parent,
+# foreign and current-coordinator label substitutions are refused. The labels
+# stay correlation, never authentication: no native or tool grant is consulted
+# or created here, external native/tool original-root scope remains the
+# authority, and this helper issues no acceptance, release, settlement or
+# retry right.
+# ---------------------------------------------------------------------------
+
+QUALITY_SUBJECT_SCHEMA = 'mastermind.collection_quality_subject.v1'
+QUALITY_ADJUDICATION_SCHEMA = 'mastermind.collection_quality_adjudication.v1'
+QUALITY_MAX_ADJUDICATION = 65536
+QUALITY_MAX_REASON = 512
+QUALITY_MAX_EVIDENCE = 128
+QUALITY_VERDICTS = ('PASS', 'FAIL', 'PARTIAL')
+QUALITY_BY_ROLES = ('deterministic', 'reviewer')
+QUALITY_CHUNK_BOUND = 64
+QUALITY_NAME = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}\Z')
+QUALITY_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.:/()+'-]{0,511}\Z")
+QUALITY_SHORT_TEXT = re.compile(r"[A-Za-z0-9][A-Za-z0-9 _.:/()+'-]{0,127}\Z")
+
+
+def quality_caller_guard(root, parent):
+    """Original-caller agreement guard. Runs before any input read or write."""
+    if (type(root) is not str or type(parent) is not str
+            or not IDENT.fullmatch(root) or not IDENT.fullmatch(parent)):
+        raise OriginalDeliveryRefused('quality_caller_scope_invalid')
+    if os.environ.get('CODEX_THREAD_ID') != root:
+        # A child thread, a vanished parent label, or a foreign operation.
+        raise OriginalDeliveryRefused('quality_caller_not_original_root')
+    coordinator = os.environ.get('POOL_ORCHESTRATOR_ID')
+    if coordinator is not None and coordinator != root:
+        # A present coordinator label must not substitute the original root;
+        # the legitimate native shell carries this label unset.
+        raise OriginalDeliveryRefused('quality_caller_coordinator_label_mismatch')
+    labelled = os.environ.get('POOL_PARENT_RUN_ID')
+    if labelled is not None and labelled != parent:
+        raise OriginalDeliveryRefused('quality_caller_parent_label_mismatch')
+
+
+class _QualifiedCollection:
+    """One qualified collection with every input descriptor held open.
+
+    Entry performs the caller guard and the full bounded qualification through
+    the existing owners, then keeps every directory chain and input regular
+    file descriptor open so reverify() can re-prove identity, mode, ownership
+    and exact content around the sidecar owner's publication. close() closes
+    every descriptor and chain on every path.
+    """
+
+    def __init__(self, binding_path, *, collection_receipt, expected_sha256,
+                 run_id, root, parent, adjudication_path=None):
+        self._chains = []
+        self._held = []
+        self._names = set()
+        self.subject = None
+        self.adjudication_raw = None
+        try:
+            self._qualify(binding_path, collection_receipt=collection_receipt,
+                          expected_sha256=expected_sha256, run_id=run_id,
+                          root=root, parent=parent,
+                          adjudication_path=adjudication_path)
+        except OriginalDeliveryRefused:
+            self.close()
+            raise
+        except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+            # Every failure is a typed refusal; a raw filesystem or parse
+            # error never escapes qualification.
+            self.close()
+            raise OriginalDeliveryRefused('quality_collection_unqualified') from error
+        except BaseException:
+            self.close()
+            raise
+
+    # ---- retained descriptor mechanics ------------------------------------
+
+    def _chain(self, path):
+        chain = delivery.DirectoryChain(Path(path))
+        self._chains.append(chain)
+        return chain
+
+    def _retain(self, chain, name, limit, expected=None):
+        """Hold the actual regular descriptor BEFORE the owner read.
+
+        The descriptor is opened and fully qualified first, then the incumbent
+        owner read runs, and the held descriptor's full identity (device,
+        inode, size, times, mode, owner, link count) is compared against the
+        visible directory entry both before and after those bytes. A same-bytes
+        replacement inside that interval can never satisfy both snapshots, so
+        the replaced inode is refused instead of qualifying it. The existing
+        read_local_at owner stays the only byte reader; its own errors keep
+        this call site's specific refusal mapping. The qualified descriptor is
+        retained through publication and revalidated by revalidate().
+        """
+        key = (id(chain), name)
+        if key in self._names:
+            return None
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=chain.fd)
+        try:
+            held = os.fstat(fd)
+            before = os.stat(name, dir_fd=chain.fd, follow_symlinks=False)
+            identity = reader.identity(held)
+            if (identity != reader.identity(before)
+                    or not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
+                    or held.st_mode & 0o022):
+                raise OriginalDeliveryRefused('quality_retained_source_changed')
+            raw = delivery.read_local_at(chain, name, limit)
+            after = os.stat(name, dir_fd=chain.fd, follow_symlinks=False)
+            if (identity != reader.identity(os.fstat(fd))
+                    or identity != reader.identity(after)
+                    or len(raw) != held.st_size):
+                raise OriginalDeliveryRefused('quality_retained_source_changed')
+        except OriginalDeliveryRefused:
+            os.close(fd)
+            raise
+        except BaseException:
+            # Owner-read errors keep their caller's specific refusal mapping;
+            # only the descriptor this call opened is released here.
+            os.close(fd)
+            raise
+        if expected is not None and sha(raw) != expected:
+            os.close(fd)
+            raise OriginalDeliveryRefused('quality_retained_source_changed')
+        self._names.add(key)
+        self._held.append((chain, name, fd, identity,
+                           stat.S_IMODE(held.st_mode), sha(raw), limit))
+        return raw
+
+    def revalidate(self):
+        """Re-prove every retained input: identity, mode, ownership, content."""
+        for chain, name, fd, identity, mode, digest, limit in self._held:
+            chain.verify()
+            info = os.fstat(fd)
+            if (reader.identity(info) != identity
+                    or stat.S_IMODE(info.st_mode) != mode
+                    or not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid()):
+                raise ValueError('qualified_collection_changed')
+            if reader.identity(info) != reader.identity(
+                    os.stat(name, dir_fd=chain.fd, follow_symlinks=False)):
+                # A same-bytes replacement at the same path still refuses.
+                raise ValueError('qualified_collection_changed')
+            data = b''
+            while len(data) <= limit:
+                chunk = os.pread(fd, min(65536, limit + 1 - len(data)), len(data))
+                if not chunk:
+                    break
+                data += chunk
+            if len(data) != info.st_size or sha(data) != digest:
+                raise ValueError('qualified_collection_changed')
+        return True
+
+    def reverify(self):
+        """Revalidation around publication; the subject is unchanged by proof."""
+        self.revalidate()
+        return self.subject
+
+    def close(self):
+        for _chain, _name, fd, *_rest in reversed(self._held):
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        self._held.clear()
+        self._names.clear()
+        for chain in reversed(self._chains):
+            chain.close()
+        self._chains.clear()
+
+    # ---- qualification over the existing owners ---------------------------
+
+    def _qualify(self, binding_path, *, collection_receipt, expected_sha256,
+                 run_id, root, parent, adjudication_path):
+        quality_caller_guard(root, parent)
+        if (not isinstance(binding_path, (str, Path))
+                or not isinstance(collection_receipt, (str, Path))
+                or not IDENT.fullmatch(run_id) or run_id in PLAIN_SCOPES
+                or type(expected_sha256) is not str or not HEX.fullmatch(expected_sha256)):
+            raise OriginalDeliveryRefused('quality_subject_unqualified')
+        receipt_path = Path(collection_receipt)
+        binding_file = Path(binding_path)
+        # Exact owned receipt bytes first, retained on a held descriptor.
+        try:
+            receipt_chain = self._chain(receipt_path.parent)
+            receipt_raw = self._retain(receipt_chain, receipt_path.name, 65536)
+        except OriginalDeliveryRefused:
+            raise
+        except (OSError, ValueError) as error:
+            raise OriginalDeliveryRefused('quality_receipt_unreadable') from error
+        if receipt_raw is None or sha(receipt_raw) != expected_sha256:
+            raise OriginalDeliveryRefused('quality_receipt_digest_mismatch')
+        # Existing readback owner: receipt scope, state, delivered files, stdout.
+        try:
+            stdout = read_collection(receipt_path, expected_sha256=expected_sha256,
+                                     run_id=run_id, root=root, parent=parent)
+        except OriginalDeliveryRefused:
+            raise
+        except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+            raise OriginalDeliveryRefused('quality_collection_readback_unqualified') from error
+        # Incumbent binding owner: exact original packet/log/support sources,
+        # producer contract and the full-hash-qualified incumbent validator.
+        try:
+            value, binding_raw, source, contract, alias, registry, original_validator, plain_binding = load_binding(
+                binding_file, run_id=run_id, root=root, parent=parent)
+        except (OSError, ValueError, TypeError, KeyError, RecursionError) as error:
+            raise OriginalDeliveryRefused('quality_binding_unqualified') from error
+        if (plain_binding is not None or contract is None
+                or contract.get('schema') != production.SCHEMA
+                or value['mode'] not in production.ORDINARY_MODES):
+            raise OriginalDeliveryRefused('quality_plain_or_historical_scope_unqualified')
+        receipt = reader.strict_json(receipt_raw)
+        if receipt.get('host') != value['host'] or receipt.get('mode') != value['mode']:
+            raise OriginalDeliveryRefused('quality_receipt_scope_mismatch')
+        request = {'schema': SCHEMA,
+                   **{k: value[k] for k in ('run_id', 'root', 'parent', 'host')},
+                   'contract': contract}
+        request_bytes = canonical(request)
+        if sha(request_bytes) != receipt.get('request_sha256'):
+            raise OriginalDeliveryRefused('quality_request_digest_mismatch')
+        # Retain the binding file and every original source on held descriptors.
+        binding_chain = self._chain(binding_file.parent)
+        self._retain(binding_chain, binding_file.name, 65536, expected=sha(binding_raw))
+        sources_chain = self._chain(Path(value['sources']['log']['path']).parent)
+        for name in ('packet', 'log', 'support'):
+            item = value['sources'][name]
+            self._retain(sources_chain, Path(item['path']).name, 2 * 1024 * 1024,
+                         expected=item['sha256'])
+        # Retained collection evidence by exact name: retained request, the
+        # collection's own binding copy, and every retained response chunk.
+        if delivery.read_local_at(receipt_chain, 'read-request.json', 65536) != request_bytes:
+            raise OriginalDeliveryRefused('quality_retained_request_mismatch')
+        self._retain(receipt_chain, 'read-request.json', 65536,
+                     expected=sha(request_bytes))
+        if delivery.read_local_at(receipt_chain, 'binding.json', 65536) != binding_raw:
+            raise OriginalDeliveryRefused('quality_retained_binding_mismatch')
+        self._retain(receipt_chain, 'binding.json', 65536, expected=sha(binding_raw))
+        response = b''
+        for index in range(QUALITY_CHUNK_BOUND):
+            name = f'read-response.{index:03d}'
+            try:
+                part = delivery.read_local_at(receipt_chain, name, reader.MAX_FILE)
+            except FileNotFoundError:
+                break
+            response += part
+            self._retain(receipt_chain, name, reader.MAX_FILE)
+        if not response:
+            raise OriginalDeliveryRefused('quality_collection_response_absent')
+        if len(response) > MAX_RESPONSE:
+            raise OriginalDeliveryRefused('quality_collection_response_limit')
+        if sha(response) != receipt.get('response_sha256'):
+            raise OriginalDeliveryRefused('quality_retained_response_mismatch')
+        verified = validate_response(response, request, value['mode'],
+                                     original_validator=original_validator)
+        if verified is None:
+            raise OriginalDeliveryRefused('quality_collection_not_terminal')
+        blobs, artifacts, manifest = verified
+        if (blobs['stdout'] != stdout
+                or sha(blobs['stdout']) != receipt.get('stdout_sha256')
+                or len(blobs['stdout']) != receipt.get('stdout_bytes')):
+            raise OriginalDeliveryRefused('quality_stdout_mismatch')
+        files = receipt.get('files')
+        if type(files) is not list or not files:
+            raise OriginalDeliveryRefused('quality_collection_files_mismatch')
+        files_by_name = {item.get('local_name'): item for item in files}
+        if (sha(blobs['process']) != (files_by_name.get('process.json') or {}).get('sha256')
+                or sha(blobs['rc']) != (files_by_name.get('returncode.txt') or {}).get('sha256')):
+            raise OriginalDeliveryRefused('quality_process_mismatch')
+        expected_artifacts = [{**meta, 'local_name': f'artifact.{index:02d}'}
+                              for index, (meta, _data) in enumerate(artifacts)]
+        if receipt.get('artifacts') != expected_artifacts:
+            raise OriginalDeliveryRefused('quality_artifact_receipt_mismatch')
+        expected_names = (['binding.json', *receipt['stdout_chunks'], 'process.json',
+                           'returncode.txt']
+                          + [f'artifact.{index:02d}' for index in range(len(artifacts))])
+        if [item.get('local_name') for item in files] != expected_names:
+            raise OriginalDeliveryRefused('quality_collection_files_mismatch')
+        for item in files:
+            self._retain(receipt_chain, item['local_name'], reader.MAX_FILE,
+                         expected=item['sha256'])
+        subject = {
+            'schema': QUALITY_SUBJECT_SCHEMA,
+            'run_id': run_id, 'root': root, 'parent': parent,
+            'host': value['host'], 'mode': value['mode'],
+            'requested_model': value['requested_model'],
+            'destination': str(receipt_path.parent),
+            'receipt_name': receipt_path.name,
+            'receipt_sha256': expected_sha256,
+            'binding_sha256': sha(binding_raw),
+            'request_sha256': sha(request_bytes),
+            'response_sha256': sha(response),
+            'packet_sha256': sha(source['packet']),
+            'body_sha256': contract['body_sha256'],
+            'support_digest': contract['support_digest'],
+            'artifact_names': list(contract['names']),
+            'stdout': {'sha256': sha(blobs['stdout']), 'bytes': len(blobs['stdout']),
+                       'chunks': len(receipt['stdout_chunks'])},
+            'process_sha256': sha(blobs['process']),
+            'returncode': 0,
+            'files': [dict(item) for item in files],
+            'artifacts': [{k: item[k] for k in ('path', 'bytes', 'sha256', 'local_name')}
+                          for item in receipt['artifacts']],
+            'artifact_manifest_sha256': sha(canonical(manifest)),
+            'collection_files_sha256': sha(canonical(files)),
+        }
+        if adjudication_path is not None:
+            # The owned closed adjudication is read once here and retained on
+            # its own descriptor, so the exact bytes the owner attests stay
+            # provable through publication.
+            adjudication_file = Path(adjudication_path)
+            adjudication_chain = self._chain(adjudication_file.parent)
+            self.adjudication_raw = self._retain(
+                adjudication_chain, adjudication_file.name, QUALITY_MAX_ADJUDICATION)
+            if self.adjudication_raw is None:
+                raise OriginalDeliveryRefused('quality_adjudication_invalid')
+        self.subject = subject
+
+
+class retained_collection_quality:
+    """Context manager: qualify one retained collection, hold every input.
+
+    Composes the existing owners into one bounded qualification whose held
+    directory chains and input file descriptors survive the whole publication
+    window, so the sidecar owner revalidates the ACTUAL retained source — not
+    a re-read by path — before and after the link. Exit closes every
+    descriptor and chain on every path; nothing here mutates the original
+    operation, runs the worker, settles a lease, or adjudicates acceptance.
+    """
+
+    def __init__(self, binding_path, *, collection_receipt, expected_sha256,
+                 run_id, root, parent, adjudication_path=None):
+        self._args = (binding_path, collection_receipt, expected_sha256,
+                      run_id, root, parent, adjudication_path)
+        self._qualified = None
+
+    def __enter__(self):
+        binding_path, collection_receipt, expected_sha256, run_id, root, parent, \
+            adjudication_path = self._args
+        self._qualified = _QualifiedCollection(
+            binding_path, collection_receipt=collection_receipt,
+            expected_sha256=expected_sha256, run_id=run_id, root=root,
+            parent=parent, adjudication_path=adjudication_path)
+        return self._qualified
+
+    def __exit__(self, *_):
+        if self._qualified is not None:
+            self._qualified.close()
+            self._qualified = None
+        return False
+
+
+def quality_adjudication(raw, *, subject):
+    """Validate one CLOSED explicit adjudication against a qualified subject.
+
+    The adjudication binds the receipt digest, the stdout digest and length,
+    every retained collection file, and every artifact digest/length/name,
+    plus verdict, role, reason and evidence. A success boolean is never
+    sufficient; any omitted, extra or changed binding refuses.
+    """
+    if (not isinstance(raw, (bytes, bytearray))
+            or not 0 < len(raw) <= QUALITY_MAX_ADJUDICATION
+            or type(subject) is not dict
+            or subject.get('schema') != QUALITY_SUBJECT_SCHEMA):
+        raise OriginalDeliveryRefused('quality_adjudication_invalid')
+    try:
+        row = reader.strict_json(bytes(raw))
+    except (ValueError, TypeError, RecursionError) as error:
+        raise OriginalDeliveryRefused('quality_adjudication_invalid') from error
+    fields = {'schema', 'run_id', 'root', 'parent', 'verdict', 'by', 'reason',
+              'evidence', 'receipt_sha256', 'stdout_sha256', 'stdout_bytes',
+              'files', 'artifacts'}
+    if (type(row) is not dict or set(row) != fields
+            or row['schema'] != QUALITY_ADJUDICATION_SCHEMA
+            or any(row.get(k) != subject[k] for k in ('run_id', 'root', 'parent'))
+            or row['verdict'] not in QUALITY_VERDICTS
+            or row['by'] not in QUALITY_BY_ROLES
+            or type(row['reason']) is not str
+            or QUALITY_TEXT.fullmatch(row['reason']) is None
+            or len(row['reason']) > QUALITY_MAX_REASON
+            or type(row['evidence']) is not str
+            or QUALITY_SHORT_TEXT.fullmatch(row['evidence']) is None
+            or len(row['evidence']) > QUALITY_MAX_EVIDENCE
+            or row['receipt_sha256'] != subject['receipt_sha256']
+            or row['stdout_sha256'] != subject['stdout']['sha256']
+            or row['stdout_bytes'] != subject['stdout']['bytes']
+            or row['files'] != subject['files']
+            or row['artifacts'] != subject['artifacts']):
+        raise OriginalDeliveryRefused('quality_adjudication_incomplete')
+    return {'verdict': row['verdict'], 'by': row['by'], 'reason': row['reason'],
+            'evidence': row['evidence'], 'adjudication_sha256': sha(bytes(raw))}
+
+
+
 if __name__=='__main__':raise SystemExit(main())

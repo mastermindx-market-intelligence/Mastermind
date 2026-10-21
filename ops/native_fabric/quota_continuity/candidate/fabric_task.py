@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import hashlib
 import json
 import os
 import re
 import shlex
+import sqlite3
 import stat
 import subprocess
 import sys
@@ -1087,6 +1089,622 @@ def _json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
+# ---------------------------------------------------------------------------
+# Candidate overlay: collected-source quality record/inspect and settlement
+# assessment. Composes the existing collector qualification owner and the
+# existing pool_ledger sidecar owner plus retained original-controller proofs;
+# adds no scheduler, authority plane, acceptance or release right.
+# ---------------------------------------------------------------------------
+
+SETTLEMENT_ASSESSMENT_SCHEMA = "mastermind.fabric_settlement_assessment.v1"
+
+
+def _quality_require_scope(run_id: str, root: str, parent: str) -> str:
+    rid = validate_run_id(run_id)
+    for value in (root, parent):
+        if type(value) is not str or not RUN_ID_RE.fullmatch(value):
+            raise FabricTaskError("collection quality scope invalid")
+    return rid
+
+
+def _quality_collector():
+    import original_delivery_collector as collector
+    return collector
+
+
+def record_collection_quality(run_id, *, root, parent, binding, collection,
+                              receipt_sha256, adjudication_path) -> dict:
+    """Forward original-operation paths to the ledger sidecar owner.
+
+    Facade only, never a trust boundary: the ledger owner runs the
+    original-caller guard before any input read, re-derives the qualified
+    subject from the actual retained evidence under the existing ledger lock,
+    and reads the owned closed adjudication itself. No acceptance, terminal,
+    outcome, release or retry effect is produced.
+    """
+    collector = _quality_collector()
+    rid = _quality_require_scope(run_id, root, parent)
+    if (type(receipt_sha256) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", receipt_sha256) is None):
+        raise FabricTaskError("collection receipt digest invalid")
+    # Convenience guard only: the owner re-runs it before any input read.
+    collector.quality_caller_guard(root, parent)
+    return pool_ledger.publish_collection_quality(
+        run_id=rid, root=root, parent=parent, binding=binding,
+        collection=collection, receipt_sha256=receipt_sha256,
+        adjudication_path=adjudication_path)
+
+
+def inspect_collection_quality(run_id, *, root, parent) -> dict:
+    """Bounded read-only sidecar inspection through the guarded ledger owner."""
+    rid = _quality_require_scope(run_id, root, parent)
+    projection = pool_ledger.read_collection_quality(rid, root=root, parent=parent)
+    if projection.get("state") == "RECORDED":
+        attestation = projection.get("attestation")
+        projection["caller_scope_matches"] = (
+            type(attestation) is dict and attestation.get("root") == root
+            and attestation.get("parent") == parent)
+    return projection
+
+
+def _settlement_dimension(state: str, reason: str, **fields) -> dict:
+    return {"state": state, "reason": reason, **fields}
+
+
+class _ProofChanged(Exception):
+    """A canonical retained proof was replaced inside the assessment window."""
+
+
+def _retained_state_chain():
+    """Strict owner custody of the canonical retained-proof directory.
+
+    The existing delivery DirectoryChain is the only directory reader: every
+    ancestor is opened no-follow and re-verified for owner, mode and identity,
+    so an unsafe, world-writable or replaced directory refuses instead of
+    yielding proofs. No new reader, transport or host probe is introduced.
+    """
+    import artifact_delivery as delivery
+    return delivery.DirectoryChain(HERE / "state" / "remote_sub")
+
+
+def _retained_proof_bundle(chain, specs: dict) -> dict:
+    """Read the fixed canonical proof bundle with overlapping identity snapshots.
+
+    Every file is read through the incumbent owner read_local_at (strict owner,
+    mode, type, symlink and size checks) and its full identity — device, inode,
+    size, times, mode, owner and link count — is captured from the held
+    directory chain before its own read and re-compared after every read in the
+    bundle. A same-bytes replacement anywhere inside that interval cannot
+    satisfy both snapshots, so it refuses instead of proving the replacement.
+    """
+    import artifact_delivery as delivery
+    identity = delivery.reader.identity
+    chain.verify()
+    snapshots = {}
+    for name in specs:
+        snapshots[name] = identity(
+            os.stat(name, dir_fd=chain.fd, follow_symlinks=False))
+    bundle = {}
+    for name, limit in specs.items():
+        bundle[name] = delivery.read_local_at(chain, name, limit)
+        snapshots[name + "@read"] = identity(
+            os.stat(name, dir_fd=chain.fd, follow_symlinks=False))
+    chain.verify()
+    for name in specs:
+        visible = identity(os.stat(name, dir_fd=chain.fd, follow_symlinks=False))
+        if visible != snapshots[name] or visible != snapshots[name + "@read"]:
+            raise _ProofChanged(name)
+    return bundle
+
+
+def _retained_request_return(rid: str, root: str, parent: str,
+                             subject: dict | None = None) -> dict:
+    """Strict bounded read of the canonical controller request-return proof.
+
+    The existing owner emits <run>.request-return.json only after
+    subprocess.run(remote_sub.sh) returns, so a fully bound rc0 row proves the
+    controller RETURNED. The proof bundle is read only through the existing
+    strict owner DirectoryChain/read_local_at custody on its fixed canonical
+    paths, with full-identity snapshots before and after every read, so an
+    unsafe directory, an unsafe file mode, a symlink or a same-bytes
+    replacement refuses instead of proving anything. The bundle must also
+    belong to the SAME qualified collected artifact subject: the retained
+    request packet is the ORIGINAL caller text the launch digest bound, and the
+    exact producer encoding of that text — reproduced through the installed
+    producer interface with the subject's own names and support generation —
+    must equal the transported packet the subject's binding pinned. A
+    historical producer without that admitted encoder interface stays UNKNOWN
+    instead of inventing a source or version equivalence. Any missing,
+    changed, prelease-refused, nonzero-rc, out-of-scope or unrelated proof
+    refuses the positive with its precise reason.
+    <run>.controller-process.jsonl covers transport subcommands only and is
+    deliberately never consulted.
+    """
+
+    def refuse(reason: str, **fields) -> dict:
+        return _settlement_dimension("UNKNOWN", reason, **fields)
+
+    subject_fields = ("artifact_names", "support_digest", "packet_sha256",
+                      "host", "mode", "requested_model")
+    if (type(subject) is not dict
+            or any(key not in subject for key in subject_fields)
+            or not isinstance(subject["artifact_names"], list)
+            or not subject["artifact_names"]
+            or any(type(name) is not str or not name
+                   for name in subject["artifact_names"])
+            or any(type(subject[key]) is not str
+                   or re.fullmatch(r"[0-9a-f]{64}", subject[key]) is None
+                   for key in ("support_digest", "packet_sha256"))
+            or any(type(subject[key]) is not str or not subject[key]
+                   for key in ("host", "mode", "requested_model"))):
+        # Without one qualified collected artifact subject there is nothing
+        # this return proof could be bound to.
+        return refuse("collected_artifact_subject_unavailable")
+
+    return_name = f"{rid}.request-return.json"
+    request_name = f"{rid}.request.json"
+    packet_name = f"{rid}.request.packet"
+    launch_name = f"{rid}.request-launch.json"
+    log_name = _paths(rid)[0].name
+    specs = {return_name: 65536, request_name: 65536, packet_name: MAX_RESULT_BYTES,
+             launch_name: 65536, log_name: MAX_LOG_BYTES}
+    try:
+        chain = _retained_state_chain()
+    except (OSError, ValueError):
+        return refuse("controller_proof_directory_unsafe")
+    try:
+        try:
+            bundle = _retained_proof_bundle(chain, specs)
+        except FileNotFoundError as exc:
+            return refuse("request_return_absent" if exc.filename == return_name
+                          else "controller_proof_artifact_missing",
+                          missing=Path(exc.filename).name if exc.filename else None)
+        except _ProofChanged as changed:
+            return refuse("controller_proof_replaced_during_assessment",
+                          replaced=str(changed))
+        except (OSError, ValueError):
+            return refuse("controller_proof_artifact_unreadable")
+    finally:
+        chain.close()
+    return_raw = bundle[return_name]
+    request_raw = bundle[request_name]
+    packet_raw = bundle[packet_name]
+    launch_raw = bundle[launch_name]
+    log_raw = bundle[log_name]
+
+    def unique(pairs):
+        data = {}
+        for key, value in pairs:
+            if key in data:
+                raise ValueError("duplicate key")
+            data[key] = value
+        return data
+
+    try:
+        row = json.loads(return_raw.decode("utf-8"), object_pairs_hook=unique)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return refuse("request_return_unreadable")
+    fields = {"schema", "run_id", "root_id", "parent_run_id", "state", "controller_rc",
+              "request_sha256", "launch_sha256", "prelease_sha256", "log_sha256"}
+    if (type(row) is not dict or set(row) != fields
+            or row["schema"] != "mastermind.fabric_request_return.v1"
+            or row["run_id"] != rid or row["root_id"] != root
+            or row["parent_run_id"] != parent
+            or row["state"] != "NATIVE_CONTROLLER_RETURNED"
+            or type(row["controller_rc"]) is not int
+            or not 0 <= row["controller_rc"] <= 255):
+        return refuse("request_return_not_current_native_return")
+    if row["controller_rc"] != 0:
+        return refuse("controller_return_nonzero", controller_rc=row["controller_rc"])
+    if row["prelease_sha256"] is not None:
+        return refuse("prelease_failure_bound")
+    if (row["request_sha256"] != hashlib.sha256(request_raw).hexdigest()
+            or row["launch_sha256"] != hashlib.sha256(launch_raw).hexdigest()
+            or type(row["log_sha256"]) is not str
+            or row["log_sha256"] != hashlib.sha256(log_raw).hexdigest()):
+        return refuse("controller_return_digest_mismatch")
+    try:
+        request_row = json.loads(request_raw.decode("utf-8"), object_pairs_hook=unique)
+        launch_row = json.loads(launch_raw.decode("utf-8"), object_pairs_hook=unique)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return refuse("controller_proof_artifact_unreadable")
+    if (type(request_row) is not dict
+            or request_row.get("schema") != "mastermind.fabric_request_artifact.v1"
+            or request_row.get("run_id") != rid or request_row.get("root_id") != root
+            or request_row.get("parent_run_id") != parent
+            or request_row.get("packet") != packet_name
+            or type(request_row.get("packet_sha256")) is not str
+            or request_row["packet_sha256"] != hashlib.sha256(packet_raw).hexdigest()):
+        return refuse("original_request_row_mismatch")
+    if (type(launch_row) is not dict
+            or launch_row.get("schema") != "mastermind.fabric_request_launch.v1"
+            or launch_row.get("run_id") != rid or launch_row.get("root_id") != root
+            or launch_row.get("parent_run_id") != parent
+            or launch_row.get("state") != "LAUNCH_ATTEMPT_RESERVED"
+            or launch_row.get("request_sha256") != row["request_sha256"]
+            or launch_row.get("packet_sha256") != request_row["packet_sha256"]):
+        return refuse("original_launch_row_mismatch")
+    # The launch packet digest binds the retained ORIGINAL caller text — the
+    # bytes before the producer appended its deterministic machine-delivery
+    # instructions and wrapped the envelope — so it differs from both the
+    # contract body digest and the transported packet digest. The relation to
+    # the qualified collection is therefore proven by reproducing that exact
+    # producer encoding through the installed producer interface and comparing
+    # it to the transported packet the subject's own binding pinned. Equating
+    # the digests, accepting any prefixed body, or parsing only a prefixed
+    # request proves nothing.
+    try:
+        import artifact_production as production
+    except ImportError:
+        return refuse("controller_packet_producer_unavailable")
+    try:
+        caller_text = packet_raw.decode("utf-8")
+    except UnicodeError:
+        return refuse("controller_packet_caller_text_unreadable")
+    try:
+        wrapped = production.parse_packet(caller_text)
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        wrapped = object()
+    if wrapped is not None:
+        # A retained request packet that is itself a wrapped artifact request
+        # is not the original caller text this launch digest bound.
+        return refuse("controller_packet_not_original_caller_text")
+    try:
+        transported = production.encode_packet(
+            caller_text, root=root, parent=parent, run_id=rid,
+            names=list(subject["artifact_names"]),
+            support_digest=subject["support_digest"]).encode("utf-8")
+    except (ValueError, TypeError, UnicodeError, RecursionError):
+        return refuse("controller_packet_producer_encoding_refused")
+    transported_sha256 = hashlib.sha256(transported).hexdigest()
+    if transported_sha256 != subject["packet_sha256"]:
+        return refuse("controller_packet_producer_relation_unproven",
+                      caller_packet_sha256=request_row["packet_sha256"],
+                      transport_packet_sha256=subject["packet_sha256"])
+    # Host, mode, model, packet and support must be the qualified collection's
+    # own: the retained acquire record is the only proof-bundle carrier of
+    # those facts, and caller labels and canonical filenames are insufficient.
+    binding = _retained_launch_binding_record(rid, root, parent, log_raw=log_raw)
+    if binding is None:
+        return refuse("controller_acquire_binding_missing")
+    mismatched = [field for field, expected in (
+        ("host", subject["host"]), ("mode", subject["mode"]),
+        ("requested_model", subject["requested_model"]),
+        ("packet_sha256", subject["packet_sha256"]),
+        ("support_digest", subject["support_digest"]),
+    ) if binding.get(field) != expected]
+    if mismatched:
+        return refuse("controller_acquire_binding_subject_mismatch",
+                      mismatched=mismatched)
+    return _settlement_dimension(
+        "VERIFIED", "native_controller_returned_rc0", controller_rc=0,
+        request_sha256=row["request_sha256"], launch_sha256=row["launch_sha256"],
+        log_sha256=row["log_sha256"], packet_sha256=request_row["packet_sha256"],
+        transport_packet_sha256=transported_sha256)
+
+
+def _retained_controller_events(rid: str, log_raw: bytes):
+    """Bounded strict event view of the retained original controller log."""
+    if not log_raw.endswith(b"\n"):
+        return None
+    prefix = (r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
+              r"\[remote_sub id=" + re.escape(rid) + r" host=([A-Za-z0-9_.-]+)\] (.*)")
+    events, hosts = [], set()
+    try:
+        lines = log_raw.decode("utf-8").splitlines()
+    except UnicodeError:
+        return None
+    for line in lines:
+        match = re.fullmatch(prefix, line)
+        if match is None:
+            return None
+        hosts.add(match[1])
+        events.append(match[2])
+    return events, hosts
+
+
+def _retained_launch_binding_record(rid: str, root: str, parent: str,
+                                    log_raw: bytes | None = None):
+    """The retained authentic original-acquire LAUNCH_BINDING record, or None.
+
+    Schema mastermind.fabric_launch_binding.v1 from
+    controller_original_acquire_return, bound to this exact root/parent/run.
+    This retained record is the only broker binding source; caller lease labels
+    are insufficient and a current broker row is never consulted. The log is
+    read through the same strict owner custody as the controller return proof
+    unless the caller already holds exactly those bytes.
+    """
+    log_path, _stdout_path = _paths(rid)
+    if log_raw is None:
+        try:
+            chain = _retained_state_chain()
+        except (OSError, ValueError):
+            return None
+        try:
+            try:
+                log_raw = _retained_proof_bundle(
+                    chain, {log_path.name: MAX_LOG_BYTES})[log_path.name]
+            except (_ProofChanged, KeyError, OSError, ValueError):
+                return None
+        finally:
+            chain.close()
+    try:
+        view = _retained_controller_events(rid, log_raw)
+    except (OSError, FabricTaskError, UnicodeError):
+        return None
+    if view is None:
+        return None
+    events, hosts = view
+    indices = [i for i, event in enumerate(events) if event.startswith("LAUNCH_BINDING ")]
+    if len(indices) != 1 or len(hosts) != 1:
+        return None
+    if any(token in event for event in events
+           for token in ("REFUSED", "FAILED", "EFFECT_UNKNOWN")):
+        return None
+    index = indices[0]
+
+    def unique(pairs):
+        data = {}
+        for key, value in pairs:
+            if key in data:
+                raise ValueError("duplicate binding key")
+            data[key] = value
+        return data
+
+    try:
+        binding = json.loads(events[index][len("LAUNCH_BINDING "):],
+                             object_pairs_hook=unique)
+    except (ValueError, TypeError, RecursionError):
+        return None
+    keys = {"schema", "run_id", "root", "parent", "host", "mode", "requested_model",
+            "pool", "lease_id", "account", "packet_sha256", "support_digest",
+            "acquire_response_sha256", "source", "phase"}
+    if (type(binding) is not dict or set(binding) != keys
+            or binding["schema"] != "mastermind.fabric_launch_binding.v1"
+            or binding["run_id"] != rid or binding["root"] != root
+            or binding["parent"] != parent or binding["host"] not in hosts
+            or binding["source"] != "controller_original_acquire_return"
+            or binding["phase"] != "PRE_LAUNCH"
+            or binding["mode"] not in ("glm", "qwen")
+            or binding["pool"] != {"glm": "glm", "qwen": "bailian"}[binding["mode"]]):
+        return None
+    for field in ("run_id", "root", "parent", "host", "requested_model", "account"):
+        if type(binding[field]) is not str or not RUN_ID_RE.fullmatch(binding[field]):
+            return None
+    if (type(binding["lease_id"]) is not str
+            or re.fullmatch(r"[a-f0-9]{12}", binding["lease_id"]) is None):
+        return None
+    for field in ("packet_sha256", "support_digest", "acquire_response_sha256"):
+        if (type(binding[field]) is not str
+                or re.fullmatch(r"[a-f0-9]{64}", binding[field]) is None):
+            return None
+    before = events[:index]
+    support = ("SUPPORT_VERSION_READY digest=" + binding["support_digest"]
+               + r" policy=[a-f0-9]{64}")
+    if (sum(event == "RUN_RESERVED explicit=1" for event in before) != 1
+            or [event for event in before if event.startswith("LEASE_OK ")]
+            != ["LEASE_OK pool=" + binding["pool"]]
+            or len([event for event in before if event.startswith("SUPPORT_VERSION_READY ")]) != 1
+            or not any(re.fullmatch(support, event) for event in before)
+            or any(event.startswith(("LAUNCH", "DONE", "REMOTE_DONE", "LEASE_PRESERVED"))
+                   for event in before)):
+        return None
+    return binding
+
+
+def _broker_lease_dimension(rid: str, binding, subject=None) -> dict:
+    """Read-only broker release check through the incumbent snapshot seam.
+
+    Uses only native_completion_reconcile._verify_released_lease (the canonical
+    read-only stable-snapshot owner helper). No _conn, no default broker, no
+    mutation, creation or expiry. A missing genuine acquire binding leaves the
+    dimension UNKNOWN; a caller lease label is never sufficient; and the
+    released snapshot is only consulted once the retained acquire record
+    matches the SAME qualified collection — packet, support, host, mode, model,
+    root, parent and run — so a released row for any other component can never
+    settle this one.
+    """
+    if binding is None:
+        return _settlement_dimension("UNKNOWN", "retained_acquire_binding_missing")
+    if type(subject) is dict:
+        mismatched = [field for field, expected in (
+            ("packet_sha256", subject.get("packet_sha256")),
+            ("support_digest", subject.get("support_digest")),
+            ("host", subject.get("host")), ("mode", subject.get("mode")),
+            ("requested_model", subject.get("requested_model")),
+            ("root", subject.get("root")),
+            ("parent", subject.get("parent")), ("run_id", subject.get("run_id")),
+        ) if binding.get(field) != expected]
+        if mismatched:
+            return _settlement_dimension("UNKNOWN", "released_lease_subject_mismatch",
+                                         mismatched=mismatched,
+                                         lease_id=binding["lease_id"])
+    expected = {"id": binding["lease_id"], "orchestrator_id": binding["root"],
+                "pool": binding["pool"], "account": binding["account"],
+                "task_class": "remote-" + binding["mode"], "host": binding["host"],
+                "state": "released", "model": binding["requested_model"]}
+    try:
+        completion_reconcile._verify_released_lease(expected)
+    except completion_reconcile.CompletionError:
+        return _settlement_dimension("UNKNOWN", "released_lease_not_proven",
+                                     lease_id=binding["lease_id"])
+    except FileNotFoundError:
+        return _settlement_dimension("UNKNOWN", "broker_snapshot_absent",
+                                     lease_id=binding["lease_id"])
+    except (OSError, ValueError, KeyError, sqlite3.Error):
+        return _settlement_dimension("UNKNOWN", "broker_snapshot_unreadable",
+                                     lease_id=binding["lease_id"])
+    return _settlement_dimension("VERIFIED", "released_lease_bound_to_acquire_record",
+                                 lease_id=binding["lease_id"], lease_state="released")
+
+
+def _terminal_publication_dimension(rid: str, root: str, parent: str) -> dict:
+    """A canonical rc0/ok terminal row proves publication only — never acceptance."""
+    try:
+        identity = pool_ledger.read_execution_identity(
+            rid, expected_rc=0, expected_signal="ok")
+    except (OSError, ValueError, TypeError, AttributeError):
+        return _settlement_dimension("UNKNOWN", "terminal_row_unverified")
+    if identity.get("lineage_state") == "VERIFIED_TERMINAL":
+        if identity.get("root_id") != root or identity.get("parent_run_id") != parent:
+            return _settlement_dimension(
+                "UNKNOWN", "terminal_row_scope_mismatch",
+                root_id=identity.get("root_id"),
+                parent_run_id=identity.get("parent_run_id"))
+        return _settlement_dimension(
+            "VERIFIED", "canonical_rc0_ok_terminal_row",
+            root_id=identity.get("root_id"), parent_run_id=identity.get("parent_run_id"))
+    detail = "terminal_row_unverified"
+    try:
+        detail = _terminal_row_classification(rid)
+    except (OSError, ValueError, TypeError, AttributeError):
+        pass
+    return _settlement_dimension("UNKNOWN", detail)
+
+
+def _terminal_row_classification(rid: str) -> str:
+    """Exact bounded missing/conflict detail from the existing ledger owner."""
+    if not os.path.exists(pool_ledger.LEDGER_PATH):
+        return "ledger_absent"
+    with pool_ledger._strict_open(pool_ledger.LEDGER_PATH, os.O_RDONLY, "r") as handle:
+        before = os.fstat(handle.fileno())
+        if before.st_size > pool_ledger.ACCEPTANCE_MAX_BYTES:
+            raise ValueError("ledger exceeds bound")
+        data = handle.buffer.read(pool_ledger.ACCEPTANCE_MAX_BYTES + 1)
+        if (len(data) != before.st_size
+                or (data and not data.endswith(b"\n"))):
+            raise ValueError("incomplete ledger snapshot")
+        matching = []
+        for line in data.splitlines():
+            if len(line) > pool_ledger.ACCEPTANCE_MAX_LINE_BYTES:
+                raise ValueError("ledger row exceeds bound")
+            if not line.strip():
+                continue
+            row = pool_ledger._strict_json(line.decode("utf-8"))
+            if row.get("run_id") == rid:
+                matching.append(row)
+    if not matching:
+        return "terminal_row_absent"
+    terminals = [row for row in matching if row.get("kind") != "outcome"]
+    if len(terminals) != 1:
+        return "terminal_row_conflicting"
+    terminal = terminals[0]
+    if (type(terminal.get("rc")) is not int or terminal["rc"] != 0
+            or terminal.get("signal") != "ok"):
+        return "terminal_row_execution_facts_disagree"
+    return "terminal_row_unverified"
+
+
+def assess_settlement(run_id, *, root, parent) -> dict:
+    """Honest read-only settlement separation across independent dimensions.
+
+    Assessment only: issues no acceptance, release, settlement, retry or other
+    right and performs no mutation. host_lane stays UNKNOWN today because the
+    ordinary LaneLease.release owner emits no durable normal-release proof; the
+    aggregate therefore stays UNKNOWN even when every other dimension verifies.
+    """
+    rid = _quality_require_scope(run_id, root, parent)
+    collector = _quality_collector()
+    # Original-caller agreement guard BEFORE any input read: a child, foreign
+    # or mismatched scope is refused for the WHOLE assessment without reading a
+    # byte, instead of degrading only the quality readback to UNKNOWN while the
+    # controller and ledger owners are still read.
+    collector.quality_caller_guard(root, parent)
+    try:
+        quality_row = pool_ledger.read_collection_quality(rid, root=root, parent=parent)
+    except (OSError, ValueError, TypeError, AttributeError):
+        quality_row = {"state": "UNREADABLE"}
+    attestation = quality_row.get("attestation")
+    recorded = (attestation if quality_row.get("state") == "RECORDED"
+                and type(attestation) is dict
+                and attestation.get("root") == root
+                and attestation.get("parent") == parent else None)
+    subject = None
+    if recorded is not None:
+        try:
+            subject = pool_ledger.collection_quality_subject_projection(recorded)
+        except (ValueError, TypeError, KeyError):
+            subject = None
+    if recorded is None:
+        delivery_dimension = _settlement_dimension(
+            "UNKNOWN", "quality_attestation_" + str(
+                quality_row.get("state", "UNREADABLE")).lower())
+        worker_dimension = _settlement_dimension(
+            "UNKNOWN", "retained_worker_terminal_proof_unavailable")
+        quality_dimension = _settlement_dimension(
+            quality_row.get("state", "UNREADABLE"), "quality_verdict_unavailable",
+            verdict=None, by=None)
+    else:
+        collection = recorded.get("collection")
+        collection = collection if type(collection) is dict else {}
+        if (collection.get("state") == "COMPLETE"
+                and collection.get("delivery_verified") is True
+                and type(collection.get("receipt_sha256")) is str
+                and type(collection.get("destination")) is str):
+            delivery_dimension = _settlement_dimension(
+                "VERIFIED", "retained_verified_collection_receipt",
+                receipt_sha256=collection["receipt_sha256"])
+        else:
+            delivery_dimension = _settlement_dimension(
+                "UNKNOWN", "retained_collection_delivery_incomplete")
+        if (collection.get("worker_terminal_proof") is True
+                and collection.get("returncode") == 0
+                and type(collection.get("process_sha256")) is str):
+            worker_dimension = _settlement_dimension(
+                "VERIFIED", "retained_rc0_worker_terminal_capture",
+                process_sha256=collection["process_sha256"])
+        else:
+            worker_dimension = _settlement_dimension(
+                "UNKNOWN", "retained_worker_terminal_capture_incomplete")
+        quality_dimension = _settlement_dimension(
+            "RECORDED", "recorded_quality_verdict",
+            verdict=recorded.get("collected_source_quality"),
+            by=recorded.get("quality_by"))
+    terminal = _terminal_publication_dimension(rid, root, parent)
+    controller = _retained_request_return(rid, root, parent, subject=subject)
+    binding = _retained_launch_binding_record(rid, root, parent)
+    broker = _broker_lease_dimension(rid, binding, subject)
+    host_lane = _settlement_dimension(
+        "UNKNOWN", "ordinary_owner_release_proof_unavailable",
+        capability_boundary=(
+            "existing LaneLease.release emits no durable normal-release proof "
+            "today; no forward release production is authorized here"))
+    dimensions = {
+        "project_delivery": delivery_dimension,
+        "worker_terminal": worker_dimension,
+        "quality_recorded": quality_dimension,
+        "terminal_publication": terminal,
+        "controller_return": controller,
+        "broker_lease": broker,
+        "host_lane": host_lane,
+    }
+    # A recorded verdict satisfies the quality dimension whatever the verdict
+    # is: settlement separation is lifecycle evidence, not a quality opinion.
+    missing = sorted(name for name, dim in dimensions.items()
+                     if dim.get("state") != "VERIFIED"
+                     and not (name == "quality_recorded"
+                              and dim.get("state") == "RECORDED"))
+    return {
+        "schema": SETTLEMENT_ASSESSMENT_SCHEMA,
+        "run_id": rid, "root": root, "parent": parent,
+        "dimensions": dimensions,
+        "aggregate": {
+            "state": "SETTLED" if not missing else "UNKNOWN",
+            "missing": missing,
+            "reason": ("all_dimensions_verified" if not missing else
+                       "dimensions_not_verified: " + ",".join(missing)),
+        },
+        "assessment_only": True,
+        "mutation": "none",
+        "acceptance_granted": False,
+        "retry_authorized": False,
+        "controller_process_jsonl": {
+            "state": "NOT_USABLE_AS_CONTROLLER_EXIT",
+            "reason": "covers transport subcommands only, never the entire controller exit",
+        },
+    }
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
@@ -1223,6 +1841,27 @@ def main(argv: list[str] | None = None) -> int:
     p_completed.add_argument("--root", required=True)
     p_completed.add_argument("--apply", action="store_true")
 
+    p_quality_record = sub.add_parser(
+        "quality-record",
+        help="record the collected-source quality attestation via the ledger owner")
+    p_quality_record.add_argument("run_id")
+    for name in ("root", "parent", "binding", "collection", "receipt-sha256",
+                 "adjudication"):
+        p_quality_record.add_argument("--" + name, required=True)
+
+    p_quality_inspect = sub.add_parser(
+        "quality-inspect", help="bounded read-only quality sidecar inspection")
+    p_quality_inspect.add_argument("run_id")
+    for name in ("root", "parent"):
+        p_quality_inspect.add_argument("--" + name, required=True)
+
+    p_settlement = sub.add_parser(
+        "settlement-assessment",
+        help="read-only settlement assessment; no acceptance/release/retry right")
+    p_settlement.add_argument("run_id")
+    for name in ("root", "parent"):
+        p_settlement.add_argument("--" + name, required=True)
+
     args = parser.parse_args(argv)
     if args.cmd in {"collect", "collection-result"}:
         command = ["/bin/bash", str(HERE/"remote_sub.sh"), "--collect-existing", args.run_id,
@@ -1289,6 +1928,20 @@ def main(argv: list[str] | None = None) -> int:
             command.extend(["--path", path])
         return subprocess.run(command).returncode
     try:
+        if args.cmd == "quality-record":
+            _json(record_collection_quality(
+                args.run_id, root=args.root, parent=args.parent,
+                binding=args.binding, collection=args.collection,
+                receipt_sha256=args.receipt_sha256,
+                adjudication_path=args.adjudication))
+            return 0
+        if args.cmd == "quality-inspect":
+            _json(inspect_collection_quality(
+                args.run_id, root=args.root, parent=args.parent))
+            return 0
+        if args.cmd == "settlement-assessment":
+            _json(assess_settlement(args.run_id, root=args.root, parent=args.parent))
+            return 0
         if args.cmd == "reconcile-completed":
             try:
                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))
