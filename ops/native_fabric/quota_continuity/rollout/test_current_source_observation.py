@@ -78,6 +78,62 @@ def tree_of(repo: str) -> dict:
     return entries
 
 
+# The exact eight relative source paths of this repair.  Three of them sit
+# under "__tests__", a component the previous first-character class refused,
+# so an all-eight request is the discriminator for the leading-underscore
+# component admission.
+UNDERSCORE_PATHS = (
+    "terminal/lib/__tests__/visualIntelligenceEvidence.test.ts",
+    "terminal/app/api/portfolio/risk-history/route.ts",
+    "terminal/lib/portfolioRiskHistory.ts",
+    "terminal/lib/__tests__/portfolioRiskHistoryRoute.test.ts",
+    "terminal/lib/__tests__/portfolioRiskHistory.test.ts",
+    "terminal/lib/portfolio.ts",
+    "terminal/lib/portfolioSnapshot.server.ts",
+    "terminal/docs/pr-crops/b-f08-9-risk-history/EVIDENCE.yml",
+)
+
+# Synthetic harmless bytes committed at each exact path inside the owned
+# fixture repositories; every read must bind these exact bytes.
+UNDERSCORE_BYTES = {
+    "terminal/lib/__tests__/visualIntelligenceEvidence.test.ts":
+        b"describe('visualIntelligenceEvidence fixture', () => {\n"
+        b"  it('synthetic inert bytes', () => {});\n"
+        b"});\n",
+    "terminal/app/api/portfolio/risk-history/route.ts":
+        b"export const runtime = 'fixture';\n",
+    "terminal/lib/portfolioRiskHistory.ts":
+        b"export const RISK_HISTORY_FIXTURE = 'risk-history-synthetic-bytes';\n",
+    "terminal/lib/__tests__/portfolioRiskHistoryRoute.test.ts":
+        b"it('route fixture', () => expect(true).toBe(true));\n",
+    "terminal/lib/__tests__/portfolioRiskHistory.test.ts":
+        b"it('history fixture', () => expect(true).toBe(true));\n",
+    "terminal/lib/portfolio.ts":
+        b"export const PORTFOLIO_FIXTURE = 1;\n",
+    "terminal/lib/portfolioSnapshot.server.ts":
+        b"export const SNAPSHOT_FIXTURE = 'server-synthetic';\n",
+    "terminal/docs/pr-crops/b-f08-9-risk-history/EVIDENCE.yml":
+        b"fixture: risk-history-evidence\nstatus: synthetic\n",
+}
+
+
+def build_eight_path_repo(root: str, name: str) -> str:
+    """Owned synthetic repository committing the exact eight paths with the
+    exact bytes above, so observations bind real Git OIDs and real bytes."""
+    repo = os.path.join(root, name)
+    os.makedirs(repo)
+    run_git(repo, "init", "-q", "-b", "main", ".")
+    for path, data in UNDERSCORE_BYTES.items():
+        target = os.path.join(repo, path)
+        os.makedirs(os.path.dirname(target), exist_ok=True)
+        with open(target, "wb") as handle:
+            handle.write(data)
+    run_git(repo, "add", ".")
+    run_git(repo, "-c", "user.email=t@example.invalid", "-c", "user.name=t",
+            "commit", "-q", "-m", "fixture-underscore-components")
+    return repo
+
+
 class FixtureOwner(cso.NativeInvocationOwner):
     """Inert owner boundary for tests only.  It is constructed here, never
     from request JSON, and it records exactly the invocations it admitted."""
@@ -273,6 +329,104 @@ class Host(unittest.TestCase):
         if commit is not None:
             request["commit"] = commit
         return request
+
+    def eight_fixture(self):
+        """Owned eight-path fixture, built at most once per test: an ordinary
+        repository with the exact eight relative paths committed, plus a real
+        linked worktree over the same store for the custody variant."""
+        if not hasattr(self, "_eight"):
+            suffix = self.id().rsplit(".", 1)[-1]
+            repo = build_eight_path_repo(self.base, "underscore-" + suffix)
+            linked = os.path.join(self.base, "underscore-linked-" + suffix)
+            run_git(repo, "worktree", "add", "-q", linked, "-b", "wt-u")
+            self._eight = {"repo": repo, "linked": linked,
+                           "commit": run_git(repo, "rev-parse", "HEAD"),
+                           "tree": tree_of(repo)}
+        return self._eight
+
+    def eight_sources(self, tree=None):
+        """All eight entries with their actual Git OIDs and exact sizes, in
+        the fixed path order; eight entries sit exactly at MAX_SOURCES."""
+        tree = tree if tree is not None else self.eight_fixture()["tree"]
+        return [{"path": path, "blob": tree[path]["oid"],
+                 "size": tree[path]["size"]} for path in UNDERSCORE_PATHS]
+
+    def eight_request(self, linked=False):
+        """An explicit-triple request (or the custody variant over the real
+        linked worktree) carrying all eight exact paths."""
+        fixture = self.eight_fixture()
+        if linked:
+            request = self.request(sources=self.eight_sources(),
+                                   commit=fixture["commit"])
+            request["worktree"] = fixture["linked"]
+            request.pop("git_dir")
+            request.pop("common_dir")
+            request["custody"] = {"mode": cso.CUSTODY_MODE,
+                                  "boundary": self.base}
+            return request
+        return self.request(repo=fixture["repo"],
+                            sources=self.eight_sources())
+
+    def owner_bound(self, request, **overrides):
+        """An inert owner bound to this exact request: its declared custody
+        (triple or resolution variant) and its exact source order."""
+        return FixtureOwner(request["host"], request["worktree"],
+                            request.get("git_dir"), request.get("common_dir"),
+                            request["commit"],
+                            [e["path"] for e in request["sources"]],
+                            observer=request["observer"],
+                            receiver=request["receiver"],
+                            custody=request.get("custody"), **overrides)
+
+    def assertEightPathsBound(self, request, response, root_tree_oid=None):
+        """The delivered body binds the original request and every one of the
+        eight requested blobs: exact bytes, exact Git OIDs, exact membership
+        chains and the exact root tree."""
+        self.assertEqual(response["status"], "OBSERVED", response)
+        self.assertEqual(response["schema"], cso.SCHEMA_OBSERVATION)
+        self.assertEqual(response["request_sha256"], cso.validate_request(request))
+        self.assertEqual(response["run_id"], request["run_id"])
+        self.assertEqual(response["root"], request["root"])
+        self.assertEqual(response["observer"], request["observer"])
+        self.assertEqual(response["receiver"], request["receiver"])
+        self.assertEqual(response["host"], request["host"])
+        self.assertEqual(response["commit"], request["commit"])
+        self.assertEqual(response["worktree"], request["worktree"])
+        files = response["files"]
+        self.assertEqual(len(files), 8)
+        self.assertEqual([item["path"] for item in files],
+                         list(UNDERSCORE_PATHS))
+        for entry, item in zip(request["sources"], files):
+            self.assertEqual(item["kind"], "source")
+            self.assertEqual(item["status"], "RETRIEVED")
+            data = base64.b64decode(item["content_b64"], validate=True)
+            self.assertEqual(data, UNDERSCORE_BYTES[item["path"]])
+            self.assertEqual(item["bytes"], len(data))
+            self.assertEqual(item["bytes"], entry["size"])
+            self.assertEqual(hashlib.sha256(data).hexdigest(), item["sha256"])
+            self.assertEqual(item["object_id"], entry["blob"])
+            self.assertIn(item["object_store"], ("loose", "packed"))
+            self.assertEqual(item["remaining_budget"],
+                             cso.MAX_BYTES_TOTAL - sum(
+                                 len(UNDERSCORE_BYTES[p]) for p in
+                                 UNDERSCORE_PATHS[:UNDERSCORE_PATHS.index(
+                                     item["path"]) + 1]))
+            membership = item["membership"]
+            self.assertEqual(membership[0], {"component": "<commit>",
+                                             "kind": "commit",
+                                             "object_id": request["commit"]})
+            self.assertEqual([link["component"] for link in membership[1:]],
+                             item["path"].split("/"))
+            self.assertTrue(all(link["kind"] == "tree" for link in membership[1:-1]))
+            self.assertEqual(membership[-1]["kind"], "blob")
+            self.assertEqual(membership[-1]["object_id"], entry["blob"])
+        proven = {row["object_id"] for row in response["git_objects"]}
+        self.assertLessEqual({"commit", "tree"},
+                             {row["kind"] for row in response["git_objects"]})
+        if root_tree_oid is not None:
+            self.assertIn(root_tree_oid, proven)
+        self.assertTrue(cso.SHA1.fullmatch(request["commit"]))
+        return files
 
     def assertRefused(self, response, reason, state="ADMITTED"):
         self.assertEqual(response["status"], "REFUSED", response)
@@ -2088,6 +2242,164 @@ class CustodyGraphGuardTests(Host):
                                 in_process_transport())
         self.assertEqual(response["status"], "OBSERVED", response)
         cso.validate_response(response)
+
+
+class UnderscoreComponentTests(Host):
+    """Leading-underscore relative source components (e.g. "__tests__") are
+    admitted for requested source paths only; every neighbouring refusal and
+    all existing custody/cap guards stay exactly as they were."""
+
+    def test_leading_underscore_component_regex_boundary(self):
+        # Admitted exactly according to the regex: underscore alone, underscore
+        # prefixes and interior underscores, at the 128-character cap.
+        for path in ("_", "__tests__", "_lead/mid_x/leaf_.ts",
+                     "a" * 128, "_" * 128, "x_.-plus"):
+            self.assertEqual(cso.validate_relative_path(path), path)
+        # No blanket punctuation: dots, signs, spaces and empty components are
+        # still refused, as is one character past the component cap.
+        for path in (".", "..", ".lead", "a/.hidden", "-lead", "+lead",
+                     "lead x", "", "a" * 129, "_" * 129):
+            with self.assertRaises(cso.CurrentSourceError) as raised:
+                cso.validate_relative_path(path)
+            self.assertEqual(raised.exception.reason, "path_invalid")
+        # Declared custody roots keep their own unchanged rule: a leading
+        # underscore component is still refused there.
+        with self.assertRaises(cso.CurrentSourceError) as raised:
+            cso.validate_absolute_custody("/fixture-root/_custody")
+        self.assertEqual(raised.exception.reason, "custody_path_invalid")
+
+    def test_all_eight_underscore_paths_validate_and_observe(self):
+        # Exactly MAX_SOURCES entries: the all-eight request fits the existing
+        # cap and validates, and one more entry is refused without a read.
+        request = self.eight_request()
+        self.assertEqual(len(request["sources"]), cso.MAX_SOURCES)
+        digest = cso.validate_request(request)
+        self.assertEqual(digest, cso.digest_of(request))
+        crowded = self.eight_request()
+        crowded["sources"] = (crowded["sources"]
+                              + [{"path": "terminal/lib/one.ts"}])
+        with self.assertRaises(cso.CurrentSourceError) as raised:
+            cso.validate_request(crowded)
+        self.assertEqual(raised.exception.reason, "entry_count_limit")
+        # The real generated reader delivers all eight blobs, bound to the
+        # request, the exact bytes and the actual Git OIDs and tree.
+        fixture = self.eight_fixture()
+        root_tree = run_git(fixture["repo"], "rev-parse",
+                            fixture["commit"] + "^{tree}")
+        response = self.observe(request, self.owner_bound(request),
+                                in_process_transport())
+        self.assertEightPathsBound(request, response, root_tree)
+        cso.validate_response(response)
+
+    def test_all_eight_paths_through_linked_custody_variant(self):
+        # The additive resolution variant over a real linked worktree of the
+        # eight-path store: same generated reader, resolved triple plus the
+        # bounded graph proof, published receipt still binds the request.
+        request = self.eight_request(linked=True)
+        fixture = self.eight_fixture()
+        root_tree = run_git(fixture["repo"], "rev-parse",
+                            fixture["commit"] + "^{tree}")
+        response = self.observe(request, self.owner_bound(request),
+                                in_process_transport())
+        self.assertEightPathsBound(request, response, root_tree)
+        cso.validate_response(response)
+        self.assertEqual(response["custody"], request["custody"])
+        with open(os.path.join(fixture["linked"], ".git")) as handle:
+            git_dir = handle.read().split("gitdir: ", 1)[1].strip()
+        self.assertEqual(response["git_dir"], git_dir)
+        self.assertEqual(response["common_dir"],
+                         os.path.join(fixture["repo"], ".git"))
+        self.assertEqual(response["resolution"]["worktree"], fixture["linked"])
+
+    def test_underscore_boundary_neighbors_stay_refused(self):
+        # Every neighbouring path shape the fix must not admit, refused with
+        # the retained reason before admission and before any read.
+        neighbors = ("../escape.ts", "./here.ts", ".hidden/leaf.ts",
+                     "terminal/.hidden/leaf.ts", "/abs/terminal/lib/x.ts",
+                     "terminal//x.ts", "terminal/lib/__tests__/",
+                     "-lead/terminal.ts", "+lead/terminal.ts",
+                     "terminal/lib/lead _.ts", "n" * 129 + ".ts",
+                     "terminal/lib/portfolio.ts/")
+        for path in neighbors:
+            request = self.request(sources=[{"path": path}])
+            with self.assertRaises(cso.CurrentSourceError) as raised:
+                cso.validate_request(request)
+            self.assertEqual(raised.exception.reason, "path_invalid", path)
+            def no_transport(_request, path=path):
+                self.fail("a refused %r path reached transport" % path)
+            response = cso.observe_current_source(request, None, no_transport)
+            self.assertRefused(response, "path_invalid", state="NOT_SEEKED")
+            self.assertEqual(response["files"], [])
+
+    def test_unknown_fields_refused_for_underscore_request(self):
+        request = self.eight_request()
+        entry_bad = self.eight_request()
+        entry_bad["sources"] = [dict(entry, extra=1)
+                                for entry in entry_bad["sources"]]
+        with self.assertRaises(cso.CurrentSourceError) as raised:
+            cso.validate_request(entry_bad)
+        self.assertEqual(raised.exception.reason, "entry_unknown_field")
+        request_bad = self.eight_request()
+        request_bad["unexpected"] = 1
+        with self.assertRaises(cso.CurrentSourceError) as raised:
+            cso.validate_request(request_bad)
+        self.assertEqual(raised.exception.reason, "request_unknown_field")
+
+    def test_refused_underscore_request_publishes_no_destination(self):
+        # Native rejection happens before the destination is even reserved:
+        # no owner, no transport, no reservation, no bytes.
+        refused = self.eight_request()
+        refused["sources"] = [{"path": "terminal/lib/__tests__/"}]
+        reserved = []
+        def reserve(destination):
+            reserved.append(destination)
+            return TestChain(destination)
+        with tempfile.TemporaryDirectory(prefix="cso-refused-") as req_dir:
+            request_path = os.path.join(req_dir, "request.json")
+            with open(request_path, "wb") as handle:
+                handle.write(cso.canonical(refused))
+            with tempfile.TemporaryDirectory(prefix="cso-dest-") as dest:
+                def factory(_digest):
+                    self.fail("an invalid request minted an invocation")
+                with self.assertRaises(cso.CurrentSourceError) as raised:
+                    cso.native_current_source_receipt(
+                        request_path, dest, factory, transport=None,
+                        reserve=reserve, load_request=inert_request_loader)
+                self.assertEqual(raised.exception.reason, "path_invalid")
+                self.assertEqual(reserved, [])
+                self.assertEqual(os.listdir(dest), [])
+
+    def test_native_receipt_publishes_all_eight_blobs_inert(self):
+        # The inert composition: owned request file -> minted invocation ->
+        # generated reader -> exclusive receipt binding the original request
+        # and all eight blobs.
+        request = self.eight_request()
+        fixture = self.eight_fixture()
+        root_tree = run_git(fixture["repo"], "rev-parse",
+                            fixture["commit"] + "^{tree}")
+        owner = self.owner_bound(request)
+        with tempfile.TemporaryDirectory(prefix="cso-req-") as req_dir:
+            request_path = os.path.join(req_dir, "request.json")
+            with open(request_path, "wb") as handle:
+                handle.write(cso.canonical(request))
+            with tempfile.TemporaryDirectory(prefix="cso-dest-") as dest:
+                summary = cso.native_current_source_receipt(
+                    request_path, dest, lambda _digest: owner,
+                    transport=in_process_transport(), reserve=TestChain,
+                    load_request=inert_request_loader)
+                self.assertEqual(summary["state"], "PUBLISHED", summary)
+                self.assertEqual(os.listdir(dest),
+                                 [os.path.basename(summary["destination"])])
+                with open(summary["destination"], "rb") as handle:
+                    stored = json.loads(handle.read().decode())
+        cso.validate_response(stored)
+        self.assertEightPathsBound(request, stored, root_tree)
+        receipt = stored["receipt"]
+        self.assertEqual(receipt["request_sha256"], cso.validate_request(request))
+        self.assertEqual(receipt["receiver"], request["receiver"])
+        self.assertEqual(receipt["root"], request["root"])
+        self.assertEqual(receipt["commit"], request["commit"])
+        self.assertEqual(receipt["no_claims"], list(cso.NO_CLAIMS))
 
 
 if __name__ == "__main__":

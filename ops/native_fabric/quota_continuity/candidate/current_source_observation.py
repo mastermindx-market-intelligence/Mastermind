@@ -124,7 +124,10 @@ IDENTITY = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 HOST = re.compile(r"[a-z0-9][a-z0-9_.-]{0,63}\Z")
 SHA1 = re.compile(r"[0-9a-f]{40}\Z")
 SHA256 = re.compile(r"[0-9a-f]{64}\Z")
-COMPONENT = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.+-]{0,127}\Z")
+# Relative source components may begin with an underscore (e.g. "__tests__");
+# leading dots and every other punctuation stay refused.  Declared custody
+# roots keep their own rule in CUSTODY_COMPONENT below.
+COMPONENT = re.compile(r"[A-Za-z0-9_][A-Za-z0-9_.+-]{0,127}\Z")
 # Declared custody roots legitimately contain Git's leading-dot components
 # (".git"); traversal stays impossible because "." and ".." are refused
 # outright and every component is opened without following links.
