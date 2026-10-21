@@ -18,7 +18,9 @@ from pathlib import Path
 import re
 import stat
 
-from ops.executive_os.os_public_edge import GET_ROUTES, HOST, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import (
+    GET_ROUTES, HOST, MCP_MAX_BODY, MCP_METADATA_ROUTE, MCP_ROUTES, POST_ROUTES, asset_routes,
+)
 
 PLAN_SCHEMA = "mastermind.os_public_edge_transition.plan.v1"
 PREPARE_CHECK_SCHEMA = "mastermind.os_public_edge_transition.prepare_check.v1"
@@ -149,7 +151,9 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             break
         inner = nested
         path += (0, "handle", 0, "routes")
-    if len(inner) != 3:
+    # Two accepted shapes: the original GET/POST/abort and, with the public MCP
+    # entrypoint (#1656), GET/POST/MCP-metadata-GET/MCP-POST/abort in that order.
+    if len(inner) not in (3, 5):
         raise ValueError("OS edge transition inner route set refused")
     expected = sorted(set(GET_ROUTES) | set(current_routes))
     legacy = sorted(list(GET_ROUTES) + list(current_routes))
@@ -158,7 +162,7 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
     for position, item in enumerate(inner):
         if type(item) is not dict:
             raise ValueError("OS edge transition inner route refused")
-        if position == 2:
+        if position == len(inner) - 1:
             if item != {"handle": [{"handler": "static_response", "abort": True}]}:
                 raise ValueError("OS edge transition terminal route refused")
             if item["handle"][0]["abort"] is not True:
@@ -173,20 +177,32 @@ def _locate(fullconfig: object, current_routes: tuple[str, ...],
             raise ValueError("OS edge transition inner matcher refused")
         method, paths = match[0]["method"], match[0]["path"]
         if (type(method) is not list or len(method) != 1 or method[0] not in ("GET", "POST")
-                or method[0] in methods or type(paths) is not list
-                or any(type(value) is not str for value in paths)):
+                or type(paths) is not list or any(type(value) is not str for value in paths)):
             raise ValueError("OS edge transition inner matcher refused")
-        methods.add(method[0])
         handlers = _branch_handlers(item["handle"])
-        if method == ["GET"]:
-            if sorted(paths) not in (expected, legacy) or len(handlers) != 1:
-                raise ValueError("OS edge transition observed GET routes differ")
-            get_path = path + (position, "match", 0, "path")
+        if position >= 2:
+            # Fixed, immutable MCP branches: only the asset GET list ever changes.
+            if position == 2:
+                same = method == ["GET"] and paths == [MCP_METADATA_ROUTE] and len(handlers) == 1
+            else:
+                same = (method == ["POST"] and paths == list(MCP_ROUTES) and len(handlers) == 2
+                        and handlers[0] == {"handler": "request_body", "max_size": MCP_MAX_BODY}
+                        and type(handlers[0].get("max_size")) is int)
+            if not same:
+                raise ValueError("OS edge transition observed MCP route differs")
         else:
-            if (sorted(paths) != sorted(POST_ROUTES) or len(handlers) != 2
-                    or handlers[0] != {"handler": "request_body", "max_size": 64000}
-                    or type(handlers[0].get("max_size")) is not int):
-                raise ValueError("OS edge transition observed POST route differs")
+            if method[0] in methods:
+                raise ValueError("OS edge transition inner matcher refused")
+            methods.add(method[0])
+            if method == ["GET"]:
+                if sorted(paths) not in (expected, legacy) or len(handlers) != 1:
+                    raise ValueError("OS edge transition observed GET routes differ")
+                get_path = path + (position, "match", 0, "path")
+            else:
+                if (sorted(paths) != sorted(POST_ROUTES) or len(handlers) != 2
+                        or handlers[0] != {"handler": "request_body", "max_size": 64000}
+                        or type(handlers[0].get("max_size")) is not int):
+                    raise ValueError("OS edge transition observed POST route differs")
         proxy = handlers[-1]
         if (proxy.get("handler") != "reverse_proxy"
                 or proxy.get("upstreams") != [{"dial": f"127.0.0.1:{relay_port}"}]):

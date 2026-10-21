@@ -93,6 +93,15 @@ no other repeat is permitted), exactly the three POST paths, and exactly the two
 reverse_proxy upstreams at the loopback reserved port. Duplicate hosts, extra
 or ambiguous matchers, wildcards, extra paths and wrong upstreams refuse.
 
+The planner accepts two inner shapes only: the three-branch OS shape (GET, POST,
+terminal abort) and the five-branch shape that adds the public MCP entrypoint
+(GET, POST, MCP metadata GET, MCP POST, terminal abort). The two MCP branches are
+observed, never rewritten: metadata is exactly GET `/.well-known/oauth-protected-resource/mcp`,
+and MCP is exactly POST `/mcp` with a 64000-byte body limit (an integer) before a
+loopback reverse_proxy at the same relay port. A wildcard, extra path or method,
+a missing, duplicated or reordered MCP branch, a different body limit or an
+unexpected upstream refuses.
+
 `prepare-config` admits the sorted unique union of the retired and candidate
 asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
 asset availability remains a separately verified host/publisher obligation; `final-config` admits only the candidate asset routes

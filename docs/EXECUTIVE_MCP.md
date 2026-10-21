@@ -421,6 +421,18 @@ file placed under a production tree is refused as well.
   mechanism (**Secure MCP Tunnel**). **Do not expose the gateway to the public
   Internet as a workaround**, and do not add TCP/HTTP to
   `ExecutiveControlService`.
+- **Amendment (Chairman decision, incident #1656, 2026-10-21).** The Chairman
+  decided to publish an authenticated public MCP entrypoint on
+  `https://mcp.mastermind-x.com/mcp`, superseding the blanket prohibition above for
+  that one endpoint. It is not a workaround for the tunnel: the owner-rendered
+  Caddy block (`ops/executive_os/os_public_edge.caddy.template`) exposes exactly
+  GET `/.well-known/oauth-protected-resource/mcp` and POST `/mcp`, the gateway
+  remains the only authenticator (Caddy performs none), bodies stay within the
+  gateway's 64000-byte ceiling, and every other path on the host still aborts.
+  `ExecutiveControlService` still gains no TCP/HTTP. Because the gateway's token
+  verifier accepts any configured resource, the public resource must be a
+  distinct, separately registered Auth0 audience and must be reviewed for
+  audience confusion against the tunnel and OS resources before it is enabled.
 - EXEC-MCP-A does not modify `allowed_peer_uids` or the production
   service-principal topology. A dedicated least-privilege principal for the
   tunnel-facing process is a **separate reviewed architecture decision** for the

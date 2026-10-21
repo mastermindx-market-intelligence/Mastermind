@@ -21,6 +21,14 @@ GET_ROUTES = (
     "/workspace/operator/activity/current",
     "/workspace/window/current",
 )
+# Public MCP entrypoint (#1656). Two dedicated branches, kept out of GET_ROUTES
+# so a previously installed 3-branch config stays plannable: the RFC 9728
+# protected-resource metadata document and the Streamable HTTP POST. The /mcp
+# branch presents a loopback Host because the gateway's SDK transport fence
+# admits only loopback hosts; Caddy still performs no authentication.
+MCP_METADATA_ROUTE = "/.well-known/oauth-protected-resource/mcp"
+MCP_ROUTES = ("/mcp",)
+MCP_MAX_BODY = 64000
 _TEMPLATE = Path(__file__).with_name("os_public_edge.caddy.template")
 
 
@@ -49,7 +57,7 @@ def render(manifest: object, relay_port: int) -> str:
         raise ValueError("OS edge relay port refused")
     routes = asset_routes(manifest)
     template = _TEMPLATE.read_text(encoding="utf-8")
-    if template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 2:
+    if template.count("__ASSET_PATHS__") != 1 or template.count("__RELAY_PORT__") != 4:
         raise ValueError("OS edge template differs")
     return template.replace("__ASSET_PATHS__", " ".join(routes)).replace("__RELAY_PORT__", str(relay_port))
 
@@ -77,6 +85,7 @@ def stage(*, manifest: object, relay_port: int, output: Path) -> dict:
         "sha256": hashlib.sha256(content).hexdigest(),
         "relay_port": relay_port,
         "routes": {"get": sorted(set(GET_ROUTES) | set(asset_routes(manifest))), "post": list(POST_ROUTES)},
+        "mcp": {"get": [MCP_METADATA_ROUTE], "post": list(MCP_ROUTES)},
         "installed": False,
     }
 
