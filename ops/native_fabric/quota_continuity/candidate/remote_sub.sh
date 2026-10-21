@@ -467,11 +467,83 @@ try:
         raise SystemExit('PLAIN_PACKET_SOURCE_CHANGED')
 finally:
     os.close(fd)
-# The original request owner may already have retained this exact input path.
-# Reuse only that same private, single-link inode; never accept an unrelated
-# existing destination merely because its contents happen to match.
+# Recheck each original reservation after the complete packet/provenance read.
+provenance_files = []
+def original_identity(value):
+    return (value.st_dev, value.st_ino, value.st_uid, value.st_mode,
+            value.st_nlink, value.st_size, value.st_mtime_ns, value.st_ctime_ns)
+# The native fabric_task adapter already freezes this exact packet before
+# routing, with a unique request and launch reservation. Never O_EXCL-create
+# its same inode again. Require both original reservations and their digests;
+# an arbitrary existing packet must still fail closed.
 if os.path.abspath(source) == os.path.abspath(retained):
+    import json, re
+    root_id = os.environ.get('POOL_ORCHESTRATOR_ID')
+    parent_id = os.environ.get('POOL_PARENT_RUN_ID')
+    if any(type(value) is not str or re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', value) is None
+           for value in (root_id, parent_id)):
+        raise SystemExit('PRE_RETAINED_PACKET_LINEAGE_INVALID')
+    suffix = '.request.packet'
+    name = os.path.basename(retained)
+    if (stat.S_IMODE(info.st_mode) != 0o600 or info.st_nlink != 1):
+        raise SystemExit('PRE_RETAINED_PACKET_CUSTODY_INVALID')
     expected = info
+    if not name.endswith(suffix) or len(name) <= len(suffix):
+        raise SystemExit('PRE_RETAINED_PACKET_ID_INVALID')
+    run_id = name[:-len(suffix)]
+    directory = os.path.dirname(retained)
+    def unique_fields(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('duplicate request field')
+            result[key] = value
+        return result
+    def read_original_json(filename):
+        path = os.path.join(directory, filename)
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        try:
+            observed = os.fstat(descriptor)
+            if (not stat.S_ISREG(observed.st_mode)
+                    or observed.st_uid != os.getuid()
+                    or stat.S_IMODE(observed.st_mode) != 0o600
+                    or observed.st_nlink != 1
+                    or not 0 < observed.st_size <= 32768):
+                raise SystemExit('PRE_RETAINED_REQUEST_SOURCE_UNQUALIFIED')
+            contents = os.read(descriptor, 32769)
+            if (len(contents) != observed.st_size
+                    or original_identity(observed) != original_identity(os.fstat(descriptor))
+                    or original_identity(observed) != original_identity(os.stat(path, follow_symlinks=False))):
+                raise SystemExit('PRE_RETAINED_REQUEST_SOURCE_CHANGED')
+        finally:
+            os.close(descriptor)
+        try:
+            parsed = json.loads(contents, object_pairs_hook=unique_fields)
+        except (ValueError, UnicodeDecodeError):
+            raise SystemExit('PRE_RETAINED_REQUEST_INVALID')
+        if type(parsed) is not dict:
+            raise SystemExit('PRE_RETAINED_REQUEST_INVALID')
+        provenance_files.append((path, original_identity(observed)))
+        return parsed, contents
+    request, request_bytes = read_original_json(run_id + '.request.json')
+    launch, _ = read_original_json(run_id + '.request-launch.json')
+    data_sha = hashlib.sha256(data).hexdigest()
+    if (request.get('schema') != 'mastermind.fabric_request_artifact.v1'
+            or request.get('run_id') != run_id
+            or request.get('packet') != name
+            or type(request.get('packet_bytes')) is not int
+            or request.get('packet_bytes') != len(data)
+            or request.get('packet_sha256') != data_sha
+            or launch.get('schema') != 'mastermind.fabric_request_launch.v1'
+            or launch.get('run_id') != run_id
+            or launch.get('state') != 'LAUNCH_ATTEMPT_RESERVED'
+            or launch.get('packet_sha256') != data_sha
+            or launch.get('request_sha256') != hashlib.sha256(request_bytes).hexdigest()
+            or launch.get('root_id') != request.get('root_id')
+            or launch.get('parent_run_id') != request.get('parent_run_id')
+            or request.get('root_id') != root_id
+            or request.get('parent_run_id') != parent_id):
+        raise SystemExit('PRE_RETAINED_PACKET_PROVENANCE_INVALID')
 else:
     out = os.open(retained, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
     try:
@@ -481,6 +553,8 @@ else:
         expected = os.fstat(out)
     finally:
         os.close(out)
+# Re-open without following symlinks, bind the same inode through the final
+# path observation, and reject replacement, races, hardlinks and public modes.
 check = os.open(retained, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
 try:
     current = os.fstat(check)
@@ -501,6 +575,9 @@ try:
         raise SystemExit('PLAIN_PACKET_RETENTION_UNVERIFIED')
 finally:
     os.close(check)
+for path, original in provenance_files:
+    if original_identity(os.stat(path, follow_symlinks=False)) != original:
+        raise SystemExit('PRE_RETAINED_REQUEST_SOURCE_CHANGED')
 PY_RETAIN_PLAIN_PACKET
     [ "$?" -eq 0 ] || { RC=78; log "PLAIN_PACKET_RETENTION_REFUSED rc=$RC before_lease=1"; exit "$RC"; }
     PLAIN_PACKET_RETAINED="$LOG_DIR/${ID}.request.packet"
@@ -1034,7 +1111,7 @@ if [ "$DRY_RUN" -eq 0 ] && [ "$OPERATOR_CHILD_BUDGET" = "0" ] &&
    { [ "$MODE" = glm ] || [ "$MODE" = qwen ]; } &&
    [ -n "${POOL_PARENT_RUN_ID:-}" ] && [ -n "$LEASE_ID" ] &&
    [ -n "$PLAIN_PACKET_RETAINED" ]; then
-  TRANSPORT_OBSERVATION="$(mktemp "${TMPDIR:-/tmp}/remote_sub_transport.XXXXXX")" || exit 78
+  TRANSPORT_OBSERVATION="$(mktemp "$LOG_DIR/${ID}.transport-observation.XXXXXX")" || exit 78
   TEMP_FILES+=("$TRANSPORT_OBSERVATION")
   PLAIN_TRANSPORT_CHAIN_SOURCE=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" custody-chain-source) || exit 78
   commission_run transport-read "$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \

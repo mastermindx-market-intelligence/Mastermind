@@ -29,8 +29,9 @@ DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8c
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # Observer, portable reader and original-state collector changes compose here.
 # Executor, donor, support and deadline identities remain independently pinned.
-# Same-path retention changes only remote_sub.sh in the declared 83-file closure.
-NATIVE_MANIFEST_SHA = "e327073b35955ae88d6c78514f6d097c77a4356c4719e9fa9e7a8226b9d56bdf"
+# Same-path provenance and private transport custody change only remote_sub.sh
+# in the declared 83-file closure; other executable identities are unchanged.
+NATIVE_MANIFEST_SHA = "ac2b2272980341788f51ea3d374a9b1bd4a69a92f63690de994babfc48d30933"
 
 
 def _sha(raw):

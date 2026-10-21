@@ -115,3 +115,73 @@ return was reconciled through the original owner's status: clean expected base
 No replacement acquisition, raw clone/worktree or source-binding override was
 used. That acquisition uncertainty is reconciled; the failed News reviewer
 request remains terminal and is not retried by this source repair.
+
+
+## Combined provenance and transport correction — 21 October 2026
+
+The later release hold in PR #1661 comments 6311037384, 6311165775 and
+6311299356 superseded the first candidate's merge eligibility. Emergency selected
+generation `4f0f6055f8c03321acbbfad41675135ea6e4ac50012f8d13435acbb4c52d4fbe`
+(sequence 11) contained positive request/launch provenance and a private
+transport-observation path that the original PR did not. The source integration
+uses its observed helper SHA-256
+`d3a019db361fcebb7d92b40d65c4624d2baad0868f1d33e1570885fee7e9a1c0`
+as a comparison input, not protected release authority.
+
+The combined candidate retains the original packet inode/content protections
+and exclusive distinct-destination creation. Same-path reuse now also requires
+the original request and launch reservation, exact run/root/parent identities,
+packet name/length/digest, request digest, and reserved launch state. Root and
+parent must be nonempty identifiers matching the incumbent grammar. Both JSON
+records must have unique keys; packet length must be an integer, not a boolean.
+Metadata files must be same-user private single-link regular files. Descriptor
+and visible-path identity are compared immediately after each read and again
+after the complete joint provenance and packet validation, including mode,
+owner, links, inode, size, mtime and ctime.
+
+The transport-observation temporary file moves from the ambient temporary
+directory into the original controller run-state directory. Unique creation,
+controller cleanup and the unchanged strict transport reader remain in force.
+No lease, route, provider, deadline, executor or acceptance behavior is relaxed.
+
+Focused qualification includes the original 13 custody cases plus 35
+provenance falsifiers, actual Bash refusal before acquisition without original
+reservations, valid same-path preservation, and a replaced transport-observation
+refusal before launch. The external-volume test root exposed its existing
+group-writable ancestor rejection. With the existing private-home test-root
+option, the four negative/matrix tests passed; two successful-controller cases
+reached verified transport but exhausted their unchanged eight-second deadlines
+on this host. The repository deadline assertions were not changed.
+
+A separate, explicitly labeled 20-second functional control passed the ordinary
+plain controller, same-path retained controller and replaced-observation
+refusal. A first supplemental assertion incorrectly assumed the inert SSH
+process's stdout was the observation file; the owned runner actually captures
+a pipe and forwards its output. That test-only assumption was corrected. The
+successful retained path verifies its original inode/mtime/hash, one inert
+acquire and launch, a mode-0600 observation under the original state directory,
+strict transport verification and temporary-file cleanup. These controls do
+not turn the eight-second local run green; hosted exact-head CI remains owed.
+
+The canonical stage builder verified all 83 declared files. Only
+`ext/remote_sub.sh` differs from the original PR generation; the other 82
+identities and installed preimages remain unchanged.
+
+- Helper SHA-256: `737744a8f04d6d6331d9aa541dfa2d0b40bf6360a8d36ef53dea958527d36767`.
+- Manifest SHA-256: `ac2b2272980341788f51ea3d374a9b1bd4a69a92f63690de994babfc48d30933`.
+- Inventory SHA-256: `0354255324bf0a238fd761e5a3d28376c479df26941045134dce8f9f51a91ccc`.
+
+### Source carrier after concurrent landing
+
+Fresh GitHub evidence reports original PR #1661 merged at 09:29:50 UTC as
+`2151a89f7ea3a340ec04932cbcfdf6a838df79b1`, retaining old head `9188c6ab...`;
+its remote branch was then deleted. That landing does not contain this combined
+delta. The original local operation, workspace and branch preserve the new
+source for a follow-up protected PR; no source re-homing is needed.
+
+This candidate still needs independent source/security review, hosted checks,
+protected merge and canonical immutable rollout. The selected generation was
+not modified. Original News reviewer `news-9612-exact-3a663-release-review-20261021`
+remains terminal with no accepted result and no retry authority. No supported
+historical reconciliation edge has yet been qualified for that failure; this
+source repair grants neither same-run replay nor a replacement News review.
