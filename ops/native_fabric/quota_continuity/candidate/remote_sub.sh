@@ -467,16 +467,40 @@ try:
         raise SystemExit('PLAIN_PACKET_SOURCE_CHANGED')
 finally:
     os.close(fd)
-out = os.open(retained, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+# The original request owner may already have retained this exact input path.
+# Reuse only that same private, single-link inode; never accept an unrelated
+# existing destination merely because its contents happen to match.
+if os.path.abspath(source) == os.path.abspath(retained):
+    expected = info
+else:
+    out = os.open(retained, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        if os.write(out, data) != len(data):
+            raise SystemExit('PLAIN_PACKET_RETENTION_SHORT_WRITE')
+        os.fsync(out)
+        expected = os.fstat(out)
+    finally:
+        os.close(out)
+check = os.open(retained, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
 try:
-    if os.write(out, data) != len(data):
-        raise SystemExit('PLAIN_PACKET_RETENTION_SHORT_WRITE')
-    os.fsync(out)
-finally:
-    os.close(out)
-with open(retained, 'rb') as check:
-    if hashlib.sha256(check.read()).hexdigest() != hashlib.sha256(data).hexdigest():
+    current = os.fstat(check)
+    if (not stat.S_ISREG(current.st_mode) or current.st_uid != os.getuid()
+            or stat.S_IMODE(current.st_mode) != 0o600 or current.st_nlink != 1
+            or not 0 < current.st_size <= 2 * 1024 * 1024):
+        raise SystemExit('PLAIN_PACKET_RETENTION_UNQUALIFIED')
+    observed = os.read(check, 2 * 1024 * 1024 + 1)
+    after = os.fstat(check)
+    at_path = os.stat(retained, follow_symlinks=False)
+    def identity(value):
+        return (value.st_dev, value.st_ino, value.st_size,
+                value.st_mtime_ns, value.st_ctime_ns)
+    if not (identity(expected) == identity(current)
+            == identity(after) == identity(at_path)):
+        raise SystemExit('PLAIN_PACKET_RETENTION_CHANGED')
+    if len(observed) != current.st_size or hashlib.sha256(observed).digest() != hashlib.sha256(data).digest():
         raise SystemExit('PLAIN_PACKET_RETENTION_UNVERIFIED')
+finally:
+    os.close(check)
 PY_RETAIN_PLAIN_PACKET
     [ "$?" -eq 0 ] || { RC=78; log "PLAIN_PACKET_RETENTION_REFUSED rc=$RC before_lease=1"; exit "$RC"; }
     PLAIN_PACKET_RETAINED="$LOG_DIR/${ID}.request.packet"
