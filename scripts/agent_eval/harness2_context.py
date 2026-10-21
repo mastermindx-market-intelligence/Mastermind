@@ -1,6 +1,7 @@
 """Read the existing Agent OS context bundle as bounded Harness2 experience.
 
-No files, network, model, database, indexing, scheduling or Agent OS writes.
+No direct file, network, model, indexing, scheduling or Agent OS writes.
+The draft producer resolves explicit IDs through the existing native evidence owner.
 The caller acquires raw bytes and expected identity through its existing trusted
 context owner. Byte agreement is not authentication or verified learning.
 The COMPLETE bundle, including higher law and every omission/degradation, stays
@@ -14,9 +15,12 @@ from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from typing import Any
 
-from scripts.agent_eval import contracts
+from scripts.agent_eval import contracts, verification
 from scripts.agent_eval.canonical import parse_digest_string, parse_source_qualified_ref
-from scripts.agent_eval.harness2_native import MAX_JSON_BYTES, decode_json, sha256_bytes
+from scripts.agent_eval.harness2_native import (
+    MAX_JSON_BYTES, configuration_lock, decode_json, harness_digest, sha256_bytes,
+)
+from scripts.agent_eval.resolver import ArtifactResolver
 
 _EXPERIENCE_FIELDS = frozenset({
     "schema", "domain", "harness_artifact", "source_run_ids", "method_source_ref",
@@ -172,3 +176,104 @@ def read_context_bundle(*, bundle_bytes: bytes, expected_bundle_digest: str,
         })
     return HarnessContext(copy.deepcopy(bundle), expected_bundle_digest, expected_repository_sha,
                           expected_workstream, records_digest, tuple(accepted), tuple(exclusions))
+
+
+def build_discovery_payload(*, refinement: dict, resolver: ArtifactResolver,
+                            key: str, workstream: str, method_source_ref: str,
+                            checked_at: str) -> dict | None:
+    """Prepare input for the incumbent Agent OS ``draft-discovery`` command.
+
+    This is a DRAFT with confidence ``suspected``, not verified institutional
+    learning. Existing EVAL graph validation authenticates no issuer and reads no
+    external evidence contents. Caller supplies the existing trusted resolver;
+    no fallback, file write, memory admission, scorer or deployment happens here.
+    Empty reflection and unchanged harnesses yield no positive learning draft.
+    """
+    _require(type(refinement) is dict, "DISCOVERY_REFINEMENT_REQUIRED")
+    _require(type(key) is str and len(key) <= 128
+             and re.fullmatch(r"[A-Z0-9]+(?:-[A-Z0-9]+)*", key) is not None,
+             "DISCOVERY_KEY_INVALID")
+    _require(type(workstream) is str and re.fullmatch(r"WS:[A-Z0-9]+(?:-[A-Z0-9]+)*", workstream)
+             is not None and len(workstream) <= 131, "DISCOVERY_WORKSTREAM_INVALID")
+    parse_source_qualified_ref(method_source_ref)
+    checked = _moment(checked_at)
+    domain = _text(refinement.get("domain"), 128, "DISCOVERY_DOMAIN_INVALID")
+    k = refinement.get("k")
+    mode = refinement.get("mode")
+    _require(type(k) is int and 1 <= k <= 16 and mode in ("agg", "seq"), "DISCOVERY_MODE_INVALID")
+    _require(refinement.get("promotion") == "NONE"
+             and refinement.get("automatic_memory_write") is False, "DISCOVERY_AUTHORITY_EXPANSION")
+    retained = refinement.get("retained_native_runs")
+    baselines = refinement.get("baseline_native_run_ids")
+    _require(type(retained) is tuple and len(retained) == 4 * k, "DISCOVERY_RUN_COUNT_INVALID")
+    _require(type(baselines) is tuple and len(baselines) == k, "DISCOVERY_BASELINE_COUNT_INVALID")
+    for ident in retained + baselines:
+        contracts.v_run_id(ident, "$.native_runs")
+    _require(len(set(retained)) == len(retained) and len(set(baselines)) == k,
+             "DISCOVERY_DUPLICATE_RUN")
+    _require(baselines == retained[:k], "DISCOVERY_BASELINE_ORDER_INVALID")
+    chosen = refinement.get("selected_native_run_id")
+    contracts.v_run_id(chosen, "$.selected_native_run_id")
+    stem = "agg" if mode == "agg" else "c"
+    _require(refinement.get("selected_label") in {stem + str(i) for i in range(1, k + 1)}
+             and chosen in retained and chosen not in baselines, "DISCOVERY_SELECTION_UNBOUND")
+    expected_lock = refinement.get("factor_lock_digest")
+    base_digest = refinement.get("baseline_harness_digest")
+    parse_digest_string(expected_lock)
+    parse_digest_string(base_digest)
+    records: dict[str, tuple[dict, dict]] = {}
+    for ident in retained:
+        run = resolver.resolve_run(ident)
+        _require(type(run) is dict and run.get("run_id") == ident, "DISCOVERY_RUN_NOT_RETAINED")
+        verification.verify_run_graph(run, resolver)
+        _require(run["validity"]["status"] == "VALID" and run["effect"]["state"] == "NO_EFFECT",
+                 "DISCOVERY_RUN_NOT_VALID")
+        _require(_moment(run["timing"]["completed_at"]) <= checked, "DISCOVERY_CHECK_PREDATES_RUN")
+        config = resolver.resolve_configuration(run["configuration"]["configuration_id"])
+        _require(type(config) is dict, "DISCOVERY_CONFIGURATION_NOT_RETAINED")
+        _require(configuration_lock(run["scenario"], config) == expected_lock,
+                 "DISCOVERY_FACTOR_LOCK_CHANGED")
+        if ident in baselines:
+            _require(config["procedure"]["instruction_bundle"]["digest"] == base_digest,
+                     "DISCOVERY_BASELINE_HARNESS_CHANGED")
+        records[ident] = (copy.deepcopy(run), copy.deepcopy(config))
+    selected_run, selected_config = records[chosen]
+    selected_artifact = refinement.get("selected_harness_artifact")
+    contracts.v_artifact_pair(selected_artifact, "$.selected_harness_artifact")
+    _require(selected_artifact == selected_config["procedure"]["instruction_bundle"],
+             "DISCOVERY_SELECTED_ARTIFACT_CHANGED")
+    _require(harness_digest(refinement.get("selected_harness")) == selected_artifact["digest"],
+             "DISCOVERY_SELECTED_HARNESS_CHANGED")
+    _require(sha256_bytes(refinement.get("selected_output")) == selected_run["evidence"]["output"]["digest"],
+             "DISCOVERY_SELECTED_OUTPUT_CHANGED")
+    reflection = refinement.get("experience_candidate")
+    if reflection is None:
+        return None
+    _require(type(reflection) is dict and set(reflection) ==
+             {"claim", "falsifier", "so_what", "evidence_run_ids"}, "DISCOVERY_REFLECTION_SHAPE")
+    for field in ("claim", "falsifier", "so_what"):
+        _text(reflection[field], 7800, "DISCOVERY_REFLECTION_TEXT_BOUND")
+    refs = reflection["evidence_run_ids"]
+    _require(type(refs) is list and 2 <= len(refs) <= 128, "DISCOVERY_REFLECTION_RUN_BOUND")
+    for ident in refs:
+        contracts.v_run_id(ident, "$.reflection.evidence_run_ids")
+    _require(len(set(refs)) == len(refs) and set(refs) <= set(retained)
+             and chosen in refs and bool(set(refs) & set(baselines)),
+             "DISCOVERY_REFLECTION_BASELINE_AND_SELECTED_REQUIRED")
+    if selected_artifact["digest"] == base_digest:
+        return None
+    return {
+        "key": key,
+        "claim": "Unvalidated harness hypothesis: " + reflection["claim"],
+        "falsifier": ("Inspect the retained comparison with scripts/agent_eval/verification.py; "
+                      "external-content and outcome review are still required. " + reflection["falsifier"]),
+        "so_what": "Test this candidate before any operational use. " + reflection["so_what"],
+        "kind": "architecture", "verified_at": checked.date().isoformat(),
+        "verified_by": ("scripts/agent_eval/verification.py checks retained graph associations, not efficacy "
+                        "or issuer authenticity; source runs: " + ", ".join(refs)),
+        "scope": [workstream], "confidence": "suspected",
+        "harness_experience": {
+            "domain": domain, "harness_artifact": copy.deepcopy(selected_artifact),
+            "source_run_ids": list(refs), "method_source_ref": method_source_ref,
+        },
+    }

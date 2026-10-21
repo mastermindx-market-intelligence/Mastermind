@@ -306,3 +306,15 @@ def finalize_selected_run(*, scenario: dict, configuration: dict, experiment: di
         validator_code_ref=validator_code_ref, validated_at=validated_at,
         created_at=created_at,
     )
+
+
+def configuration_lock(scenario_ref: dict, c: dict) -> str:
+    """Factor lock over the declared comparison, not a lock invented by its first return."""
+    return digest_value({
+        "scenario": scenario_ref, "execution": c["execution"],
+        "protected_source_ref": c["procedure"]["protected_source_ref"],
+        "skillpack_source_ref": c["procedure"]["skillpack_source_ref"],
+        "skillpack_version": c["procedure"]["skillpack_version"],
+        "handoff": c["procedure"]["handoff"], "context": c["context"],
+        "capabilities": c["capabilities"], "randomness": c["randomness"],
+    })

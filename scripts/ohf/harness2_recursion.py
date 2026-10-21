@@ -23,8 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from scripts.agent_eval import contracts, validity
-from scripts.agent_eval.canonical import digest_value
-from scripts.agent_eval.harness2_native import harness_digest, sha256_bytes
+from scripts.agent_eval.harness2_native import configuration_lock, harness_digest, sha256_bytes
 from scripts.agent_eval.harness2_context import read_context_bundle
 
 
@@ -81,18 +80,6 @@ class Harness2Port(Protocol):
 def _check(condition: bool, code: str) -> None:
     if not condition:
         raise Harness2CycleError(code)
-
-
-def configuration_lock(scenario_ref: dict, c: dict) -> str:
-    """Factor lock over the declared comparison, not a lock invented by its first return."""
-    return digest_value({
-        "scenario": scenario_ref, "execution": c["execution"],
-        "protected_source_ref": c["procedure"]["protected_source_ref"],
-        "skillpack_source_ref": c["procedure"]["skillpack_source_ref"],
-        "skillpack_version": c["procedure"]["skillpack_version"],
-        "handoff": c["procedure"]["handoff"], "context": c["context"],
-        "capabilities": c["capabilities"], "randomness": c["randomness"],
-    })
 
 
 def _validate_trial(trial: Trial, files: dict[str, bytes]) -> None:
@@ -312,6 +299,9 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             _check(type(refs) is list and 2 <= len(refs) <= 128
                    and all(type(v) is str and v in native_ids for v in refs) and len(set(refs)) == len(refs),
                    "REFLECTION_EVIDENCE_UNBOUND")
+            _check(trials[chosen].run["run_id"] in refs
+                   and any(trials[label].run["run_id"] in refs for label in baselines),
+                   "REFLECTION_BASELINE_AND_SELECTED_REQUIRED")
         _check(len(trials) == 4 * k and improver_calls == needed_improvers, "RECURSION_ACCOUNTING_MISMATCH")
         return {
             "task_id": task["task_id"], "domain": task["domain"], "mode": mode, "k": k,
@@ -319,6 +309,8 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             "selected_harness": copy.deepcopy(trees[chosen]), "selected_output": trials[chosen].output,
             "selected_harness_artifact": copy.deepcopy(trials[chosen].configuration["procedure"]["instruction_bundle"]),
             "retained_native_runs": tuple(trials[label].run["run_id"] for label in trials),
+            "baseline_native_run_ids": tuple(trials[label].run["run_id"] for label in baselines),
+            "baseline_harness_digest": base_digest,
             "rollout_count": len(trials), "improver_call_count": improver_calls,
             "factor_lock_digest": expected_lock, "step_notes": copy.deepcopy(notes),
             "context_bundle_digest": source_context.bundle_digest if source_context else None,

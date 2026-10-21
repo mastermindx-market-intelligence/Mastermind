@@ -298,3 +298,96 @@ bounded read-only check found the named physical directories present but did not
 establish the cause. Preserve the readback guard; no unchanged retry or alternate
 carrier was used. This review route and the native production-port qualification
 remain actual dependencies, not accepted work.
+
+
+## Feedback producer and actual two-task mechanism proof
+
+The native kernel now names its actual baseline run IDs and baseline harness
+hash. Model reflection must cite both a baseline and the selected result. The
+shared configuration factor lock remains one implementation in the pure native
+adapter, consumed by the kernel and the Agent OS draft producer.
+
+`harness2_context.build_discovery_payload()` resolves the complete declared
+4k native run set through the incumbent ArtifactResolver, recomputes the existing
+EVAL graph/validity, checks the factor lock, baseline identities, selected
+harness/output bytes and selected artifact association. It prepares only the
+existing `agentos.py draft-discovery` input. It writes no memory, issues no
+approval and authenticates no source issuer. Its confidence is always `suspected`;
+the claim explicitly remains an unvalidated hypothesis. No reflection or an
+unchanged selected harness produces no positive-learning draft. The external
+content, factual lesson and any claimed performance gain still need independent
+review. Graph consistency is not that review.
+
+The actual Macro text renderer previously dropped full nested harness metadata
+under `--harness-experience --text`, although the JSON view retained it. A failing
+real-CLI regression exposed the omission. The existing renderer now emits the
+same complete selected data; default text without the opt-in is unchanged.
+
+Proof through the real native commands, all in a disposable fixture store:
+
+1. A scripted improver and four real Python helper processes produced the first
+   signed-accounting contrast: 105 baseline versus 85 candidate. Existing native
+   EVAL records retained the observations.
+2. The new native draft producer read those records. The real Macro
+   `draft-discovery --from` command returned the identical payload and valid
+   existing DSC frontmatter, with confidence `suspected`.
+3. The unchanged Macro `compile-context` machinery read that temporary record,
+   emitted full provenance and missingness, and its raw JSON was byte-bound by
+   the native reader.
+4. A second task with DIFFERENT amounts (35, -10, -5) started from its own common
+   H0, received the prior suspected lesson and retained the complete context. Its
+   four scripted-improver/real-helper executions yielded 35 baseline versus 20
+   candidate. Both the JSON and text consumers retained the complete lesson.
+
+This proves data transport, deterministic mechanics and H0 reset, NOT that an
+LLM learned, that a lesson caused a gain, that holdout efficacy is demonstrated,
+or that any production memory or harness changed. The fixture improver is
+scripted and already knows its edit. All eight executions are synthetic EVAL
+fixtures even though their arithmetic helper subprocesses actually ran.
+
+Original retained fixture: `/private/tmp/harness2-feedback-20261021-i_s0h2i3/`.
+Its report and existing EVAL stores preserve exact run identities, content
+hashes and limitations. The first diagnostic stopped before second-task
+execution because the test driver omitted the required `prior_experience=()`;
+the original first-task artifacts were preserved and only the missing second
+leg was run. No live operation was retried or moved.
+
+Complete core `tests/test_agent_eval_*.py`: 862 passed. New draft-producer
+negative cases first failed on the missing producer. Exact targeted producer,
+kernel and inertness suite: 192 passed. Macro text feature subset: 13 passed;
+its new discriminator failed before the renderer fix. The full Macro compiler
+and schema campaign is separately recorded on its original PR.
+
+## Current execution and independent-review boundaries
+
+Executive V3 exact bounded summon `harness2-native-crossrepo-audit-e39917f5-20261021`
+returned `backend_unavailable`, with no Job/START. The existing native manual
+Fabric route is distinct and remains the lawful alternate for new admitted
+bounded work, never a replay of an uncertain action.
+
+MiniMax cross-repository review `harness2-crossrepo-minimax-e39917f5-20261021`
+terminated before model execution with `REMOTE_SUB_CWD_MISSING`. The corrected
+new child `harness2-crossrepo-minimax-e39917f5-r2-20261021` used the documented
+host-relative directory and terminated rc78: `canonical_source_unreadable`.
+Both retain their original root/parent and terminal receipts; neither produced
+review or source effects. Cursor labor was policy-refused; it was not relabelled
+to evade that policy. Flash refused bounded C2 complexity. A subsequent eligible
+GLM-5.3 review preview selected Ubuntu0 under the existing explicit C2 escalation
+rule; a preview is not execution and must be followed by actual retained evidence.
+The earlier M1 Qwen review was independently reconciled terminal before launch:
+its direct cause was a `lanes` symlink rejected by the current no-follow
+transport reader, not a model opinion or successful review. Preserve its original
+terminal ID and no-follow guard; do not repeat that same failed invocation.
+
+The real native-port gap is concrete. The existing
+`OperatorHarnessOrchestrator.start_attempt/run_turn` requires an actual admitted
+Attempt, immutable provider profile and owner-provided prompt binding. A
+`CandidateResult.summary` is not a full retained deliverable; an observed
+attestation can legitimately have `served_model=None`. Neither may be filled
+with an invented output/model to satisfy EVAL. The actual production composition
+must supply each stage's source/profile, complete raw result, observed process/
+session/model/capabilities/network/effects/cleanup and resource evidence through
+the incumbent owners. It must retain root-wide limits and the actual release
+holds. Creating an injected callback or a self-signed observation is not the
+missing implementation. Preserve the existing Runtime/COO/observation source
+custody; this PR does not start or replace that control plane.
