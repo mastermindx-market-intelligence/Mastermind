@@ -1,0 +1,46 @@
+{
+  "reviewed_head": "5c64d1f83c1aba17a9365730182bc0cfe6ab0aa1",
+  "review_id": 5363345941,
+  "finding_comment": 4142287861,
+  "scope": "Enforce canonical root acquisition count and depth constraints",
+  "red": {
+    "passed": 61,
+    "failed": 2
+  },
+  "green_full_frontend": {
+    "passed": 601,
+    "failed": 0,
+    "skipped": 1
+  },
+  "typecheck": "PASS",
+  "web_build": "PASS",
+  "native_assets": "PASS",
+  "source_postimages": {
+    "app/mastermind_os/src/work.ts": "4741de69de08cfde014345b8fa11404ad53cc5e5348d280aec8c358a7a390265",
+    "app/mastermind_os/src/work.test.ts": "be0a2907149bb50bb1b514d83385198d197b262e9b74258ab763e95ca46128a0"
+  },
+  "native_rust_prior_head": {
+    "head": "5c64d1f83c1aba17a9365730182bc0cfe6ab0aa1",
+    "passed": 19,
+    "failed": 0
+  },
+  "installed_acceptance": false,
+  "additional_depth_repair": {
+    "source_base": "0d4f60b466fbb6decc3444e8ce3c58d117ee946e",
+    "producer": "control_plane/fabric_job_view.py:1718-1745",
+    "reason": "root discovery requires depth exactly zero",
+    "red": {
+      "passed": 69,
+      "failed": 1
+    },
+    "green_full_frontend": {
+      "passed": 608,
+      "failed": 0,
+      "skipped": 1
+    },
+    "typecheck": "PASS",
+    "web_build": "PASS",
+    "native_assets": "PASS",
+    "note": "Prior independent count review and exact0d4 repair review remain distinct from this added depth guard."
+  }
+}

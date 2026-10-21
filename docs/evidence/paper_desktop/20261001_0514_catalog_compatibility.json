@@ -1,0 +1,68 @@
+{
+  "candidate": {
+    "bridge_sha256": "7d810c458a53e00e21014fd7375ac338dc9c1421b30f823feb4d34184f9d08fc",
+    "bridge_version": "0.1.4",
+    "deployed": false,
+    "live_write_proven": false,
+    "production_acceptance": false,
+    "runtime_generation": "v10"
+  },
+  "effect_boundary": {
+    "effect_unknown": false,
+    "paper_document_mutated": false,
+    "runtime_deployed": false,
+    "service_restarted": false
+  },
+  "exact_catalog_delta": {
+    "added_tools": [
+      "list_resources",
+      "rename_resource"
+    ],
+    "added_tools_allowlisted": false,
+    "changed_existing_tools": [],
+    "classification": "BLOCKED_DISCOVERY_DELTA",
+    "removed_tools": [
+      "list_files"
+    ]
+  },
+  "observed": {
+    "blocked_tools": [
+      "create_file",
+      "delete_nodes",
+      "export",
+      "export_combined_pdf",
+      "list_resources",
+      "open_file",
+      "rename_pages",
+      "rename_resource"
+    ],
+    "catalog_sha256": "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+    "edit_tools": 12,
+    "read_tools": 16,
+    "tool_count": 36
+  },
+  "observed_on": "2026-10-01",
+  "prior": {
+    "catalog_sha256": "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+    "reconstructed_from": "ca90 accepted catalog plus exact rename_pages descriptor",
+    "reconstruction_sha256": "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+    "tool_count": 35
+  },
+  "protected_base": "fb78a964748836c4c0e0a966369690b8fef33be1",
+  "reconstruction": {
+    "ca90_expected": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570",
+    "ca90_reconstructed": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570",
+    "comparison_method": "canonical bridge JSON encoding over exact name-keyed tool dictionaries",
+    "current_expected": "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+    "current_recomputed": "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+    "eightcd_expected": "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+    "eightcd_reconstructed": "8cd27488a3adfc19c6c36d4349b75feebc71c159253c47f8a0f8d50c27043deb",
+    "surviving_allowed_descriptors_changed": false,
+    "surviving_blocked_descriptors_changed": false
+  },
+  "schema": "mastermind.paper_catalog_compatibility.v3",
+  "server": [
+    "paper-desktop",
+    "0.5.14"
+  ]
+}

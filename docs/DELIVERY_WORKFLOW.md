@@ -19,12 +19,15 @@ mmx-workspace acquire \
 
 The accepted release installs `mmx-workspace` with `scripts/install_mastermind_workspace_cli.sh`. The launcher, not the model/session, pins the canonical source checkout and host workspace root. On the Studio it also refuses execution when `/Volumes/Mastermind` is not the actual mounted workspace volume. `scripts/mastermind_workspace.py` is the versioned implementation payload and test/admin seam; it is not the production Web invocation.
 
-The JSON receipt supplies the exact `workspace_path`, derived branch, base SHA, and shared Git common directory. Repeating `acquire` for the same operation reuses that workspace. Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm:
+The JSON receipt supplies the exact `workspace_path`, derived branch, base SHA, and shared Git common directory. Repeating `acquire` for the same operation reuses that workspace. Never point two independent operations at one workspace or mint proof/review worktrees outside this owner. Before editing, `cd` to the receipt path and confirm the intended branch, source revision and common ancestor:
 
 ```bash
 git status --short --branch
-git merge-base --is-ancestor origin/master HEAD
+git rev-parse HEAD
+git merge-base HEAD origin/master
 ```
+
+If protected `master` moved since acquisition, **do not block ordinary edits solely because the worktree is behind**. Compare current governing instructions, owned paths and imported dependencies. Only a material overlap or changed source law requires a bounded integration/review decision; no ancestry-only join, rebase or duplicate worker is required for path-disjoint movement. The native merge queue provides exact integrated checks before a protected merge.
 
 If a session opens in the legacy shared checkout and it is dirty, do not clean,
 stash, reset, or overwrite it. Treat those changes as user-owned. Create a fresh
@@ -32,8 +35,9 @@ worktree and move only the task's deliberate edits there.
 
 ## Complete a change
 
-1. Run the smallest relevant test set while iterating, then the repository CI
-   gate before handoff.
+1. Run the smallest relevant local test set while iterating. Publish a truthful candidate
+   and request review with those results while hosted checks are pending; full required CI
+   remains a merge/release gate, not a prerequisite to handing off a reviewable candidate.
 2. Review `git diff --check`, `git status`, and the staged diff. Never stage
    `.env*`, credentials, logs, caches, runtime `data/`, or backup archives.
 3. Commit a scoped change, push the branch, and open a PR:
@@ -43,20 +47,40 @@ worktree and move only the task's deliberate edits there.
    gh pr create --fill
    ```
 
-4. Wait for required checks. If checks fail or the work is incomplete, mark the
-   PR draft and stop; do not merge or deploy.
-5. Merge through GitHub:
+4. CI blocks merge/release, not independent useful work. If checks fail or work is
+   incomplete, keep the PR draft and release held; diagnose the failure and repair it within
+   the assigned scope. While checks are queued/running, continue the highest-leverage safe
+   independent implementation, tests, review or integration preparation. Do not duplicate an
+   incumbent worker or mutate its frozen review candidate merely to appear busy.
+5. Offload the wait to one existing Class-E or Class-T observer through the current
+   process/CI owner. Bind repository, PR, exact head SHA and workflow run IDs; retain the
+   process/run handle and return location in the existing checkpoint. Reuse an observer rather
+   than creating one per check or chat. No merge/deploy action belongs in the observer.
+   Consume only the matching candidate's results; a changed head invalidates stale observations.
+   Queued CI is not a failing build, and do not push empty/rebase-only commits to restart CI.
+   Without a usable observer, continue useful foreground work and check once at the next real
+   integration boundary. Never claim a background Web turn or automatic wake that does not exist.
+6. After required PR-head checks and review pass and queue entry is authorized, use the
+   repository's native GitHub merge queue when enabled. The active queue's `merge_group`
+   workflow qualifies the exact integrated candidate after queue entry and **before merge**;
+   do not add a manual synthetic PR merge-ref check requirement or ancestry-only rebase as
+   a precondition to queue entry. If final integrated checks fail, the queue must not merge.
+   Preserve current head/concurrency checks and never use an admin bypass:
 
    ```bash
-   gh pr checks --watch
+   gh pr checks --required
    gh pr merge --squash --delete-branch
    ```
 
-6. Resolve the merge commit from GitHub and deploy that exact commit:
+7. Deploy only when the assigned change requires runtime rollout and release is authorized.
+   A source-only, research, documentation or instruction task must not restart an unrelated
+   application. For a required deployment, resolve this operation's actual merge commit from
+   GitHub; the newest default-branch commit may belong to another operation:
 
    ```bash
    git fetch origin master
-   merge_sha="$(git rev-parse origin/master)"
+   merge_sha="$(gh pr view --json mergeCommit --jq '.mergeCommit.oid')"
+   test -n "$merge_sha" && test "$merge_sha" != null
    ./scripts/deploy_from_git.sh "$merge_sha"
    ```
 
@@ -68,8 +92,10 @@ creates a rolling snapshot, restarts `mastermind.service`, checks
 ## Recovery and concurrency rules
 
 - Never resolve concurrent work by copying one shared directory over another.
-  Rebase or merge the latest `origin/master` into the task branch and resolve
-  conflicts in the branch worktree.
+  When actual path/semantic/dependency collisions require composition, coordinate with the
+  incumbent source writer and update that same branch/worktree with bounded conflict resolution,
+  affected tests, and appropriate review. Do not join/rebase merely to reset GitHub's `behind`
+  count; rely on the native immutable merge-ref/merge-queue proof for a compatible unchanged head.
 - Never bypass a failed check merely to get a deployment out.
 - Never deploy a draft PR, a branch head, or a commit that is not the current
   `origin/master`.

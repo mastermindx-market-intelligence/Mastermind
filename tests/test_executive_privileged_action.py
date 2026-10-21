@@ -54,7 +54,28 @@ def test_service_start_has_fixed_argv(tmp_path: Path) -> None:
     )
 
 
-@pytest.mark.parametrize("verb", ["start", "stop", "restart"])
+@pytest.mark.parametrize(
+    ("action", "verb"),
+    [
+        ("executive.services.start_readside", "start-readside"),
+        ("executive.services.stop_readside", "stop-readside"),
+    ],
+)
+def test_readside_service_actions_have_fixed_argv(
+    tmp_path: Path, action: str, verb: str
+) -> None:
+    request = validate_request(_request(action))
+    assert request.effect_class == "SERVICE_CONTROL"
+    assert build_argv(request, tmp_path) == (
+        "/bin/bash",
+        str(tmp_path / "ops/executive_os/service-control.sh"),
+        verb,
+    )
+
+
+@pytest.mark.parametrize(
+    "verb", ["start", "stop", "restart", "start_readside", "stop_readside"]
+)
 def test_service_actions_reject_all_arguments(verb: str) -> None:
     with pytest.raises(PrivilegedActionError, match="arguments"):
         validate_request(_request(f"executive.services.{verb}", {"shell": "/bin/sh"}))
@@ -208,11 +229,36 @@ def test_recover_transaction_has_fixed_argv(tmp_path: Path) -> None:
     )
 
 
-def test_exactly_six_actions_are_accepted() -> None:
+def test_secondary_host_power_policy_has_fixed_no_argument_argv(tmp_path: Path) -> None:
+    request = validate_request(_request("executive.host.prepare_secondary_power_policy"))
+    assert request.effect_class == "HOST_POWER_POLICY"
+    assert build_argv(request, tmp_path) == (
+        "/usr/bin/python3",
+        "-I",
+        "-S",
+        "-B",
+        str(tmp_path / "ops/executive_os/secondary_host_power_policy.py"),
+    )
+
+
+def test_secondary_host_power_policy_rejects_all_arguments() -> None:
+    with pytest.raises(PrivilegedActionError, match="host policy action arguments"):
+        validate_request(
+            _request(
+                "executive.host.prepare_secondary_power_policy",
+                {"host": "admins-Mini-652"},
+            )
+        )
+
+
+def test_exactly_nine_actions_are_accepted() -> None:
     cases = {
         "executive.services.start": {},
         "executive.services.stop": {},
         "executive.services.restart": {},
+        "executive.services.start_readside": {},
+        "executive.services.stop_readside": {},
+        "executive.host.prepare_secondary_power_policy": {},
         "executive.worker_auth.verify_only": {},
         "executive.worker_auth.verify_ready": {
             "slot_id": "codex-pro-01",

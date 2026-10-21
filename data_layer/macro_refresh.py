@@ -743,4 +743,6 @@ def refresh_and_check(log=print) -> dict:
             log("[macro_refresh] refresh skipped/failed — reading last-good cached macro data")
     info = check_and_warn(block=(os.environ.get("MACRO_STALE_BLOCK", "0") == "1"), log=log)
     info["refreshed_to"] = new_asof
+    info["refresh_mode"] = "external" if externally_managed else "owned"
+    info["refresh_succeeded"] = None if externally_managed else bool(new_asof)
     return info

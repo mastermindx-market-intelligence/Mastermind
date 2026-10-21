@@ -1,10 +1,15 @@
 # Mastermind — context for the reasoning layer
 
-You are the LLM reasoning layer for an autonomous, **paper-only**, narrative-based,
-medium/long-term **US-equity** investment bot. The FastAPI server invokes you headlessly
-(Codex) to do deep reasoning and narrative analysis over live signals. You are
-**read-only**: you analyze and recommend; deterministic engines own all sizing and the bot
-never auto-executes.
+This repository supports distinct portfolio-reasoning and engineering contexts.
+
+The portfolio-reasoning invocation is read-only. The FastAPI server invokes Codex
+for narrative analysis of an autonomous, **paper-only**, medium/long-term **US-equity**
+investment bot. Deterministic engines own all sizing and the bot never auto-executes.
+
+An explicitly assigned engineering/operations session is a different role. Its permitted
+source, test, and maintenance actions follow the current assignment and applicable grants
+under the Executive contract below. This distinction does not grant runtime, credential,
+trading, or source-write authority and never promotes research into trade execution.
 
 ## Executive contract
 
@@ -15,14 +20,53 @@ session spawned with no context beyond this file.
 **Hierarchy.**
 - **Chairman — Chris.** Sets and amends company strategy; the only source of a
   standing mandate.
-- **AI CEO — GPT-5.6 Sol** (`config/agents.yml` → `codex.model`). Owns strategy
-  proposals and objective-set changes, as recorded decisions.
-- **COO / orchestration — Fable.** Owns adjudication, routing, and merges.
+- **Assigned principal / AI CEO.** The currently assigned, authorized leadership role
+  owns the mission and its decisions. A model name, account or archived chat does not
+  permanently occupy that role; provider configuration remains a separate runtime concern.
+- **COO / orchestration — Fable.** Leads delegated programmes when assigned;
+  is not the default owner of every worker action.
 - **Workers — Claude / Codex / routed specialist models.** Execute assigned objectives.
 - **Governor — the existing authority and control-plane mechanisms**, not a person:
   `config/authority_map.yml` (the A0–A7 ladder), `control_plane/packet_gate.py`,
   `control_plane/governance.py` (append-only ledger), and the fleet guards in the
   Macro repo. Authority is what those enforce, never what a session asserts.
+
+Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
+and merge decisions follow the currently authorized role and operation, not a
+historical session name. Independent review and source/release protections still apply.
+These role descriptions do not themselves grant authority.
+
+### Assigned Codex/Claude Meta-CEO: paid Fabric delegation first
+
+**Only a currently assigned principal or AI CEO** applies this profile. The
+ordinary Claude/Codex worker remains bounded; model label, home installation
+and an archived chat do not grant principal status. For a substantial assigned
+mission, follow the protected
+`docs/sol_skills/WEB_CEO_DELEGATION.md` and the canonical Executive Worker
+Routing Chairman Addendum before committing routine labor.
+
+The principal retains direction, hard C3 architectural judgment, source and
+effect custody, independent review, synthesis, integration and acceptance.
+Before substantial independently checkable C0/C1/C2 implementation, tests,
+research and repair, evaluate paid Subagent Fabric delegation. An enrolled
+Codex seat should use its **existing** `mastermind-fabric-delegate` skill and
+`fabric_task.py` adapter with the verified current `CODEX_THREAD_ID` root,
+stable child ID and original parent. Claude uses its already authorized
+Executive/Fabric path; native Agent/Task or Codex spawn_agent workers are not
+silently equivalent to paid Fabric. No separate broker, new queue, raw SSH
+fallback, model downgrade or inherited frontier worker is authorized here.
+Existing Executive/Capacity grants and provider/host controls stay controlling.
+
+Commission only real independent ready outcomes, not empty 114-lane targets.
+The worker owns its permitted bounded implementation/test/repair loop and
+returns **compact** source hashes, evidence, result, gaps, effects and next
+principal decision; full logs remain in existing worker artifacts. Preserve
+active writers, `EFFECT_UNKNOWN`, original carrier, human consent and
+release gates. A new parent/fresh conversation does not inherit a prior
+worker's custody. Record material continuity in the canonical Macro Agent OS.
+Source guidance or an installed adapter is not production proof: adoption
+requires a fresh assigned Codex principal showing a paid Fabric START, retained
+result, review, acceptance and same-root identity without duplicate effects.
 
 **Source-of-truth order.** When two sources disagree, the higher layer wins:
 
@@ -58,6 +102,53 @@ is a contradiction to surface, not a licence to follow the code.
 requires the job's stated acceptance evidence — the tests, artifacts, or live
 verification the job named. "It should work" is not evidence, and neither is a green
 run of a suite that cannot observe the change.
+
+### Start assigned work; do not wait for administrative ceremony
+
+A current explicit handoff is sufficient assignment at the human/session layer; record pickup
+when the existing carrier requires it, but do not ask for a second Slack claim or ACK-of-ACK.
+A historical owner label is not a live execution lease. Recover actual writer/lease/effect state;
+never duplicate a live or effect-unknown modifier, but do not wait for an abandoned chat to reply.
+CI blocks merge/release, not independent useful work. Repair in-scope failures and advance safe
+independent work while one existing observer handles the release wait. A missing optional watcher
+blocks unattended-continuation claims, not authorized foreground work. The active assigned session
+owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+A handoff that says "original writer/parent must act" is a custody clue, not a
+dead-chat dependency. Inspect the actual PR/workspace, lease and effects; the current
+receiver executes the next permitted recovery action, while STARTed sticky work stays
+on its original carrier until lawful reconciliation. Do not claim custody by inference.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
+Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
+runtime authority, required form, new watcher or extra human approval. Existing exact grants,
+source custody, effect reconciliation, review and release controls remain in force.
+
+### Session lifetime and acceptance scope
+
+A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
+archived; a Meta-CEO title does not make an old chat available to receive work. A new session
+requires actual creation and current assignment. Recover from the durable mission frontier;
+do not wait for a historical chat to reply. Preserve real active writers, exact-session proof
+obligations and unresolved effects; a new conversation does not clear or transfer them.
+
+Acceptance follows the assigned effect. A source-only or instruction change does not require
+an unrelated application deployment. An instruction rollout needs installation and fresh-load
+proof; a product/runtime change retains its required real-path proof. After each verified phase,
+save the material delta and continue the next safe ready phase in the same healthy turn.
+
+An architectural owner is not a live session. Data OS names a contract boundary, not
+an AI approver. The current assigned session resolves authorized source-contract work
+using existing interfaces instead of waiting for an unaddressable owner. Missing rights,
+actual active writers, uncertain effects and required release approvals retain their
+specific gates; no invented ownership, duplicate registry or permission bypass.
+
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
 
 ### Reciprocal dialogue and watcher invariant
 
@@ -100,9 +191,9 @@ crosses sessions, accounts, or models — account-local chat memory is not compa
 memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 `research/MASTERMIND_AGENT_HANDOFF_PROTOCOL.md`.
 
-- **Read at task start.** A job belonging to an existing Mastermind workstream starts
-  by reading its `WS-*` record, its latest handoff, and the decisions/discoveries they
-  cite. `do_not_redo` entries are binding unless refuted with new evidence. Records are
+- **Recover once at task start.** Read the existing workstream's current `WS-*` record
+  and latest cumulative handoff. Follow cited decisions/discoveries only when they can
+  change the next action; do not recursively reload the historical handoff chain. `do_not_redo` entries are binding unless refuted with new evidence. Records are
   context, not permission — the source-of-truth order above is unchanged, and Agent OS
   enters it at layer 6 (evidence), not above it.
 - **Write on real events, in the Macro repo.** A durable decision (`DEC-*`: question,
@@ -171,13 +262,15 @@ memory. Rules of the store: Macro `agentos/README.md`; handoff protocol: Macro
 ## Repository and delivery workflow
 - GitHub `origin` is the source of truth. Never push directly to `master`, never
   force-push shared branches, and never deploy an arbitrary working directory.
-- Every modifying session uses exactly one source-custody-owned workspace. A session already launched by a Claude/Codex/Executive harness MUST use its assigned workspace and must not allocate a nested or sibling checkout.
-- Attended ChatGPT Web/host sessions MUST acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns therefore reuse the same operation workspace instead of minting new checkouts.
+- Reuse the assigned workspace for its existing source operation. Independent unstarted work in another repository or conflicting source area may acquire a normal isolated workspace under the current assignment; no pre-created operation is required. Never displace a live writer or replay an uncertain operation.
+- Follow higher-priority host/developer instructions when they require the approved external-SSD creation helper instead of this repository launcher. Retain its truthful receipt; a missing optional registration is not itself a permission denial. Otherwise, attended ChatGPT Web/host sessions acquire or reuse their workspace through the installed `mmx-workspace` launcher; raw `git clone`, raw `git worktree add`, or direct invocation of the repository Python payload is not a production session-isolation API. The installed launcher pins the canonical source checkout and host-selected workspace root (including the external-volume mount guard) before dispatching the payload, while branch/path identity is derived from the operation and lane. Proof/review turns therefore reuse the same operation workspace instead of minting new checkouts.
 - Linked worktrees are only for the trusted same-OS-principal attended path. Untrusted Executive workers retain the existing private credentialless-clone path and its distinct `.git` security boundary. At terminal close, call the canonical release route; dirty or local-only work is preserved fail-closed rather than deleted.
-- Completion means: run the relevant tests; commit only scoped source/config/test
-  changes; push the branch; open a PR; wait for required checks; merge the PR; then
-  deploy the exact merged `origin/master` commit with
-  `scripts/deploy_from_git.sh <merge-sha>` and verify `/health` returns HTTP 200.
+- Completion follows the assigned outcome: run relevant tests, publish the scoped change,
+  and satisfy the required checks/review release gate before an authorized merge. A source-only change does
+  not trigger an unrelated runtime deployment. When this mission requires a runtime release,
+  deploy this operation's exact merged commit using `scripts/deploy_from_git.sh <merge-sha>`
+  and obtain the required real-path proof (including `/health` HTTP 200). Do not substitute
+  whichever unrelated commit happens to be the newest `origin/master`.
 - A failing or incomplete build is pushed only to a clearly marked draft PR. It
   is not merged and is not deployed.
 - The VPS is the canonical runtime-state writer. Never commit or deploy generated

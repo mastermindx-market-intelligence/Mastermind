@@ -105,9 +105,13 @@ def _oauth_available(role: str | None = None) -> bool:
         capability_broker, key_pool = _shared_availability_modules()
         lane = _lane(role)
         for capability_id in key_pool.discover_present_keys():
-            resolved = capability_broker.resolve(capability_id, lane=lane)
-            if resolved.get("allowed") and resolved.get("ref_name"):
-                return True
+            try:
+                resolved = capability_broker.resolve(capability_id, lane=lane)
+                if resolved.get("allowed") and resolved.get("ref_name"):
+                    return True
+            except Exception:
+                # Shared discovery skips a broken slot and considers the rest.
+                continue
     except Exception:
         return False
     return False
@@ -120,6 +124,12 @@ def available() -> bool:
     reasoning time.  Keeping this existence check independent is load-bearing:
     ``/health`` calls it and must not rescan cooling/usage ledgers per probe.
     """
+    # Actual reasoning imports these before selecting any provider.
+    # Preserve that prerequisite without consulting ranking ledgers.
+    try:
+        _shared_modules()
+    except Exception:
+        return False
     try:
         from brain import codex_bridge
 
@@ -218,7 +228,7 @@ async def reason(prompt: str, **kwargs) -> dict:
                 prompt,
                 **kwargs,
                 _backend_override="cli",
-                _oauth_candidates=[candidate],
+                _subscription_slots=[candidate],
             )
 
         result["provider"] = rung["provider"]

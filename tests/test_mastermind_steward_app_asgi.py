@@ -1030,3 +1030,25 @@ def test_real_signed_token_claim_refusals_are_closed_and_secret_free(
     rendered_audit = repr(sink.events)
     for forbidden in (token, SUBJECT, CLIENT_ID, "client-one", "client-two"):
         assert forbidden not in rendered_audit
+
+
+def test_steward_stack_is_pinned_and_live_window_is_opt_in_and_disabled_by_default():
+    """The Live Window mount must never be an implicit part of this stack."""
+
+    app, _, _, _ = _build()
+
+    assert [(route.path, sorted(route.methods or ())) for route in app.routes] == [
+        ("/healthz", ["GET", "HEAD"]),
+        ("/readyz", ["GET", "HEAD"]),
+        (METADATA_PATH, ["GET", "HEAD"]),
+        (MCP_PATH, ["POST"]),
+    ]
+    assert [middleware.cls.__name__ for middleware in app.user_middleware] == [
+        "_StewardTransportGuard",
+        "AuthenticationMiddleware",
+        "_A1AuthGate",
+        "AuthContextMiddleware",
+    ]
+    parameter = inspect.signature(build_authenticated_app).parameters["live_window"]
+    assert parameter.default is None
+    assert parameter.kind is inspect.Parameter.KEYWORD_ONLY

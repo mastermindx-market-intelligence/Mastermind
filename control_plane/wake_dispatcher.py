@@ -10,6 +10,7 @@ result.
 """
 from __future__ import annotations
 
+import copy
 import dataclasses
 import hashlib
 import re
@@ -17,6 +18,7 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
+from control_plane.operator_harness_contract import AttentionCompanyReadProjection
 from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
 from control_plane.wake_ack_ingress import (
     TrustedWorkerWakeAckProjection,
@@ -33,6 +35,7 @@ from control_plane.wake_events import (
 from control_plane.wake_ledger import (
     DeliveryAttempt,
     LedgerPhase,
+    NativeCompanyReadEvidence,
     ObligationStatus,
     UNARMED_RETRY_POLICY,
     WakeLedgerRecord,
@@ -318,6 +321,11 @@ class WakeTransportCompletion:
         repr=False,
     )
 
+    company_read_projection: AttentionCompanyReadProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
     def __post_init__(self) -> None:
         if not isinstance(self.receipt, TransportReceipt):
             raise WakeDispatchError("Wake transport completion requires a receipt")
@@ -331,6 +339,12 @@ class WakeTransportCompletion:
                 raise WakeDispatchError(
                     "Wake transport completion ACK projection requires DELIVERED"
                 )
+        company = self.company_read_projection
+        if company is not None:
+            if not isinstance(company, AttentionCompanyReadProjection):
+                raise WakeDispatchError("Wake Company read projection must be typed")
+            if self.receipt.outcome is not TransportOutcome.DELIVERED:
+                raise WakeDispatchError("Wake Company read projection requires DELIVERED")
 
 
 def normalize_transport_completion(
@@ -351,6 +365,9 @@ class PersistedNudgeResult:
     nudge_attempt: NudgeAttempt
     transport_receipt: TransportReceipt | None = None
     receipts: tuple[WakeReceipt, ...] = ()
+    native_company_read: NativeCompanyReadEvidence | None = dataclasses.field(
+        default=None, repr=False,
+    )
 
     @property
     def nudge_id(self) -> str:
@@ -839,6 +856,64 @@ def _reconciliation_required(
     )
 
 
+def _native_company_evidence(
+    completion: TransportReceipt | WakeTransportCompletion,
+    wake: WakeNudge,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+) -> NativeCompanyReadEvidence | None:
+    """Withhold optional evidence on mismatch; never downgrade known delivery."""
+    if (not isinstance(completion, WakeTransportCompletion)
+            or completion.receipt.outcome is not TransportOutcome.DELIVERED
+            or len(pairs) != 1):
+        return None
+    projection = completion.company_read_projection
+    if projection is None:
+        return None
+    obligation, route = pairs[0]
+    if (wake.wake_transport != "codex-app-server"
+            or wake.reasoning_surface != "codex"
+            or projection.target_attempt_id != obligation.attempt_id
+            or projection.binding_id != wake.binding_id
+            or projection.binding_generation != wake.binding_generation
+            or projection.binding_id != route.binding_id
+            or projection.binding_generation != route.binding_generation
+            or projection.nudge_id != wake.nudge_id
+            or projection.provider_session_id != wake.native_handle):
+        return None
+    try:
+        return NativeCompanyReadEvidence(
+            target_attempt_id=projection.target_attempt_id,
+            process_generation_id=projection.process_generation_id,
+            binding_id=projection.binding_id,
+            binding_generation=projection.binding_generation,
+            nudge_id=projection.nudge_id,
+            consultation_ref=projection.consultation_ref,
+            provider_session_sha256=hashlib.sha256(
+                projection.provider_session_id.encode("utf-8")).hexdigest(),
+            provider_native_turn_sha256=hashlib.sha256(
+                projection.provider_native_turn_id.encode("utf-8")).hexdigest(),
+            result_sha256=projection.result_sha256,
+            native_item_sha256=projection.native_item_sha256,
+            answer_attestation_sha256=projection.answer_attestation_sha256,
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def _stored_native_company_evidence(
+    repo: WakeLedgerRepository, nudge_attempt: NudgeAttempt,
+) -> NativeCompanyReadEvidence | None:
+    if len(nudge_attempt.attempts) != 1:
+        return None
+    attempt = nudge_attempt.attempts[0]
+    stored = repo.get_by_command_id(ledger_command_id(
+        attempt.obligation_id, LedgerPhase.DELIVERED, attempt_n=attempt.attempt_n,
+    ))
+    if stored is None or not stored.record.matches_attempt(attempt):
+        return None
+    return stored.record.native_company_read
+
+
 def _persist_transport_result(
     repo: WakeLedgerRepository,
     pairs: Sequence[tuple[WakeObligation, WakeRoute]],
@@ -848,12 +923,13 @@ def _persist_transport_result(
     transport: TransportReceipt,
     target_ack_projection: TrustedWorkerWakeAckProjection | None,
     target_registry: SessionTargetRegistry | None,
+    native_company_read: NativeCompanyReadEvidence | None = None,
 ) -> PersistedNudgeResult:
     attempts = nudge_attempt.attempts
     phase = LedgerPhase(transport.outcome.value)
     terminal_persisted = repo.append_records_atomic(
         tuple(
-            (attempt_record(attempt, phase), obligation)
+            (attempt_record(attempt, phase, native_company_read=native_company_read), obligation)
             for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
         )
     )
@@ -901,6 +977,7 @@ def _persist_transport_result(
         nudge_attempt=nudge_attempt,
         transport_receipt=transport,
         receipts=tuple(receipts),
+        native_company_read=_stored_native_company_evidence(repo, nudge_attempt),
     )
 
 
@@ -982,6 +1059,10 @@ async def dispatch_persisted_nudge(
             return PersistedNudgeResult(
                 state=_state_for_phase(terminal_phase),
                 nudge_attempt=nudge_attempt,
+                native_company_read=(
+                    _stored_native_company_evidence(repo, nudge_attempt)
+                    if terminal_phase is LedgerPhase.DELIVERED else None
+                ),
             )
         if first_route.human_required or not first_route.delivery_allowed:
             return _reconciliation_required(nudge_attempt)
@@ -1034,6 +1115,7 @@ async def dispatch_persisted_nudge(
             transport=transport,
             target_ack_projection=target_ack_projection,
             target_registry=target_registry,
+            native_company_read=_native_company_evidence(raw_completion, wake, pairs),
         )
 
     if first_route.human_required or not first_route.delivery_allowed:
@@ -1070,6 +1152,7 @@ async def dispatch_persisted_nudge(
 
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
     target_ack_projection: TrustedWorkerWakeAckProjection | None = None
+    native_company_read: NativeCompanyReadEvidence | None = None
     try:
         raw_completion = await dispatcher.nudge(wake)
         raw_transport, target_ack_projection = normalize_transport_completion(
@@ -1078,6 +1161,7 @@ async def dispatch_persisted_nudge(
         transport = authenticate_transport_receipt(
             raw_transport, expected_nudge_id=wake.nudge_id
         )
+        native_company_read = _native_company_evidence(raw_completion, wake, pairs)
     except WakePreSubmitError as exc:
         transport = TransportReceipt(
             outcome=exc.outcome,
@@ -1099,7 +1183,148 @@ async def dispatch_persisted_nudge(
         transport=transport,
         target_ack_projection=target_ack_projection,
         target_registry=target_registry,
+        native_company_read=native_company_read,
     )
+
+
+def _reconciliation_snapshot(
+    repo: WakeLedgerRepository,
+    connection,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+    nudge_id: str,
+) -> tuple[NudgeAttempt, bool, tuple[tuple[WakeLedgerRecord, ...], ...]]:
+    """Read the complete original group in one existing repository snapshot."""
+    histories = tuple(
+        repo.list_ledger_records_on_connection(connection, obligation.obligation_id)
+        for obligation, _route in pairs
+    )
+    attempts: list[DeliveryAttempt] = []
+    accepted: list[bool] = []
+    for (obligation, route), records in zip(pairs, histories, strict=True):
+        assert_causal(records)
+        if not records or records[0].obligation != obligation:
+            raise WakeDispatchError("reconciliation requires the frozen requested obligation")
+        candidates = [r for r in records if r.phase is LedgerPhase.DELIVERY_ATTEMPT]
+        if not candidates:
+            raise WakeDispatchError("reconciliation cannot create a delivery attempt")
+        # An explicit old nudge must never silently select a newer attempt.
+        attempt = _attempt_from_record(candidates[-1])
+        if attempt.nudge_id != nudge_id or not attempt.matches_route(route):
+            raise WakeDispatchError("reconciliation moved from the original nudge or route")
+        current = [r for r in records if r.attempt_n == attempt.attempt_n]
+        if any(not r.matches_attempt(attempt) for r in current):
+            raise WakeDispatchError("reconciliation attempt evidence disagrees")
+        if any(r.phase not in {LedgerPhase.DELIVERY_ATTEMPT, LedgerPhase.ACCEPTED}
+               for r in current) or any(
+                   r.phase in {LedgerPhase.TARGET_ACKNOWLEDGED, LedgerPhase.SOURCE_RESOLVED}
+                   for r in records):
+            raise WakeDispatchError("reconciliation cannot replace a closed delivery")
+        attempts.append(attempt)
+        accepted.append(any(r.phase is LedgerPhase.ACCEPTED for r in current))
+    nudge = _nudge_attempt_from(attempts)
+    if nudge.nudge_id != nudge_id or len(set(accepted)) != 1:
+        raise WakeDispatchError("reconciliation requires one complete consistent nudge")
+    return nudge, all(accepted), histories
+
+
+async def reconcile_persisted_nudge(
+    repo: WakeLedgerRepository,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+    *,
+    nudge_id: str,
+    dispatcher: WakeDispatcher,
+    binding: RuntimeBinding,
+    descriptor: WakeTransportDescriptor | None = None,
+) -> PersistedNudgeResult:
+    """Explicitly record proven acceptance of one existing unfinished nudge.
+
+    The caller is the existing trusted Wake owner, not a public/model endpoint.
+    Its reviewed dispatcher.reconcile seam must inspect the exact original
+    native session and enforce current host/binding/permission checks. No nudge,
+    new attempt, retry, provider selection, DELIVERED or target ACK is possible.
+    Ordinary dispatch remains unchanged and never automatically enters this path.
+
+    Both ledger observations use the existing repository transaction boundary;
+    no transaction spans the external read. A concurrent terminal/attempt change
+    prevents recording late acceptance. Replays read existing ACCEPTED without
+    another provider call. Unavailable reads and uncertain persistence leave the
+    original attempt unresolved; cancellation propagates.
+    """
+    if (not isinstance(repo, WakeLedgerRepository)
+            or not isinstance(binding, RuntimeBinding)
+            or type(nudge_id) is not str or _NUDGE_ID_RE.fullmatch(nudge_id) is None):
+        raise WakeDispatchError("exact persisted reconciliation inputs are required")
+    # Copy the finite supplied group before yielding; no caller-owned list/maps
+    # can substitute another obligation while provider observation is in flight.
+    try:
+        selected = copy.deepcopy(tuple(pairs))
+        if not selected or any(
+                not isinstance(obligation, WakeObligation) or not isinstance(route, WakeRoute)
+                or obligation.obligation_id != route.obligation_id
+                for obligation, route in selected):
+            raise ValueError
+        if len({obligation.obligation_id for obligation, _ in selected}) != len(selected):
+            raise ValueError
+        resolved_descriptor = descriptor or _descriptor(selected[0][1].wake_transport)
+        for _obligation, route in selected:
+            if (route.human_required or not route.delivery_allowed
+                    or getattr(dispatcher, "transport_id", None) != route.wake_transport):
+                raise ValueError
+            _assert_binding_ready(binding, route, resolved_descriptor)
+        with repo.store.transaction() as connection:
+            original, accepted, before = _reconciliation_snapshot(
+                repo, connection, selected, nudge_id)
+    except Exception:
+        raise WakeDispatchError("original persisted reconciliation group is unavailable") from None
+
+    if accepted:
+        return PersistedNudgeResult(PersistedNudgeState.ACCEPTED, original)
+    unresolved = _reconciliation_required(original)
+    reconcile = getattr(dispatcher, "reconcile", None)
+    if not callable(reconcile):
+        return unresolved
+    wake = _nudge_from(original.attempts, binding=binding, first_route=selected[0][1])
+    try:
+        raw = await reconcile(wake)
+        raw_receipt, acknowledgement = normalize_transport_completion(raw)
+        # Legacy receipt authentication tolerates missing correlation. An
+        # uncertain-operation closure must require one exact correlation value.
+        keys = [key for key, _value in raw_receipt.details]
+        # Refuse noncanonical spellings before legacy normalization can merge
+        # distinct raw keys into duplicate operation correlations.
+        if (any(type(key) is not str or key not in ALLOWED_DETAIL_KEYS for key in keys)
+                or len(keys) != len(set(keys))
+                or dict(raw_receipt.details).get("nudge_id") != nudge_id):
+            return unresolved
+        receipt = authenticate_transport_receipt(raw_receipt, expected_nudge_id=nudge_id)
+        if acknowledgement is not None or receipt.outcome is not TransportOutcome.ACCEPTED:
+            return unresolved
+        receipts = tuple(
+            authenticate_receipt(
+                make_receipt(outcome=WakeOutcome.ACCEPTED, obligation=obligation,
+                    route=route, reason_code=receipt.reason_code,
+                    created_at=receipt.created_at, details=dict(receipt.details), attempt=attempt),
+                obligation=obligation, route=route, descriptor=resolved_descriptor, attempt=attempt)
+            for attempt, (obligation, route) in zip(original.attempts, selected, strict=True)
+        )
+        with repo.store.transaction() as connection:
+            current, already_accepted, after = _reconciliation_snapshot(
+                repo, connection, selected, nudge_id)
+            if current != original:
+                return unresolved
+            if already_accepted:
+                return PersistedNudgeResult(PersistedNudgeState.ACCEPTED, original)
+            if before != after:
+                return unresolved
+            persisted = repo.append_records_on_connection(connection, tuple(
+                (attempt_record(attempt, LedgerPhase.ACCEPTED), obligation)
+                for attempt, (obligation, _route) in zip(original.attempts, selected, strict=True)
+            ))
+            if not all(item.inserted for item in persisted):
+                raise WakeDispatchError("reconciliation insertion raced with another owner")
+        return PersistedNudgeResult(PersistedNudgeState.ACCEPTED, original, receipt, receipts)
+    except Exception:
+        return unresolved
 
 
 async def reconcile_persisted_delivered_ack(
@@ -1469,6 +1694,7 @@ __all__ = [
     "delivery_record",
     "dispatch_nudge",
     "dispatch_persisted_nudge",
+    "reconcile_persisted_nudge",
     "dispatch_wake",
     "dispatcher_for",
     "ledger_command_id",

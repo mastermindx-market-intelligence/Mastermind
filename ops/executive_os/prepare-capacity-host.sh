@@ -20,8 +20,8 @@ PYYAML_WHEEL="pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl"
 PYYAML_WHEEL_SHA256="fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0"
 PYYAML_RECORD_SHA256="715146d21711444bc73c3137d18cffb6e38ace40e8998c5a9dfa69bd7dc46e3e"
 RUNTIME_TREE_SHA256="79e1e4dc67c0fbefc266fcf2c27b98a7e0aeff5048e015fae11b20115ee864ee"
-CODEX_VERSION="0.147.0"
-CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_VERSION="0.159.2"
+CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 SOURCE_PARENT="$SYSTEM_ROOT/capacity-sources/macro"
@@ -714,6 +714,9 @@ if [ "$CREATE_TELEMETRY_ROOT" = "true" ]; then
 fi
 verify_telemetry_boundary || refuse "canonical empty Provider Control telemetry root did not verify"
 
+# Freeze the intermediate source boundary explicitly instead of relying on
+# install(1) parent creation under this script's umask 077.
+/usr/bin/install -d -o root -g wheel -m 0700 "$SYSTEM_ROOT/capacity-sources"
 /usr/bin/install -d -o root -g wheel -m 0755 "$SOURCE_PARENT" "$RUNTIME_PARENT" "$RELEASE_PARENT" "$GENERATION_ROOT"
 if [ -e "$SOURCE_ROOT" ]; then verify_materialized_source "$SOURCE_ROOT" || refuse "existing versioned Macro source conflicts"; else /bin/mv "$SOURCE_STAGE" "$SOURCE_ROOT"; NEW_VERSIONED_PATHS+=("$SOURCE_ROOT"); fi
 if [ -e "$RUNTIME_ROOT" ]; then verify_runtime_tree "$RUNTIME_ROOT" >/dev/null || refuse "existing versioned capacity runtime conflicts"; else /bin/mv "$RUNTIME_STAGE" "$RUNTIME_ROOT"; NEW_VERSIONED_PATHS+=("$RUNTIME_ROOT"); fi

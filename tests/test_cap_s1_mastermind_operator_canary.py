@@ -1339,7 +1339,7 @@ class _ScriptedCanaryClient:
     def __getattr__(self, name):
         return getattr(self._inner, name)
 
-    def request(self, method, params=None, *, timeout: float = 15.0):
+    def request(self, method, params=None, *, timeout: float = 15.0, before_send=None):
         self.calls.append((method, dict(params or {})))
         if method == "skills/extraRoots/set" and self._force_post_clear_nonempty:
             if isinstance(params, dict) and params.get("extraRoots") == []:
@@ -1362,7 +1362,8 @@ class _ScriptedCanaryClient:
             self._turn_start_calls += 1
             if self._fail_turn_start_at == self._turn_start_calls:
                 raise ConnectionError("synthetic transport failure")
-        result = self._inner.request(method, params, timeout=timeout)
+        kwargs = {} if before_send is None else {"before_send": before_send}
+        result = self._inner.request(method, params, timeout=timeout, **kwargs)
         if (
             method == "turn/start"
             and self._inject_skills_changed_after_turn_starts == self._turn_start_calls
@@ -1375,25 +1376,54 @@ class _ScriptedCanaryClient:
             native_turn_id = str(turn_obj.get("id") or "")
             if native_turn_id:
                 self._native_turn_replies[native_turn_id] = self._replies.pop(0)
-        elif method == "thread/turns/list" and isinstance(result.get("data"), list):
-            patched = []
-            for row in result["data"]:
-                native_id = str(row.get("id") or "")
-                if native_id in self._native_turn_replies:
-                    reply = self._native_turn_replies[native_id]
-                    row = dict(row)
-                    row["text"] = reply
-                    row["items"] = [
-                        {
-                            "type": "agentMessage",
-                            "text": reply,
-                            "content": [{"type": "text", "text": reply}],
-                        }
-                    ]
-                patched.append(row)
-            result = dict(result)
-            result["data"] = patched
+        elif method == "thread/turns/list":
+            result = self._script_turn_replies(result)
         return result
+
+
+    def _script_turn_replies(self, result):
+        """Patch one page identically on the ordinary and private test seam."""
+        if not isinstance(result.get("data"), list):
+            return result
+        patched = []
+        for row in result["data"]:
+            native_id = str(row.get("id") or "")
+            if native_id in self._native_turn_replies:
+                reply = self._native_turn_replies[native_id]
+                row = dict(row)
+                row["text"] = reply
+                row["items"] = [
+                    {
+                        "type": "agentMessage",
+                        "text": reply,
+                        "content": [{"type": "text", "text": reply}],
+                    }
+                ]
+            patched.append(row)
+        result = dict(result)
+        result["data"] = patched
+        return result
+
+
+    def request_raw_turn_page(
+        self, *, thread_id, native_turn_id, cursor=None, timeout: float = 15.0
+    ):
+        from scripts.ohf.laboratory import PrivateRawTurnPage
+
+        self.calls.append(("thread/turns/list", {"threadId": thread_id, "cursor": cursor}))
+        page = self._inner.request_raw_turn_page(
+            thread_id=thread_id, native_turn_id=native_turn_id,
+            cursor=cursor, timeout=timeout,
+        )
+        original = page.consume()
+        scripted = self._script_turn_replies(original)
+        # Keep the private frame's original envelope cost while accounting
+        # for the changed fixture text. Production byte bounds stay intact.
+        def size(value):
+            return len(json.dumps(value, ensure_ascii=False, separators=(",", ":")).encode("utf-8"))
+        frame_bytes = page.frame_byte_length + size(scripted) - size(original)
+        return PrivateRawTurnPage(scripted, frame_bytes)
+
 
 
 def _canary_client_factory(
@@ -2050,6 +2080,55 @@ def test_build_synthetic_workspace_unexpected_error_rolls_back_workspace(
 # ---------------------------------------------------------------------------
 # run_canary: full fake journey happy path
 # ---------------------------------------------------------------------------
+
+
+def test_rich_write_skill_profile_runs_full_fake_app_server_journey(tmp_path) -> None:
+    """Source-qualified V4 write+Skills must survive real adapter launch and turn.
+
+    The disposable fake App Server executes all four typed Skill turns and the
+    real projection lifecycle.  This is NOT live provider or runtime admission.
+    """
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+
+    scratch = tmp_path / "rich-write-cap-s1"
+    scratch.mkdir()
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None, codex_home=None, repo_root=REPO_ROOT,
+        scratch_root=scratch, operation_id="cap-s1-rich-write-fake",
+        protected_join="c" * 40,
+        client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        rich_write_candidate=True,
+    )
+    profile = ExecutionCapabilityRegistry.load(
+        REPO_ROOT / "scripts/ohf/fixtures/"
+        "executive_agent_capabilities_v4_rich_write_operator.json",
+        source_root=REPO_ROOT,
+    ).resolve("operator.appserver.write.mastermind-operator.v1")
+    assert profile.write_capable is True
+    assert evidence.launch_decision == "ALLOW"
+    assert evidence.app_server_config_digest == profile.expected_config_digest
+    assert all(ok for _skill, ok in evidence.turn_marker_results)
+    assert len(evidence.skill_closure_digests) == 4
+    assert evidence.after_clear_enabled_names == ()
+    cleanup = _cleanup_map(evidence.cleanup)
+    assert all(cleanup[name] == (True, True) for name in
+               ("schema", "workspace", "origin", "projection", "attempt", "thread"))
+
+
+def test_rich_write_fake_canary_refuses_live_provider_before_effect(tmp_path) -> None:
+    scratch = tmp_path / "rich-write-live-refusal"
+    with pytest.raises(CanaryStop) as exc:
+        run_canary(
+            backend="live", binary_path=None, codex_home=None,
+            repo_root=REPO_ROOT, scratch_root=scratch,
+            operation_id="cap-s1-rich-write-no-live", protected_join="c" * 40,
+            client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+            rich_write_candidate=True,
+        )
+    assert exc.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not scratch.exists()
 
 
 def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
@@ -5790,7 +5869,7 @@ def test_cap_s1_source_archive_omits_tracked_symlink_from_regular_blob_copy(
 def _cap_s1_copy_bootstrap_source(destination: Path) -> tuple[_CapS1SourceCopyEntry, ...]:
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
 
-    for top_level in ("scripts", "control_plane"):
+    for top_level in ("scripts", "control_plane", "common"):
         shutil.copytree(
             REPO_ROOT / top_level,
             destination / top_level,
@@ -5897,6 +5976,41 @@ def test_cap_s1_actual_pytest_bootstrap_refuses_digest_drift_with_non_test_exit(
         timeout=120,
     )
     assert restored.returncode == 0, restored.stderr
+
+
+@pytest.mark.parametrize("relative", [
+    "common/agent_dialogue_contract.py",
+    "control_plane/executive_process_identity.py",
+    "scripts/ohf/redaction.py",
+])
+def test_cap_s1_pytest_bootstrap_refuses_mutated_transitive_import(
+    tmp_path, relative
+) -> None:
+    """A dependency loaded during canary import cannot escape source sealing."""
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    manifest = _cap_s1_copy_bootstrap_source(source)
+    interpreter = _capture_cap_s1_interpreter_identity()
+    binding = canary_module._build_cap_s1_pytest_binding(
+        source_root=source, source_manifest=manifest, interpreter=interpreter,
+    )
+    assert any(row[1] == relative for row in binding.source_rows)
+    changed = source / relative
+    changed.write_bytes(changed.read_bytes() + b"\n# unreviewed dependency drift\n")
+    probe = tmp_path / "test_bootstrap_probe.py"
+    probe.write_text("def test_bootstrap_probe():\n    assert True\n", encoding="utf-8")
+    junit = tmp_path / "bootstrap.xml"
+    completed = _run_cap_s1_python_observer_process(
+        interpreter,
+        canary_module._cap_s1_pytest_argv(
+            binding, ("-q", "--junitxml", str(junit), str(probe)),
+        ),
+        cwd=source, timeout=120,
+    )
+    assert completed.returncode == canary_module._CAP_S1_PYTEST_PROVENANCE_EXIT
+    assert not junit.exists()
 
 
 def _build_cap_s1_historical_git_repository(
@@ -6924,7 +7038,15 @@ def _cap_s1_copy_selected_fake_child_fixture(
         mode = stat.S_IMODE(before.st_mode)
         assert stat.S_ISREG(before.st_mode)
         assert not origin.is_symlink()
-        assert mode in {0o644, 0o755}
+        # The installed managed-workspace launcher can check out source under
+        # an intentionally restrictive umask (0600/0700). Determine the
+        # canonical execute bit from Git's read-only index, not local umask;
+        # no wider/foreign mode is accepted or copied into the fixture.
+        indexed = _cap_s1_test_git(REPO_ROOT, "ls-files", "--stage", "--", relative)
+        tracked_mode = indexed.split()[0] if indexed else ""
+        assert tracked_mode in {"100644", "100755"}
+        canonical_mode = 0o755 if tracked_mode == "100755" else 0o644
+        assert mode in {canonical_mode, canonical_mode & ~0o077}
         assert 0 < before.st_size <= 1024 * 1024
         payload = origin.read_bytes()
         after = origin.lstat()
@@ -6947,14 +7069,14 @@ def _cap_s1_copy_selected_fake_child_fixture(
         destination = source_root / relative
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         destination.write_bytes(payload)
-        destination.chmod(mode)
+        destination.chmod(canonical_mode)
         git_blob = hashlib.sha1()
         git_blob.update(f"blob {len(payload)}\0".encode("ascii"))
         git_blob.update(payload)
         rows.append(
             _CapS1SourceCopyEntry(
                 path=relative,
-                mode="100755" if mode == 0o755 else "100644",
+                mode=tracked_mode,
                 blob=git_blob.hexdigest(),
                 size=len(payload),
                 sha256=hashlib.sha256(payload).hexdigest(),
@@ -8056,3 +8178,31 @@ def test_completed_cap_s1_result_projects_attempt_local_paths_to_safe_identities
             "provider_attempt_id": raw["provider_attempt"]["attempt_id"],
         }
     )
+
+
+@pytest.mark.parametrize("cursor", [None, "next-page"])
+def test_scripted_reply_is_identical_on_public_and_private_page_readers(cursor):
+    """A test injection must reach the same native result on both read paths."""
+    from scripts.ohf.laboratory import PrivateRawTurnPage
+    import copy
+
+    document = {"data": [{"id": "native-turn", "text": "old",
+                         "items": [{"type": "agentMessage", "text": "old"}]}],
+                "nextCursor": "following-page"}
+    calls = []
+    class Inner:
+        def request(self, method, params=None, *, timeout=15.0):
+            calls.append(("ordinary", method, params, timeout))
+            return copy.deepcopy(document)
+        def request_raw_turn_page(self, *, thread_id, native_turn_id, cursor=None, timeout=15.0):
+            calls.append(("private", thread_id, native_turn_id, cursor, timeout))
+            return PrivateRawTurnPage(copy.deepcopy(document), len(json.dumps(document).encode()))
+    client = _ScriptedCanaryClient(Inner())
+    client._native_turn_replies["native-turn"] = "PROGRESS COMPLETE scripted failure"
+    ordinary = client.request("thread/turns/list", {"threadId": "thread"}, timeout=3.0)
+    page = client.request_raw_turn_page(thread_id="thread", native_turn_id="native-turn",
+                                        cursor=cursor, timeout=2.0)
+    assert page.consume() == ordinary
+    assert page.frame_byte_length > 0
+    assert calls[-1] == ("private", "thread", "native-turn", cursor, 2.0)
+    assert document["data"][0]["text"] == "old"

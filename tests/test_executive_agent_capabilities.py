@@ -11,9 +11,12 @@ from control_plane.executive_agent_capabilities import (
     CAPABILITY_POLICY_SCHEMA_V4,
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
+    adapter_supports_execution_surface,
     app_server_security_config_digest,
     app_server_security_config_projection,
     observed_mcp_tool_schema_digest,
+    claude_security_config_digest,
+    claude_security_config_projection,
 )
 from control_plane.operator_harness_contract import NativeHelperPolicy
 from integrations.mastermind_company_mcp.schemas import (
@@ -33,6 +36,75 @@ def _write(tmp_path: Path, value: dict) -> Path:
     path = tmp_path / "capabilities.json"
     path.write_text(json.dumps(value), encoding="utf-8")
     return path
+
+
+def _claude_candidate_policy():
+    raw = _raw_policy()
+    raw["profiles"]["operator.claude.readonly.v1"] = {
+        **raw["profiles"]["operator.appserver.readonly.v1"],
+        "enabled": False, "execution_surface": "claude-agent-sdk"}
+    return raw
+
+
+def test_claude_policy_is_a_distinct_disabled_projection_not_an_attestation(tmp_path):
+    registry = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy()))
+    profile = registry.profiles["operator.claude.readonly.v1"]
+    assert profile.enabled is False
+    assert profile.execution_surface == "claude-agent-sdk"
+    requested = profile.claude_sdk_config_projection()
+    assert requested["tools"] == ["Read", "Glob", "Grep"]
+    manifest = profile.capability_manifest(harness_binary_digest="a" * 64)
+    assert {(item.kind, item.name) for item in manifest.required} == {
+        ("tool", name) for name in ("Read", "Glob", "Grep", "StructuredOutput")}
+    assert all(item.harness_binary_digest == "a" * 64 for item in manifest.required)
+    assert manifest.allowed_ambient == ()
+    assert requested["sandbox"]["failIfUnavailable"] is True
+    assert requested["sandbox"]["allowUnsandboxedCommands"] is False
+    assert requested["sandbox"]["excludedCommands"] == []
+    assert requested["mcp_servers"] == {}
+    assert "observed" not in json.dumps(requested)
+    assert profile.expected_config_digest != registry.profiles["operator.appserver.readonly.v1"].expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="Claude policy cannot use"):
+        profile.app_server_config_projection()
+    with pytest.raises(CapabilityPolicyError, match="not an App Server profile"):
+        profile.app_server_config_overrides()
+
+
+def test_claude_cannot_be_enabled_by_a_config_flag_before_policy_observation(tmp_path):
+    raw = _claude_candidate_policy()
+    raw["profiles"]["operator.claude.readonly.v1"]["enabled"] = True
+    with pytest.raises(CapabilityPolicyError, match="policy observation is not admitted"):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
+
+
+def test_claude_cannot_inherit_codex_capability_or_write_authority(tmp_path):
+    import dataclasses
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    for overrides in ({"write_capable": True}, {"skills": ("arbitrary",)},
+                      {"network_policy": "loopback-browser-only"}):
+        changed = dataclasses.replace(profile, **overrides)
+        with pytest.raises(CapabilityPolicyError, match="exceeds its unadmitted first profile"):
+            changed.claude_sdk_config_projection()
+
+
+def test_claude_digest_uses_actual_security_state_and_detects_drift(tmp_path):
+    profile = ExecutionCapabilityRegistry.load(_write(tmp_path, _claude_candidate_policy())).profiles["operator.claude.readonly.v1"]
+    sandbox = profile.claude_sdk_config_projection()["sandbox"]
+    provenance = {"setting_sources": [], "strict_mcp_config": True, "skills": []}
+    observed = {"sandbox": sandbox, "model": "irrelevant-model-field"}
+    assert claude_security_config_digest(observed, launch_provenance=provenance) == profile.expected_config_digest
+    assert claude_security_config_digest(observed, launch_provenance={**provenance, "skills": ["unexpected"]}) != profile.expected_config_digest
+    with pytest.raises(CapabilityPolicyError, match="launch provenance"):
+        claude_security_config_digest(observed, launch_provenance={})
+    assert claude_security_config_digest({"sandbox": {**sandbox, "allowUnsandboxedCommands": True}}, launch_provenance=provenance) != profile.expected_config_digest
+    assert claude_security_config_digest({"sandbox": sandbox, "permissions": {"allow": ["Bash"]}}, launch_provenance=provenance) != profile.expected_config_digest
+    for bad in ({}, {"sandbox": None}, {"sandbox": sandbox, "permissions": None},
+                {"sandbox": {**sandbox, "enabled": 1}}, {"sandbox": {**sandbox, "unexpected": float("nan")}}):
+        with pytest.raises(CapabilityPolicyError):
+            claude_security_config_digest(bad, launch_provenance=provenance)
+    snapshot = claude_security_config_projection(observed, launch_provenance=provenance)
+    sandbox["enabled"] = False
+    assert snapshot["sandbox"]["enabled"] is True
 
 
 def _company_dialogue_fixture_policy() -> dict:
@@ -64,7 +136,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-08-29.browser-b1"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -72,6 +144,23 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert sealed.write_capable is True
     assert sealed.native_helper_policy is NativeHelperPolicy.DISABLED
     assert sealed.required_capability_names == ()
+
+    claude_read = registry.resolve("sealed.worker.claude.readonly.no-extensions.v1")
+    assert claude_read.execution_surface == "claude-code"
+    assert claude_read.write_capable is False
+    assert claude_read.required_capability_names == ()
+
+    claude_write = registry.resolve("sealed.worker.claude.write.no-extensions.v1")
+    assert claude_write.execution_surface == "claude-code"
+    assert claude_write.write_capable is True
+    assert claude_write.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert claude_write.required_capability_names == ()
+
+    assert adapter_supports_execution_surface("codex-cli", "codex-exec")
+    assert adapter_supports_execution_surface("codex-cli", "codex-app-server")
+    assert not adapter_supports_execution_surface("codex-cli", "claude-code")
+    assert adapter_supports_execution_surface("claude-code", "claude-code")
+    assert not adapter_supports_execution_surface("claude-code", "codex-exec")
 
     operator = registry.resolve("operator.appserver.readonly.v1")
     assert operator.execution_surface == "codex-app-server"
@@ -96,6 +185,18 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     assert helper.native_helper.hide_spawn_agent_metadata is True
     assert helper.mcp_servers == ("openai-developer-docs-v1",)
 
+
+
+def test_native_claude_sealed_surface_refuses_extension_capabilities(tmp_path):
+    raw = _raw_policy()
+    profile = raw["profiles"]["sealed.worker.claude.readonly.no-extensions.v1"]
+    profile["mcp_servers"] = ["openai-developer-docs-v1"]
+
+    with pytest.raises(
+        CapabilityPolicyError,
+        match="sealed worker execution surface",
+    ):
+        ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 def test_profile_compiles_exact_mcp_manifest_and_secret_free_config():
     profile = ExecutionCapabilityRegistry.load().resolve(
@@ -198,11 +299,16 @@ def test_company_dialogue_fixture_compiles_through_existing_capability_authority
     assert widened.expected_config_digest != expected_digest
 
 
-def test_production_policy_has_no_company_dialogue_placeholder_endpoint_or_profile():
+def test_production_policy_has_no_legacy_company_dialogue_placeholder():
     raw = _raw_policy()
     rendered = json.dumps(raw, sort_keys=True)
-    assert "mastermind-company-dialogue" not in rendered
-    assert "mastermindCompanyDialogue" not in rendered
+    # The old test-only HTTPS placeholder remains forbidden. H1-RG1 now has a
+    # distinct reviewed principal Company Dialogue grant, covered separately.
+    assert "mastermind-company-dialogue-v1" not in raw["mcp_servers"]
+    assert (
+        "operator.appserver.readonly.company-dialogue.fixture.v1"
+        not in raw["profiles"]
+    )
     assert "company-dialogue.test.invalid" not in rendered
 
 
@@ -472,7 +578,7 @@ def test_browser_profile_uses_existing_capability_registry_for_stdio_mcp_and_one
         "worker-browser-b1-install-manifest.json"
     )
     assert resource.runtime_manifest_digest == (
-        "ca55da0fbdd1366bfc6fd78612ebe9cc669e45ef5c21b084ad338b50e2d0e49d"
+        "c4b15f3ba4d5c20e869b63af86109ed57d2da929d525d1d8a0a2c65625209e9f"
     )
 
     assert profile.mcp_server_grants[0] == registry.mcp_servers[
@@ -581,30 +687,59 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 
-def test_v3_compatibility_digests_and_schema_constants_remain_exact():
-    """CAP-S1 package-identity amendment: opt-in V4 must never move V3 identity.
-
-    These are the exact protected-master values verified live before the V4
-    dispatch/duplicate-key production edit landed.
-    """
-
+def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
+    """Preserve protected native-return and explicit RG1 predecessor identities."""
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
-    registry = ExecutionCapabilityRegistry.load()
-    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
-    assert registry.capability_packages == {}
-    assert registry.policy_digest == (
-        "0d025d2728c7dbf73977ac5997e1bd6832be5660ab996ad7e837e50887f7c856"
+    default = ExecutionCapabilityRegistry.load()
+    assert default.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert default.capability_packages == {}
+    root = Path(__file__).resolve().parents[1]
+    candidate_raw = json.loads(
+        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
     )
-    assert registry.resolve(
+    candidate = ExecutionCapabilityRegistry.load(
+        root / "config" / "candidates" / "claude_principal_rg1.json",
+        source_root=root,
+    )
+    del candidate_raw["profiles"]["principal.claude.coo.rich.v1"]
+    del candidate_raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del candidate_raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    candidate_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, candidate_raw))
+    assert candidate.policy_digest != previous.policy_digest
+    assert previous.policy_digest == (
+        "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
+    )
+
+    # The accepted native-return generation remains in the default policy;
+    # removing only its own additions recovers the same frozen predecessor.
+    protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
+    del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
+    del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
+    del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
+    assert default.policy_digest != protected_previous.policy_digest
+    assert protected_previous.policy_digest == previous.policy_digest
+
+    older_raw = json.loads(json.dumps(candidate_raw))
+    del older_raw["profiles"]["operator.browser.isolated.v1"]
+    del older_raw["resources"]["worker-browser-isolated"]
+    older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
+    assert older.policy_digest == (
+        "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
+    )
+    assert older.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     ).profile_digest == (
         "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
     )
-
-    for profile in registry.profiles.values():
+    for profile in older.profiles.values():
         assert profile.skill_grants == ()
         assert profile.app_server_config_projection()["skills"] == {"config": None}
 

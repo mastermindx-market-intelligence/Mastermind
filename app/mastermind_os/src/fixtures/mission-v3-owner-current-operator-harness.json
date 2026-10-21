@@ -1,0 +1,332 @@
+{
+  "acceptance": {
+    "artifact_revision": null,
+    "evidence": [],
+    "owner": null,
+    "reason_codes": [
+      "ACCEPTANCE_OWNER_NOT_PROJECTED"
+    ],
+    "ruling": null,
+    "state": "NOT_PROJECTED"
+  },
+  "budget": {},
+  "children": {
+    "coverage": "INCOMPLETE",
+    "items": [],
+    "overflow_count": null,
+    "reason_codes": [
+      "UNJOINED_JOBS_PRESENT"
+    ],
+    "state": "PARTIAL",
+    "total_count": null,
+    "unjoined_job_count": 8,
+    "unjoined_job_ids": [
+      "JOB-001",
+      "JOB-002",
+      "JOB-003",
+      "JOB-004",
+      "JOB-005",
+      "JOB-006",
+      "JOB-007",
+      "JOB-008"
+    ]
+  },
+  "conversation": {
+    "coverage": "NOT_PROJECTED",
+    "items": [],
+    "overflow_count": null,
+    "reason_codes": [
+      "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+    ],
+    "state": "UNAVAILABLE",
+    "total_count": null
+  },
+  "degraded": [
+    "provenance not projected: JOB-001: workstream unavailable",
+    "provenance not projected: JOB-002: durable CEO-intent provenance invalid or unsupported",
+    "provenance not projected: JOB-003: durable CEO-intent provenance invalid or unsupported",
+    "provenance not projected: JOB-004: durable CEO-intent provenance invalid or unsupported",
+    "provenance not projected: JOB-005: durable CEO-intent provenance invalid or unsupported",
+    "provenance not projected: JOB-006: durable CEO-intent provenance invalid or unsupported",
+    "provenance not projected: JOB-007: durable CEO-intent provenance invalid or unsupported",
+    "provenance not projected: JOB-008: durable CEO-intent provenance invalid or unsupported",
+    "unjoined jobs: 8 job(s) under root 'JOB-001' carry no CEO-intent workstream provenance"
+  ],
+  "execution": {
+    "artifacts": [],
+    "errors_present": false,
+    "evidence": [],
+    "next_actions": [],
+    "state": "NOT_STARTED",
+    "summary_present": false
+  },
+  "feature_gates": {
+    "actions": "READ_ONLY",
+    "advanced": "AVAILABLE",
+    "conversation": "UNAVAILABLE"
+  },
+  "generated_at": "2026-09-20T00:00:00Z",
+  "missingness": [
+    {
+      "missingness_class": "EXCLUDED",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "conversation"
+    },
+    {
+      "missingness_class": "EXCLUDED",
+      "producer_owner": "wake",
+      "reason": "source detail withheld",
+      "target_field": "return_path"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "acceptance"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": null,
+      "reason": "source detail withheld",
+      "target_field": "acceptance.state"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "children.worker_id"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "mission.title"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "executive_runtime",
+      "reason": "source detail withheld",
+      "target_field": "runtime.acquisition.provenance"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "slack",
+      "reason": "source detail withheld",
+      "target_field": "transport.continued"
+    },
+    {
+      "missingness_class": "MISSING_PRODUCER",
+      "producer_owner": "slack",
+      "reason": "source detail withheld",
+      "target_field": "transport.stopped"
+    },
+    {
+      "missingness_class": "NULL_BY_DESIGN",
+      "producer_owner": "executive_os",
+      "reason": "source detail withheld",
+      "target_field": "runtime.identity"
+    }
+  ],
+  "mission": {
+    "armed": {
+      "ceo_ingress_app_armed": null,
+      "ceo_submit_armed": null,
+      "coo_autonomy_armed": null,
+      "dialogue_bridge_armed": null,
+      "source": "absent",
+      "terminal_return_armed": null
+    },
+    "capability": {
+      "detail": "bounded snapshot has omitted rows or unavailable provenance",
+      "installed": true,
+      "state": "PARTIAL",
+      "version": null
+    },
+    "depth": 0,
+    "evidence": [],
+    "orchestration_role": "aggregation",
+    "plan_step_id": null,
+    "root_job_ambiguous": false,
+    "root_job_candidates": [
+      "JOB-001"
+    ],
+    "root_job_id": "JOB-001",
+    "runtime_root_state": "RESOLVED",
+    "status": "QUEUED",
+    "submission_availability": "UNKNOWN",
+    "title": null
+  },
+  "posture": {
+    "evidence": [],
+    "rule": "F0",
+    "value": "RETURN_EXECUTION_MISMATCH"
+  },
+  "principal": {
+    "accountable_seat": "ceo",
+    "current_sol_target": null,
+    "current_worker": null,
+    "evidence": [],
+    "owed_turn": {
+      "reason": "attention_targets_seat",
+      "seat": "ceo",
+      "source_refs": []
+    }
+  },
+  "program": {
+    "attention_ids": [],
+    "disagreements": [],
+    "evidence": [],
+    "github_prs": [],
+    "next_action": "Read",
+    "state": "active",
+    "title": "One",
+    "work_ref": "WS:ONE"
+  },
+  "read_state": {
+    "reason_codes": [],
+    "state": "CURRENT",
+    "usable_sections": [
+      "program",
+      "mission",
+      "review",
+      "execution",
+      "principal",
+      "transport",
+      "children"
+    ]
+  },
+  "result_refs": {
+    "absent_job_ids": [
+      "JOB-001"
+    ],
+    "availability": "AVAILABLE",
+    "generation": {
+      "after": 2,
+      "before": 2,
+      "schema": "mastermind.runtime_read_observation.v1",
+      "source_identity": "8f2ba172e5e975d5ab0f0965a4df9b53",
+      "state": "SAME"
+    },
+    "omitted_job_ids": [],
+    "refs": [
+      {
+        "attempt_id": "ATT-f762f805f4ab4567ab244aba0d106721",
+        "job_id": "JOB-002",
+        "orchestration_role": "plan",
+        "result_envelope_digest": "52780b9d310fcfe2a95fc3f7f4a21426604eb2ce7fdbef6bc69414bdec85832a",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      },
+      {
+        "attempt_id": "ATT-0f7521645e5b462da6c3890da7575125",
+        "job_id": "JOB-003",
+        "orchestration_role": "work",
+        "result_envelope_digest": "e3f365cc856fd9b205c16485cd148dd795baf794147f370530c384f3a66d3bbb",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      },
+      {
+        "attempt_id": "ATT-c0ed7b3dea244d18a28e6677f04aefa0",
+        "job_id": "JOB-004",
+        "orchestration_role": "review",
+        "result_envelope_digest": "867e1551abfcf92b1718b1fdd06ac37eed9f5d2783a8dc2332ec7d4936f9e1d1",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      },
+      {
+        "attempt_id": "ATT-5d77c6ff01984f0bb0a1e83a40301cd1",
+        "job_id": "JOB-005",
+        "orchestration_role": "repair",
+        "result_envelope_digest": "6797ee07859494b54caad2832a8fefa600eb8b4e73dd568e0c4bc0d88cee9fde",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      },
+      {
+        "attempt_id": "ATT-a1e449e6e02e4eeb8271fcb11fdd836a",
+        "job_id": "JOB-006",
+        "orchestration_role": "review",
+        "result_envelope_digest": "affb31703d0349accb4f7c7ecc932b7feb7ccdc13d375f24ffc37ce823d69de0",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      },
+      {
+        "attempt_id": "ATT-f2dc8c0c163e47d1831128ee6f06a268",
+        "job_id": "JOB-007",
+        "orchestration_role": "repair",
+        "result_envelope_digest": "d7a82ffb86b6f8a3a2c3e194c60db869c15a3ed818e611368ccde6050725f48a",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      },
+      {
+        "attempt_id": "ATT-ad068ac8f9744f6c9e9d38ee93006ce3",
+        "job_id": "JOB-008",
+        "orchestration_role": "review",
+        "result_envelope_digest": "4db9efd82ed357ac8d3219a11df35642d0b0c58dcc597617c5e067a38bb2af1d",
+        "root_job_id": "JOB-001",
+        "validation": "UNVALIDATED"
+      }
+    ],
+    "root_job_id": "JOB-001",
+    "schema": "mastermind.fabric_result_reference_index.v1",
+    "snapshot_digest": "b025afa54ba7cb8ce68b287edbcd48023982a147252531b2c476b3de1937efeb",
+    "truncated": false
+  },
+  "review": {
+    "evidence": [],
+    "required": false,
+    "reviews_job_id": null,
+    "verdict": "NOT_YET"
+  },
+  "schema": "mastermind.mission_workspace.v3",
+  "source": {
+    "control_room_generated_at": "2026-09-20T00:00:00Z",
+    "control_room_schema": "mastermind.chairman_control_room.v1",
+    "fabric_view_generated_at": "2026-09-21T18:44:44Z",
+    "fabric_view_schema": "mastermind.fabric_job_view.v2",
+    "owner_observation": {
+      "control_room": {
+        "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+        "document_digest": "1b24b3b5a1936d74a46a1f9de0bcdbe10089082f3fd7f4aa0d7a3a3ca62bc47a",
+        "instance_after": "control_fixture_123456",
+        "instance_before": "control_fixture_123456",
+        "publication_after": 1,
+        "publication_before": 1,
+        "source_validity_digest": "2b96cbdcbeb4961c293d7ad21a8063e44b5d40ab87135017cf957b5ad6d98a94"
+      },
+      "runtime": {
+        "after": 2,
+        "before": 2,
+        "schema": "mastermind.runtime_read_observation.v1",
+        "snapshot_digest": "b025afa54ba7cb8ce68b287edbcd48023982a147252531b2c476b3de1937efeb",
+        "source_identity": "8f2ba172e5e975d5ab0f0965a4df9b53",
+        "state": "SAME"
+      },
+      "schema": "mastermind.workspace_source_observation.v1",
+      "selection": {
+        "root_job_id": "JOB-001",
+        "work_ref": "WS:ONE"
+      },
+      "state": "SAME"
+    },
+    "source_coverage": [
+      "control_room",
+      "fabric_view"
+    ],
+    "source_generation": {
+      "generation": null,
+      "state": "UNKNOWN",
+      "version": null
+    }
+  },
+  "transport": {
+    "actionable": true,
+    "carrier": null,
+    "dispatch_state": "RETURNED",
+    "evidence": [],
+    "historical": false,
+    "reason": "fixture",
+    "w3c": null,
+    "watch_proven": true
+  }
+}

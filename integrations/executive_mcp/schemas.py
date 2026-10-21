@@ -55,6 +55,7 @@ __all__ = [
     "TOOL_SPECS",
     "ToolSpec",
     "bound_document",
+    "bound_job_document",
     "canonical_json",
     "derive_branch",
     "derive_intent_id",
@@ -996,14 +997,18 @@ def bound_document(
          "field": "job.result.summary", "preview": "..."}
 
     so the result is always valid JSON and a bounded field can never be read as
-    a complete one.  If the document is still over the limit after every string
-    leaf has been bounded, this raises ``output_too_large`` rather than emitting
-    something misleading.
+    a complete one. Receipt growth shares the byte budget. Only replacements
+    that reduce the combined size are applied. If the document cannot fit,
+    this raises ``output_too_large`` rather than emitting something misleading.
     """
 
     receipts: list[dict[str, Any]] = []
     current = _jsonable(data)
-    if len(canonical_json(current)) <= limit:
+    def size() -> int:
+        return len(canonical_json(current)) + len(canonical_json(receipts)) - 2
+
+    current_size = size()
+    if current_size <= limit:
         return current, receipts
 
     sizes: list[tuple[int, tuple[str | int, ...]]] = []
@@ -1011,7 +1016,7 @@ def bound_document(
     sizes.sort(key=lambda item: (-item[0], _display_path(item[1])))
 
     for original_bytes, parts in sizes:
-        if len(canonical_json(current)) <= limit:
+        if current_size <= limit:
             break
         node: Any = current
         reachable = True
@@ -1034,22 +1039,94 @@ def bound_document(
             "field": display,
             "preview": preview,
         }
+        receipt = {key: value for key, value in replacement.items() if key != "preview"}
+        # Include JSON escaping, the new receipt and its list separator. Small
+        # leaves usually grow when wrapped and must remain byte-for-byte intact.
+        saving = len(canonical_json(node)) - len(canonical_json(replacement))
+        cost = len(canonical_json(receipt)) + (1 if receipts else 0)
+        if saving <= cost:
+            continue
         current = _replace_at(current, parts, replacement)
-        receipts.append(
-            {
-                "bounded": True,
-                "original_bytes": original_bytes,
-                "returned_bytes": len(preview.encode("utf-8")),
-                "field": display,
-            }
-        )
+        receipts.append(receipt)
+        # Leaf replacement and receipt append have exact canonical byte deltas.
+        # Do not re-encode a wide unboundable document for every small leaf.
+        current_size -= saving - cost
 
-    if len(canonical_json(current)) > limit:
+    if size() > limit:
         raise GatewayError(
             "output_too_large",
             f"response exceeds the {limit}-byte ceiling even after bounding "
             f"{len(receipts)} field(s)",
         )
+    return current, receipts
+
+
+def bound_job_document(
+    data: Mapping[str, Any], *, limit: int = MAX_RESPONSE_BYTES
+) -> tuple[Any, list[dict[str, Any]]]:
+    """Bound opaque job payloads before leaf bounding, retaining lifecycle rows.
+
+    Real launch metadata can contain hundreds of small leaves, and appears in
+    both ``attempts`` and ``latest_attempt``. Replacing each leaf individually
+    enlarges that topology. Only the named payload fields below are eligible
+    for aggregate bounding; job/attempt identities, status, counts, and the
+    attempt list itself are never removed. Small documents remain verbatim.
+    The data and its bounding receipts share the existing byte allowance.
+    """
+
+    current = _jsonable(data)
+    receipts: list[dict[str, Any]] = []
+
+    def size() -> int:
+        return len(canonical_json(current)) + len(canonical_json(receipts))
+
+    if size() <= limit:
+        return current, receipts
+    job_fields = ("checkpoint", "result", "constraints", "orchestration_provenance")
+    attempt_fields = (
+        "checkpoint", "result", "error", "launch_metadata",
+        "requested_execution_profile", "effective_grant", "placement_snapshot",
+        "execution_principal_snapshot",
+    )
+    rows = [(('job',), current.get('job'), job_fields)]
+    rows.extend(
+        (("attempts", index), row, attempt_fields)
+        for index, row in enumerate(current.get("attempts", []))
+    )
+    rows.append((("latest_attempt",), current.get("latest_attempt"), attempt_fields))
+    candidates = []
+    for prefix, row, fields in rows:
+        if not isinstance(row, Mapping):
+            continue
+        for field in fields:
+            value = row.get(field)
+            if isinstance(value, (dict, list)):
+                encoded = canonical_json(value)
+                candidates.append((len(encoded), prefix + (field,), encoded))
+    candidates.sort(key=lambda item: (-item[0], _display_path(item[1])))
+    for original_bytes, parts, encoded in candidates:
+        if size() <= limit:
+            break
+        preview = encoded.decode("utf-8")[:BOUND_PREVIEW_CHARS]
+        receipt = {
+            "bounded": True,
+            "original_bytes": original_bytes,
+            "returned_bytes": len(preview.encode("utf-8")),
+            "field": _display_path(parts),
+        }
+        replacement = {**receipt, "preview": preview}
+        # Never enlarge a small payload in an effort to shrink the response.
+        if len(canonical_json(replacement)) + len(canonical_json(receipt)) + 1 >= original_bytes:
+            continue
+        current = _replace_at(current, parts, replacement)
+        receipts.append(receipt)
+    if size() > limit:
+        current, leaf_receipts = bound_document(
+            current, limit=max(0, limit - len(canonical_json(receipts)))
+        )
+        receipts.extend(leaf_receipts)
+    if size() > limit:
+        raise GatewayError("output_too_large", "job data and bounding receipts exceed the response ceiling")
     return current, receipts
 
 

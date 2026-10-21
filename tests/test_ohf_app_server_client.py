@@ -164,3 +164,480 @@ def test_observer_extraction_fault_does_not_escape_receiver_demux(monkeypatch):
         laboratory.ObserverFault("publish_demultiplexed", "RuntimeError"),
     )
     assert projection._viewers_by_turn == {}
+
+
+def test_request_preserves_typed_send_failure_before_payload_exists(monkeypatch):
+    client = AppServerClient([], env={}, cwd=Path("."))
+
+    def fail_send(_message):
+        raise JsonRpcError("sentinel send failure")
+
+    monkeypatch.setattr(client, "_send", fail_send)
+
+    with pytest.raises(JsonRpcError, match="sentinel send failure"):
+        client.request("account/read", timeout=0.01)
+
+    assert client._responses == {}
+
+
+def test_request_preserves_typed_timeout_before_payload_exists(monkeypatch):
+    client = AppServerClient([], env={}, cwd=Path("."))
+    monkeypatch.setattr(client, "_send", lambda _message: None)
+
+    with pytest.raises(JsonRpcError, match="timeout waiting for account/read"):
+        client.request("account/read", timeout=0.001)
+
+    assert client._responses == {}
+
+
+# Ordered-prefix consumption uses the same queue and condition as legacy waits.
+def test_ordered_notification_wait_preserves_before_and_after_completion(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    before = {"method": "item/completed", "params": {"item": {"id": "before"}}}
+    completed = {"method": "turn/completed", "params": {"turn": {"id": "done"}}}
+    after = {"method": "account/rateLimits/updated", "params": {}}
+    with client._notification_condition:
+        client.notifications.extend([before, completed, after])
+    assert client.wait_notifications_through("turn/completed", timeout=0.01) == [before, completed]
+    assert client.drain_notifications() == [after]
+
+
+def test_legacy_selected_notification_wait_keeps_its_existing_contract(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    before = {"method": "before"}
+    completed = {"method": "turn/completed"}
+    after = {"method": "after"}
+    with client._notification_condition:
+        client.notifications.extend([before, completed, after])
+    assert client.wait_notification("turn/completed", timeout=0.01) == completed
+    assert client.drain_notifications() == [before, after]
+
+
+def test_ordered_notification_wait_timeout_preserves_queued_evidence(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    queued = {"method": "item/completed"}
+    with client._notification_condition:
+        client.notifications.append(queued)
+    with pytest.raises(JsonRpcError, match="timeout"):
+        client.wait_notifications_through("turn/completed", timeout=0)
+    assert client.drain_notifications() == [queued]
+
+
+def test_ordered_notification_wait_fails_on_closed_transport(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    client._transport_closed = True
+    with pytest.raises(JsonRpcError, match="exited"):
+        client.wait_notifications_through("turn/completed", timeout=0.01)
+
+
+
+def test_guarded_send_serializes_actual_notification_enqueue_through_write(tmp_path):
+    import threading
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    old = {"method": "before"}
+    new = {"method": "after"}
+    client.notifications.append(old)
+    begin_enqueue = threading.Event()
+    attempting = threading.Event()
+    acquired = threading.Event()
+    evidence = []
+    def enqueue():
+        assert begin_enqueue.wait(timeout=1)
+        attempting.set()
+        with client._notification_condition:
+            client.notifications.append(new)
+            acquired.set()
+    thread = threading.Thread(target=enqueue)
+    thread.start()
+    def guard(request_id, queued):
+        assert queued == [old]
+        assert client._transport_lock.locked()
+        evidence.append(request_id)
+        begin_enqueue.set()
+        assert attempting.wait(timeout=1)
+        assert not acquired.is_set()
+    def send(payload, **kwargs):
+        assert client._transport_lock.locked()
+        assert not acquired.is_set()
+        assert payload["id"] == evidence[0]
+        client._responses[payload["id"]].put({"result": {"sent": True}})
+    client._send = send
+    try:
+        assert client.request("turn/start", {}, before_send=guard) == {"sent": True}
+    finally:
+        begin_enqueue.set()
+        thread.join(timeout=1)
+    assert not thread.is_alive() and acquired.is_set()
+    assert client.drain_notifications() == [new]
+    assert client._responses == {}
+
+
+def test_guard_refusal_cannot_send_or_leave_a_pending_request(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    sends = []
+    client._send = lambda payload: sends.append(payload)
+    def refuse(request_id, queued):
+        raise ValueError("known guard refusal")
+    with pytest.raises(ValueError, match="known guard refusal"):
+        client.request("turn/start", {}, before_send=refuse)
+    assert sends == [] and client._responses == {}
+
+
+@pytest.mark.parametrize("raw", [False, True])
+def test_guarded_send_refuses_an_existing_request_without_replacing_it(tmp_path, raw):
+    import queue
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    existing = queue.Queue()
+    owner = client._raw_responses if raw else client._responses
+    owner[999] = existing
+    sends, guards = [], []
+    client._send = lambda payload: sends.append(payload)
+    with pytest.raises(JsonRpcError, match="idle request boundary"):
+        client.request("turn/start", {}, before_send=lambda *args: guards.append(args))
+    assert sends == [] and guards == [] and owner[999] is existing
+    assert set(client._responses) == (set() if raw else {999})
+
+
+def test_notification_guard_cannot_be_used_for_an_unrelated_method(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    with pytest.raises(JsonRpcError, match="only valid for turn/start"):
+        client.request("thread/read", {}, before_send=lambda *args: None)
+    assert client._responses == {} and client._next_id == 1
+
+
+
+def test_guarded_large_write_terminates_a_backpressured_transport(tmp_path):
+    import threading
+    marker = tmp_path / "peer-read-first-byte"
+    code = (
+        "import pathlib,sys\n"
+        "sys.stdin.buffer.read(1)\n"
+        "pathlib.Path(sys.argv[1]).write_text('observed')\n"
+        "for i in range(3000):\n"
+        " sys.stdout.write('{\"method\":\"account/update\",\"params\":{\"padding\":\"' + 'x'*256 + '\"}}\\n')\n"
+        " sys.stdout.flush()\n"
+        "sys.stdin.buffer.readline()\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code, str(marker)],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    client.start()
+    rescued = []
+    def rescue():
+        rescued.append(True)
+        if client.proc.poll() is None:
+            client.proc.kill()
+    timer = threading.Timer(2.0, rescue)
+    timer.start()
+    failure = None
+    try:
+        client.request("turn/start", {"input": "x" * 262144}, timeout=0.25,
+                       before_send=lambda *_args: None)
+    except Exception as exc:
+        failure = exc
+    finally:
+        timer.cancel()
+        if client.proc.poll() is None:
+            client.proc.kill()
+        client.close()
+        timer.join(timeout=1)
+    assert marker.exists(), "the peer never consumed the beginning of the actual frame"
+    assert not rescued, "guarded write outlived its deadline and needed external rescue"
+    assert isinstance(failure, JsonRpcError)
+    assert "timeout" in str(failure)
+    assert client._transport_closed and client._responses == {}
+    assert client.proc.poll() is not None
+
+
+def test_guarded_write_lock_uses_the_same_request_deadline(tmp_path):
+    import threading
+    client = _client(tmp_path)
+    client._write_lock.acquire()
+    rescued = []
+    def rescue():
+        rescued.append(True)
+        if client._write_lock.locked():
+            client._write_lock.release()
+    timer = threading.Timer(1.0, rescue)
+    timer.start()
+    failure = None
+    try:
+        client.request("turn/start", {}, timeout=0.02, before_send=lambda *_args: None)
+    except Exception as exc:
+        failure = exc
+    finally:
+        timer.cancel()
+        if client._write_lock.locked():
+            client._write_lock.release()
+        client.close()
+        timer.join(timeout=1)
+    assert not rescued, "write-lock acquisition ignored the request deadline"
+    assert isinstance(failure, JsonRpcError)
+    assert client._responses == {}
+
+
+def test_guard_that_exhausts_the_deadline_cannot_send(tmp_path, monkeypatch):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    clock = [10.0]
+    monkeypatch.setattr(laboratory.time, "monotonic", lambda: clock[0])
+    sends = []
+    client._send = lambda payload, **kwargs: sends.append(payload)
+    def guard(*_args):
+        clock[0] = 11.0
+    with pytest.raises(JsonRpcError, match="timeout"):
+        client.request("turn/start", {}, timeout=0.5, before_send=guard)
+    assert sends == [] and client._responses == {}
+
+
+def test_guarded_response_wait_spends_only_remaining_deadline(tmp_path, monkeypatch):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    clock = [10.0]
+    monkeypatch.setattr(laboratory.time, "monotonic", lambda: clock[0])
+    class CapturingQueue:
+        def __init__(self, maxsize):
+            self.timeout = None
+        def get(self, timeout):
+            self.timeout = timeout
+            return {"result": {"ok": True}}
+    queues = []
+    def make_queue(maxsize):
+        queue = CapturingQueue(maxsize)
+        queues.append(queue)
+        return queue
+    monkeypatch.setattr(laboratory.queue, "Queue", make_queue)
+    def guard(*_args):
+        clock[0] = 10.4
+    client._send = lambda payload, **kwargs: None
+    assert client.request("turn/start", {}, timeout=1, before_send=guard) == {"ok": True}
+    assert queues[0].timeout == pytest.approx(0.6)
+
+
+
+def test_compromised_transport_does_not_block_on_a_full_waiter(tmp_path):
+    import queue
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    ordinary = queue.Queue(maxsize=1)
+    raw = queue.Queue(maxsize=1)
+    ordinary.put({"result": {"already": "received"}})
+    raw.put(None)
+    client._responses[1] = ordinary
+    client._raw_responses[2] = raw
+    client._compromise_transport()
+    assert client._transport_closed
+    assert ordinary.get_nowait() == {"result": {"already": "received"}}
+    assert raw.get_nowait() is None
+
+
+def test_send_deadline_restores_the_pipe_mode_after_success(tmp_path):
+    client = _client(tmp_path)
+    original = os.get_blocking(client.proc.stdin.fileno())
+    try:
+        result = client.request("turn/start", {}, timeout=2, before_send=lambda *_: None)
+        assert isinstance(result, dict)
+        assert os.get_blocking(client.proc.stdin.fileno()) == original
+        assert not client._write_lock.locked()
+    finally:
+        client.close()
+
+
+@pytest.mark.parametrize("stage", ["parse", "prebind"])
+def test_guarded_send_waits_for_a_frame_read_but_not_published(tmp_path, monkeypatch, stage):
+    import json
+    import threading
+    entered = threading.Event()
+    release = threading.Event()
+    attempting = threading.Event()
+    sent = threading.Event()
+    marker = "in-flight-reader-marker"
+    code = (
+        "import json,sys\n"
+        "print(json.dumps({'method':'account/update','params':{'marker':'in-flight-reader-marker'}}),flush=True)\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " print(json.dumps({'id':request['id'],'result':{'ok':True}}),flush=True)\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    original_loads = json.loads
+    def loads(value, *args, **kwargs):
+        if stage == "parse" and isinstance(value, str) and marker in value:
+            entered.set()
+            assert release.wait(timeout=2)
+        return original_loads(value, *args, **kwargs)
+    monkeypatch.setattr(laboratory.json, "loads", loads)
+    class Observer:
+        def active_prebind_request_id(self):
+            return None
+        def prebind_frame(self, request_id, *, method, params):
+            if stage == "prebind" and method == "account/update":
+                entered.set()
+                assert release.wait(timeout=2)
+        def publish_demultiplexed(self, *args, **kwargs):
+            pass
+        def arm_prebind(self, *args):
+            pass
+        def drop_prebind(self, *args):
+            pass
+        def drop_expired_prebind(self):
+            pass
+    if stage == "prebind":
+        client.visible_projection = Observer()
+    original_send = client._send
+    def send(payload, **kwargs):
+        if payload.get("method") == "turn/start":
+            sent.set()
+        return original_send(payload, **kwargs)
+    client._send = send
+    prefixes, results, errors = [], [], []
+    def submit():
+        attempting.set()
+        try:
+            results.append(client.request("turn/start", {}, timeout=1,
+                before_send=lambda request_id, queued: prefixes.append(queued)))
+        except Exception as exc:
+            errors.append(exc)
+    client.start()
+    thread = threading.Thread(target=submit)
+    early_send = False
+    try:
+        assert entered.wait(timeout=1), "fixture did not reach the read-to-publication interval"
+        thread.start()
+        assert attempting.wait(timeout=1)
+        early_send = sent.wait(timeout=0.05)
+    finally:
+        release.set()
+        if thread.ident is not None:
+            thread.join(timeout=2)
+        client.close()
+    assert not thread.is_alive()
+    assert not early_send, "new turn passed an already-read, unclassified frame"
+    assert not errors and results == [{"ok": True}]
+    assert len(prefixes) == 1 and len(prefixes[0]) == 1
+    assert prefixes[0][0]["method"] == "account/update"
+
+
+def test_guarded_send_waits_for_an_already_read_partial_frame(tmp_path):
+    import threading
+    import time
+    marker = tmp_path / "partial-written"
+    finish = tmp_path / "complete-frame"
+    code = (
+        "import json,pathlib,sys,time\n"
+        "sys.stdout.write('{\"method\":\"account/update\",');sys.stdout.flush()\n"
+        "pathlib.Path(sys.argv[1]).write_text('partial')\n"
+        "while not pathlib.Path(sys.argv[2]).exists(): time.sleep(.002)\n"
+        "sys.stdout.write('\"params\":{}}\\n');sys.stdout.flush()\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " print(json.dumps({'id':request['id'],'result':{'ok':True}}),flush=True)\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code, str(marker), str(finish)],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    sent = threading.Event()
+    original_send = client._send
+    def send(payload, **kwargs):
+        if payload.get("method") == "turn/start":
+            sent.set()
+        return original_send(payload, **kwargs)
+    client._send = send
+    errors, prefixes = [], []
+    def submit():
+        try:
+            client.request("turn/start", {}, timeout=1,
+                           before_send=lambda request_id, queued: prefixes.append(queued))
+        except Exception as exc:
+            errors.append(exc)
+    client.start()
+    thread = threading.Thread(target=submit)
+    try:
+        limit = time.monotonic() + 1
+        while not marker.exists() and time.monotonic() < limit:
+            time.sleep(.002)
+        assert marker.exists()
+        # The repaired reader exposes the same parser buffer, not a new queue.
+        if hasattr(client, "_stdout_pending"):
+            while not client._stdout_pending and time.monotonic() < limit:
+                time.sleep(.002)
+            assert client._stdout_pending
+        thread.start()
+        early = sent.wait(timeout=.05)
+    finally:
+        finish.write_text('finish')
+        if thread.ident is not None:
+            thread.join(timeout=2)
+        client.close()
+    assert not thread.is_alive()
+    assert not early, "new turn passed a previously started incoming frame"
+    assert not errors
+    assert prefixes and prefixes[0][0]["method"] == "account/update"
+
+
+
+def test_partial_ingress_timeout_cannot_send_or_discard_the_fragment(tmp_path):
+    client = AppServerClient([], env={}, cwd=tmp_path)
+    client._stdout_pending.extend(b'{"method":')
+    sends = []
+    client._send = lambda payload, **kwargs: sends.append(payload)
+    with pytest.raises(JsonRpcError, match="incomplete ingress frame"):
+        client.request("turn/start", {}, timeout=.01, before_send=lambda *_: None)
+    assert sends == [] and client._responses == {}
+    assert client._stdout_pending == b'{"method":'
+    assert not client._transport_closed
+
+
+
+def test_guarded_send_waits_for_selected_but_unread_ingress(tmp_path, monkeypatch):
+    import threading
+    entered = threading.Event()
+    release = threading.Event()
+    attempted = threading.Event()
+    sent = threading.Event()
+    code = (
+        "import json,sys\n"
+        "print(json.dumps({'method':'thread/started','params':{'thread':{'id':'ungranted-selected-helper'}}}),flush=True)\n"
+        "for line in sys.stdin:\n"
+        " request=json.loads(line)\n"
+        " print(json.dumps({'id':request['id'],'result':{'ok':True}}),flush=True)\n"
+    )
+    client = AppServerClient([sys.executable, "-u", "-c", code],
+                             env={"PATH": "/usr/bin:/bin"}, cwd=tmp_path)
+    original_select = laboratory.select.select
+    def select_and_pause(read, write, error, timeout=None):
+        result = original_select(read, write, error, timeout)
+        if (threading.current_thread() is client._reader and result[0]
+                and not entered.is_set()):
+            entered.set()
+            assert release.wait(timeout=2)
+        return result
+    monkeypatch.setattr(laboratory.select, "select", select_and_pause)
+    original_send = client._send
+    def send(payload, **kwargs):
+        sent.set()
+        return original_send(payload, **kwargs)
+    client._send = send
+    errors, prefixes = [], []
+    def refuse_pending_helper(request_id, queued):
+        prefixes.append(queued)
+        if queued:
+            raise ValueError("ungranted helper before send")
+    def submit():
+        attempted.set()
+        try:
+            client.request("turn/start", {}, timeout=1, before_send=refuse_pending_helper)
+        except Exception as exc:
+            errors.append(exc)
+    client.start()
+    thread = threading.Thread(target=submit)
+    try:
+        assert entered.wait(timeout=1), "reader did not select the real frame"
+        thread.start()
+        assert attempted.wait(timeout=1)
+        early = sent.wait(timeout=.05)
+    finally:
+        release.set()
+        if thread.ident is not None:
+            thread.join(timeout=2)
+        client.close()
+    assert not thread.is_alive()
+    assert not early and not sent.is_set()
+    assert len(errors) == 1 and str(errors[0]) == "ungranted helper before send"
+    assert prefixes and prefixes[0][0]["method"] == "thread/started"

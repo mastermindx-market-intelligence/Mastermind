@@ -1,0 +1,37 @@
+--- a/fabric_operator_owner.py
++++ b/fabric_operator_owner.py
+@@ -67,0 +68,34 @@
++
++    def original_delivery_binding(self, run_id, *, root):
++        """Historical launch correlation only; no capability, renewal or lease authority.
++
++        The caller's original commission/ancestry must be qualified separately.
++        Read a bounded held broker snapshot, never the live mutating transaction.
++        """
++        import artifact_delivery
++        import artifact_reader
++        safe_id(run_id); safe_id(root)
++        row = artifact_delivery._retained_broker_row(
++            "SELECT operator_run,root,grant_json,launch_json FROM operator_grants "
++            "WHERE operator_run=? AND root=?", (run_id, root), here=self.here)
++        if row is None:
++            refuse("original_operator_binding_unavailable")
++        grant = artifact_reader.strict_json(row["grant_json"])
++        launch = artifact_reader.strict_json(row["launch_json"])
++        fields = ("root", "lease_id", "pool", "model", "account", "host",
++                  "support_sha256", "packet_sha256")
++        if (type(grant) is not dict or type(launch) is not dict
++                or row["operator_run"] != run_id or row["root"] != root
++                or grant.get("schema") != "mastermind.fabric_operator_grant.v1"
++                or grant.get("operator_run") != run_id or launch.get("run_id") != run_id
++                or grant.get("root") != root or launch.get("root") != root
++                or launch.get("task_class") != "domain_orchestration"
++                or any(type(grant.get(k)) is not str or grant[k] != launch.get(k) for k in fields)
++                or any(not IDENT.fullmatch(grant[k]) for k in fields[:-2])
++                or any(not re.fullmatch(r"[a-f0-9]{64}", grant[k]) for k in fields[-2:])):
++            refuse("original_operator_binding_mismatch")
++        return {"schema": "mastermind.original_operator_launch_binding.v1",
++                "operator_run": run_id, **{k: grant[k] for k in fields},
++                "parent_binding": "NOT_RECORDED_IN_OPERATOR_GRANT",
++                "current_authority": False, "lease_settlement": "UNKNOWN",
++                "children_settlement": "UNKNOWN"}

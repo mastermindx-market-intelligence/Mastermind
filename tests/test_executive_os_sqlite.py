@@ -109,6 +109,7 @@ def test_sqlite_defaults_pragmas_migration_and_five_durable_objects(tmp_path):
         (2, "durable_parent_child_review_contract"),
         (3, "ohf_session_epochs_and_process_generations"),
         (4, "executive_phase1fc_orchestration_contract"),
+        (5, "executive_finite_drive_arm_contract"),
     ]
     assert all(len(row[2]) == 64 for row in migrations)
 
@@ -808,7 +809,120 @@ def test_v4_runtime_normal_open_refuses_existing_v2_without_v3_artifacts(
     assert "execution_mode" not in columns
 
 
-def _c2_r1a_ready_source(tmp_path, monkeypatch):
+def test_v5_fresh_schema_pins_vector_fingerprint_and_finite_arm_index_ddl(tmp_path):
+    runtime = _runtime(tmp_path)
+    with runtime.store.read() as connection:
+        vector = connection.execute(
+            "SELECT version,name,checksum FROM schema_migrations ORDER BY version"
+        ).fetchall()
+        fresh_digest = executive_runtime._normalized_schema_digest(connection)
+        index_row = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE type='index' "
+            "AND name='events_one_coo_finite_drive_arm_per_root'"
+        ).fetchone()
+    assert [tuple(row)[:2] for row in vector][-1] == (
+        5,
+        "executive_finite_drive_arm_contract",
+    )
+    assert vector[-1][2] == executive_runtime._migration_checksum(
+        executive_runtime._MIGRATIONS[4][2]
+    )
+    assert index_row is not None
+    assert executive_runtime._normalize_schema_sql(str(index_row[0])) == (
+        executive_runtime._normalize_schema_sql(
+            "CREATE UNIQUE INDEX events_one_coo_finite_drive_arm_per_root "
+            "ON events(job_id) WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        )
+    )
+    assert fresh_digest == executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
+    # The historical v4 fingerprint stays frozen for prior-version verification.
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
+        "56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4"
+    )
+
+
+def test_v5_runtime_normal_open_refuses_existing_v4_until_explicit_upgrade(
+    tmp_path, monkeypatch
+):
+    migrations = executive_runtime._MIGRATIONS
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations[:4])
+    v4 = _runtime(tmp_path)
+    database = v4.store.path
+    before = (
+        database.read_bytes(),
+        stat.S_IMODE(database.stat().st_mode),
+        database.stat().st_ino,
+        database.stat().st_dev,
+    )
+
+    monkeypatch.setattr(executive_runtime, "_MIGRATIONS", migrations)
+    with pytest.raises(
+        executive_runtime.ExecutiveSchemaUpgradeRequired,
+        match="upgrade_v4_to_v5",
+    ):
+        _runtime(tmp_path)
+
+    info = database.stat()
+    assert (
+        database.read_bytes(),
+        stat.S_IMODE(info.st_mode),
+        info.st_ino,
+        info.st_dev,
+    ) == before
+    assert not any(
+        database.with_name(database.name + suffix).exists()
+        for suffix in ("-wal", "-shm", "-journal")
+    )
+    connection = sqlite3.connect(database)
+    try:
+        assert (
+            connection.execute("SELECT MAX(version) FROM schema_migrations").fetchone()[
+                0
+            ]
+            == 4
+        )
+        index_row = connection.execute(
+            "SELECT name FROM sqlite_master WHERE type='index' "
+            "AND name='events_one_coo_finite_drive_arm_per_root'"
+        ).fetchone()
+    finally:
+        connection.close()
+    assert index_row is None
+
+
+def test_v5_finite_drive_arm_index_admits_one_arm_event_per_root(tmp_path):
+    runtime = _runtime(tmp_path)
+    first = runtime.jobs.create_job("finite arm root one")
+    second = runtime.jobs.create_job("finite arm root two")
+
+    def insert_event(job_id: str, command: str, event_type: str) -> None:
+        with runtime.store.transaction() as connection:
+            connection.execute(
+                """
+                INSERT INTO events(
+                  aggregate_type,aggregate_id,sequence,event_type,command_id,actor,
+                  job_id,payload_json,created_at_ms
+                ) VALUES('job',?,1,?,?,'coo',?,'{}',1)
+                """,
+                (f"finite-arm-stream:{command}", event_type, command, job_id),
+            )
+
+    insert_event(first.job_id, "finite-arm:first", "COO_FINITE_DRIVE_ARMED")
+    # SQLite reports partial-index violations by column, not by index name; the
+    # bare events.job_id uniqueness can only come from the migration-5 index.
+    with pytest.raises(StateConflict, match=r"UNIQUE constraint failed: events\.job_id"):
+        insert_event(
+            first.job_id, "finite-arm:first-again", "COO_FINITE_DRIVE_ARMED"
+        )
+    insert_event(second.job_id, "finite-arm:second", "COO_FINITE_DRIVE_ARMED")
+    insert_event(first.job_id, "unrelated:first", "JOB_FENCED")
+    with runtime.store.read() as connection:
+        assert connection.execute(
+            "SELECT COUNT(*) FROM events WHERE event_type='COO_FINITE_DRIVE_ARMED'"
+        ).fetchone()[0] == 2
+
+
+def _c2_r1a_ready_source(tmp_path, monkeypatch, *, capacity_join_metadata=None):
     """Build one genuine, reviewed COO root at the aggregation handoff edge."""
 
     import tests.test_executive_os_phase1fc as phase1fc
@@ -863,6 +977,7 @@ def _c2_r1a_ready_source(tmp_path, monkeypatch):
                 "effort": "xhigh",
                 "cost_class": "small",
                 "capabilities": ["read"],
+                "metadata": capacity_join_metadata or {},
             }
         },
     )
@@ -1832,11 +1947,13 @@ def test_c2_r1a_second_root_refuses_existing_generation_one_carrier_before_c1(
     ).carrier_job_id == (first.carrier_job_id)
     assert second_runtime.current_capacity_commitment(second_root.job_id) is None
 
-# M2 is deliberately absent from the production migration vector. Only this
-# synthetic fixture changes the three coupled expectations, with real verifiers.
-_M2_V4_VECTOR = executive_runtime._MIGRATIONS
-_M2_V4_DIGEST = executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST
-_M2_CANDIDATE_DIGEST = 'cd6fe8982e5b8ca8ea40ffff1dee089b5ab0d395916e7384a1ff14b5748f0caf'
+# M2 is deliberately absent from the production migration vector. Production
+# schema v5 carries only the finite-arm index; this synthetic fixture defers
+# the inactive candidate to the next synthetic version 6 and changes the three
+# coupled expectations, with real verifiers.
+_M2_V5_VECTOR = executive_runtime._MIGRATIONS
+_M2_V5_DIGEST = getattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', None)
+_M2_V6_CANDIDATE_DIGEST = '2618959767e49acc70db044ee1e86441feb2bd39ed413afe0c86e455ea0b21b4'
 _M2_CANDIDATE_CHECKSUM = '9bee01a6ee1f129a9c6b6fb24f52012d2cb790c39057722c5a6867163055b3d8'
 
 
@@ -1851,10 +1968,10 @@ def m2_store(tmp_path, monkeypatch):
     import copy
     candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
     assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
-    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V4_VECTOR + (
-        (5, 'synthetic_m2_physical_resources', candidate),))
-    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 5)
-    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V4_SCHEMA_DIGEST', _M2_CANDIDATE_DIGEST)
+    monkeypatch.setattr(executive_runtime, '_MIGRATIONS', _M2_V5_VECTOR + (
+        (6, 'synthetic_m2_physical_resources', candidate),))
+    monkeypatch.setattr(executive_runtime, 'SCHEMA_VERSION', 6)
+    monkeypatch.setattr(executive_runtime, '_NORMALIZED_V5_SCHEMA_DIGEST', _M2_V6_CANDIDATE_DIGEST)
     contexts = {}
     def admission(self, request, caller_context, *, connection=None, stage='entry'):
         context = contexts[str(self.store.path)]
@@ -1865,7 +1982,7 @@ def m2_store(tmp_path, monkeypatch):
     def create(name='one'):
         runtime = Runtime.at(tmp_path / name, clock=MutableClock(100), busy_timeout_ms=1000)
         with runtime.store.read() as connection:
-            assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+            assert executive_runtime._normalized_schema_digest(connection) == _M2_V6_CANDIDATE_DIGEST
         request, context = _m2_inputs()
         # Synthetic timing allowances include real filesystem/schema validation.
         context['policy']['waits'] = {'service_request_max_ms': 2000, 'database_lock_max_ms': 1000}
@@ -1899,14 +2016,17 @@ def _m2_reserve(runtime, request):
     return runtime.broker.reserve_physical(request, caller_context=None)
 
 
-def test_m2_default_runtime_keeps_exact_v4_vector_and_has_no_candidate_tables(tmp_path):
+def test_m2_default_runtime_keeps_exact_v5_vector_and_has_no_candidate_tables(tmp_path):
     runtime = Runtime.at(tmp_path)
-    assert executive_runtime.SCHEMA_VERSION == 4
-    assert executive_runtime._MIGRATIONS == _M2_V4_VECTOR
-    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == _M2_V4_DIGEST
+    assert executive_runtime.SCHEMA_VERSION == 5
+    assert executive_runtime._MIGRATIONS == _M2_V5_VECTOR
+    assert executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST == _M2_V5_DIGEST
+    assert executive_runtime._NORMALIZED_V4_SCHEMA_DIGEST == (
+        '56054e6e64ca6e69e878ce6488bb5527e1051212db94bae0fbf625eed78ca6a4'
+    )
     with runtime.store.read() as connection:
         assert connection.execute("SELECT name FROM sqlite_master WHERE name LIKE 'physical_resource_%'").fetchall() == []
-        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 4
+        assert connection.execute('SELECT max(version) FROM schema_migrations').fetchone()[0] == 5
 
 
 def test_m2_default_resource_entry_refuses_before_database_open(tmp_path):
@@ -1932,9 +2052,9 @@ def test_m2_candidate_schema_uses_same_store_and_existing_events_without_jobs(m2
         assert [tuple(r) for r in events] == [('physical_resource_operation', None, None, None)]
         assert connection.execute('SELECT count(*) FROM physical_resource_demands').fetchone()[0] == 6
         assert connection.execute('PRAGMA foreign_key_check').fetchall() == []
-        assert executive_runtime._normalized_schema_digest(connection) == _M2_CANDIDATE_DIGEST
+        assert executive_runtime._normalized_schema_digest(connection) == _M2_V6_CANDIDATE_DIGEST
     with runtime.store.transaction() as connection:
-        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=5")
+        connection.execute("UPDATE schema_migrations SET checksum='bad' WHERE version=6")
     with pytest.raises(PersistenceError):
         Runtime.at(runtime.store.root, clock=MutableClock(100))
 
@@ -3054,3 +3174,935 @@ def test_bound_managed_schema_cancellation_drains_acquired_connection(tmp_path, 
     with pytest.raises(PersistenceError):
         with runtime.store.read():
             pytest.fail("invalid request cannot reconnect")
+
+
+# FP1B transaction proofs: reuse the existing host-keyed ResourceBroker plane.
+def _fp1b_m2_context(*, host="a"):
+    from test_executive_physical_resources import _fp1b_context
+    request, policy, observations = _fp1b_context(host=host)
+    # Preserve the synthetic M2 fixture's qualified timing envelope; no Runtime
+    # production path is armed by these test-only values.
+    policy["waits"] = {
+        "service_request_max_ms": 2000,
+        "database_lock_max_ms": 1000,
+    }
+    policy["freshness"]["decision_to_effect_max_ms"] = 1000
+    return request, policy, observations
+
+
+def test_fp1b_m2_same_host_v2_last_capacity_still_allows_only_one_reservation(m2_store):
+    import copy
+    runtime, second, _, context = m2_store("fp1b-same-host")
+    request, policy, observations = _fp1b_m2_context(host="a")
+    context["policy"] = policy
+    context["observations"] = observations
+    context["observations"]["pools"]["external"]["available"] = 60
+    other = copy.deepcopy(request)
+    other["operation_key"] = "fp1b-other"
+    other["command_id"] = "physical:fp1b-other"
+    barrier = Barrier(2)
+
+    def reserve(pair):
+        barrier.wait()
+        return _m2_reserve(*pair)
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(reserve, [(runtime, request), (second, other)]))
+    assert sorted(result["code"] for result in results) == [
+        "INSUFFICIENT_CAPACITY",
+        "RESERVED",
+    ]
+    assert len(_m2_rows(runtime)["physical_resource_commitments"]) == 1
+
+
+def test_fp1b_m2_equivalent_pool_ids_on_two_qualified_hosts_account_independently(m2_store):
+    runtime, second, _, context = m2_store("fp1b-two-hosts")
+    request_a, policy, observations_a = _fp1b_m2_context(host="a")
+    request_b, policy_b, observations_b = _fp1b_m2_context(host="b")
+    assert policy_b == policy
+    request_b["operation_key"] = "fp1b-host-b"
+    request_b["command_id"] = "physical:fp1b-host-b"
+    observations_a["pools"]["external"]["available"] = 60
+    observations_b["pools"]["external"]["available"] = 60
+
+    context["policy"] = policy
+    context["observations"] = observations_a
+    first = _m2_reserve(runtime, request_a)
+    assert first["admitted"] and first["code"] == "RESERVED"
+
+    context["observations"] = observations_b
+    second_result = _m2_reserve(second, request_b)
+    assert second_result["admitted"] and second_result["code"] == "RESERVED"
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            "SELECT host_id,capacity_pool_id,remaining_charge "
+            "FROM physical_resource_commitments c "
+            "JOIN physical_resource_demands d USING(commitment_id,allocation_generation) "
+            "WHERE d.capacity_pool_id='external' ORDER BY host_id"
+        ).fetchall()
+    assert [(row[0], row[1], row[2]) for row in rows] == [
+        (request_a["host_id"], "external", 40),
+        (request_b["host_id"], "external", 40),
+    ]
+
+
+def test_fp1b_m2_host_qualification_move_inside_write_lock_fails_closed(m2_store):
+    runtime, _, _, context = m2_store("fp1b-host-move")
+    request, policy, observations = _fp1b_m2_context(host="a")
+    context["policy"] = policy
+    context["observations"] = observations
+    reserved = _m2_reserve(runtime, request)
+    assert reserved["admitted"] and reserved["code"] == "RESERVED"
+    before = _m2_rows(runtime)
+
+    def move(_broker, _connection, stage):
+        if stage == "locked":
+            context["policy"]["host_qualifications"][0][
+                "qualification_revision"
+            ] = "host-qualification-moved"
+
+    context["at_stage"] = move
+    result = runtime.broker.begin_physical(
+        _m2_envelope(request, reserved, "fp1b-host-move"),
+        caller_context=None,
+    )
+    assert result["admitted"] is False
+    assert result["fresh_begin"] is False
+    assert result["code"] == "ADMISSION_MOVED"
+    assert _m2_rows(runtime) == before
+
+
+# HF1-B: exercise the original Runtime and admitted COO child, not copied methods.
+def _hf1b_claim_fixture(tmp_path):
+    import test_executive_os_phase1fc as phase1fc
+    runtime = Runtime.at(tmp_path / "hf1b-runtime")
+    runtime.workers.register_worker(
+        "worker-a", provider="codex", account_label="hf1b-fixture-a",
+        worker_type="mock", capabilities=["read", "research"],
+        quota_classes={"default": {"provider": "codex", "capabilities": ["read", "research"],
+            "cost_class": "small", "model": "gpt-5.6-sol", "effort": "xhigh"}},
+    )
+    workspace = tmp_path / "workspaces" / "hf1b-work"
+    workspace.mkdir(parents=True, mode=0o700)
+    intent = phase1fc._v2_intent(intent_id="CEO-HF1B-FIXTURE-001", business_impact="routine",
+        execution_contract={"requested_authorities": ["READ"], "attempt_limit": 2,
+                            "worktree": str(workspace.resolve())})
+    receipt = phase1fc.submit_intent(runtime, intent, workspace_root=workspace.parent)
+    root = runtime.jobs.get_job(receipt["job_id"])
+    planner = runtime.jobs.create_cycle_planner(root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:create-planner:0")
+    planned = runtime.attempts.dispatch_cycle_job(planner.job_id,
+        command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
+        worker_id="worker-a", quota_class="default")
+    plan = {"schema_version": "mastermind.execution_plan/v1", "root_job_id": root.job_id,
+            "plan_attempt_id": planned.attempt.attempt_id, "steps": [{
+                "ordinal": 0, "step_id": "step-0", "objective": "Read one synthetic fixture.",
+                "business_impact": "routine", "review_required": False,
+                "requested_authorities": ["READ"], "allowed_write_paths": [],
+                "validation_ids": [], "attempt_limit": 1, "cost_class": "small"}]}
+    phase1fc._complete_ohf_role(runtime, planned, plan, identity_seed=7301)
+    runtime.jobs.admit_cycle_plan(root.job_id,
+        command_id=f"coo-cycle:{root.job_id}:admit-plan:{planned.attempt.attempt_id}")
+    work = next(j for j in runtime.jobs.list_jobs()
+                if j.root_job_id == root.job_id and j.orchestration_role == "work")
+    now = runtime.store.now_ms()
+    definition = {
+        "schema_version": "mastermind.exact_worker_claim_target/v1",
+        "operation_key": root.orchestration_provenance["source_id"], "root_job_id": root.job_id,
+        "job_id": work.job_id, "worker_id": "worker-a", "quota_class": "default",
+        "expected_provider": "codex", "expected_account_label": "hf1b-fixture-a",
+        "expected_model": "gpt-5.6-sol", "expected_effort": "xhigh", "expected_cost_class": "small",
+        "expected_capabilities": ["read", "research"], "excluded_worker_ids": [],
+        "source_owner": "executive-control", "source_generation": "fixture-generation-1",
+        "authority_policy_hash": work.authority_policy_hash, "expires_at_ms": now + 60000,
+    }
+    observation = {"schema_version": "mastermind.exact_worker_target_observation/v1",
+        "source_sha256": "d" * 64, "control_attestation_sha256": "e" * 64,
+        "observed_at_ms": now, "max_age_ms": 30000}
+    command = f"coo-cycle:{root.job_id}:dispatch:{work.job_id}:attempt:1"
+    return runtime, root, work, command, definition, observation
+
+
+def _hf1b_issue(definition, observation, revalidate=lambda: None):
+    import control_plane.executive_runtime as runtime_module
+    factory = getattr(runtime_module, "_issue_exact_worker_claim_target", None)
+    assert callable(factory), "HF1-B trusted target issuance is not implemented"
+    return factory(definition, observation,
+                   _producer_capability=runtime_module._EXACT_WORKER_TARGET_PRODUCER,
+                   revalidate=revalidate)
+
+
+def test_hf1b_exact_claim_retains_original_target_and_fresh_origin(tmp_path):
+    runtime, root, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert first is not None and first.claimed_now is True
+    assert first.attempt.worker_id == definition["worker_id"]
+    assert first.attempt.quota_class == definition["quota_class"]
+    event = runtime.store.get_event_by_command_id(command)
+    assert event is not None
+    binding = event.payload["exact_worker_target"]
+    assert binding["definition"] == definition
+    assert binding["observation"] == observation
+    assert first.attempt.placement_snapshot_digest
+    replay = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert replay is not None and replay.claimed_now is False
+    assert replay.attempt.attempt_id == first.attempt.attempt_id
+    assert first.to_dict() == replay.to_dict()  # internal issuance evidence is not public authority
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+    assert runtime.jobs.get_job(root.job_id).current_attempt_id is None
+
+
+@pytest.mark.parametrize("field,value", [
+    ("source_generation", "fixture-generation-2"),
+    ("expected_account_label", "different-account"),
+    ("expires_at_ms", 9999999999999),
+])
+def test_hf1b_same_pair_changed_definition_conflicts(tmp_path, field, value):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                              exact_target=_hf1b_issue(definition, observation))
+    changed = {**definition, field: value}
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                           exact_target=_hf1b_issue(changed, observation))
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+    assert runtime.attempts.get_attempt(first.attempt.attempt_id).worker_id == "worker-a"
+
+
+def test_hf1b_reobservation_does_not_rewrite_original_claim(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                              exact_target=_hf1b_issue(definition, observation))
+    before = runtime.store.get_event_by_command_id(command).payload
+    expired = {**observation, "observed_at_ms": 1, "source_sha256": "f" * 64}
+    replay = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                               exact_target=_hf1b_issue(definition, expired))
+    assert replay.attempt.attempt_id == first.attempt.attempt_id and not replay.claimed_now
+    assert runtime.store.get_event_by_command_id(command).payload == before
+
+
+@pytest.mark.parametrize("target_first", [True, False])
+def test_hf1b_targeted_and_untargeted_history_cannot_switch(tmp_path, target_first):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    target_args = {"exact_target": target}
+    plain_args = {"worker_id": definition["worker_id"], "quota_class": definition["quota_class"]}
+    first_args, second_args = (target_args, plain_args) if target_first else (plain_args, target_args)
+    runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, **first_args)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, **second_args)
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+
+
+@pytest.mark.parametrize("field,value", [
+    ("expected_account_label", "wrong-account"), ("expected_provider", "wrong-provider"),
+    ("expected_model", "wrong-model"), ("expected_effort", "wrong-effort"),
+    ("expected_cost_class", "frontier"), ("expected_capabilities", ["read"]),
+    ("excluded_worker_ids", ["worker-a"]), ("authority_policy_hash", "f" * 64),
+    ("root_job_id", "JOB-FOREIGN"), ("job_id", "JOB-FOREIGN"),
+    ("operation_key", "CEO-FOREIGN"),
+])
+def test_hf1b_target_mismatch_refuses_without_claim(tmp_path, field, value):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue({**definition, field: value}, observation)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert runtime.attempts.list_attempts(work.job_id) == []
+    assert runtime.jobs.get_job(work.job_id).status == JobStatus.QUEUED
+
+
+@pytest.mark.parametrize("definition_change,observation_change", [
+    ({"expires_at_ms": 1}, {}), ({}, {"observed_at_ms": 1}),
+    ({}, {"observed_at_ms": 9999999999999}),
+])
+def test_hf1b_first_claim_requires_fresh_observation_and_grant(tmp_path, definition_change, observation_change):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue({**definition, **definition_change}, {**observation, **observation_change})
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+def test_hf1b_plain_caller_dictionary_is_not_a_trusted_target(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    _hf1b_issue(definition, observation)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                           exact_target={"definition": definition, "observation": observation})
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+def test_hf1b_target_copies_source_and_has_closed_fields(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    definition["worker_id"] = "caller-tampered"
+    observation["source_sha256"] = "f" * 64
+    first = runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    assert first.attempt.worker_id == "worker-a"
+    assert runtime.store.get_event_by_command_id(command).payload["exact_worker_target"]["observation"]["source_sha256"] == "d" * 64
+    with pytest.raises(StateConflict, match="target"):
+        _hf1b_issue({**definition, "fallback": "worker-b"}, observation)
+
+
+@pytest.mark.parametrize("value", [None, {}, {"definition": None}])
+def test_hf1b_explicit_null_or_partial_target_never_means_automatic(tmp_path, value):
+    runtime, _, work, command, _, _ = _hf1b_claim_fixture(tmp_path)
+    with pytest.raises(StateConflict, match="target"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=value)
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+def test_hf1b_concurrent_claims_have_one_original_issuance(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue(definition, observation)
+    barrier = threading.Barrier(2)
+    def claim():
+        barrier.wait(timeout=5)
+        return runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target)
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [executor.submit(claim) for _ in range(2)]
+        results = [f.result(timeout=10) for f in futures]
+    assert sum(result.claimed_now for result in results) == 1
+    assert len({result.attempt.attempt_id for result in results}) == 1
+    assert len(runtime.attempts.list_attempts(work.job_id)) == 1
+
+
+def test_hf1b_failed_event_write_rolls_back_target_attempt_and_quota(tmp_path, monkeypatch):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    original = runtime.store.append_event
+    def fail_claim(*args, **kwargs):
+        if kwargs.get("event_type") == "JOB_CLAIMED":
+            raise RuntimeError("fixture claim event unavailable")
+        return original(*args, **kwargs)
+    monkeypatch.setattr(runtime.store, "append_event", fail_claim)
+    with pytest.raises(RuntimeError, match="claim event unavailable"):
+        runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command,
+                                           exact_target=_hf1b_issue(definition, observation))
+    assert runtime.attempts.list_attempts(work.job_id) == []
+    assert runtime.store.get_event_by_command_id(command) is None
+    assert runtime.jobs.get_job(work.job_id).status is JobStatus.QUEUED
+    with runtime.store.read() as connection:
+        assert connection.execute("SELECT held_attempt_id FROM worker_quota_classes WHERE worker_id=? AND quota_class=?", ("worker-a", "default")).fetchone()[0] is None
+
+
+def test_hf1b_missing_exact_worker_cannot_choose_available_alternative(tmp_path):
+    runtime, _, work, command, definition, observation = _hf1b_claim_fixture(tmp_path)
+    target = _hf1b_issue({**definition, "worker_id": "missing-worker"}, observation)
+    assert runtime.attempts.dispatch_cycle_job(work.job_id, command_id=command, exact_target=target) is None
+    assert runtime.attempts.list_attempts(work.job_id) == []
+
+
+@pytest.mark.parametrize("key,value", [
+    ("worker_id", ""), ("worker_id", "/private/worker"),
+    ("expected_capabilities", ["read", "read"]),
+    ("expected_account_label", "account@example.com"),
+    ("expected_account_label", "sk-abcdefghijklmnop"),
+    ("source_generation", None), ("expires_at_ms", True),
+])
+def test_hf1b_target_definition_is_closed_and_secret_safe(tmp_path, key, value):
+    _, _, _, _, definition, observation = _hf1b_claim_fixture(tmp_path)
+    with pytest.raises(StateConflict, match="target"):
+        _hf1b_issue({**definition, key: value}, observation)
+
+
+
+def _c2_capacity_join_wire(worker_id: str, host_ref: str) -> dict:
+    import hashlib
+    return {
+        "schema": "mastermind.executive_capacity_join/v1",
+        "host_ref": host_ref,
+        "capacity_capability_id": f"capability-{worker_id}",
+        "provider_capacity_schema": "mastermind.provider_capacity.v1",
+        "worker_source_config_digest": hashlib.sha256(
+            f"source:{worker_id}".encode("utf-8")
+        ).hexdigest(),
+    }
+
+
+def _c2_physical_package(runtime, source_root, source_revision):
+    import hashlib
+    import json
+    from datetime import datetime, timezone
+
+    from control_plane import executive_host_placement_preference as ehpp
+    from control_plane import executive_placement_preference as epp
+    from control_plane import executive_selected_physical_reservation as espr
+    from control_plane.executive_capacity_join import (
+        CapacityJoin,
+        RegisteredCapacityJoin,
+    )
+    from control_plane.executive_capacity_observation import (
+        OBSERVATION_LIFETIME_MS,
+        OBSERVATION_SCHEMA,
+    )
+    from tests import test_executive_selected_physical_reservation as fp3b
+
+    now_ms = runtime.store.now_ms()
+    with runtime.store.read() as connection:
+        source = executive_runtime._validated_capacity_source_root(
+            connection,
+            source_root_job_id=source_root.job_id,
+            expected_revision=source_revision,
+            now_ms=now_ms,
+        )
+        target = executive_runtime._capacity_target_definition()
+        (
+            _selection_contract,
+            responsibility,
+            demand,
+            candidates,
+            rows_by_identity,
+        ) = executive_runtime._capacity_c1_inputs(
+            connection,
+            source=source,
+            target=target,
+            now_ms=now_ms,
+        )
+    base = executive_runtime.select_placement(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=candidates,
+    )
+    assert base.state.value == "tie_abstained"
+    assert len(candidates) == 2
+
+    host_rows = {
+        "c2-codex-read": (
+            fp3b.HOST_M1,
+            fp3b.BOOT_M1,
+            fp3b.POOL_M1,
+            fp3b._capacity_snapshot(
+                host_ref=fp3b.HOST_M1,
+                boot_ref=fp3b.BOOT_M1,
+                pool_ref=fp3b.POOL_M1,
+                logical_cpu_count=12,
+                load1_milli=9_000,
+                physical_memory_bytes=32 * 1024**3,
+                free_pages=500_000,
+                inactive_pages=200_000,
+                speculative_pages=50_000,
+                compressed_pages=150_000,
+                swap_used_bytes=512 * 1024**2,
+                pool_free_bytes=180 * 1024**3,
+            ),
+        ),
+        "c2-codex-read-b": (
+            fp3b.HOST_M3,
+            fp3b.BOOT_M3,
+            fp3b.POOL_M3,
+            fp3b._capacity_snapshot(
+                host_ref=fp3b.HOST_M3,
+                boot_ref=fp3b.BOOT_M3,
+                pool_ref=fp3b.POOL_M3,
+                logical_cpu_count=12,
+                load1_milli=1_000,
+                physical_memory_bytes=32 * 1024**3,
+                free_pages=900_000,
+                inactive_pages=300_000,
+                speculative_pages=100_000,
+                compressed_pages=50_000,
+                swap_used_bytes=128 * 1024**2,
+                pool_free_bytes=300 * 1024**3,
+            ),
+        ),
+    }
+    from control_plane.executive_host_pressure import canonical_host_pressure_json
+    for _worker_id, (_host_ref, _boot_ref, _pool_ref, snapshot) in host_rows.items():
+        pressure = fp3b._pressure_snapshot(
+            host_ref=_host_ref,
+            boot_ref=_boot_ref,
+            logical_cpu_count=snapshot["logical_cpu_count"],
+            load1_milli=snapshot["load1_milli"],
+        )
+        pressure["observed_at_ms"] = now_ms - 5
+        snapshot["observed_at_ms"] = now_ms - 2
+        snapshot["hp0_observed_at_ms"] = now_ms - 5
+        snapshot["hp0_sha256"] = hashlib.sha256(
+            canonical_host_pressure_json(pressure)
+        ).hexdigest()
+    policy = fp3b._fleet_policy()
+    policy["freshness"]["sample_max_age_ms"] = 60_000
+    policy["freshness"]["decision_to_effect_max_ms"] = 60_000
+    policy["waits"]["service_request_max_ms"] = 60_000
+    policy["waits"]["database_lock_max_ms"] = 60_000
+
+    candidate_by_worker = {item.worker_id: item for item in candidates}
+    qualified = []
+    inputs = {}
+    for worker_id in sorted(candidate_by_worker):
+        host_ref, boot_ref, _pool_ref, snapshot = host_rows[worker_id]
+        row = rows_by_identity[(worker_id, "default")]
+        metadata = json.loads(row["metadata_json"])
+        join_wire = metadata["capacity_join"]
+        join = RegisteredCapacityJoin(
+            worker_id=worker_id,
+            quota_class="default",
+            provider="codex",
+            capacity_join=CapacityJoin(
+                host_ref=join_wire["host_ref"],
+                capacity_capability_id=join_wire["capacity_capability_id"],
+                provider_capacity_schema=join_wire["provider_capacity_schema"],
+                worker_source_config_digest=join_wire["worker_source_config_digest"],
+            ),
+        )
+        observed_at_ms = now_ms
+        without_digest = {
+            "schema_version": OBSERVATION_SCHEMA,
+            "host_ref": host_ref,
+            "capacity_capability_id": join.capacity_join.capacity_capability_id,
+            "realm_metadata_valid": True,
+            "credential_present": True,
+            "credential_metadata_valid": True,
+            "provider_binary_attested": True,
+            "broker_generation_ready": True,
+            "source_config_digest": join.capacity_join.worker_source_config_digest,
+            "observed_at": datetime.fromtimestamp(
+                observed_at_ms / 1000, tz=timezone.utc
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "expires_at": datetime.fromtimestamp(
+                (observed_at_ms + OBSERVATION_LIFETIME_MS) / 1000,
+                tz=timezone.utc,
+            ).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        }
+        rendered = json.dumps(
+            without_digest,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("utf-8")
+        capacity_observation = {
+            **without_digest,
+            "observation_digest": hashlib.sha256(rendered).hexdigest(),
+        }
+        request = fp3b._request(
+            host_ref=host_ref,
+            boot_ref=boot_ref,
+            worker_id=worker_id,
+        )
+        observations = fp3b._observations(
+            host_ref=host_ref,
+            boot_ref=boot_ref,
+            snapshot=snapshot,
+        )
+        observations["observed_at_ms"] = now_ms
+        entry = {
+            "placement_candidate": candidate_by_worker[worker_id],
+            "registered_join": join,
+            "capacity_observation": capacity_observation,
+            "request": request,
+            "policy": policy,
+            "current_charges": [],
+            "observations": observations,
+            "decision_time_ms": now_ms,
+        }
+        inputs[worker_id] = entry
+        qualified.append(ehpp.qualify_host_candidate(**entry))
+
+    artifact = ehpp.make_host_capacity_preference(
+        decision=base,
+        candidates=tuple(qualified),
+        generation=1,
+    )
+    selection = epp.select_placement_v2(
+        responsibility=responsibility,
+        demand=demand,
+        candidates=candidates,
+        preference=artifact.preference,
+        resolved_capacity_sources=artifact.resolved_capacity_sources(),
+    )
+    assert selection.state.value == "selected"
+    assert selection.selected["worker_id"] == "c2-codex-read-b"
+    winner = inputs[selection.selected["worker_id"]]
+    package = espr.make_selected_physical_reservation_package(
+        selection=selection,
+        artifact=artifact,
+        qualified_candidates=tuple(qualified),
+        **winner,
+    )
+    return package, selection, artifact, tuple(qualified), policy, winner["observations"]
+
+
+def _c2_enable_physical_candidate_schema(monkeypatch):
+    candidate = executive_runtime._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE
+    assert executive_runtime._migration_checksum(candidate) == _M2_CANDIDATE_CHECKSUM
+    monkeypatch.setattr(
+        executive_runtime,
+        "_MIGRATIONS",
+        _M2_V5_VECTOR + ((6, "synthetic_m2_physical_resources", candidate),),
+    )
+    monkeypatch.setattr(executive_runtime, "SCHEMA_VERSION", 6)
+    monkeypatch.setattr(
+        executive_runtime,
+        "_NORMALIZED_V5_SCHEMA_DIGEST",
+        _M2_V6_CANDIDATE_DIGEST,
+    )
+
+
+def _physical_rows(runtime):
+    with runtime.store.read() as connection:
+        return {
+            "headers": [
+                tuple(row)
+                for row in connection.execute(
+                    "SELECT * FROM physical_resource_commitments ORDER BY commitment_id"
+                )
+            ],
+            "demands": [
+                tuple(row)
+                for row in connection.execute(
+                    "SELECT * FROM physical_resource_demands ORDER BY commitment_id,dimension,capacity_pool_id"
+                )
+            ],
+            "events": [
+                tuple(row)
+                for row in connection.execute(
+                    "SELECT * FROM events WHERE aggregate_type='physical_resource_operation' ORDER BY event_id"
+                )
+            ],
+        }
+
+
+def test_c2_fp4_atomically_claims_v2_selected_worker_and_physical_reservation(
+    tmp_path, monkeypatch
+):
+    from tests import test_executive_selected_physical_reservation as fp3b
+
+    _c2_enable_physical_candidate_schema(monkeypatch)
+    runtime, source_root, source_revision = _c2_r1a_ready_source(
+        tmp_path,
+        monkeypatch,
+        capacity_join_metadata={
+            "capacity_join": _c2_capacity_join_wire("c2-codex-read", fp3b.HOST_M1)
+        },
+    )
+    runtime.workers.register_worker(
+        "c2-codex-read-b",
+        provider="codex",
+        account_label="c2-secondary",
+        worker_type="codex",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cost_class": "small",
+                "capabilities": ["read"],
+                "metadata": {
+                    "capacity_join": _c2_capacity_join_wire(
+                        "c2-codex-read-b", fp3b.HOST_M3
+                    )
+                },
+            }
+        },
+    )
+    package, selection, artifact, qualified, policy, observations = _c2_physical_package(
+        runtime, source_root, source_revision
+    )
+
+    outcome = runtime.commit_initial_capacity_placement(
+        source_root.job_id,
+        expected_source_root_revision=source_revision,
+        selected_physical_package=package,
+        placement_selection_v2=selection,
+        host_preference_artifact=artifact,
+        qualified_host_candidates=qualified,
+        physical_policy=policy,
+        physical_observations=observations,
+    )
+
+    assert outcome.fresh_attempt_lease is not None
+    assert outcome.fresh_attempt_lease.attempt.worker_id == "c2-codex-read-b"
+    rows = _physical_rows(runtime)
+    assert len(rows["headers"]) == 1
+    assert len(rows["demands"]) == 1
+    assert len(rows["events"]) == 1
+    assert outcome.physical_reservation_receipt is not None
+    assert outcome.physical_reservation_receipt["request_fingerprint"] == package.to_dict()[
+        "selected_qualification"
+    ]["request_fingerprint"]
+    assert all(row[8] == "RESERVED" for row in rows["headers"])
+
+
+def test_c2_fp4_failure_after_physical_insert_rolls_back_claim_and_reservation(
+    tmp_path, monkeypatch
+):
+    from tests import test_executive_selected_physical_reservation as fp3b
+
+    _c2_enable_physical_candidate_schema(monkeypatch)
+    runtime, source_root, source_revision = _c2_r1a_ready_source(
+        tmp_path,
+        monkeypatch,
+        capacity_join_metadata={
+            "capacity_join": _c2_capacity_join_wire("c2-codex-read", fp3b.HOST_M1)
+        },
+    )
+    runtime.workers.register_worker(
+        "c2-codex-read-b",
+        provider="codex",
+        account_label="c2-secondary",
+        worker_type="codex",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cost_class": "small",
+                "capabilities": ["read"],
+                "metadata": {
+                    "capacity_join": _c2_capacity_join_wire(
+                        "c2-codex-read-b", fp3b.HOST_M3
+                    )
+                },
+            }
+        },
+    )
+    package, selection, artifact, qualified, policy, observations = _c2_physical_package(
+        runtime, source_root, source_revision
+    )
+    before = _c2_durable_state(runtime)
+    assert _physical_rows(runtime) == {"headers": [], "demands": [], "events": []}
+
+    def fail_at_checkpoint(phase):
+        if phase == "after_physical_reservation_insert":
+            raise RuntimeError("injected FP4 failure")
+
+    monkeypatch.setattr(executive_runtime, "_C2_R1A_TEST_HOOK", fail_at_checkpoint)
+    with pytest.raises(RuntimeError, match="injected FP4 failure"):
+        runtime.commit_initial_capacity_placement(
+            source_root.job_id,
+            expected_source_root_revision=source_revision,
+            selected_physical_package=package,
+            placement_selection_v2=selection,
+            host_preference_artifact=artifact,
+            qualified_host_candidates=qualified,
+            physical_policy=policy,
+            physical_observations=observations,
+        )
+
+    assert _c2_durable_state(runtime) == before
+    assert _physical_rows(runtime) == {"headers": [], "demands": [], "events": []}
+    assert runtime.current_capacity_commitment(source_root.job_id) is None
+
+
+def _c2_fp4_fixture(tmp_path, monkeypatch):
+    from tests import test_executive_selected_physical_reservation as fp3b
+
+    _c2_enable_physical_candidate_schema(monkeypatch)
+    runtime, source_root, source_revision = _c2_r1a_ready_source(
+        tmp_path,
+        monkeypatch,
+        capacity_join_metadata={
+            "capacity_join": _c2_capacity_join_wire("c2-codex-read", fp3b.HOST_M1)
+        },
+    )
+    runtime.workers.register_worker(
+        "c2-codex-read-b",
+        provider="codex",
+        account_label="c2-secondary",
+        worker_type="codex",
+        capabilities=["read"],
+        quota_classes={
+            "default": {
+                "provider": "codex",
+                "model": "gpt-5.6-sol",
+                "effort": "xhigh",
+                "cost_class": "small",
+                "capabilities": ["read"],
+                "metadata": {
+                    "capacity_join": _c2_capacity_join_wire(
+                        "c2-codex-read-b", fp3b.HOST_M3
+                    )
+                },
+            }
+        },
+    )
+    package, selection, artifact, qualified, policy, observations = _c2_physical_package(
+        runtime, source_root, source_revision
+    )
+    kwargs = {
+        "selected_physical_package": package,
+        "placement_selection_v2": selection,
+        "host_preference_artifact": artifact,
+        "qualified_host_candidates": qualified,
+        "physical_policy": policy,
+        "physical_observations": observations,
+    }
+    return runtime, source_root, source_revision, kwargs
+
+
+def test_c2_fp4_replay_verifies_durable_physical_rows_without_rerunning_live_selection(
+    tmp_path, monkeypatch
+):
+    from control_plane import executive_selected_physical_reservation as espr
+
+    runtime, source_root, source_revision, kwargs = _c2_fp4_fixture(
+        tmp_path, monkeypatch
+    )
+    fresh = runtime.commit_initial_capacity_placement(
+        source_root.job_id,
+        expected_source_root_revision=source_revision,
+        **kwargs,
+    )
+    before = _c2_durable_state(runtime)
+    physical_before = _physical_rows(runtime)
+
+    def must_not_re_evaluate(*_args, **_kwargs):
+        raise AssertionError("causal replay must not rerun live physical selection")
+
+    monkeypatch.setattr(
+        espr.SelectedPhysicalReservationPackage,
+        "evaluate_for_commit",
+        must_not_re_evaluate,
+    )
+    replay = runtime.commit_initial_capacity_placement(
+        source_root.job_id,
+        expected_source_root_revision=source_revision,
+        **kwargs,
+    )
+
+    assert replay.commitment_event == fresh.commitment_event
+    assert replay.mutation_disposition == "REPLAYED_EXISTING"
+    assert replay.fresh_attempt_lease is None
+    assert replay.physical_reservation_receipt is not None
+    assert replay.physical_reservation_receipt["request_fingerprint"] == (
+        fresh.physical_reservation_receipt["request_fingerprint"]
+    )
+    assert _c2_durable_state(runtime) == before
+    assert _physical_rows(runtime) == physical_before
+
+
+def test_c2_fp4_registry_host_binding_move_refuses_before_any_commit(tmp_path, monkeypatch):
+    from tests import test_executive_selected_physical_reservation as fp3b
+
+    runtime, source_root, source_revision, kwargs = _c2_fp4_fixture(
+        tmp_path, monkeypatch
+    )
+    moved = {
+        "capacity_join": _c2_capacity_join_wire("c2-codex-read-b", fp3b.HOST_M2)
+    }
+    with runtime.store.transaction() as connection:
+        connection.execute(
+            "UPDATE worker_quota_classes SET metadata_json=? "
+            "WHERE worker_id='c2-codex-read-b' AND quota_class='default'",
+            (json.dumps(moved, sort_keys=True, separators=(",", ":")),),
+        )
+    before = _c2_durable_state(runtime)
+    physical_before = _physical_rows(runtime)
+
+    with pytest.raises(StateConflict, match="C2_PHYSICAL_CAPACITY_JOIN_MOVED"):
+        runtime.commit_initial_capacity_placement(
+            source_root.job_id,
+            expected_source_root_revision=source_revision,
+            **kwargs,
+        )
+    assert _c2_durable_state(runtime) == before
+    assert _physical_rows(runtime) == physical_before
+
+
+def test_c2_fp4_transaction_current_charge_move_refuses_without_c2_mutation(
+    tmp_path, monkeypatch
+):
+    import copy
+
+    runtime, source_root, source_revision, kwargs = _c2_fp4_fixture(
+        tmp_path, monkeypatch
+    )
+    package = kwargs["selected_physical_package"]
+    policy = kwargs["physical_policy"]
+    observations = kwargs["physical_observations"]
+    binding = {"origin": "SYNTHETIC_TEST_ONLY", "runtime": "runtime-test"}
+
+    def admission(self, request, caller_context, *, connection=None, stage="entry"):
+        return {
+            "policy": copy.deepcopy(policy),
+            "observations": copy.deepcopy(observations),
+            "binding": copy.deepcopy(binding),
+        }
+
+    monkeypatch.setattr(
+        executive_runtime.ResourceBroker, "_physical_admission", admission
+    )
+    prior = copy.deepcopy(package.to_dict()["reservation_input"]["request"])
+    prior["operation_key"] = "fleet-prior-charge"
+    prior["command_id"] = "physical:fleet-prior-charge"
+    result = runtime.broker.reserve_physical(prior, caller_context=None)
+    assert result["admitted"] is True
+    before = _c2_durable_state(runtime)
+    physical_before = _physical_rows(runtime)
+
+    with pytest.raises(StateConflict, match="C2_PHYSICAL_CURRENT_CHARGES_MOVED"):
+        runtime.commit_initial_capacity_placement(
+            source_root.job_id,
+            expected_source_root_revision=source_revision,
+            **kwargs,
+        )
+    assert _c2_durable_state(runtime) == before
+    assert _physical_rows(runtime) == physical_before
+
+
+def test_c2_fp4_commit_does_not_grant_begin_permission(tmp_path, monkeypatch):
+    runtime, source_root, source_revision, kwargs = _c2_fp4_fixture(
+        tmp_path, monkeypatch
+    )
+    outcome = runtime.commit_initial_capacity_placement(
+        source_root.job_id,
+        expected_source_root_revision=source_revision,
+        **kwargs,
+    )
+    assert outcome.physical_reservation_receipt is not None
+    assert "physical_reservation_receipt" not in outcome.to_dict()
+    assert "fresh_begin" not in outcome.physical_reservation_receipt
+    with runtime.store.read() as connection:
+        rows = connection.execute(
+            "SELECT state,begin_event_id FROM physical_resource_commitments"
+        ).fetchall()
+    assert rows
+    assert all(row["state"] == "RESERVED" for row in rows)
+    assert all(row["begin_event_id"] is None for row in rows)
+
+
+def test_c2_capacity_candidate_evidence_is_stable_when_only_decision_clock_moves(
+    tmp_path, monkeypatch
+):
+    runtime, source_root, source_revision = _c2_r1a_ready_source(tmp_path, monkeypatch)
+    target = executive_runtime._capacity_target_definition()
+    with runtime.store.read() as connection:
+        source = executive_runtime._validated_capacity_source_root(
+            connection,
+            source_root_job_id=source_root.job_id,
+            expected_revision=source_revision,
+            now_ms=runtime.store.now_ms(),
+        )
+        first = executive_runtime._capacity_c1_inputs(
+            connection,
+            source=source,
+            target=target,
+            now_ms=runtime.store.now_ms(),
+        )[3]
+        second = executive_runtime._capacity_c1_inputs(
+            connection,
+            source=source,
+            target=target,
+            now_ms=runtime.store.now_ms() + 60_000,
+        )[3]
+    assert first == second
+
+
+def test_c2_fp4_incomplete_physical_context_refuses_before_database_mutation(
+    tmp_path, monkeypatch
+):
+    runtime, source_root, source_revision = _c2_r1a_ready_source(tmp_path, monkeypatch)
+    before = _c2_durable_state(runtime)
+    with pytest.raises(StateConflict, match="C2_PHYSICAL_CONTEXT_INCOMPLETE"):
+        runtime.commit_initial_capacity_placement(
+            source_root.job_id,
+            expected_source_root_revision=source_revision,
+            selected_physical_package=object(),
+        )
+    assert _c2_durable_state(runtime) == before

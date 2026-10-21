@@ -903,6 +903,8 @@ def _from_nw_reflection(asof: date) -> list[dict]:
         for n in (rep.get("nudges") or []):
             if not isinstance(n, dict) or n.get("severity") not in ("high", "medium"):
                 continue
+            if not nw_reflection.nudge_is_evaluable(rep, n, asof=asof):
+                continue
             code = str(n.get("code", "other"))
             kind = str(n.get("kind", "other"))
             sev = 0.8 if n.get("severity") == "high" else 0.4
@@ -1272,12 +1274,16 @@ def _annotate_readiness(
 # build + write
 # ─────────────────────────────────────────────────────────────────────────────────────────────────
 
-def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
+def build(asof: date | None = None, *, cio_rep: dict | None = None,
+          discovery_bundle: object | None = None, discovery_now: str | None = None) -> dict:
     """Fuse every accountability artifact into a RANKED agenda dict. Deterministic and READ-ONLY,
     never raises. Every source degrades to [] on missing data (charter P2). Items with empty evidence
     are dropped (charter P3 — no evidence, no item). `cio_rep` may be injected (tests / to avoid a
     second cio.review); when None it is computed once here. Agent OS readiness is read through the
-    existing CEO-brief bridge and attached only after rank, score, and age are final."""
+    existing CEO-brief bridge and attached only after rank, score, and age are final.
+    Optional discovery is a public-safe unranked count projection. Without an injected
+    bundle it reads the existing NW reflection owner; explicit bundles require a clock.
+    Unavailable evidence is never represented as zero gaps."""
     asof = asof or date.today()
 
     if cio_rep is None:
@@ -1408,6 +1414,9 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
     else:
         items = annotated_items
 
+    discovery = _discovery_projection(discovery_bundle, discovery_now, asof=asof)
+    from brain.improvement_discovery import public_note
+
     counts: dict[str, int] = {}
     for it in items:
         counts[it["class"]] = counts.get(it["class"], 0) + 1
@@ -1421,10 +1430,21 @@ def build(asof: date | None = None, *, cio_rep: dict | None = None) -> dict:
                    for o in (OWNER_SELF, OWNER_OPUS, OWNER_FABLE)},
         "items": items,
         "readiness_input": readiness_input,
+        "discovery": discovery,
         "note": ("Advisory only. This agenda RANKS and WRITES — it never trades, flips a flag, or "
                  "mutates a seat. self-tunable items are actionable only by self_tune (L4) through the "
-                 "Lab harness gates; opus-session/fable-review items need a session."),
+                 "Lab harness gates; opus-session/fable-review items need a session." + public_note(discovery)),
     }
+
+
+def _discovery_projection(bundle: object, now: str | None, *, asof: date | None = None) -> dict:
+    # This join is deliberately AFTER frozen ranking/readiness. It cannot create
+    # ranked items, self-tune actions, or Executive jobs. Private prose stays out.
+    from brain.improvement_discovery import optional_agenda_projection
+    if bundle is None:
+        from brain.improvement_discovery_nw import latest_agenda_projection
+        return latest_agenda_projection(root=_ROOT, asof=asof or date.today(), now=now)
+    return optional_agenda_projection(bundle, now=now)
 
 
 def _md(agenda: dict) -> str:
@@ -1465,6 +1485,8 @@ def _md(agenda: dict) -> str:
         L += ["", "**Degraded warnings.**"]
         L.extend(f"- {warning}" for warning in degraded)
     L.append("")
+    from brain.improvement_discovery import render_public_summary
+    L.extend(render_public_summary(agenda.get("discovery")))
     if not agenda.get("items"):
         L += ["_No items — every accountability source is clean or absent (P2 no-op)._"]
         return "\n".join(L)

@@ -137,6 +137,17 @@ class TestLoopMaintenanceStepFailures:
             "brain.ledger", "brain.macro_risk", "brain.calibration",
             "data_layer.store",
         ]
+        # Every write goes through monkeypatch so it is undone at teardown.
+        # `setattr(parent, leaf, stub)` and `sys.modules[mod_name] = stub` used
+        # to be raw: the first bound the stub as an attribute of the real parent
+        # package (which is how pytest's own
+        # `monkeypatch.setattr("pkg.mod.attr", ...)` resolves), and the second
+        # ran BEFORE `monkeypatch.setitem`, so setitem recorded the stub as the
+        # "original" and restored the stub rather than removing the key.
+        # The `if mod_name not in sys.modules` guard hid both: in one serial
+        # pytest process these are all imported before this test runs, so
+        # nothing was stubbed. Under `scripts/ci_pytest.py --jobs N` this test
+        # can run first and leak `portfolio.desk_ab` into everything after it.
         for mod_name in stub_modules:
             # Only stub if not already importable (keeps the real ones if present)
             if mod_name not in sys.modules:
@@ -145,12 +156,11 @@ class TestLoopMaintenanceStepFailures:
                 for i in range(1, len(parts)):
                     parent = ".".join(parts[:i])
                     if parent not in sys.modules:
-                        sys.modules[parent] = _make_stub(parent)
+                        monkeypatch.setitem(sys.modules, parent, _make_stub(parent))
                 stub = _make_stub(mod_name)
                 # attach to parent so "from parent import child" works
                 parent_name = ".".join(parts[:-1])
-                setattr(sys.modules[parent_name], parts[-1], stub)
-                sys.modules[mod_name] = stub
+                monkeypatch.setattr(sys.modules[parent_name], parts[-1], stub, raising=False)
                 monkeypatch.setitem(sys.modules, mod_name, stub)
 
         # Give all stubs no-op callables
@@ -161,13 +171,21 @@ class TestLoopMaintenanceStepFailures:
                              "track_record", "all_theses", "connect", "save_track_record",
                              "persist", "latest"):
                     if not hasattr(m, attr):
-                        setattr(m, attr, lambda *a, **kw: {})
+                        # `m` is the REAL module whenever the guard above skipped
+                        # stubbing it, so this must be undone at teardown too.
+                        monkeypatch.setattr(m, attr, lambda *a, **kw: {}, raising=False)
 
         # Now inject the real failure: calibration.persist raises
         import importlib
         cal_mod = sys.modules.get("brain.calibration")
         assert cal_mod is not None
-        cal_mod.persist = lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("injected: calibration failure"))
+        # Was a raw assignment: it left the real brain.calibration.persist
+        # raising for every later test sharing the process.
+        monkeypatch.setattr(
+            cal_mod, "persist",
+            lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("injected: calibration failure")),
+            raising=False,
+        )
 
         # Spy: the step AFTER calibration.persist in the real source is outcomes.realized_returns
         # being used — but for simplicity we spy on a later top-level try block via rejections.record.
@@ -569,14 +587,11 @@ class TestSettleLocks:
         import sys, types
         for mod_name in ("scripts.fill_pending_now", "bot.settle", "bot"):
             if mod_name not in sys.modules:
-                m = types.ModuleType(mod_name)
-                sys.modules[mod_name] = m
-                monkeypatch.setitem(sys.modules, mod_name, m)
+                monkeypatch.setitem(sys.modules, mod_name, types.ModuleType(mod_name))
         fill_mod = sys.modules["scripts.fill_pending_now"]
-        fill_mod.settle = lambda *a, **kw: None
+        monkeypatch.setattr(fill_mod, "settle", lambda *a, **kw: None, raising=False)
         bot_settle = sys.modules.get("bot.settle") or types.ModuleType("bot.settle")
-        bot_settle.settle_us = lambda: None
-        sys.modules["bot.settle"] = bot_settle
+        monkeypatch.setattr(bot_settle, "settle_us", lambda: None, raising=False)
         monkeypatch.setitem(sys.modules, "bot.settle", bot_settle)
 
         sched_mod._settle_pending_job()

@@ -67,12 +67,43 @@ def _broker(tmp_path: Path, executor=None) -> PrivilegedActionBroker:
     )
 
 
+def test_trusted_effect_paths_cover_every_root_actuator() -> None:
+    assert broker_module._TRUSTED_EFFECT_PATHS == (
+        "ops/executive_os/service-control.sh",
+        "ops/executive_os/provision-worker-auth.sh",
+        "ops/executive_os/secondary_host_power_policy.py",
+    )
+
+
 def test_peer_uid_must_be_allowlisted_before_spawn(tmp_path: Path) -> None:
     executor = FakeExecutor()
     broker = _broker(tmp_path, executor)
     with pytest.raises(PeerAuthorizationError):
         broker.handle(_raw(), peer_uid=502)
     assert executor.calls == []
+
+
+def test_power_policy_action_uses_existing_receipt_and_replay_owner(tmp_path: Path) -> None:
+    executor = FakeExecutor(stdout=b'{"autorestart":1,"scope":"charger","sleep":0}\n')
+    broker = _broker(tmp_path, executor)
+
+    first = broker.handle(
+        _raw("executive.host.prepare_secondary_power_policy", "req-power-001"),
+        peer_uid=501,
+    )
+    second = broker.handle(
+        _raw("executive.host.prepare_secondary_power_policy", "req-power-001"),
+        peer_uid=501,
+    )
+
+    assert first == second
+    assert first["effect_class"] == "HOST_POWER_POLICY"
+    assert first["action"] == "executive.host.prepare_secondary_power_policy"
+    assert first["outcome"] == "SUCCEEDED"
+    assert len(executor.calls) == 1
+    argv = executor.calls[0][0]
+    assert argv[:4] == ("/usr/bin/python3", "-I", "-S", "-B")
+    assert argv[4].endswith("/ops/executive_os/secondary_host_power_policy.py")
 
 
 def test_success_persists_terminal_receipt_and_replays_without_second_spawn(tmp_path: Path) -> None:
@@ -182,6 +213,35 @@ def test_stale_inflight_different_request_hash_is_conflict(tmp_path: Path) -> No
     assert executor.calls == []
 
 
+def test_power_policy_reserved_exit_75_preserves_effect_unknown_marker(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75, stderr=b"secondary-host power policy effect unknown\n")
+    broker = _broker(tmp_path, executor)
+    raw = _raw("executive.host.prepare_secondary_power_policy", "req-power-unknown")
+
+    with pytest.raises(EffectUnknownError, match="action-level effect uncertainty"):
+        broker.handle(raw, peer_uid=501)
+
+    assert len(executor.calls) == 1
+    assert broker.inflight_path("req-power-unknown").is_file()
+    assert not broker.receipt_path("req-power-unknown").exists()
+    projection = broker.query_status(
+        {"schema": STATUS_REQUEST_SCHEMA, "request_id": "req-power-unknown"},
+        peer_uid=501,
+    )
+    assert projection["status"] == "EFFECT_UNKNOWN"
+
+
+def test_non_power_exit_75_remains_terminal_failed(tmp_path: Path) -> None:
+    executor = FakeExecutor(returncode=75)
+    broker = _broker(tmp_path, executor)
+
+    receipt = broker.handle(_raw("executive.services.start", "req-service-75"), peer_uid=501)
+
+    assert receipt["outcome"] == "FAILED"
+    assert receipt["exit_code"] == 75
+    assert not broker.inflight_path("req-service-75").exists()
+
+
 def test_nonzero_child_is_failed_and_external_text_is_bounded_and_redacted(tmp_path: Path) -> None:
     secret = "sk-ant-" + "x" * 40
     executor = FakeExecutor(returncode=65, stderr=("bad credential " + secret + "\n").encode())
@@ -191,7 +251,118 @@ def test_nonzero_child_is_failed_and_external_text_is_bounded_and_redacted(tmp_p
     assert result["exit_code"] == 65
     assert secret not in json.dumps(result)
     assert "<redacted>" in result["stderr_excerpt"]
-    assert len(result["stderr_excerpt"]) <= 320
+    assert len(result["stderr_excerpt"]) <= 300
+
+
+def test_oversized_streams_generate_exact_three_hundred_character_excerpts(tmp_path: Path) -> None:
+    marker = "...[truncated]"
+    stdout = ("output line " * 40).encode()
+    secret = "sk-ant-" + "x" * 47
+    stderr = ("ok " * 92 + secret + " trailing" * 40).encode()
+    executor = FakeExecutor(returncode=65, stdout=stdout, stderr=stderr)
+    broker = _broker(tmp_path, executor)
+
+    receipt = broker.handle(_raw(), peer_uid=501)
+    persisted = json.loads(broker.receipt_path("req-001").read_text())
+
+    assert receipt == persisted
+    assert len(receipt["stdout_excerpt"]) == 300
+    assert len(receipt["stderr_excerpt"]) == 300
+    assert receipt["stdout_excerpt"] == ("output line " * 40)[:286] + marker
+    assert receipt["stderr_excerpt"] == ("ok " * 92 + "<redacted>" + " trailing" * 40)[:286] + marker
+    assert "x" * 8 not in receipt["stderr_excerpt"]
+    assert receipt["stdout_bytes"] == len(stdout)
+    assert receipt["stderr_bytes"] == len(stderr)
+    assert receipt["stdout_sha256"] == hashlib.sha256(stdout).hexdigest()
+    assert receipt["stderr_sha256"] == hashlib.sha256(stderr).hexdigest()
+    assert len(executor.calls) == 1
+
+    assert broker.handle(_raw(), peer_uid=501) == receipt
+    assert len(executor.calls) == 1
+
+
+def test_serve_connection_generates_valid_oversized_stream_excerpts(
+    tmp_path: Path,
+) -> None:
+    class MemoryConnection:
+        def __init__(self, payload: bytes) -> None:
+            self.payload = payload
+            self.sent = bytearray()
+
+        def recv(self, _size: int) -> bytes:
+            payload, self.payload = self.payload, b""
+            return payload
+
+        def sendall(self, payload: bytes) -> None:
+            self.sent.extend(payload)
+
+    stdout = ("output line " * 40).encode()
+    stderr = ("error line " * 40).encode()
+    executor = FakeExecutor(returncode=65, stdout=stdout, stderr=stderr)
+    broker = _broker(tmp_path, executor)
+    connection = MemoryConnection(
+        (json.dumps(_raw(), sort_keys=True, separators=(",", ":")) + "\n").encode()
+    )
+
+    serve_connection(broker, connection, peer_resolver=lambda _connection: 501)
+    response = json.loads(bytes(connection.sent))
+
+    assert response["ok"] is True
+    assert response["receipt"]["stdout_excerpt"] == ("output line " * 40)[:286] + "...[truncated]"
+    assert response["receipt"]["stderr_excerpt"] == ("error line " * 40)[:286] + "...[truncated]"
+    assert response["receipt"]["stdout_sha256"] == hashlib.sha256(stdout).hexdigest()
+    assert response["receipt"]["stderr_sha256"] == hashlib.sha256(stderr).hexdigest()
+    assert len(executor.calls) == 1
+
+
+def test_legacy_314_character_excerpts_replay_without_effect_or_rewrite(tmp_path: Path) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    receipt = json.loads(path.read_text())
+    marker = "...[truncated]"
+    receipt["stdout_excerpt"] = "o" * 300 + marker
+    receipt["stderr_excerpt"] = "e" * 300 + marker
+    raw = (json.dumps(receipt, sort_keys=True, separators=(",", ":")) + "\n").encode()
+    path.write_bytes(raw)
+    before = path.stat()
+
+    replayed = broker.handle(_raw(), peer_uid=501)
+    projection = broker.query_status(_status(), peer_uid=501)
+    after = path.stat()
+
+    assert replayed["stdout_excerpt"] == "o" * 300 + marker
+    assert replayed["stderr_excerpt"] == "e" * 300 + marker
+    assert projection["receipt"]["request_id"] == "req-001"
+    assert projection["installed_release_sha"] == broker.config.release_root.name
+    assert path.read_bytes() == raw
+    assert (after.st_mtime_ns, after.st_size, after.st_ino) == (
+        before.st_mtime_ns, before.st_size, before.st_ino
+    )
+    assert len(executor.calls) == 1
+
+
+@pytest.mark.parametrize("length", [301, 313, 314, 315])
+def test_nonlegacy_oversized_excerpts_fail_read_without_effect(tmp_path: Path, length: int) -> None:
+    executor = FakeExecutor()
+    broker = _broker(tmp_path, executor)
+    broker.handle(_raw(), peer_uid=501)
+    path = broker.receipt_path("req-001")
+    receipt = json.loads(path.read_text())
+    receipt["stdout_excerpt"] = "o" * length
+    if length == 314:
+        receipt["stdout_excerpt"] = "o" * 300 + "...[truncatex]"
+    path.write_text(json.dumps(receipt))
+
+    with pytest.raises(BrokerTrustError, match="stdout_excerpt is invalid"):
+        broker.handle(_raw(), peer_uid=501)
+    assert len(executor.calls) == 1
+
+    path.write_text(json.dumps(receipt))
+    with pytest.raises(BrokerTrustError, match="stdout_excerpt is invalid"):
+        broker.query_status(_status(), peer_uid=501)
+    assert len(executor.calls) == 1
 
 
 def test_receipt_failure_after_spawn_preserves_inflight_as_effect_unknown(tmp_path: Path, monkeypatch) -> None:

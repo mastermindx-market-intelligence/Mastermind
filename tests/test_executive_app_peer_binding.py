@@ -128,3 +128,68 @@ def test_app_reads_share_admitted_runtime_and_c1_cannot_read_them(tmp_path, shor
             await service.close()
             await readers.aclose()
     asyncio.run(exercise())
+
+
+def test_installed_fallback_delegates_to_canonical_boot_owner(tmp_path, monkeypatch):
+    from control_plane import ceo_boot_packet
+    from integrations.executive_mcp import installed as installed_module
+
+    repo = tmp_path / 'mastermind'
+    macro = tmp_path / 'macro'
+    runtime = tmp_path / 'runtime'
+    for path in (repo, macro, runtime):
+        path.mkdir()
+    expected = {'schema': ceo_boot_packet.SCHEMA, 'degraded': []}
+    seen = {}
+
+    def fake_builder(**kwargs):
+        seen.update(kwargs)
+        return expected
+
+    monkeypatch.setattr(ceo_boot_packet, 'build_packet_in_interpreter', fake_builder)
+    readers = installed_module.InstalledExecutiveReaders(
+        repo_root=repo, macro_root=macro, runtime_root=runtime,
+    )
+    try:
+        result = readers._installed_packet(
+            repo_root=repo, macro_root_flag=str(macro), timeout=3.0,
+            now='2026-09-16T10:00:00Z',
+        )
+        assert result == expected
+        assert seen == {
+            'boot_python': None,
+            'repo_root': repo.resolve(),
+            'macro_root': macro.resolve(),
+            'timeout': 3.0,
+            'now': '2026-09-16T10:00:00Z',
+        }
+    finally:
+        asyncio.run(readers.aclose())
+
+
+def test_installed_fallback_binding_mismatch_degrades_locally(tmp_path, monkeypatch):
+    from control_plane import ceo_boot_packet
+    from integrations.executive_mcp import installed as installed_module
+
+    repo = tmp_path / 'mastermind'
+    macro = tmp_path / 'macro'
+    runtime = tmp_path / 'runtime'
+    other = tmp_path / 'other'
+    for path in (repo, macro, runtime, other):
+        path.mkdir()
+    monkeypatch.setattr(
+        ceo_boot_packet, 'build_packet',
+        lambda **_kwargs: {'schema': ceo_boot_packet.SCHEMA, 'degraded': []},
+    )
+    readers = installed_module.InstalledExecutiveReaders(
+        repo_root=repo, macro_root=macro, runtime_root=runtime,
+    )
+    try:
+        result = readers._installed_packet(
+            repo_root=other, macro_root_flag=str(macro), timeout=3.0,
+        )
+        assert result['degraded'] == [
+            'installed boot helper unavailable: source_binding_mismatch'
+        ]
+    finally:
+        asyncio.run(readers.aclose())

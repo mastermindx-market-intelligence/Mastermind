@@ -1,0 +1,26 @@
+[Unit]
+Description=Mastermind Research Read MCP (pinned candidate)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=mastermind-research
+Group=mastermind-research
+WorkingDirectory=/opt/mastermind-research/releases/@MASTERMIND_COMMIT@
+ExecStart=/opt/mastermind-research/venvs/@LOCK_SHA256@/bin/python -I -B /opt/mastermind-research/releases/@MASTERMIND_COMMIT@/scripts/mastermind_research_read_server.py --config /etc/mastermind/research-read-deployment.json
+EnvironmentFile=/etc/mastermind/research-read.env
+Restart=on-failure
+RestartSec=5
+NoNewPrivileges=true
+ProtectSystem=strict
+ReadWritePaths=/var/lib/mastermind-research/audit
+ProtectHome=true
+PrivateTmp=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+CapabilityBoundingSet=
+AmbientCapabilities=
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

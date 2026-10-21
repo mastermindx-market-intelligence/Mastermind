@@ -1,0 +1,156 @@
+--- a/fabric_operator_stop.py
++++ b/fabric_operator_stop.py
+@@ -11,10 +11,59 @@
+ 
+ ENDPOINT = 'https://m2studio.taila6eca1.ts.net/studio-fabric'
+ ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}')
++EVENTS = frozenset((
++    'operator_stop:hook_entered',
++    'operator_stop:exit_non_stop',
++    'operator_stop:exit_no_binding',
++    'operator_stop:mcp_initialize',
++    'operator_stop:mcp_query',
++    'operator_stop:mcp_error',
++    'operator_stop:decision_quiet',
++    'operator_stop:decision_block',
++    'operator_stop:attention_persist',
++    'operator_stop:attention_error',
++    'operator_stop:observation_error',
++    'operator_stop:parse_failure',
++    'operator_stop:attention_existing',
++    'operator_stop:block_emitted',
++))
+ 
+ class NoRedirect(urllib.request.HTTPRedirectHandler):
+     def redirect_request(self, *args, **kwargs):
+         raise ValueError('operator_attention_redirect_refused')
++
++
++def diagnose(event):
++    # Diagnostic failure never changes attention, stdout, or lifecycle authority.
++    mapping = {
++        'operator_stop:hook_entered': 'entered',
++        'operator_stop:exit_non_stop': 'not_stop',
++        'operator_stop:exit_no_binding': 'binding_missing',
++        'operator_stop:mcp_initialize': 'initialize',
++        'operator_stop:mcp_query': 'query',
++        'operator_stop:mcp_error': 'observation_failed',
++        'operator_stop:decision_quiet': 'no_outstanding',
++        'operator_stop:decision_block': 'decision_ready',
++        'operator_stop:attention_persist': 'decision_ready',
++        'operator_stop:attention_error': 'persistence_failed',
++        'operator_stop:observation_error': 'internal_error',
++        'operator_stop:parse_failure': 'invalid_event',
++        'operator_stop:attention_existing': 'attention_already_attempted',
++        'operator_stop:block_emitted': 'block_emitted',
++    }
++    if event not in mapping:
++        return
++    try:
++        from fabric_operator_diagnostics import record
++        record(Path(__file__).resolve().parent,
++               os.environ.get('REMOTE_SUB_RUN_ID', ''), mapping[event])
++    except Exception:
++        pass
++    try:
++        sys.stderr.write(event + '\n')
++        sys.stderr.flush()
++    except Exception:
++        pass
+ 
+ 
+ def read_summaries(token, *, opener=None):
+@@ -38,13 +87,19 @@
+             text=rows[0]
+         return json.loads(text)
+     try:
+-        result=post({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-03-26','capabilities':{},'clientInfo':{'name':'fabric-operator-stop','version':'1'}}})
+-        if 'error' in result or 'Mcp-Session-Id' not in headers:raise ValueError('operator_attention_initialization')
+-        post({'jsonrpc':'2.0','method':'notifications/initialized'})
+-        result=post({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'fabric_operator_returns','arguments':{}}})
+-        content=result['result']
+-        if content.get('isError'):raise ValueError('operator_attention_unavailable')
+-        return json.loads(content['content'][0]['text'])
++        diagnose('operator_stop:mcp_initialize')
++        try:
++            result=post({'jsonrpc':'2.0','id':1,'method':'initialize','params':{'protocolVersion':'2025-03-26','capabilities':{},'clientInfo':{'name':'fabric-operator-stop','version':'1'}}})
++            if 'error' in result or 'Mcp-Session-Id' not in headers:raise ValueError('operator_attention_initialization')
++            post({'jsonrpc':'2.0','method':'notifications/initialized'})
++            diagnose('operator_stop:mcp_query')
++            result=post({'jsonrpc':'2.0','id':2,'method':'tools/call','params':{'name':'fabric_operator_returns','arguments':{}}})
++            content=result['result']
++            if content.get('isError'):raise ValueError('operator_attention_unavailable')
++            return json.loads(content['content'][0]['text'])
++        except Exception:
++            diagnose('operator_stop:mcp_error')
++            raise
+     finally:
+         if 'Mcp-Session-Id' in headers:
+             try:
+@@ -92,25 +147,52 @@
+     finally:os.close(directory_fd)
+ 
+ 
+-def main():
+-    event=json.loads(sys.stdin.buffer.read(65537))
+-    name=event.get('hook_event_name',event.get('hookEventName'))
+-    if name not in ('Stop','stop'):return
++def main(opener=None, directory=None):
++    diagnose('operator_stop:hook_entered')
++    try:
++        event=json.loads(sys.stdin.buffer.read(65537))
++        name=event.get('hook_event_name',event.get('hookEventName'))
++    except Exception:
++        diagnose('operator_stop:parse_failure')
++        raise
++    if name not in ('Stop','stop'):
++        diagnose('operator_stop:exit_non_stop')
++        return
+     token=os.environ.get('FABRIC_OPERATOR_CAPABILITY','')
+     root=os.environ.get('POOL_ORCHESTRATOR_ID','');parent=os.environ.get('REMOTE_SUB_RUN_ID','')
+-    if not ID.fullmatch(root) or not ID.fullmatch(parent):return
+-    summary=read_summaries(token)
++    if not ID.fullmatch(root) or not ID.fullmatch(parent):
++        diagnose('operator_stop:exit_no_binding')
++        return
++    summary=read_summaries(token, opener=opener)
+     signature,result=decide(summary,root,parent)
+-    if not result:return
++    if not result:
++        diagnose('operator_stop:decision_quiet')
++        return
++    diagnose('operator_stop:decision_block')
+     # Metadata-only attention receipt, not worker/lease state. O_EXCL makes
+     # repeated unchanged Stop events quiet, including an interrupted continuation.
+-    directory=Path(__file__).resolve().parent/'lanes'
+-    if not persist_attention(directory,parent,signature,{'root':root,'parent':parent,'summary_sha256':signature,'decision':'block','attention_only':True}):return
++    directory=directory or (Path(__file__).resolve().parent/'lanes')
++    try:
++        kept=persist_attention(directory,parent,signature,{'root':root,'parent':parent,'summary_sha256':signature,'decision':'block','attention_only':True})
++    except Exception:
++        diagnose('operator_stop:attention_error')
++        raise
++    if not kept:
++        diagnose('operator_stop:attention_existing')
++        return
++    diagnose('operator_stop:attention_persist')
+     print(json.dumps(result))
++    sys.stdout.flush()
++    diagnose('operator_stop:block_emitted')
++
++
++def run(opener=None, directory=None):
++    try:
++        main(opener=opener, directory=directory)
++    except Exception:
++        diagnose('operator_stop:observation_error')
++        print('{}')
++
+ 
+ if __name__=='__main__':
+-    try:main()
+-    except Exception:
+-        # A failed observation cannot authorize a worker effect or repeated hook
+-        # block. No endpoint, token, request, provider text or secret is logged.
+-        print('{}')
++    run()

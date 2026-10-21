@@ -9,11 +9,12 @@ WORKER_USER="_mastermind_worker"
 WORKER_GROUP="_mastermind_worker"
 WORKER_UID="451"
 WORKER_GID="451"
+CODEX_ATTESTATION_OWNER_GID="$WORKER_GID"
 PROVIDER_HOME="/var/db/mastermind-executive/workers/codex-01/provider-home"
 CODEX_BINARY="/opt/homebrew/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
-CODEX_VERSION="0.147.0"
+CODEX_VERSION="0.159.2"
 CODEX_TEAM_ID="2DC432GLL2"
-CODEX_SHA256="19c4f144c5226a9f17c58e6f0fa854843b0f77a6eb420f40e2745a12f10f5d37"
+CODEX_SHA256="16593cc2f422d5f398a8e40f550ebbaf1245392528957be342c295920a300704"
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 SYSTEM_BIN="$SYSTEM_ROOT/bin"
 SYSTEM_CONFIG="$SYSTEM_ROOT/config"
@@ -29,15 +30,24 @@ RECOVER_READINESS_TRANSACTION="false"
 EXPECTED_CREDENTIAL_KIND=""
 WORKSPACE_BINDING_CLASS=""
 CREDENTIAL_EXPIRES_AT=""
+REQUALIFY_TERMINAL_ADVERSE_SHA256=""
+REQUALIFY_SAME_GENERATION_TERMINAL_SHA256=""
+RENEW_DEVICE_REVALIDATION_SHA256=""
+REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256=""
+RECOVER_CURRENT_PIN_GRANT_SHA256=""
+RECOVERY_REQUEST_ID=""
 READINESS_RECEIPT="/Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json"
 READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"
 READINESS_LOCK_HELD="false"
 READINESS_LOCK_RELEASE_ON_EXIT="true"
 INSTALLED_CODEX_BINARY=""
+CODEX_EXECUTABLE=""
+USING_INSTALLED_CODEX="false"
 PINNED_CODEX_BINARY=""
 IDENTITY_RESULT=""
 POST_IDENTITY_RESULT=""
 CANARY_RESULT=""
+RECOVERY_OBSERVATION_RESULT=""
 SLOT_ID="codex-01"
 SLOT_SELECTED="false"
 LOW_LEVEL_SLOT_OVERRIDE="false"
@@ -51,6 +61,7 @@ cleanup() {
   [ -z "$IDENTITY_RESULT" ] || /bin/rm -f -- "$IDENTITY_RESULT"
   [ -z "$POST_IDENTITY_RESULT" ] || /bin/rm -f -- "$POST_IDENTITY_RESULT"
   [ -z "$CANARY_RESULT" ] || /bin/rm -f -- "$CANARY_RESULT"
+  [ -z "$RECOVERY_OBSERVATION_RESULT" ] || /bin/rm -f -- "$RECOVERY_OBSERVATION_RESULT"
   if [ "$READINESS_LOCK_HELD" = "true" ] \
     && [ "$READINESS_LOCK_RELEASE_ON_EXIT" = "true" ]; then
     lock_owner="$READINESS_TRANSACTION_LOCK/owner-pid"
@@ -84,7 +95,7 @@ trap 'preserve_readiness_lock_on_signal 131' QUIT
 trap 'preserve_readiness_lock_on_signal 143' TERM
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [options]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --requalify-same-generation-terminal-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256 | --requalify-company-device-drift-sha256 SHA256 | --recover-current-pin-grant-sha256 SHA256 --successor-request-id ID] [options]" >&2
   /bin/echo "modes: --verify-only | --verify-ready | --enroll-service-account | --enroll-personal-access-token | --reauthorize-device | --recover-readiness-transaction" >&2
   exit 64
 }
@@ -102,6 +113,12 @@ while [ "$#" -gt 0 ]; do
     --expected-credential-kind) EXPECTED_CREDENTIAL_KIND="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --workspace-binding-class) WORKSPACE_BINDING_CLASS="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --credential-expires-at) CREDENTIAL_EXPIRES_AT="${2:-}"; shift 2 ;;
+    --requalify-terminal-adverse-sha256) REQUALIFY_TERMINAL_ADVERSE_SHA256="${2:-}"; shift 2 ;;
+    --requalify-same-generation-terminal-sha256) REQUALIFY_SAME_GENERATION_TERMINAL_SHA256="${2:-}"; shift 2 ;;
+    --renew-device-revalidation-sha256) RENEW_DEVICE_REVALIDATION_SHA256="${2:-}"; shift 2 ;;
+    --requalify-company-device-drift-sha256) REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256="${2:-}"; shift 2 ;;
+    --recover-current-pin-grant-sha256) RECOVER_CURRENT_PIN_GRANT_SHA256="${2:-}"; shift 2 ;;
+    --successor-request-id) RECOVERY_REQUEST_ID="${2:-}"; shift 2 ;;
     --codex-binary) CODEX_BINARY="${2:-}"; shift 2 ;;
     --codex-version) CODEX_VERSION="${2:-}"; shift 2 ;;
     --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; LOW_LEVEL_SLOT_OVERRIDE="true"; shift 2 ;;
@@ -146,6 +163,41 @@ resolve_selected_slot() {
 }
 
 resolve_selected_slot
+
+explicit_count=0
+[ -z "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$RENEW_DEVICE_REVALIDATION_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$RECOVER_CURRENT_PIN_GRANT_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ "$explicit_count" -le 1 ] || usage
+# The designated successor request id belongs only to the bounded current-pin
+# recovery transition; no other route may carry it.
+if [ -n "$RECOVERY_REQUEST_ID" ]; then
+  [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ] || usage
+fi
+EXPLICIT_PREDECESSOR_SHA256="${RECOVER_CURRENT_PIN_GRANT_SHA256:-${REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256:-${REQUALIFY_TERMINAL_ADVERSE_SHA256:-${REQUALIFY_SAME_GENERATION_TERMINAL_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}}}}"
+if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
+  [ "$VERIFY_READY" = "true" ] && [ "$SLOT_SELECTED" = "false" ] \
+    && [ "$LOW_LEVEL_SLOT_OVERRIDE" = "false" ] \
+    && [ "$EXPECTED_CREDENTIAL_KIND" = "device-auth" ] \
+    && [ "$WORKSPACE_BINDING_CLASS" = "company-workspace-admin-attested" ] \
+    && [ "${#EXPLICIT_PREDECESSOR_SHA256}" -eq 64 ] || usage
+  case "$EXPLICIT_PREDECESSOR_SHA256" in *[!0-9a-f]*) usage ;; esac
+fi
+if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+  case "$RECOVERY_REQUEST_ID" in
+    *[!A-Za-z0-9._-]*) usage ;;
+  esac
+  case "$RECOVERY_REQUEST_ID" in
+    [A-Za-z0-9]*) ;;
+    *) usage ;;
+  esac
+  [ "${#RECOVERY_REQUEST_ID}" -ge 3 ] && [ "${#RECOVERY_REQUEST_ID}" -le 64 ] || usage
+fi
+if [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+  [ "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" = "654abd66f6baef1b610a6c03fafe85f76fd81ed646266d3ff90db3c6e85e2a7d" ] || usage
+fi
 
 if [ "$SLOT_SELECTED" = "true" ]; then
   case "$SLOT_ID" in
@@ -208,6 +260,20 @@ case "$CODEX_VERSION" in
   ''|*[!0-9A-Za-z._-]*) /bin/echo "Codex version is invalid" >&2; exit 65 ;;
 esac
 INSTALLED_CODEX_BINARY="$SYSTEM_BIN/codex-$CODEX_VERSION"
+CODEX_ATTESTATION_RECEIPT="$SYSTEM_ROOT/codex-attestation-$CODEX_VERSION.json"
+# Once this reviewed version is installed, bind every auth/readiness operation
+# to that root-owned versioned binary. The mutable Homebrew enrollment source is
+# only a pre-install bootstrap input and may legitimately upgrade afterward; it
+# must not break credential rotation, Personal-Pro enrollment, --verify-only, or
+# readiness for an already-installed exact release. --verify-ready remains
+# strictly post-install and therefore refuses when the installed binary is absent.
+if [ -x "$INSTALLED_CODEX_BINARY" ] && [ ! -L "$INSTALLED_CODEX_BINARY" ]; then
+  CODEX_BINARY="$INSTALLED_CODEX_BINARY"
+  USING_INSTALLED_CODEX="true"
+elif [ "$VERIFY_READY" = "true" ]; then
+  /bin/echo "install the exact release before --verify-ready" >&2
+  exit 65
+fi
 for absolute_path in "$PROVIDER_HOME" "$CODEX_BINARY" "$READINESS_RECEIPT"; do
   case "$absolute_path" in
     /*) ;;
@@ -306,7 +372,7 @@ run_codex_as_worker() {
         LC_ALL="C.UTF-8" \
         NO_COLOR="1" \
         PATH="/usr/bin:/bin" \
-        "$PINNED_CODEX_BINARY" "$@"
+        "$CODEX_EXECUTABLE" "$@"
   )
 }
 
@@ -357,45 +423,90 @@ esac
   exit 65
 }
 
-# Never execute the Homebrew/user-owned source while this script is root. Copy
-# it first to a root-owned, non-writable temporary path, then attest and execute
-# only that pinned copy. A raced or partial copy cannot pass strict codesign.
-PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
-/bin/rm -f -- "$PINNED_CODEX_BINARY"
-/usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
-/usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
-/bin/chmod 0555 "$PINNED_CODEX_BINARY"
-[ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
-  && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
-    /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+if [ "$USING_INSTALLED_CODEX" = "true" ]; then
+  # BEGIN installed Codex fast path
+  if ! "$PYTHON_BINARY" -I -S -B - \
+      "$SCRIPT_DIR/../.." "$CODEX_ATTESTATION_RECEIPT" "$INSTALLED_CODEX_BINARY" \
+      "$CODEX_ATTESTATION_OWNER_GID" "$CODEX_VERSION" "$CODEX_TEAM_ID" "$CODEX_SHA256" \
+      >/dev/null 2>&1 <<'PYATTEST'
+import pathlib
+import sys
+
+(
+    release_root,
+    receipt_path,
+    binary_path,
+    owner_gid,
+    expected_version,
+    expected_team,
+    expected_sha256,
+) = sys.argv[1:]
+sys.path.insert(0, str(pathlib.Path(release_root).resolve(strict=True)))
+from control_plane.codex_worker import load_codex_attestation_receipt
+
+attestation = load_codex_attestation_receipt(
+    receipt_path,
+    expected_binary_path=binary_path,
+    expected_owner_gid=int(owner_gid),
+)
+if (
+    attestation.path != binary_path
+    or attestation.version != expected_version
+    or attestation.team_identifier != expected_team
+    or attestation.sha256 != expected_sha256
+):
+    raise SystemExit("installed Codex attestation differs from reviewed constants")
+PYATTEST
+  then
+    /bin/echo "installed Codex attestation receipt validation failed" >&2
+    exit 65
+  fi
+  CODEX_EXECUTABLE="$INSTALLED_CODEX_BINARY"
+  # END installed Codex fast path
+else
+  # BEGIN pre-install Codex staging path
+  # Never execute the Homebrew/user-owned source while this script is root. Copy
+  # it first to a root-owned, non-writable temporary path, then attest and execute
+  # only that pinned copy. A raced or partial copy cannot pass strict codesign.
+  PINNED_CODEX_BINARY="$(/usr/bin/mktemp "$SYSTEM_BIN/.codex-auth-$CODEX_VERSION.XXXXXX")"
+  /bin/rm -f -- "$PINNED_CODEX_BINARY"
+  /usr/bin/ditto --noqtn "$CODEX_BINARY" "$PINNED_CODEX_BINARY"
+  /usr/sbin/chown root:wheel "$PINNED_CODEX_BINARY"
+  /bin/chmod 0555 "$PINNED_CODEX_BINARY"
+  [ -f "$PINNED_CODEX_BINARY" ] && [ ! -L "$PINNED_CODEX_BINARY" ] \
+    && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$PINNED_CODEX_BINARY")" = "0:0:555:1" ] || {
+      /bin/echo "staged Codex binary is not an immutable root-owned regular file" >&2
+      exit 65
+    }
+  case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
+    *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
+  esac
+  /usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
+    /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
     exit 65
   }
-case "$(/usr/bin/stat -f '%Sp' "$PINNED_CODEX_BINARY")" in
-  *+) /bin/echo "staged Codex binary has an unexpected filesystem ACL" >&2; exit 65 ;;
-esac
-/usr/bin/file -b "$PINNED_CODEX_BINARY" | /usr/bin/grep -q '^Mach-O ' || {
-  /bin/echo "Codex binary must be the native macOS executable, not a script or shim" >&2
-  exit 65
-}
-/usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
-  /bin/echo "Codex binary signature is invalid" >&2
-  exit 65
-}
-OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
-[ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
-  /bin/echo "Codex binary bytes do not match the exact reviewed 0.147.0 allowlist" >&2
-  exit 65
-}
-OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
-[ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
-  /bin/echo "Codex binary signer is not OpenAI" >&2
-  exit 65
-}
-OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
-[ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
-  /bin/echo "Codex binary version does not match the explicit allowlist" >&2
-  exit 65
-}
+  /usr/bin/codesign --verify --strict "$PINNED_CODEX_BINARY" >/dev/null 2>&1 || {
+    /bin/echo "Codex binary signature is invalid" >&2
+    exit 65
+  }
+  OBSERVED_SHA256="$(/usr/bin/shasum -a 256 "$PINNED_CODEX_BINARY" | /usr/bin/awk '{print $1}')"
+  [ "$OBSERVED_SHA256" = "$CODEX_SHA256" ] || {
+    /bin/echo "Codex binary bytes do not match the exact reviewed 0.159.2 allowlist" >&2
+    exit 65
+  }
+  OBSERVED_TEAM="$(/usr/bin/codesign -dv --verbose=4 "$PINNED_CODEX_BINARY" 2>&1 | /usr/bin/awk -F= '$1 == "TeamIdentifier" {print $2}')"
+  [ "$OBSERVED_TEAM" = "$CODEX_TEAM_ID" ] || {
+    /bin/echo "Codex binary signer is not OpenAI" >&2
+    exit 65
+  }
+  CODEX_EXECUTABLE="$PINNED_CODEX_BINARY"
+  OBSERVED_VERSION="$(run_codex_as_worker --version 2>/dev/null | /usr/bin/awk '$1 == "codex-cli" {print $2}')"
+  [ "$OBSERVED_VERSION" = "$CODEX_VERSION" ] || {
+    /bin/echo "Codex binary version does not match the explicit allowlist" >&2
+    exit 65
+  }
+  # END pre-install Codex staging path
+fi
 
 AUTH_PATH="$PROVIDER_HOME/auth.json"
 
@@ -529,16 +640,19 @@ recover_readiness_transaction_lock() {
 }
 
 invalidate_readiness_receipt() {
+  local receipt_binding_args
+  receipt_binding_args=()
+  if [ -n "$WORKSPACE_BINDING_CLASS" ]; then
+    receipt_binding_args=(--workspace-binding-class "$WORKSPACE_BINDING_CLASS")
+  fi
   if [ -e "$READINESS_RECEIPT" ] || [ -L "$READINESS_RECEIPT" ]; then
-    [ -f "$READINESS_RECEIPT" ] && [ ! -L "$READINESS_RECEIPT" ] \
-      && [ "$(/usr/bin/stat -f '%u:%g:%Lp:%l' "$READINESS_RECEIPT")" = "0:0:400:1" ] || {
-        /bin/echo "existing provider readiness receipt is unsafe" >&2
-        exit 65
-      }
-    case "$(/usr/bin/stat -f '%Sp' "$READINESS_RECEIPT")" in
-      *+) /bin/echo "existing provider readiness receipt has an ACL" >&2; exit 65 ;;
-    esac
-    /bin/rm -f -- "$READINESS_RECEIPT"
+    if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" invalidate \
+        --receipt "$READINESS_RECEIPT" \
+        --worker-gid "$WORKER_GID" \
+        ${receipt_binding_args[@]+"${receipt_binding_args[@]}"} >/dev/null 2>&1; then
+      /bin/echo "existing provider readiness receipt is unsafe" >&2
+      exit 65
+    fi
   fi
 }
 
@@ -626,24 +740,85 @@ fi
 if [ "$VERIFY_READY" = "true" ]; then
   verify_complete_auth
   verify_installed_binary_available
+  requalification_args=()
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    requalification_args=(--recover-current-pin-grant-sha256 "$RECOVER_CURRENT_PIN_GRANT_SHA256"
+                          --successor-request-id "$RECOVERY_REQUEST_ID")
+  elif [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+    requalification_args=(--requalify-company-device-drift-sha256 "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256")
+  elif [ -n "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ]; then
+    requalification_args=(--requalify-same-generation-terminal-sha256 "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256")
+  elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
+    requalification_args=(--requalify-terminal-adverse-sha256 "$REQUALIFY_TERMINAL_ADVERSE_SHA256")
+  elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+    requalification_args=(--renew-device-revalidation-sha256 "$RENEW_DEVICE_REVALIDATION_SHA256")
+  fi
   if "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reuse \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
       --binary "$INSTALLED_CODEX_BINARY" \
       --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
+      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+      ${requalification_args[@]+"${requalification_args[@]}"} >/dev/null 2>&1; then
     /bin/echo "dedicated worker auth is READY; current passing receipt reused; no canary spent"
     exit 0
   else
     reuse_status=$?
   fi
-  [ "$reuse_status" -eq 3 ] || {
-    /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
-    exit 65
-  }
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    # Status 8 requires qualified ordinary-cause evidence plus full grant
+    # custody. The pinned production exec producer cannot qualify any cause,
+    # so this gate stays closed on the current pin and no provider call below
+    # is ever reached.
+    [ "$reuse_status" -eq 8 ] || {
+      /bin/echo "bounded current-pin recovery is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+    [ "$reuse_status" -eq 7 ] || {
+      /bin/echo "explicit company-device drift requalification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+    [ "$reuse_status" -eq 6 ] || {
+      /bin/echo "explicit device-auth revalidation is not due or eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ]; then
+    # Status 9 admits only a >=24h-old closed terminal failure recorded on the
+    # exact current pin with the exact unchanged credential lstat.
+    [ "$reuse_status" -eq 9 ] || {
+      /bin/echo "explicit same-generation terminal requalification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
+    [ "$reuse_status" -eq 5 ] || {
+      /bin/echo "explicit terminal-adverse requalification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  else
+    [ "$reuse_status" -eq 3 ] || [ "$reuse_status" -eq 4 ] || {
+      /bin/echo "existing provider readiness receipt is stale or invalid; fail closed" >&2
+      exit 65
+    }
+  fi
 
   IDENTITY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-identity.XXXXXX)"
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    # Reached only after status 8.  This observation is transaction-bound to the
+    # designated successor request, the live source, the live credential and one
+    # observation time; it is a reservation prerequisite, never a receipt.
+    RECOVERY_OBSERVATION_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-recovery-observation.XXXXXX)"
+    if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
+        --recovery-observation --slot-id "$SLOT_ID" \
+        --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
+        --successor-request-id "$RECOVERY_REQUEST_ID" \
+        >"$RECOVERY_OBSERVATION_RESULT" 2>/dev/null; then
+      /bin/echo "recovery observation refused before reservation; no canary spent" >&2
+      exit 65
+    fi
+  else
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
       --binary "$INSTALLED_CODEX_BINARY" --provider-home "$PROVIDER_HOME" \
       --worker-user "$WORKER_USER" --worker-group "$WORKER_GROUP" \
@@ -651,17 +826,33 @@ if [ "$VERIFY_READY" = "true" ]; then
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       >"$IDENTITY_RESULT" 2>/dev/null; then
-    /bin/echo "provider identity policy refused before inference; no canary spent" >&2
+    refusal_code="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
+      --refusal-code-stdin 2>/dev/null <"$IDENTITY_RESULT")" || refusal_code=identity_probe_failed
+    /bin/echo "provider identity policy refused before inference: $refusal_code; no canary spent" >&2
     exit 65
   fi
+  fi
 
+  refresh_args=()
+  if [ "$reuse_status" -eq 4 ]; then
+    refresh_args=(--refresh-expired)
+  fi
+  recovery_reserve_args=()
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    recovery_reserve_args=(--recovery-observation-json "$RECOVERY_OBSERVATION_RESULT")
+  else
+    recovery_reserve_args=(--identity-json "$IDENTITY_RESULT")
+  fi
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reserve \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
-      --binary "$INSTALLED_CODEX_BINARY" --identity-json "$IDENTITY_RESULT" \
+      --binary "$INSTALLED_CODEX_BINARY" \
+      "${recovery_reserve_args[@]}" \
       --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" >/dev/null 2>&1; then
+      --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+      ${refresh_args[@]+"${refresh_args[@]}"} \
+      ${requalification_args[@]+"${requalification_args[@]}"} >/dev/null 2>&1; then
     /bin/echo "provider canary reservation failed; no canary spent" >&2
     exit 65
   fi

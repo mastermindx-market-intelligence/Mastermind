@@ -1,0 +1,72 @@
+FF.FF....F                                                               [100%]
+=================================== FAILURES ===================================
+____ test_generated_packet_uses_distinct_tool_output_and_one_terminal_line _____
+test_tool_framing.py:68: in test_generated_packet_uses_distinct_tool_output_and_one_terminal_line
+    assert 'seal --tool-output --packet ' in encoded
+E   assert 'seal --tool-output --packet ' in 'FABRIC_ARTIFACT_REQUEST_V1 {"body_sha256":"5f2ab774c4eb8097f156f7ed1a6ec04b806bed3e87ea9683d9d27ff7ddb0ff88","names":...pletion fail even if the model exits0. No descendants, retries or old-worker replay are authorized by this contract.\n'
+_____ test_actual_helper_tool_transcript_plus_final_answer_is_unambiguous ______
+test_tool_framing.py:76: in test_actual_helper_tool_transcript_plus_final_answer_is_unambiguous
+    diagnostic = run_seal(tmp_path, monkeypatch, capsys, tool_output=True)
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+test_tool_framing.py:61: in run_seal
+    subject.main()
+artifact_production.base.py:386: in main
+    args=parser.parse_args()
+         ^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2012: in parse_args
+    self.error(msg)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2785: in error
+    self.exit(2, _('%(prog)s: error: %(message)s\n') % args)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2772: in exit
+    _sys.exit(status)
+E   SystemExit: 2
+----------------------------- Captured stderr call -----------------------------
+usage: artifact_production.py [-h] --packet PACKET {seal}
+artifact_production.py: error: unrecognized arguments: --tool-output
+_______ test_tool_mode_preserves_binding_and_observation_refusals[bind] ________
+test_tool_framing.py:95: in test_tool_mode_preserves_binding_and_observation_refusals
+    run_seal(tmp_path, monkeypatch, capsys, tool_output=True, refuse=refuse)
+test_tool_framing.py:61: in run_seal
+    subject.main()
+artifact_production.base.py:386: in main
+    args=parser.parse_args()
+         ^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2012: in parse_args
+    self.error(msg)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2785: in error
+    self.exit(2, _('%(prog)s: error: %(message)s\n') % args)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2772: in exit
+    _sys.exit(status)
+E   SystemExit: 2
+----------------------------- Captured stderr call -----------------------------
+usage: artifact_production.py [-h] --packet PACKET {seal}
+artifact_production.py: error: unrecognized arguments: --tool-output
+______ test_tool_mode_preserves_binding_and_observation_refusals[observe] ______
+test_tool_framing.py:95: in test_tool_mode_preserves_binding_and_observation_refusals
+    run_seal(tmp_path, monkeypatch, capsys, tool_output=True, refuse=refuse)
+test_tool_framing.py:61: in run_seal
+    subject.main()
+artifact_production.base.py:386: in main
+    args=parser.parse_args()
+         ^^^^^^^^^^^^^^^^^^^
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2012: in parse_args
+    self.error(msg)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2785: in error
+    self.exit(2, _('%(prog)s: error: %(message)s\n') % args)
+/opt/homebrew/Cellar/python@3.14/3.14.7/Frameworks/Python.framework/Versions/3.14/lib/python3.14/argparse.py:2772: in exit
+    _sys.exit(status)
+E   SystemExit: 2
+----------------------------- Captured stderr call -----------------------------
+usage: artifact_production.py [-h] --packet PACKET {seal}
+artifact_production.py: error: unrecognized arguments: --tool-output
+____________ test_packet_body_cannot_inject_the_new_reserved_marker ____________
+test_tool_framing.py:133: in test_packet_body_cannot_inject_the_new_reserved_marker
+    with pytest.raises(ValueError, match='artifact_contract_reserved_marker'):
+         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+E   Failed: DID NOT RAISE ValueError
+=========================== short test summary info ============================
+FAILED test_tool_framing.py::test_generated_packet_uses_distinct_tool_output_and_one_terminal_line
+FAILED test_tool_framing.py::test_actual_helper_tool_transcript_plus_final_answer_is_unambiguous
+FAILED test_tool_framing.py::test_tool_mode_preserves_binding_and_observation_refusals[bind]
+FAILED test_tool_framing.py::test_tool_mode_preserves_binding_and_observation_refusals[observe]
+FAILED test_tool_framing.py::test_packet_body_cannot_inject_the_new_reserved_marker

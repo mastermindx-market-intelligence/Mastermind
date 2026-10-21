@@ -107,7 +107,7 @@ Review reuse is allowed only when all of the following are proven:
 5. protected movement does not intersect candidate-owned paths;
 6. the declared dependency closure does not intersect protected movement in a way that changes behavior, authority, security, build/runtime compatibility or proof meaning;
 7. the candidate remains mergeable with the current protected base;
-8. required repository/security checks pass on the latest protected-base merge ref or equivalent immutable integrated candidate;
+8. the latest-base integration is structurally identified and conflict-free. Required repository/security checks still must pass on that integrated candidate before the actual merge. With a native GitHub merge queue, `merge_group` CI supplies this final qualification *after queue entry*; absence of prequeue check runs on `refs/pull/<n>/merge` does not block review reuse or queue entry;
 9. no unresolved blocking review, review thread or known counterexample applies;
 10. the capability boundary remains identical and no new production/live claim is introduced.
 
@@ -147,7 +147,7 @@ Release is blocked, without branch replay or carrier failover, when:
 - merge-ref/integrated-candidate identity is unavailable or ambiguous;
 - candidate blob preservation cannot be established;
 - collision or dependency impact is unknown;
-- required latest-base checks are unavailable/nonterminal/failed;
+- required latest-base checks are unavailable/nonterminal/failed **at the actual merge/release boundary** (a not-yet-created merge-queue group is not a prequeue failure);
 - review state is ambiguous;
 - effect state is unknown;
 - expected-head or current protected-base identity moves during the release action.
@@ -172,7 +172,7 @@ When no semantic join is needed, the source branch stays frozen and GitHub's cur
 
 This law removes duplicate proof, not proof itself.
 
-Required current integration checks still run against the latest protected-base merge ref or equivalent immutable integrated candidate.
+Required current integration checks still run against the latest protected-base merge ref or equivalent immutable integrated candidate. For repositories with an active GitHub merge queue and `on: merge_group` CI (including Mastermind), separate checks on GitHub's synthetic `refs/pull/<n>/merge` are **not** a prerequisite to entering the queue. The normal flow is: green head checks + satisfied required review + resolved substantive blockers + current compatible merge-ref identity -> authorized queue entry -> required `merge_group` checks on the real integrated group -> native protected merge. A queue entry is not release acceptance; failures or missing group checks still stop the merge. Never invent a second CI owner, merge-ref manual test mandate, or ancestry-only rebase to obtain an indicator.
 
 The release packet must not count both of these as separately necessary when they prove the same composition:
 
@@ -234,11 +234,12 @@ read PR + exact SEMANTIC_HEAD
 verify candidate-owned paths/blobs
 compare protected movement with owned paths and dependency closure
 compare governing material source
-read latest-base INTEGRATION_PROOF and required checks
+read latest-base INTEGRATION_PROOF and available head checks
 read reviews + unresolved threads
 classify REVIEW_REUSE_ALLOWED | FULL_REREVIEW_REQUIRED | RELEASE_BLOCKED
 Program-CEO acceptance when allowed
-expected-head merge
+authorize native queue entry when source/reviews are eligible; let required merge_group CI qualify the integrated group
+expected-head merge only after that qualification
 post-merge protected readback
 truthful capability-state update
 ```

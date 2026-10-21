@@ -174,6 +174,10 @@ def project_quota_preference(
         raise CapacityEconomicsProjectionError(
             "suggested_parallelism cannot exceed estimated_startable_jobs"
         )
+    if estimated == 0 or parallelism == 0:
+        raise CapacityEconomicsProjectionError(
+            "suggested option must have positive actionable capacity"
+        )
     pressure = row.get("expiry_pressure_jobs_per_hour")
     if pressure is not None and (not isinstance(pressure, str) or not pressure or len(pressure) > 64):
         raise CapacityEconomicsProjectionError(

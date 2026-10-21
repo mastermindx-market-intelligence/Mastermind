@@ -353,12 +353,28 @@ class TestMarketViewNeuralWebPlane:
         assert rec["status"] == "advisory"
         assert rec["raw"].get("present") is False
 
-    def test_plane_order_contains_neural_web_at_end(self):
-        """PLANE_ORDER must have neural_web as last element (after H4 stubs)."""
+    def test_plane_order_appends_neural_web_after_the_h4_stubs(self):
+        """PLANE_ORDER must carry neural_web AFTER the H4 handoff stubs.
+
+        INTENTIONAL CHANGE (W-LIQ.2, Mastermind #119): this assertion used to read
+        ``PLANE_ORDER[-1] == "neural_web"``.  What W-NW.1 was pinning is that neural_web is
+        APPENDED — it must not be spliced in among the Tier-A/W-I planes, because
+        PLANE_ORDER is a golden key order fed into LLM prompts and re-seating an existing
+        plane silently moves every key after it.  Appending a LATER plane behind it
+        (liquidity_transmission) preserves exactly that property: every pre-existing
+        position is unchanged.  Pinning "last forever" would have made the order
+        append-hostile rather than append-only, so the invariant is restated as the one
+        that was actually meant.
+        """
         from brain import market_view as MV
-        assert MV.PLANE_ORDER[-1] == "neural_web", (
-            f"neural_web must be last in PLANE_ORDER; last element is {MV.PLANE_ORDER[-1]!r}"
-        )
+        order = list(MV.PLANE_ORDER)
+        assert "neural_web" in order
+        for stub in ("rrg", "group_flow", "event_calendar", "intl_spillover"):
+            assert order.index("neural_web") > order.index(stub), (
+                f"neural_web must come after the H4 stub {stub!r}"
+            )
+        # nothing may be inserted BETWEEN the stubs and neural_web
+        assert order.index("neural_web") == order.index("intl_spillover") + 1
 
     def test_view_planes_keys_match_plane_order(self, monkeypatch, tmp_path):
         """planes dict keys must match PLANE_ORDER exactly (with neural_web included)."""

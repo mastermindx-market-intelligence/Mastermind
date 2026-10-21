@@ -1,0 +1,10 @@
+{
+  "account_selection": "NOT_PERFORMED",
+  "commission_sha256": "3dd587e8b6555ff83e986ef7d835232e2fe0153b8d9fd1892ae73e09c4fc2ef0",
+  "compact_input_sha256": "2fb040f74669d66495942b8e06be1fdbcf0367a2d2501ad4b40e13144eb74430",
+  "method_sha256": "1ad99fbeddee07cd3c4b6996448a190f570a80ac32c52c2c47b8948c6fec6a5b",
+  "model_selection": "NOT_PERFORMED",
+  "normalized_brief_sha256": "4728b1b02577968bb5f43f9683086ea602f0d8461abf248b0836d2cd7ef9864e",
+  "provider_selection": "NOT_PERFORMED",
+  "schema_version": "mastermind.craft_commission_compilation.v1"
+}

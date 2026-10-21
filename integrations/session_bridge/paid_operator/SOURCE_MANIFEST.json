@@ -1,0 +1,59 @@
+{
+  "scope": "paid operator delegation through existing Fabric; no Executive dependency",
+  "adapter_unchanged": "506bdb8af4cd5cc874933bd2641a16c4b4e3d6e3353e4b026693d2c2c81af87a",
+  "installed": false,
+  "new": {
+    "fabric_operator_contract.py": "a2589a23151d75300d89443624ae2ba95ca4af2fbfd222cea50c48575a5b904f",
+    "fabric_operator_owner.py": "e83fe2d82f982bad4ab27d6df14d91cdf6f0de79c7ef84503c3eae193fea6d7d",
+    "fabric_operator_issue.py": "bca96a78976b111303050ef3ca61c77d4a3e69f53f9e29a961eb1a70396a0b9d",
+    "fabric_operator_client.py": "6718ade7a1245c8e5295edaee3ca75330bde4c92fd69c531caeee8d9c6f10d08",
+    "fabric_operator_stop.py": "5ad090e703468503ec5466a83c61e1de9b93320e432d71963e9ba1d33e301ec5",
+    "fabric_operator_recovery.py": "08d54778b3ec1d31ae0388d8ceebefff78990924a458630a35d8e517ae24fd63"
+  },
+  "overlays": {
+    "remote_sub.sh": {
+      "before": "f4333d88e547dc2a2c06a4d6919793cbd62adc1cad5c8ccdee792ff1daba5bf8",
+      "after": "fc44e51afec8ff64abcf36fd9a1bb4554cddc3bad57212c330fe4e1a9de10041"
+    },
+    "remote_sub_exec.py": {
+      "before": "88f3db214cdb6258865961ccb6e201288778df7d38e26fba310598021f078e8f",
+      "after": "edb9780fdd71e462d5187176740ceb402f5f0e98368290a3fb2eb95c275e313f"
+    },
+    "native_remote.py": {
+      "before": "054dc77cafdd46e9e8837ecebada4afa28ae78a42bd5958b84b509cf36bf1d24",
+      "after": "18bf26c27e496f43deaedfbf8f89af4e7d93831f379d23e0207311b58f61448d"
+    },
+    "fabric_client_projection.py": {
+      "before": "96017f511fbf2e3f70c2d87787fc12f4043e7e95d95fbfc17d28b5d60c63292c",
+      "after": "39a138f88f6a3e4fb9b60f4365620ca05903e9f15783f95495627a54a13402e6"
+    },
+    "studio_mcp_projection.sh": {
+      "before": "8be4a1506e022e3bee6de6e4d7408918e8903aa494ede2152dc3021aa74e0d6b",
+      "after": "098bd6d97a1375e5b7304cd85eadbe82a2d1519a334679d1d7dec39d987f97ec"
+    },
+    "glm_bound_claude.py": {
+      "before": "21ad1f14717b7f2d4ebd4f9c150b998200cf5281e3d9479f2a0d129d0e66cd95",
+      "after": "b7d67e1f96149192f8ad9bd135d8337ac4286ecc1a5dd137abf079b2d56c8a1a"
+    },
+    "lease_broker.py": {
+      "before": "56eac1575eeea501f38be03eacfaefad5c5db9ab1e449996738d277619b4dfd6",
+      "after": "6b836cb353e1bce6c3fb017b4ec16eddc4f30df625aef09fceffa31dae721bb4"
+    },
+    "support_bundle.py": {
+      "before": "808e77bef551746f5eb33baf80168345c49bf13742f7de2de6af6c62796f2c94",
+      "after": "a19d24c72788ca7b8b69e45ffd0d3f74c8bd5270ed441c6f2325227d95800952"
+    },
+    "gateway/gateway.mjs": {
+      "before": "970b47f1c6a15bc3f1175f1043c5dd4a59ad748c2374b586e384bbd6ba40ce5e",
+      "after": "2a9038d802cdefeea3af4a3fbe45d2326fb894a42c72f3f4f946603419b93446"
+    },
+    "gateway/tailnet-gateway.mjs": {
+      "before": "bd46b40cfd5f2744f9b07be38ff2656676939707e753f6e846f4a2c578944d25",
+      "after": "89a3d1c972a31ab62f19205439d6f09bc24f4d51783ebc2e1bea788bcd9d817c"
+    },
+    "gateway/private_service.py": {
+      "before": "f1b4d080a3bd2a862016cbbdba755922dd56f1270622126106975f6893ebcadf",
+      "after": "f8939715ae8a8808025214832997a0707d14a5318ce7b8c505820ea4ab167be2"
+    }
+  }
+}

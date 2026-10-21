@@ -1,0 +1,21 @@
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -211,6 +211,10 @@
+             lease.release()
+             return _fail("native_remote_lease_expired", 78)
+     receipt = here / "lanes" / f"{key}.process.jsonl"
++    diagnostic_reader = None
++    if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
++        from fabric_operator_diagnostics import collect
++        diagnostic_reader = lambda: collect(here, key)
+     try:
+         with lease, ExitStack() as artifact_stack:
+             artifact_owner = (artifact_stack.enter_context(artifact_production.NewDirectory(artifact_contract))
+@@ -229,6 +233,7 @@
+                     label=key,
+                     receipt_path=receipt,
+                     timeout_returncode=124,
++                    receipt_diagnostics=diagnostic_reader,
+                 )
+             except OwnedProcessStartError as exc:
+                 state["started"] = False

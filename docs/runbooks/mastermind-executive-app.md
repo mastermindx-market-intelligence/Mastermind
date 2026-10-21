@@ -291,10 +291,41 @@ control configuration. Its peer must differ from control, Operator, worker,
 and C1 identities. C1 retains its existing peer, grounding provider and arming
 setting.
 
-The full-schema `control.json.template` includes an unarmed App binding and an
-explicit Macro snapshot placeholder. Supply the actual sealed snapshot when
-provisioning the App, or omit all three App fields when installing control
-without it. The base installer does not add these optional fields by default.
+The full-schema `control.json.template` includes an unarmed App binding, an
+explicit Macro snapshot placeholder, and an optional `ceo_ingress_app_boot_python`
+coordinate. The three App identity/arm/Macro fields remain the binding atom; the
+boot interpreter is additive so an older install can still start and degrade
+honestly instead of failing closed during rollout. Production should bind it to a
+root-owned, executable, non-group/other-writable Python runtime that already carries
+the read-only YAML dependency. The control process itself remains `-I -S -B` and
+never imports that third-party package tree.
+
+When configured, the control loader first attests `ceo_ingress_app_boot_python`
+against the existing CF2 capacity-runtime owner: exact runtime root and interpreter,
+root-owned/non-writable metadata, reviewed Python digest, PyYAML RECORD digest, full
+runtime-tree digest, and a bounded `-I -S -B` import probe that explicitly inserts
+the reviewed site-packages directory. This attestation does not replace the boot
+child's dependency-loading mode: the actual immutable boot-packet helper runs with
+`-I -B`, which is required for PyYAML 6.0.3 to remain importable from the sealed
+capacity runtime. If no boot interpreter is configured, #697's backward-compatible
+stdlib-only degraded path remains available and never changes admission state.
+
+With a boot interpreter bound, `InstalledExecutiveReaders` executes
+`scripts/ceo_boot_packet.py` only from the root-owned immutable installed release;
+the control-owned administrative Mastermind checkout contributes grounding identity
+only. Git observation is fail-closed before object traversal for gitfiles/external
+gitdirs, `commondir`, shallow state, alternates, promisor/partial-clone/helper
+configuration and `.promisor` packs, with `GIT_NO_LAZY_FETCH=1`. The Macro snapshot
+is copied to a same-filesystem temporary materialization for the child read, while
+pre/post path metadata seals on the canonical roots reject transient mutate-and-
+restore races. The packet must retain the exact source/Macro SHAs, path/type closure,
+load-bearing raw blob identities, schema and roots before it is projected back to the
+canonical Macro path.
+
+Supply the actual sealed Macro snapshot when provisioning the App, or omit the App
+binding when installing control without it. The existing installer preserves the
+optional boot coordinate from a reviewed control-config source; it does not create a
+second runtime/configuration authority.
 
 The App peer can use existing v2 submit/status frames and two closed internal
 read frames on the same CeoIngress socket. The four public tools and schemas

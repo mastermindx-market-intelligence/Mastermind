@@ -36,6 +36,8 @@ dev = [
     # 1.28.1 is the maintained security-fix release on the v1 API line used by
     # current Executive, Secretary, Company Dialogue, and Business app code.
     "mcp==1.28.1",
+    # Match the qualified Research signal owner and its production hash lock.
+    "uvicorn[standard]==0.52.4",
     # Exact current security-reviewed JWT implementation for hermetic A1 tests.
     "PyJWT[crypto]==2.13.0",
 ]
@@ -45,6 +47,9 @@ dev = [
 business-mcp = [
     "mcp==1.28.1",
     "PyJWT[crypto]==2.13.0",
+    # Executive installed reads execute the canonical boot-packet collector in
+    # this dependency-complete edge runtime; the sealed control Python stays -S.
+    "PyYAML==6.0.3",
 ]
 
 [tool.setuptools.packages.find]

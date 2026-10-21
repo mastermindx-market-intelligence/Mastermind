@@ -1,0 +1,159 @@
+{
+  "audit_scope_limit": "The CLI only reads provider-home discovery configuration; repository/profile/managed overrides and actual provider context require separate observation.",
+  "auditor_verification": {
+    "command": "python3.11 -m unittest discover -s tests -p test_execution_instruction_audit.py -v",
+    "failed": 0,
+    "log": "/tmp/execution-audit-green-20261011.log",
+    "passed": 12,
+    "tests": 12
+  },
+  "cache_authority_note": "Imported files are observed projections, not proof of current source Project settings or active-session loading.",
+  "chain": [
+    {
+      "assigned_execution_marker": true,
+      "bytes": 13558,
+      "content_scan_truncated": false,
+      "eligible_bytes": 13558,
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 144,
+      "path": "/Users/chriswong/.codex/AGENTS.md",
+      "scanned_prefix_sha256": "ec2192aabebbf31c687fd4a951d4e7582f72aa107ec4f0f573a314c7d6d029b0",
+      "scope": "global",
+      "sha256": "ec2192aabebbf31c687fd4a951d4e7582f72aa107ec4f0f573a314c7d6d029b0",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict.",
+      "truncated_by_project_budget": false
+    },
+    {
+      "assigned_execution_marker": false,
+      "bytes": 17086,
+      "content_scan_truncated": false,
+      "eligible_bytes": 17086,
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 232,
+      "path": "/Volumes/Mastermind/agent-workspaces/web/execution-friction-repair-20261011-astra-001/AGENTS.md",
+      "scanned_prefix_sha256": "9d9ff12511371d1198c03b12e5ce6a6088ad04f6a5be891f54894d86c14c9997",
+      "scope": "project",
+      "sha256": "9d9ff12511371d1198c03b12e5ce6a6088ad04f6a5be891f54894d86c14c9997",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict.",
+      "truncated_by_project_budget": false
+    }
+  ],
+  "codex_home": "/Users/chriswong/.codex",
+  "cwd": "/Volumes/Mastermind/agent-workspaces/web/execution-friction-repair-20261011-astra-001",
+  "effect": "READ_ONLY",
+  "host": "m2studio",
+  "imported_chatgpt_project_cache": [
+    {
+      "assigned_execution_marker": false,
+      "bytes": 8236,
+      "content_scan_truncated": false,
+      "is_symlink": false,
+      "legacy_signals": [
+        "old_checkpoint_boundary"
+      ],
+      "line_count": 65,
+      "path": "/Users/chriswong/.codex/.chatgpt-projects/g-p-6a800016c92881919f8ed040dcfc6b7a/AGENTS.md",
+      "scanned_prefix_sha256": "b7c078ed188717558e67c77b5a16be7850a023fc2e55a3cfcd39721bfea5d3ec",
+      "sha256": "b7c078ed188717558e67c77b5a16be7850a023fc2e55a3cfcd39721bfea5d3ec",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    },
+    {
+      "assigned_execution_marker": false,
+      "bytes": 8082,
+      "content_scan_truncated": false,
+      "is_symlink": false,
+      "legacy_signals": [
+        "blanket_one_shot_ban",
+        "blanket_no_coding_role",
+        "mandatory_program_stages"
+      ],
+      "line_count": 112,
+      "path": "/Users/chriswong/.codex/.chatgpt-projects/g-p-6a828db54d2c8191852a875fd6f9be50/AGENTS.md",
+      "scanned_prefix_sha256": "dd3606961e876d0f284e49457cacc82847ee5c802e921714bd2c89cfb228637a",
+      "sha256": "dd3606961e876d0f284e49457cacc82847ee5c802e921714bd2c89cfb228637a",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    },
+    {
+      "assigned_execution_marker": false,
+      "bytes": 8129,
+      "content_scan_truncated": false,
+      "is_symlink": false,
+      "legacy_signals": [
+        "blanket_one_shot_ban",
+        "blanket_no_coding_role",
+        "mandatory_program_stages"
+      ],
+      "line_count": 114,
+      "path": "/Users/chriswong/.codex/.chatgpt-projects/g-p-6a8291ddf8ec81918277fd21f92042b4/AGENTS.md",
+      "scanned_prefix_sha256": "cec5eb6d42eefa3ee611144d4c2119ac23497179c50b5fe058d6b198a9366696",
+      "sha256": "cec5eb6d42eefa3ee611144d4c2119ac23497179c50b5fe058d6b198a9366696",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    },
+    {
+      "assigned_execution_marker": false,
+      "bytes": 8082,
+      "content_scan_truncated": false,
+      "is_symlink": false,
+      "legacy_signals": [
+        "blanket_one_shot_ban",
+        "blanket_no_coding_role",
+        "mandatory_program_stages"
+      ],
+      "line_count": 112,
+      "path": "/Users/chriswong/.codex/.chatgpt-projects/g-p-6a857268cf7c8191a671bb92ab1179f8/AGENTS.md",
+      "scanned_prefix_sha256": "dd3606961e876d0f284e49457cacc82847ee5c802e921714bd2c89cfb228637a",
+      "sha256": "dd3606961e876d0f284e49457cacc82847ee5c802e921714bd2c89cfb228637a",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    }
+  ],
+  "installed_projection_readbacks": [
+    {
+      "assigned_execution_marker": true,
+      "bytes": 13558,
+      "content_scan_truncated": false,
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 144,
+      "matches_candidate_brief": true,
+      "path": "/Users/chriswong/.codex/AGENTS.md",
+      "scanned_prefix_sha256": "ec2192aabebbf31c687fd4a951d4e7582f72aa107ec4f0f573a314c7d6d029b0",
+      "sha256": "ec2192aabebbf31c687fd4a951d4e7582f72aa107ec4f0f573a314c7d6d029b0",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    },
+    {
+      "assigned_execution_marker": true,
+      "bytes": 13154,
+      "content_scan_truncated": false,
+      "is_symlink": false,
+      "legacy_signals": [],
+      "line_count": 129,
+      "matches_candidate_brief": true,
+      "path": "/Users/chriswong/.claude/CLAUDE.md",
+      "scanned_prefix_sha256": "4383f7b851cc8baeec8c64d7b570ac6a0a5594461a313776ae0d68ba78cdb126",
+      "sha256": "4383f7b851cc8baeec8c64d7b570ac6a0a5594461a313776ae0d68ba78cdb126",
+      "signal_interpretation": "Literal presence requires contextual review; not an execution verdict."
+    }
+  ],
+  "known_configuration_difference": {
+    "provider_home_concurrent_threads": 12,
+    "repository_concurrent_threads": 16,
+    "runtime_effective_value": "NOT_OBSERVED"
+  },
+  "method": "Static file discovery; no provider session was launched or inspected.",
+  "not_observed": [
+    "injected project instructions",
+    "active-session context",
+    "managed provider policy",
+    "plugin selection",
+    "hook execution",
+    "remote accounts and other hosts"
+  ],
+  "observed_at": "2026-10-11T12:01:15.144002+00:00",
+  "project_max_bytes": 32768,
+  "project_remaining_bytes": 15682,
+  "repo_root": "/Volumes/Mastermind/agent-workspaces/web/execution-friction-repair-20261011-astra-001",
+  "runtime_verified": false,
+  "source_head": "100282db0147ddec02effa0570a01555d2a4067c"
+}
