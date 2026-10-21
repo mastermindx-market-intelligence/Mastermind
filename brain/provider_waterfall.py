@@ -137,7 +137,9 @@ def available() -> bool:
             return True
     except Exception:
         pass
-    return _oauth_available()
+    # Public availability exposes boolean state, never the helper's payload.
+    # Fail closed if a future helper change returns a non-boolean value.
+    return _oauth_available() is True
 
 
 def _failure_kind(error: object) -> str | None:
