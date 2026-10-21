@@ -367,9 +367,9 @@ test('private seats are included in original owner readiness consistency checks'
   await assert.rejects(() => createFleetStatus(invalid.config).status(), /FLEET_STATUS_OWNER_RESULT_INVALID/);
 });
 
-test('malformed or unknown private seat rows still fail closed', async t => {
+test('malformed private seat rows still fail closed', async t => {
   const cases = [
-    ownerFor([privateFabricStatus('sk-proj-secret-shaped')]),
+    ownerFor([privateFabricStatus('sk/proj-secret-shaped')]),
     ownerFor([privateFabricStatus('fabric-c3-570f6f34'), privateFabricStatus('fabric-c3-570f6f34')]),
     ownerFor([{ ...privateFabricStatus('fabric-design'), extra:'refuse' }]),
   ];
@@ -411,6 +411,48 @@ test('new owner-enumerated private Fabric seats remain bounded and undisclosed',
   assert.deepEqual(result.issues, ['OWNER_FLEET_DEGRADED']);
   assert.deepEqual(result.accounts.map(x => x.account), ['chatgpt1']);
   assert.equal(JSON.stringify(result).includes('fabric-new-worker-catalog-2027'), false);
+});
+
+test('unknown future owner account is hidden and cannot produce READY even when full owner reports ready', async t => {
+  const unknown = 'nonpublic-future-worker-2027';
+  const owner = ownerFor([
+    statusRow('chatgpt1', true),
+    privateFabricStatus(unknown, true),
+  ]);
+  assert.equal(owner.allReady, true);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.schema, 'mastermind.studio_fleet_status_tool.v2');
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.scope, 'public_accounts');
+  assert.equal(result.allReady, true); // original owner truth is not rewritten
+  assert.equal(result.publicAllReady, true);
+  assert.equal(result.ownerRosterClassified, false);
+  assert.equal(result.accountCount, 1);
+  assert.deepEqual(result.issues, ['FLEET_STATUS_OWNER_ROSTER_UNCLASSIFIED']);
+  assert.deepEqual(result.accounts.map(r => r.account), ['chatgpt1']);
+  const wire = JSON.stringify(fleetStatusToolResult(result));
+  assert.equal(wire.includes(unknown), false);
+});
+
+test('unknown stopped owner seat cannot disclose private diagnostics or force false green', async t => {
+  const unknown = 'sk-proj-secret-shaped';
+  const secret = '/private/owner/key/material-that-must-not-leak';
+  const owner = ownerFor([
+    statusRow('chatgpt1', true),
+    {account: unknown, ready:false, error:secret},
+  ]);
+  const fx = await fixture(JSON.stringify(owner));
+  t.after(() => rm(fx.dir, {recursive:true, force:true}));
+  const result = await createFleetStatus(fx.config).status();
+  assert.equal(result.state, 'DEGRADED');
+  assert.equal(result.allReady, false);
+  assert.equal(result.ownerRosterClassified, false);
+  assert.deepEqual(result.issues, ['OWNER_FLEET_DEGRADED', 'FLEET_STATUS_OWNER_ROSTER_UNCLASSIFIED']);
+  const wire = JSON.stringify(fleetStatusToolResult(result));
+  assert.equal(wire.includes(unknown), false);
+  assert.equal(wire.includes(secret), false);
 });
 
 test('stopped public tunnel may omit TTL without concealing degraded owner readiness', async t => {
