@@ -59,6 +59,7 @@ def unavailable(portfolio_id: str, run_id: str | None, reason: str) -> dict:
         "duplicate_candidate_ordinals": [], "duplicate_candidate_count": None,
         "duplicate_candidate_omissions": None, "latest_observation_at": None,
         "observation_age_seconds": None, "issues": [],
+        "legacy_failure_observation": None,
         "attempt_coverage": "partial", "provider_start": "not_proven",
         "effect_reconciliation": "not_performed",
         "verification_scope": "selected_diagnostic_fields_and_exact_recorded_identity",
@@ -226,6 +227,64 @@ def _project(envelope: dict, *, run_id: str, portfolio_id: str) -> tuple[dict | 
     return result, None
 
 
+# Exact legacy bridge emissions observed in the October 2026 incident.
+# These are display signatures, never provider-error classification or retry input.
+_LEGACY_AUTH_BANNER = (
+    "Failed to authenticate. API Error: 401 OAuth access token has been revoked."
+)
+_LEGACY_SDK_ERROR = "Exception('Claude Code returned an error result: success')"
+
+
+def _legacy_failure_observation(rows, source, *, portfolio_id, run_id, seed_time, observed):
+    """Project one closed old-log sequence without asserting candidate identity.
+
+    The decision journal supplies the book-to-run reference. Old run metadata
+    does not positively identify the book or credential. A complete stable read
+    and this exact emission layout qualify only the retained log observation;
+    they do not establish provider startup, effect absence or retry eligibility.
+    """
+    if source.get("status") != "available" or len(rows) != 5:
+        return None
+    if (set(rows[0]) != {"_meta"}
+            or rows[0]["_meta"].get("kind") != "research"):
+        return None
+    events = rows[1:]
+    required = {"type", "title", "ts", "detail"}
+    allowed = required | {"book", "portfolio_id", "run_id"}
+    if any(not required <= set(row) <= allowed or type(row.get("detail")) is not str
+           for row in events):
+        return None
+    titles = ("session start", "assistant text", "sdk error", "result")
+    if any(row.get("type") != "reasoning" or row.get("title") != title
+           for row, title in zip(events, titles)):
+        return None
+    if (events[1].get("detail") != _LEGACY_AUTH_BANNER
+            or events[2].get("detail") != _LEGACY_SDK_ERROR
+            or events[3].get("detail") != ""):
+        return None
+    for row in events:
+        if any(key in row and row[key] != portfolio_id for key in ("book", "portfolio_id")):
+            return None
+        if "run_id" in row and row["run_id"] != run_id:
+            return None
+    times = [_instant(row.get("ts")) for row in events]
+    if (any(stamp is None for stamp in times)
+            or not seed_time <= times[0] <= times[1] <= times[2] <= times[3] <= observed):
+        return None
+    return {
+        "schema": "mastermind.bot.recorded_failure_observation.v1",
+        "kind": "recorded_authentication_revoked",
+        "source_kind": "legacy_runlog_assistant_banner",
+        "run_id": run_id, "portfolio_id": portfolio_id,
+        "book_binding": "selected_decision_run_reference",
+        "candidate_identity": "unavailable",
+        "recorded_at": events[2]["ts"],
+        "banner_recorded_at": events[1]["ts"],
+        "observation_age_seconds": (observed - times[2]).total_seconds(),
+        "verification_scope": "closed_legacy_sequence_only",
+    }
+
+
 def read_provider_diagnostic_evidence(
     portfolio_id: str, attempt: dict | None, *, runs_dir: Path, observed_at: str,
 ) -> dict:
@@ -269,6 +328,10 @@ def read_provider_diagnostic_evidence(
         result["reason"] = "run_metadata_clock_invalid"
         return result
     result["run_binding"] = "matched_recorded_run_id"
+    result["legacy_failure_observation"] = _legacy_failure_observation(
+        rows, source, portfolio_id=portfolio_id, run_id=run_id,
+        seed_time=seed_time, observed=observed,
+    )
     issues = set()
     if source["status"] != "available":
         issues.add("run_source_partial")
@@ -350,6 +413,7 @@ def read_provider_diagnostic_evidence(
     if changed:
         result.update(status="provisional", reason="run_source_changed_during_read",
                       run_binding="provisional", candidates=[], candidates_observed=None,
-                      candidate_omissions=None, latest_observation_at=None, observation_age_seconds=None)
+                      candidate_omissions=None, latest_observation_at=None, observation_age_seconds=None,
+                      legacy_failure_observation=None)
         result["issues"] = sorted(issues | {"run_source_changed_during_read"})
     return result

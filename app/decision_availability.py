@@ -428,6 +428,7 @@ def read_decision_availability(
             "portfolio_id": portfolio_id, "run_id": expected_run_id,
             "status": "unavailable", "reason": "diagnostic_inspection_unavailable",
             "candidates": [], "candidates_observed": None,
+            "legacy_failure_observation": None,
             "attempt_coverage": "partial", "provider_start": "not_proven",
             "effect_reconciliation": "not_performed",
         }
@@ -519,6 +520,7 @@ def read_decision_availability(
                 status="provisional", reason="decision_source_changed_during_read",
                 run_binding="provisional", candidates=[], candidates_observed=None,
                 candidate_omissions=None, latest_observation_at=None, observation_age_seconds=None,
+                legacy_failure_observation=None,
             )
     return {
         **({"provider_diagnostic_inspection": provider_diagnostic_inspection}

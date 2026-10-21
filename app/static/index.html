@@ -6977,6 +6977,35 @@ function _providerDiagnosticHtml(d, portfolio, isZh) {
     decision_source_changed_during_read: ['The decision journal changed during the read; this run binding is provisional.', '读取期间决策日志发生变化；此运行绑定为暂定状态。']
   };
   if (Object.prototype.hasOwnProperty.call(reasons, p.reason)) body += '<div class="mm-da-detail">' + safe(reasons[p.reason][isZh ? 1 : 0]) + '</div>';
+  var legacy = p.legacy_failure_observation;
+  var legacyTime = stamp(legacy && legacy.recorded_at);
+  var legacyBannerTime = stamp(legacy && legacy.banner_recorded_at);
+  if (legacy && legacy.schema === 'mastermind.bot.recorded_failure_observation.v1' &&
+      legacy.kind === 'recorded_authentication_revoked' &&
+      legacy.source_kind === 'legacy_runlog_assistant_banner' &&
+      legacy.verification_scope === 'closed_legacy_sequence_only' &&
+      legacy.book_binding === 'selected_decision_run_reference' &&
+      legacy.candidate_identity === 'unavailable' &&
+      legacy.run_id === expectedRun && expectedRun !== null && legacy.portfolio_id === portfolio &&
+      p.role === 'deep' && p.attempt_coverage === 'partial' &&
+      p.status !== 'provisional' && p.run_binding === 'matched_recorded_run_id' &&
+      p.decision_binding_consistency === 'observed_stable' &&
+      p.source && p.source.status === 'available' &&
+      observed !== null && legacyTime !== null && legacyBannerTime !== null &&
+      legacyBannerTime <= legacyTime && legacyTime <= observed) {
+    var legacySeconds = (observed - legacyTime) / 1000;
+    var legacyAge = legacySeconds >= 3600 ? Math.floor(legacySeconds / 3600) + say(' hours', ' 小时') :
+      Math.floor(legacySeconds / 60) + say(' minutes', ' 分钟');
+    body += '<div class="mm-da-alert" data-recorded-auth-failure="true"><strong>' +
+      say('Recorded authentication failure', '已记录身份验证失败') + '</strong><div>' +
+      say('The retained attempt log reports a revoked OAuth access token.',
+        '保留的尝试日志记录了 OAuth 访问令牌已撤销。') + '</div>' +
+      detail(say('Recorded at', '记录时间'), _daTime(legacy.recorded_at, isZh)) +
+      detail(say('Age at this read', '本次读取时的时长'), legacyAge) +
+      '<div>' + say('This is a legacy log observation. Candidate and credential identity are unavailable; it does not establish the current state of other credentials.',
+        '这是旧版日志中的观察记录。候选及凭证身份不可用；不能据此判断其他凭证的当前状态。') +
+      '</div></div>';
+  }
   if (count(p.unattributed_capture_events) > 0) body += '<div class="mm-da-alert">' +
     safe(say('Capture failures without candidate attribution: ', '缺少候选归属的捕获失败：') + p.unattributed_capture_events) +
     '<br>' + say('These are run-level observations; no candidate is inferred.', '这些仅归属于运行；不据此推断候选。') + '</div>';
