@@ -265,3 +265,66 @@ One origin monotonic deadline governs routing, provider-lease acquisition, contr
 Deadline routing excludes only the local `m2` slot transport, whose slot wait and child lifetime do not yet consume this commission deadline. Remote Darwin hosts remain eligible through all ordinary economic, readiness, and placement gates. Direct deadline-bearing `m2` calls refuse before slot acquisition or task creation. Local calls without commission metadata retain their incumbent behavior.
 
 Automatic continuation applies to eligible ordinary C3 commissions and explicitly opted-in native CLI requests. It does not add a background scheduler, wake an ended native parent conversation, replay uncertain task effects, or bypass context, output, turn, resource, or time limits. Exhausting all authorized routes or the commission budget still returns retained evidence for the existing owner. A healthy canary validates normal dispatch and settlement; it does not establish that a real provider returned HTTP 429 or that quota failover occurred.
+
+## Registry-bound physical roots for new ordinary runs
+
+The optional `physical_lane_root` field belongs to the existing host entry in
+the original `ext/hosts.json` registry. This source capability does not enroll a
+host or select a path from publisher output, task text, environment overrides,
+or a resolved home-directory alias. No live registry value is changed by this
+source repair. Installing the protected release and admitting a real host root
+remain separate owner actions.
+
+The first supported shape is one **new explicit-ID ordinary plain GLM or Qwen
+remote run**, with an original root and assigning parent, `cwd=~`, no artifact
+contract, no operator child/budget or continuation, and no Macro workspace or
+CPU-scope extension. Configured unsupported shapes refuse before a provider
+lease or remote transfer; local reservation and packet retention may already
+exist. The local m2 shortcut also refuses a configured field before worker
+invocation. Entries without the field retain the legacy transport path.
+
+The field must name an absolute physical path using ASCII letters, digits,
+`_`, `-`, `.`, and `/`, with no empty, dot, or dot-dot components. The owner must
+already provide the root plus `tmp`, `ext`, `ext/active`, `ext/lanes`, `orch`,
+`orch/fabric`, and `support-releases`. The unchanged `DirectoryChain` checks
+every ancestor for permitted ownership, directory type, safe mode and no-follow
+custody. A pre-upload observation pins device, inode, UID and mode for this
+fixed layout. Later checks compare with that observation; replacement at the
+same pathname does not refresh the pin. These checks use the existing commission
+supervisor and deadline.
+
+Only this shape adds `artifact_delivery.py` to the exact remote support closure
+(38 files); default and historical 37-file or earlier generations retain their
+existing membership. The publisher still checks closed file sets. Transport,
+executor and collector check the immutable code manifest and the publisher's
+fixed state-link map against the same physical root. Bound executor reads
+require owned regular files, one link, no group/other write, stable identities,
+and exact sealed modes for code and release metadata. The generic legacy file
+reader and `DirectoryChain` body are unchanged.
+
+Bound packet transfer uses the existing SSH channel with a bounded stdin
+receiver and exclusive no-follow creation. Existing packet, output or receipt
+leaves refuse; they are never adopted, overwritten or removed. The bound launch
+reserves stdout and RC with exclusive opens and keeps their descriptors through
+the original executor entry. A strictly qualified empty reserved RC is pending
+only in v2; malformed nonempty content remains refused. It makes exactly one
+launch attempt, including when physical admission refuses. This avoids inventing a second attempt outside
+the retained evidence contract.
+
+`transport_observation.v2`, `transport_verification.v2`,
+`fabric_plain_launch_binding.v2`, and `original_plain_result_contract.v2`
+carry the closed root/layout evidence. Collection checks current original
+registry agreement and reads the retained physical path. Old v1 records and
+historical scopes cannot acquire a root retrospectively. Authentication,
+producer packet-consumption attestation, served-model/physical-host
+authentication, and business acceptance remain unproven by these records.
+
+`rollout/test_remote_lane_root.py` exercises the actual publisher, portable
+transport reader, retained binding, generated collector, exclusive packet and
+launch entries, and executor boundaries with inert fixtures. It covers alias
+retargeting, same-path directory substitution, link/mode/hash changes, existing
+leaf preservation, incompatible schemas, unsupported carriers, single-attempt
+admission and supervised deadline expiry. No test starts a provider worker or
+alters a live host/configuration owner. Passing these tests is source
+qualification, not live installation, worker START, result acceptance, or
+permission to replay any held operation.

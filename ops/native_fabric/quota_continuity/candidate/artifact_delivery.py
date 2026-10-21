@@ -973,6 +973,301 @@ def validate_response(raw, request):
     return result
 
 
+def validate_remote_lane_root(binding):
+    """Validate a retained host-owner path tuple; never resolve an alias.
+
+    This is correlation/configuration evidence, not a new admission authority.
+    Callers obtain new tuples only from the existing selected host registry.
+    The portable spelling deliberately excludes shell and transfer metacharacters.
+    DirectoryChain still owns all physical filesystem checks.
+    """
+    import hashlib
+    import json
+    import re
+    fields = {'schema', 'host', 'ssh_alias', 'path', 'sha256'}
+    if (type(binding) is not dict or set(binding) != fields
+            or binding['schema'] != 'mastermind.remote_lane_root.v1'
+            or type(binding['host']) is not str
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', binding['host'])
+            or type(binding['ssh_alias']) is not str
+            or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}', binding['ssh_alias'])
+            or type(binding['path']) is not str
+            or not 2 <= len(binding['path']) <= 1024
+            or not re.fullmatch(r'/[A-Za-z0-9_./-]+', binding['path'])
+            or any(part in {'', '.', '..'} for part in binding['path'].split('/')[1:])
+            or type(binding['sha256']) is not str
+            or not re.fullmatch(r'[a-f0-9]{64}', binding['sha256'])):
+        raise ValueError('remote_lane_root_binding_invalid')
+    body = {key: binding[key] for key in ('schema', 'host', 'ssh_alias', 'path')}
+    digest = hashlib.sha256(json.dumps(
+        body, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if digest != binding['sha256']:
+        raise ValueError('remote_lane_root_binding_invalid')
+    return binding
+
+
+def configured_remote_lane_root(host, entry):
+    """Read only the optional field owned by the existing host registry."""
+    if type(entry) is not dict:
+        raise ValueError('remote_lane_root_host_invalid')
+    if 'physical_lane_root' not in entry:
+        return None
+    binding = {'schema': 'mastermind.remote_lane_root.v1', 'host': host,
+               'ssh_alias': entry.get('ssh_alias'), 'path': entry['physical_lane_root']}
+    binding['sha256'] = digest(json.dumps(binding, sort_keys=True, separators=(',', ':')).encode())
+    return validate_remote_lane_root(binding)
+
+
+def validate_remote_lane_layout(layout):
+    """Validate the bounded directory identities observed before transport."""
+    import hashlib
+    import json
+    import stat
+    required = {'', 'tmp', 'ext', 'ext/active', 'ext/lanes',
+                'orch', 'orch/fabric', 'support-releases'}
+    if (type(layout) is not dict
+            or set(layout) != {'schema', 'binding', 'directories', 'sha256'}
+            or layout['schema'] != 'mastermind.remote_lane_layout.v1'):
+        raise ValueError('remote_lane_layout_invalid')
+    validate_remote_lane_root(layout['binding'])
+    rows = layout['directories']
+    if (type(rows) is not dict or set(rows) != required
+            or any(type(row) is not list or len(row) != 4
+                   or any(type(value) is not int or value < 0 for value in row)
+                   or row[1] == 0 or not stat.S_ISDIR(row[3]) or row[3] & 0o022
+                   for row in rows.values())):
+        raise ValueError('remote_lane_layout_invalid')
+    body = {key: layout[key] for key in ('schema', 'binding', 'directories')}
+    observed = hashlib.sha256(json.dumps(
+        body, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    if layout['sha256'] != observed:
+        raise ValueError('remote_lane_layout_invalid')
+    return layout
+
+
+def observe_remote_lane_layout(binding, expected=None):
+    """Walk the same physical directories; substitution never refreshes a pin."""
+    import hashlib
+    import json
+    import os
+    from pathlib import Path
+    validate_remote_lane_root(binding)
+    if expected is not None:
+        validate_remote_lane_layout(expected)
+        if expected['binding'] != binding:
+            raise ValueError('remote_lane_layout_binding_changed')
+    rows = {}
+    for relative in ('', 'tmp', 'ext', 'ext/active', 'ext/lanes',
+                     'orch', 'orch/fabric', 'support-releases'):
+        with DirectoryChain(Path(binding['path']) / relative) as chain:
+            info = os.fstat(chain.fd)
+            rows[relative] = [info.st_dev, info.st_ino, info.st_uid, info.st_mode]
+            chain.verify()
+    layout = {'schema': 'mastermind.remote_lane_layout.v1',
+              'binding': binding, 'directories': rows}
+    layout['sha256'] = hashlib.sha256(json.dumps(
+        layout, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+    validate_remote_lane_layout(layout)
+    if expected is not None and layout != expected:
+        raise ValueError('remote_lane_layout_changed')
+    return layout
+
+
+def strict_remote_lane_file(path, limit, *, mode=None):
+    """Read one v2 regular file with the transport's unchanged custody rules."""
+    import os
+    import stat
+    from pathlib import Path
+    path = Path(path)
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink,
+                info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    with DirectoryChain(path.parent) as chain:
+        fd = os.open(path.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=chain.fd)
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.geteuid()
+                    or before.st_nlink != 1 or before.st_mode & 0o022
+                    or not 0 < before.st_size <= limit
+                    or (mode is not None and stat.S_IMODE(before.st_mode) != mode)):
+                raise ValueError('remote_lane_file_owner_mode_type_or_size')
+            data = b''
+            while len(data) <= limit:
+                chunk = os.read(fd, min(65536, limit + 1 - len(data)))
+                if not chunk:
+                    break
+                data += chunk
+            chain.verify()
+            if (len(data) != before.st_size
+                    or identity(before) != identity(os.fstat(fd))
+                    or identity(before) != identity(os.stat(
+                        path.name, dir_fd=chain.fd, follow_symlinks=False))):
+                raise ValueError('remote_lane_file_changed')
+            return data
+        finally:
+            os.close(fd)
+
+
+def require_remote_lane_output_absence(layout, run_id):
+    """Check only this new run's fixed output leaves, without following any."""
+    import os
+    import re
+    from pathlib import Path
+    validate_remote_lane_layout(layout)
+    if type(run_id) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', run_id):
+        raise ValueError('remote_lane_run_invalid')
+    root = Path(layout['binding']['path'])
+    for relative, names in (
+            ('ext', ('lanes_' + run_id + '.stdout', 'lanes_' + run_id + '.rc')),
+            ('ext/lanes', tuple(run_id + suffix for suffix in
+                               ('.process.jsonl', '.usage.json', '.provider.json', '.session.json')))):
+        with DirectoryChain(root / relative) as chain:
+            for name in names:
+                try:
+                    os.stat(name, dir_fd=chain.fd, follow_symlinks=False)
+                except FileNotFoundError:
+                    pass
+                else:
+                    raise ValueError('remote_lane_output_already_exists')
+            chain.verify()
+
+
+def open_remote_lane_outputs(layout, run_id):
+    """Reserve new output leaves and return held FDs for the one launch."""
+    import os
+    from pathlib import Path
+    observe_remote_lane_layout(layout['binding'], layout)
+    require_remote_lane_output_absence(layout, run_id)
+    descriptors = []
+    try:
+        with DirectoryChain(Path(layout['binding']['path']) / 'ext') as chain:
+            for suffix in ('.stdout', '.rc'):
+                fd = os.open('lanes_' + run_id + suffix, os.O_WRONLY | os.O_CREAT
+                             | os.O_EXCL | os.O_NOFOLLOW | os.O_NONBLOCK,
+                             0o600, dir_fd=chain.fd)
+                descriptors.append(fd)
+            chain.verify()
+            os.fsync(chain.fd)
+            observe_remote_lane_layout(layout['binding'], layout)
+        return tuple(descriptors)
+    except BaseException:
+        for fd in descriptors:
+            os.close(fd)
+        # Preserve any own partial reservation; never remove existing evidence.
+        raise
+
+
+def publish_remote_lane_packet(layout, run_id, raw):
+    """Exclusively create this NEW packet leaf; never overwrite or repair one."""
+    import os
+    import re
+    import stat
+    from pathlib import Path
+    validate_remote_lane_layout(layout)
+    if (type(run_id) is not str or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}', run_id)
+            or type(raw) is not bytes or not 0 < len(raw) <= 2 * 1024 * 1024):
+        raise ValueError('remote_lane_packet_publication_invalid')
+    observe_remote_lane_layout(layout['binding'], layout)
+    require_remote_lane_output_absence(layout, run_id)
+    root = Path(layout['binding']['path'])
+    with DirectoryChain(root / 'tmp') as chain:
+        # A collision refuses before any byte is written, including symlinks,
+        # hardlinks, regular files and incomplete prior publication effects.
+        fd = os.open(run_id + '.txt', os.O_WRONLY | os.O_CREAT | os.O_EXCL
+                     | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=chain.fd)
+        try:
+            view = memoryview(raw)
+            while view:
+                count = os.write(fd, view)
+                if count <= 0:
+                    raise OSError('remote_lane_packet_short_write')
+                view = view[count:]
+            os.fsync(fd)
+            created = os.fstat(fd)
+            visible = os.stat(run_id + '.txt', dir_fd=chain.fd, follow_symlinks=False)
+            def identity(info):
+                return (info.st_dev, info.st_ino, info.st_uid, info.st_mode, info.st_nlink,
+                        info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+            chain.verify()
+            if (not stat.S_ISREG(created.st_mode) or created.st_uid != os.geteuid()
+                    or created.st_nlink != 1 or stat.S_IMODE(created.st_mode) != 0o600
+                    or created.st_size != len(raw) or identity(created) != identity(visible)):
+                raise ValueError('remote_lane_packet_publication_changed')
+            os.fsync(chain.fd)
+            observe_remote_lane_layout(layout['binding'], layout)
+        finally:
+            # Any partial own file remains evidence. No replacement or retry.
+            os.close(fd)
+
+
+def verify_remote_lane_release(layout, support, meta):
+    """Check the publisher's fixed state aliases without following them.
+
+    File hashes are checked by the caller against the retained code digest.
+    Alias targets are a separate, closed publisher convention; metadata may
+    not introduce another state owner. No host state or credential is read.
+    """
+    import os
+    import re
+    import stat
+    from pathlib import Path
+    validate_remote_lane_layout(layout)
+    if type(support) is not str or not re.fullmatch(r'[a-f0-9]{64}', support):
+        raise ValueError('remote_lane_release_invalid')
+    lane_root = Path(layout['binding']['path'])
+    ext_names = {'active', 'lanes', 'slots', 'state', 'broker', 'lane_bin',
+                 'hosts.json', 'bailian_policy.json', 'bailian_usage.json',
+                 'GROK_EXHAUSTED', 'glm_window_state.json', 'glm_shim',
+                 'go_shim', 'codex_glm', 'codex_go', 'codex_minimax'}
+    root_names = {'orch', 'codex_bailian', 'minimax_claude_home',
+                  'glm_claude_home', 'go_claude_home'}
+    links = {'ext/' + name: str(lane_root / 'ext' / name) for name in ext_names}
+    links.update({name: str(lane_root / name) for name in root_names})
+    if (type(meta) is not dict
+            or set(meta) != {'schema', 'files', 'digest', 'links'}
+            or meta['schema'] != 'remote-support-code.v1'
+            or meta['digest'] != support or meta['links'] != links
+            or type(meta['files']) is not dict or not 1 <= len(meta['files']) <= 256
+            or any(type(name) is not str or not name or Path(name).name != name
+                   or type(value) is not str or not re.fullmatch(r'[a-f0-9]{64}', value)
+                   for name, value in meta['files'].items())
+            or not {'remote_sub_exec.py', 'artifact_delivery.py', 'artifact_reader.py',
+                    'native_runtime_bindings.py'} <= set(meta['files'])):
+        raise ValueError('remote_lane_release_binding_invalid')
+    release = lane_root / 'support-releases' / support
+    with DirectoryChain(release) as root, DirectoryChain(release / 'ext') as ext:
+        if (stat.S_IMODE(os.fstat(root.fd).st_mode) != 0o555
+                or stat.S_IMODE(os.fstat(ext.fd).st_mode) != 0o555
+                or set(os.listdir(root.fd)) != {'ext', 'RELEASE.json'} | root_names
+                or set(os.listdir(ext.fd)) != set(meta['files']) | ext_names
+                or stat.S_IMODE(os.stat('RELEASE.json', dir_fd=root.fd,
+                                       follow_symlinks=False).st_mode) != 0o444):
+            raise ValueError('remote_lane_release_shape_invalid')
+        for name in meta['files']:
+            info = os.stat(name, dir_fd=ext.fd, follow_symlinks=False)
+            if (not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid()
+                    or info.st_nlink != 1 or stat.S_IMODE(info.st_mode) != 0o555):
+                raise ValueError('remote_lane_release_code_custody_invalid')
+        held = []
+        def identity(info):
+            return (info.st_dev, info.st_ino, info.st_uid, info.st_mode,
+                    info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        for alias, target in links.items():
+            chain = ext if alias.startswith('ext/') else root
+            name = alias.split('/')[-1]
+            chain.verify()
+            before = os.stat(name, dir_fd=chain.fd, follow_symlinks=False)
+            if (not stat.S_ISLNK(before.st_mode) or before.st_uid != os.geteuid()
+                    or os.readlink(name, dir_fd=chain.fd) != target):
+                raise ValueError('remote_lane_release_alias_changed')
+            held.append((chain, name, target, identity(before)))
+        for chain, name, target, before in held:
+            chain.verify()
+            if (before != identity(os.stat(name, dir_fd=chain.fd, follow_symlinks=False))
+                    or os.readlink(name, dir_fd=chain.fd) != target):
+                raise ValueError('remote_lane_release_alias_changed')
+
+
 class DirectoryChain:
     """Hold and revalidate every directory edge without following symlinks."""
     def __init__(self, path):
@@ -1035,7 +1330,11 @@ def remote_directory_chain_source():
     local_adapter = "            path = owner_path(path, HERE)"
     if source.count(local_adapter) != 1:
         raise ValueError("remote_directory_chain_source_changed")
-    return source.replace(local_adapter, "            path = Path(path)", 1)
+    return (source.replace(local_adapter, "            path = Path(path)", 1)
+            + "\n\n" + inspect.getsource(validate_remote_lane_root)
+            + "\n\n" + inspect.getsource(validate_remote_lane_layout)
+            + "\n\n" + inspect.getsource(observe_remote_lane_layout)
+            + "\n\n" + inspect.getsource(verify_remote_lane_release))
 
 
 def reserve_destination(destination):
