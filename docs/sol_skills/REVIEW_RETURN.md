@@ -76,8 +76,10 @@ RELEASE_BLOCKED
   non-material;
 * protected movement is disjoint from owned paths and does not materially intersect the declared
   dependency closure;
-* the latest-base merge ref/integrated candidate is conflict-free and passes required repository and
-  security checks;
+* the latest-base merge ref/integrated candidate is conflict-free and its identity is bound. Head
+  checks and mandatory semantic review must pass before queue entry; with GitHub's native merge
+  queue, required `merge_group` repository/security checks pass **in the queue before merge**,
+  not necessarily on the synthetic PR merge ref before queue entry;
 * no unresolved blocker/thread applies;
 * capability/non-goal claims are unchanged and no new live/production proof is claimed.
 
@@ -187,7 +189,7 @@ Do not send the builder back to “rethink everything” unless the architecture
 Accept only when:
 
 * every blocker is closed on the exact current semantic head;
-* required latest-base integration/hosted checks are green for that same semantic head;
+* required latest-base integration/hosted checks are green for that same semantic head **at final merge acceptance**; with a native merge queue, a missing prequeue synthetic merge-ref check is not grounds to withhold an otherwise eligible queue entry;
 * the changed-file set and authority surface remain bounded;
 * production/browser/consumer proof exists when the wave owes it;
 * the capability ledger is updated truthfully;
@@ -223,6 +225,35 @@ source/dependency/authority change, touched prior finding, or strengthened capab
 `FULL_REREVIEW_REQUIRED`. Unknown current-source, collision, integration, review, or effect state is
 `RELEASE_BLOCKED`. This preserves existing PR #404 review-reuse semantics rather than creating a
 second review or release rule.
+
+### Step 8B — Technical writer-gate evidence for same-PR release
+
+Before commissioning the maintenance-only release operation of Step 8A, read the technical writer gate
+for the exact PR branch with `scripts/source_continuity.py writer-gate` and cite its receipt digest. The
+observed state must be recorded in the release commission:
+
+* `TECHNICAL_WRITER_GATE_UNAVAILABLE` does not block a clean RCH-1 same-PR release; it records that
+  branch custody is procedural only, so the release maintainer's fresh exact-head
+  `REMOTE_COMPLETE_VERIFIED` re-proof is the sole stale-writer detection and any moved head/tree is
+  `RELEASE_BLOCKED` until reconciled. Checkpoint abandonment after writer loss (RCH-1A) is not available
+  on that branch.
+* `TECHNICAL_WRITER_GATE_ACTIVE` records that stale writers are technically fenced by GitHub and only the
+  accepted source-writer integration in `always` mode can mediate an expected-head update. Before
+  relying on this state, review the receipt's complete `rule_types`, `enforcing_ruleset_ids` and
+  `bypass_actors`: `lock_branch` and every other applicable mutation rule must preserve that same
+  mediation path; an unknown applicable rule is `UNKNOWN_APPLICABLE_RULE`; the accepted integration
+  in `pull_request` mode and every `exempt` or additional actor are `BYPASS_WIDENED`, never `ACTIVE`.
+  `rule_types` is the applicable census: only the inert `merge_queue`/`branch_name_pattern`/
+  `tag_name_pattern` types are excluded, so confirm the branch carries no other rule you expected to
+  see before relying on the state.
+* `legacy_branch_protected` is the branch's own classic branch-protection readback, not the ambiguous
+  branch summary flag. Classic protection is enforced alongside rulesets, so any present layer is
+  `LEGACY_PROTECTION_PRESENT` and `UNAVAILABLE` in V1 — the receipt does not model whether that layer
+  leaves the accepted integration an expected-head path. An unreadable or moved classic readback is a
+  refusal, never absence.
+
+The receipt is evidence only; neither state grants Ready, merge, fence, retry, receiver-transfer, or
+production authority, and neither weakens `EFFECT_UNKNOWN`, local-dirt, or exact-session stickiness.
 
 ## Step 9 — Close or continue the reciprocal dialogue explicitly
 

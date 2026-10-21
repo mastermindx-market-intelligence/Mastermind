@@ -15,12 +15,14 @@ from integrations.slack_agent_dialogue.engine import (
     SlackTransportUnavailable,
 )
 from integrations.slack_agent_dialogue.slack_web_api import (
+    BoundedHistoryPage,
     MAX_CURSOR_CHARS,
     MAX_RESPONSE_BYTES,
     SLACK_API_ROOT,
     SlackHttpResponse,
     SlackWebApiDialogueClient,
     UrllibSlackHttpTransport,
+    estimate_replies_append_bytes,
 )
 
 TOKEN = "INERT-A2-AGENT-RELAY-TOKEN"
@@ -110,6 +112,113 @@ def page_payload(messages: list[dict], *, has_more=False, cursor="") -> dict:
         "has_more": has_more,
         "response_metadata": {"next_cursor": cursor},
     }
+
+
+def test_thread_history_preserves_exact_raw_page_byte_lengths() -> None:
+    first_query = {"channel": CHANNEL, "ts": THREAD_TS, "limit": "3"}
+    second_query = {
+        "channel": CHANNEL,
+        "cursor": "cursor-1",
+        "ts": THREAD_TS,
+        "limit": "1",
+    }
+    first = response(
+        "conversations.replies",
+        page_payload(
+            [
+                message(ts=THREAD_TS, user=BOT, text="parent"),
+                message(
+                    ts="1787471000.000002",
+                    text="reply-one",
+                    thread_ts=THREAD_TS,
+                ),
+            ],
+            has_more=True,
+            cursor="cursor-1",
+        ),
+        query=first_query,
+    )
+    second = response(
+        "conversations.replies",
+        page_payload(
+            [message(
+                ts="1787471000.000003",
+                text="reply-two",
+                thread_ts=THREAD_TS,
+            )],
+            has_more=False,
+            cursor="",
+        ),
+        query=second_query,
+    )
+    adapter, _transport = client(
+        lambda call: first if call["query"].get("cursor") is None else second
+    )
+
+    page = run(
+        adapter.fetch_thread(channel_id=CHANNEL, thread_ts=THREAD_TS, limit=3)
+    )
+
+    assert isinstance(page, BoundedHistoryPage)
+    assert page.response_page_bytes == (len(first.body), len(second.body))
+    assert page.response_byte_limit == MAX_RESPONSE_BYTES
+    assert page == HistoryPage(
+        messages=page.messages,
+        complete=True,
+        mutation_evidence_complete=True,
+    )
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "plain-ascii",
+        '"quoted" and \\ backslashes',
+        "中文字符",
+        "astral-😀-🚀",
+    ],
+    ids=["ascii", "escaping", "cjk", "astral"],
+)
+def test_replies_append_estimator_is_deterministic_and_conservative(
+    text: str,
+) -> None:
+    worst_case_message = {
+        "type": "message",
+        "team": "T" + "Z" * 31,
+        "user": "U" + "Z" * 31,
+        "text": text,
+        "ts": "9" * 16 + ".999999",
+        "thread_ts": THREAD_TS,
+    }
+    encoded = len(json.dumps(
+        worst_case_message,
+        ensure_ascii=False,
+        sort_keys=True,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8"))
+
+    first = estimate_replies_append_bytes(text=text, thread_ts=THREAD_TS)
+    second = estimate_replies_append_bytes(text=text, thread_ts=THREAD_TS)
+
+    assert first == second
+    assert first >= encoded
+
+
+def test_oversize_response_never_yields_bounded_history_facts() -> None:
+    query = {"channel": CHANNEL, "limit": "1"}
+    adapter, _transport = client(
+        lambda call: response(
+            call["path"],
+            b"{" + b"x" * MAX_RESPONSE_BYTES + b"}",
+            query=query,
+        )
+    )
+
+    with pytest.raises(
+        SlackTransportUnavailable, match="^SLACK_TRANSPORT_UNAVAILABLE$"
+    ):
+        run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
 
 
 def test_unedited_history_and_thread_parse_exactly_and_preserve_limit() -> None:

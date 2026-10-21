@@ -17,33 +17,36 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  test:
+  # Run each canonical, disjoint pytest shard on a separate hosted runner.
+  # This changes placement only, not discovery, exclusions, selected modules
+  # or the repository's one protected status context named "test".
+  pytest_shards:
+    name: pytest shard ${{ matrix.index }}
     runs-on: ubuntu-latest
-    timeout-minutes: 40
-
+    # Retain protected master's bounded five-minute headroom for test setup.
+    # All three shards must still succeed within the finite 45-minute limit.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        index: [0, 1, 2]
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
       # `vendor/macro` is a tracked developer symlink to `vendor/macro_src`.
-      # A clean hosted runner has no sibling checkout behind that symlink, so
-      # app imports would otherwise depend on untracked workstation state.
-      # Pin the exact Macro engine revision used by this release and fetch only
-      # its importable code surface; runtime data remains VPS-owned and is never
-      # copied into CI or this repository.
-      # DEC:B1-MACRO-PRIVATE-CUTOVER -- macro is going private. The default
-      # `github.token` this job otherwise relies on is scoped to THIS
-      # repository only and cannot read another repo, so this checkout works
-      # today solely because mastermindx-market-intelligence/macro is still
-      # public. The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback
-      # keeps CI green right now (an undefined secret evaluates to an empty,
-      # falsy string, so behavior stays byte-identical to today) and keeps it
-      # green after the flip once the operator adds a read-only
-      # MACRO_CI_READ_TOKEN secret (fine-grained PAT or GitHub App
-      # installation token with Contents: Read on
-      # mastermindx-market-intelligence/macro, or an `ssh-key:` deploy-key
-      # equivalent) before or at the visibility flip.
+      # A clean hosted runner lacks the local sibling checkout; pin exactly
+      # the importable Macro engine revision, not VPS-owned runtime data.
+      # DEC:B1-MACRO-PRIVATE-CUTOVER -- github.token is scoped to THIS repo
+      # and can currently read Macro only because Macro is public. When the
+      # upstream repository becomes private, the owner must first install a
+      # read-only MACRO_CI_READ_TOKEN (fine-grained PAT or GitHub App token
+      # with Contents: Read on mastermindx-market-intelligence/macro).
+      # The `secrets.MACRO_CI_READ_TOKEN || github.token` fallback keeps CI
+      # working before that admission; no privilege expansion or anonymous
+      # fallback is allowed after private cutover.
       - name: Checkout pinned Macro engine
         uses: actions/checkout@v4
         with:
@@ -56,6 +59,15 @@ jobs:
           persist-credentials: false
           token: ${{ secrets.MACRO_CI_READ_TOKEN || github.token }}
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.14.0"
+          cache: npm
+          cache-dependency-path: app/mastermind_os/package-lock.json
+
+      - name: Install Node dependencies
+        run: npm ci --prefix app/mastermind_os
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
@@ -66,16 +78,66 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev]"
 
+      # Non-pytest qualification is required once per immutable CI checkout.
+      # Failure of shard 0 also fails the exact required fan-in status.
+      - name: Verify Paper direct pinned MCP SDK
+        if: matrix.index == 0
+        run: |
+          PAPER_MCP_VENV="$RUNNER_TEMP/paper-direct-mcp-ci"
+          python -m venv "$PAPER_MCP_VENV"
+          "$PAPER_MCP_VENV/bin/python" -m pip install --disable-pip-version-check \
+            -r integrations/paper_desktop/requirements-mcp.txt
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_direct*.py'
+          PAPER_DIRECT_PINNED_SDK_TESTS=1 "$PAPER_MCP_VENV/bin/python" -I -m unittest discover -s tests -p 'test_paper_mcp_results.py'
+
+      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime
+        if: matrix.index == 0
+        working-directory: integrations/studio_direct_mcp
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node --test gateway-modern-fabric.test.mjs gateway.test.mjs gateway-shared-backend.test.mjs gateway-owner-lifecycle-regression.test.mjs gateway-output-budget.test.mjs fabric-backend.test.mjs private-cli.test.mjs private-tunnel-auth.test.mjs
+          python -m unittest discover -s . -p 'private_service*test.py'
+
       - name: Compile source
+        if: matrix.index == 0
         run: >-
           python -m compileall -q
           app bot brain bridge common control_plane data_layer integrations loop
           portfolio scripts
 
       - name: Validate shell scripts
+        if: matrix.index == 0
         run: |
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      - name: Run repository test shard
+        run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
+
+  # Branch protection requires exactly the stable context "test". Matrix
+  # checks alone have dynamic names and are NOT a sufficient required check.
+  # A skipped/cancelled/failed matrix must not turn into a green required gate.
+  test:
+    name: test
+    needs: [pytest_shards]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install gate parser
+        run: python -m pip install --disable-pip-version-check PyYAML==6.0.2
+
       - name: Run repository test gate
-        run: python scripts/ci_pytest.py
+        env:
+          SHARDS_STATUS: ${{ needs.pytest_shards.result }}
+        run: |
+          if [ "$SHARDS_STATUS" != success ]; then
+            echo "required pytest shard matrix did not fully succeed"
+            exit 1
+          fi
+          # Same discovery/exclusion/total-cover plan, never a test skip.
+          python scripts/ci_pytest.py --plan-only --jobs 3

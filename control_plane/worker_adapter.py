@@ -23,6 +23,7 @@ from control_plane.worker_execution_contract import (
     ProcessInspector,
     ValidationReceipt,
     WorkerLaunchSpec,
+    WorkerRecoveryBinding,
     WorkerProcessRef,
     WorkerRunStatus,
 )
@@ -48,6 +49,13 @@ class AdapterDescriptor:
 
 
 ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
+    # The retained facade exists; its concrete qualified host backend is not
+    # installed. Catalogue source must not imply worker admission.
+    "attended-fabric": AdapterDescriptor(
+        adapter_id="attended-fabric",
+        implemented=False,
+        implementation="control_plane.executive_fabric_adapter.AttendedFabricWorkerAdapter",
+    ),
     "codex-cli": AdapterDescriptor(
         adapter_id="codex-cli",
         implemented=True,
@@ -59,6 +67,11 @@ ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
             "control_plane.claude_subscription_worker"
             ".ClaudeSubscriptionWorkerAdapter"
         ),
+    ),
+    "claude-code": AdapterDescriptor(
+        adapter_id="claude-code",
+        implemented=False,
+        implementation="control_plane.claude_worker.ClaudeCodeWorkerAdapter",
     ),
     # Clean, deliberately unarmed seams for later provider work.  A routing
     # policy cannot bind a live worker through an unimplemented descriptor.
@@ -246,12 +259,22 @@ class WorkerExecutionAdapter(Protocol):
     ) -> ValidationReceipt: ...
 
 
+@runtime_checkable
+class RecoverableWorkerExecutionAdapter(WorkerExecutionAdapter, Protocol):
+    """Optional same-execution recovery on top of the stable adapter/v1 floor."""
+
+    def reattach(
+        self, spec: WorkerLaunchSpec, binding: WorkerRecoveryBinding
+    ) -> WorkerProcessRef: ...
+
+
 __all__ = [
     "ADAPTER_DESCRIPTORS",
     "ADAPTER_INTERFACE_VERSION",
     "AdapterBindingError",
     "AdapterDescriptor",
     "WorkerExecutionAdapter",
+    "RecoverableWorkerExecutionAdapter",
     "adapter_descriptor",
     "adapter_implementation",
     "bind_reviewed_adapter",

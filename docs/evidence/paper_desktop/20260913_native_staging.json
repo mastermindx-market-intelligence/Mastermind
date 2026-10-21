@@ -1,0 +1,124 @@
+{
+  "observed_on": "2026-09-18",
+  "capability_state": "PARTIAL",
+  "production_accepted": false,
+  "procedure_commit": "55473bb43c3ae1908f53ddd4ccfe724643dd6c69",
+  "native_host": "admins-Mini-652.ts.net lan",
+  "device_id": "37db60bd-f84d-4521-ae9e-47c575d9ba86",
+  "app": {
+    "version": "0.5.11",
+    "path": "/Users/chriswong/Applications/Paper.app",
+    "previous_app_preserved": "/Users/chriswong/Applications/Paper.app.prev-0.5.9",
+    "download_url": "https://download.paper.design/mac/dmg/arm64",
+    "dmg_sha256": "03a027b2b1bc1df2e54f8db3d4cd5c1c404bf56994926113efe223e0b2a27079",
+    "codesign": "valid on disk; satisfies Designated Requirement",
+    "gatekeeper": "accepted; Notarized Developer ID",
+    "signer": "Stephen Haney (PA579U484X)",
+    "listener_observed": "127.0.0.1:29979"
+  },
+  "install_root": "/Users/chriswong/.local/share/mastermind-paper/paper-20260913-sol01/workbench",
+  "python": "3.14.6",
+  "mcp_sdk": "1.30.0",
+  "runtime_sha256": {
+    "bridge.py": "cd34f98c1647ba52f392fb93aa9d7aed24eb39aac90d7de75bce39021444740d",
+    "mcp_server.py": "294e699d6da31b56a114003257e6a361b83cfd7844c546d172eb51276d83a6a8",
+    "requirements-mcp.txt": "4fe75062c5d424bbc86a8cd58c63ab19aeffe4f0a0e100022252c8032e12ee5b"
+  },
+  "paper_0511_compatibility": {
+    "server_name": "paper-desktop",
+    "live_version": "0.5.11",
+    "original_failure": "DOCUMENT_SCHEMA_UNVERIFIED on compact structured file header",
+    "repair": "reconcile agreeing stable file header + rich detail; exact fileId required on stable-ID edits",
+    "catalog_sha256": "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519",
+    "pure_guard_tests": "PASS"
+  },
+  "live_design_canary": {
+    "scratch_file_id_persisted_in_repo": false,
+    "create_artboard": {
+      "operation_id": "paper-live-canary-20260918-01",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    "write_html": {
+      "operation_id": "paper-live-canary-20260918-02",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    "screenshot": {
+      "state": "OBSERVED",
+      "artifact_sha256": "d200166b831f154bcef7e59883c0193225961ed73b52c17b83d445a7fd195200"
+    },
+    "jsx": {
+      "state": "OBSERVED",
+      "contains_heading": "Native design tooling is live.",
+      "format": "inline-styles"
+    },
+    "finish_working": {
+      "operation_id": "paper-live-canary-20260918-03",
+      "state": "APPLIED_RESPONSE_OBSERVED"
+    },
+    "effect_unknown_count": 0,
+    "replayed_operations": 0
+  },
+  "access_policy": {
+    "read_tools_added": [
+      "list_files",
+      "find_nodes",
+      "get_tokens",
+      "list_comment_threads",
+      "get_comment_thread",
+      "list_comment_thread_authors"
+    ],
+    "guarded_edit_tools_added": [
+      "create_page",
+      "create_tokens",
+      "set_tokens",
+      "set_comment_thread_status"
+    ],
+    "additionally_refused": [
+      "token deletion",
+      "create_file",
+      "open_file",
+      "delete_nodes",
+      "export",
+      "export_combined_pdf"
+    ]
+  },
+  "unchanged": [
+    "provider account credentials (Codex workspace trust was added, but no credential value was read or changed)",
+    "live worker processes",
+    "Executive capability registry and production gates",
+    "Figma designs and billing",
+    "Paper paid-plan state"
+  ],
+  "remaining": [
+    "exact-head hosted CI",
+    "independent semantic review",
+    "Codex reauthentication and one native Codex Paper canary",
+    "Claude project-MCP approval and one native Claude Paper canary",
+    "sealed Executive worker grant",
+    "fresh ChatGPT Web session repeat",
+    "Business/Enterprise/Edu custom full-MCP app enrollment if first-class ChatGPT write is desired",
+    "one real Mastermind design-to-code/browser proof before Figma retirement"
+  ],
+  "live_client_enrollment": {
+    "codex": {
+      "workspace_trust": "APPLIED_TO_EXACT_ISOLATED_WORKSPACE",
+      "user_config_backup": "/Users/chriswong/.codex/config.toml.pre-paper-20260918",
+      "mcp_list": "mastermindPaper enabled; guarded stdio adapter visible",
+      "provider_auth": "BLOCKED_INVALID_REFRESH_TOKEN_401",
+      "exact_human_gate": "codex logout; codex login; repeat read-only canary"
+    },
+    "claude": {
+      "mcp_list": "mastermindPaper visible",
+      "project_mcp_state": "PENDING_APPROVAL",
+      "exact_human_gate": "launch interactive claude in isolated workspace and approve mastermindPaper; repeat canary"
+    }
+  },
+  "schema_write_pin": {
+    "server": [
+      "paper-desktop",
+      "0.5.11"
+    ],
+    "catalog_sha256": "e295e78106615d4058f47f18b661c97b1832231ae77164c534ee42df62a11519",
+    "behavior": "read/catalog may inspect drift; every bridge edit refuses UPSTREAM_SCHEMA_UNREVIEWED unless both exact pins match"
+  }
+}

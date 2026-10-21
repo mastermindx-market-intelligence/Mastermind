@@ -897,76 +897,76 @@ def _project_runtime(
     except (RuntimeProofError, ValueError, KeyError) as exc:
         projection.degraded.append(f"runtime workers unreadable: {_first_line(exc)}")
 
+    initial = project_runtime_inputs(jobs=jobs, attempts=attempts, workers=workers,
+                                     provenance_by_job={}, completeness="whole", now=now)
+    provenance_by_job: dict[str, Mapping[str, Any]] = {}
+    event_warnings: list[str] = []
+    if jobs is not None:
+        for item in initial.attention:
+            job_id = item["job_id"]
+            try:
+                provenance, warning = ceo_intent_provenance(runtime, job_id)
+            except (RuntimeProofError, ValueError, KeyError) as exc:
+                event_warnings.append(
+                    f"runtime events unreadable: {_first_line(exc)}; CEO-intent "
+                    f"provenance not projected")
+                break
+            if warning is not None:
+                event_warnings.append(warning)
+            if provenance is not None:
+                provenance_by_job[job_id] = provenance
+    result = project_runtime_inputs(jobs=jobs, attempts=attempts, workers=workers,
+                                   provenance_by_job=provenance_by_job,
+                                   completeness="whole", now=now)
+    result.degraded[:0] = projection.degraded + event_warnings
+    return result
+
+
+def project_runtime_inputs(*, jobs, attempts, workers, provenance_by_job,
+                           completeness, now=None) -> _RuntimeProjection:
+    """Project supplied owner objects; a bounded root slice has no global totals."""
+    from control_plane.executive_runtime import AttemptStatus, JobStatus, WorkerStatus
+    globals()["AttemptStatus"] = AttemptStatus
+    if completeness not in {"whole", "bounded"}:
+        raise ValueError("unknown runtime projection completeness")
+    projection = _RuntimeProjection()
     projection.counts = {
         "jobs": _counts(jobs, JobStatus) if jobs is not None else None,
         "attempts": _counts(attempts, AttemptStatus) if attempts is not None else None,
         "workers": _counts(workers, WorkerStatus) if workers is not None else None,
-    }
-
+    } if completeness == "whole" else {"jobs": None, "attempts": None, "workers": None}
+    if completeness == "bounded":
+        projection.degraded.append("bounded runtime slice; global Jobs/Attempts/Workers counts unavailable")
     if jobs is None:
         return projection
-
     latest = _last_attempt_by_job(attempts or [])
     children_by_parent: dict[str, list[Job]] = {}
     for candidate in jobs:
         if candidate.parent_job_id:
             children_by_parent.setdefault(candidate.parent_job_id, []).append(candidate)
     suppressed = {key: 0 for key in _SUPPRESSION_KEYS}
-    events_closed = False
-
     for job in jobs:
-        last_attempt = latest.get(job.job_id)
+        if completeness == "bounded" and (
+                (job.attempt_count and job.job_id not in latest)
+                or (job.reviews_job_id and job.reviews_job_id not in latest)):
+            projection.degraded.append(f"{job.job_id}: required Attempt evidence unavailable in bounded slice")
+            continue
         item, bucket = classify_job(
-            job,
-            last_attempt=last_attempt,
-            now=now,
+            job, last_attempt=latest.get(job.job_id), now=now,
             children=children_by_parent.get(job.job_id, ()),
             reviewed_attempt=latest.get(job.reviews_job_id) if job.reviews_job_id else None,
-            attempts_by_job=latest,
-        )
+            attempts_by_job=latest, provenance=provenance_by_job.get(job.job_id))
         if item is None:
             if bucket is not None:
                 suppressed[bucket] = suppressed.get(bucket, 0) + 1
-            continue
-
-        # Events are read ONLY for jobs already selected as attention — the
-        # bounded read.  A per-job event scan across a whole runtime would grow
-        # with the ledger; the attention list does not.
-        if not events_closed:
-            try:
-                provenance, warning = ceo_intent_provenance(runtime, job.job_id)
-            except (RuntimeProofError, ValueError, KeyError) as exc:
-                projection.degraded.append(
-                    f"runtime events unreadable: {_first_line(exc)}; CEO-intent "
-                    f"provenance not projected"
-                )
-                events_closed = True
-            else:
-                if warning is not None:
-                    projection.degraded.append(warning)
-                if provenance is not None:
-                    # Re-classify with the provenance in hand: it contributes the
-                    # workstream and two evidence refs, and the identity hash
-                    # covers both.  Classification is pure, so this cannot diverge
-                    # from the decision just made.
-                    item = classify_job(
-                        job,
-                        last_attempt=last_attempt,
-                        provenance=provenance,
-                        now=now,
-                        children=children_by_parent.get(job.job_id, ()),
-                        reviewed_attempt=latest.get(job.reviews_job_id) if job.reviews_job_id else None,
-                        attempts_by_job=latest,
-                    )[0]
-        if item is not None:
+        else:
             projection.attention.append(item)
-
-    projection.suppressed = suppressed
-    gap = _reconciliation_gap(
-        suppressed, len(projection.attention), projection.counts["jobs"]["total"]
-    )
-    if gap is not None:
-        projection.degraded.append(gap)
+    if completeness == "whole":
+        projection.suppressed = suppressed
+        gap = _reconciliation_gap(suppressed, len(projection.attention), projection.counts["jobs"]["total"])
+        if gap is not None:
+            projection.degraded.append(gap)
+    # Bounded slice suppression counts are not global reconciliation evidence.
     return projection
 
 
@@ -1010,9 +1010,51 @@ def project_needs_ceo(
             f"— not read; CEO attention not projected"
         ]
 
+    # The brief carries its own supply warnings one level down, in
+    # `inputs.degraded`.  The boot-packet renderer discloses them from there,
+    # but this module reads only the packet's top-level `degraded` — which does
+    # not include them — so every warning the collector recorded about its
+    # inputs has vanished from every executive surface.  Collect them here,
+    # immediately after the schema gate (a foreign brief's `inputs` stays
+    # unread), and keep them even when `needs_ceo` itself is unreadable: a
+    # malformed ruling list must not erase what the inputs said.
+    input_degraded: list[str] = []
+    raw_inputs = brief.get("inputs")
+    if raw_inputs is not None:
+        if not isinstance(raw_inputs, Mapping):
+            input_degraded.append(
+                f"boot packet brief inputs is a {type(raw_inputs).__name__}, "
+                f"not an object; its degraded warnings were not read"
+            )
+        else:
+            raw_degraded = raw_inputs.get("degraded")
+            if raw_degraded is not None:
+                if not isinstance(raw_degraded, (list, tuple)):
+                    # A string here would iterate character by character, and
+                    # dropping it would discard the brief's own account of what
+                    # its inputs could not read.
+                    input_degraded.append(
+                        f"boot packet brief inputs degraded is a "
+                        f"{type(raw_degraded).__name__}, not a list; "
+                        f"its warnings were not disclosed"
+                    )
+                else:
+                    for index, warning in enumerate(raw_degraded):
+                        if isinstance(warning, str):
+                            # Verbatim, in source order, duplicates kept — the
+                            # same bubble the packet's own top-level warnings
+                            # get in `compose_inbox`.
+                            input_degraded.append(f"boot_packet: {warning}")
+                        else:
+                            input_degraded.append(
+                                f"boot packet brief inputs degraded[{index}] "
+                                f"is a {type(warning).__name__}, not a string; "
+                                f"no warning disclosed from it"
+                            )
+
     rows = brief.get("needs_ceo") or []
     if not isinstance(rows, (list, tuple)):
-        return items, [
+        return items, input_degraded + [
             f"boot packet needs_ceo is a {type(rows).__name__}, not a list; "
             f"CEO attention not projected"
         ]
@@ -1059,7 +1101,7 @@ def project_needs_ceo(
                 ordinal=index,
             )
         )
-    return items, degraded
+    return items, input_degraded + degraded
 
 
 def load_boot_packet_file(path: str | Path) -> tuple[dict[str, Any] | None, str | None]:
@@ -1173,6 +1215,39 @@ def build_inbox(
             "not projected"
         )
 
+    runtime = project_runtime(projection_root, now_dt) if read_binding is None else project_runtime(
+        projection_root, now_dt, read_binding=read_binding)
+    result = compose_inbox(
+        runtime_projection=runtime, boot_packet=packet, generated_at=generated_at,
+        degraded=degraded,
+        mastermind_grounding={"root": os.fspath(root), "sha": ceo_boot_packet.git_sha(root),
+                              "branch": ceo_boot_packet.git_branch(root)},
+        runtime_grounding={"path": os.fspath(projection_root / DB_RELATIVE_PATH),
+                           "present": (projection_root / DB_RELATIVE_PATH).is_file() if read_binding is None else False})
+    if read_binding is not None:
+        from control_plane.executive_runtime import RuntimeProofError
+
+        try:
+            with read_binding.physical_read(projection_root / DB_RELATIVE_PATH):
+                present = (projection_root / DB_RELATIVE_PATH).is_file()
+            result["grounding"]["runtime_db"]["present"] = present
+            read_binding.validate_before_core_return()
+        except (RuntimeProofError, OSError, ValueError, KeyError) as exc:
+            read_binding.invalidate()
+            ceo_items = (project_needs_ceo(packet)[0]
+                         if packet is not None and packet.get("schema") == BOOT_PACKET_SCHEMA else [])
+            result["attention"] = sorted(ceo_items, key=_sort_key)
+            result["runtime_counts"] = None
+            result["suppressed"] = None
+            result["degraded"].append(f"bound runtime unavailable: {_first_line(exc)}")
+    return result
+
+
+def compose_inbox(*, runtime_projection, boot_packet, mastermind_grounding,
+                  runtime_grounding, generated_at, degraded=()) -> dict[str, Any]:
+    """Assemble the existing inbox from owner inputs without acquisition."""
+    packet = boot_packet
+    degraded = list(degraded)
     macro_root: str | None = None
     macro_sha: str | None = None
     packet_schema: str | None = None
@@ -1211,49 +1286,18 @@ def build_inbox(
             ceo_items, packet_degraded = project_needs_ceo(packet)
             degraded.extend(packet_degraded)
 
-    runtime = project_runtime(projection_root, now_dt) if read_binding is None else project_runtime(
-        projection_root, now_dt, read_binding=read_binding
-    )
-    degraded.extend(runtime.degraded)
-
-    attention = sorted(ceo_items + runtime.attention, key=_sort_key)
-
-    result = {
-        "schema": SCHEMA,
-        "generated_at": generated_at,
-        "grounding": {
-            "mastermind": {
-                "root": os.fspath(root),
-                "sha": ceo_boot_packet.git_sha(root),
-                "branch": ceo_boot_packet.git_branch(root),
-            },
-            "macro": {"root": macro_root, "sha": macro_sha},
-            "boot_packet_schema": packet_schema,
-            "runtime_db": {
-                "path": os.fspath(projection_root / DB_RELATIVE_PATH),
-                "present": (projection_root / DB_RELATIVE_PATH).is_file() if read_binding is None else False,
-            },
-        },
-        "attention": attention,
-        "runtime_counts": runtime.counts,
-        "suppressed": runtime.suppressed,
+    degraded.extend(runtime_projection.degraded)
+    return {
+        "schema": SCHEMA, "generated_at": generated_at,
+        "grounding": {"mastermind": dict(mastermind_grounding),
+                      "macro": {"root": macro_root, "sha": macro_sha},
+                      "boot_packet_schema": packet_schema,
+                      "runtime_db": dict(runtime_grounding)},
+        "attention": sorted(ceo_items + runtime_projection.attention, key=_sort_key),
+        "runtime_counts": runtime_projection.counts,
+        "suppressed": runtime_projection.suppressed,
         "degraded": degraded,
     }
-    if read_binding is not None:
-        from control_plane.executive_runtime import RuntimeProofError
-
-        try:
-            with read_binding.physical_read(projection_root / DB_RELATIVE_PATH):
-                present = (projection_root / DB_RELATIVE_PATH).is_file()
-            result["grounding"]["runtime_db"]["present"] = present
-            read_binding.validate_before_core_return()
-        except (RuntimeProofError, OSError, ValueError, KeyError) as exc:
-            read_binding.invalidate()
-            result["attention"] = sorted(ceo_items, key=_sort_key)
-            result["runtime_counts"] = None
-            result["suppressed"] = None
-            result["degraded"].append(f"bound runtime unavailable: {_first_line(exc)}")
-    return result
 
 
 # ---------------------------------------------------------------------------
@@ -1437,6 +1481,8 @@ __all__ = [
     "TARGETS",
     "attention_id",
     "build_inbox",
+    "compose_inbox",
+    "project_runtime_inputs",
     "ceo_intent_provenance",
     "classify_job",
     "load_boot_packet_file",

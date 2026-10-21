@@ -215,9 +215,13 @@ class PreAuthMcpBodyApp:
         app: Callable[[Mapping[str, Any], _Receive, _Send], Awaitable[None]],
         *,
         deadline_seconds: float | None = None,
+        foreground_requests: bool = False,
     ):
         self._app = app
         self._deadline_seconds = deadline_seconds
+        if type(foreground_requests) is not bool:
+            raise ValueError("compiled foreground selection must be boolean")
+        self._foreground_requests = foreground_requests
 
     async def __call__(self, scope: Mapping[str, Any], receive: _Receive, send: _Send) -> None:
         if (
@@ -258,7 +262,24 @@ class PreAuthMcpBodyApp:
                 return {"type": "http.request", "body": request_body, "more_body": False}
             return {"type": "http.disconnect"}
 
-        await self._app(scope, replay_receive, send)
+        # Only this compiled MCP composition can enable the finite lifetime.
+        # Selection is not authentication; the real call handler still validates
+        # arguments and verifies its current principal before binding it.
+        eligible = False
+        if self._foreground_requests:
+            try:
+                body = json.loads(request_body)
+                eligible = (isinstance(body, dict) and body.get("method") == "tools/call"
+                    and "id" in body and isinstance(body.get("params"), dict)
+                    and body["params"].get("name") == "session_summon")
+            except (ValueError, TypeError):
+                pass
+        if eligible:
+            from integrations.session_bridge.http_foreground import owned_request
+            async with owned_request(scope, receive) as current:
+                await self._app(current, replay_receive, send)
+        else:
+            await self._app(scope, replay_receive, send)
 
 
 class FixedE1App(BoundedE1App):

@@ -1,0 +1,22 @@
+.mm-admitted-plan { border: 1px solid var(--line, rgba(120,130,150,.24)); border-radius: 14px; padding: 16px; min-width: 0; }
+.mm-admitted-plan__heading { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+.mm-admitted-plan__heading h3 { font-size: 1rem; font-weight: 700; margin: 0; }
+.mm-admitted-plan__heading p, .mm-admitted-plan__footnote { color: var(--muted, #89919f); font-size: .84rem; margin: 5px 0 0; }
+.mm-admitted-plan__heading button { border: 1px solid var(--line, rgba(120,130,150,.4)); color: inherit; background: transparent; padding: 8px 12px; border-radius: 8px; cursor: pointer; }
+.mm-admitted-plan__heading button:disabled { cursor: not-allowed; opacity: .55; }
+.mm-admitted-plan__summary { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; font-size: .82rem; color: var(--muted, #89919f); margin-top: 14px; }
+.mm-admitted-plan__summary strong { color: inherit; }
+.mm-admitted-plan__results ol { list-style: none; margin: 12px 0 0; padding: 0; }
+.mm-admitted-plan__results li { border-top: 1px solid var(--line, rgba(120,130,150,.2)); padding: 12px 0; overflow-wrap: anywhere; }
+.mm-admitted-plan__step-title { display: flex; align-items: flex-start; gap: 9px; font-weight: 600; font-size: .9rem; }
+.mm-admitted-plan__step-no { flex: none; border: 1px solid var(--line, rgba(120,130,150,.3)); width: 23px; height: 23px; line-height: 21px; border-radius: 50%; text-align: center; font-size: .72rem; }
+.mm-admitted-plan__meta { display: flex; flex-wrap: wrap; gap: 9px; padding-left: 32px; margin-top: 5px; font-size: .76rem; color: var(--muted, #89919f); }
+.mm-admitted-plan__meta code { font: inherit; }
+@media (max-width: 480px) { .mm-admitted-plan { padding: 12px; } .mm-admitted-plan__heading button { width: 100%; } }
+/* Mission job observations are independent of the admitted-plan receipt. */
+.mm-admitted-plan__observed { margin: 10px 0 0 32px; padding: 9px 12px; border-left: 2px solid var(--line, rgba(120,130,150,.32)); font-size: .79rem; }
+.mm-admitted-plan__observed > strong { font-size: .77rem; }
+.mm-admitted-plan__observed ul { list-style: none; margin: 6px 0 0; padding: 0; }
+.mm-admitted-plan__observed ul li { border: none; padding: 3px 0; font-weight: 400; color: var(--muted, #89919f); }
+.mm-admitted-plan__observed-note { margin: 8px 0 0 32px; font-size: .75rem; color: var(--muted, #89919f); }
+.mm-admitted-plan__observed-source { color: var(--muted, #89919f); margin: 4px 0; font-size: .74rem; overflow-wrap: anywhere; }

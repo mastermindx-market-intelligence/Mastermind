@@ -1,0 +1,6 @@
+compat-stage/
+baseline-stage/
+__pycache__/
+.pytest_cache/
+host-eligibility.patch
+TEST_PACKET.txt

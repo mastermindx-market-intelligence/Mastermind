@@ -15,12 +15,19 @@ from collections.abc import Mapping, Sequence
 from typing import Any, Protocol, runtime_checkable
 
 from scripts.ohf.redaction import evidence_contains_secret, redact_evidence
+from common.product_acceptance_contract import (
+    PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA,
+    ProductAcceptanceContractError,
+    validate_product_acceptance_review_proof,
+)
 
 
 RESULT_SCHEMA = "mastermind.executive_orchestration_result/v1"
 RAW_OBSERVATION_SCHEMA = "mastermind.operator_raw_role_result_observation/v1"
 PLAN_SCHEMA_V1 = "mastermind.execution_plan/v1"
 PLAN_SCHEMA_V2 = "mastermind.execution_plan/v2"
+PLAN_SCHEMA_V3 = "mastermind.execution_plan/v3"
+PLAN_SCHEMA_V4 = "mastermind.execution_plan/v4"
 MAX_CANONICAL_RESULT_BYTES = 8_388_608
 ROLES = frozenset({"plan", "work", "review", "repair", "aggregation"})
 _ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
@@ -142,22 +149,56 @@ def _role_body_schema(role: str) -> dict[str, Any]:
             }
         )
         v2_step["required"].append("placement")
-        return _schema_object(
+        v3_step = json.loads(json.dumps(v2_step))
+        v3_step["properties"]["prerequisite_step_ids"] = _schema_array(
+            identifier,
+            maximum=7,
+            unique=True,
+        )
+        v3_step["required"].append("prerequisite_step_ids")
+        # V4 is the explicit manual-model override-capable form. V3 remains
+        # the normal auto-model path. V4 may add one exact model constraint
+        # inside the already-admitted provider/quota pool; it never selects an account,
+        # host, credential, Worker or native session.
+        v4_step = json.loads(json.dumps(v3_step))
+        # V4 restores automatic routing as the default per step.  Omitting
+        # placement inherits the root's already-reviewed automatic route.
+        # Supplying placement pins one admitted pool; model remains optional.
+        v4_step["required"].remove("placement")
+        v4_step["properties"]["placement"]["properties"]["model"] = _schema_string(
+            minimum=1, maximum=128
+        )
+        plan_body = _schema_object(
             {
                 "schema_version": {
                     "anyOf": [
                         {"const": PLAN_SCHEMA_V1},
                         {"const": PLAN_SCHEMA_V2},
+                        {"const": PLAN_SCHEMA_V3},
+                        {"const": PLAN_SCHEMA_V4},
                     ]
                 },
                 "root_job_id": identifier,
                 "plan_attempt_id": identifier,
                 "steps": {
                     **_schema_array(v1_step, minimum=1, maximum=8),
-                    "items": {"anyOf": [v1_step, v2_step]},
+                    "items": {"anyOf": [v1_step, v2_step, v3_step, v4_step]},
                 },
             }
         )
+        plan_body["allOf"] = [
+            {
+                "if": {"properties": {"schema_version": {"const": version}}},
+                "then": {"properties": {"steps": {"items": step_schema}}},
+            }
+            for version, step_schema in (
+                (PLAN_SCHEMA_V1, v1_step),
+                (PLAN_SCHEMA_V2, v2_step),
+                (PLAN_SCHEMA_V3, v3_step),
+                (PLAN_SCHEMA_V4, v4_step),
+            )
+        ]
+        return plan_body
 
     if role in {"work", "repair"}:
         properties: dict[str, Mapping[str, Any]] = {
@@ -279,6 +320,8 @@ def orchestration_result_schema(
 
     role_body = _role_body_schema(role)
     if role == "plan":
+        # The public provider contract remains the frozen V1-only schema.
+        role_body.pop("allOf")
         role_body["properties"]["schema_version"] = {"const": PLAN_SCHEMA_V1}
         role_body["properties"]["steps"]["items"] = role_body["properties"][
             "steps"
@@ -312,6 +355,61 @@ def role_schema_digest(role: str) -> str:
     """Content identity of the unbound executable schema for one role."""
 
     return canonical_digest(orchestration_result_schema(role))
+
+
+def product_acceptance_review_result_schema(
+    *, job_id: str, run_id: str, worker_id: str, root_job_id: str,
+    expected_basis_digest: str, expected_criterion_digests: tuple[str, ...],
+    expected_obligation_digests: tuple[str, ...],
+) -> dict[str, Any]:
+    """Opt-in review output bound to the actual source basis and every row.
+
+    Only the verified commissioning owner selects this provider contract. The
+    ordinary role schema and its golden digest remain byte-for-byte unchanged.
+    UNPROVEN is valid truthful review data, and cannot satisfy product proof.
+    """
+    if (type(expected_criterion_digests) is not tuple or type(expected_obligation_digests) is not tuple
+        or not 1 <= len(expected_criterion_digests) <= 6
+        or not 1 <= len(expected_obligation_digests) <= 64):
+        raise OrchestrationResultError("product review expected identities are invalid")
+    try:
+        validate_product_acceptance_review_proof({
+            "schema": PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA,
+            "acceptance_basis_digest": expected_basis_digest,
+            "criteria": [{"criterion_digest": digest, "state": "UNPROVEN", "evidence_digests": []}
+                for digest in expected_criterion_digests],
+            "obligations": [{"obligation_digest": digest, "state": "UNPROVEN", "evidence_digests": []}
+                for digest in expected_obligation_digests],
+        })
+    except ProductAcceptanceContractError as exc:
+        raise OrchestrationResultError("product review expected identities are invalid") from exc
+
+    def bound_rows(expected: tuple[str, ...], identity: str) -> dict[str, Any]:
+        # Provider Structured Outputs is a subset of JSON Schema: do not send
+        # tuple items or allOf/if/then. The canonical proof codec rejects duplicate
+        # identities/evidence, and the request owner checks the full ordered
+        # expected tuple before any decision request can be issued.
+        variants = []
+        for states, minimum_evidence in ((["SATISFIED"], 1), (["UNSATISFIED", "UNPROVEN"], 0)):
+            variants.append(_schema_object({
+                identity: {"type": "string", "enum": list(expected)},
+                "state": {"type": "string", "enum": states},
+                "evidence_digests": _schema_array(_schema_digest(), minimum=minimum_evidence),
+            }))
+        return _schema_array({"anyOf": variants}, minimum=len(expected), maximum=len(expected))
+
+    schema = orchestration_result_schema("review", job_id=job_id, run_id=run_id,
+        worker_id=worker_id, root_job_id=root_job_id)
+    body = schema["properties"]["role_result"]
+    body["properties"]["schema_version"] = {"const": "mastermind.review_result/v2"}
+    body["properties"]["product_acceptance_proof"] = _schema_object({
+        "schema": {"const": PRODUCT_ACCEPTANCE_REVIEW_PROOF_SCHEMA},
+        "acceptance_basis_digest": {"const": expected_basis_digest},
+        "criteria": bound_rows(expected_criterion_digests, "criterion_digest"),
+        "obligations": bound_rows(expected_obligation_digests, "obligation_digest"),
+    })
+    body["required"].append("product_acceptance_proof")
+    return schema
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -480,7 +578,12 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
         keys={"schema_version", "root_job_id", "plan_attempt_id", "steps"},
     )
     schema_version = raw["schema_version"]
-    if schema_version not in {PLAN_SCHEMA_V1, PLAN_SCHEMA_V2}:
+    if schema_version not in {
+        PLAN_SCHEMA_V1,
+        PLAN_SCHEMA_V2,
+        PLAN_SCHEMA_V3,
+        PLAN_SCHEMA_V4,
+    }:
         raise OrchestrationResultError("unsupported plan schema")
     expected_root = outer.get("expected_root_job_id")
     if expected_root is None:
@@ -493,15 +596,25 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
     steps: list[dict[str, Any]] = []
     step_ids: set[str] = set()
     for index, item in enumerate(_array(raw["steps"], name="steps", minimum=1, maximum=8)):
+        step_keys = {
+            "ordinal", "step_id", "objective", "business_impact",
+            "review_required", "requested_authorities", "allowed_write_paths",
+            "validation_ids", "attempt_limit", "cost_class",
+        }
+        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3}:
+            step_keys.add("placement")
+        elif (
+            schema_version == PLAN_SCHEMA_V4
+            and isinstance(item, Mapping)
+            and "placement" in item
+        ):
+            step_keys.add("placement")
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+            step_keys.add("prerequisite_step_ids")
         step = _closed(
             item,
             name=f"steps[{index}]",
-            keys={
-                "ordinal", "step_id", "objective", "business_impact",
-                "review_required", "requested_authorities", "allowed_write_paths",
-                "validation_ids", "attempt_limit", "cost_class",
-            }
-            | ({"placement"} if schema_version == PLAN_SCHEMA_V2 else set()),
+            keys=step_keys,
         )
         if _integer(step["ordinal"], name="ordinal", minimum=0, maximum=7) != index:
             raise OrchestrationResultError("step ordinal must equal its array position")
@@ -544,12 +657,24 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
             ),
             "cost_class": step["cost_class"],
         }
-        if schema_version == PLAN_SCHEMA_V2 and "placement" in step:
-            placement = _closed(
-                step["placement"],
-                name=f"steps[{index}].placement",
-                keys={"provider_realm", "quota_class"},
+        if schema_version in {PLAN_SCHEMA_V2, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4} and "placement" in step:
+            placement_value = step["placement"]
+            placement_keys = (
+                set(placement_value) if isinstance(placement_value, Mapping) else set()
             )
+            required_placement_keys = {"provider_realm", "quota_class"}
+            valid_placement_keys = (
+                placement_keys == required_placement_keys
+                or (
+                    schema_version == PLAN_SCHEMA_V4
+                    and placement_keys == required_placement_keys | {"model"}
+                )
+            )
+            if not isinstance(placement_value, Mapping) or not valid_placement_keys:
+                raise OrchestrationResultError(
+                    f"steps[{index}].placement does not match its closed schema"
+                )
+            placement = placement_value
             resolved["placement"] = {
                 "provider_realm": _text(
                     placement["provider_realm"],
@@ -564,9 +689,51 @@ def _validate_plan(value: Any, *, outer: Mapping[str, Any]) -> dict[str, Any]:
                     nonempty=True,
                 ),
             }
+            if schema_version == PLAN_SCHEMA_V4 and "model" in placement:
+                resolved["placement"]["model"] = _text(
+                    placement["model"],
+                    name=f"steps[{index}].placement.model",
+                    maximum=128,
+                    nonempty=True,
+                )
+        if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+            prerequisites = _unique_strings(
+                step["prerequisite_step_ids"],
+                name=f"steps[{index}].prerequisite_step_ids",
+                minimum=0,
+                maximum=7,
+                validator=_identifier,
+            )
+            resolved["prerequisite_step_ids"] = list(prerequisites)
         steps.append(resolved)
         if not isinstance(step["cost_class"], str) or step["cost_class"] not in {"default", "small"}:
             raise OrchestrationResultError("step cost_class is invalid")
+    if schema_version in {PLAN_SCHEMA_V3, PLAN_SCHEMA_V4}:
+        for index, step in enumerate(steps):
+            prerequisites = step.get("prerequisite_step_ids", [])
+            seen: set[str] = set()
+            for prerequisite in prerequisites:
+                prerequisite_id = _identifier(
+                    prerequisite,
+                    name=f"steps[{index}].prerequisite_step_ids",
+                )
+                if prerequisite_id in seen:
+                    raise OrchestrationResultError("plan prerequisite contains a duplicate step")
+                seen.add(prerequisite_id)
+                prerequisite_ordinal = next(
+                    (
+                        ordinal
+                        for ordinal, candidate in enumerate(steps)
+                        if candidate["step_id"] == prerequisite_id
+                    ),
+                    None,
+                )
+                if prerequisite_ordinal is None:
+                    raise OrchestrationResultError("plan prerequisite names an unknown step")
+                if prerequisite_ordinal >= index:
+                    raise OrchestrationResultError(
+                        "plan prerequisite must name a lower-ordinal step"
+                    )
     return {
         "schema_version": schema_version,
         "root_job_id": root_job_id,
@@ -610,10 +777,13 @@ def _validate_review(value: Any, *, outer_errors: list[Any]) -> dict[str, Any]:
         "reviewed_result_digest", "repair_round", "verdict", "evidence_digests",
         "findings",
     }
+    version = value.get("schema_version") if isinstance(value, Mapping) else None
+    if version == "mastermind.review_result/v2":
+        keys = keys | {"product_acceptance_proof"}
     raw = _closed(value, name="review role_result", keys=keys)
-    if raw["schema_version"] != "mastermind.review_result/v1":
+    if type(raw["schema_version"]) is not str or raw["schema_version"] not in {"mastermind.review_result/v1", "mastermind.review_result/v2"}:
         raise OrchestrationResultError("unsupported review schema")
-    result = {"schema_version": "mastermind.review_result/v1", **_lineage(raw)}
+    result = {"schema_version": raw["schema_version"], **_lineage(raw)}
     result.update(
         {
             "reviewed_job_id": _identifier(raw["reviewed_job_id"], name="reviewed_job_id"),
@@ -649,6 +819,11 @@ def _validate_review(value: Any, *, outer_errors: list[Any]) -> dict[str, Any]:
     if raw["verdict"] == "reject" and not blocking:
         raise OrchestrationResultError("reject requires at least one blocking finding")
     result["findings"] = findings
+    if raw["schema_version"] == "mastermind.review_result/v2":
+        try:
+            result["product_acceptance_proof"] = validate_product_acceptance_review_proof(raw["product_acceptance_proof"])
+        except ProductAcceptanceContractError as exc:
+            raise OrchestrationResultError("product acceptance review proof is invalid") from exc
     return result
 
 
@@ -874,6 +1049,8 @@ __all__ = [
     "OrchestrationResultError",
     "PLAN_SCHEMA_V1",
     "PLAN_SCHEMA_V2",
+    "PLAN_SCHEMA_V3",
+    "PLAN_SCHEMA_V4",
     "RAW_OBSERVATION_SCHEMA",
     "RESULT_SCHEMA",
     "ROLES",

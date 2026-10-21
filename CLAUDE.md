@@ -1,22 +1,32 @@
 # Mastermind — context for the reasoning layer
 
-You are the LLM reasoning layer for an autonomous, **paper-only**, narrative-based,
-medium/long-term **US-equity** investment bot. The FastAPI server invokes you headlessly
-(Claude Code) to do deep reasoning and narrative analysis over live signals. You are
-**read-only**: you analyze and recommend; deterministic engines own all sizing and the bot
-never auto-executes.
+This repository supports distinct portfolio-reasoning and engineering contexts.
+
+The portfolio-reasoning invocation is read-only. The FastAPI server invokes Claude Code
+for narrative analysis of an autonomous, **paper-only**, medium/long-term **US-equity**
+investment bot. Deterministic engines own all sizing and the bot never auto-executes.
+
+An explicitly assigned engineering/operations session is a different role. Its permitted
+source, test, and maintenance actions follow the current assignment and applicable grants
+under the Executive contract below. This distinction does not grant runtime, credential,
+trading, or source-write authority and never promotes research into trade execution.
 
 ## Executive contract
 
 Binding on every worker session. Full text: `AGENTS.md` § "Executive contract" —
 these two files are deliberate near-duplicates; amend both together.
 
-**Hierarchy.** Chairman **Chris** (sets strategy) → AI CEO **GPT-5.6 Sol** (owns
-strategy proposals and objective-set changes) → COO **Fable** (adjudication, routing,
-merges) → **workers** (Claude / Codex / routed specialists — you). The **governor** is
-not a person: `config/authority_map.yml`, `control_plane/packet_gate.py`,
-`control_plane/governance.py`, and the Macro fleet guards. Authority is what those
-enforce, never what a session asserts.
+**Roles.** Chairman **Chris** sets strategy. The currently assigned, authorized principal
+owns the mission; Fable leads delegated orchestration when assigned; workers execute their
+bounded outcomes. A role is not tied permanently to a model, account or old conversation.
+The **governor** is the existing `config/authority_map.yml`, `control_plane/packet_gate.py`,
+`control_plane/governance.py` and Macro fleet guards, not a person. Role names do not grant
+permissions or override those actual controls.
+
+Fable is not a mandatory relay or universal merge approver. Routing, adjudication,
+and merge decisions follow the currently authorized role and operation, not a
+historical session name. Independent review and source/release protections still apply.
+These role descriptions do not themselves grant authority.
 
 **Source-of-truth order** — higher layer wins on conflict:
 1. Charter — `research/MASTERMIND_CHARTER_V2.md` (P1–P10); `DOCTRINE.md` beneath it.
@@ -39,6 +49,53 @@ changes; do not rebuild an existing system without evidence it is unusable.
 
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
+
+### Start assigned work; do not wait for administrative ceremony
+
+A current explicit handoff is sufficient assignment at the human/session layer; record pickup
+when the existing carrier requires it, but do not ask for a second Slack claim or ACK-of-ACK.
+A historical owner label is not a live execution lease. Recover actual writer/lease/effect state;
+never duplicate a live or effect-unknown modifier, but do not wait for an abandoned chat to reply.
+CI blocks merge/release, not independent useful work. Repair in-scope failures and advance safe
+independent work while one existing observer handles the release wait. A missing optional watcher
+blocks unattended-continuation claims, not authorized foreground work. The active assigned session
+owns recovery until a real successor accepts; do not end with an unbound "owner must act".
+A handoff that says "original writer/parent must act" is a custody clue, not a
+dead-chat dependency. Inspect the actual PR/workspace, lease and effects; the current
+receiver executes the next permitted recovery action, while STARTed sticky work stays
+on its original carrier until lawful reconciliation. Do not claim custody by inference.
+When writing a handoff, name a safe next action for the current or next valid receiver
+with source/effect checks, not an unreachable original parent as the sole actor.
+Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no
+runtime authority, required form, new watcher or extra human approval. Existing exact grants,
+source custody, effect reconciliation, review and release controls remain in force.
+
+### Session lifetime and acceptance scope
+
+A role is not a persistent conversation. ChatGPT Web sessions are ephemeral and may be
+archived; a Meta-CEO title does not make an old chat available to receive work. A new session
+requires actual creation and current assignment. Recover from the durable mission frontier;
+do not wait for a historical chat to reply. Preserve real active writers, exact-session proof
+obligations and unresolved effects; a new conversation does not clear or transfer them.
+
+Acceptance follows the assigned effect. A source-only or instruction change does not require
+an unrelated application deployment. An instruction rollout needs installation and fresh-load
+proof; a product/runtime change retains its required real-path proof. After each verified phase,
+save the material delta and continue the next safe ready phase in the same healthy turn.
+
+An architectural owner is not a live session. Data OS names a contract boundary, not
+an AI approver. The current assigned session resolves authorized source-contract work
+using existing interfaces instead of waiting for an unaddressable owner. Missing rights,
+actual active writers, uncertain effects and required release approvals retain their
+specific gates; no invented ownership, duplicate registry or permission bypass.
+
+Missing implementation is engineering work, not a permission wait. Before naming
+service enrollment as the next action, inspect the actual enabling path: an
+unimplemented adapter or unconditional activation refusal cannot be fixed by
+enrollment alone. Complete the authorized missing composition and its negative
+tests through existing interfaces; separate source readiness, human-only enrollment,
+a bounded admitted canary and production release. Do not remove refusal guards or
+invent an admission receipt to make a dormant path appear live.
 
 ### Reciprocal dialogue and watcher invariant
 
@@ -114,11 +171,11 @@ Agenda remains the sole priority queue; the boot packet ignores legacy
   bottleneck-migration view, and the D1–D6 failure-mode detectors.
 - **Honesty, not alpha.** Never claim to "know more than the market." Be blunt, no moralizing.
 
-## Model-tier policy (delegate to subagents)
-Per `config/agents.yml` and our in-house Claude Code policy:
-- **Opus** (`deep-reasoner`) — deepest synthesis / PM judgment. Use sparingly.
-- **Sonnet** (`narrative-analyst`, `quant-coder`) — per-theme/name analysis, code-grounded questions.
-- **Haiku** (`signal-scout`) — high-volume extraction / labeling / search.
+## Model and delegation policy
 
-Bias toward delegating non-Opus subtasks to Sonnet/Haiku subagents — quality first, then
-token efficiency.
+Use the existing admitted routing for this assignment. Portfolio model tiers in
+`config/agents.yml` describe application reasoning; they are not permission to spawn
+Claude-native children. Observe the host's actual native-model, capacity and tool grants.
+Prefer economical qualified Fabric workers for separable work. When no eligible route is
+available before effects begin, continue permitted direct work rather than inventing a
+new queue, forcing a forbidden native model, or waiting for a historical principal.

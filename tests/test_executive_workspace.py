@@ -181,11 +181,14 @@ def test_shared_index_stays_group_readable_after_control_cleanliness(
     real_run_bytes = executive_workspace._run_bytes
 
     def observed_run_bytes(argv, *, cwd, env):
-        recorded_envs.append(dict(env))
-        recorded_argv.append(tuple(argv))
-        index = Path(cwd) / ".git" / "index"
-        if index.exists() and not index_mode_before_status:
-            index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
+        # Construction now reads the pinned profile from the source. This
+        # regression guards the distinct post-sharing workspace observations.
+        if Path(cwd) != source:
+            recorded_envs.append(dict(env))
+            recorded_argv.append(tuple(argv))
+            index = Path(cwd) / ".git" / "index"
+            if index.exists() and not index_mode_before_status:
+                index_mode_before_status.append(stat.S_IMODE(index.stat().st_mode))
         return real_run_bytes(argv, cwd=cwd, env=env)
 
     monkeypatch.setattr(executive_workspace, "_run_bytes", observed_run_bytes)
@@ -510,6 +513,20 @@ def test_symlink_permission_repair_fails_closed_when_mode_does_not_change(
 
 
 def test_launch_cleanliness_definition_includes_ignored_untracked_material():
+    # Tracked-status observation must not recursively enumerate untracked files:
+    # the second observation already enumerates every untracked/ignored path.
+    assert executive_workspace.LAUNCH_CLEAN_STATUS_ARGS == (
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=no",
+    )
+    assert executive_workspace.LAUNCH_CLEAN_UNTRACKED_ARGS == (
+        "ls-files",
+        "--others",
+        "-z",
+    )
+
     calls: list[tuple[str, ...]] = []
 
     def observe(arguments):
@@ -577,6 +594,83 @@ def test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary(
         seal_control_owned_paths({"workspace": workspace, "run": run_dir})
 
     assert stat.S_IMODE(run_dir.stat().st_mode) == 0o700
+
+
+def test_assignment_seal_binds_original_snapshot_and_retains_content(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    (root / "result").write_text("retained")
+    before = _seal_identity(root, root.stat())
+    receipt = seal_control_owned_paths(
+        {"run": root}, expected_identities={"run": before}
+    )
+    assert receipt["paths"]["run"]["before"] == before
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert (root / "result").read_text() == "retained"
+
+
+def test_assignment_seal_rejects_replacement_before_chmod(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    before = _seal_identity(root, root.stat())
+    root.rename(tmp_path / "original")
+    root.mkdir(mode=0o750)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root}, expected_identities={"run": before})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("edge", ["label", "path", "bool_inode", "missing"])
+def test_assignment_seal_malformed_snapshot_has_no_effect(tmp_path, edge):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    snapshot = {"run": _seal_identity(root, root.stat())}
+    if edge == "label":
+        snapshot["foreign"] = snapshot.pop("run")
+    elif edge == "path":
+        snapshot["run"]["path"] = str(tmp_path / "other")
+    elif edge == "bool_inode":
+        snapshot["run"]["inode"] = True
+    else:
+        snapshot["run"].pop("inode")
+    with pytest.raises(AssignmentSealError, match="snapshot"):
+        seal_control_owned_paths({"run": root}, expected_identities=snapshot)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("replace_at", ["open", "chmod"])
+def test_assignment_seal_refuses_path_swap_around_pinned_fd(tmp_path, monkeypatch, replace_at):
+    import control_plane.executive_workspace as module
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    original_open, original_chmod = os.open, os.fchmod
+
+    def swap():
+        root.rename(tmp_path / "original")
+        root.mkdir(mode=0o750)
+
+    def swapped_open(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        if Path(path) == root:
+            swap()
+        return fd
+
+    def swapped_chmod(fd, mode):
+        original_chmod(fd, mode)
+        swap()
+
+    monkeypatch.setattr(module.os, "open" if replace_at == "open" else "fchmod",
+                        swapped_open if replace_at == "open" else swapped_chmod)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
 
 
 # ---------------------------------------------------------------------------
@@ -925,6 +1019,32 @@ def test_install_sh_prunes_unreachable_objects_after_repack_and_before_final_cho
     assert "not company state" in comment_block
 
 
+def test_install_sh_normalizes_safe_promisor_markers_after_prune_before_final_trust():
+    install_text = _INSTALL_SH.read_text(encoding="utf-8")
+
+    prune_marker = '/usr/bin/git -C "$ADMIN_CHECKOUT" prune --expire=now'
+    normalize_marker = '"$RELEASE_ROOT/ops/executive_os/admin_checkout.py" normalize'
+    final_chown = '/usr/sbin/chown -R "$CONTROL_USER:$CONTROL_GROUP" "$ADMIN_CHECKOUT"'
+    loose_assertion = "administrative checkout still holds loose objects after repack"
+
+    prune_index = install_text.index(prune_marker)
+    normalize_index = install_text.index(normalize_marker, prune_index)
+    chown_index = install_text.index(final_chown, normalize_index)
+    assertion_index = install_text.index(loose_assertion, chown_index)
+    assert prune_index < normalize_index < chown_index < assertion_index
+
+    invocation_start = install_text.rindex('/usr/bin/sudo -u "$CONTROL_USER"', prune_index, normalize_index)
+    invocation = install_text[invocation_start:normalize_index + len(normalize_marker) + 320]
+    assert 'GIT_NO_LAZY_FETCH=1' in invocation
+    assert 'GIT_NO_REPLACE_OBJECTS=1' in invocation
+    assert 'GIT_TERMINAL_PROMPT=0' in invocation
+    assert '--checkout "$ADMIN_CHECKOUT"' in invocation
+    assert '--expected-commit "$EXPECTED_SHA"' in invocation
+    refusal = install_text[normalize_index:chown_index]
+    assert "administrative checkout promisor normalization refused" in refusal
+    assert "exit 65" in refusal
+
+
 def test_prune_after_repack_reaches_zero_loose_objects_and_stays_clonable(tmp_path: Path):
     """The full fix, proved end to end without root.
 
@@ -1193,3 +1313,47 @@ def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_pa
     assert released.removed is True
     assert not workspace.exists()
     assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "mixed"])
+def test_linked_release_explains_hidden_untracked_without_removing_files(tmp_path: Path, kind: str):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id="dirty-explanation", lane="web", base_sha=base,
+        branch="sol/web-dirty-explanation",
+    )
+    workspace = Path(receipt.workspace_path)
+    payloads = {}
+    if kind in {"tracked", "mixed"}:
+        payloads["README.md"] = b"uncommitted source must survive\n"
+    if kind in {"untracked", "mixed"}:
+        payloads["private-filename-marker.txt"] = b"untracked evidence must survive\n"
+    if kind == "ignored":
+        payloads[".pytest_cache/private-filename-marker"] = b"ignored evidence is not automatically disposable\n"
+    for relative, payload in payloads.items():
+        target = workspace / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    if kind == "ignored":
+        assert _git(workspace, "status", "--porcelain=v1") == ""
+    observed = executive_workspace.release_linked_worktree(
+        source, root, workspace, expected_operation_id="dirty-explanation",
+    )
+    assert observed.state == "PRESERVED_DIRTY"
+    assert observed.dirty is True and observed.removed is False
+    assert "including ignored files" in observed.reason
+    assert f"tracked_changes={'present' if kind in {'tracked', 'mixed'} else 'absent'}" in observed.reason
+    assert f"all_untracked={'absent' if kind == 'tracked' else 'present'}" in observed.reason
+    assert "git ls-files --others -z" in observed.reason
+    assert "retain needed source and evidence" in observed.reason
+    assert "No files were removed" in observed.reason
+    assert "private-filename-marker" not in observed.reason
+    assert len(observed.reason.encode("utf-8")) < 600
+    assert _git(workspace, "rev-parse", "HEAD") == base
+    for relative, payload in payloads.items():
+        assert (workspace / relative).read_bytes() == payload

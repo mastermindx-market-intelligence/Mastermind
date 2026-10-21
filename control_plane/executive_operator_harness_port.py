@@ -10,7 +10,10 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 
-from control_plane.executive_runtime import AttemptLease, Runtime, StateConflict
+from control_plane.executive_runtime import (
+    AttemptLease, AttemptStatus, Runtime, StateConflict,
+    _interactive_tx5_admitted, orchestration_digest,
+)
 from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
 from control_plane.executive_orchestration_result import RawRoleResultObservation
 from control_plane.operator_harness_contract import (
@@ -146,6 +149,51 @@ class ExecutiveOperatorHarnessPort:
     ) -> OperatorPrincipalObservation | None:
         self._require_attempt(attempt_id)
         return self.runtime.operator_harness.admitted_principal_observation(generation)
+
+    def existing_interactive_plan_seal(
+        self, attempt_id: str, generation: ProcessGenerationRef
+    ) -> str | None:
+        """Project an existing initial seal; never grant or start another turn.
+
+        Reuse the Runtime owner's lease, lineage and seal validators. This
+        read-only projection lets the driver distinguish the immutable plan
+        from later candidate evidence without attempting a second plan seal.
+        Ordinary roles and an interactive first turn retain normal sealing.
+        """
+        self._require_attempt(attempt_id)
+        registry = self.runtime.operator_harness
+        epoch, stored = registry.generation_refs(generation.process_generation_id)
+        if stored != generation or epoch.attempt_id != attempt_id:
+            raise StateConflict("interactive seal generation is outside the lease")
+        with self.runtime.store.read() as connection:
+            row = registry._leased(
+                connection, attempt_id=attempt_id,
+                fence_generation=self.fence_generation,
+                lease_token=self.lease_token,
+                timestamp=self.runtime.store.now_ms(),
+                statuses={AttemptStatus.RUNNING, AttemptStatus.CHECKPOINTED},
+            )
+            job = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (row["job_id"],)
+            ).fetchone()
+            if job is None:
+                raise StateConflict("interactive seal lost its Job")
+            if not _interactive_tx5_admitted(job):
+                return None
+            registry._owned_generation(
+                connection, leased=row, epoch=epoch, generation=generation,
+                require_current=True, require_writer=True,
+            )
+            if registry._event(
+                connection, f"orchestration-result-seal:{attempt_id}"
+            ) is None:
+                return None
+            seal = registry._validate_interactive_active_plan_seal(
+                connection, attempt_row=row, job_row=job,
+            )
+            if seal["process_generation_id"] != generation.process_generation_id:
+                raise StateConflict("interactive seal belongs to another generation")
+            return orchestration_digest(seal)
 
     def begin_operator_turn(
         self,

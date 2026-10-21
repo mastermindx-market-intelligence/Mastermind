@@ -1,0 +1,84 @@
+{
+  "casebook_provenance": {
+    "evidence_grade": "RESEARCH_RETROSPECTIVE_PUBLIC_PAGE_TWO_DAY_ADJ_CLOSE_ONLY",
+    "first_release_clock_caveat": "First public release instant not established. A dated company release and later after-close public wire/reprint corroborate a market-session publication window; earlier private leaks or public notices are not exhaustively excluded.",
+    "market_price_caveat": "Yahoo Finance adjusted closes are retrospective, may change with corporate actions; two-session historical label only, no PIT trading data assertion.",
+    "factor_caveat": "ETF benchmarks are contemporaneous, not ex-issuer, beta-neutral or causally estimated, and may include the issuer itself.",
+    "rights": "Research citation and tiny derived fact sample only; no bulk rehosting or live/vendor feed"
+  },
+  "event": {
+    "event_ref": "earnings:CIK:789019:FY2026Q3",
+    "issuer_ref": "CIK:789019",
+    "fiscal_target": "FY2026Q3",
+    "first_public_source_ref": "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q3/press-release-webcast",
+    "first_publication_clock_status": "AFTER_CLOSE_WINDOW_CORROBORATED",
+    "first_published_utc": null,
+    "after_close_session": "2026-04-29",
+    "observed_public_by_utc": "2026-04-29T20:15:00Z",
+    "public_by_source_kind": "PRESS_RELEASE_REPRINT",
+    "after_close_evidence_refs": [
+      "https://www.microsoft.com/en-us/investor/earnings/fy-2026-q3/press-release-webcast",
+      "https://www.marketscreener.com/news/microsoft-cloud-and-ai-strength-fuels-third-quarter-results-ce7f58dadf8cff24"
+    ]
+  },
+  "evaluated_asof_utc": "2026-08-01T04:00:00Z",
+  "sessions": [
+    {
+      "date": "2026-04-29",
+      "open_utc": "2026-04-29T13:30:00Z",
+      "close_utc": "2026-04-29T20:00:00Z"
+    },
+    {
+      "date": "2026-04-30",
+      "open_utc": "2026-04-30T13:30:00Z",
+      "close_utc": "2026-04-30T20:00:00Z"
+    }
+  ],
+  "price_series": {
+    "issuer": {
+      "adjustment": "split_dividend_adjusted_close",
+      "source_ref": "https://finance.yahoo.com/quote/MSFT/history/",
+      "ticker": "MSFT",
+      "bars": [
+        {
+          "date": "2026-04-29",
+          "adjusted_close": 422.75
+        },
+        {
+          "date": "2026-04-30",
+          "adjusted_close": 406.13
+        }
+      ]
+    },
+    "market": {
+      "adjustment": "split_dividend_adjusted_close",
+      "source_ref": "https://finance.yahoo.com/quote/SPY/history/",
+      "ticker": "SPY",
+      "bars": [
+        {
+          "date": "2026-04-29",
+          "adjusted_close": 707.99
+        },
+        {
+          "date": "2026-04-30",
+          "adjusted_close": 715.04
+        }
+      ]
+    },
+    "sector": {
+      "adjustment": "split_dividend_adjusted_close",
+      "source_ref": "https://finance.yahoo.com/quote/XLK/history/",
+      "ticker": "XLK",
+      "bars": [
+        {
+          "date": "2026-04-29",
+          "adjusted_close": 158.74
+        },
+        {
+          "date": "2026-04-30",
+          "adjusted_close": 159.12
+        }
+      ]
+    }
+  }
+}

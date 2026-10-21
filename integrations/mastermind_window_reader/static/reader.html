@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="@@POLICY@@">
+<title>Mastermind — recorded output workspace</title>
+<style>@@CSS@@</style>
+</head>
+<body>
+<a class="skip" href="#reading">Skip to recorded output</a>
+<div id="workspace">
+  <aside class="sidebar" aria-label="Recorded output navigation">
+    <div class="brand"><span class="brand-mark" aria-hidden="true">M</span><div>Mastermind<span class="brand-sub">OPERATING WORKSPACE</span></div></div>
+    <div class="sidebar-section"><span class="eyebrow">NATIVE RECORDS</span><h1 id="lane-title">Recorded output</h1><p id="lane-subtitle"></p></div>
+    <label for="search" class="search-label">Find in this capture</label>
+    <div class="search-wrap"><span aria-hidden="true">⌕</span><input id="search" type="search" role="searchbox" aria-label="Find in recorded outputs" placeholder="Search available text…" maxlength="256"><kbd>/</kbd></div>
+    <div class="search-row"><span id="search-result" aria-live="polite"></span><button id="clear-search" class="link-button" hidden>Clear search</button></div>
+    <nav id="output-nav" aria-label="Select an output"></nav>
+    <div class="sidebar-footer"><span class="small-caps">A READ-ONLY WORKING SLICE</span><p>Real recorded outputs.<br>No live session attached.</p><button id="connections" class="secondary full">Inspect recorded connections <span aria-hidden="true">↗</span></button></div>
+  </aside>
+  <main id="reading" tabindex="-1">
+    <header class="topbar"><div class="breadcrumb">Workspace <span>/</span> Native output reader</div><div class="capture-chip" id="capture-notice"><span class="square" aria-hidden="true"></span>Recorded capture</div></header>
+    <section class="page-header"><div><div class="eyebrow" id="record-scope">ONE SELECTED NATIVE LANE</div><h2>Read the work. Inspect the evidence.</h2><p id="captured-time"></p></div><button id="evidence" class="secondary">Inspect capture evidence <span aria-hidden="true">↗</span></button></section>
+    <section id="source-connection" class="source-connection" aria-label="Recorded-source connection" hidden>
+      <span id="source-status" role="status" aria-live="polite"></span>
+      <div><button id="refresh-source" class="secondary">Refresh source</button><button id="disconnect-source" class="secondary">Disconnect reader</button></div>
+    </section>
+    <div id="review-warning" class="review-warning"></div>
+    <section class="toolbar" aria-label="Reading options"><div class="segmented"><button id="single" aria-pressed="true">Single output</button><button id="compare" aria-pressed="false">Compare outputs</button></div><div class="type-tools"><span>Reading size</span><button id="smaller" aria-label="Decrease reading size">A−</button><button id="larger" aria-label="Increase reading size">A+</button></div></section>
+    <div id="empty-result" class="empty-result" hidden></div>
+    <section id="reading-grid" class="reading-grid" aria-label="Recorded output text"></section>
+    <footer class="read-boundary"><span class="lock" aria-hidden="true">▣</span><div><strong id="mode-note">No live connection. No commands can be sent.</strong><span>This capture can be read without touching a worker, provider or runtime.</span></div></footer>
+  </main>
+</div>
+<dialog id="details" aria-labelledby="dialog-title"><div class="dialog-header"><div><div class="eyebrow">SOURCE-QUALIFIED DETAIL</div><h2 id="dialog-title"></h2></div><button id="close-dialog" class="icon-button" aria-label="Close details">×</button></div><div id="dialog-body"></div></dialog>
+<noscript>This local reader requires JavaScript for selection and evidence views. It makes no network calls. The complete source capture is included with the downloadable code package.</noscript>
+<script type="application/json" id="capture-data">@@DATA@@</script>
+<script>@@JS@@</script>
+</body>
+</html>

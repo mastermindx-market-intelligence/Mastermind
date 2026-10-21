@@ -43,6 +43,108 @@ Importance and difficulty are not the same as ambiguity. A critical but fully sp
 may still belong to a bounded engineering worker with stronger review. Programmatic convenience is
 not the same as economic or product necessity.
 
+## 1A. Difficulty-signal calibration law
+
+Worker selection must not use one vague "difficulty" label. Before a bounded mission is handed to
+Model Router / Capacity or an attended orchestrator chooses a worker avenue, keep these dimensions
+separate:
+
+- `business_impact`: consequence if the mission is wrong or delayed; this controls validation,
+  review and acceptance rigor, not model strength by itself;
+- `execution_risk`: authority, reversibility, security, data-loss and operational-effect risk;
+- `task_complexity`: reasoning difficulty of this exact bounded mission after decomposition;
+- `ambiguity`: unresolved requirements, architecture, acceptance criteria or contradictory evidence;
+- `topology`: parent, worker, subagent, reviewer or coordinator role;
+- required capabilities, context breadth and continuity.
+
+**Topology is not difficulty.** A task does not become harder because it is delegated to a
+subagent, reviewer, worker, or child session. A provider's generic `subagent` model setting must not
+silently promote a routine child to a stronger model than the routine worker default. If a child
+mission actually requires a stronger tier, the parent must classify that bounded child by its own
+complexity and record the escalation reason.
+
+**Business impact is not difficulty.** `material` or `critical` business impact can require
+independent review, stronger validation, rollback planning or Chairman/authority gates while the
+builder remains a routine bounded worker. Do not translate business impact directly into
+`critical` execution risk or `high` ambiguity.
+
+Use these bounded complexity classes when an orchestrator has to choose a provider/model class:
+
+```text
+C0_MECHANICAL
+  deterministic transform, extraction, formatting, fixture/test update, narrow lookup
+
+C1_ROUTINE_BOUNDED
+  clear objective + acceptance, frozen architecture, ordinary implementation/research/debugging
+
+C2_COMPLEX_BOUNDED
+  multi-step or multi-file reasoning, difficult debugging/refactor/research, but objective and
+  architecture remain frozen and the result is independently testable
+
+C3_FRONTIER_JUDGMENT
+  unresolved architecture/contract, cross-system tradeoff, materially conflicting evidence,
+  novel recovery where the decision changes the system boundary, or sustained long-horizon
+  coordination that cannot be safely decomposed first
+```
+
+Default down, escalate on evidence. `C0` and `C1` use the least-scarce qualified fast/routine
+worker. `C2` may use a stronger standard/hard worker. `C3` is the only complexity class that
+justifies a frontier principal/model merely because of reasoning difficulty.
+
+A frontier route must name at least one concrete `FRONTIER_WITNESS` from the C3 definition above.
+The following are **not** frontier witnesses by themselves:
+
+- the parent program is important, expensive, customer-facing or production-bound;
+- many files exist, the repository is large, or the prompt/context is long;
+- the task can write code or run tests;
+- the worker is a subagent, coordinator, reviewer or child;
+- a frontier model is available or has unused quota;
+- the orchestrator is uncertain because it has not yet decomposed the mission.
+
+When the task is large but separable, first split it into bounded missions and classify each child.
+Do not promote the whole program to a frontier model because one subproblem is difficult.
+
+For meaningful external-worker routing, preserve these decision facts in the existing routing /
+commission evidence where that carrier already supports them:
+
+```text
+TASK_COMPLEXITY: <C0_MECHANICAL|C1_ROUTINE_BOUNDED|C2_COMPLEX_BOUNDED|C3_FRONTIER_JUDGMENT>
+BUSINESS_IMPACT: <routine|material|critical>
+EXECUTION_RISK: <routine|elevated|critical>
+AMBIGUITY: <low|medium|high>
+TOPOLOGY: <parent|worker|subagent|reviewer|coordinator>
+FRONTIER_WITNESS: <NONE or one concrete C3 witness>
+```
+
+These fields are explanatory classification evidence, not a new router, lifecycle record, quota
+ledger, placement authority or runtime schema. Existing Executive OS / Model Router / Capacity
+owners remain canonical.
+
+## 1B. Operator-first completion economics
+
+For sustained delivery, the default economical operator owns decomposition, worker commissioning,
+ordinary return adjudication, independent review, bounded repair and domain integration. Prefer
+qualified admitted GLM/Grok-class operators outside the scarce principal subscription pool when the
+whole completion cycle benefits; the operator delegates easy bounded labor rather than performing
+it all. This refines the delivery-management defaults in Sections 3 and 5, not their reserved
+principal, quality or authority responsibilities. Role and topology never manufacture a frontier
+witness. Deterministic work remains deterministic; each bounded child retains its own task fit.
+
+Sol/Opus remain program executives and exceptional specialists rather than mandatory routine
+management. Astra/Fable remain optional strategic principals. Omit any layer that adds only relay
+cost. Direct CEO -> worker remains allowed when its complete closure is cheaper or a concrete
+existing direct-work exception applies; the direct commissioning owner retains adjudication.
+The goal is accepted outcomes per conserved original-root budget including principal consumption,
+not a cheaper model doing one part while premium parents still manage every return.
+
+For substantial orchestration, load `skills/mastermind-fabric-orchestration/SKILL.md` plus only the
+assigned role from the same protected commit as this law. The existing capability/launch owners
+must separately project and prove actual per-session loading and available tools. Installation or
+instructional role selection grants no descendant, identity, native-helper, depth or budget right.
+This amendment does not change cognition-route or Pro-mode admission, provider/credential holds,
+first-lawful-tier routing, Runtime enums, quota ownership, effect reconciliation, independent review,
+source custody or release gates. All descendants conserve the original root and true parent.
+
 ## 2. Mandatory Chat-native cognition law
 
 Every meaningful Sol/model delegation must apply:

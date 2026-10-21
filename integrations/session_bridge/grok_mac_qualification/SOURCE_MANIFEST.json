@@ -1,0 +1,23 @@
+{
+  "at": "2026-10-12T04:09:37.548339+00:00",
+  "review_run": "fabric-grok-mac-qualification-review-01a11e90-v1",
+  "review_sha256": "307cef955c366de88fe3f69b7d82816fb221709f2fbd83d893765838bab1cb9c",
+  "parent_adjudication": "APPROVE_SCOPED; no automatic enrollment, all non-qualification gates remain",
+  "files": {
+    "fabric_host_qualification.py": {
+      "before": null,
+      "after": "d2a1c8f589a9758f94e36f947a91a0a4b731c5aa69694ac7258691a85873166a"
+    },
+    "bootstrap_clis.py": {
+      "before": "10c8b6df82bc6c5ab4d153052c99c3db2c71259f6807b1277219175a4a8c440a",
+      "after": "14a859e644268f6d92ff19c6899955b57fa67c1a68c085cb33bab3949de6909f"
+    },
+    "fabric_task.py": {
+      "before": "506bdb8af4cd5cc874933bd2641a16c4b4e3d6e3353e4b026693d2c2c81af87a",
+      "after": "cbd46bd88a4e5d545c77010bfb9eb1997399fe4f5cc67596210e849858eddd99"
+    }
+  },
+  "tests": "14 isolated source checks PASS; source qualification only",
+  "macbook_original_outcome": "rc78/native_remote_host_refused before provider start; original result consumed once, NOT_ACCEPTED",
+  "m1_cli_install": "bootstrap_clis m1 --tool grok --install-missing: rc0 grok=installed; authentication not established"
+}

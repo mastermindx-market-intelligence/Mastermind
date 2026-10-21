@@ -35,6 +35,7 @@ from control_plane.executive_runtime import (
 from control_plane.executive_supervisor import ExecutiveSupervisor
 from control_plane.executive_terminal_return import (
     TerminalReturnError,
+    TerminalReviewFinding,
     reduce_terminal_return,
 )
 from tests.test_executive_os_phase1fc import (
@@ -109,6 +110,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
         self.ref = dataclasses.replace(
             ref,
             session_id=ref.pid,
+            base_sha=spec.expected_base_sha,
             effective_uid=uid,
             effective_gid=gid,
             real_uid=uid,
@@ -129,6 +131,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
             "rendered_argv": [ref.binary.real_path, "exec", "--json", "-"],
             "environment_keys": ["CODEX_HOME", "HOME", "PATH"],
             "permission_profile_sha256": "c" * 64,
+            "isolation_manifest_sha256": self.spec.isolation_manifest_sha256,
             "prompt_sha256": hashlib.sha256(
                 self.spec.prompt.encode("utf-8")
             ).hexdigest(),
@@ -215,7 +218,7 @@ class _PlannerSealedWorkerAdapter(FakeAdapter):
             status=WorkerRunStatus.SUCCEEDED,
             structured_output=envelope,
             artifact_manifest=(),
-            git_manifest={"base_sha": "b" * 40, "head_sha": "b" * 40},
+            git_manifest={"base_sha": self.spec.expected_base_sha, "head_sha": self.spec.expected_base_sha},
             usage={"input_tokens": 10, "output_tokens": 5},
             provider_session_id=provider_session_id,
             exit_code=0,
@@ -299,31 +302,36 @@ def test_runtime_refuses_dialogue_source_digest_without_source(tmp_path: Path) -
         )
 
 
-def test_reducer_projects_positive_canonical_sealed_worker_completion(
-    tmp_path: Path,
-) -> None:
-    runtime_root = tmp_path / "runtime"
-    runtime = Runtime.at(runtime_root)
-    _register(runtime, "worker-a")
+def completed_sealed_worker_fixture(tmp_path: Path, *, include_launch=False, with_commission=False):
+    if with_commission:
+        from tests.test_executive_supervisor import _strict_v2_root_with_commission
+        runtime_root = tmp_path / "commission-runtime"
+        runtime, root, workspace, _ = _strict_v2_root_with_commission(runtime_root)
+        _register(runtime, "worker-a")
+        workspace_root = workspace.parent
+    else:
+        runtime_root = tmp_path / "runtime"
+        runtime = Runtime.at(runtime_root)
+        _register(runtime, "worker-a")
 
-    workspace_root = tmp_path / "workspaces"
-    workspace = workspace_root / "planner"
-    workspace.mkdir(parents=True, mode=0o700)
-    admitted = submit_intent(
-        runtime,
-        _v2_intent(
-            intent_id="CEO-SEALED-WORKER-TERMINAL-RETURN",
-            execution_contract={
-                "requested_authorities": ["READ"],
-                "worktree": str(workspace),
-                "attempt_limit": 2,
-                "constraints": {"base_sha": "b" * 40},
-            },
-        ),
-        workspace_root=workspace_root,
-    )
-    root = runtime.jobs.get_job(admitted["job_id"])
-    assert root is not None
+        workspace_root = tmp_path / "workspaces"
+        workspace = workspace_root / "planner"
+        workspace.mkdir(parents=True, mode=0o700)
+        admitted = submit_intent(
+            runtime,
+            _v2_intent(
+                intent_id="CEO-SEALED-WORKER-TERMINAL-RETURN",
+                execution_contract={
+                    "requested_authorities": ["READ"],
+                    "worktree": str(workspace),
+                    "attempt_limit": 2,
+                    "constraints": {"base_sha": "b" * 40},
+                },
+            ),
+            workspace_root=workspace_root,
+        )
+        root = runtime.jobs.get_job(admitted["job_id"])
+        assert root is not None
     planner = runtime.jobs.create_cycle_planner(
         root.job_id,
         command_id=f"coo-cycle:{root.job_id}:create-planner:0",
@@ -374,6 +382,27 @@ def test_reducer_projects_positive_canonical_sealed_worker_completion(
         planner.job_id,
         expected_attempt_id=receipt.attempt.attempt_id,
     )
+    # The existing sealed reader can still read the exact historical v1 wire,
+    # while fresh principal sealing cannot admit that missing-evidence shape.
+    from control_plane.executive_runtime import _validated_sealed_worker_launch_material
+    with reopened.store.read() as connection:
+        row = dict(connection.execute(
+            "SELECT * FROM attempts WHERE attempt_id=?", (receipt.attempt.attempt_id,),
+        ).fetchone())
+    modern = _validated_sealed_worker_launch_material(row)
+    legacy_metadata = json.loads(row["launch_metadata_json"])
+    legacy_metadata["launch_attestation"].pop("isolation_manifest_sha256")
+    legacy_metadata["launch_attestation_sha256"] = hashlib.sha256(
+        json.dumps(legacy_metadata["launch_attestation"], sort_keys=True,
+                   separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    legacy_row = {**row, "launch_metadata_json": json.dumps(
+        legacy_metadata, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+    )}
+    assert _validated_sealed_worker_launch_material(legacy_row)[1:] == modern[1:]
+    with pytest.raises(StateConflict, match="complete launch attestation"):
+        _validated_sealed_worker_launch_material(legacy_row, allow_unsealed_principal=True)
+
     candidate = reduce_terminal_return(material=material)
 
     terminal = material.terminal_receipt
@@ -454,6 +483,14 @@ def test_reducer_projects_positive_canonical_sealed_worker_completion(
         "JOB_COMPLETED",
     }.issubset(event_types)
 
+    if include_launch:
+        return reopened, row, terminal, adapter.spec, adapter.ref
+    return reopened, row, terminal
+
+
+def test_reducer_projects_positive_canonical_sealed_worker_completion(tmp_path):
+    completed_sealed_worker_fixture(tmp_path)
+
 
 def test_reducer_projects_one_exact_sealed_completed_child(tmp_path) -> None:
     runtime, job, attempt = _completed_planner(tmp_path)
@@ -530,6 +567,101 @@ def test_reducer_is_deterministic_and_preserves_review_verdict_shape(
 
     assert first == second
     assert first.review_verdict == verdict
+
+
+def test_reducer_preserves_review_findings_and_next_actions_from_sealed_result(
+    tmp_path,
+) -> None:
+    runtime, job, attempt = _completed_review(tmp_path, "reject")
+    material = runtime.validated_role_completion(
+        job.job_id,
+        expected_attempt_id=attempt.attempt_id,
+    )
+    changed = dict(material.result_envelope)
+    role_result = dict(changed["role_result"])
+    role_result["findings"] = [
+        {
+            "code": "MISSING_DATA",
+            "severity": "blocking",
+            "message": "Missing data can overstate confidence.",
+            "evidence_digests": ["a" * 64],
+        },
+        {
+            "code": "LANG_PARITY",
+            "severity": "warning",
+            "message": "English and Chinese states diverge.",
+            "evidence_digests": [],
+        },
+    ]
+    changed["role_result"] = role_result
+    changed["next_actions"] = ["Repair both findings.", "Rerun independent review."]
+    changed_digest = canonical_digest(changed)
+    terminal_receipt = dict(material.terminal_receipt)
+    terminal_receipt["result_envelope_digest"] = changed_digest
+    candidate = reduce_terminal_return(
+        material=dataclasses.replace(
+            material,
+            result_envelope=changed,
+            terminal_receipt=terminal_receipt,
+            result_digest=changed_digest,
+            role_result_digest=canonical_digest(role_result),
+        )
+    )
+
+    assert candidate.next_actions == (
+        "Repair both findings.",
+        "Rerun independent review.",
+    )
+    assert candidate.review_findings == (
+        TerminalReviewFinding(
+            code="MISSING_DATA",
+            severity="blocking",
+            message="Missing data can overstate confidence.",
+            evidence_digests=("a" * 64,),
+        ),
+        TerminalReviewFinding(
+            code="LANG_PARITY",
+            severity="warning",
+            message="English and Chinese states diverge.",
+        ),
+    )
+
+
+def test_reducer_refuses_malformed_review_findings_even_after_terminal_seal(
+    tmp_path,
+) -> None:
+    runtime, job, attempt = _completed_review(tmp_path, "reject")
+    material = runtime.validated_role_completion(
+        job.job_id,
+        expected_attempt_id=attempt.attempt_id,
+    )
+    changed = dict(material.result_envelope)
+    role_result = dict(changed["role_result"])
+    role_result["findings"] = [
+        {
+            "code": "BROKEN",
+            "severity": "critical",
+            "message": "unsupported severity",
+            "evidence_digests": [],
+        }
+    ]
+    changed["role_result"] = role_result
+    changed_digest = canonical_digest(changed)
+    terminal_receipt = dict(material.terminal_receipt)
+    terminal_receipt["result_envelope_digest"] = changed_digest
+
+    with pytest.raises(TerminalReturnError) as refused:
+        reduce_terminal_return(
+            material=dataclasses.replace(
+                material,
+                result_envelope=changed,
+                terminal_receipt=terminal_receipt,
+                result_digest=changed_digest,
+                role_result_digest=canonical_digest(role_result),
+            )
+        )
+
+    assert refused.value.code == "EVIDENCE_REFUSED"
 
 
 @pytest.mark.parametrize(

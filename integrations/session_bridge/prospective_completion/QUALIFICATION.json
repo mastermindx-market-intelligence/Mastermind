@@ -1,0 +1,179 @@
+{
+  "schema": "mastermind.source_qualification.v1",
+  "source_only": true,
+  "installed": false,
+  "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+  "created_at": "2026-10-14T08:54:32.389266+00:00",
+  "files": {
+    "fabric_task.py": {
+      "preimage_sha256": "bfa5fcdc3df04d76d6c3b0b2dda2dac17ab4539253ec3ffb86fca4e2c4c13207",
+      "postimage_sha256": "b4e3f1cb43a01746e848528038b189960e3bc6062676213c64bfda9d6b576289",
+      "bytes": 38835
+    },
+    "remote_sub.sh": {
+      "preimage_sha256": "e2ec7dfe2efa0680b4bf961ac73ce916adf5f1dc90e510f6c8ff6ed50e069deb",
+      "postimage_sha256": "9bf4f5317792746bbfd84e941c11e0decf5f53a2723b8023486be2cf4c0cadf5",
+      "bytes": 57175
+    },
+    "remote_sub_exec.py": {
+      "preimage_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
+      "postimage_sha256": "16ade6703ce7959938c243e01ceae356cd6d70b88dcae800bf1028c3c9478366",
+      "bytes": 25732
+    },
+    "original_delivery_collector.py": {
+      "preimage_sha256": "0781977b0f5f6b7c493211e4a2f7e03d6938fb2ac53c65788f5afc5937dca3a7",
+      "postimage_sha256": "30cce4abf8b50473906506452dd70f84cf001f5f4a030dd0c6751df108c2df15",
+      "bytes": 46165
+    }
+  },
+  "tests": {
+    "command": "test-venv/bin/python -m pytest -q test_prospective_completion.py --junitxml=f1-successor.xml",
+    "count": 44,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "cases": [
+      "test_retained_completion_consumed_by_exact_assigning_parent",
+      "test_active_original_controller_blocks_collection",
+      "test_another_collector_blocks_collection",
+      "test_changed_original_custody_or_source_refuses_before_transport[root]",
+      "test_changed_original_custody_or_source_refuses_before_transport[parent]",
+      "test_changed_original_custody_or_source_refuses_before_transport[environment]",
+      "test_changed_original_custody_or_source_refuses_before_transport[packet]",
+      "test_changed_original_custody_or_source_refuses_before_transport[support]",
+      "test_changed_original_custody_or_source_refuses_before_transport[hosts]",
+      "test_changed_original_custody_or_source_refuses_before_transport[code]",
+      "test_changed_original_custody_or_source_refuses_before_transport[lock]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[lease_id]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[account]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[packet_sha256]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[support_digest]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[controller]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[parent]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[cleanup]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[stdout]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[marker]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[partial]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[symlink]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[mode]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[missing-binding]",
+      "test_uncertain_collection_is_sticky_no_second_read[transport]",
+      "test_uncertain_collection_is_sticky_no_second_read[after-transport]",
+      "test_uncertain_collection_is_sticky_no_second_read[publication]",
+      "test_uncertain_collection_is_sticky_no_second_read[after-publication]",
+      "test_original_unknown_operation_cannot_gain_capsule",
+      "test_launch_binding_once_and_requires_inherited_descriptor",
+      "test_producer_checks_packet_environment_deadline_and_regular_file",
+      "test_adapter_holds_original_custody_across_existing_controller",
+      "test_collection_only_entry_never_enters_controller",
+      "test_fixed_remote_reader_code_compiles",
+      "test_real_controller_interruption_releases_only_original_custody",
+      "test_actual_owned_process_capture_produces_collectable_result",
+      "test_published_receipt_without_final_owner_readback_cannot_be_consumed",
+      "test_actual_embedded_transport_reader_returns_original_capsule",
+      "test_prelaunch_seal_cli_preserves_inherited_kernel_custody",
+      "test_actual_executor_ordinary_profile_wires_prelaunch_and_terminal",
+      "test_f1_validator_change_after_binding_refuses_before_transport",
+      "test_f1_validator_change_before_launch_seal_refuses",
+      "test_f1_validator_change_during_collection_prevents_publication[after-transport]",
+      "test_f1_validator_change_during_collection_prevents_publication[publication]"
+    ],
+    "xml_sha256": "6970215420c3d175990f0a7f590f9cb8189912614306ea0bc44432a77a08c59a",
+    "source_mtime_precedes_report": true
+  },
+  "compatibility": {
+    "candidate_passed": 27,
+    "candidate_failed": 2,
+    "baseline_same_two_failed": true,
+    "excluded": [
+      "remote_sub_accepts_stable_explicit_run_id",
+      "explicit_run_id_is_atomically_duplicate_fenced_before_provider",
+      "prelaunch_e2big_releases_unstarted_lane_without_cleanup_hold"
+    ],
+    "reason_exclusions": "Old fixture requires unrelated support closure updates; Linux per-argument E2BIG expectation excluded on Darwin. Not claimed as passing.",
+    "failures": [
+      "test_request_forwards_explicit_escalation_and_preserves_ids: unchanged route_key parameter omitted by old expectation",
+      "test_request_cli_accepts_explicit_escalation_arguments: unchanged qualification_host=None omitted by old expectation"
+    ],
+    "evidence_dir": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/prospective-completion-20261014"
+  },
+  "non_claims": [
+    "No existing run or unknown effect adopted/retried",
+    "No provider or remote host call",
+    "No acceptance or lease settlement",
+    "No authenticated RuntimeBinding or idle Wake proof",
+    "No release or installation"
+  ],
+  "historical_tests_638392": {
+    "command": "test-venv/bin/python -m pytest -q test_prospective_completion.py --junitxml=checks-final.xml",
+    "cases": [
+      "test_retained_completion_consumed_by_exact_assigning_parent",
+      "test_active_original_controller_blocks_collection",
+      "test_another_collector_blocks_collection",
+      "test_changed_original_custody_or_source_refuses_before_transport[root]",
+      "test_changed_original_custody_or_source_refuses_before_transport[parent]",
+      "test_changed_original_custody_or_source_refuses_before_transport[environment]",
+      "test_changed_original_custody_or_source_refuses_before_transport[packet]",
+      "test_changed_original_custody_or_source_refuses_before_transport[support]",
+      "test_changed_original_custody_or_source_refuses_before_transport[hosts]",
+      "test_changed_original_custody_or_source_refuses_before_transport[code]",
+      "test_changed_original_custody_or_source_refuses_before_transport[lock]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[lease_id]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[account]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[packet_sha256]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[support_digest]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[controller]",
+      "test_remote_producer_identity_mismatch_is_not_delivery[parent]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[cleanup]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[stdout]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[marker]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[partial]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[symlink]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[mode]",
+      "test_unproven_terminal_or_corrupt_capsule_never_delivers[missing-binding]",
+      "test_uncertain_collection_is_sticky_no_second_read[transport]",
+      "test_uncertain_collection_is_sticky_no_second_read[after-transport]",
+      "test_uncertain_collection_is_sticky_no_second_read[publication]",
+      "test_uncertain_collection_is_sticky_no_second_read[after-publication]",
+      "test_original_unknown_operation_cannot_gain_capsule",
+      "test_launch_binding_once_and_requires_inherited_descriptor",
+      "test_producer_checks_packet_environment_deadline_and_regular_file",
+      "test_adapter_holds_original_custody_across_existing_controller",
+      "test_collection_only_entry_never_enters_controller",
+      "test_fixed_remote_reader_code_compiles",
+      "test_real_controller_interruption_releases_only_original_custody",
+      "test_actual_owned_process_capture_produces_collectable_result",
+      "test_published_receipt_without_final_owner_readback_cannot_be_consumed",
+      "test_actual_embedded_transport_reader_returns_original_capsule",
+      "test_prelaunch_seal_cli_preserves_inherited_kernel_custody",
+      "test_actual_executor_ordinary_profile_wires_prelaunch_and_terminal"
+    ],
+    "count": 40,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0,
+    "xml_sha256": "5d9370da1f3b942751ab6754218693ad4750a510e4882c76dc2320e6f048050a",
+    "source_mtime_precedes_report": true
+  },
+  "review_f1": {
+    "review_receipt_sha256": "366378934f256b73011ac7e8b0b9a74a00d7f73f19c21ecf7ad826b6f895af83",
+    "predecessor": "63839212fd0732c50599edb79be8dc743b7ccb3c",
+    "falsifier": "Actual candidate remote_sub_exec.py present before begin/seal; changed after original binding.",
+    "owner_old_source_red": {
+      "cases": 4,
+      "failures": 4,
+      "errors": 0,
+      "xml_sha256": "000dcf38bb6537c551c0b0e02ed63c8f1fbe4ea6905c865219c206b664118853"
+    },
+    "new_source_green": {
+      "cases": 44,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "xml_sha256": "6970215420c3d175990f0a7f590f9cb8189912614306ea0bc44432a77a08c59a"
+    },
+    "source_delta": "Add remote_sub_exec.py to fixed local source keys at both producer validator and collector dependency hash closure; prelaunch, collection admission and final unchanged checks reuse same closure.",
+    "state": "FIXED_IN_SOURCE_PENDING_SAME_REVIEWER_ADJUDICATION"
+  },
+  "updated_at": "2026-10-14T09:07:01.935258+00:00"
+}

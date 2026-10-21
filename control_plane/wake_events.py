@@ -49,6 +49,12 @@ RUNTIME_REF_RE = re.compile(
 )
 RUNTIME_JOB_REF_RE = re.compile(r"^runtime:job:(JOB-\d{3,}):([1-9][0-9]*)$")
 DIALOGUE_ATTENTION_REF_RE = re.compile(r"^agent_dialogue_attention:[0-9a-f]{64}$")
+CONSULTATION_ANSWER_ATTENTION_REF_RE = re.compile(
+    r"^consultation_answer_attention:[0-9a-f]{64}$"
+)
+GITHUB_CI_CANDIDATE_REF_RE = re.compile(
+    r"^github_ci_candidate:[0-9a-f]{64}$"
+)
 WORKSTREAM_RE = re.compile(r"^[a-z][a-z0-9_]{0,63}$")
 SOURCE_WORKSTREAM_RE = re.compile(r"^[^\x00-\x1f]{1,128}$")
 ISO_UTC_RE = re.compile(
@@ -76,17 +82,25 @@ WAKE_KINDS = frozenset(
         "ceo_decision_pending",
         "review_required",
         "dialogue_turn_pending",
+        "consultation_answer_available",
+        "ci_candidate_material",
     }
 )
-INBOX_WAKE_KINDS = WAKE_KINDS - {"review_required", "dialogue_turn_pending"}
+INBOX_WAKE_KINDS = WAKE_KINDS - {
+    "review_required", "dialogue_turn_pending", "consultation_answer_available"
+}
 RUNTIME_WAKE_KINDS = frozenset({"review_required"})
 DIALOGUE_WAKE_KINDS = frozenset({"dialogue_turn_pending"})
+REQUESTER_ANSWER_WAKE_KINDS = frozenset({"consultation_answer_available"})
+GITHUB_CI_WAKE_KINDS = frozenset({"ci_candidate_material"})
 
 SOURCE_KINDS = frozenset(
     {
         "executive_runtime_event",
         "executive_inbox_attention",
         "agent_dialogue_attention",
+        "consultation_answer_attention",
+        "github_ci_candidate_observation",
     }
 )
 
@@ -156,12 +170,16 @@ class WakeKind(str, Enum):
     CEO_DECISION_PENDING = "ceo_decision_pending"
     REVIEW_REQUIRED = "review_required"
     DIALOGUE_TURN_PENDING = "dialogue_turn_pending"
+    CONSULTATION_ANSWER_AVAILABLE = "consultation_answer_available"
+    CI_CANDIDATE_MATERIAL = "ci_candidate_material"
 
 
 class SourceKind(str, Enum):
     EXECUTIVE_RUNTIME_EVENT = "executive_runtime_event"
     EXECUTIVE_INBOX_ATTENTION = "executive_inbox_attention"
     AGENT_DIALOGUE_ATTENTION = "agent_dialogue_attention"
+    CONSULTATION_ANSWER_ATTENTION = "consultation_answer_attention"
+    GITHUB_CI_CANDIDATE_OBSERVATION = "github_ci_candidate_observation"
 
 
 def canonical_json_bytes(value: Any) -> bytes:
@@ -275,6 +293,21 @@ def mint_obligation(
         if resolved_kind.value not in DIALOGUE_WAKE_KINDS:
             raise WakeObligationError(
                 f"agent dialogue source cannot mint wake_kind {resolved_kind.value!r}"
+            )
+    elif resolved_source is SourceKind.CONSULTATION_ANSWER_ATTENTION:
+        if resolved_kind.value not in REQUESTER_ANSWER_WAKE_KINDS:
+            raise WakeObligationError(
+                "consultation answer source cannot mint wake_kind "
+                f"{resolved_kind.value!r}"
+            )
+    elif resolved_source is SourceKind.GITHUB_CI_CANDIDATE_OBSERVATION:
+        if resolved_kind.value not in GITHUB_CI_WAKE_KINDS:
+            raise WakeObligationError(
+                f"github CI source cannot mint wake_kind {resolved_kind.value!r}"
+            )
+        if job is not None or attempt is not None:
+            raise WakeObligationError(
+                "github CI candidate wake cannot claim a Job or Attempt identity"
             )
     elif resolved_kind.value not in RUNTIME_WAKE_KINDS:
         raise WakeObligationError(
@@ -414,6 +447,18 @@ def _source_ref(source_kind: str | SourceKind, value: Any) -> str:
                 "agent dialogue source_ref must be a canonical attention identity"
             )
         return token
+    if kind is SourceKind.CONSULTATION_ANSWER_ATTENTION:
+        if CONSULTATION_ANSWER_ATTENTION_REF_RE.fullmatch(token) is None:
+            raise WakeObligationError(
+                "consultation answer source_ref must be a canonical attention identity"
+            )
+        return token
+    if kind is SourceKind.GITHUB_CI_CANDIDATE_OBSERVATION:
+        if GITHUB_CI_CANDIDATE_REF_RE.fullmatch(token) is None:
+            raise WakeObligationError(
+                "github CI source_ref must bind one candidate observer decision"
+            )
+        return token
     if RUNTIME_REF_RE.fullmatch(token) is None:
         raise WakeObligationError("runtime source_ref must be runtime:type:id:sequence")
     return token
@@ -527,6 +572,8 @@ def _allowed_evidence(token: str) -> bool:
         or ATTENTION_ID_RE.fullmatch(token)
         or RUNTIME_REF_RE.fullmatch(token)
         or DIALOGUE_ATTENTION_REF_RE.fullmatch(token)
+        or CONSULTATION_ANSWER_ATTENTION_REF_RE.fullmatch(token)
+        or GITHUB_CI_CANDIDATE_REF_RE.fullmatch(token)
     )
 
 
@@ -534,12 +581,16 @@ __all__ = [
     "ATTENTION_ID_RE",
     "ATTEMPT_ID_RE",
     "DIALOGUE_ATTENTION_REF_RE",
+    "CONSULTATION_ANSWER_ATTENTION_REF_RE",
+    "GITHUB_CI_CANDIDATE_REF_RE",
     "DIALOGUE_WAKE_KINDS",
+    "GITHUB_CI_WAKE_KINDS",
     "ENVELOPE_KEYS",
     "FORBIDDEN_KEYS",
     "INBOX_WAKE_KINDS",
     "JOB_ID_RE",
     "RUNTIME_WAKE_KINDS",
+    "REQUESTER_ANSWER_WAKE_KINDS",
     "SCHEMA",
     "SEATS",
     "SOURCE_KINDS",

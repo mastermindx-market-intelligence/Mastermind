@@ -1,0 +1,114 @@
+{
+  "scope": "Ordinary foreground-only arm, original request freshness through physical effect boundary, restart no-fresh-turn guard, and mixed primary startup. Source only, not installed or paid production proof.",
+  "base_head": "2877b0d284c44ad84f0b8cda56e7632ba8e3cc9d",
+  "files": {
+    "control_plane/executive_coo_cycle.py": "66cbb0ae7edcebdb1389449b075d25811aef3173388aced74ccb08917b5e5d8d",
+    "control_plane/executive_operator_supervisor.py": "233f4cb3a4ab26ccfe00c073da80562beba8a490efc0bde535e43b8217c9b9c5",
+    "control_plane/executive_service.py": "0e89da188c659de0d70d037814abfb035aad95893f1750aa613fb822b7dd190f",
+    "control_plane/executive_worker_broker.py": "281486dd68dffc5ca6d9cf704057bc4c202059a3f18fc69e8e9c2fed78c382e8",
+    "control_plane/foreground_operation.py": "2589a305850a610cfe800eafff6a97cbc186be07ed939843e08526c5e1bc8a3d",
+    "control_plane/mixed_worker_supervisor.py": "3b08abc45169d041f69104cfd00a919954dbc1210276a7efec1e5f63e1eb6c35",
+    "control_plane/remote_operator_harness_adapter.py": "b2debd3fb7d6d7317af6dc2e8bf70f3c571b030727ebf5eb542b04a1b6d6bc83",
+    "control_plane/remote_worker_broker_client.py": "1eae3d4d19f9cceaefd4e42d6816f2e3d2ab9dc0f7c67d397c0b8edffdc46866",
+    "ops/executive_os/autonomy_control.py": "2f2f603304a0702e1668679a81478f53611917b66373933f406ca571e2721e6e",
+    "scripts/executive_os_phase1c.py": "c3bbd23384d8047b985f696c53b7d0ad468b64dd7871f3754546a17be508252d"
+  },
+  "evidence_directory": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013",
+  "test_evidence": [
+    {
+      "file": "FOREGROUND_ONLY_BASE.xml",
+      "sha256": "a3e451f5ee795df81434d5cfa6220b63731201c6500442899c7e584675070deb",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 5,
+          "skipped": 0,
+          "tests": 5
+        }
+      ]
+    },
+    {
+      "file": "MIXED_STARTUP_BASE_VALID.xml",
+      "sha256": "f3711056c651acb0353ea90bd7c7c96a26bc4eb921d8a959d5ccbc1bbc11143d",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 2,
+          "skipped": 0,
+          "tests": 2
+        }
+      ]
+    },
+    {
+      "file": "FOREGROUND_MIXED_FINAL.xml",
+      "sha256": "d28b5be2443698a54f69be0b1f802d0a39c7c6b28bbf53da0b8fcd09687f196a",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 387
+        }
+      ]
+    },
+    {
+      "file": "FOREGROUND_RESTART_BASE.xml",
+      "sha256": "1b47452b44b2cdcb26f447fc8cc0ed4c192a095661efe58f6b4857fa93e5dcf1",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 2,
+          "skipped": 0,
+          "tests": 3
+        }
+      ]
+    },
+    {
+      "file": "FOREGROUND_RESTART_FINAL.xml",
+      "sha256": "1e028c0ecbf8f73daae52c79f87685ed5f9cbb15af69b9e0402c7b878693c21e",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 52
+        }
+      ]
+    },
+    {
+      "file": "FOREGROUND_RESTART_FACTORY.xml",
+      "sha256": "09d2178f96f18977c74b1b6202934e320cee2fea5da3497639ba1d916a9791e2",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 1
+        }
+      ]
+    },
+    {
+      "file": "FOREGROUND_UNIX_RESPONSE_COMPAT.xml",
+      "sha256": "b6823f2f218998b7b2df5028eae43e6902fe969c50f7d24fc7d233e2510cca53",
+      "counts": [
+        {
+          "errors": 0,
+          "failures": 0,
+          "skipped": 0,
+          "tests": 6
+        }
+      ]
+    }
+  ],
+  "review": {
+    "reviewer": "native_activation_adjudication",
+    "role": "Independent architecture/security reviewer, no source edits or effects",
+    "disposition": "PASS",
+    "final_review_scope": "All original reviewed files retained; latest strict foreground-only propagation, preclaim source requirement and two restart fresh-turn exclusions adjudicated at exact hashes. Collection, sealing, cancellation and existing turn settlement preserved.",
+    "supersedes": "Earlier PASS missed recovery fresh-turn path; final disposition follows 2 failing negatives, passing settlement positive and 52 affected passing checks."
+  },
+  "installed": false,
+  "native_production_proven": false,
+  "fixed_proof_operation": "fabric-parent-native-operator-proof-01a11e90-v1",
+  "fixed_proof_effect": "NOT_SUBMITTED"
+}
