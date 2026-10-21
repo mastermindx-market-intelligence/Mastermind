@@ -242,7 +242,7 @@ test('owner counts, readiness, duplicates, types, and future fields fail closed'
     cases.push(ownerFor([row]));
   }
   {
-    const row = statusRow('sk-proj-secret-shaped', true);
+    const row = statusRow('sk/proj-secret-shaped', true);
     cases.push(ownerFor([row]));
   }
   {
