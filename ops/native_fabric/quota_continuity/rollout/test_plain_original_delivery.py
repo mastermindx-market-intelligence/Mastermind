@@ -621,9 +621,11 @@ class PlainRepairCase(unittest.TestCase):
             '\nPY_VERIFY_PLAIN_TRANSPORT', 1)[0]
         source = source.replace('$PLAIN_TRANSPORT_CHAIN_SOURCE',
                                 self.collector.delivery.remote_directory_chain_source())
-        prefix = ('import pwd, types, sys\n'
-                  f'pwd.getpwuid=lambda uid: types.SimpleNamespace(pw_dir={str(self.fx.home)!r})\n'
-                  f'sys.argv={["reader", RUN_ID, self.fx.support_digest, POLICY]!r}\n')
+        # The bound reader receives the publisher's physical lanes root.
+        arguments = ["reader", RUN_ID, self.fx.support_digest, POLICY,
+                     str(self.fx.home / "lanes")]
+        prefix = ('import sys\n'
+                  f'sys.argv={arguments!r}\n')
         return subprocess.run([sys.executable, '-I', '-S', '-c', prefix + source],
                               capture_output=True, text=True, timeout=10)
 
@@ -635,6 +637,8 @@ class PlainRepairCase(unittest.TestCase):
         self.assertEqual(row['files'], self.fx.support_manifest)
 
     def test_actual_transport_reader_refuses_symlink_ancestor(self):
+        before = self.transport_reader()
+        self.assertEqual(before.returncode, 0, before.stderr)
         packet_directory = self.fx.home / 'lanes/tmp'
         packet_directory.rename(self.fx.home / 'lanes/real-tmp')
         packet_directory.symlink_to('real-tmp', target_is_directory=True)
