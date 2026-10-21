@@ -29,6 +29,7 @@ degrades independently; the whole assembler NEVER raises.
 PUBLIC API
 ----------
 * ``view(region='us')``       -> the full market_view.v1 dict (deterministic, zero LLM).
+* ``serving_view(published)`` -> freshness-only response projection; no publication or new vote.
 * ``build(region='us', write=True)`` -> ``view()`` + atomic write of latest.json + a
                               dated copy under data/market_view/.
 * ``PLANE_ORDER`` / ``TOP_LEVEL_ORDER`` -> the golden key orders (the artifact feeds
@@ -53,6 +54,7 @@ walk-forward gate FAILED (hit-rate 0.354) — it is a plane of the view but neve
 """
 from __future__ import annotations
 
+import copy
 import json
 import os
 from datetime import date, datetime, timezone
@@ -192,7 +194,7 @@ def _coverage_floor() -> float:
 # freshness — per-plane, from each block's OWN asof (never the file mtime)
 # ---------------------------------------------------------------------------
 
-def _freshness(asof: Any) -> dict[str, Any]:
+def _freshness(asof: Any, *, now: datetime | None = None) -> dict[str, Any]:
     """Build a freshness sub-record from a plane's OWN asof.
 
     ``age_sessions`` reuses regime_frame's trading-day arithmetic (the one calendar).
@@ -200,12 +202,14 @@ def _freshness(asof: Any) -> dict[str, Any]:
     be checked separately. Unknown or future source dates cannot sign the tilt.
     """
     asof_text = str(asof) if asof is not None else None
-    age = _rf._trading_days_since(asof_text)
+    checked_on = (now if now is not None else datetime.now(tz=timezone.utc)).date()
+    age = (_rf._trading_days_since(asof_text) if now is None else
+           _rf._trading_days_since(asof_text, today=checked_on))
     future_dated = age is not None and age < 0
     if asof_text is not None:
         try:
             future_dated = future_dated or (
-                date.fromisoformat(asof_text) > datetime.now(tz=timezone.utc).date()
+                date.fromisoformat(asof_text) > checked_on
             )
         except (ValueError, TypeError):
             pass  # The existing age reader makes malformed dates unavailable.
@@ -951,7 +955,12 @@ def _adapt_rotation_tensor() -> dict[str, Any]:
         confidence=t.get("confidence"),
         validated=False,
         source_contract="data/market_view/rotation_tensor.json",
-        raw={"headline_episode": ep, "advisory": t.get("advisory")},
+        # Capture the pair extract in the same publication as its episode/source clock.
+        # A serving read must never splice a newer tensor into an older Market View.
+        raw={"headline_episode": ep, "advisory": t.get("advisory"),
+             "top_pairs": (t.get("rs_velocity") or {}).get("top_pairs", [])
+             if isinstance(t.get("rs_velocity"), dict) else [],
+             "asof_by_plane": t.get("asof_by_plane")},
     )
 
 
@@ -1652,6 +1661,156 @@ def view(
     }
     # enforce golden top-level order (defensive: build a fresh ordered dict)
     return {k: out[k] for k in TOP_LEVEL_ORDER}
+
+
+def serving_view(published: dict[str, Any], *, now: datetime | None = None) -> dict[str, Any]:
+    """Reassess an existing publication without acquiring, building or writing evidence.
+
+    Eligibility can only decrease. Expiring dissent must never manufacture a new
+    consensus or higher coherence from the surviving subset. Publication clocks,
+    source readings and historical disagreements remain attributable to the producer.
+    This response-only projection is not a new artifact or portfolio-policy input.
+    """
+    if published.get("schema_version") != _SCHEMA_VERSION:
+        raise ValueError("unsupported market view schema")
+    if not isinstance(published.get("planes"), dict):
+        raise ValueError("market view planes must be an object")
+    checked_at = now if now is not None else datetime.now(tz=timezone.utc)
+    if checked_at.tzinfo is None:
+        raise ValueError("freshness assessment requires an aware clock")
+    checked_at = checked_at.astimezone(timezone.utc)
+    out = copy.deepcopy(published)
+    original = published["planes"]
+    planes = out["planes"]
+
+    def present(rec: Any) -> bool:
+        if not isinstance(rec, dict) or not isinstance(rec.get("raw"), dict):
+            return False
+        raw = rec["raw"]
+        return raw.get("artifact_present", raw.get("present", True)) is not False
+
+    def originally_fresh(rec: Any) -> bool:
+        return (present(rec) and isinstance(rec.get("freshness"), dict)
+                and rec["freshness"].get("stale") is False)
+
+    original_eligible = {
+        name: original[name] for name in PLANE_ORDER
+        if name in _VALIDATED_PLANES and originally_fresh(original.get(name))
+        and original[name].get("status") == "validated"
+        and original[name].get("direction") in (_RISK_ON, _RISK_OFF, _NEUTRAL)
+    }
+    for name in PLANE_ORDER:
+        rec = planes.get(name)
+        if not isinstance(rec, dict):
+            rec = planes[name] = _absent_record("unavailable published plane")
+        previous_fresh = originally_fresh(original.get(name))
+        fresh = rec.get("freshness")
+        source_date = fresh.get("asof") if isinstance(fresh, dict) else None
+        rec["freshness"] = _freshness(source_date, now=checked_at)
+        if not present(rec):
+            rec["raw"] = {**(rec.get("raw") if isinstance(rec.get("raw"), dict) else {}),
+                          "artifact_present": False}
+        if (name not in original_eligible or not previous_fresh
+                or rec["freshness"]["stale"] or not present(rec)):
+            rec["status"] = "advisory"
+    eligible = {name: planes[name] for name in original_eligible
+                if planes[name].get("status") == "validated"}
+    lost = [name for name in original_eligible if name not in eligible]
+
+    # Validate the stored membership; never silently reconstruct a missing aggregate.
+    published_tilt = published.get("net_posture_tilt")
+    expected = _net_posture_tilt(original_eligible)
+    consistent = isinstance(published_tilt, dict) and all(
+        key in published_tilt and published_tilt[key] == value
+        for key, value in expected.items()
+    )
+    reason = ("published_consensus_inconsistent" if not consistent else
+              "published_consensus_inputs_expired" if lost else
+              "no_published_consensus" if not expected["n_validated"] else None)
+    tilt = (copy.deepcopy(published_tilt) if reason is None else
+            {"tilt": 0.0, "direction": None, "n_validated": 0, "contributors": []})
+    out["net_posture_tilt"] = tilt
+
+    directional = [name for name in PLANE_ORDER
+                   if originally_fresh(original.get(name))
+                   and original[name].get("direction") in (_RISK_ON, _RISK_OFF, _NEUTRAL)]
+    coherence_lost = [name for name in directional
+                      if planes[name]["freshness"]["stale"] or not present(planes[name])]
+    if coherence_lost:
+        out["coherence"] = None
+    # Disagreements deliberately stay as published: expiry is not conflict resolution.
+    label_freshness = _freshness(published.get("asof"), now=checked_at)
+    published_lvp = published.get("label_vs_planes")
+    published_lvp = published_lvp if isinstance(published_lvp, dict) else {}
+    published_label = published_lvp.get("label_direction")
+    label = (published_label if not label_freshness["stale"]
+             and published_label in (_RISK_ON, _RISK_OFF, _NEUTRAL) else None)
+    lvp = _label_vs_planes(label, tilt, planes)
+    out["label_vs_planes"] = lvp
+    out["posture_floor_defense"] = bool(
+        lvp["conflict"] and lvp["plane_consensus_direction"] == _RISK_OFF
+    )
+
+    total = len(PLANE_ORDER)
+    count_present = sum(present(planes[name]) for name in PLANE_ORDER)
+    count_fresh = sum(present(planes[name]) and not planes[name]["freshness"]["stale"]
+                      for name in PLANE_ORDER)
+    coverage = round(count_present / total, 4) if total else 0.0
+    decision_coverage = round(len(eligible) / len(_VALIDATED_PLANES), 4)
+    old_assembly = published.get("assembly")
+    old_assembly = old_assembly if isinstance(old_assembly, dict) else {}
+    reasons = old_assembly.get("degrade_reasons")
+    reasons = [r for r in reasons if isinstance(r, str)] if isinstance(reasons, list) else []
+    for condition, code in (
+        (coverage < _coverage_floor(), "availability_coverage_below_floor"),
+        (decision_coverage < 1.0, "validated_decision_plane_incomplete"),
+        (reason is not None, "serving_consensus_unavailable"),
+        (label is None, "serving_label_unavailable"),
+        (bool(coherence_lost), "serving_coherence_inputs_expired"),
+    ):
+        if condition and code not in reasons:
+            reasons.append(code)
+    out["coverage"] = coverage
+    out["assembly"] = {
+        **old_assembly, "total": total, "present": count_present, "fresh": count_fresh,
+        "stale": count_present - count_fresh, "missing": total - count_present,
+        "validated": len(eligible), "eligible_validated": len(eligible),
+        "decision_total": len(_VALIDATED_PLANES), "decision_coverage": decision_coverage,
+        "fresh_coverage": round(count_fresh / total, 4) if total else 0.0,
+        "aggregate_available": reason is None,
+        "degrade_reasons": reasons, "degraded": bool(reasons) or bool(old_assembly.get("degraded")),
+    }
+    confirmation_available = reason is None and label is not None
+    out["serving_freshness"] = {
+        "checked_at": checked_at.isoformat(), "label_freshness": label_freshness,
+        "current_confirmation_available": confirmation_available,
+        "consensus_reason": reason, "expired_contributors": lost,
+        "expired_coherence_planes": coherence_lost,
+        "published_label_direction": published_label,
+        "published_posture_floor_defense": published.get("posture_floor_defense"),
+        "disagreements_scope": "as_published", "budget_ref_scope": "as_published",
+    }
+    # This is an assessment of one publication, not a new episode/lifecycle event.
+    brief = _brief(planes, lvp, tilt, None)
+    brief["what_changed"] = (
+        "Source-date freshness was checked for the existing publication; "
+        "no new market observation was issued."
+    )
+    brief["whats_rotating"] = (
+        "Inspect the dated rotation readings below; expired readings are historical."
+    )
+    if not confirmation_available:
+        brief["posture_implication"] = (
+            "Current confirmation is unavailable. Evidence expiry does not establish recovery "
+            "or release existing protection."
+        )
+    if not count_fresh:
+        brief["wheres_the_risk"] = (
+            "Current risk cannot be assessed from expired or unavailable readings; "
+            "historical observations remain visible below."
+        )
+    out["brief"] = brief
+    return out
 
 
 def _read_prev_latest() -> Optional[dict[str, Any]]:
