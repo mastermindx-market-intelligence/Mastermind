@@ -269,7 +269,7 @@ def test_begin_commitment_cannot_drift_without_bound_event(setup):
 
 def test_exception_after_activation_before_common_claim_rolls_back(setup,monkeypatch):
     s=setup;before=snap(s)
-    monkeypatch.setattr(rt,'_capacity_matches_route',lambda *a:False)
+    monkeypatch.setattr(rt,'_capacity_matches_route',lambda *a, router=None: False)
     with pytest.raises(rt.StateConflict,match='common claim refused'):claim(s)
     assert snap(s)==before
 
