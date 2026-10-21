@@ -52,6 +52,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import time
 import unittest
 from pathlib import Path
 
@@ -1504,6 +1505,364 @@ class QualityCase(unittest.TestCase):
         copy.unlink()
         exclusive(copy, tampered)
         self.assertEqual(self.fx.inspect()["state"], "RECORDED")
+
+    # ---- serialized readback ---------------------------------------------
+
+    def pause_publisher_at_post_link_reverify(self, *, fail_after_release):
+        """Hold one real publication paused at its post-link reverify call.
+
+        The wrapped qualification behaves identically except that the second
+        reverify call — after the canonical link, fsync and readback — first
+        publishes linked, then waits for release, then either fails (the owner
+        invalidates its own held inode) or proceeds exactly as written.
+        """
+        original = self.fx.collector.retained_collection_quality
+        linked = threading.Event()
+        release = threading.Event()
+        state = {"n": 0}
+
+        class Paused:
+            def __init__(self, *args, **kwargs):
+                self._inner = original(*args, **kwargs)
+
+            def __enter__(self):
+                qualified = self._inner.__enter__()
+                base = qualified.reverify
+
+                def reverify():
+                    state["n"] += 1
+                    if state["n"] == 2:
+                        linked.set()
+                        if not release.wait(60):
+                            raise ValueError("paused_publisher_timeout")
+                        if fail_after_release:
+                            raise ValueError("paused_publication_failed_after_link")
+                    return base()
+
+                qualified.reverify = reverify
+                return qualified
+
+            def __exit__(self, *exc):
+                return self._inner.__exit__(*exc)
+
+        self.fx.collector.retained_collection_quality = Paused
+        return original, linked, release
+
+    def test_readback_refuses_positive_while_a_publisher_is_paused_after_link(self):
+        """The unserialized readback's repro, refused by lock serialization.
+
+        A real publication holds the incumbent ledger lock exclusively when its
+        canonical link already exists but its post-link reverification has not
+        passed — exactly the window the old readback observed and projected
+        RECORDED. The serialized readback reports the explicit non-positive
+        under a bounded zero-wait shared attempt instead, and the failed
+        publication's invalidated inode stays non-positive afterwards.
+        """
+        self.fx.collect_complete()
+        with self.fx.qualify() as qualified:
+            subject = qualified.subject
+        self.fx.write_adjudication(subject)
+        original, linked, release = self.pause_publisher_at_post_link_reverify(
+            fail_after_release=True)
+        outcomes, errors = [], []
+
+        def publisher():
+            try:
+                outcomes.append(self.fx.publish())
+            except BaseException as exc:  # noqa: BLE001 - the failure is the result
+                errors.append(exc)
+
+        thread = threading.Thread(target=publisher)
+        thread.start()
+        try:
+            self.assertTrue(linked.wait(60))
+            canonical_path, _pending = self.fx.sidecar_paths()
+            # The canonical name already carries the full attestation bytes —
+            # exactly what the unserialized readback used to project.
+            self.assertTrue(canonical_path.exists())
+            self.assertTrue(canonical_path.read_bytes().strip())
+            # The publisher is paused inside its own exclusive lock hold: the
+            # bounded zero-wait shared attempt must refuse, never block and
+            # never project the mid-flight row.
+            for _ in range(3):
+                projection = self.fx.inspect()
+                self.assertEqual(projection["state"], "PUBLICATION_IN_PROGRESS")
+                self.assertEqual(projection["reason"],
+                                 "collection_quality_publisher_lock_busy")
+                self.assertNotIn("collected_source_quality", projection)
+                self.assertNotIn("attestation", projection)
+            self.assertTrue(thread.is_alive())
+        finally:
+            release.set()
+            thread.join(60)
+            self.fx.collector.retained_collection_quality = original
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(outcomes, [])
+        self.assertEqual(len(errors), 1)
+        self.assertIsInstance(errors[0], ValueError)
+        # The failed publication invalidated its own held inode: the final
+        # readback is a non-positive, never the mid-flight row.
+        final = self.fx.inspect()
+        self.assertEqual(final["state"], "CANONICAL_UNREADABLE")
+        self.assertNotIn("collected_source_quality", final)
+        self.assertNotIn("attestation", final)
+
+    def test_readback_projects_recorded_only_after_the_publisher_releases(self):
+        """A paused successful publication stays non-positive until released.
+
+        The same real publication completes after its exclusive hold is gone,
+        and the next inspection projects the real confirmed attestation — the
+        lost-foreground-acknowledgement discovery path stays discoverable.
+        """
+        self.fx.collect_complete()
+        with self.fx.qualify() as qualified:
+            subject = qualified.subject
+        self.fx.write_adjudication(subject)
+        original, linked, release = self.pause_publisher_at_post_link_reverify(
+            fail_after_release=False)
+        outcomes, errors = [], []
+
+        def publisher():
+            try:
+                outcomes.append(self.fx.publish())
+            except BaseException as exc:  # noqa: BLE001 - the failure is the result
+                errors.append(exc)
+
+        thread = threading.Thread(target=publisher)
+        thread.start()
+        try:
+            self.assertTrue(linked.wait(60))
+            canonical_path, _pending = self.fx.sidecar_paths()
+            canonical_bytes = canonical_path.read_bytes()
+            for _ in range(3):
+                projection = self.fx.inspect()
+                self.assertEqual(projection["state"], "PUBLICATION_IN_PROGRESS")
+                self.assertNotIn("collected_source_quality", projection)
+                self.assertNotIn("attestation", projection)
+        finally:
+            release.set()
+            thread.join(60)
+            self.fx.collector.retained_collection_quality = original
+        self.assertFalse(thread.is_alive())
+        self.assertEqual(errors, [])
+        self.assertEqual(len(outcomes), 1)
+        self.assertEqual(outcomes[0]["state"], "RECORDED")
+        projection = self.fx.inspect()
+        self.assertEqual(projection["state"], "RECORDED")
+        self.assertEqual(projection["attestation_sha256"], sha(canonical_bytes))
+        self.assertEqual(projection["collected_source_quality"], "PASS")
+        self.assertEqual(projection["attestation"]["run_id"], RUN_ID)
+
+    def test_shared_inspection_racing_a_conflicting_publisher_never_deadlocks(self):
+        """Bounded shared inspection cannot deadlock with a competing publisher.
+
+        While one reader repeatedly inspects, a conflicting publication waits
+        for the incumbent lock, wins it, and is refused as a conflict. Every
+        inspection returns promptly, never blocks, never projects a positive
+        other than the confirmed verdict, and the loser never overwrites or
+        touches the confirmed inode.
+        """
+        self.fx.collect_complete()
+        outcome = self.fx.record()
+        self.assertEqual(outcome["state"], "RECORDED")
+        canonical_path, _pending = self.fx.sidecar_paths()
+        confirmed_bytes = canonical_path.read_bytes()
+        confirmed_inode = os.stat(canonical_path).st_ino
+        with self.fx.qualify() as qualified:
+            subject = qualified.subject
+        conflict_adj = self.fx.base / "adj-conflicting.json"
+        self.fx.write_adjudication(subject, verdict="FAIL", path=conflict_adj)
+        seen, conflicts = [], []
+
+        def reader():
+            for _ in range(24):
+                try:
+                    projection = self.fx.inspect()
+                except Exception as exc:  # noqa: BLE001 - collected, asserted below
+                    seen.append(("RAISED", type(exc).__name__))
+                    continue
+                seen.append((projection["state"],
+                             projection.get("collected_source_quality")))
+                time.sleep(0.001)
+
+        def competitor():
+            try:
+                self.fx.publish(adjudication=conflict_adj)
+            except Exception as exc:  # noqa: BLE001 - the typed refusal is the result
+                conflicts.append(exc)
+
+        reader_thread = threading.Thread(target=reader)
+        other = threading.Thread(target=competitor)
+        reader_thread.start()
+        other.start()
+        reader_thread.join(120)
+        other.join(120)
+        self.assertFalse(reader_thread.is_alive())
+        self.assertFalse(other.is_alive())
+        self.assertEqual(len(conflicts), 1)
+        self.assertIsInstance(conflicts[0], self.fx.ledger.CollectionQualityConflict)
+        self.assertTrue(seen)
+        self.assertTrue(all(state != "RAISED" for state, _positive in seen))
+        self.assertTrue({state for state, _positive in seen}
+                        <= {"RECORDED", "PUBLICATION_IN_PROGRESS"})
+        for state, positive in seen:
+            if state == "RECORDED":
+                self.assertEqual(positive, "PASS")
+            else:
+                self.assertIsNone(positive)
+        # The loser never overwrote or touched the confirmed inode.
+        self.assertEqual(canonical_path.read_bytes(), confirmed_bytes)
+        self.assertEqual(os.stat(canonical_path).st_ino, confirmed_inode)
+        self.assertEqual(self.fx.inspect()["state"], "RECORDED")
+        self.assertEqual(self.fx.inspect()["collected_source_quality"], "PASS")
+
+    def test_canonical_replacement_during_qualification_is_reported_changed(self):
+        """A canonical row must survive its own re-qualification to be positive.
+
+        The readback holds the canonical descriptor it first read and re-proves
+        the same inode, bytes, ownership and mode after the attested evidence
+        has been re-qualified — so a same-bytes replacement, an in-place
+        truncation or a symlink swap landing inside that window is reported
+        UNQUALIFIED as changed, never the stale positive read before it.
+        """
+        self.fx.collect_complete()
+        outcome = self.fx.record()
+        self.assertEqual(outcome["state"], "RECORDED")
+        canonical_path, pending_path = self.fx.sidecar_paths()
+        good = canonical_path.read_bytes()
+
+        def truncate_in_place():
+            fd = os.open(canonical_path, os.O_WRONLY | os.O_NOFOLLOW)
+            try:
+                os.ftruncate(fd, 0)
+                os.fsync(fd)
+            finally:
+                os.close(fd)
+
+        replacements = (
+            # A byte-identical replacement is still a different inode.
+            lambda: (canonical_path.unlink(), exclusive(canonical_path, good)),
+            truncate_in_place,
+            # A symlink at the canonical name is never followed to a positive.
+            lambda: (canonical_path.unlink(),
+                     os.symlink(pending_path, canonical_path)),
+        )
+
+        def inspect_with_midflight(mutate):
+            original = self.fx.collector.retained_collection_quality
+
+            def factory(*args, **kwargs):
+                inner = original(*args, **kwargs)
+
+                class MidQualification:
+                    def __enter__(self):
+                        mutate()
+                        return inner.__enter__()
+
+                    def __exit__(self, *exc):
+                        return inner.__exit__(*exc)
+
+                return MidQualification()
+
+            self.fx.collector.retained_collection_quality = factory
+            return original
+
+        def restore():
+            canonical_path.unlink(missing_ok=True)
+            exclusive(canonical_path, good)
+
+        for mutation in replacements:
+            original = inspect_with_midflight(mutation)
+            try:
+                projection = self.fx.inspect()
+                self.assertEqual(projection["state"], "UNQUALIFIED")
+                self.assertEqual(projection["reason"],
+                                 "collection_quality_canonical_changed")
+                self.assertNotIn("collected_source_quality", projection)
+                self.assertNotIn("attestation", projection)
+            finally:
+                self.fx.collector.retained_collection_quality = original
+            restore()
+            projection = self.fx.inspect()
+            self.assertEqual(projection["state"], "RECORDED")
+            self.assertEqual(projection["attestation_sha256"], sha(good))
+
+    def test_inspection_never_creates_substitutes_or_tolerates_a_changed_lock(self):
+        """The incumbent lock is observed, never created, replaced or mutated.
+
+        A fresh install with no publication has no lock: the readback reports
+        the precise non-positive and creates nothing. A group/other-writable
+        lock file is refused, and a symlinked lock is never followed. A lock
+        swapped after it was opened is refused as replaced. Every refusal
+        leaves the recorded row exactly as it was, and it still reads RECORDED
+        afterwards through the untouched lock.
+        """
+        lock_path = Path(str(self.fx.ledger_path) + ".lock")
+        # No publication has run in this fresh fixture: no lock may be created
+        # by inspection, and nothing can be confirmed.
+        self.assertFalse(lock_path.exists())
+        projection = self.fx.inspect()
+        self.assertEqual(projection["state"], "NOT_RECORDED")
+        self.assertEqual(projection["reason"],
+                         "collection_quality_publisher_lock_absent")
+        self.assertNotIn("collected_source_quality", projection)
+        self.assertFalse(lock_path.exists())
+        self.assertFalse(self.fx.ledger_path.exists())
+        # A confirmed row for the true scope, then the hostile lock shapes.
+        self.fx.collect_complete()
+        outcome = self.fx.record()
+        self.assertEqual(outcome["state"], "RECORDED")
+        canonical_path, _pending = self.fx.sidecar_paths()
+        confirmed_bytes = canonical_path.read_bytes()
+        confirmed_inode = os.stat(canonical_path).st_ino
+        confirmed_lock_inode = os.stat(lock_path).st_ino
+        # A group/other-writable incumbent lock is refused, never repaired.
+        os.chmod(lock_path, 0o606)
+        try:
+            with self.assertRaises(ValueError):
+                self.fx.inspect()
+        finally:
+            os.chmod(lock_path, 0o600)
+        self.assertEqual(os.stat(lock_path).st_ino, confirmed_lock_inode)
+        self.assertEqual(self.fx.inspect()["state"], "RECORDED")
+        # A symlinked lock is never followed.
+        swapped = self.fx.base / "lock-swapped.json"
+        os.rename(lock_path, swapped)
+        os.symlink(swapped, lock_path)
+        try:
+            with self.assertRaises(OSError):
+                self.fx.inspect()
+        finally:
+            lock_path.unlink()
+            os.rename(swapped, lock_path)
+        self.assertEqual(os.stat(lock_path).st_ino, confirmed_lock_inode)
+        self.assertEqual(self.fx.inspect()["state"], "RECORDED")
+        # A lock replaced after it was opened is refused as replaced.
+        original_identity = self.fx.ledger._strict_identity
+        state = {"n": 0}
+
+        def swap_after_open(handle, path):
+            if state["n"] == 0:
+                state["n"] += 1
+                raw = Path(path).read_bytes()
+                os.unlink(path)
+                exclusive(path, raw)
+            return original_identity(handle, path)
+
+        self.fx.ledger._strict_identity = swap_after_open
+        try:
+            with self.assertRaises(ValueError) as caught:
+                self.fx.inspect()
+            self.assertIn("ledger or lock replaced", str(caught.exception))
+        finally:
+            self.fx.ledger._strict_identity = original_identity
+        # Zero mutation by the readbacks: the canonical row is untouched and
+        # the lock, whatever inode the test left there, is still strict.
+        post_swap_lock_inode = os.stat(lock_path).st_ino
+        self.assertEqual(canonical_path.read_bytes(), confirmed_bytes)
+        self.assertEqual(os.stat(canonical_path).st_ino, confirmed_inode)
+        self.assertEqual(self.fx.inspect()["state"], "RECORDED")
+        self.assertEqual(os.stat(lock_path).st_ino, post_swap_lock_inode)
 
     def test_cross_collection_runs_are_independent(self):
         first = self.fx.collect_complete()

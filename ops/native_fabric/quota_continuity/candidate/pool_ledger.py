@@ -1931,6 +1931,23 @@ def print_stats(task_class: Optional[str] = None) -> None:
 # evidence-diverged row is reported UNQUALIFIED, never positive. Caller labels
 # and file existence never self-authenticate, and a read never mutates the
 # original operation or retries a publication.
+#
+# SERIALIZED READBACK: the whole inspection runs under the SAME incumbent
+# ledger.jsonl.lock every publication holds exclusively — opened read-only
+# WITHOUT O_CREAT through this owner's strict same-owner primitive and held
+# LOCK_SH|LOCK_NB with bounded zero wait. A busy incumbent lock reports the
+# explicit non-positive PUBLICATION_IN_PROGRESS with no sidecar IO, so a
+# publication paused anywhere inside its qualification/link/readback window is
+# never projected as positive; an absent lock is the precise non-positive
+# NOT_RECORDED (a new confirmed record requires an existing publisher lock,
+# and inspection never creates the lock, its directory or any state); a
+# replaced, foreign-owned or unsafe lock is refused. The canonical link is
+# additionally held open from its first strict read through the complete
+# closed validation and evidence re-qualification and is re-proved to be the
+# same inode with the same bytes, ownership, mode and link count afterwards
+# through the incumbent DirectoryChain/read_local_at owners, so a canonical
+# row replaced or invalidated while its evidence is re-qualified is reported
+# UNQUALIFIED as changed, never a stale positive.
 # ---------------------------------------------------------------------------
 
 import hashlib
@@ -2575,6 +2592,101 @@ def _collection_quality_requalified(collector, rid, root, parent, subject):
     return None, None
 
 
+def _collection_quality_stat_identity(info):
+    """Full held-inode identity, the fields the retained readers compare.
+
+    Device, inode, size, both times, mode, owner and link count, so a
+    same-bytes replacement, a truncation, a permission mutation or a path
+    swap can never masquerade as the inode this readback opened.
+    """
+    return (info.st_dev, info.st_ino, info.st_size, info.st_mtime_ns,
+            info.st_ctime_ns, info.st_mode, info.st_uid, info.st_nlink)
+
+
+def _collection_quality_inspection_lock():
+    """Hold the SAME incumbent publisher lock shared and non-blocking.
+
+    Every publication holds ledger.jsonl.lock exclusively from before any
+    input read until its link, fsync, readback and revalidation are done, so
+    a held shared hold proves the canonical names are stable for this whole
+    inspection. The lock is opened read-only WITHOUT O_CREAT through the
+    owner's strict same-owner primitive: inspection never creates the lock,
+    its directory or any state, and never turns a missing lock into a new
+    control plane. Acquisition is LOCK_SH|LOCK_NB with bounded zero wait — a
+    busy incumbent lock raises BlockingIOError (a publication may be inside
+    its window), a missing lock raises FileNotFoundError, and a replaced,
+    foreign-owned or unsafe lock raises the owner's ValueError.
+    """
+    lock_path = LEDGER_PATH + ".lock"
+    handle = _strict_open(lock_path, os.O_RDONLY, "r")
+    try:
+        fcntl.flock(handle.fileno(), fcntl.LOCK_SH | fcntl.LOCK_NB)
+        _strict_identity(handle, lock_path)
+    except BaseException:
+        handle.close()
+        raise
+    return handle
+
+
+def _collection_quality_retained_raw(chain, name):
+    """Open-and-hold the canonical link, then read it through the owner reader.
+
+    Returns (raw, holder) with the original descriptor held open, or
+    (None, None) when the name is absent. The holder keeps the descriptor,
+    its name, the held chain and the full identity captured before the owner
+    read, so the visible path can be re-proved to be the SAME inode with the
+    SAME bytes, ownership, mode and link count after qualification. The
+    incumbent read_local_at stays the only byte reader.
+    """
+    import artifact_delivery as delivery
+    try:
+        fd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
+                     dir_fd=chain.fd)
+    except FileNotFoundError:
+        return None, None
+    try:
+        held = os.fstat(fd)
+        if (not stat.S_ISREG(held.st_mode) or held.st_uid != os.getuid()
+                or held.st_mode & 0o022):
+            raise ValueError("collection_quality_canonical_changed")
+        identity = _collection_quality_stat_identity(held)
+        if identity != _collection_quality_stat_identity(
+                os.stat(name, dir_fd=chain.fd, follow_symlinks=False)):
+            raise ValueError("collection_quality_canonical_changed")
+        raw = delivery.read_local_at(chain, name, COLLECTION_QUALITY_MAX_BYTES)
+        if identity != _collection_quality_stat_identity(os.fstat(fd)):
+            raise ValueError("collection_quality_canonical_changed")
+    except BaseException:
+        os.close(fd)
+        raise
+    return raw, (fd, name, chain, identity)
+
+
+def _collection_quality_retained_verify(holder, raw):
+    """Re-prove the held canonical inode after qualification, before positive.
+
+    The descriptor held since before validation must still carry its captured
+    full identity — the canonical row cannot have been truncated, re-permis-
+    sioned or rewritten in place — the visible canonical name must still
+    resolve to that same inode through the held directory chain (a same-bytes
+    replacement, a symlink or any path swap refuses), and the canonical bytes
+    must read back identical through the incumbent owner reader.
+    """
+    import artifact_delivery as delivery
+    fd, name, chain, identity = holder
+    chain.verify()
+    current = os.fstat(fd)
+    if (_collection_quality_stat_identity(current) != identity
+            or not stat.S_ISREG(current.st_mode) or current.st_uid != os.getuid()):
+        raise ValueError("collection_quality_canonical_changed")
+    if (_collection_quality_stat_identity(
+            os.stat(name, dir_fd=chain.fd, follow_symlinks=False)) != identity):
+        raise ValueError("collection_quality_canonical_changed")
+    if delivery.read_local_at(chain, name, COLLECTION_QUALITY_MAX_BYTES) != raw:
+        raise ValueError("collection_quality_canonical_changed")
+    return True
+
+
 def read_collection_quality(run_id, *, root, parent):
     """Guarded closed readback of one quality sidecar. Never mutates anything.
 
@@ -2582,6 +2694,21 @@ def read_collection_quality(run_id, *, root, parent):
     closed AND whose attested collection still re-qualifies from the canonical
     owned references counts as RECORDED. A staged or ambiguous publication is
     reported exactly as retained; nothing is retried or cleaned.
+
+    The whole inspection is serialized on the SAME incumbent ledger.jsonl.lock
+    every publication holds exclusively: the caller guard runs before any IO,
+    then the existing lock is opened read-only WITHOUT O_CREAT and held
+    LOCK_SH|LOCK_NB with bounded zero wait. A busy lock reports the explicit
+    non-positive PUBLICATION_IN_PROGRESS without reading a byte, so a
+    publication paused anywhere inside its window is never projected positive;
+    an absent lock is the precise non-positive NOT_RECORDED (a new confirmed
+    record requires an existing publisher lock, and inspection never creates
+    one); a replaced or unsafe lock is refused. The canonical link is held
+    open from its first strict read through the complete closed validation and
+    evidence re-qualification and is re-proved to be the same inode with the
+    same bytes, ownership, mode and link count afterwards, so a canonical row
+    replaced or invalidated while its evidence is re-qualified is reported
+    UNQUALIFIED as changed, never a stale positive.
     """
     rid = _collection_quality_scope(run_id, root, parent)
     collector = _collection_quality_collector()
@@ -2592,58 +2719,111 @@ def read_collection_quality(run_id, *, root, parent):
     state_dir = _collection_quality_state_dir()
     result = {"schema": COLLECTION_QUALITY_SCHEMA, "run_id": rid,
               "root": root, "parent": parent}
-    with delivery.DirectoryChain(state_dir) as chain:
-        canonical_raw = _collection_quality_raw(
-            chain, rid + COLLECTION_QUALITY_SUFFIX)
+    lock = None
+    chain = None
+    holder = None
+    try:
+        try:
+            lock = _collection_quality_inspection_lock()
+        except BlockingIOError:
+            # A publisher holds the incumbent lock: its link/readback window
+            # is unconfirmed. Explicit non-positive, bounded zero wait, and
+            # no sidecar IO at all — never a mid-flight positive.
+            result["state"] = "PUBLICATION_IN_PROGRESS"
+            result["reason"] = "collection_quality_publisher_lock_busy"
+            return result
+        except FileNotFoundError:
+            # No publication ever created the incumbent lock for this ledger
+            # configuration, so no record can be confirmed here. Reported
+            # precisely; the lock is never created or substituted.
+            result["state"] = "NOT_RECORDED"
+            result["reason"] = "collection_quality_publisher_lock_absent"
+            return result
+        chain = delivery.DirectoryChain(state_dir)
+        canonical_name = rid + COLLECTION_QUALITY_SUFFIX
+        try:
+            canonical_raw, holder = _collection_quality_retained_raw(
+                chain, canonical_name)
+        except ValueError as error:
+            if not (error.args
+                    and error.args[0] == "collection_quality_canonical_changed"):
+                raise
+            # The canonical link changed inside its own strict read window:
+            # reported changed, never a positive, and never rewritten here.
+            result["state"] = "UNQUALIFIED"
+            result["reason"] = "collection_quality_canonical_changed"
+            return result
         staged_raw = _collection_quality_raw(
             chain, rid + COLLECTION_QUALITY_PENDING_SUFFIX)
-    if canonical_raw is None and staged_raw is None:
-        result["state"] = "NOT_RECORDED"
-        return result
-    result["staged_retained"] = staged_raw is not None
-    if canonical_raw is None:
-        result["state"] = "STAGED_UNPUBLISHED"
-        result["staged_sha256"] = hashlib.sha256(staged_raw).hexdigest()
+        if canonical_raw is None and staged_raw is None:
+            result["state"] = "NOT_RECORDED"
+            return result
+        result["staged_retained"] = staged_raw is not None
+        if canonical_raw is None:
+            result["state"] = "STAGED_UNPUBLISHED"
+            result["staged_sha256"] = hashlib.sha256(staged_raw).hexdigest()
+            try:
+                staged = _strict_json(staged_raw.decode("utf-8"))
+                if (isinstance(staged, dict)
+                        and staged.get("schema") == COLLECTION_QUALITY_SCHEMA):
+                    result["staged_schema"] = COLLECTION_QUALITY_SCHEMA
+            except ValueError:
+                result["staged_schema"] = "UNREADABLE"
+            return result
+        result["attestation_sha256"] = hashlib.sha256(canonical_raw).hexdigest()
         try:
-            staged = _strict_json(staged_raw.decode("utf-8"))
-            if isinstance(staged, dict) and staged.get("schema") == COLLECTION_QUALITY_SCHEMA:
-                result["staged_schema"] = COLLECTION_QUALITY_SCHEMA
+            row = _strict_json(canonical_raw.decode("utf-8"))
         except ValueError:
-            result["staged_schema"] = "UNREADABLE"
+            result["state"] = "CANONICAL_UNREADABLE"
+            return result
+        if type(row) is not dict or row.get("schema") != COLLECTION_QUALITY_SCHEMA:
+            result["state"] = "CANONICAL_UNRELATED"
+            return result
+        try:
+            subject = collection_quality_subject_projection(row)
+        except CollectionQualityRefused as error:
+            result["state"] = "UNQUALIFIED"
+            result["reason"] = (error.args[0] if error.args
+                                else "collection_quality_attestation_invalid")
+            return result
+        if subject["run_id"] != rid or subject["root"] != root or subject["parent"] != parent:
+            # The guarded caller scope must be the attested scope; a different
+            # parent or root claim never projects another run's row as positive.
+            result["state"] = "UNQUALIFIED"
+            result["reason"] = "collection_quality_scope_mismatch"
+            return result
+        state, reason = _collection_quality_requalified(collector, rid, root, parent,
+                                                        subject)
+        if state is not None:
+            result["state"] = state
+            result["reason"] = reason
+            return result
+        try:
+            _collection_quality_retained_verify(holder, canonical_raw)
+        except ValueError as error:
+            # The canonical row did not survive unchanged through its own
+            # qualification: an explicit changed refusal — never the stale
+            # positive read before the replacement.
+            result["state"] = "UNQUALIFIED"
+            result["reason"] = (error.args[0] if error.args
+                                else "collection_quality_canonical_changed")
+            return result
+        result["state"] = "RECORDED"
+        result["attestation"] = row
+        result["collected_source_quality"] = row["collected_source_quality"]
+        result["quality_by"] = row["quality_by"]
         return result
-    result["attestation_sha256"] = hashlib.sha256(canonical_raw).hexdigest()
-    try:
-        row = _strict_json(canonical_raw.decode("utf-8"))
-    except ValueError:
-        result["state"] = "CANONICAL_UNREADABLE"
-        return result
-    if type(row) is not dict or row.get("schema") != COLLECTION_QUALITY_SCHEMA:
-        result["state"] = "CANONICAL_UNRELATED"
-        return result
-    try:
-        subject = collection_quality_subject_projection(row)
-    except CollectionQualityRefused as error:
-        result["state"] = "UNQUALIFIED"
-        result["reason"] = (error.args[0] if error.args
-                            else "collection_quality_attestation_invalid")
-        return result
-    if subject["run_id"] != rid or subject["root"] != root or subject["parent"] != parent:
-        # The guarded caller scope must be the attested scope; a different
-        # parent or root claim never projects another run's row as positive.
-        result["state"] = "UNQUALIFIED"
-        result["reason"] = "collection_quality_scope_mismatch"
-        return result
-    state, reason = _collection_quality_requalified(collector, rid, root, parent,
-                                                    subject)
-    if state is not None:
-        result["state"] = state
-        result["reason"] = reason
-        return result
-    result["state"] = "RECORDED"
-    result["attestation"] = row
-    result["collected_source_quality"] = row["collected_source_quality"]
-    result["quality_by"] = row["quality_by"]
-    return result
+    finally:
+        # Every handle and chain is closed on every path, including refusals.
+        if holder is not None:
+            os.close(holder[0])
+            holder = None
+        if chain is not None:
+            chain.close()
+            chain = None
+        if lock is not None:
+            lock.close()
+            lock = None
 
 
 

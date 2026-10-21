@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 71894,
+      "bytes": 104149,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "f559e7d9b4186a013335082defe549a2ff11a4fe6689aad2e1b0f6ae328392e4",
+      "sha256": "5a282d389f82d8de4a1d99ef22a76cb5951541f4074499568b81273db06ffa2d",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -384,9 +384,9 @@
       "source": "source/operator_stdout_delivery.py"
     },
     "ext/original_delivery_collector.py": {
-      "bytes": 64013,
+      "bytes": 86893,
       "installed_preimage_sha256": "c5cc0c5762073a0029c88ef6daa6fb7d073db1c8aa6518b93594a114cb6fe1f8",
-      "sha256": "871263c4c5bcce1879475aec30ba0183f33b1cc84ebba534eb46dcdb6cc322a6",
+      "sha256": "f0a876e4cc24338bf0197b357da9417f92d0dc1289b79b596c6d5049ae672996",
       "source": "candidate/original_delivery_collector.py"
     },
     "ext/original_result_delivery.py": {
@@ -414,10 +414,10 @@
       "source": "source/placement_view.py"
     },
     "ext/pool_ledger.py": {
-      "bytes": 85541,
+      "bytes": 137056,
       "installed_preimage_sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "sha256": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
-      "source": "source/pool_ledger.py"
+      "sha256": "a451a93092243580addf9e4e9a454937c035ca75d120a50dc1699d6fb1666364",
+      "source": "candidate/pool_ledger.py"
     },
     "ext/pool_status.py": {
       "bytes": 51566,
