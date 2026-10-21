@@ -120,11 +120,12 @@ class FixturePort:
         return self.reflection_mutation(answer) if self.reflection_mutation else answer
 
 
-def invoke(port, *, mode="agg", k=1, experience=(), limits=None):
+def invoke(port, *, mode="agg", k=1, experience=(), limits=None, resolved=None):
     return run_refinement(task=TASK, common_base=BASE, expected_scenario=port.scenario,
         baseline_configuration=port.base_configuration, prior_experience=experience,
         allowed_edit_paths=frozenset({"scripts/total.py"}), k=k, mode=mode,
-        limits=limits or Limits(4 * k, 3 * k + 1 + (k > 1), 7), port=port)
+        limits=limits or Limits(4 * k, 3 * k + 1 + (k > 1), 7), port=port,
+        resolved_experience_harnesses=resolved)
 
 
 @pytest.mark.parametrize("mode,k", [("agg", 1), ("agg", 2), ("seq", 1), ("seq", 2), ("seq", 3)])
@@ -230,7 +231,8 @@ def test_second_task_uses_library_but_restarts_at_common_base(tmp_path):
              **{key: proposal[key] for key in ("claim", "falsifier", "so_what")}}
     before = copy.deepcopy(entry)
     port.contexts.clear()
-    second = invoke(port, experience=(entry,))
+    second = invoke(port, experience=(entry,), resolved={
+        first["selected_harness_artifact"]["artifact_ref"]: first["selected_harness"]})
     assert port.trials["base1"].output == b"105\n"
     assert second["selected_output"] == b"85\n"
     assert all(ctx["prior_experience"][0] == entry for _label, ctx in port.contexts)
@@ -246,7 +248,7 @@ def test_model_cannot_mutate_frozen_library(tmp_path):
         assert context["prior_experience"][0]["claim"] == "prior"
         context["prior_experience"][0]["claim"] = "tamper"
     port.proposal_mutation = mutate
-    invoke(port, experience=(entry,))
+    invoke(port, experience=(entry,), resolved={entry["harness_artifact"]["artifact_ref"]: BASE})
     assert entry["claim"] == "prior"
 
 
@@ -333,28 +335,32 @@ def test_model_proposal_without_bound_evidence_is_refused(tmp_path):
     assert len(port.trials) == 1
 
 
-def _invoke_context(port, context_inputs, prior=()):
+def _invoke_context(port, context_inputs, prior=(), resolved=None):
     return run_refinement(task=TASK, common_base=BASE, expected_scenario=port.scenario,
         baseline_configuration=port.base_configuration, prior_experience=prior,
         allowed_edit_paths=frozenset({"scripts/total.py"}), k=1, mode="agg",
-        limits=Limits(4, 4, 7), port=port, agentos_context_inputs=context_inputs)
+        limits=Limits(4, 4, 7), port=port, agentos_context_inputs=context_inputs,
+        resolved_experience_harnesses=resolved)
 
 
 def test_native_agentos_context_guides_refinement_without_dropping_higher_law(tmp_path):
     from tests.test_agent_eval_harness2_context import inputs, bundle_fixture
     port = FixturePort(tmp_path)
-    context_inputs = inputs()
+    bundle = bundle_fixture()
+    bundle["sections"][3]["items"][0]["harness_experience"]["harness_artifact"]["digest"] = harness_digest(BASE)
+    context_inputs = inputs(bundle)
     cfg = copy.deepcopy(port.base_configuration)
     cfg.pop("schema")
     cfg.pop("configuration_digest")
     cfg["context"]["context_packet"] = {"artifact_ref": "artifact:native-agentos-context",
                                         "digest": context_inputs["expected_bundle_digest"]}
     port.base_configuration = contracts.build_configuration(cfg)
-    result = _invoke_context(port, context_inputs)
+    result = _invoke_context(port, context_inputs, resolved={"artifact:fixture/adopted-harness": BASE})
     assert result["selected_output"] == b"85\n"
     assert result["context_bundle_digest"] == context_inputs["expected_bundle_digest"]
     for label, context in port.contexts:
-        assert context["organizational_context"] == bundle_fixture()
+        assert context["organizational_context"] == bundle
+        assert context["prior_harnesses"] == {"artifact:fixture/adopted-harness": BASE}
         assert context["prior_experience"][0]["confidence"] == "verified"
         assert context["prior_experience"][0]["source_run_ids"]
         assert context["organizational_context"]["degraded"]
@@ -385,3 +391,68 @@ def test_context_task_domain_mismatch_is_pre_effect(tmp_path):
     with pytest.raises(Harness2CycleError, match="CONTEXT_TASK_DOMAIN_MISMATCH"):
         _invoke_context(port, args)
     assert not port.calls
+
+
+def _prior_entry(files=BASE, artifact_ref="artifact:prior-harness"):
+    return {"discovery_ref": "DSC:PRIOR", "source_ref": REPO_REF_BASE,
+            "domain": "accounting", "claim": "A previous candidate exists.",
+            "falsifier": "Compare against the same baseline.", "so_what": "Inspect its complete files.",
+            "harness_artifact": {"artifact_ref": artifact_ref, "digest": harness_digest(files)}}
+
+
+def test_prior_harness_bytes_are_required_before_any_rollout(tmp_path):
+    port = FixturePort(tmp_path)
+    with pytest.raises(Harness2CycleError, match="EXPERIENCE_HARNESS_INVENTORY_MISMATCH"):
+        invoke(port, experience=(_prior_entry(),))
+    assert port.calls == []
+
+
+@pytest.mark.parametrize("bad", [None, {}, {"artifact:other": BASE},
+    {"artifact:prior-harness": {"AGENTS.md": BASE["AGENTS.md"]}},
+    {"artifact:prior-harness": {**BASE, "scripts/total.py": b"print(999)"}},
+    {"artifact:prior-harness": BASE, "artifact:unrelated": BASE},
+])
+def test_prior_harness_missing_partial_changed_or_extra_is_refused(tmp_path, bad):
+    port = FixturePort(tmp_path)
+    with pytest.raises(Harness2CycleError):
+        invoke(port, experience=(_prior_entry(),), resolved=bad)
+    assert port.calls == []
+
+
+def test_conflicting_prior_ref_is_refused_before_execution(tmp_path):
+    port = FixturePort(tmp_path)
+    a = _prior_entry()
+    b = copy.deepcopy(a)
+    b["discovery_ref"] = "DSC:OTHER"
+    b["harness_artifact"]["digest"] = "sha256:" + "f" * 64
+    with pytest.raises(Harness2CycleError, match="EXPERIENCE_HARNESS_REF_CONFLICT"):
+        invoke(port, experience=(a, b), resolved={"artifact:prior-harness": BASE})
+    assert port.calls == []
+
+
+def test_prior_full_harness_is_frozen_and_not_installed_as_task_base(tmp_path):
+    port = FixturePort(tmp_path)
+    previous = copy.deepcopy(BASE)
+    previous["scripts/total.py"] = b"print(85)\n"
+    resolved = {"artifact:prior-harness": previous}
+    before = copy.deepcopy(resolved)
+    def mutate(label, files, context):
+        assert context["prior_harnesses"] == before
+        context["prior_harnesses"]["artifact:prior-harness"]["scripts/total.py"] = b"tamper"
+    port.proposal_mutation = mutate
+    result = invoke(port, experience=(_prior_entry(previous),), resolved=resolved)
+    assert port.calls[0] == ("execute", "base1", BASE)
+    assert result["resolved_experience_artifacts"] == ("artifact:prior-harness",)
+    assert resolved == before
+
+
+def test_prior_harness_total_bytes_have_a_shared_bound(tmp_path):
+    port = FixturePort(tmp_path)
+    first = {"large-a.txt": b"a" * 1048576, "large-b.txt": b"b" * 1048576}
+    second = {"large-c.txt": b"c" * 1048576, "large-d.txt": b"d" * 1048576, "extra.txt": b"e"}
+    a = _prior_entry(first, "artifact:first")
+    b = _prior_entry(second, "artifact:second")
+    b["discovery_ref"] = "DSC:OTHER"
+    with pytest.raises(Harness2CycleError, match="EXPERIENCE_HARNESS_TOTAL_BOUND"):
+        invoke(port, experience=(a, b), resolved={"artifact:first": first, "artifact:second": second})
+    assert port.calls == []

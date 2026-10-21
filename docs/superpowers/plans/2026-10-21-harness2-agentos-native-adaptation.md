@@ -391,3 +391,66 @@ the incumbent owners. It must retain root-wide limits and the actual release
 holds. Creating an injected callback or a self-signed observation is not the
 missing implementation. Preserve the existing Runtime/COO/observation source
 custody; this PR does not start or replace that control plane.
+
+
+## Complete prior-harness materialization
+
+The original integration delivered prior lesson metadata plus a harness artifact
+reference, leaving actual full-tree retrieval optional in the port. That was an
+incomplete implementation of the published full-adopted-harness library. A
+regression proved that a nonempty history could previously start without the
+prior files. The kernel now requires `resolved_experience_harnesses` from the
+existing artifact owner before any port call when prior experience is present.
+
+The input is exactly the referenced artifact set, not a filesystem search or a
+new library. Every complete file map passes the existing alias/path/UTF-8 bounds
+and must hash to its associated native artifact. Missing, partial, modified,
+conflicting-ref, unrelated and oversized inputs stop before any rollout. All
+unique prior trees share the existing four-MiB bound. Frozen detached complete
+files are supplied to each improver/reflection context so the admitted port can
+stage them for on-demand inspection. They never replace this task's common H0
+and do not grant execution authority to their contents. The result explicitly
+names the realized artifact refs. No-history callers retain their prior behavior.
+
+The focused context/kernel/inertness suite passed 202 tests after the change;
+the missing-files discriminator first failed on the predecessor. The existing
+later-task and real Agent OS context tests now require actual matching full files,
+not merely a matching prose lesson.
+
+## Existing Fabric release finding and preserved effects
+
+The independent GLM run `harness2-core-glm-fa39136c-r2-20261021` ended without
+review at `transport_verification_log_not_prelaunch`. Its router selected
+Ubuntu2, and the launcher correctly recorded its physical `glm-frontier` lease;
+the installed verifier instead demanded the logical `glm` string. The same
+contradiction was confirmed on the active combined source #1674 at
+`b30168a811d938716da2188ba27dd8d08286cfae`: `candidate/remote_sub.sh:733`
+versus `candidate/remote_sub_helpers.py:410,597,679`. The original native status
+is terminal failure with no result and null root/parent projection. A before-launch
+log does not substitute for any remaining original lease/effect reconciliation.
+
+The exact finding and discriminating controller-test recipe were delivered to
+that existing source owner in Mastermind #1674 comment `6315860850`. Its active
+source/release and both frozen News requests were left untouched. #1665/#1674
+must compose their original release unit; #1681 separately identifies existing
+Studio consumer-pin coordination requirements. No installed generation, selector,
+manifest or runtime helper was patched to bypass these obligations.
+
+A separate observed Ubuntu0 directory-custody defect was corrected by its owning
+UID with a single no-follow descriptor operation: only the group-write bit on
+`/home/ubuntu0/lanes/support-releases` was removed, mode 0775 to 0755. Owner/group,
+release files, credentials, admission guards and selector remained unchanged;
+readback verified the narrower mode. This does not claim the other hosts fixed.
+
+Executive's current read surface is live at v1.5.0 with installed source
+`80f384b8f58b7ca46422d9783aa5c0613c7bf4b2`, but reports `readonly`. Its
+2026-10-21T12:08:25Z snapshot had zero running Jobs/Attempts. The earlier bounded
+summon returned backend_unavailable and no Job. Neither read-side health nor
+three existing queued Jobs establishes a writable Harness2 execution path.
+
+The native router separately exposes the established exact-model Grok quota
+exception through `cursor-grok-4.6-high`; source `policy_allows` explicitly keeps
+ordinary Cursor labor forbidden and admits only exhausted-weekly-Grok tasks with
+that exact eligible model. A future actual review must preserve those native
+checks, original root, its own identity and real retained return; the route
+preview is not a review. No categorical Cursor-labor policy is relaxed here.

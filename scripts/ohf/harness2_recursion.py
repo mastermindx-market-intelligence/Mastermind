@@ -23,7 +23,9 @@ from dataclasses import dataclass
 from typing import Any, Protocol
 
 from scripts.agent_eval import contracts, validity
-from scripts.agent_eval.harness2_native import configuration_lock, harness_digest, sha256_bytes
+from scripts.agent_eval.harness2_native import (
+    MAX_TREE_BYTES, configuration_lock, harness_digest, sha256_bytes,
+)
 from scripts.agent_eval.harness2_context import read_context_bundle
 
 
@@ -125,7 +127,8 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
                    expected_scenario: dict, baseline_configuration: dict,
                    prior_experience: tuple[dict, ...], allowed_edit_paths: frozenset[str],
                    k: int, mode: str, limits: Limits, port: Harness2Port,
-                   agentos_context_inputs: dict | None = None) -> dict:
+                   agentos_context_inputs: dict | None = None,
+                   resolved_experience_harnesses: dict[str, dict[str, bytes]] | None = None) -> dict:
     """One finite Propose-Probe-Compose/Select/Reflect invocation.
 
     No ground-truth score is accepted or provided to the improver/selector.
@@ -171,6 +174,7 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
     library = copy.deepcopy(prior_experience)
     fields = {"discovery_ref", "source_ref", "domain", "claim", "falsifier", "so_what", "harness_artifact"}
     provenance_fields = {"confidence", "source_run_ids", "method_source_ref"}
+    required_harnesses: dict[str, str] = {}
     for entry in library:
         _check(type(entry) is dict and (set(entry) == fields or set(entry) == fields | provenance_fields),
                "EXPERIENCE_SHAPE")
@@ -185,9 +189,23 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             for ref in refs:
                 contracts.v_run_id(ref, "$.experience.source_run_ids")
             _check(len(set(refs)) == len(refs), "EXPERIENCE_RUN_REFERENCE_DUPLICATE")
-        # Full adopted trees stay in their existing artifact owner. The port may
-        # retrieve this exact artifact on demand; no shadow library is persisted.
-        contracts.v_artifact_pair(entry["harness_artifact"], "$.experience.harness_artifact")
+        artifact = entry["harness_artifact"]
+        contracts.v_artifact_pair(artifact, "$.experience.harness_artifact")
+        ref, digest = artifact["artifact_ref"], artifact["digest"]
+        _check(ref not in required_harnesses or required_harnesses[ref] == digest,
+               "EXPERIENCE_HARNESS_REF_CONFLICT")
+        required_harnesses[ref] = digest
+    # Existing artifact owners resolve complete inventories, not inferred paths
+    # or clipped summaries. These are frozen task-local inputs, not a new store.
+    resolved = {} if resolved_experience_harnesses is None else resolved_experience_harnesses
+    _check(type(resolved) is dict and set(resolved) == set(required_harnesses),
+           "EXPERIENCE_HARNESS_INVENTORY_MISMATCH")
+    total_prior_bytes = 0
+    for ref, files in resolved.items():
+        _check(harness_digest(files) == required_harnesses[ref], "EXPERIENCE_HARNESS_BYTES_CHANGED")
+        total_prior_bytes += sum(len(raw) for raw in files.values())
+        _check(total_prior_bytes <= MAX_TREE_BYTES, "EXPERIENCE_HARNESS_TOTAL_BOUND")
+    prior_harnesses = copy.deepcopy(resolved)
     task = copy.deepcopy(task)
     trials: dict[str, Trial] = {}
     trees: dict[str, dict[str, bytes]] = {}
@@ -201,6 +219,9 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
         return copy.deepcopy({
             "current_harness": current, "common_base": base,
             "prior_experience": library,
+            # The admitted port may stage these complete files for on-demand
+            # model reading. Never install them over this task's common H0.
+            "prior_harnesses": prior_harnesses,
             # Preserve higher law, the workstream and missingness rather than
             # replacing the native context packet with a persuasive lesson list.
             "organizational_context": source_context.bundle if source_context else None,
@@ -311,6 +332,7 @@ def run_refinement(*, task: dict, common_base: dict[str, bytes],
             "retained_native_runs": tuple(trials[label].run["run_id"] for label in trials),
             "baseline_native_run_ids": tuple(trials[label].run["run_id"] for label in baselines),
             "baseline_harness_digest": base_digest,
+            "resolved_experience_artifacts": tuple(sorted(prior_harnesses)),
             "rollout_count": len(trials), "improver_call_count": improver_calls,
             "factor_lock_digest": expected_lock, "step_notes": copy.deepcopy(notes),
             "context_bundle_digest": source_context.bundle_digest if source_context else None,
