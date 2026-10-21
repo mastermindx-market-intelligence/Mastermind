@@ -1580,6 +1580,32 @@ def cmd_stage(args) -> int:
         modern_fabric=_modern_fabric_setting(args, roots, prior, fabric_only),
     )
 
+def _sealed_historical_tailnet_launch_argv(
+    account: str, manifest: dict, roots: dict,
+    expected_argv: list[str], actual_argv: list[str],
+) -> bool:
+    """Allow only the two byte-pinned historical Fabric tailnet launchers.
+
+    The caller has already verified every module hash, the immutable original
+    manifest bytes, the plist SHA256, and the account/label. This helper does
+    not permit re-staging or changing the original launch agent.
+    """
+    if account not in {"fabric-design", "fabric-read"}:
+        return False
+    if not _sealed_v2_fleet_gateway_predecessor(manifest, account):
+        return False
+    if "tailnet-gateway.mjs" not in manifest.get("files", {}):
+        return False
+    if len(expected_argv) != 3 or len(actual_argv) != 3:
+        return False
+    historical_argv = [
+        expected_argv[0],
+        str(roots["base"] / "tailnet-gateway.mjs"),
+        expected_argv[2],
+    ]
+    return actual_argv == historical_argv
+
+
 def _verify_staged_install(
     account: str,
     label: str,
@@ -1646,9 +1672,14 @@ def _verify_staged_install(
         raise SystemExit("plist is not our exact install")
 
     expected_argv = _expected_argv(node, roots["gateway"], roots["config"])
-    if list(plist.get("ProgramArguments") or []) != expected_argv:
+    actual_argv = list(plist.get("ProgramArguments") or [])
+    historical_tailnet = _sealed_historical_tailnet_launch_argv(
+        account, manifest, roots, expected_argv, actual_argv,
+    )
+    if actual_argv != expected_argv and not historical_tailnet:
         raise SystemExit("plist is not our exact install")
-    if Path(expected_argv[1]).name != PRIVATE_GATEWAY_NAME:
+    if (Path(actual_argv[1]).name != PRIVATE_GATEWAY_NAME
+            and not historical_tailnet):
         raise SystemExit("plist is not our exact install")
 
     return manifest
