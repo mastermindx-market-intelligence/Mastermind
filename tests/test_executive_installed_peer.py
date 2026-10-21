@@ -2034,3 +2034,132 @@ def test_private_late_metadata_refusal_is_preserved_without_next_open(monkeypatc
     with pytest.raises(m.PeerIdentityError) as failure:
         m._open_trusted("/fixed", budget=budget)
     assert failure.value.code == expected
+
+
+# ---------------------------------------------------------------------------
+# I2 — the optional workspace Control Room socket (4-socket admission).
+#
+# The control plist may carry the optional WorkspaceControlRoom socket (added
+# by install.sh when the config carries the unix stanza). The installed
+# peer qualifier admits exactly {3-socket, 4-socket} control plists and
+# refuses every drift on the room entry.
+# ---------------------------------------------------------------------------
+
+import copy as _copy
+import plistlib as _plistlib
+
+
+def _qualified_control_with_room() -> dict:
+    profile = _copy.deepcopy(QUALIFIED_CONTROL_PLIST)
+    profile["Sockets"] = _copy.deepcopy(m._CONTROL_SOCKETS)
+    profile["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = _copy.deepcopy(
+        m._WORKSPACE_CONTROL_ROOM_SOCKET
+    )
+    return profile
+
+
+def _drift_room(profile: dict, *, transform) -> dict:
+    profile = _copy.deepcopy(profile)
+    transform(profile["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME])
+    return profile
+
+
+def _drift_base_socket(profile: dict, *, transform) -> dict:
+    profile = _copy.deepcopy(profile)
+    transform(profile["Sockets"]["CeoIngress"])
+    return profile
+
+
+def test_three_socket_control_plist_still_matches():
+    parsed = m._load_strict_plist(_plistlib.dumps(QUALIFIED_CONTROL_PLIST), code="PLIST_INVALID")
+    releases = []
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, releases)
+    assert releases == [QUALIFIED_CONTROL_PLIST["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+def test_four_socket_control_plist_matches_via_template_swap():
+    document = _qualified_control_with_room()
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    releases = []
+    # The guard at the top of _profile_matches swaps the 3-socket template
+    # for the 4-socket one when the room key is present; both templates
+    # admit the same document.
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, releases)
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, releases)
+    assert releases == [document["WorkingDirectory"].rsplit("/", 1)[1]]
+
+
+@pytest.mark.parametrize("mutator,description", [
+    (lambda e: e.__setitem__("SockPathMode", 0o660), "room SockPathMode 0o660"),
+    (lambda e: e.__setitem__("SockPathMode", True), "room SockPathMode True (bool)"),
+    (lambda e: e.__setitem__("SockPathGroup", 470), "room SockPathGroup 470"),
+    (lambda e: e.__setitem__("SockPathGroup", 457), "room SockPathGroup 457 (CeoIngress gid)"),
+    (lambda e: e.__setitem__("SockPathOwner", 470), "room SockPathOwner 470"),
+    (lambda e: e.__setitem__("SockPathName", "/var/run/mastermind-executive/control-room.sock"),
+     'room SockPathName "/var/run/mastermind-executive/control-room.sock"'),
+    (lambda e: e.__setitem__("SockFamily", "Unix"), 'room entry with extra key "SockFamily": "Unix"'),
+    (lambda e: e.pop("SockPassive"), "room entry missing SockPassive"),
+])
+def test_room_entry_drift_is_refused(mutator, description):
+    document = _drift_room(_qualified_control_with_room(), transform=mutator)
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False, description
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False, description
+
+
+def test_extra_socket_alongside_room_is_refused():
+    document = _qualified_control_with_room()
+    document["Sockets"]["Extra"] = {"SockPassive": True, "SockPathMode": 384,
+                                    "SockPathName": "/tmp/x", "SockPathOwner": 450,
+                                    "SockPathGroup": 450, "SockType": "stream"}
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_base_socket_drift_is_refused_when_room_is_present():
+    # CeoIngress SockPathMode drifted to 384 (== 0o600) while the room entry
+    # is present — the 4-socket admission must not loosen the base sockets.
+    document = _drift_base_socket(_qualified_control_with_room(),
+                                  transform=lambda e: e.__setitem__("SockPathMode", 384))
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_three_socket_with_stale_room_entry_is_refused():
+    # A 3-socket document with a stray room entry must not be admitted.
+    document = _qualified_control_with_room()
+    document["Sockets"].pop(m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+    # Re-add a stale room entry that drifts: SockPathGroup 470.
+    document["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = _copy.deepcopy(
+        m._WORKSPACE_CONTROL_ROOM_SOCKET)
+    document["Sockets"][m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME]["SockPathGroup"] = 470
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    assert m._profile_matches(m._EXPECTED_PLIST_PROFILES["control"], parsed, []) is False
+    assert m._profile_matches(m._CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM, parsed, []) is False
+
+
+def test_template_cross_equality_phase1c_and_installed_peer():
+    from scripts import executive_os_phase1c as phase1c
+    from tests.executive_installed_control_fixture import unix_stanza
+
+    config = {"control_uid": 450, "workspace_control_room": unix_stanza(450)}
+    entry = phase1c.workspace_control_room_launchd_entry(config, control_gid=450)
+    assert entry == m._WORKSPACE_CONTROL_ROOM_SOCKET
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET_NAME == phase1c._WORKSPACE_CONTROL_ROOM_SOCKET_NAME
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathName"] == phase1c._CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathOwner"] == m._ROLE_TOPOLOGIES["control"].service_uid
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathGroup"] == m._ROLE_TOPOLOGIES["control"].config_gid
+    assert m._WORKSPACE_CONTROL_ROOM_SOCKET["SockPathMode"] == 0o600
+
+
+def test_release_observation_matcher_admits_four_socket_control_plist():
+    from control_plane import executive_release_observation as obs
+    control_spec = next(spec for spec in obs._SPECS if spec.role == "control")
+    document = _qualified_control_with_room()
+    parsed = m._load_strict_plist(_plistlib.dumps(document), code="PLIST_INVALID")
+    found = []
+    assert obs._profile(control_spec) is m._EXPECTED_PLIST_PROFILES["control"]
+    assert m._profile_matches(obs._profile(control_spec), parsed, found) is True
+    assert found == [document["WorkingDirectory"].rsplit("/", 1)[1]]

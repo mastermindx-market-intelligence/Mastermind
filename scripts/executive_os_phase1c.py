@@ -361,6 +361,13 @@ class FabricActivationRefused(ServiceError):
     """Shared Fabric execution has no admitted backend and isolation profile."""
 
 
+def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
+    """A source pin can be prepared only while every execution switch is off."""
+    return all(raw.get(key, False) is False for key in (
+        "coo_autonomy_armed", "coo_operator_harness_armed", "coo_foreground_only",
+        "ceo_submit_armed", "fabric_bridge_armed"))
+
+
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
     armed = raw.get("fabric_bridge_armed", False)
     if type(armed) is not bool:
@@ -390,7 +397,9 @@ def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
             raise ServiceError("Fabric attended probe requires one fixed worker definition")
     if "native_capacity_v2" in raw:
         stanza = raw["native_capacity_v2"]
-        if ("fabric_attended_probe" not in raw or raw.get("coo_foreground_only") is not True
+        if ("fabric_attended_probe" not in raw
+                or (not _native_capacity_staging_only(raw)
+                    and raw.get("coo_foreground_only") is not True)
                 or type(stanza) is not dict or set(stanza) != {"macro_release", "producer_sha256"}
                 or type(stanza["macro_release"]) is not str
                 or re.fullmatch(r"[0-9a-f]{40}", stanza["macro_release"]) is None
@@ -874,6 +883,64 @@ _CANONICAL_COMPANY_CONSULTATION_SOCKET = "/var/run/mastermind-executive/company-
 _COMPANY_CONSULTATION_SOCKET_NAME = "CompanyConsultation"
 
 
+_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET = "/var/run/mastermind-executive/workspace-control-room.sock"
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+
+
+def validate_workspace_control_room(stanza: Any, *, control_uid: int) -> dict[str, Any]:
+    """Closed unix/launchd stanza for the in-process workspace Control Room.
+
+    The legacy ``{"port": int}`` TCP shape is refused loudly so a forgotten
+    migration tool never silently degrades Control back onto a loopback socket.
+    """
+
+    if type(stanza) is dict and set(stanza) == {"port"}:
+        raise ServiceError(
+            "workspace Control Room legacy TCP port stanza refused; "
+            "migrate it with ops/executive_os/migrate_workspace_control_room.py"
+        )
+    if type(stanza) is not dict:
+        raise ServiceError("workspace Control Room topology refused")
+    expected = {"transport", "socket_path", "launchd_socket_name", "allowed_peer_uids"}
+    if set(stanza) != expected:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["transport"] != "unix":
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["socket_path"] != _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["launchd_socket_name"] != _WORKSPACE_CONTROL_ROOM_SOCKET_NAME:
+        raise ServiceError("workspace Control Room topology refused")
+    peers = stanza["allowed_peer_uids"]
+    if (type(peers) is not list or len(peers) == 0
+            or any(type(item) is not int for item in peers)
+            or any(item is True or item is False for item in peers)
+            or len(set(peers)) != len(peers)):
+        raise ServiceError("workspace Control Room topology refused")
+    if any(peer != control_uid for peer in peers):
+        raise ServiceError("workspace Control Room topology refused")
+    return {key: value for key, value in stanza.items()}
+
+
+def workspace_control_room_launchd_entry(
+    config: Mapping[str, Any], *, control_gid: int
+) -> dict[str, Any] | None:
+    """Closed optional host binding, shared by loader, installer and factory."""
+
+    if "workspace_control_room" not in config:
+        return None
+    validate_workspace_control_room(
+        config["workspace_control_room"], control_uid=int(config["control_uid"]))
+    if type(control_gid) is not int or control_gid <= 0:
+        raise ServiceError("workspace Control Room launchd entry requires a positive control gid")
+    return {
+        "SockPathName": _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+        "SockType": "stream", "SockPassive": True,
+        "SockPathOwner": int(config["control_uid"]),
+        "SockPathGroup": control_gid,
+        "SockPathMode": 0o600,
+    }
+
+
 def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, Any] | None:
     """One closed optional host binding, shared by loader, installer and factory."""
     value = config.get("company_consultation")
@@ -1062,10 +1129,8 @@ def load_control_config(
     if keys & workspace_keys:
         if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
             raise ServiceError("workspace acquisition requires its policy and installed App peer")
-        topology = config["workspace_control_room"]
-        if (type(topology) is not dict or set(topology) != {"port"}
-                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
-            raise ServiceError("workspace Control Room topology refused")
+        config["workspace_control_room"] = validate_workspace_control_room(
+            config["workspace_control_room"], control_uid=config["control_uid"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
         try:
@@ -1979,7 +2044,10 @@ def _service_from_config(
         product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
 
     native_capacity_source = None
-    if "native_capacity_v2" in raw:
+    if ("native_capacity_v2" in raw and _native_capacity_staging_only(raw)
+            and attended_work_placements):
+        raise ServiceError("staged native capacity cannot carry active placements")
+    if "native_capacity_v2" in raw and not _native_capacity_staging_only(raw):
         if (len(attended_work_placements) != 1
                 or qualification_for(attended_work_placements) is None):
             raise ServiceError("native V2 capacity requires the single original finite placement")
@@ -2322,12 +2390,24 @@ def _service_from_config(
             )
             # Existing source paths and existing controller permissions only.
             # Bind the installation-selected incumbent topology before publishing.
-            port = raw["workspace_control_room"]["port"]
-            workspace_control_room = HostedControlRoom(ServerConfig(
-                repo_root=Path(raw["proof_source_repository"]),
-                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
-                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
-                compose_inputs=compose_inputs))
+            # Closed AF_UNIX launchd listener; never a TCP loopback port.
+            room_listener = activate_launchd_socket(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+            activated_listeners.append(room_listener)
+            from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+            workspace_control_room = HostedControlRoom(
+                ServerConfig(
+                    repo_root=Path(raw["proof_source_repository"]),
+                    macro_root=str(raw["ceo_ingress_app_macro_root"]),
+                    bindings_path=workspace_bindings_path,
+                    token=secrets.token_urlsafe(32),
+                    origin=UNIX_CONTROL_ROOM_ORIGIN,
+                    port=0,
+                    compose_inputs=compose_inputs,
+                ),
+                listener=room_listener,
+                socket_path=str(raw["workspace_control_room"]["socket_path"]),
+                allowed_peer_uids=tuple(raw["workspace_control_room"]["allowed_peer_uids"]),
+            )
             from integrations.product_acceptance_read import read_acceptance
             from integrations.product_acceptance_selector import read_original_acceptance_observation
             from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
@@ -2388,6 +2468,30 @@ def _service_from_config(
             from integrations.session_bridge.schemas import BridgeError
             from integrations.mastermind_executive_app.gateway import READ_SCOPE, SUBMIT_SCOPE
             from control_plane import executive_ceo_ingress as session_ingress, ceo_request
+            from ops.executive_os.coo_principal_host import DEFAULT_INSTALL_PATH
+
+            # Reuse the network gateway's root-sealed OAuth policy installation;
+            # Control neither owns OAuth nor trusts policy IDs supplied by an App
+            # principal frame. Missing/invalid/unarmed installation keeps the
+            # cross-policy reply downgrade dark, without disabling existing
+            # exact-policy Session Bridge reads.
+            session_read_policy_loader = None
+            # Control constructs a fresh per-frame provider. Keep one private
+            # HMAC cursor key for this one installed service composition so
+            # READ pagination works across frames but not across restarts.
+            from secrets import token_bytes as _session_cursor_random_bytes
+            session_reference_cursor_key = _session_cursor_random_bytes(32)
+            if installed_profile == WEB_CEO_V3_PROFILE:
+                from ops.executive_os.executive_mcp_entry import (
+                    installed_os_session_policy_source)
+                gateway_policy_path = DEFAULT_INSTALL_PATH
+                if gateway_policy_path.exists() or gateway_policy_path.is_symlink():
+                    try:
+                        session_read_policy_loader = installed_os_session_policy_source(
+                            gateway_policy_path, Path(__file__).resolve().parents[1],
+                            expected_uid=int(raw["control_uid"]))
+                    except (OSError, ValueError):
+                        session_read_policy_loader = None
 
             def session_bridge_factory(runtime):
                 # Validate the supplied live Runtime through the incumbent
@@ -2530,10 +2634,20 @@ def _service_from_config(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                     wake_handler_provider=lambda: service._dialogue_wake_handler,
                     admission_guard=require_attention_admission)
+                trusted_policies = None
+                if session_read_policy_loader is not None:
+                    try:
+                        trusted_policies = session_read_policy_loader()
+                    except (OSError, ValueError):
+                        # File/policy drift disables only the independent
+                        # cross-policy read, never grants a substitute identity.
+                        trusted_policies = None
                 return build_runtime_session_bridge(
                     runtime, dialogue_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                     summon_handler=summon, codex_owner_configured=codex_owner_configured,
-                    attention_requester=attention)
+                    attention_requester=attention,
+                    authorized_policies=trusted_policies,
+                    reference_cursor_key=session_reference_cursor_key)
             session_factories["session_bridge_provider_factory"] = session_bridge_factory
         ceo_ingress_kwargs["ceo_ingress_app_binding"] = CeoIngressAppBinding(
             peer_uid=int(raw["ceo_ingress_app_peer_uid"]),
@@ -3065,6 +3179,10 @@ async def _run(args: argparse.Namespace) -> int:
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "to_dict"):
         return _jsonable(value.to_dict())
+    # asdict() skips to_dict() on nested dataclasses and leaves Enums as-is; neither
+    # applies to WakeRetryPolicy (flat, frozen, bool/int/None fields).
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(dataclasses.asdict(value))
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

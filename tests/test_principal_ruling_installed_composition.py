@@ -3,6 +3,7 @@ import asyncio
 import copy
 import dataclasses
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -166,7 +167,10 @@ def test_control_dialogue_selection_requires_separate_exact_opt_in(principal, di
     from ops.executive_os.coo_principal_host import validate_control_coo
     raw = dict(coo_principal_armed=principal, coo_principal_dialogue_armed=dialogue,
         executive_mcp_profile="web_ceo_v2", workspace_acquisition={}, workspace_resource_policy={},
-        workspace_control_room={}, ceo_ingress_app_peer_uid=458)
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [os.geteuid()]}, ceo_ingress_app_peer_uid=458)
     if valid: assert validate_control_coo(raw) is principal
     else:
         with pytest.raises(ValueError): validate_control_coo(raw)
@@ -186,7 +190,11 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     owner, _, _, _ = host.setup(tmp_path)
     raw = _raw(tmp_path)
     raw.update(ceo_ingress_app_peer_uid=458, ceo_ingress_app_armed=False,
-        ceo_ingress_app_macro_root=tmp_path/"macro", workspace_control_room={"port": 8787},
+        ceo_ingress_app_macro_root=tmp_path/"macro",
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [raw["control_uid"]]},
         workspace_acquisition={}, workspace_resource_policy=json.loads(json.dumps(dataclasses.asdict(_workspace_policy()))),
         ceo_ingress_app_boot_python=tmp_path/"sealed-python", executive_mcp_profile="web_ceo_v2",
         coo_principal_armed=True, coo_principal_dialogue_armed=selected)
@@ -197,7 +205,18 @@ def test_control_launcher_selects_same_service_runtime_without_observation_socke
     import socket
     from contextlib import ExitStack
     sockets = ExitStack()
+    import shutil
+    import control_plane.workspace_control_room_lifecycle as room_lifecycle
+    from tests.executive_installed_control_fixture import unix_listener
+    # The Control Room socket parent is a test-owned egid dir, not /var/run.
+    monkeypatch.setattr(room_lifecycle, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
     def activated(name):
+        if name == "WorkspaceControlRoom":
+            listener, room_path = unix_listener()
+            sockets.callback(shutil.rmtree, os.path.dirname(room_path), ignore_errors=True)
+            sockets.enter_context(listener)
+            raw["workspace_control_room"]["socket_path"] = room_path
+            return listener
         value = sockets.enter_context(socket.socket(socket.AF_UNIX))
         value.bind(str(raw["control_socket_path" if name == "Operator" else "ceo_ingress_socket_path"]))
         value.listen()

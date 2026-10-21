@@ -5,6 +5,8 @@ import type { MissionResultRead } from "../host";
 import { normalizeResultSelection, type ResultSelection } from "../result";
 import type { DraftInsertion, DraftSource } from "./drafts";
 import { ResultSourceReader } from "./ResultSourceReader";
+import type { OperationPointer } from "../orchestration/operation-controller";
+import type { QualifiedSessionAnswer } from "../orchestration/executive-session-command-port";
 import "./conversation.css";
 
 type ConversationLocale = "en" | "zh-CN";
@@ -68,10 +70,48 @@ const STATIC_ZH: Record<string, string> = {
 };
 function ui(locale: ConversationLocale, text: string) { return locale === "zh-CN" ? STATIC_ZH[text] ?? text : text; }
 
+/** Local, scope-fenced display of one already-validated original reply.
+ * A browser-local render is NOT a canonical parent-consumed acknowledgement. */
+export interface QualifiedConversationReply {
+  readonly pointer: OperationPointer;
+  readonly answer: QualifiedSessionAnswer;
+}
+
+function QualifiedReplyCard({ value, onCommitted }: {
+  value: QualifiedConversationReply;
+  onCommitted?: (value: QualifiedConversationReply) => void;
+}) {
+  const mounted = useRef<HTMLElement>(null);
+  useLayoutEffect(() => {
+    // The local owner may clear its original pending hint only AFTER React
+    // actually commits this exact answer into a connected conversation view.
+    if (mounted.current?.isConnected &&
+        mounted.current.textContent?.includes(value.answer.text)) {
+      onCommitted?.(value);
+    }
+  }, [value, onCommitted]);
+  return <section ref={mounted} className="conversation-result"
+      aria-label="Qualified original answer" data-operation-key={value.pointer.operationKey}>
+    <div>
+      <p className="conversation-eyebrow">Qualified original reply · READ only</p>
+      <h2>Original answer recovered</h2>
+      <p className="conversation-answer">{value.answer.text}</p>
+      <p className="conversation-history">Next step: {value.answer.nextStep}</p>
+      <p className="conversation-history">Original read reference: <code>{value.answer.readRef}</code></p>
+      <p className="conversation-history">Original-parent acceptance is not established by this local display.</p>
+    </div>
+  </section>;
+}
+
 export interface ConversationWindowProps {
   locale?: ConversationLocale;
   /** Exact parent-created owner-keyed element; this window supplies no command identity. */
   continuation?: ReactNode;
+  historicalAnswers?: ReactNode;
+  /** Exact current-scope native reply, independent of passive transcript data. */
+  qualifiedAnswer?: QualifiedConversationReply | null;
+  /** Called after the actual current React DOM commit, never by a receipt. */
+  onQualifiedAnswerCommitted?: (value: QualifiedConversationReply) => void;
   notesPresentation?: "inline" | "collapsed";
   projection: OfficeProjection;
   /** Shell-controlled, unsent text. Scope and auth isolation live in drafts.ts. */
@@ -246,6 +286,9 @@ export function ConversationWindow(props: ConversationWindowProps) {
     <ConversationBody key={JSON.stringify([context.authGeneration, context.selection, context.sessionRef,
     context.bindingGeneration, conversation.source.state === "WITHHELD",
     mission.source.state === "WITHHELD", result.source.state === "WITHHELD"])} {...props} />
+    {props.qualifiedAnswer && <QualifiedReplyCard value={props.qualifiedAnswer}
+      onCommitted={props.onQualifiedAnswerCommitted} />}
+    {props.historicalAnswers}
     {props.continuation != null && <div className="conversation-continuation-slot">{props.continuation}</div>}
   </div>;
 }

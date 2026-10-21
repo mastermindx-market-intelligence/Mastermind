@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { planObservationFixture } from "../planning/plan-observation.fixture";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it } from "vitest";
 import { useState } from "react";
@@ -226,5 +227,61 @@ describe("Daily Office consumer", () => {
     render(<MetaCeoOffice projection={projectOffice(reads, context)} draft={{ text: "", context }} onDraftChange={() => {}} />);
     expect(screen.getByRole("alert").textContent).toContain("Reconcile the original operation");
     expect(screen.queryByRole("button", { name: /resend|retry|switch account/i })).toBeNull();
+  });
+});
+
+describe("Meta-CEO admitted-plan live host wiring", () => {
+  it("renders the selected authenticated plan, retains it on draft rerender, and clears it after identity rotation", async () => {
+    const { bindMissionHost } = await import("../host");
+    const selected = { work_ref: "WS:ONE", root_job_id: "JOB-1" };
+    let signedIn = true, reads = 0;
+    const raw = {
+      getState: () => ({ status: signedIn ? "signed_in" : "signed_out",
+        acquisition: signedIn, content: false, reason: null }),
+      invalidationGeneration: () => signedIn ? 3 : 4,
+      subscribe: () => () => {},
+      signIn: async () => {}, signOut: async () => { signedIn = false; },
+      readPrograms: async () => null, readWork: async () => null,
+      readMission: async () => null, readCurrentWindow: async () => null,
+      readAdmittedPlan: async () => {
+        reads++;
+        return { schema: "mastermind.workspace_admitted_execution_plan.v1",
+          selection: selected, availability: "AVAILABLE", reason_codes: [],
+          source_observation: planObservationFixture(selected),
+          plan: { schema: "mastermind.admitted_execution_plan_view.v1",
+            root_job_id: selected.root_job_id, plan_attempt_id: "ATT-1",
+            plan_schema_version: "mastermind.execution_plan/v3",
+            admission_schema_version: "mastermind.coo_plan_admission/v2",
+            policy_sha: "a".repeat(64), plan_digest: "b".repeat(64),
+            reservation_digest: "c".repeat(64), admission_state: "ADMITTED",
+            steps: [{ ordinal: 0, step_id: "step-0",
+              objective: "Review canonical output before acceptance",
+              business_impact: "material", review_required: true,
+              prerequisite_step_ids: [] }],
+          },
+        };
+      },
+    };
+    const original = window.MastermindMissionHost;
+    window.MastermindMissionHost = bindMissionHost(raw as any);
+    try {
+      const office = (ctx: ProjectionContext, draftText: string) =>
+        <MetaCeoOffice projection={projectOffice(input(), ctx)}
+          draft={{ text: draftText, context: ctx }} onDraftChange={() => {}} />;
+      const { rerender } = render(office(context, "Original direction"));
+      const inspector = screen.getByRole("region", { name: "Admitted execution plan" });
+      fireEvent.click(within(inspector).getByRole("button", { name: "Inspect plan" }));
+      expect(await screen.findByText("Review canonical output before acceptance")).toBeTruthy();
+      expect(reads).toBe(1);
+      rerender(office(context, "Revised direction"));
+      expect(screen.getByText("Review canonical output before acceptance")).toBeTruthy();
+      expect(reads).toBe(1);
+      await window.MastermindMissionHost!.auth!.signOut();
+      rerender(office({ ...context, authGeneration: context.authGeneration + 1 }, "Revised direction"));
+      expect(screen.queryByText("Review canonical output before acceptance")).toBeNull();
+      expect(reads).toBe(1);
+    } finally {
+      window.MastermindMissionHost = original;
+    }
   });
 });

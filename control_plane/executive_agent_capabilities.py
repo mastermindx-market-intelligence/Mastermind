@@ -55,6 +55,10 @@ _MIN_CAPABILITY_PACKAGES = 1
 _MAX_CAPABILITY_PACKAGES = 16
 _MAX_SKILL_CAPABILITIES_PER_PROFILE = 32
 
+# A per-load raw-source budget, separate from schema/cardinality limits.
+# Existing V3/V4 semantics and digests apply within this acquisition ceiling.
+_MAX_CAPABILITY_POLICY_SOURCE_BYTES = 2 * 1024 * 1024
+
 # Fixed, non-echoing refusal reason for every duplicate-JSON-key refusal
 # (review 5087139217 BLOCKER 4). Kept as a module constant -- rather than
 # inlined at the one raise site -- so a test can assert byte-for-byte
@@ -1333,8 +1337,14 @@ class ExecutionCapabilityRegistry:
             strict=True
         )
         try:
+            with source.open("rb") as policy_source:
+                source_bytes = policy_source.read(_MAX_CAPABILITY_POLICY_SOURCE_BYTES + 1)
+            if len(source_bytes) > _MAX_CAPABILITY_POLICY_SOURCE_BYTES:
+                raise CapabilityPolicyError("capability policy source exceeds byte limit")
+            # Preserve read_text's strict UTF-8 and universal-newline behavior.
+            source_text = source_bytes.decode("utf-8").replace("\r\n", "\n").replace("\r", "\n")
             raw = json.loads(
-                source.read_text(encoding="utf-8"),
+                source_text,
                 object_pairs_hook=_no_duplicate_keys_object_pairs_hook,
             )
         except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:

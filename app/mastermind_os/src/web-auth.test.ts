@@ -1,5 +1,6 @@
 // @vitest-environment jsdom
 // @vitest-environment-options {"url":"https://mcp.mastermind-x.com/os/"}
+import { planObservationFixture } from "./planning/plan-observation.fixture";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createWebAuth,
@@ -559,15 +560,67 @@ describe("optional Executive authentication in the existing web owner", () => {
     expect(e.client.getState()).toMatchObject({ status: "signed_in", acquisition: true, content: true });
     expect(e.client.executive!.available()).toBe(false);
   });
-  it.each([scopes.split(" ").reverse().join(" "), scopes + " admin", scopes + " mastermind.executive.read"])(
-    "accepts only the exact scope set from an Executive token response", async (returnedScope) => {
+  it.each([scopes.split(" ").reverse().join(" "), "mastermind.executive.read", "mastermind.executive.intent.submit", scopes + " admin", scopes + " mastermind.executive.read"])(
+    "accepts only the full or READ-only Executive scope set", async (returnedScope) => {
       const e = setup({ executiveResource: resource });
       e.fetcher.mockImplementation(async () => response({ token_type: "Bearer", access_token: "private-token", expires_in: 3600,
         scope: new URL(e.popup.location).searchParams.get("audience") === resource
           ? returnedScope : new URL(e.popup.location).searchParams.get("scope") }));
       await e.login();
-      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" "));
+      expect(e.client.executive!.available()).toBe(returnedScope === scopes.split(" ").reverse().join(" ") || returnedScope === "mastermind.executive.read");
     });
+  it("keeps READ-only Executive grants usable for observation but refuses SEND before fetch", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? "mastermind.executive.read"
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    expect(e.client.executive!.available()).toBe(true);
+    expect(e.client.executiveSession!.available()).toBe(true);
+    e.fetcher.mockClear();
+    const signal = new AbortController().signal;
+    await expect(e.client.executive!.submit({ operation_key: "readonly-denied" }, signal))
+      .rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    await expect(e.client.executiveSession!.send({
+      target_ref: "fabric_attempt:" + "a".repeat(64),
+      instruction: "continue", stop_condition: "finish",
+      operation_key: "session-continue-" + "b".repeat(64),
+    }, signal)).rejects.toThrow("EXECUTIVE_SEND_SCOPE_REQUIRED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    e.fetcher.mockImplementation(async () => response({ ok: true }));
+    await e.client.executive!.context(signal);
+    await e.client.executive!.status({ intent_id: "read-only-status" }, signal);
+    await e.client.executiveSession!.reply({ operation_key: "read-only-result" }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/context", ORIGIN + "/os/executive/status",
+      ORIGIN + "/os/executive/session/reply",
+    ]);
+  });
+  it("retains SEND only when the exact combined Executive scopes are granted, regardless of ordering", async () => {
+    const e = setup({ executiveResource: resource });
+    e.fetcher.mockImplementation(async () => response({
+      token_type: "Bearer", access_token: "private-token", expires_in: 3600,
+      scope: new URL(e.popup.location).searchParams.get("audience") === resource
+        ? scopes.split(" ").reverse().join(" ")
+        : new URL(e.popup.location).searchParams.get("scope"),
+    }));
+    await e.login();
+    e.fetcher.mockClear();
+    e.fetcher.mockImplementation(async () => response({ ok: true }));
+    const signal = new AbortController().signal;
+    await e.client.executive!.submit({ operation_key: "combined-grant" }, signal);
+    await e.client.executiveSession!.send({
+      target_ref: "fabric_attempt:" + "a".repeat(64),
+      instruction: "continue", stop_condition: "finish",
+      operation_key: "session-continue-" + "b".repeat(64),
+    }, signal);
+    expect(e.fetcher.mock.calls.map(([url]) => url)).toEqual([
+      ORIGIN + "/os/executive/submit", ORIGIN + "/os/executive/session/send",
+    ]);
+  });
   it("exposes only three fixed authenticated POST routes with exact bodies", async () => {
     const e = setup({ executiveResource: resource }); await e.login();
     e.fetcher.mockClear(); e.fetcher.mockResolvedValue(response({ ok: true }));
@@ -620,5 +673,81 @@ describe("optional Executive authentication in the existing web owner", () => {
     expect(e.client.executive!.authGeneration()).toBeGreaterThan(generation);
     expect(listener).toHaveBeenCalled();
     expect(e.client.getState().status).toBe("signed_in");
+  });
+});
+
+describe("authenticated admitted-plan Web host transport", () => {
+  const selection = { work_ref: "WS:PLAN-VISIBILITY", root_job_id: "JOB-123" };
+  const request = () => ({ ...selection, signal: new AbortController().signal });
+  const observation = (state: "SAME" | "UNKNOWN") => state === "SAME"
+    ? planObservationFixture(selection)
+    : { ...planObservationFixture(selection), state, control_room: null, runtime: null };
+  const unavailablePlan = () => ({
+    schema: "mastermind.workspace_admitted_execution_plan.v1",
+    selection: { ...selection }, availability: "UNAVAILABLE",
+    reason_codes: ["ADMISSION_NOT_ESTABLISHED"],
+    source_observation: observation("UNKNOWN"), plan: null,
+  });
+  const availablePlan = () => ({
+    schema: "mastermind.workspace_admitted_execution_plan.v1",
+    selection: { ...selection }, availability: "AVAILABLE",
+    reason_codes: [], source_observation: observation("SAME"),
+    plan: { schema: "mastermind.admitted_execution_plan_view.v1",
+      root_job_id: selection.root_job_id, plan_attempt_id: "ATT-123",
+      plan_schema_version: "mastermind.execution_plan/v3",
+      admission_schema_version: "mastermind.coo_plan_admission/v2",
+      policy_sha: "a".repeat(64), plan_digest: "b".repeat(64),
+      reservation_digest: "c".repeat(64), admission_state: "ADMITTED",
+      steps: [{ ordinal: 0, step_id: "step-0",
+        objective: "Validate the authenticated original plan",
+        business_impact: "material", review_required: true, prerequisite_step_ids: [] }],
+    },
+  });
+  it("mounts only the existing generation-fenced owner port, with no unsigned acquisition", async () => {
+    const e = setup();
+    const host = bindMissionHost(e.client);
+    expect(typeof e.client.invalidationGeneration).toBe("function");
+    expect(typeof host.readAdmittedPlan).toBe("function");
+    await expect(host.readAdmittedPlan!(request())).rejects.toThrow("PLAN_READ_UNAUTHORIZED");
+    expect(e.fetcher).not.toHaveBeenCalled();
+    await e.login();
+    e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(response(availablePlan()));
+    const result = await host.readAdmittedPlan!(request());
+    expect(result.availability).toBe("AVAILABLE");
+    if (result.availability !== "AVAILABLE") throw Error("expected admitted plan");
+    expect(result.plan.steps[0].objective).toBe("Validate the authenticated original plan");
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const [url, options] = e.fetcher.mock.calls[0];
+    expect(new URL(String(url)).pathname).toBe("/workspace/plan/current");
+    expect(Object.fromEntries(new URL(String(url)).searchParams)).toEqual(selection);
+    expect(options).toMatchObject({
+      method: "GET", redirect: "error", credentials: "omit", cache: "no-store",
+      headers: { Authorization: "Bearer private-token" },
+    });
+  });
+  it("preserves 503 as a typed unavailable plan without treating admission as execution", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailablePlan()), {
+      status: 503, headers: { "content-type": "application/json" },
+    }));
+    const observed = await bindMissionHost(e.client).readAdmittedPlan!(request());
+    expect(observed).toMatchObject({ availability: "UNAVAILABLE", observation: "UNKNOWN",
+      plan: null, reason_codes: ["ADMISSION_NOT_ESTABLISHED"] });
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+  });
+  it("fences a late plan reply after sign-out using the original OAuth generation", async () => {
+    const e = setup(); await e.login(); e.fetcher.mockClear();
+    const host = bindMissionHost(e.client);
+    const late = deferred<Response>();
+    e.fetcher.mockReturnValueOnce(late.promise);
+    const before = host.invalidationGeneration!();
+    const result = host.readAdmittedPlan!(request());
+    const denied = expect(result).rejects.toThrow();
+    await host.auth!.signOut();
+    late.resolve(response(availablePlan()));
+    await denied;
+    expect(host.invalidationGeneration!()).toBeGreaterThan(before);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
 });

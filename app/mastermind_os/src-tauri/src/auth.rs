@@ -69,6 +69,8 @@ pub struct AuthStatus {
 struct Token {
     value: String,
     expires: Instant,
+    // Derived from the exact validated Executive grant; stays in the native owner.
+    executive_send: bool,
 }
 struct Pending {
     state: String,
@@ -464,14 +466,17 @@ async fn read_json_body(mut response: reqwest::Response, cap: usize) -> Result<V
 }
 fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     let object = value.as_object().ok_or("TOKEN_RESPONSE_INVALID")?;
-    if resource == Resource::Executive {
+    let executive_send = if resource == Resource::Executive {
         let scopes = object.get("scope").and_then(Value::as_str).ok_or("TOKEN_RESPONSE_INVALID")?;
         let mut scopes: Vec<_> = scopes.split_whitespace().collect();
         scopes.sort_unstable();
-        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] {
+        if scopes != ["mastermind.executive.intent.submit", "mastermind.executive.read"] && scopes != ["mastermind.executive.read"] {
             return Err("TOKEN_RESPONSE_INVALID".into());
         }
-    }
+        scopes == ["mastermind.executive.intent.submit", "mastermind.executive.read"]
+    } else {
+        false
+    };
     let token = object
         .get("access_token")
         .and_then(Value::as_str)
@@ -495,6 +500,7 @@ fn parse_token(value: Value, resource: Resource) -> Result<Token> {
     Ok(Token {
         value: token.into(),
         expires: Instant::now() + Duration::from_secs(seconds),
+        executive_send,
     })
 }
 pub async fn callback(app: AppHandle, raw: String) {
@@ -617,6 +623,9 @@ const RESULT_RESPONSE_CAP: usize = 16_384;
 const MISSION_V3_RESPONSE_CAP: usize = 2_000_000;
 const RESULT_MISSION_V3_PATH: &str = "/workspace/mission/v3/current";
 const RESULT_DETAIL_PATH: &str = "/workspace/result/current";
+const PLAN_DETAIL_PATH: &str = "/workspace/plan/current";
+const PLAN_RESPONSE_CAP: usize = 16_384;
+const PLAN_SCHEMA: &str = "mastermind.workspace_admitted_execution_plan.v1";
 const WORK_PATH: &str = "/workspace/work/current";
 const MISSION_V3_SCHEMA: &str = "mastermind.mission_workspace.v3";
 const RESULT_SCHEMA: &str = "mastermind.workspace_role_result.v1";
@@ -745,6 +754,108 @@ pub async fn read_mission(app: AppHandle, selection: MissionSelection) -> Result
     )
     .await
 }
+#[tauri::command]
+pub async fn read_admitted_plan(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    // Original Workspace selection grammar is narrower than legacy Mission selection.
+    validate_workspace_pair(&selection.work_ref, &selection.root_job_id)?;
+    let mut url = Url::parse(&format!("{ORIGIN}{PLAN_DETAIL_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (inner.token(Resource::Acquisition)
+            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
+    };
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, PLAN_RESPONSE_CAP).await
+            .and_then(|value| typed_unavailable(value, PLAN_SCHEMA, false))
+    } else {
+        bounded_json(response, PLAN_RESPONSE_CAP).await
+    };
+    // A completed HTTP request is not publication permission after identity rotation.
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(PLAN_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // Exact fields, source observation, availability, and selectors are decoded in
+    // the existing frontend Plan consumer; no private response fields are projected.
+    Ok(value)
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RetainedActivitySelection {
+    work_ref: String,
+    root_job_id: String,
+    job_id: String,
+    attempt_id: String,
+}
+impl RetainedActivitySelection {
+    fn validate(&self) -> Result<()> {
+        validate_workspace_pair(&self.work_ref, &self.root_job_id)?;
+        validate_workspace_pair(&self.work_ref, &self.job_id)?;
+        if self.job_id == self.root_job_id
+            || !self.attempt_id.strip_prefix("ATT-")
+                .is_some_and(|v| lowercase_hex(v, 32)) {
+            return Err("SELECTION_INVALID".into());
+        }
+        Ok(())
+    }
+}
+const RETAINED_ACTIVITY_PATH: &str = "/workspace/operator/activity/current";
+const RETAINED_ACTIVITY_SCHEMA: &str = "mastermind.workspace_retained_activity.v1";
+const RETAINED_ACTIVITY_CAP: usize = 16_384;
+
+/// Same fixed public Workspace acquisition bearer and owner-issued generation
+/// fence as admitted plan; never pass private keys, native Fabric run IDs or
+/// raw Event rows into the webview. A 503 must keep the closed typed schema.
+#[tauri::command]
+pub async fn read_retained_activity(app: AppHandle, selection: RetainedActivitySelection) -> Result<Value> {
+    selection.validate()?;
+    let mut url = Url::parse(&format!("{ORIGIN}{RETAINED_ACTIVITY_PATH}"))
+        .map_err(|_| "REQUEST_INVALID")?;
+    url.query_pairs_mut()
+        .append_pair("work_ref", &selection.work_ref)
+        .append_pair("root_job_id", &selection.root_job_id)
+        .append_pair("job_id", &selection.job_id)
+        .append_pair("attempt_id", &selection.attempt_id);
+    let state = app.state::<NativeAuth>();
+    let (token, generation) = {
+        let inner = state.lock()?;
+        (inner.token(Resource::Acquisition)
+            .ok_or("AUTHENTICATION_REQUIRED")?.value.clone(), inner.generation)
+    };
+    let response = state.http.get(url).bearer_auth(token)
+        .header("Accept", "application/json")
+        .header("Cache-Control", "no-store")
+        .send().await.map_err(|_| "SOURCE_UNAVAILABLE")?;
+    let result = if response.status().as_u16() == 503 {
+        read_json_body(response, RETAINED_ACTIVITY_CAP).await
+            .and_then(|value| typed_unavailable(value, RETAINED_ACTIVITY_SCHEMA, false))
+    } else {
+        bounded_json(response, RETAINED_ACTIVITY_CAP).await
+    };
+    if !state.lock()?.release_allowed(generation, Resource::Acquisition) {
+        return Err("AUTHENTICATION_CHANGED".into());
+    }
+    let value = result?;
+    if value.get("schema").and_then(Value::as_str) != Some(RETAINED_ACTIVITY_SCHEMA) {
+        return Err("RESPONSE_INVALID".into());
+    }
+    // The existing host's strict DTO decoder removes unrecognized fields.
+    Ok(value)
+}
+
 #[tauri::command]
 pub async fn read_mission_v3(app: AppHandle, selection: MissionSelection) -> Result<Value> {
     let mut url =
@@ -901,30 +1012,57 @@ fn executive_body(body: &Value) -> Result<Vec<u8>> {
     Ok(serialized)
 }
 async fn executive_post(app: AppHandle, path: &'static str, body: Value) -> Result<Value> {
-    let serialized = executive_body(&body)?;
     let state = app.state::<NativeAuth>();
+    executive_post_with_dispatch(&state, path, body, reqwest::RequestBuilder::send).await
+}
+
+// Production and tests share the authorization and transport-dispatch boundary.
+async fn executive_post_with_dispatch<D, F>(
+    state: &NativeAuth,
+    path: &'static str,
+    body: Value,
+    dispatch: D,
+) -> Result<Value>
+where
+    D: FnOnce(reqwest::RequestBuilder) -> F,
+    F: std::future::Future<Output = std::result::Result<reqwest::Response, reqwest::Error>>,
+{
     let (token, token_expires, generation) = {
         let inner = state.lock()?;
         let token = inner.token(Resource::Executive).ok_or("EXECUTIVE_AUTH_REQUIRED")?;
+        match path {
+            "/os/executive/context"
+            | "/os/executive/status"
+            | "/os/executive/session/context"
+            | "/os/executive/session/reply"
+            | "/os/executive/session/references" => {}
+            "/os/executive/submit" => {
+                if !token.executive_send {
+                    return Err("EXECUTIVE_SEND_SCOPE_REQUIRED".into());
+                }
+            }
+            _ => return Err("REQUEST_INVALID".into()),
+        }
         (
             token.value.clone(),
             token.expires,
             inner.executive_generation,
         )
     };
+    let serialized = executive_body(&body)?;
     let url = Url::parse(&format!("{ORIGIN}{path}")).map_err(|_| "REQUEST_INVALID".to_owned())?;
     if url.origin().ascii_serialization() != ORIGIN {
         return Err("REQUEST_INVALID".into());
     }
-    let response = state
+    let request = state
         .http
         .post(url)
         .bearer_auth(token)
         .header("Accept", "application/json")
         .header("Cache-Control", "no-store")
         .header(reqwest::header::CONTENT_TYPE, "application/json")
-        .body(serialized)
-        .send()
+        .body(serialized);
+    let response = dispatch(request)
         .await
         .map_err(|_| "EXECUTIVE_TRANSPORT_UNAVAILABLE".to_owned())?;
     { executive_guard(&mut *state.lock()?, generation, token_expires)?; }
@@ -984,9 +1122,91 @@ pub async fn executive_status(app: AppHandle, intent_id: String) -> Result<Value
     result
 }
 
+// Read-only original-answer transport on the existing Executive token and
+// generation. These commands do not originate or ACK a CONTINUE; in particular
+// there is deliberately no executive_session_send native command. The separate
+// original F2 review of executive_submit remains held and unmodified.
+fn valid_original_operation_key(key: &str) -> bool {
+    key.strip_prefix("session-continue-")
+        .is_some_and(|suffix| lowercase_hex(suffix, 64))
+}
+fn valid_reference_cursor(cursor: &str) -> bool {
+    !cursor.is_empty() && cursor.len() <= 2048 &&
+        cursor.bytes().all(|b| b.is_ascii_alphanumeric() || b"_-=".contains(&b))
+}
+fn original_reference_args(
+    selection: &MissionSelection, page_size: Option<u8>, cursor: Option<&str>,
+) -> Result<Value> {
+    selection.validate()?;
+    let size = page_size.unwrap_or(16);
+    if !(1..=32).contains(&size) ||
+       cursor.is_some_and(|value| !valid_reference_cursor(value)) {
+        return Err("SESSION_REFERENCES_INVALID".into());
+    }
+    let mut args = serde_json::json!({
+        "work_ref": selection.work_ref, "root_job_id": selection.root_job_id,
+        "page_size": size,
+    });
+    if let Some(cursor) = cursor {
+        args["cursor"] = Value::String(cursor.to_owned());
+    }
+    Ok(args)
+}
+#[tauri::command]
+pub async fn executive_session_context(app: AppHandle, selection: MissionSelection) -> Result<Value> {
+    selection.validate()?;
+    // The Session context endpoint requires the selected pair directly,
+    // whereas replies/references use the existing arguments envelope.
+    let result = executive_post(app.clone(), "/os/executive/session/context",
+        serde_json::json!({ "selection": {
+            "work_ref": selection.work_ref, "root_job_id": selection.root_job_id
+        }})).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_session_reply(app: AppHandle, operation_key: String) -> Result<Value> {
+    if !valid_original_operation_key(&operation_key) {
+        return Err("SESSION_OPERATION_INVALID".into());
+    }
+    let result = executive_post(app.clone(), "/os/executive/session/reply",
+        serde_json::json!({ "arguments": { "operation_key": operation_key } })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+#[tauri::command]
+pub async fn executive_session_references(
+    app: AppHandle, selection: MissionSelection, page_size: Option<u8>, cursor: Option<String>,
+) -> Result<Value> {
+    let args = original_reference_args(&selection, page_size, cursor.as_deref())?;
+    let result = executive_post(app.clone(), "/os/executive/session/references",
+        serde_json::json!({ "arguments": args })).await;
+    if result.is_err() { emit(&app); }
+    result
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn native_original_reads_admit_only_closed_selection_operation_and_cursor() {
+        let selected = MissionSelection { work_ref: "WS:ORIGINAL".into(), root_job_id: "JOB-1".into() };
+        let args = original_reference_args(&selected, None, None).unwrap();
+        assert_eq!(args["page_size"], 16);
+        assert!(args.get("cursor").is_none());
+        let args = original_reference_args(&selected, Some(32), Some("YWJjZA==")).unwrap();
+        assert_eq!(args["cursor"], "YWJjZA==");
+        assert!(original_reference_args(&selected, Some(0), None).is_err());
+        assert!(original_reference_args(&selected, Some(33), None).is_err());
+        assert!(original_reference_args(&selected, Some(16), Some("abc/..")).is_err());
+        assert!(original_reference_args(&selected, None, Some(&"A".repeat(2049))).is_err());
+        assert!(original_reference_args(&MissionSelection {
+            work_ref: "WS:BAD?".into(), root_job_id: "JOB-1".into(),
+        }, None, None).is_err());
+        assert!(valid_original_operation_key(&format!("session-continue-{}", "a".repeat(64))));
+        assert!(!valid_original_operation_key(&format!("session-continue-{}", "A".repeat(64))));
+        assert!(!valid_original_operation_key("session-continue-invalid"));
+    }
     fn inner() -> Inner {
         Inner::new(Some("public-client"))
     }
@@ -997,6 +1217,7 @@ mod tests {
         Token {
             value: value.into(),
             expires: Instant::now() + Duration::from_secs(60),
+            executive_send: false,
         }
     }
     #[test]
@@ -1143,6 +1364,7 @@ mod tests {
         i.acquisition = Some(Token {
             value: "secret".into(),
             expires: Instant::now() + Duration::from_secs(60),
+            executive_send: false,
         });
         let generation = i.generation;
         assert!(i.release_allowed(generation, Resource::Acquisition));
@@ -1359,11 +1581,11 @@ mod tests {
     }
     #[test]
     fn executive_scope_is_an_exact_set_and_never_accepts_duplicates() {
-        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read"] {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read", "mastermind.executive.read"] {
             assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
                 "expires_in":60, "scope":scope}), Resource::Executive).is_ok());
         }
-        for scope in [Value::Null, Value::String("mastermind.executive.read".into()),
+        for scope in [Value::Null, Value::String("mastermind.executive.intent.submit".into()),
             Value::String(format!("{EXECUTIVE_SCOPE} extra")), Value::String(format!("{EXECUTIVE_SCOPE} mastermind.executive.read"))] {
             assert!(parse_token(serde_json::json!({"access_token":"opaque", "token_type":"Bearer",
                 "expires_in":60, "scope":scope}), Resource::Executive).is_err());
@@ -1375,4 +1597,196 @@ mod tests {
         assert!(executive_body(&serde_json::json!({"arguments":{"goal":"é".repeat(33_000)}})).is_err());
     }
 
+    fn parsed_native_executive_token(scope: &str) -> Token {
+        parse_token(serde_json::json!({
+            "access_token": "fixture-native-executive",
+            "token_type": "Bearer",
+            "expires_in": 60,
+            "scope": scope,
+        }), Resource::Executive).unwrap()
+    }
+
+    fn install_native_executive_token(inner: &mut Inner, scope: &str) {
+        let pending_state = inner.pending.as_ref().unwrap().state.clone();
+        let (pending, _, _) = inner.consume(&callback_url(&pending_state)).unwrap();
+        inner.finish_exchange(pending.generation, pending.resource,
+            Ok(parsed_native_executive_token(scope)));
+    }
+
+    fn native_executive_state(scope: &str) -> NativeAuth {
+        let mut inner = at_executive_pending();
+        install_native_executive_token(&mut inner, scope);
+        let state = NativeAuth::new().unwrap();
+        *state.lock().unwrap() = inner;
+        state
+    }
+
+    fn native_fixture_response() -> reqwest::Response {
+        tauri::http::Response::builder()
+            .status(200)
+            .header("Content-Type", "application/json")
+            .body(r#"{"fixture":"native-dispatch"}"#.to_owned())
+            .unwrap()
+            .into()
+    }
+
+    fn native_post_spy(state: &NativeAuth, path: &'static str) -> (Result<Value>, usize) {
+        let calls = std::cell::Cell::new(0);
+        let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+            state, path, serde_json::json!({"arguments": {}}), |builder| {
+                calls.set(calls.get() + 1);
+                let request = builder.build().unwrap();
+                assert_eq!(request.method(), reqwest::Method::POST);
+                assert_eq!(request.url().as_str(), format!("{ORIGIN}{path}"));
+                std::future::ready(Ok(native_fixture_response()))
+            },
+        ));
+        (result, calls.get())
+    }
+
+    #[test]
+    fn native_executive_read_only_submit_never_dispatches() {
+        let state = native_executive_state("mastermind.executive.read");
+        assert!(state.lock().unwrap().executive_status().available);
+        let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+        assert_eq!(calls, 0, "READ-only token reached the transport dispatcher");
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+    }
+
+    #[test]
+    fn native_executive_read_only_observation_routes_dispatch() {
+        for path in [
+            "/os/executive/context",
+            "/os/executive/status",
+            "/os/executive/session/context",
+            "/os/executive/session/reply",
+            "/os/executive/session/references",
+        ] {
+            let state = native_executive_state("mastermind.executive.read");
+            let (result, calls) = native_post_spy(&state, path);
+            assert_eq!(calls, 1);
+            assert_eq!(result.unwrap(), serde_json::json!({"fixture":"native-dispatch"}));
+        }
+    }
+
+    #[test]
+    fn native_executive_exact_combined_grants_dispatch_submit() {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.intent.submit mastermind.executive.read"] {
+            let state = native_executive_state(scope);
+            let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+            assert_eq!(calls, 1);
+            assert_eq!(result.unwrap(), serde_json::json!({"fixture":"native-dispatch"}));
+        }
+    }
+
+    #[test]
+    fn native_executive_downgrade_does_not_keep_send_permission() {
+        let state = native_executive_state(EXECUTIVE_SCOPE);
+        assert_eq!(native_post_spy(&state, "/os/executive/submit").1, 1);
+        {
+            let mut inner = state.lock().unwrap();
+            inner.transaction(Resource::Executive).unwrap();
+            install_native_executive_token(&mut inner, "mastermind.executive.read");
+        }
+        let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+        assert_eq!(calls, 0, "new READ-only token inherited old SEND permission");
+        assert_eq!(result.unwrap_err(), "EXECUTIVE_SEND_SCOPE_REQUIRED");
+        assert_eq!(native_post_spy(&state, "/os/executive/context").1, 1);
+    }
+
+    #[test]
+    fn native_executive_missing_or_expired_token_never_dispatches() {
+        for expired in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            {
+                let mut inner = state.lock().unwrap();
+                if expired {
+                    inner.executive.as_mut().unwrap().expires = Instant::now() - Duration::from_secs(1);
+                } else {
+                    inner.executive = None;
+                }
+            }
+            let (result, calls) = native_post_spy(&state, "/os/executive/submit");
+            assert_eq!(calls, 0);
+            assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_REQUIRED");
+        }
+    }
+
+    #[test]
+    fn native_executive_unknown_route_never_dispatches() {
+        for scope in [EXECUTIVE_SCOPE, "mastermind.executive.read"] {
+            for path in ["/os/executive/not-enrolled", "/os/executive/session/send"] {
+                let state = native_executive_state(scope);
+                let (result, calls) = native_post_spy(&state, path);
+                assert_eq!(calls, 0);
+                assert_eq!(result.unwrap_err(), "REQUEST_INVALID");
+            }
+        }
+    }
+
+    #[test]
+    fn native_executive_signout_or_token_rotation_withholds_in_flight_reply() {
+        for signout in [false, true] {
+            let state = native_executive_state(EXECUTIVE_SCOPE);
+            let calls = std::cell::Cell::new(0);
+            let result = tauri::async_runtime::block_on(executive_post_with_dispatch(
+                &state, "/os/executive/submit", serde_json::json!({"arguments":{}}), |_| {
+                    calls.set(calls.get() + 1);
+                    let mut inner = state.lock().unwrap();
+                    if signout {
+                        inner.invalidate();
+                    } else {
+                        inner.transaction(Resource::Executive).unwrap();
+                        install_native_executive_token(&mut inner, "mastermind.executive.read");
+                    }
+                    std::future::ready(Ok(native_fixture_response()))
+                },
+            ));
+            assert_eq!(calls.get(), 1);
+            assert_eq!(result.unwrap_err(), "EXECUTIVE_AUTH_CHANGED");
+        }
+    }
+
+}
+
+#[cfg(test)]
+mod retained_activity_selection_tests {
+    use super::*;
+
+    fn selection() -> RetainedActivitySelection {
+        RetainedActivitySelection {
+            work_ref: "WS:ORIGINAL".into(),
+            root_job_id: "JOB-123".into(),
+            job_id: "JOB-124".into(),
+            attempt_id: format!("ATT-{}", "a".repeat(32)),
+        }
+    }
+
+    #[test]
+    fn accepts_only_exact_original_executor_selection() {
+        assert!(selection().validate().is_ok());
+        let mut invalid = selection();
+        invalid.job_id = invalid.root_job_id.clone();
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.attempt_id = format!("ATT-{}", "A".repeat(32));
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.attempt_id = "ATT-123".into();
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.work_ref = "WS:foreign!".into();
+        assert!(invalid.validate().is_err());
+        let mut invalid = selection();
+        invalid.job_id = "JOB-123/../private".into();
+        assert!(invalid.validate().is_err());
+    }
+    #[test]
+    fn retained_activity_never_reuses_executive_or_native_fabric_resource() {
+        assert_eq!(Resource::Acquisition.audience(), "https://mcp.mastermind-x.com/workspace/read");
+        assert_eq!(Resource::Acquisition.scope(), "mastermind.workspace.read");
+        assert_eq!(RETAINED_ACTIVITY_PATH, "/workspace/operator/activity/current");
+        assert_eq!(RETAINED_ACTIVITY_SCHEMA, "mastermind.workspace_retained_activity.v1");
+        assert_eq!(RETAINED_ACTIVITY_CAP, PLAN_RESPONSE_CAP);
+    }
 }

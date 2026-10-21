@@ -2201,6 +2201,29 @@ if entry is not None:
 with plist_path.open("wb") as stream:
     plistlib.dump(document, stream, sort_keys=False)
 PY
+# The optional workspace Control Room socket belongs to this same service and
+# Runtime. Configs without the stanza have no Control Room socket; a legacy
+# TCP stanza is refused here, loudly, by the shared validator.
+"$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_PLIST" "$CONTROL_GID" <<'PY'
+import json, pathlib, plistlib, sys
+release, config_path, plist_path = map(pathlib.Path, sys.argv[1:4])
+control_gid = int(sys.argv[4])
+sys.path.insert(0, str(release))
+from scripts.executive_os_phase1c import (
+    _WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+    workspace_control_room_launchd_entry,
+)
+config = json.loads(config_path.read_text(encoding="utf-8"))
+entry = workspace_control_room_launchd_entry(config, control_gid=control_gid)
+with plist_path.open("rb") as stream:
+    document = plistlib.load(stream)
+sockets = document["Sockets"]
+sockets.pop(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME, None)
+if entry is not None:
+    sockets[_WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = entry
+with plist_path.open("wb") as stream:
+    plistlib.dump(document, stream, sort_keys=False)
+PY
 /usr/bin/plutil -replace StandardOutPath -string /var/log/mastermind-executive/control/stdout.log "$CONTROL_PLIST"
 /usr/bin/plutil -replace StandardErrorPath -string /var/log/mastermind-executive/control/stderr.log "$CONTROL_PLIST"
 /usr/sbin/chown root:wheel "$CONTROL_PLIST"

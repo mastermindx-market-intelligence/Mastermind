@@ -241,7 +241,7 @@ def test_performance_contract_shape(tmp_account: None) -> None:
         assert "nav" in item
         assert "kind" in item
         # kind must never be "hypothetical" — no backfill of our allocation
-        assert item["kind"] in ("pre_inception", "realized"), (
+        assert item["kind"] in ("pre_inception", "realized", "unavailable"), (
             f"Unexpected kind={item['kind']!r} — hypothetical backfill must be removed"
         )
 
@@ -314,8 +314,9 @@ def test_china_performance_uses_native_index_history_not_legacy_fxi(
     assert perf["benchmark_name"] == "CSI 300"
     assert perf["benchmark_as_of"] == "2026-07-02"
     assert perf["total_return_pct"] == 0.0
-    assert perf["vs_benchmark_pct"] == pytest.approx(-5.0)
-    assert perf["vs_spy_pct"] == perf["vs_benchmark_pct"]  # compatibility alias
+    # Cash-only account value has no effective date; do not compare it with July 2 closes.
+    assert perf["vs_benchmark_pct"] is None
+    assert perf["vs_spy_pct"] is None  # compatibility alias
     assert perf["series"][-1]["spy_nav"] == pytest.approx(1_050_000.0)
 
 
@@ -366,7 +367,7 @@ def test_pre_inception_nav_is_flat(tmp_account: None) -> None:
         name="SPY",
     )
 
-    def fake_fetch(ticker: str):
+    def fake_fetch(ticker: str, *, cache_only: bool = False):
         if ticker == "SPY":
             return fake_spy
         return None
@@ -411,7 +412,7 @@ def test_spy_nav_varies(tmp_account: None) -> None:
     prices = [400.0, 410.0, 405.0, 420.0, 415.0, 430.0, 425.0, 440.0, 435.0, 450.0]
     fake_spy = pd.Series(prices, index=pd.to_datetime(dates), name="SPY")
 
-    def fake_fetch(ticker: str):
+    def fake_fetch(ticker: str, *, cache_only: bool = False):
         if ticker == "SPY":
             return fake_spy
         return None
@@ -724,9 +725,11 @@ def test_closed_market_build_then_open_fill_converges(tmp_account: None) -> None
     assert held == {"AAPL", "GOOG"}                         # converged toward the target book
 
 
-def test_max_drawdown_computed(tmp_account: None) -> None:
+def test_max_drawdown_computed(tmp_account: None, monkeypatch) -> None:
     from portfolio import paper_account
 
+    # Historical marks must belong to the synthetic account episode.
+    monkeypatch.setattr(paper_account, "_INCEPTION_DATE", "2026-01-02")
     # up then down — should detect a drawdown
     paper_account.rebalance({"AAPL": 0.5}, _PRICES_1, "2026-01-02")
     paper_account.mark(_PRICES_1, "2026-01-02")
@@ -743,19 +746,24 @@ def test_performance_safe_on_empty(tmp_account: None) -> None:
     from portfolio import paper_account
 
     perf = paper_account.performance()
-    assert perf["starting_nav"] == 1_000_000
+    assert perf["starting_nav"] is None
+    assert perf["current_nav"] is None
+    assert perf["availability"]["status"] == "unavailable"
     assert isinstance(perf["series"], list)
     assert isinstance(perf["note"], str)
 
 
-def test_api_performance_route_never_500() -> None:
-    """The /api/performance FastAPI route must always return 2xx."""
+def test_api_performance_route_never_500(tmp_path: Path, monkeypatch) -> None:
+    """A missing synthetic active book returns 2xx with explicitly unavailable values."""
     from fastapi.testclient import TestClient
     from app.main import app
+    from portfolio import registry
 
+    monkeypatch.setattr(registry, "data_dir", lambda portfolio_id=None: tmp_path / "missing")
     client = TestClient(app, raise_server_exceptions=False)
-    r = client.get("/api/performance")
+    r = client.get("/api/performance?portfolio=china")
     assert r.status_code == 200
     data = r.json()
-    assert "starting_nav" in data
-    assert data["starting_nav"] == 1_000_000
+    assert data["starting_nav"] is None
+    assert data["current_nav"] is None
+    assert data["availability"]["status"] == "unavailable"

@@ -2457,6 +2457,10 @@ class ExecutiveWorkerBroker:
             await self._operator_release_busy(state)
 
     async def _ohf_observer_lifecycle(self, operation, payload):
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
         if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
             raise BrokerStateError("OBSERVER_CONFLICT")
@@ -2494,6 +2498,9 @@ class ExecutiveWorkerBroker:
                         code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
                         else "GRANT_INVALIDATED"
                     ) from None
+            if (operation == "ohf-observer-enroll" and release_profile
+                    and getattr(active.adapter, "supports_progress_metadata", False) is not True):
+                raise BrokerStateError("CONTENT_UNAVAILABLE")
             state = active.adapter._generations.get(payload["generation"])
             native = state.turns.get(payload["turn"]) if state else None
             if not native:
@@ -2504,7 +2511,8 @@ class ExecutiveWorkerBroker:
             try:
                 if operation == "ohf-observer-enroll":
                     turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
-                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    result = active.adapter.mint_observer_grant(turn, binding=binding,
+                        **({"progress_metadata": True} if release_profile else {}))
                     return result
                 projection = getattr(active.adapter, "visible_turn_projection", None)
                 if projection is None:
@@ -2516,6 +2524,10 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
 
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         expected = {
             "attempt",
             "epoch",

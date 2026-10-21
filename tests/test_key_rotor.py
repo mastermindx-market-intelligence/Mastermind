@@ -553,7 +553,7 @@ class TestRotationLoop:
                 "what is the market doing?",
                 log_run=False,
                 _backend_override="cli",
-                _oauth_candidates=pinned,
+                _subscription_slots=pinned,
             )
         )
 

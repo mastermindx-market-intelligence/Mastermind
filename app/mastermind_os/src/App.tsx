@@ -12,6 +12,10 @@ import { Projects } from "./projects/Projects";
 import { Inbox } from "./inbox/Inbox";
 import { Knowledge } from "./knowledge/Knowledge";
 import { ConversationWindow } from "./conversations/ConversationWindow";
+import { HistoricalOriginalAnswers } from "./conversations/HistoricalOriginalAnswers";
+import { createAwaitingAnswerPort } from "./conversations/awaiting-answer-port";
+import { useQualifiedOriginalAnswer } from "./conversations/useQualifiedOriginalAnswer";
+import type { QualifiedSessionAnswer } from "./orchestration/executive-session-command-port";
 import { useObservedConversation } from "./conversations/useObservedConversation";
 import {
   OperationController,
@@ -1450,6 +1454,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   const sessionTargetKey = sessionOwner && sessionBinding
     ? sessionBinding.port.currentTargetRef()
     : null;
+  const answerView = useQualifiedOriginalAnswer();
+  // React may abandon an interrupted render. Only the committed layout
+  // publishes a current identity to the private reply acceptance fence.
+  useLayoutEffect(() => {
+    answerView.setCurrent(sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+      active: active === "Conversations",
+    } : null);
+  }, [active, signedIn, sessionBinding, sessionOwner?.principalScope,
+    sessionOwner?.generation, authRevision, selection?.workRef, selection?.rootJobId]);
   const ownsSession = (binding: MountedExecutiveSessionBinding, ctx: { principalScope: string; generation: string }, sequence: number) => {
     const liveBinding = completeExecutiveSessionBinding(window.MastermindMissionHost?.sessionCommandBinding);
     const liveContext = liveBinding ? readSessionOwnerContext(liveBinding) : null;
@@ -1457,7 +1475,29 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       window.MastermindMissionHost?.auth?.getState().status === "signed_in" &&
       liveContext?.principalScope === ctx.principalScope && liveContext.generation === ctx.generation;
   };
+  const makeSessionController = (
+    binding: MountedExecutiveSessionBinding,
+    ctx: { principalScope: string; generation: string },
+    sequence: number,
+  ): OperationController => {
+    const identity = { binding, principalScope: ctx.principalScope, generation: ctx.generation,
+      selectionSeq: sequence, authRevision };
+    // The real mounted host supplies the existing native qualified reader.
+    // An older unqualified fixture is fail-dark: it cannot clear an original
+    // hint by promoting a receipt without a validated answer.
+    const wrapper = createAwaitingAnswerPort<QualifiedSessionAnswer>({
+      port: binding.port,
+      readAnswer: (pointer, signal) => typeof binding.port.readQualifiedAnswer === "function"
+        ? binding.port.readQualifiedAnswer(pointer, signal)
+        : Promise.resolve({ receipt: { ...pointer, disposition: "unknown", reason: "UNKNOWN_RECEIPT" }, answer: null }),
+      isCurrent: () => ownsSession(binding, ctx, sequence) && answerView.isCurrent(identity),
+      onAdmission: () => { if (ownsSession(binding, ctx, sequence)) answerView.invalidate(); },
+      onAnswer: (pointer, answer) => answerView.stage(identity, pointer, answer),
+    });
+    return new OperationController(wrapper, binding.store);
+  };
   const invalidateSessionPresentation = () => {
+    answerView.invalidate();
     sessionSlot.current?.controller.invalidate();
     sessionSlot.current = null;
     const held = sessionPending.current;
@@ -1584,12 +1624,12 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       return;
     if (cur) cur.controller.invalidate();
     sessionSlot.current = {
-      controller: new OperationController(sessionBinding.port, sessionBinding.store),
+      controller: makeSessionController(sessionBinding, sessionOwner, selectionSeq.current),
       binding: sessionBinding,
       principalScope: sessionOwner.principalScope,
       generation: sessionOwner.generation,
     };
-  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation]);
+  }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation, authRevision]);
   useEffect(() => {
     // Discover the retained hint without invoking prepare, submit or even a
     // status request. This is available before any launch catalog is loaded.
@@ -1661,6 +1701,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     setSessionRefusal(null);
   }, [sessionBinding, sessionOwner?.principalScope, sessionOwner?.generation,
     selection?.workRef, selection?.rootJobId]);
+  useEffect(() => {
+    if (active !== "Conversations") answerView.leavePresentation();
+  }, [active]);
+
   useEffect(() => () => {
     commandSlot.current?.controller.invalidate();
     recoveryFlight.current++;
@@ -1725,6 +1769,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         setReopenedOperation(null);
         recoveryFlight.current++;
         setRecoverInFlight(false);
+        answerView.invalidate();
         sessionSlot.current?.controller.invalidate();
         const heldSession = sessionPending.current;
         if (heldSession) {
@@ -2629,7 +2674,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       sessionSlot.current.generation !== ctx.generation
     ) {
       sessionSlot.current?.controller.invalidate();
-      controller = new OperationController(binding.port, binding.store);
+      controller = makeSessionController(binding, ctx, selectionSeq.current);
       sessionSlot.current = {
         controller,
         binding,
@@ -2843,6 +2888,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   );
   const sessionLive =
     !!sessionBinding && signedIn && !!sessionOwner && !!sessionTargetKey;
+  // A qualified original READ is scoped to the current selected-session
+  // owner, even if the old target is now unavailable for NEW sends.
+  const presentedSessionAnswer = answerView.visible(
+    sessionBinding && sessionOwner && signedIn ? {
+      binding: sessionBinding,
+      principalScope: sessionOwner.principalScope,
+      generation: sessionOwner.generation,
+      selectionSeq: selectionSeq.current,
+      authRevision,
+    } : null,
+  );
   const sessionContinuationUnavailable =
     sessionBinding && !sessionLive ? "SESSION_UNAVAILABLE" : undefined;
   const sessionContinuationPanel = sessionBinding ? (
@@ -3124,6 +3180,17 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         <ConversationWindow
           locale={locale}
           continuation={sessionContinuationPanel}
+          historicalAnswers={<HistoricalOriginalAnswers
+            binding={sessionBinding}
+            selection={selection}
+            principalScope={sessionOwner?.principalScope ?? null}
+            generation={sessionOwner?.generation ?? null}
+            authRevision={authRevision}
+            selectionSeq={selectionSeq.current}
+            activeReadRef={presentedSessionAnswer?.answer.readRef}
+          />}
+          qualifiedAnswer={presentedSessionAnswer}
+          onQualifiedAnswerCommitted={answerView.acknowledgeRender}
           notesPresentation="collapsed"
           projection={observedConversation.projection}
           draft={observedConversation.draft}

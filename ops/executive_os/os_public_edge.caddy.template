@@ -2,7 +2,7 @@ mcp.mastermind-x.com {
   route {
     @get {
       method GET
-      path /os/ /os/auth/callback /workspace/programs/current /workspace/work/current /workspace/mission/current /workspace/mission/v3/current /workspace/result/current /workspace/window/current __ASSET_PATHS__
+      path /os/ /os/auth/callback /workspace/programs/current /workspace/work/current /workspace/mission/current /workspace/mission/v3/current /workspace/result/current /workspace/plan/current /workspace/operator/activity/current /workspace/window/current __ASSET_PATHS__
     }
     handle @get {
       reverse_proxy 127.0.0.1:__RELAY_PORT__ {
@@ -20,7 +20,7 @@ mcp.mastermind-x.com {
     }
     @post {
       method POST
-      path /os/executive/context /os/executive/submit /os/executive/status
+      path /os/executive/context /os/executive/submit /os/executive/status /os/executive/session/context /os/executive/session/reply /os/executive/session/references
     }
     handle @post {
       request_body {

@@ -1,0 +1,24 @@
+{
+  "schema": "mastermind.native_source_preimages.v1",
+  "files": {
+    "fabric_task.py": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
+    "remote_sub_exec.py": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
+    "glm_codex_exec.sh": "df2db87ce9fce63d78fb76388d20d8f7a876d71ce453a844255edec044b21c98",
+    "lease_broker.py": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
+    "remote_sub.sh": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
+    "pick.py": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
+    "glm_bound_claude.py": "7944854d9a55c38af9f492d574e567a87fae1799c8fa0f8ff6c35cf7e8d33d17",
+    "mm_codex_exec.sh": "8875be8db4ecdf0a16529687de7062d5215da43ba8f7c1481283f042bb218e9a",
+    "sub.sh": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866",
+    "support_bundle.py": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
+    "remote_sub_helpers.py": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
+    "quota_remote.py": "a1dab11da10264836e6271955b375b8e6508c23f23d0444c99d96464deb70f2b",
+    "artifact_delivery.py": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
+    "glm_host_account_source.py": "1ec07bd756e8b3edc66f39218b69876f2e9aa898b0b539319e93d8c2ff68587c",
+    "native_prestart_reconcile.py": "94e94625fefcfe09368b397493415dc6cd401a40f77d3787217f4fbf225e1dee",
+    "native_preexec_reconcile.py": "880b8e6a2d26206f69f03a3ed04ba23c1a575a692860313680bc83a7f992f119",
+    "pool_launcher.sh": "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78",
+    "bailian_keys.py": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
+    "qwen_exec.sh": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1"
+  }
+}

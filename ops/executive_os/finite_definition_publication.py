@@ -2,11 +2,12 @@
 
 This writes no credential, provider state, CEO/COO arm, Runtime row or service.
 It requires a root-installed release, a stopped/quiescent Control+Worker, and
-five exact already-rendered bytes from the selected trusted host/Capacity input.
+five exact rendered artifacts from the selected trusted host/Capacity input.
 An interrupted write is EFFECT_UNKNOWN and must be reconciled, never replayed.
 """
 from __future__ import annotations
 
+from contextlib import ExitStack
 import fcntl
 import hashlib
 import os
@@ -57,9 +58,20 @@ def verify_candidate(artifacts: Mapping[str, bytes]) -> dict[str, str]:
         import json
         from control_plane.fabric_attended_routing import FINITE_SOCKET_PATH
         worker = json.loads(artifacts["worker.json"])
-        # Validate the full registered Capacity token schema before any effect.
-        CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
-            PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+        # This structural check grants neither source acceptance nor enrollment.
+        # Native generation/source joins are checked by the locked native owner.
+        if "native_capacity_enrollment" in worker:
+            from ops.executive_os.capacity_source_contract import validate_native_subscription_capacity_enrollment
+            native = validate_native_subscription_capacity_enrollment(worker["native_capacity_enrollment"])
+            from control_plane.native_capacity_v2 import TOKEN
+            if (native["enrollment_state"] != "unenrolled"
+                    or native["host_ref"] != physical.host_ref
+                    or type(worker.get("capacity_capability_id")) is not str
+                    or TOKEN.fullmatch(worker["capacity_capability_id"]) is None):
+                raise FinitePublicationRefused("initial native definition must remain unenrolled")
+        else:
+            CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
+                PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
         if (type(worker.get("capacity_capability_id")) is not str
                 or not worker["capacity_capability_id"]
                 or HOST_REF_RE.fullmatch(physical.host_ref) is None
@@ -144,6 +156,15 @@ def _trusted_control_root(lock_fd: int) -> os.stat_result:
     return held
 
 
+def _require_definition_absent(parent_fd: int, name: str) -> None:
+    if _object_at(parent_fd, name) is not None:
+        raise FinitePublicationRefused("definition already exists, inspect original")
+    prefix = "." + name + "."
+    if any(value.startswith(prefix) and value.endswith(".stage")
+           for value in os.listdir(parent_fd)):
+        raise FinitePublicationRefused("prior finite private stage requires reconciliation")
+
+
 def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
                      uid: int, gid: int, mode: int = 0o444,
                      parent_fd: int | None = None) -> dict[str, str]:
@@ -178,14 +199,7 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
                 != (visible_parent.st_uid, visible_parent.st_gid,
                     stat.S_IMODE(visible_parent.st_mode))):
             raise FinitePublicationRefused("original locked parent directory moved")
-        if _object_at(parent_fd, directory.name) is not None:
-            raise FinitePublicationRefused("definition already exists, inspect original")
-        # A prior crash can leave an unpublished private inode. That is an
-        # original EFFECT_UNKNOWN, not clearance to create a second generation.
-        prefix = "." + directory.name + "."
-        if any(name.startswith(prefix) and name.endswith(".stage")
-               for name in os.listdir(parent_fd)):
-            raise FinitePublicationRefused("prior finite private stage requires reconciliation")
+        _require_definition_absent(parent_fd, directory.name)
         os.mkdir(stage_name, 0o700, dir_fd=parent_fd)
         stage_created = True
         stage_fd = os.open(stage_name,
@@ -309,7 +323,9 @@ def _write_exclusive(directory: Path, artifacts: Mapping[str, bytes], *,
                 pass
 
 
-def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin) -> dict[str, bytes]:
+def _render_owner_definition(prior, expected_release_sha: str, *, host_ref: str,
+                             capacity_capability_id: str,
+                             native_capacity_enrollment=None) -> dict[str, bytes]:
     """Reproduce the sealed installed worker from the incumbent root source.
 
     The caller already holds the one original config lock and has verified
@@ -326,8 +342,8 @@ def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin
     )
     from ops.executive_os.release_manifest import verify
 
-    if (os.geteuid() != 0 or type(join) is not CapacityJoin
-            or HOST_REF_RE.fullmatch(join.host_ref) is None
+    if (os.geteuid() != 0 or type(host_ref) is not str
+            or HOST_REF_RE.fullmatch(host_ref) is None
             or type(expected_release_sha) is not str or len(expected_release_sha) != 40
             or any(c not in "0123456789abcdef" for c in expected_release_sha)):
         raise FinitePublicationRefused("sealed root source identity required")
@@ -363,13 +379,11 @@ def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin
             release_root=str(release), release_commit=expected_release_sha,
             release_tree=manifest["tree_sha"],
             release_manifest_sha256=sha256(manifest_bytes),
-            python_binary=PYTHON, host_ref=join.host_ref, model_class="routine",
+            python_binary=PYTHON, host_ref=host_ref, model_class="routine",
             execution_profile_digest=profile.profile_digest,
             routing_root_id=ROOT_ID, routing_parent_run_id=ROOT_ID,
-            max_turns=2, capacity_capability_id=join.capacity_capability_id)
-        if (sha256(artifacts["worker.json"]) != join.worker_source_config_digest
-                or set(artifacts) != FILES):
-            raise FinitePublicationRefused("Capacity-bound source digest changed")
+            max_turns=2, capacity_capability_id=capacity_capability_id,
+            native_capacity_enrollment=native_capacity_enrollment)
         verify_candidate(artifacts)
         return artifacts
     except FinitePublicationRefused:
@@ -378,14 +392,18 @@ def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin
         raise FinitePublicationRefused("incumbent sealed renderer refused") from exc
 
 
-def publish_disarmed_definition(expected_release_sha: str, expected_control_sha256: str,
-                                artifacts: dict[str, bytes], *,
-                                verified_capacity_binding) -> dict[str, object]:
-    """One incumbent root/Capacity-gated publication with exact source readback.
+def render_owner_definition(prior, expected_release_sha: str, join: CapacityJoin) -> dict[str, bytes]:
+    """Retain the original legacy join and exact source digest contract."""
+    if type(join) is not CapacityJoin:
+        raise FinitePublicationRefused("sealed root source identity required")
+    artifacts = _render_owner_definition(prior, expected_release_sha,
+        host_ref=join.host_ref, capacity_capability_id=join.capacity_capability_id)
+    if sha256(artifacts["worker.json"]) != join.worker_source_config_digest:
+        raise FinitePublicationRefused("Capacity-bound source digest changed")
+    return artifacts
 
-    Trusted host code selects the callback. No request, config file, plugin or
-    model selects source code or a worker. No new scheduler or lifecycle owner.
-    """
+
+def _require_publication_inputs(expected_release_sha, expected_control_sha256):
     if (os.geteuid() != 0 or type(expected_release_sha) is not str
             or len(expected_release_sha) != 40
             or any(c not in "0123456789abcdef" for c in expected_release_sha)
@@ -393,85 +411,79 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
             or len(expected_control_sha256) != 64
             or any(c not in "0123456789abcdef" for c in expected_control_sha256)):
         raise FinitePublicationRefused("exact root release and Control preimage required")
-    if not callable(verified_capacity_binding):
-        raise FinitePublicationRefused("incumbent Capacity owner is required")
-    if type(artifacts) is not dict:
-        raise FinitePublicationRefused("exact source bundle required")
-    # Never publish from the caller's mutable mapping after validating a copy.
-    # Every member must be immutable bytes, not an externally owned bytearray.
-    sealed = dict(artifacts)
-    hashes = verify_candidate(sealed)
-    import json
-    physical, = _bindings(sealed["bindings.json"])
-    worker = json.loads(sealed["worker.json"])
-    try:
-        join = CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
-                            PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
-    except CapacityJoinError as exc:
-        raise FinitePublicationRefused("Capacity identity is not admissible") from exc
+
+
+def _publish_selected_definition(expected_release_sha, expected_control_sha256, prepare_locked):
+    """The original publication interval, shared by two closed preparations."""
+    _require_publication_inputs(expected_release_sha, expected_control_sha256)
     host = owner.ProductionCeoSubmitHost()
     lock_fd = -1
     effect_possible = False
     try:
-        host.require_exact_install(expected_release_sha)
-        host.require_transaction_absent()
-        host._config_root_safe()
-        lock_fd = os.open(owner.CONFIG_ROOT,
-            os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as exc:
-            raise FinitePublicationRefused(
-                "incumbent Control publication mutex occupied") from exc
-        _trusted_control_root(lock_fd)
-        host.require_exact_install(expected_release_sha)
-        host.require_transaction_absent()
-        host.require_services_already_stopped()
-        host.require_service_uids_quiescent()
-        prior = host.load_unarmed_configs(expected_release_sha)
-        host.require_runtime_quiescent(prior)
-        if (prior.control_sha256 != expected_control_sha256
-                or any(prior.control.get(k, False) is not False for k in
-                       ("ceo_submit_armed", "coo_autonomy_armed",
-                        "coo_operator_harness_armed", "fabric_bridge_armed", "coo_foreground_only"))
-                or prior.worker.get("operator_harness_armed") is not False):
-            raise FinitePublicationRefused("Control and primary Worker must remain disarmed")
-        if (DESTINATION.parent != owner.CONFIG_ROOT
-                or verified_capacity_binding(join) is not True):
-            raise FinitePublicationRefused("incumbent Capacity/config binding differs")
-        # Signed-source reproduction is committed under the SAME mutex.
-        expected = render_owner_definition(prior, expected_release_sha, join)
-        if expected != sealed:
-            raise FinitePublicationRefused("source-rendered finite definition differs")
-        effect_possible = True
-        hashes_published = _write_exclusive(DESTINATION, sealed, uid=0, gid=0,
-                                            parent_fd=lock_fd)
-        if hashes_published != hashes:
-            raise FinitePublicationEffectUnknown("published disk digest differs")
-        # Preserve the original effect state on any post-publication drift.
-        host.require_exact_install(expected_release_sha)
-        host.require_transaction_absent()
-        host.require_services_already_stopped()
-        host.require_service_uids_quiescent()
-        current = host.load_unarmed_configs(expected_release_sha)
-        host.require_runtime_quiescent(current)
-        host._config_root_safe()
-        if (current.control_sha256 != prior.control_sha256
-                or current.worker_sha256 != prior.worker_sha256
-                or verified_capacity_binding(join) is not True):
-            raise FinitePublicationEffectUnknown("original config/Capacity postimage changed")
-        return {"state": "STAGED_DISARMED_DEFINITION", "release": expected_release_sha,
-                "control_preimage_sha256": expected_control_sha256,
-                "artifacts": hashes_published, "effect": "APPLIED",
-                "admitted_worker": False, "service_started": False}
-    except FinitePublicationRefused:
+        with ExitStack() as custody:
+            host.require_exact_install(expected_release_sha)
+            host.require_transaction_absent()
+            host._config_root_safe()
+            lock_fd = os.open(owner.CONFIG_ROOT,
+                os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0))
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise FinitePublicationRefused("incumbent Control publication mutex occupied") from exc
+            _trusted_control_root(lock_fd)
+            host.require_exact_install(expected_release_sha)
+            host.require_transaction_absent()
+            host.require_services_already_stopped()
+            host.require_service_uids_quiescent()
+            prior = host.load_unarmed_configs(expected_release_sha)
+            host.require_runtime_quiescent(prior)
+            if (prior.control_sha256 != expected_control_sha256
+                    or any(prior.control.get(k, False) is not False for k in
+                           ("ceo_submit_armed", "coo_autonomy_armed",
+                            "coo_operator_harness_armed", "fabric_bridge_armed", "coo_foreground_only"))
+                    or prior.worker.get("operator_harness_armed") is not False):
+                raise FinitePublicationRefused("Control and primary Worker must remain disarmed")
+            if DESTINATION.parent != owner.CONFIG_ROOT:
+                raise FinitePublicationRefused("incumbent Capacity/config binding differs")
+            sealed, recheck = prepare_locked(prior, lock_fd, custody)
+            hashes = verify_candidate(sealed)
+            _trusted_control_root(lock_fd)
+            effect_possible = True
+            try:
+                hashes_published = _write_exclusive(DESTINATION, sealed, uid=0, gid=0,
+                                                    parent_fd=lock_fd)
+            except FinitePublicationRefused:
+                # Only this incumbent writer can prove its stage never became
+                # canonical and that its own private cleanup completed.
+                effect_possible = False
+                raise
+            if hashes_published != hashes:
+                raise FinitePublicationEffectUnknown("published disk digest differs")
+            host.require_exact_install(expected_release_sha)
+            host.require_transaction_absent()
+            host.require_services_already_stopped()
+            host.require_service_uids_quiescent()
+            current = host.load_unarmed_configs(expected_release_sha)
+            host.require_runtime_quiescent(current)
+            host._config_root_safe()
+            _trusted_control_root(lock_fd)
+            if (current.control_sha256 != prior.control_sha256
+                    or current.worker_sha256 != prior.worker_sha256):
+                raise FinitePublicationEffectUnknown("original config/Capacity postimage changed")
+            recheck(current)
+            return {"state": "STAGED_DISARMED_DEFINITION", "release": expected_release_sha,
+                    "control_preimage_sha256": expected_control_sha256,
+                    "artifacts": hashes_published, "effect": "APPLIED",
+                    "admitted_worker": False, "service_started": False}
+    except FinitePublicationRefused as exc:
+        if effect_possible:
+            raise FinitePublicationEffectUnknown("original finite publication effect unconfirmed") from exc
         raise
     except FinitePublicationEffectUnknown:
         raise
     except Exception as exc:
         if effect_possible:
-            raise FinitePublicationEffectUnknown(
-                "original finite publication effect unconfirmed") from exc
+            raise FinitePublicationEffectUnknown("original finite publication effect unconfirmed") from exc
         raise FinitePublicationRefused("original Control/Capacity qualification refused") from exc
     finally:
         if lock_fd >= 0:
@@ -479,6 +491,170 @@ def publish_disarmed_definition(expected_release_sha: str, expected_control_sha2
                 os.close(lock_fd)
             except OSError:
                 pass
+
+
+def publish_disarmed_definition(expected_release_sha: str, expected_control_sha256: str,
+                                artifacts: dict[str, bytes], *,
+                                verified_capacity_binding) -> dict[str, object]:
+    """Retain the legacy root/Capacity-gated entry; native data cannot enter it."""
+    _require_publication_inputs(expected_release_sha, expected_control_sha256)
+    if not callable(verified_capacity_binding):
+        raise FinitePublicationRefused("incumbent Capacity owner is required")
+    if type(artifacts) is not dict:
+        raise FinitePublicationRefused("exact source bundle required")
+    sealed = dict(artifacts)
+    verify_candidate(sealed)
+    import json
+    physical, = _bindings(sealed["bindings.json"])
+    worker = json.loads(sealed["worker.json"])
+    if "native_capacity_enrollment" in worker:
+        raise FinitePublicationRefused("native definition requires its initial owner path")
+    try:
+        join = CapacityJoin(physical.host_ref, worker["capacity_capability_id"],
+                            PROVIDER_CAPACITY_SCHEMA, physical.worker_source_config_digest)
+    except CapacityJoinError as exc:
+        raise FinitePublicationRefused("Capacity identity is not admissible") from exc
+
+    def prepare(prior, lock_fd, custody):
+        if verified_capacity_binding(join) is not True:
+            raise FinitePublicationRefused("incumbent Capacity/config binding differs")
+        if render_owner_definition(prior, expected_release_sha, join) != sealed:
+            raise FinitePublicationRefused("source-rendered finite definition differs")
+        def recheck(current):
+            if verified_capacity_binding(join) is not True:
+                raise FinitePublicationEffectUnknown("original config/Capacity postimage changed")
+        return sealed, recheck
+
+    return _publish_selected_definition(expected_release_sha, expected_control_sha256, prepare)
+
+
+def _require_native_installed_owner(expected_release_sha):
+    import sys
+    from ops.executive_os.finite_service_lifecycle import SYSTEM
+    if (sys.platform != "darwin" or not sys.flags.isolated or not sys.dont_write_bytecode
+            or Path(__file__).absolute() != SYSTEM / "releases" / expected_release_sha /
+                "ops/executive_os/finite_definition_publication.py"):
+        raise FinitePublicationRefused("installed isolated native publication owner required")
+
+
+def _require_initial_native_context(prior, custody):
+    import grp
+    import pwd
+    from control_plane.codex_provider_realm import _native_open
+    from control_plane.executive_physical_resources import load_physical_resource_policy
+    from ops.executive_os.finite_reference_assignment import require_initial_reference_context
+    from ops.executive_os.subscription_provider_credential import _assert_worker_quiescent
+    from ops.executive_os.finite_enrollment_completion import _absent
+    from ops.executive_os.finite_service_lifecycle import LABEL, SOCKET, checked_command, parse_override
+    require_initial_reference_context(dict(prior.control), dict(prior.worker),
+                                      load_physical_resource_policy())
+    # No process is weaker than no activation route. Reuse the completion
+    # owner's observe-only finite lifecycle checks; never unload or clean up.
+    if (owner.ProductionCeoSubmitHost()._loaded_observe_only(LABEL)
+            or parse_override(checked_command([
+                "/bin/launchctl", "print-disabled", "system"]).stdout.decode())
+                not in {"default", "disabled"}):
+        raise FinitePublicationRefused("finite service must remain absent and disabled")
+    _absent(Path(SOCKET))
+    home = Path("/private/var/db/mastermind-executive/workers/minimax-finite-01/provider-home")
+    user = pwd.getpwnam("_mastermind_minimax")
+    group = grp.getgrnam("_mastermind_minimax")
+    if (user.pw_uid, user.pw_gid, group.gr_gid, user.pw_dir, user.pw_shell) != (
+            470, 470, 470, str(home), "/usr/bin/false"):
+        raise FinitePublicationRefused("native principal identity unavailable")
+    _assert_worker_quiescent(470)
+    _, info = custody.enter_context(_native_open(home, directory=True, private_uid=470))
+    if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (470, 470, 0o700):
+        raise FinitePublicationRefused("native private HOME unavailable")
+
+
+def _read_initial_native_source(select_accepted_native_source):
+    """Observe selection; this never creates acceptance, materializes or exports."""
+    from control_plane.codex_provider_realm import _native_open, _native_read_config
+    from ops.executive_os import capacity_host_artifacts as source_owner
+    from ops.executive_os.capacity_source_contract import SYSTEM_ROOT, validate_native_registration_source
+    source = validate_native_registration_source(select_accepted_native_source())
+    source_root = SYSTEM_ROOT / "capacity-sources/macro" / source["release_commit"]
+    with _native_open(source_root, directory=True) as (_, info):
+        if (info.st_uid, info.st_gid, stat.S_IMODE(info.st_mode)) != (0, 0, 0o555):
+            raise FinitePublicationRefused("native source root custody unavailable")
+        manifest, _ = source_owner._verify_installed_repair_source(source_root, source["release_commit"])
+        if manifest["schema_version"] != "mastermind.capacity_source_transport/native_v1":
+            raise FinitePublicationRefused("native complete source profile required")
+    export_path = SYSTEM_ROOT / "config/capacity-source-components-native-v2" / (source["release_commit"] + ".json")
+    document = _native_read_config(export_path, source["export_sha256"])
+    if (type(document) is not dict
+            or set(document) != {"repository_commit", "previous_repository_commit", "material_source_digest", "registrations"}
+            or document["repository_commit"] != source["release_commit"]
+            or document["previous_repository_commit"] != source["previous_release_commit"]
+            or document["material_source_digest"] != source["material_source_digest"]
+            or type(document["registrations"]) is not list):
+        raise FinitePublicationRefused("accepted native source export differs")
+    candidates = [row for row in document["registrations"] if type(row) is dict and
+        (row.get("provider"), row.get("billing_mode"), row.get("credential_kind"),
+         row.get("execution_surface"), row.get("registration_state")) ==
+        ("minimax", "subscription", "api_key", "native_cli", "registered")]
+    if len(candidates) != 1:
+        raise FinitePublicationRefused("one accepted finite MiniMax registration required")
+    return source, document, candidates[0]["capacity_capability_id"]
+
+
+def _native_candidate_join(artifacts, document):
+    import json
+    from control_plane import native_capacity_v2 as v2
+    from ops.executive_os.capacity_source_contract import validate_native_registration_document
+    verify_candidate(artifacts)
+    worker = json.loads(artifacts["worker.json"])
+    row = validate_native_registration_document(worker, document)
+    physical, = _bindings(artifacts["bindings.json"])
+    return v2.validate_join({"schema": v2.JOIN_SCHEMA, "provider_capacity_schema": v2.SCHEMA,
+        "host_ref": physical.host_ref, "capacity_capability_id": row["capacity_capability_id"],
+        "capability_generation": row["capability_generation"],
+        "worker_source_config_digest": physical.worker_source_config_digest})
+
+
+def publish_initial_native_from_installed_sources(expected_release_sha: str,
+        expected_control_sha256: str, *, select_accepted_native_source) -> dict[str, object]:
+    """Initial, unenrolled publication through the incumbent root/Capacity owners.
+
+    Installed trusted owner code supplies the read-only, no-argument selector.
+    No request, plugin, model or config selects that callable or its four pins.
+    Its current/predecessor acceptance is separate from complete Git integrity;
+    absent acceptance or export must refuse. There is no legacy migration,
+    provider observation, enrollment grant, Runtime admission or service effect.
+    """
+    _require_publication_inputs(expected_release_sha, expected_control_sha256)
+    if not callable(select_accepted_native_source):
+        raise FinitePublicationRefused("accepted native Capacity source owner required")
+    _require_native_installed_owner(expected_release_sha)
+
+    def prepare(prior, lock_fd, custody):
+        from ops.executive_os.finite_reference_assignment import prepare_finite_reference_stanza
+        _require_definition_absent(lock_fd, DESTINATION.name)
+        _require_initial_native_context(prior, custody)
+        selected = _read_initial_native_source(select_accepted_native_source)
+        source, document, capability = selected
+        # Exactly one initial generation, after first-publication qualification.
+        stanza = prepare_finite_reference_stanza(registration_source=source,
+                                                 realm_generation=1)
+        def render(current):
+            return _render_owner_definition(current, expected_release_sha,
+                host_ref=stanza["host_ref"], capacity_capability_id=capability,
+                native_capacity_enrollment=stanza)
+        sealed = render(prior)
+        joined = _native_candidate_join(sealed, document)
+        def recheck(current):
+            _require_initial_native_context(current, custody)
+            if _read_initial_native_source(select_accepted_native_source) != selected:
+                raise FinitePublicationRefused("accepted native source selection changed")
+            reproduced = render(current)
+            if reproduced != sealed or _native_candidate_join(reproduced, document) != joined:
+                raise FinitePublicationRefused("source-rendered native definition differs")
+        # Reproduction uses the retained stanza, never a second reference mint.
+        recheck(prior)
+        return sealed, recheck
+
+    return _publish_selected_definition(expected_release_sha, expected_control_sha256, prepare)
 
 
 def publish_from_installed_sources(expected_release_sha: str,
