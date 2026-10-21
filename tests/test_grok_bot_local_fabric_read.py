@@ -74,7 +74,9 @@ def test_status_returns_only_bounded_fields_and_is_not_authorization(monkeypatch
 def test_result_consumes_only_terminal_matching_root(monkeypatch, tmp_path):
     adapter, seen = _capture(monkeypatch, tmp_path)
     response = client.result(adapter, RUN, ROOT, ROOT)
-    assert response["text"] == "OK\n"
+    assert response["content_exposed"] is False
+    assert response["content_policy"] == "DIGEST_ONLY_UNAUTHENTICATED"
+    assert "text" not in response
     assert response["result_sha256"] == hashlib.sha256(b"OK\n").hexdigest()
     assert response["result_bytes"] == 3
     assert response["accepted"] is True
@@ -132,13 +134,15 @@ def test_invalid_status_is_not_canonical(monkeypatch, tmp_path, bad):
     monkeypatch.setattr(client, "_call", orig)
 
 
-def test_result_bounds_and_invalid_utf8_fail_closed(monkeypatch, tmp_path):
+def test_result_bounds_do_not_expose_opaque_worker_bytes(monkeypatch, tmp_path):
     adapter, seen = _capture(monkeypatch, tmp_path, result=b"\xff")
     with pytest.raises(client.Refused, match="RESULT_BOUND_INVALID"):
         client.result(adapter, RUN, ROOT, ROOT, client.MAX_RESULT_BYTES + 1)
     assert seen == []
-    with pytest.raises(client.Refused, match="RESULT_NOT_UTF8"):
-        client.result(adapter, RUN, ROOT, ROOT)
+    projection = client.result(adapter, RUN, ROOT, ROOT)
+    assert projection["content_exposed"] is False
+    assert "text" not in projection
+    assert projection["result_bytes"] == 1
     assert len(seen) == 2
 
 
@@ -276,3 +280,17 @@ def test_subprocess_timeout_reaps_its_original_process(monkeypatch, tmp_path):
         pid = int(pidfile.read_text())
         with pytest.raises(ProcessLookupError):
             os.kill(pid, 0)
+
+
+def test_secret_shaped_worker_result_does_not_enter_transport(monkeypatch, tmp_path):
+    secret = b"BEGIN SECRET PRIVATE TOKEN DO NOT LEAK"
+    adapter, seen = _capture(monkeypatch, tmp_path, result=secret)
+    value = client.result(adapter, RUN, ROOT, ROOT)
+    payload = json.dumps(value, sort_keys=True).encode()
+    assert b"SECRET" not in payload
+    assert b"PRIVATE" not in payload
+    assert secret not in payload
+    assert value["content_exposed"] is False
+    assert value["result_bytes"] == len(secret)
+    assert value["result_sha256"] == hashlib.sha256(secret).hexdigest()
+    assert len(seen) == 2

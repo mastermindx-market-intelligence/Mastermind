@@ -36,7 +36,14 @@ a fixed working directory. The subprocess stdout is read with a bounded
 buffer, and timeout/error paths terminate the original process group.
 
 The client performs only incumbent adapter status and result calls. Returned
-status fields are closed and output is bounded. For a result, the incumbent
+status fields are closed and output is bounded. The output intentionally
+**does not expose raw worker result text**: it includes only result length,
+SHA-256 digest and the typed content-exposed=false flag because this
+Mac-user-local caller lacks a cryptographically authenticated Grok principal.
+The original attended Fabric owner remains the only existing route for
+reviewed exact result bytes. To provide a Bot with arbitrary result content,
+the future authorized Executive principal/result-consumption path must be
+qualified instead of adding a caller-selectable show-text flag. For a result, the incumbent
 status must prove exact matching root AND immediate parent, TERMINAL state,
 integer rc=0 and actual result availability. Unknown, pending, changed or mismatched states
 fail closed. It never retries a request, starts a child or records acceptance.
@@ -65,7 +72,8 @@ backend_unavailable for this session. That authenticated route remains a
 separate not-yet-proven wave under issue #983; VPS/Steward is not a dependency
 of the already-proven Mac-local manual route.
 
-Tests in tests/test_grok_bot_local_fabric_read.py cover root and parent correlation,
+Tests in tests/test_grok_bot_local_fabric_read.py cover opaque secret-result
+non-disclosure, root and parent correlation,
 fixed executable/digest denial, stripped ambient auth environment, byte/time
 bounds, subprocess cleanup, parser/backend refusals and absence of
 side-effecting tool commands. Source build does not prove that the native

@@ -217,10 +217,10 @@ def result(
     ):
         raise Refused("RESULT_NOT_READY")
     raw = _call(adapter, ["result", _ident(run_id), "--max-bytes", str(max_bytes)], max_bytes)
-    try:
-        decoded = raw.decode("utf-8", errors="strict")
-    except UnicodeDecodeError:
-        raise Refused("RESULT_NOT_UTF8") from None
+    # No authenticated Grok-specific result-recipient binding exists yet.
+    # Never echo arbitrary worker bytes into the model/chat/Slack transcript.
+    # A future principal-authenticated consumer must use canonical Executive
+    # result consumption, not a caller-supplied --show-text escape switch.
     return {
         "schema": SCHEMA,
         "action": "result",
@@ -230,7 +230,8 @@ def result(
         "accepted": value.get("accepted") is True,
         "result_sha256": hashlib.sha256(raw).hexdigest(),
         "result_bytes": len(raw),
-        "text": decoded,
+        "content_exposed": False,
+        "content_policy": "DIGEST_ONLY_UNAUTHENTICATED",
     }
 
 
