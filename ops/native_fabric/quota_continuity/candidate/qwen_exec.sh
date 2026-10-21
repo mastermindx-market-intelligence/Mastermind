@@ -149,6 +149,7 @@ QWEN_PROJECTION_BASIS = "stream_parse"
 CAT_COMPLETED = "QWEN_CLOSED_COMPLETED"
 CAT_MALFORMED_EVENT = "QWEN_CLOSED_MALFORMED_EVENT"
 CAT_IO_ERROR = "QWEN_CLOSED_IO_ERROR"
+CAT_ENCODING_ERROR = "QWEN_CLOSED_ENCODING_ERROR"
 CAT_NONOBJECT_EVENT = "QWEN_CLOSED_NONOBJECT_EVENT"
 CAT_THREAD_INVALID = "QWEN_CLOSED_THREAD_INVALID"
 CAT_TURN_STATE_INVALID = "QWEN_CLOSED_TURN_STATE_INVALID"
@@ -301,6 +302,10 @@ def stream_final_jsonl(in_f: IO[str], out_f: IO[str], thread_path: str,
     except UnicodeDecodeError:
         failed = True
         note(CAT_MALFORMED_EVENT)
+        raise
+    except UnicodeError:
+        failed = True
+        note(CAT_ENCODING_ERROR)
         raise
     except OSError:
         failed = True
@@ -516,6 +521,9 @@ classify_limit() {
 CLASSIFIER_RULE="none"
 CLASSIFIER_CHANNEL="none"
 CLASSIFIER_STRUCTURE="none"
+CLASSIFIER_ANSWER_MATCH="false"
+CLASSIFIER_STDERR_MATCH="false"
+CLASSIFIER_RAW_EVENT_MATCH="false"
 
 # Fixed enum: which classifier kind the winning EXISTING rule reports.
 provenance_kind_of_rule() {
@@ -572,7 +580,8 @@ provenance_rule_matches() {
 }
 
 # Determine the winning rule in classify_limit order and which channel file(s)
-# carried it. Channel enums: answer | stderr | raw_event | multiple | unknown.
+# carried it. Fixed per-channel match booleans retain all three sources even
+# when the compatibility channel enum is multiple. Channel enums: answer | stderr | raw_event | multiple | unknown.
 # The same evidence is reported per source channel, so an ordinary numeric 429
 # found in the projected answer text is distinguishable from the same match on
 # the provider stderr or the raw event stream. unknown covers evidence spanning
@@ -583,6 +592,9 @@ classify_provenance() {
   CLASSIFIER_RULE="none"
   CLASSIFIER_CHANNEL="none"
   CLASSIFIER_STRUCTURE="none"
+  CLASSIFIER_ANSWER_MATCH="false"
+  CLASSIFIER_STDERR_MATCH="false"
+  CLASSIFIER_RAW_EVENT_MATCH="false"
   _cp_rule=""
   for _cp_r in json_code_invalid_api_key status_token_auth_401               json_code_access_denied status_token_auth_403               rate_limit_429 json_code_quota status_token_quota_402               reconnect_quota; do
     if provenance_rule_matches "$_cp_r" "$_cp_scan"; then
@@ -604,11 +616,15 @@ classify_provenance() {
     _cp_var="${_cp_pair#*:}"
     eval "_cp_path=\"\${$_cp_var:-}\""
     if [ -n "$_cp_path" ] && provenance_rule_matches "$_cp_rule" "$_cp_path"; then
+      case "$_cp_ch" in
+        answer) CLASSIFIER_ANSWER_MATCH="true" ;;
+        stderr) CLASSIFIER_STDERR_MATCH="true" ;;
+        raw_event) CLASSIFIER_RAW_EVENT_MATCH="true" ;;
+      esac
       if [ -z "$_cp_hits" ]; then
         _cp_hits="$_cp_ch"
       else
         _cp_hits="multiple"
-        break
       fi
     fi
   done
@@ -972,7 +988,7 @@ while [ "$ATTEMPT" -lt "$MAX_KEYS" ]; do
   # Observational provenance only: runs after KIND is fixed and can never
   # change the classification, the failover decision, the cooldown or any rc.
   classify_provenance "$SCAN_FILE" >/dev/null 2>&1 || true
-  log "CLASSIFIER_PROVENANCE kind_reported=${KIND} rule=${CLASSIFIER_RULE} channel=${CLASSIFIER_CHANNEL} structure=${CLASSIFIER_STRUCTURE} basis=classification_inference http_observed=false" || true
+  log "CLASSIFIER_PROVENANCE kind_reported=${KIND} rule=${CLASSIFIER_RULE} channel=${CLASSIFIER_CHANNEL} structure=${CLASSIFIER_STRUCTURE} answer_match=${CLASSIFIER_ANSWER_MATCH} stderr_match=${CLASSIFIER_STDERR_MATCH} raw_event_match=${CLASSIFIER_RAW_EVENT_MATCH} basis=classification_inference http_observed=false" || true
   if should_failover "$RC" "$KIND"; then
     case "$KIND" in
       429)

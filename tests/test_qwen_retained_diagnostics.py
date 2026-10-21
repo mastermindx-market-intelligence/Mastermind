@@ -34,6 +34,7 @@ PROJECTION_DIAG_RE = re.compile(
 KNOWN_CLOSED = {
     "QWEN_CLOSED_COMPLETED",
     "QWEN_CLOSED_IO_ERROR",
+    "QWEN_CLOSED_ENCODING_ERROR",
     "QWEN_CLOSED_MALFORMED_EVENT",
     "QWEN_CLOSED_NONOBJECT_EVENT",
     "QWEN_CLOSED_THREAD_INVALID",
@@ -758,6 +759,7 @@ def test_run_level_provenance_line_format_and_fixed_tokens():
     )
     assert set(tokens) == {
         "kind_reported", "rule", "channel", "structure", "basis",
+        "answer_match", "stderr_match", "raw_event_match",
         "http_observed",
     }
     assert tokens["basis"] == "classification_inference"
@@ -781,7 +783,7 @@ def test_run_level_diag_lines_are_bounded_and_keyless():
     for marker in ("PROJECTION_DIAG outcome=", "CLASSIFIER_PROVENANCE "):
         for line in text.splitlines():
             if marker in line and line.lstrip().startswith("log "):
-                assert len(line) <= 240
+                assert len(line) <= 440
                 assert "PICK_ERR" not in line
                 assert "$RAW" not in line and "$TEXT_FILE" not in line
 
@@ -1003,3 +1005,98 @@ elif command=='exec-codex':
         assert b"DIAG" not in consumer_result and b"CLASSIFIER_PROVENANCE" not in consumer_result
     else:
         assert b"CLASSIFIER_PROVENANCE" in consumer_result
+
+
+@pytest.mark.parametrize("failure", ["write", "flush"])
+def test_encoding_failure_never_reports_completed_and_propagates(tmp_path, capsys, failure):
+    module = load_projection_module(tmp_path)
+    class BrokenOutput(io.StringIO):
+        def write(self, text):
+            if failure == "write":
+                raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "synthetic")
+            return super().write(text)
+        def flush(self):
+            raise UnicodeEncodeError("utf-8", "\ud800", 0, 1, "synthetic")
+    with pytest.raises(UnicodeEncodeError):
+        module.stream_final_jsonl(io.StringIO(completed_stream()), BrokenOutput(),
+                                  str(tmp_path / "thread"), str(tmp_path / "raw"))
+    line = capsys.readouterr().err.strip()
+    assert "closed=QWEN_CLOSED_ENCODING_ERROR" in line
+    assert "failed=true" in line
+    assert "closed=QWEN_CLOSED_COMPLETED" not in line
+    assert PROJECTION_DIAG_RE.fullmatch(line)
+
+
+def test_real_unpaired_surrogate_preserves_unconfirmed_rc(tmp_path):
+    import json
+    rows = [{"type": "thread.started", "thread_id": "fixture"},
+            {"type": "turn.started"},
+            {"type": "item.completed", "item": {"type": "agent_message", "text": "\ud800"}},
+            {"type": "turn.completed"}]
+    raw = "".join(json.dumps(row) + "\n" for row in rows).encode()
+    result = run_projection_main(tmp_path, raw, [])
+    assert result["rc"] == 77
+    assert result["stdout"] == ""
+    assert "closed=QWEN_CLOSED_ENCODING_ERROR" in result["stderr"]
+    assert "failed=true" in result["stderr"]
+    assert PROJECTION_SENTINEL in result["stderr"]
+
+
+@pytest.mark.parametrize("answer,stderr,raw_event", [
+    (a, e, r) for a in (False, True) for e in (False, True) for r in (False, True)])
+def test_all_source_match_combinations_remain_distinguishable(tmp_path, answer, stderr, raw_event):
+    import json
+    text = "STATUS: COMPLETE\n429 records\n" if answer else ""
+    error = "HTTP 429 too many requests\n" if stderr else ""
+    raw = json.dumps({"type": "item.completed", "item": {"type": "agent_message", "text": "429 records"}}) + "\n" if raw_event else ""
+    paths = classify_fixture(tmp_path, text, error, raw)
+    body = """
+    TEXT_FILE=%(TEXT_FILE)r
+    ERR_FILE=%(ERR_FILE)r
+    RAW_FILE=%(RAW_FILE)r
+    SCAN_FILE=%(SCAN_FILE)r
+    KIND="$(classify_limit "$SCAN_FILE")"
+    classify_provenance "$SCAN_FILE" >/dev/null 2>&1 || true
+    printf '%%s %%s %%s' "$CLASSIFIER_ANSWER_MATCH" "$CLASSIFIER_STDERR_MATCH" "$CLASSIFIER_RAW_EVENT_MATCH"
+    """ % paths
+    result = run_shell(body)
+    expected = " ".join("true" if flag else "false" for flag in (answer, stderr, raw_event))
+    assert result["rc"] == 0 and result["stdout"] == expected
+    assert result["stderr"] == ""
+
+
+def test_channel_flags_reset_and_are_fixed_booleans(tmp_path):
+    paths = classify_fixture(tmp_path, "429 records\n", "", "429 mirror\n")
+    body = """
+    TEXT_FILE=%(TEXT_FILE)r
+    ERR_FILE=%(ERR_FILE)r
+    RAW_FILE=%(RAW_FILE)r
+    SCAN_FILE=%(SCAN_FILE)r
+    KIND=429
+    classify_provenance "$SCAN_FILE" >/dev/null 2>&1 || true
+    KIND=none
+    classify_provenance /dev/null >/dev/null 2>&1 || true
+    printf '%%s %%s %%s' "$CLASSIFIER_ANSWER_MATCH" "$CLASSIFIER_STDERR_MATCH" "$CLASSIFIER_RAW_EVENT_MATCH"
+    """ % paths
+    result = run_shell(body)
+    assert result["rc"] == 0 and result["stdout"] == "false false false"
+
+
+def test_actual_wrapper_record_contains_bounded_match_booleans():
+    source = candidate_text()
+    line = next(line for line in source.splitlines()
+                if line.lstrip().startswith('log "CLASSIFIER_PROVENANCE '))
+    result = run_shell('''log() { printf '%s\n' "$1"; }
+KIND=429
+CLASSIFIER_RULE=rate_limit_429
+CLASSIFIER_CHANNEL=multiple
+CLASSIFIER_STRUCTURE=numeric_text
+CLASSIFIER_ANSWER_MATCH=true
+CLASSIFIER_STDERR_MATCH=false
+CLASSIFIER_RAW_EVENT_MATCH=true
+'''+line)
+    assert result["rc"] == 0
+    output = result["stdout"]
+    assert "answer_match=true stderr_match=false raw_event_match=true" in output
+    assert "basis=classification_inference http_observed=false" in output
+    assert len(output.encode()) <= 384
