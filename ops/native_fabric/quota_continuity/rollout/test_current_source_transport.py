@@ -300,5 +300,173 @@ class CustodyTransportTests(Host):
             artifact_delivery.subprocess.Popen = real_popen
 
 
+class UnderscoreTransportTests(Host):
+    """The exact eight leading-underscore source paths through the real
+    incumbent strict-SSH bounded transport: "ssh" is mocked by the local
+    isolated interpreter running the same fixed generated reader.  There is no
+    network, no real host, and no fabricated positive callback -- the only
+    OBSERVED bodies come from the generated reader's own custody checks and
+    object reads over the stdin-only request."""
+
+    def setUp(self):
+        if artifact_delivery is None:
+            self.skipTest("incumbent artifact_delivery dependencies unavailable: %s"
+                          % _ARTIFACT_DELIVERY_IMPORT_ERROR)
+
+    def mocked_ssh(self, expected_alias, request):
+        real_popen = artifact_delivery.subprocess.Popen
+
+        def spawn(argv, **kwargs):
+            self.assertEqual(argv[0], "ssh")
+            self.assertEqual(argv[1:7],
+                             ["-o", "BatchMode=yes",
+                              "-o", "StrictHostKeyChecking=yes",
+                              "-o", "ConnectTimeout=8"])
+            self.assertEqual(argv[7], expected_alias)
+            command = argv[8]
+            prefix = "python3 -I -S -c "
+            self.assertTrue(command.startswith(prefix), command[:80])
+            tokens = shlex.split(command)
+            self.assertEqual(tokens[:4], ["python3", "-I", "-S", "-c"])
+            # The remote program is exactly the fixed generated reader -- the
+            # same bytes for these underscore paths as for any other request;
+            # the eight paths ride stdin only and never shape the command.
+            self.assertEqual(tokens[4], cso.generated_reader_source())
+            self.assertNotIn(cso.canonical(request).decode("ascii"), command)
+            self.assertNotIn("__tests__", command)
+            self.assertNotIn("&&", command)
+            self.assertIsNone(kwargs.get("shell"))
+            return real_popen([sys.executable, "-I", "-S", "-c", tokens[4]],
+                              **kwargs)
+
+        return spawn
+
+    def test_incumbent_transport_executes_reader_for_all_eight(self):
+        request = self.eight_request()
+        invocation = self.mint(request, self.owner_bound(request))
+        fixture = self.eight_fixture()
+        root_tree = run_git(fixture["repo"], "rev-parse",
+                            fixture["commit"] + "^{tree}")
+        real_popen = artifact_delivery.subprocess.Popen
+        artifact_delivery.subprocess.Popen = self.mocked_ssh(
+            "fixture-host-alias", request)
+        try:
+            # The incumbent transport genuinely executes the fixed generated
+            # reader for this exact eight-path request.
+            raw = artifact_delivery.transport("fixture-host-alias", request)
+            self.assertEqual(cso.strict_json(raw), cso.observe_remote(request))
+            # The full composition rides the same incumbent seam.
+            response = cso.observe_current_source(
+                request, invocation,
+                lambda req: artifact_delivery.transport("fixture-host-alias",
+                                                        req))
+        finally:
+            artifact_delivery.subprocess.Popen = real_popen
+        self.assertEightPathsBound(request, response, root_tree)
+        cso.validate_response(response)
+        self.assertEqual(response["receipt"]["request_sha256"],
+                         cso.validate_request(request))
+        self.assertEqual(response["receipt"]["receiver"], "receiver-1")
+
+    def test_incumbent_transport_linked_custody_all_eight(self):
+        # The resolution variant over a real linked worktree of the eight-path
+        # store, through the same incumbent transport and generated reader.
+        request = self.eight_request(linked=True)
+        invocation = self.mint(request, self.owner_bound(request))
+        fixture = self.eight_fixture()
+        root_tree = run_git(fixture["repo"], "rev-parse",
+                            fixture["commit"] + "^{tree}")
+        real_popen = artifact_delivery.subprocess.Popen
+        artifact_delivery.subprocess.Popen = self.mocked_ssh(
+            "fixture-host-alias", request)
+        try:
+            response = cso.observe_current_source(
+                request, invocation,
+                lambda req: artifact_delivery.transport("fixture-host-alias",
+                                                        req))
+        finally:
+            artifact_delivery.subprocess.Popen = real_popen
+        self.assertEightPathsBound(request, response, root_tree)
+        cso.validate_response(response)
+        self.assertIn("resolution", response)
+        with open(os.path.join(fixture["linked"], ".git")) as handle:
+            git_dir = handle.read().split("gitdir: ", 1)[1].strip()
+        self.assertEqual(response["git_dir"], git_dir)
+        self.assertEqual(response["common_dir"],
+                         os.path.join(fixture["repo"], ".git"))
+
+    def test_native_receipt_publishes_all_eight_via_incumbent_transport(self):
+        request = self.eight_request()
+        fixture = self.eight_fixture()
+        root_tree = run_git(fixture["repo"], "rev-parse",
+                            fixture["commit"] + "^{tree}")
+        registry = {"ubuntu2": {"roles": ["lanes"], "allowed_modes": ["glm"],
+                                "ssh_alias": "fixture-host-alias"}}
+        factory = base.make_owner_factory(registry)
+        spawns = []
+        inner = self.mocked_ssh("fixture-host-alias", request)
+        real_popen = artifact_delivery.subprocess.Popen
+
+        def wrapped(argv, **kwargs):
+            spawns.append(argv)
+            return inner(argv, **kwargs)
+
+        with tempfile.TemporaryDirectory(prefix="cso-req-") as req_dir:
+            request_path = os.path.join(req_dir, "request.json")
+            with open(request_path, "wb") as handle:
+                handle.write(cso.canonical(request))
+            artifact_delivery.subprocess.Popen = wrapped
+            try:
+                with tempfile.TemporaryDirectory(prefix="cso-dest-") as dest:
+                    with mock.patch.dict(os.environ,
+                                         CODEX_THREAD_ID=request["observer"]):
+                        summary = cso.native_current_source_receipt(
+                            request_path, dest, factory, reserve=TestChain,
+                            load_request=inert_request_loader)
+                    self.assertEqual(summary["state"], "PUBLISHED", summary)
+                    self.assertEqual(os.listdir(dest),
+                                     [os.path.basename(summary["destination"])])
+                    with open(summary["destination"], "rb") as handle:
+                        stored = json.loads(handle.read().decode())
+            finally:
+                artifact_delivery.subprocess.Popen = real_popen
+        # Exactly one real transport spawn carried the whole request; the
+        # published receipt binds the original request and all eight blobs.
+        self.assertEqual(len(spawns), 1)
+        cso.validate_response(stored)
+        self.assertEightPathsBound(request, stored, root_tree)
+        receipt = stored["receipt"]
+        self.assertEqual(receipt["request_sha256"], cso.validate_request(request))
+        self.assertEqual(receipt["receiver"], request["receiver"])
+        self.assertEqual(receipt["root"], request["root"])
+        self.assertEqual(receipt["commit"], request["commit"])
+        self.assertEqual(receipt["no_claims"], list(cso.NO_CLAIMS))
+        self.assertEqual(os.path.basename(summary["destination"]),
+                         "current-source-%s.json"
+                         % receipt["response_sha256"][:16])
+
+    def test_refused_underscore_path_spawns_nothing_incumbent(self):
+        # A trailing-slash path is refused in closed-world validation before
+        # admission, so the incumbent seam spawns no process at all and no
+        # destination can appear.
+        request = self.eight_request()
+        request["sources"] = [{"path": "terminal/lib/__tests__/"}]
+        real_popen = artifact_delivery.subprocess.Popen
+
+        def refusing(*args, **kwargs):
+            self.fail("a refused request spawned a process")
+
+        artifact_delivery.subprocess.Popen = refusing
+        try:
+            response = cso.observe_current_source(
+                request, None,
+                lambda req: artifact_delivery.transport("fixture-host-alias",
+                                                        req))
+        finally:
+            artifact_delivery.subprocess.Popen = real_popen
+        self.assertRefused(response, "path_invalid", state="NOT_SEEKED")
+        self.assertEqual(response["files"], [])
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

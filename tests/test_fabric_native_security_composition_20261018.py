@@ -29,7 +29,7 @@ DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8c
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # Observer, portable reader and original-state collector changes compose here.
 # Executor, donor, support and deadline identities remain independently pinned.
-NATIVE_MANIFEST_SHA = "c411addbc1a4f3fd94827c0059a99426a59e2bd9b4edf83f96bb8a31ab4d3467"
+NATIVE_MANIFEST_SHA = "60b8bd9bdf7e07e762f1fd30acfbb6a24defb12dc2d1cea68426b25f5a3b1f1f"
 
 
 def _sha(raw):
