@@ -16,7 +16,10 @@ import subprocess
 import sys
 import tempfile
 
-BASE = '0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f'
+ORIGINAL_REVIEWED_BASE = '0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f'
+# Protected master PR #1730 accepted an unrelated native release. We must
+# preserve its three installed files rather than publish a stale seq14 closure.
+BASE = '3a1bbcf121e9ec63ffba7a035ca67a380736608023ad3d74c2f0a67325255178'
 OVERLAYS = frozenset({
     'ext/artifact_delivery.py', 'ext/fabric_operator_client.py',
     'ext/fabric_operator_contract.py', 'ext/native_remote.py',
@@ -33,13 +36,62 @@ spec.loader.exec_module(generation)
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 
 
+def verify_incumbent_grok_policy(store: Path) -> dict:
+    """Fail closed if the installed signed policy overrides our 4.7 source default.
+
+    No policy file is modified. A later native-generation selection must
+    repeat this same read and compare the observed policy digest.
+    """
+    store = store.resolve(strict=True)
+    path = store.parent / "orch" / "fabric" / "pools.yaml"
+    if path.is_symlink() or not path.is_file() or path.stat().st_size > 262144:
+        raise ValueError("grok47_incumbent_policy_unavailable")
+    try:
+        import yaml
+        raw = path.read_bytes()
+        doc = yaml.safe_load(raw)
+    except Exception as exc:
+        raise ValueError("grok47_incumbent_policy_unreadable") from exc
+    if not isinstance(doc, dict) or not isinstance(doc.get("pools"), dict):
+        raise ValueError("grok47_incumbent_policy_invalid")
+    grok = doc["pools"].get("grok")
+    if not isinstance(grok, dict):
+        raise ValueError("grok47_incumbent_grok_pool_missing")
+    configured = grok.get("default_model")
+    if configured not in (None, "", "grok-4.7"):
+        # Never silently bypass a critical routing-policy snapshot with an
+        # unreviewed new source default. Route owner must reconcile this first.
+        raise ValueError("grok47_policy_default_conflict")
+    return {"sha256": sha(raw), "configured_default": configured,
+            "effective_default": "grok-4.7"}
+
+
+def verified_rebase_changes(previous: dict, selected: dict) -> list[str]:
+    """Prove no reviewed overlay preimage changed in the accepted predecessor.
+
+    Every non-overlay change is inherited from the selected sealed generation.
+    An overlap requires original-owner review, never blind overlay replacement.
+    """
+    old_files = previous.get("files") or {}
+    new_files = selected.get("files") or {}
+    if set(old_files) != set(new_files):
+        raise ValueError("native_rebase_release_closure_changed")
+    for rel in OVERLAYS:
+        if old_files[rel] != new_files[rel]:
+            raise ValueError("native_rebase_reviewed_overlay_preimage_changed")
+    return sorted(rel for rel in new_files if old_files[rel] != new_files[rel])
+
+
 def qualify(store: Path, release_stage: Path | None = None):
     store = store.resolve(strict=True)
     before = (store/'CURRENT.json').read_bytes()
     selected = generation.current(store)
     if selected is None or selected['generation'] != BASE:
         raise ValueError('selected native generation differs from pinned source')
+    policy = verify_incumbent_grok_policy(store)
     base_root, original = generation.verify(store, BASE)
+    _, previous = generation.verify(store, ORIGINAL_REVIEWED_BASE)
+    inherited_changes = verified_rebase_changes(previous, original)
     overlay_names = {'ext/'+p.name for p in (HERE/'overlay').iterdir() if p.is_file()}
     if overlay_names != OVERLAYS:
         raise ValueError('overlay file set is not reviewed')
@@ -114,12 +166,15 @@ def qualify(store: Path, release_stage: Path | None = None):
         if probe.returncode != 0 or probe.stdout.strip() != 'NATIVE_IMPORT_GROK47_PASS':
             raise ValueError('isolated native import failed: '+probe.stderr[-700:])
         result = {'state':'QUALIFIED_ISOLATED_ONLY', 'base_generation':BASE,
+                  'original_reviewed_base':ORIGINAL_REVIEWED_BASE,
+                  'inherited_accepted_release_changes':inherited_changes,
                   'offline_executor_import_verified':True,
                   'files_verified':len(new_hashes), 'overlaid_files':changed,
                   'code_manifest_sha256':sha(generation.canonical(new_hashes)),
                   'isolated_publish_verified':True,
                   'isolated_select_verified':True,
-                  'isolated_stale_cas_refused':True}
+                  'isolated_stale_cas_refused':True,
+                  'incumbent_grok_policy':policy}
         if release_stage is not None:
             # Stage reviewed bytes only. The installed publisher and pointer are untouched.
             pending = Path(tempfile.mkdtemp(prefix='.grok47-pending-', dir=release_stage.parent))
@@ -144,5 +199,12 @@ if __name__ == '__main__':
     parser.add_argument('--installed-store', type=Path, required=True)
     parser.add_argument('--release-stage', type=Path, default=None,
                         help='optional fresh sibling workspace for owner-run publication')
+    parser.add_argument('--policy-preflight-only', action='store_true',
+                        help='read only the incumbent Grok model-default policy')
     args=parser.parse_args()
-    print(json.dumps(qualify(args.installed_store, args.release_stage), sort_keys=True))
+    if args.policy_preflight_only:
+        if args.release_stage is not None:
+            parser.error('--policy-preflight-only cannot stage source')
+        print(json.dumps(verify_incumbent_grok_policy(args.installed_store), sort_keys=True))
+    else:
+        print(json.dumps(qualify(args.installed_store, args.release_stage), sort_keys=True))

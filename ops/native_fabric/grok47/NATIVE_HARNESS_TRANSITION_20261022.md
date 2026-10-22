@@ -1,5 +1,13 @@
 # Grok capacity tuning and native-harness convergence
 
+> **Stage-history warning (October 22):** The stage numbers and manifest
+> digests recorded below are historical evidence, not active publication
+> instructions. The **only** current release identity and qualification
+> instructions are in `ops/native_fabric/grok47/README.md`. Never publish
+> an old stage based on a prior line in this research record. The original
+> Cursor Grok 4.7 default mutation remains action-scoped platform-held.
+
+
 Date: 2026-10-22. Status: **source-attributed implementation plan; NOT a production activation**.
 
 This extends the Chairman's original Grok upgrade and the existing native-harness parity programme (#600), rather than introducing another scheduler, role hierarchy, quota database or OS. Original upgrade carrier: Mastermind #1691, branch `sol/fabric-grok47-default-20261021`. Current procedure pin: `230e9a301ed774e79410829f1b5c049226fa59f1`, Sol skillpack 1.0.1. Newer implementation sources were inspected at `d31aade92b969e8897513d8634ecd59dba00e1e3`; that source observation is not a replacement procedure pin.

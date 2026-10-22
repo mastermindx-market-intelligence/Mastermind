@@ -20,7 +20,7 @@ class NativeFabricGrok47Qualification(unittest.TestCase):
                          (completed.stdout + '\n' + completed.stderr)[-5000:])
         match = re.search(r'Ran ([0-9]+) tests', completed.stderr)
         self.assertIsNotNone(match, completed.stderr[-1000:])
-        self.assertGreaterEqual(int(match.group(1)), 11)
+        self.assertGreaterEqual(int(match.group(1)), 50)
 
 
 if __name__=='__main__':

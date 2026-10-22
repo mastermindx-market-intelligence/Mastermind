@@ -130,7 +130,8 @@ class Grok47WorkerContracts(unittest.TestCase):
                 with self.subTest(expected=expected,served=usage['served_model'],source=usage['model_identity_source']):
                     file.write_text(json.dumps(usage))
                     proc=subprocess.run([sys.executable,str(OVERLAY/'remote_sub_helpers.py'),
-                        'validate-usage',str(file),'run123'],capture_output=True,text=True,timeout=5)
+                        'validate-usage',str(file),'run123','grok','grok-4.7'],
+                        capture_output=True,text=True,timeout=5)
                     self.assertEqual(proc.returncode==0,expected,(proc.stdout,proc.stderr))
 
     def test_reject_malformed_private_json_without_leaking_reasoning(self):
@@ -168,11 +169,12 @@ class Grok47WorkerContracts(unittest.TestCase):
                'source':'grok_native_headless','served_model':'grok-4.7','run_id':'run123'}
         with tempfile.TemporaryDirectory() as td:
             file=Path(td)/'usage.json'
-            for model,valid in [('grok-4.6',True),('grok-4.7',True),('grok-4.8',False)]:
+            for model,valid in [('grok-4.6',True),('grok-4.7',False),('grok-4.8',False)]:
                 with self.subTest(model=model):
                     usage['served_model']=model;file.write_text(json.dumps(usage))
                     call=subprocess.run([sys.executable,str(OVERLAY/'remote_sub_helpers.py'),
-                                         'validate-usage',str(file),'run123'],capture_output=True,text=True,timeout=5)
+                                         'validate-usage',str(file),'run123','grok','grok-4.6'],
+                                         capture_output=True,text=True,timeout=5)
                     self.assertEqual(call.returncode==0,valid,(call.stdout,call.stderr))
                     if valid:self.assertIn('grok_native_headless',call.stdout)
 
@@ -202,6 +204,8 @@ class Grok47WorkerContracts(unittest.TestCase):
             del usage['model_identity_source']
             usage['served_model']='grok-4.6'
             file.write_text(json.dumps(usage))
+            unbound=subprocess.run(base,capture_output=True,text=True,timeout=5)
+            self.assertEqual(unbound.returncode,2,'unbound usage cannot be accepted')
             historical=subprocess.run(base+['grok','grok-4.6'],capture_output=True,text=True,timeout=5)
             self.assertEqual(historical.returncode,0,historical.stderr)
             wrong=subprocess.run(base+['grok','grok-4.7'],capture_output=True,text=True,timeout=5)

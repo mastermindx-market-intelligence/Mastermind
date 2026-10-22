@@ -194,13 +194,12 @@ def validate_usage():
     def integer(value):
         return type(value) is int and 0 <= value <= 2**53
 
-    # The controller now supplies its own launch mode/model to bind usage
-    # metadata to the exact requested worker. The original two-argument
-    # read-only parser remains for historical diagnostics and old test calls.
-    if len(sys.argv) not in (3, 5):
+    # No three-argument escape hatch: even read-only callers must identify
+    # the original controller's exact mode and model for truthful accounting.
+    if len(sys.argv) != 5:
         raise SystemExit(2)
-    expected_mode = sys.argv[3] if len(sys.argv) == 5 else None
-    expected_model = sys.argv[4] if len(sys.argv) == 5 else None
+    expected_mode = sys.argv[3]
+    expected_model = sys.argv[4]
     path = pathlib.Path(sys.argv[1])
     valid = False
     usage = None
@@ -229,7 +228,7 @@ def validate_usage():
                 valid_source = (
                     (schema == "mastermind.grok_usage.v1"
                      and usage.get("source") == "grok_native_headless"
-                     and usage.get("served_model") in supported_grok)
+                     and usage.get("served_model") == "grok-4.6")
                     or (grok_v2 and usage.get("source") == "grok_native_headless"
                         and type(usage.get("requested_model")) is str
                         and usage["requested_model"] in supported_grok
@@ -246,12 +245,12 @@ def validate_usage():
                     and isinstance(usage.get("reason"), str)
                     and valid_source
                     and usage.get("run_id") == sys.argv[2]
-                    and (expected_mode is None or (
+                    and (
                         (grok and expected_mode == "grok"
                          and (usage.get("requested_model") if grok_v2 else usage.get("served_model"))
                          == expected_model)
                         or (not grok and expected_mode in (
-                            "codex-native", "go-codex", "glm-codex", "minimax-codex"))))
+                            "codex-native", "go-codex", "glm-codex", "minimax-codex")))
                     and isinstance(usage.get("session_ids"), list)
                     and len(usage["session_ids"]) == 1
                     and isinstance(usage["session_ids"][0], str)

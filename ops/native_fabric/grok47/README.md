@@ -1,149 +1,151 @@
-# Grok 4.7 Fabric model compatibility candidate
+# Grok Build 4.7 — immutable Fabric release candidate
 
-Source basis: installed native generation `0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f` on M2, inspected October 21/22 2026. The generated overlay is a non-installed candidate; it is NOT evidence of a production runtime switch.
+**Capability state: BUILT_NOT_PROVEN.** This is source for one existing
+Subagent Fabric native-generation release, not permission to select a new live
+generation, create workers, change routing policy, or use provider credentials.
 
-* New worker picker default: `grok-4.7`; the historical ledger fallback is left on 4.6 so old records are not relabeled.
-* Keep both `grok-4.6` and `grok-4.7` valid for new and historical receipts, executor validation, usage normalization and operator grant binding. Exact prior-operation reconciliation files remain bound to the original 4.6 records.
-* Preserve the existing separate Cursor `cursor-grok-4.6-high` route: it is not Grok Build 4.7, and any fallback to it is a changed model.
-* Do not change live leases, service, authentication, active generations, workers, or host placement.
-* The four online Ubuntu hosts advertise 4.7 in `grok models`, but this command also said `You are not authenticated`; a successful paid authenticated Grok 4.7 worker return has **not** been established.
+## One authoritative release target
 
-`overlay/` is intentionally assembled from the installed exact generation, because `ops/native_fabric/quota_continuity/source` contains earlier baseline preimages, not the complete current installed release. Test scripts `test_model_selection.py` and `test_runtime_compat.py` validate 12 offline selector, execution, private-output, identity, usage and authorization contracts; `tests/test_native_fabric_grok47.py` runs them in repository CI. Run `python3 ops/native_fabric/grok47/qualify_installed_generation.py --installed-store /path/to/native-code-releases` to verify the 85 installed source file hashes and create/verify/select a published generation in a disposable isolated owner without touching the live pointer. The current nine-overlay code-only manifest digest is `b6180122f83214bbc4c48f67b976e86084ae4aebc04082d0689935c52d721905` (stage `-005`). The exact source closure, manifest hashes, actual controlled native publish/select via incumbent generation owner, host bootstrap and authenticated end-to-end return remain mandatory to finish rollout.
+- **Candidate stage:** `/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-008`
+- **Canonical code manifest SHA256:** `3e54c0b1217e68acf3fe98c849d8c4df72ce6570351efbc260f2fa76766891b0`
+- **Predicted native-generation identity:** `b440ec08d1fb6199160a230031e89b5e509048799f10a7067e4048f0a21c238b`
+- **Release source:** original `mastermindx-market-intelligence/Mastermind`
+  PR #1691, subject to current protected-master merge and release admission
+- **Installed M2 generation before release:**
+  `3a1bbcf121e9ec63ffba7a035ca67a380736608023ad3d74c2f0a67325255178`,
+  `CURRENT.json` sequence 15 at last verified read
+- **Historical stages:** `-001` through `-007` are superseded and must **never**
+  be published or selected. Historical proof remains in PR #1691 comments
+  and the transition research; it is not a second release source.
 
+These exact values come from the new 85-file qualification. The selected
+generation must still equal the above incumbent before any owner-run
+compare-and-swap. Requalify and update this section on source drift. If another accepted Fabric
+fix has been published, rebuild from that generation instead.
 
-## Prepared release input (not installed)
+## Implemented, not yet accepted in production
 
-For the exact M2 pinned source generation above, qualification has also produced an
-immutable-input *staging candidate* under the existing Mastermind workspaces root:
-`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-002`.
-It has `source/` and `manifest.json` and verifies all 85 code hashes, without
-storing credentials or modifying installed native code, service or `CURRENT.json`.
-Reproduction on the same pinned source uses:
+The reviewed overlay consists of nine exact installed-generation files:
 
-`python3 ops/native_fabric/grok47/qualify_installed_generation.py --installed-store "$BASE/native-code-releases" --release-stage "$FRESH_SIBLING_STAGE"`
+`ext/pick.py`, `ext/native_remote.py`, `ext/sub.sh`,
+`ext/remote_sub.sh`, `ext/remote_sub_exec.py`,
+`ext/remote_sub_helpers.py`, `ext/artifact_delivery.py`,
+`ext/fabric_operator_client.py`, `ext/fabric_operator_contract.py`.
 
-**Release boundary:** after review/green protected CI and rechecking the exact
-incumbent generation, invoke the existing `native_generation.py publish` with
-`--source <stage>/source --stable-ext <kit>/ext --manifest <stage>/manifest.json`.
-Its returned digest is the only eligible identity for subsequent `verify` and
-compare-and-swap `select` (`--expect` pinned prior generation). Reconcile the
-existing Fabric/Studio backend and controller path before selection; the native
-publisher is not a process/control-plane owner. Test actual new-run model and
-result identity after routing capacity permits it. Never force Grok despite the
-existing weekly exhaustion/cooldown marker or rewrite old 4.6 receipts.
+The Grok Build picker defaults new unpinned jobs to `grok-4.7` and preserves
+explicit `grok-4.6` and `grok-4.7` pins through the advisory selector and
+native launch policy. The local shell also pins unqualified-default Build
+calls explicitly before economic/admission checks. Both models are valid for
+historical reconciliation and scoped operator model grant validation.
 
-Stages `-001` and `-002` are superseded by `-003` (which adds the separate legacy Cursor argument-forwarding safety repair). Never publish either earlier stage.
+Cursor's legacy `cursor-grok-4.6-high` path remains separate, with only
+that established alias and `composer-2.5` forwarded from the local Cursor
+shell. The new Cursor `grok-4.7-high` / `grok-4.7-xhigh` defaults and
+priority routing are **not activated**: the earlier platform refusal
+continues to govern those modifying actions. A Cursor quota or binary
+catalog entry is not authorization to bypass that restriction.
 
-## Expanded routing and native-harness audit (2026-10-22)
+New `mastermind.grok_usage.v2` records distinguish the requested model from
+a nullable, self-reported native-final model. An explicit mismatch fails
+closed before optional text, usage or session parsing and never passes
+private response JSON to the parent. The existing `v1` receipt validator
+stays backward readable. The remote controller passes its exact selected
+mode/model to usage validation; wrong-model usage is not counted. Supported
+Codex-native, Go-Codex, GLM-Codex and MiniMax-Codex usage continue to validate.
 
-See [NATIVE_HARNESS_TRANSITION_20261022.md](NATIVE_HARNESS_TRANSITION_20261022.md) for the current observations, proposed capability/expiry policy, existing-owner integration map and production acceptance scenarios. The Cursor default edit is held by an action-scoped platform safety denial; this audit does not deploy or bypass it.
+No authenticated paid Grok 4.7 worker response, independently attested
+served model, monthly Cursor budget amount, live original-parent consumption,
+or Mastermind OS-launched native principal has yet been proven. The existing
+model-specific R22 quality floor has too few adjudicated Grok 4.7 outcomes
+to establish a reliable first-pass acceptance rate; an explicit bounded
+real-worker pilot and independent adjudication remain required.
 
-`analyze_pool_stats.py <canonical-stats-export>` reads an existing `pool stats --class ...` export and highlights missing outcomes, inadequate evaluated samples and separate admission failures. It contacts no provider, writes no registry and changes no routing. Its 10 tests supplement the original 12 model-compatibility tests and five legacy local-Cursor forwarding tests, yielding 32 focused tests; the existing repository CI entrypoint discovers both. A report is not a causal cross-model benchmark or a quota/spend authorisation.
+## Policy compatibility is a release gate
 
+The existing signed policy is `<kit>/orch/fabric/pools.yaml`. Its
+`pools.grok.default_model`, if set, precedes the source fallback default.
+The live M2 policy inspected on October 22 had **no** such field; its
+observed full-file SHA256 was
+`db4e4b1768809bd991003ef045568b480cdb42ea0715a6b73ea5353930bf90d8`.
 
-## Separate legacy Cursor model-forwarding repair (source only)
+Use the **read-only** original-source preflight:
 
-The local `sub.sh cursor` entry previously accepted an explicit model and then omitted the `--model` CLI argument, silently letting the CLI select its own default. This source-only correction preserves the original default when no model is specified and forwards only the already-reviewed `composer-2.5` and `cursor-grok-4.6-high` aliases. Unsupported and new 4.7 aliases are refused. Five isolated subprocess tests exercise the actual shell branch with fake `cursor-agent` and fake slot/ledger helpers: no account, provider, lease, host or production change is made. **This is not the earlier platform-denied Cursor 4.7 default change**, and it does not arm the new 4.7 aliases. The previous staged -002 source is superseded. The currently qualified isolated candidate is `fabric-grok47-stage-20261022-sol-005` with all 85 pinned release-file hashes verified and nine reviewed overlays. This is a candidate only; installed `CURRENT.json` remains sequence 14 on the original generation.
+```bash
+python3 ops/native_fabric/grok47/qualify_installed_generation.py \
+  --installed-store "$KIT/native-code-releases" --policy-preflight-only
+```
 
-The isolated original publisher now exercises a **two-generation compare-and-swap**: original release selected first, patched release selected against the exact predecessor, then an intentionally stale original expectation refused without changing the selected pointer. It does not select the live M2 generation.
+It refuses malformed, symlinked, missing, or conflicting policy. An existing
+`grok-4.6` default blocks publication; do **not** ignore or overwrite the
+policy fingerprint. Rerun this check immediately before any selection and
+reconcile changes in the incumbent policy digest through its existing owner.
+A default absent from the incumbent remains governed by the code's 4.7
+fallback; this does not itself change the policy file. The incumbent
+policy-preflight accepted the observed digest above, with no 4.6 override.
 
+This source is rebased onto the already selected generation from merged
+Fabric PR #1730. It **preserves** its three sealed changes in
+`ext/lane_runtime.py`, `ext/run_observation_delivery.py` and `ext/slot.py`
+while applying the nine Grok overlays only where their original reviewed
+preimages are unchanged. A new overlapping installed generation causes the
+qualifier to refuse instead of overwriting its fixes.
 
-## Local Grok Build default consistency
+## Verification and protected publication
 
-The same source overlay now sets an **un-pinned local Grok Build call** to
-`grok-4.7` *before* the existing economic/policy gate and provider CLI call.
-Explicit `grok-4.6` historical pins remain unchanged; unknown models fail with
-`LOCAL_GROK_MODEL_REFUSED` (78) without attempting any provider call. The native
-Grok adapter's existing `-m` argument receives the normalized model. Five
-additional isolated Bash-contract tests cover model default, both pins, and
-unsupported identifiers. Total focused test count: **32**, with repository CI
-entrypoint and shell checks passing locally. This does not alter any Cursor 4.7
-default, weekly exhaustion marker, account permission or live service.
+Local/offline verification (does not admit or run a worker):
 
-Stage `-003` is superseded by exact pinned stage `-004` at
-`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-004`,
-manifest `9c8e3fd927fe3c9979db937613fa3fab3625c510007847be1f5af6f997ce31cf`.
-Earlier stages `-001`, `-002`, and `-003` MUST NOT be published. The installed
-native pointer remained unchanged at sequence 14 after qualification.
+```bash
+python3 -m unittest discover -s ops/native_fabric/grok47 -p 'test_*.py' -v
+python3 -m pytest -q tests/test_native_fabric_grok47.py
+bash -n ops/native_fabric/grok47/overlay/sub.sh
+bash -n ops/native_fabric/grok47/overlay/remote_sub.sh
+```
 
+The existing `qualify_installed_generation.py` verifies all 85 source hashes,
+assembles the nine approved overlays, runs an isolated original-owner
+publish/verify/select, exercises exact predecessor CAS and stale-CAS
+refusal, and imports the complete native executor. With `--release-stage`
+it writes a **fresh** candidate under the approved workspace root, without
+touching the installed native store. It also validates the incumbent
+policy model default as above.
 
-## Native headless model identity: v2 (source candidate)
+**Only after** the PR is reviewed, all required current-head CI/security
+checks pass, the source is accepted on protected master, and the incumbent
+runtime/policy preflight still matches, may the original native release
+owner use `native_generation.py publish`, `verify`, and exact-predecessor
+`select --expect`. Reconcile any concurrent native generation owner first.
+Do not select a draft branch, older manifest, or stage based on a stale
+incumbent. The original launchers select immutable code once and reject
+source-directory mixing.
 
-Native Grok usage now issues `mastermind.grok_usage.v2` for *new* attempts,
-retaining the exact observed token counts and session identifier. Unlike the
-old v1 record, `requested_model` is the CLI selection and `served_model` is
-**null** when the provider's final JSON has no explicit model field.
-`model_identity_source=requested_cli_only` makes that distinction testable;
-a matching native-final `model` string can instead set
-`model_identity_source=native_headless_final_model_field`, which is still a
-non-cryptographic provider-output observation, not an independent entitlement
-attestation. A contradictory native-final model fails closed as
-`GROK_NATIVE_FINAL_MODEL_CONFLICT` after process cleanup; private raw JSON is
-never sent as the visible result on this path. The existing `validate-usage`
-reader accepts historical v1 records without rewriting them and requires a
-strict v2 source/field combination. The old normalized-output manifest schema
-continues to bind the **requested** model for exact source/command identity.
-Three focused regression tests were added, for **35 focused tests** locally.
-No API/account/provider invocation, native live generation selection, receipt
-backfill or Cursor-model default change occurred during this patch.
+The independent reviewer of prior head `86aef280` returned
+**CHANGES_REQUESTED**. This updated candidate repairs its explicit 4.6-pin
+regression, removes conflicting current-stage claims, and makes the
+incumbent-policy override an explicit release preflight. The old head also
+had a failing CodeQL check for the generic CLI output sink; the current
+candidate sanitizes returned alias labels and does not echo unknown requested
+model input, but **a new hosted CodeQL PASS is still required**. This
+document, local tests and the previous review are not approvals for the
+changed head.
 
+A protected merge and successful CAS are still **not production acceptance**.
+Finish a real policy-admitted Grok 4.7 native worker, source/result checks,
+original assigning-parent consumption, and later an OS-initiated native
+principal workflow with preserved session identity. Keep the old generation
+and already-started workers intact during transition.
 
-## Current qualified release target — only stage -005
+## External release dependencies
 
-The **only publishable candidate after required protected review, CI and owner qualification**
-is `/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-005`;
-manifest SHA256 `b6180122f83214bbc4c48f67b976e86084ae4aebc04082d0689935c52d721905`;
-original-owner predicted native generation
-`cbf87f8c6e27f1cbae13f034ed8bc77fd1d8b047789c6c01be6f9734faf8ff28`.
-All 85 source files match this manifest, and an isolated two-generation original-owner
-publish/verify/select + stale-CAS refusal passed. Stages -001 through -004 have
-been superseded; **none** may be published. The prior stage sections above are
-historical test observations, not current release instructions. Live M2
-`CURRENT.json` has not been selected or altered. All required production
-acceptance and held Cursor-default constraints remain in force.
+Fabric PR #1730 (uncertain cleanup) has **merged** and its resulting
+installed generation is the pinned incumbent at sequence 15. This candidate
+preserves those accepted source changes. PR #1720 (provider-outcome
+qualification) remains open: if it publishes a newer selected generation,
+the exact predecessor CAS for stage -008 must refuse and qualification must
+be repeated against the new owner. PR #1365's model-host selector overlaps
+`pick.py` semantically and requires original-owner review before combining
+those policy effects.
 
-
-## Controller-bound usage release target — stage -006
-
-New remote usage is now checked against the **controller's actual launch mode and
-model**, not merely the usage JSON's self-contained fields. For Grok v2, the
-selected model must exactly match `requested_model`; Grok v1 historical reads
-remain supported. The same check accepts the actual Codex-native, Go-Codex,
-GLM-Codex and MiniMax-Codex usage families rather than breaking their legacy
-metering. A wrong-model usage file fails validation; unknown spend is reported
-rather than credited to the wrong pool. Local focused suite: **36/36**; source
-and shell checks passing. The owner still needs independent review and live
-consumer proof for production release.
-
-Current (superseding ALL previous stages) immutable input:
-`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-006`;
-85 verified release source files, 9 overlays, code-only manifest SHA256
-`caf916a76a8e4489bf49b95d3484d86bce76083636948f7882477f062ef244fd`;
-original owner's *predicted, unpublished* native generation ID
-`f17209d31c3c268337e403ac97a0412a8e5e195e5c75b8c343699b774015d43e`.
-Stages -001 through -005 must NOT be published. The earlier release-stage
-entries in this history record older qualification, not current targets.
-
-
-## Definitive observed-model conflict ordering — stage -007
-
-Release review uncovered another fail-open sequence: the normalized final JSON
-originally checked `usage`/`sessionId` (and then visible `text`) before examining
-its model field. A conflicting native-final model with missing usage or text
-could therefore reach an rc=0 return. The new producer now checks any observed
-model conflict **immediately after parsing a JSON object**, before extracting
-visible text, session or optional token counters. It emits the same typed
-`GROK_NATIVE_FINAL_MODEL_CONFLICT` refusal and never returns private JSON.
-One additional focused regression covers missing usage, missing session and
-malformed visible text; focused total **37/37**.
-
-Only the verified stage
-`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-007`
-may be submitted for authorized release review. 85 source files, 9 overlays;
-source-manifest SHA256
-`b7fdea364aec6d06e2b5e08df751925fda0d37986fb867ae6ff134cf4609235a`;
-original owner's predicted (NOT PUBLISHED) native-generation ID
-`aadb1d5db43ae253e7823f05f8587afe393aa9b9f8b833bceb2a6534272d4e27`.
-All previous stage targets -001 through -006 are superseded/retired. Original
-selected M2 native generation and 14th sequence remain unchanged. This is
-source quality, not the held Cursor-default activation or live model proof.
+This document is the single current stage reference. The separate
+`NATIVE_HARNESS_TRANSITION_20261022.md` records historical research and the
+longer OS/Executive/Fabric delivery plan; its older stage names are
+superseded evidence, not publication instructions.
