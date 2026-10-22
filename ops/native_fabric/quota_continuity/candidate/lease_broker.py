@@ -895,6 +895,15 @@ class Broker:
         if preferred:
             for a in grantable:
                 if a.get("name") == preferred:
+                    # Existing exact pin is sticky; a *known* hard local
+                    # denial is a refusal, never permission to substitute.
+                    if self.external_gates and self.provider_name(pool) == "bailian":
+                        try:
+                            import bailian_keys
+                            if bailian_keys.cooldown_rank_readonly(preferred) == 3:
+                                return None
+                        except Exception:
+                            pass  # unknown remains subject to incumbent gates
                     if (
                         self._account_held(conn, pool, preferred) < int(a["_eff_cap"])
                         and has_model_room(a, preferred)
@@ -937,16 +946,34 @@ class Broker:
                 for a in grantable
             } if grantable_override is not None else {}
 
+            local_ranks = {}
+            if self.external_gates:
+                try:
+                    import bailian_keys
+                    local_ranks = {
+                        name: bailian_keys.cooldown_rank_readonly(name)
+                        for _, _, name in scored
+                    }
+                except Exception:
+                    local_ranks = {name: 1 for _, _, name in scored}
+                # Known 401/403/402 hard denials must not be leased on an
+                # unpinned path even if all configured accounts are parked.
+                scored = [
+                    row for row in scored
+                    if local_ranks.get(row[2], 1) != 3
+                ]
+                if not scored:
+                    return None
+
             def cooldown_priority(name: str) -> int:
                 if not self.external_gates:
                     return 0
-                try:
-                    import bailian_keys
-                    cooldown = bailian_keys.cooldown_info(name)
-                    local_rank = 0 if cooldown is None else 2
-                except Exception:
+                local_rank = local_ranks.get(name, 1)
+                if type(local_rank) is not int or local_rank not in (0, 1, 2, 3):
                     local_rank = 1
-                observed = host_rank.get(name, 0)
+                observed = host_rank.get(
+                    name, 1 if grantable_override is not None else 0
+                )
                 if type(observed) is not int or observed not in (0, 1, 2):
                     observed = 1
                 return max(local_rank, observed)

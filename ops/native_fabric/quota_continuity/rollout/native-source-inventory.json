@@ -48,9 +48,9 @@
       "source": "source/artifact_reader.py"
     },
     "ext/bailian_keys.py": {
-      "bytes": 30957,
+      "bytes": 33468,
       "installed_preimage_sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
-      "sha256": "77052ba1b71f684ffe72962519773928b82cea39fa9d79cd974156d23aa627d2",
+      "sha256": "45aa2ad9747d40a99fd507e5aaca71461741a46a63c76609570144c168419880",
       "source": "candidate/bailian_keys.py"
     },
     "ext/bootstrap_clis.py": {
@@ -282,9 +282,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 70456,
+      "bytes": 71774,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "dc54cb641ec7d5b1bd76aaabf2fbe3c33b0526fdab5648125621d2fc33b133ba",
+      "sha256": "874f363c90887b1f1229a04c18eee8fbc45d59c55beef5399ce48307bf18245b",
       "source": "candidate/lease_broker.py"
     },
     "ext/mac_policy_return.py": {

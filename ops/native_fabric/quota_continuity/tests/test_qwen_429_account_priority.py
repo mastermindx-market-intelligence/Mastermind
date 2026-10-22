@@ -72,14 +72,16 @@ class Qwen429AccountPriorityTests(unittest.TestCase):
                               [("bailian", "Ryan", 1), ("bailian", "Chris", 2),
                                ("bailian", "Kris", 3)])
 
-        def cooldown_info(name):
+        def cooldown_rank_readonly(name):
             state = self.statuses.get(name)
-            if state == "unreadable":
-                raise OSError("simulated missing cooldown evidence")
-            return None if state is None else (9999999999, state)
+            return {
+                None: 0, "expired": 0, "unreadable": 1,
+                "http_429": 2, "access_denied": 3,
+                "invalid_api_key": 3, "quota_or_insufficient": 3,
+            }.get(state, 1)
 
         qwen = types.ModuleType("bailian_keys")
-        qwen.cooldown_info = cooldown_info
+        qwen.cooldown_rank_readonly = cooldown_rank_readonly
         quota = types.ModuleType("quota_circuit")
         quota.admission_room = lambda broker, conn, pool, acct: (
             acct["name"] not in self.broker.blocked)
@@ -135,6 +137,27 @@ class Qwen429AccountPriorityTests(unittest.TestCase):
 
     def test_unknown_cooldown_is_not_scored_healthy(self):
         self.statuses["Ryan"] = "unreadable"
+        self.assertEqual(self.pick(), "Chris")
+
+    def test_hard_local_denial_never_gets_unpinned_lease(self):
+        self.statuses["Ryan"] = "access_denied"
+        self.assertEqual(self.pick(), "Chris")
+
+    def test_all_hard_local_denials_refuse(self):
+        self.statuses.update(Ryan="access_denied", Chris="invalid_api_key",
+                             Kris="quota_or_insufficient")
+        self.assertIsNone(self.pick())
+
+    def test_exact_pinned_hard_denial_is_refused(self):
+        self.statuses["Ryan"] = "access_denied"
+        self.assertIsNone(self.pick(preferred="Ryan"))
+
+    def test_expired_cooldown_is_healthy_without_mutating(self):
+        self.statuses.update(Ryan="expired", Chris="http_429")
+        self.assertEqual(self.pick(), "Ryan")
+
+    def test_malformed_local_rank_not_accepted_as_healthy(self):
+        self.statuses["Ryan"] = "invalid_state"
         self.assertEqual(self.pick(), "Chris")
 
     def test_unknown_ranked_between_healthy_and_throttled(self):

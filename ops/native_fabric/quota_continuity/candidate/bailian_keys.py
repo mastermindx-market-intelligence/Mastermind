@@ -22,8 +22,10 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import re
+import stat
 import sys
 import time
 from datetime import datetime
@@ -292,6 +294,71 @@ def prune_stale(name: str) -> int:
             except OSError:
                 pass
     return alive
+
+
+def cooldown_rank_readonly(name: str) -> int:
+    """Conservative *observation*, never a picker, writer or retry gate.
+
+    Ranks: 0 absent/verified expired; 1 unreadable/unknown; 2 live 429
+    soft-cooldown; 3 live non-429 hard cooldown. Unlike cooldown_info this
+    never unlinks an expired record, changes capacity, or reads a credential.
+    """
+    path = _cooldown_path(name)
+    try:
+        directory = os.stat(SLOTS_ROOT)
+        if (not stat.S_ISDIR(directory.st_mode)
+                or directory.st_uid != os.geteuid()
+                or directory.st_mode & 0o022):
+            return 1
+    except OSError:
+        return 1
+    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        fd = os.open(path, flags)
+    except FileNotFoundError:
+        # Missing file means healthy only while the original owned directory
+        # is still the same object; absent/unreadable state roots are unknown.
+        try:
+            current = os.stat(SLOTS_ROOT)
+            if (current.st_dev, current.st_ino, current.st_uid) != (
+                    directory.st_dev, directory.st_ino, directory.st_uid):
+                return 1
+        except OSError:
+            return 1
+        return 0
+    except OSError:
+        return 1
+    try:
+        before = os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode)
+                or before.st_uid != os.geteuid()
+                or before.st_mode & 0o022
+                or before.st_size < 1 or before.st_size > 256):
+            return 1
+        data = os.read(fd, 257)
+        after = os.fstat(fd)
+        observed = os.stat(path, follow_symlinks=False)
+        identity = lambda st: (st.st_dev, st.st_ino, st.st_size,
+                               st.st_mode, st.st_uid, st.st_mtime_ns, st.st_ctime_ns)
+        if (len(data) != before.st_size or identity(before) != identity(after)
+                or identity(before) != identity(observed)):
+            return 1
+        parts = data.decode("utf-8").strip().split(None, 1)
+        if len(parts) != 2 or not parts[1].strip():
+            return 1
+        value = float(parts[0])
+        if not math.isfinite(value):
+            return 1
+        expiry = int(value)
+        if expiry <= int(time.time()):
+            return 0
+        return 2 if parts[1] == "http_429" else 3
+    except (OSError, ValueError, UnicodeError, OverflowError, IndexError):
+        return 1
+    finally:
+        os.close(fd)
 
 
 def cooldown_info(name: str) -> Optional[Tuple[int, str]]:
