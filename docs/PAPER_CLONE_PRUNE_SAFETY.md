@@ -38,6 +38,9 @@ these tested on representative real design content.
 
 ## Evidence helper
 
+Invoke the helper with `python3 -m integrations.paper_desktop.clone_prune_guard` from the Mastermind repository root. This reuses the canonical `integrations.paper_desktop.bridge` module identity; direct script-path invocation is not the supported operator entrypoint.
+
+
 `integrations/paper_desktop/clone_prune_guard.py` is read-only. It uses
 the same reviewed Paper `bridge.execute(read/get_basic_info)` and existing
 desktop serialization; no new Paper HTTP endpoint, listener, token, retry
@@ -47,7 +50,7 @@ Before any UI deletion, make a complete **clone** and confirm its page
 array matches the exact source. With the separate source and clone IDs:
 
 ```sh
-python3 integrations/paper_desktop/clone_prune_guard.py plan \
+python3 -m integrations.paper_desktop.clone_prune_guard plan \
   --source-file-id 01M5HPWFPQ2Z5X79A9H8MJFKK0 \
   --clone-file-id 01M5HQ8VMMY87NVDENZAGJNYKM \
   --keep-page-id p-1-0 \
@@ -70,7 +73,7 @@ reliably find even short page names in a trial; a visual mismatch is a
 After each intended removal, use the original carrier's readback, then:
 
 ```sh
-python3 integrations/paper_desktop/clone_prune_guard.py verify \
+python3 -m integrations.paper_desktop.clone_prune_guard verify \
   --plan scratch-plan.json
 ```
 
