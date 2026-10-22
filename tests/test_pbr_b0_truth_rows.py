@@ -661,6 +661,77 @@ __result = {during: during, bookFlag: bookFlag, after: _accountStateInvalid() ? 
     assert out == {"during": "invalid", "bookFlag": False, "after": "valid"}
 
 
+SELF_IDS = ("sd-nav", "sd-nav-status", "sd-hb", "sd-cash", "sd-invested", "sd-unreal",
+            "sd-return", "sd-cash-pct", "sd-gross")
+
+
+def _self_header(tmp_path, book, lang="en") -> dict:
+    """Run the real renderSelfHeader on a synthetic Self-Directed payload (ECON E13 shape)."""
+    scenario = (_marked("// PBR-SELF-UNAVAILABLE:BEGIN", "// PBR-SELF-UNAVAILABLE:END") + "\n" +
+                _fn("renderSelfHeader") + r"""
+SELF_IDS.forEach(function(id) {
+  var el = __mk(id); el.attrs = {}; el.hidden = true;
+  el.setAttribute = function(k, v) { this.attrs[k] = String(v); };
+  el.removeAttribute = function(k) { delete this.attrs[k]; };
+  __els[id] = el;
+});
+_self = BOOK; _selfSettled = true;
+renderSelfHeader();
+__result = {};
+SELF_IDS.forEach(function(id) {
+  var el = __els[id];
+  __result[id] = {text: String(el.textContent), html: String(el.innerHTML), attrs: el.attrs,
+                  hidden: el.hidden};
+});
+""").replace("SELF_IDS", json.dumps(list(SELF_IDS))).replace("BOOK", json.dumps(book))
+    return _run(tmp_path, scenario, lang)["result"]
+
+
+def _e13_invalid(quarantine_file):
+    # ECON E13 (#1756) unavailable shape for an existing-but-invalid account file.
+    return {"status": "unavailable", "reason_code": "self_directed_account_invalid",
+            "problems": ["synthetic: schema check failed"], "quarantine_file": quarantine_file,
+            "nav": None, "cash": None}
+
+
+@requires_node
+@pytest.mark.parametrize("lang,word,ref,un", [
+    ("en", "Book unavailable — state invalid", "Quarantine ref " + SHA16, "unavailable"),
+    ("zh", "账本不可用 — 状态无效", "隔离编号 " + SHA16, "不可用"),
+])
+def test_self_directed_invalid_account_is_the_canonical_cell_never_a_funded_book(
+        tmp_path, lang, word, ref, un):
+    out = _self_header(tmp_path, _e13_invalid("account.quarantine." + SHA16 + ".json"), lang)
+    nav = out["sd-nav"]["html"]
+    assert word in nav and ref in nav and "⊘" in nav
+    assert out["sd-nav"]["attrs"] == {"data-availability": "unavailable"}
+    assert out["sd-hb"]["attrs"] == {"data-availability": "unavailable"}
+    assert out["sd-nav-status"]["hidden"] is False
+    for tile in ("sd-cash", "sd-invested", "sd-unreal", "sd-return"):
+        assert out[tile]["text"] == un, tile
+    blob = json.dumps(out, ensure_ascii=False)
+    for bad in ("1,000,000", "$0", "0.00%", "NaN", "undefined"):
+        assert bad not in blob, bad
+
+
+@requires_node
+@pytest.mark.parametrize("qfile", [None, "account.quarantine.<b>x.json", "../" + SHA16,
+                                   "account.quarantine." + SHA16.upper() + ".json"])
+def test_self_directed_invalid_account_never_echoes_an_unshaped_ref(tmp_path, qfile):
+    nav = _self_header(tmp_path, _e13_invalid(qfile))["sd-nav"]["html"]
+    assert "Book unavailable — state invalid" in nav
+    assert "Quarantine ref" not in nav and "<b>x" not in nav and "&lt;b&gt;" not in nav
+
+
+@requires_node
+def test_self_directed_other_unavailable_reasons_keep_the_plain_word(tmp_path):
+    book = {"status": "unavailable", "reason_code": "self_directed_read_failed", "nav": None,
+            "quarantine_file": "account.quarantine." + SHA16 + ".json"}
+    out = _self_header(tmp_path, book)
+    assert out["sd-nav"]["text"] == "unavailable"  # sd.unavailable, the p3b word
+    assert "state invalid" not in out["sd-nav"]["html"]
+
+
 # ── p3b review NITs 2/3/5 folded into B0 ──────────────────────────────────────
 
 

@@ -6389,6 +6389,18 @@ function _selfHistState(hist, settled) {
   if (!Array.isArray(hist.history)) return 'unavailable';
   return 'ok';
 }
+
+// D-ACCT-1 on the Self-Directed book: an existing-but-invalid account file
+// (reason_code self_directed_account_invalid) is "book unavailable — state
+// invalid", never a funded book or a zero NAV. The quarantine ref is taken only
+// from the published file name's sha16; any other string is never echoed.
+function _selfInvalidState(book) {
+  if (!book || typeof book !== 'object' || book.status !== 'unavailable') return null;
+  if (book.reason_code !== 'self_directed_account_invalid') return null;
+  var m = typeof book.quarantine_file === 'string'
+    ? /^account\.quarantine\.([0-9a-f]{16})\.json$/.exec(book.quarantine_file) : null;
+  return { status: 'invalid', quarantine_sha16: m ? m[1] : null };
+}
 // PBR-SELF-UNAVAILABLE:END
 
 function renderSelfHeader() {
@@ -6400,8 +6412,11 @@ function renderSelfHeader() {
   if (E('sd-hb'))  E('sd-hb').removeAttribute('data-availability');
   if (st === 'pending') return;             // pre-load placeholders stay exactly as shipped
   if (st === 'unavailable') {
-    var un = t('sd.unavailable');
-    if (E('sd-nav'))       { E('sd-nav').textContent = un; E('sd-nav').setAttribute('data-availability', 'unavailable'); }
+    var un = t('sd.unavailable'), inv = _selfInvalidState(b);
+    if (E('sd-nav')) {
+      if (inv) E('sd-nav').innerHTML = _bookInvalidHtml(inv); else E('sd-nav').textContent = un;
+      E('sd-nav').setAttribute('data-availability', 'unavailable');
+    }
     if (E('sd-hb'))        E('sd-hb').setAttribute('data-availability', 'unavailable');
     if (E('sd-cash'))      { E('sd-cash').textContent = un; E('sd-cash').className = 'mm-perf-stat-value neu'; }
     if (E('sd-invested'))  { E('sd-invested').textContent = un; E('sd-invested').className = 'mm-perf-stat-value neu'; }
