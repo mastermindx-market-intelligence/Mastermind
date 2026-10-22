@@ -297,68 +297,87 @@ def prune_stale(name: str) -> int:
 
 
 def cooldown_rank_readonly(name: str) -> int:
-    """Conservative *observation*, never a picker, writer or retry gate.
+    """Read-only, directory-bound local cooldown classification.
 
-    Ranks: 0 absent/verified expired; 1 unreadable/unknown; 2 live 429
-    soft-cooldown; 3 live non-429 hard cooldown. Unlike cooldown_info this
-    never unlinks an expired record, changes capacity, or reads a credential.
+    0 verified absent/expired; 1 unknown; 2 live 429 soft throttle;
+    3 live non-429 hard denial. Never delete, write or pick a key.
     """
-    path = _cooldown_path(name)
+    if (not isinstance(name, str) or not name or len(name) > 128
+            or "/" in name or "\\x00" in name or name in (".", "..")):
+        return 1
+    # A directory fd binds file reads to the original owned slots directory;
+    # O_NOFOLLOW rejects a symlinked *final* directory component. Installed
+    # generation ext/slots may itself be a trusted intermediate state link.
+    if not all(hasattr(os, x) for x in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")):
+        return 1
     try:
-        directory = os.stat(SLOTS_ROOT)
+        root_fd = os.open(
+            SLOTS_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError:
+        return 1
+    try:
+        directory = os.fstat(root_fd)
         if (not stat.S_ISDIR(directory.st_mode)
                 or directory.st_uid != os.geteuid()
                 or directory.st_mode & 0o022):
             return 1
-    except OSError:
-        return 1
-    flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK
-    if hasattr(os, "O_NOFOLLOW"):
-        flags |= os.O_NOFOLLOW
-    try:
-        fd = os.open(path, flags)
-    except FileNotFoundError:
-        # Missing file means healthy only while the original owned directory
-        # is still the same object; absent/unreadable state roots are unknown.
+
+        def bound_directory() -> bool:
+            try:
+                current = os.stat(SLOTS_ROOT, follow_symlinks=False)
+            except OSError:
+                return False
+            return (
+                stat.S_ISDIR(current.st_mode)
+                and (directory.st_dev, directory.st_ino, directory.st_uid,
+                     directory.st_mode) ==
+                    (current.st_dev, current.st_ino, current.st_uid,
+                     current.st_mode)
+            )
+
+        entry = name + ".cooldown"
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW
         try:
-            current = os.stat(SLOTS_ROOT)
-            if (current.st_dev, current.st_ino, current.st_uid) != (
-                    directory.st_dev, directory.st_ino, directory.st_uid):
-                return 1
+            fd = os.open(entry, flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            return 0 if bound_directory() else 1
         except OSError:
             return 1
-        return 0
-    except OSError:
-        return 1
-    try:
-        before = os.fstat(fd)
-        if (not stat.S_ISREG(before.st_mode)
-                or before.st_uid != os.geteuid()
-                or before.st_mode & 0o022
-                or before.st_size < 1 or before.st_size > 256):
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode)
+                    or before.st_uid != os.geteuid()
+                    or before.st_mode & 0o022
+                    or before.st_size < 1 or before.st_size > 256):
+                return 1
+            data = os.read(fd, 257)
+            after = os.fstat(fd)
+            observed = os.stat(entry, dir_fd=root_fd, follow_symlinks=False)
+            identity = lambda st: (
+                st.st_dev, st.st_ino, st.st_size, st.st_mode, st.st_uid,
+                st.st_mtime_ns, st.st_ctime_ns,
+            )
+            if (len(data) != before.st_size or identity(before) != identity(after)
+                    or identity(before) != identity(observed)
+                    or not bound_directory()):
+                return 1
+            parts = data.decode("utf-8").strip().split(None, 1)
+            if len(parts) != 2 or not parts[1].strip():
+                return 1
+            value = float(parts[0])
+            if not math.isfinite(value):
+                return 1
+            expiry = int(value)
+            if expiry <= int(time.time()):
+                return 0
+            return 2 if parts[1] == "http_429" else 3
+        except (OSError, ValueError, UnicodeError, OverflowError, IndexError):
             return 1
-        data = os.read(fd, 257)
-        after = os.fstat(fd)
-        observed = os.stat(path, follow_symlinks=False)
-        identity = lambda st: (st.st_dev, st.st_ino, st.st_size,
-                               st.st_mode, st.st_uid, st.st_mtime_ns, st.st_ctime_ns)
-        if (len(data) != before.st_size or identity(before) != identity(after)
-                or identity(before) != identity(observed)):
-            return 1
-        parts = data.decode("utf-8").strip().split(None, 1)
-        if len(parts) != 2 or not parts[1].strip():
-            return 1
-        value = float(parts[0])
-        if not math.isfinite(value):
-            return 1
-        expiry = int(value)
-        if expiry <= int(time.time()):
-            return 0
-        return 2 if parts[1] == "http_429" else 3
-    except (OSError, ValueError, UnicodeError, OverflowError, IndexError):
-        return 1
+        finally:
+            os.close(fd)
     finally:
-        os.close(fd)
+        os.close(root_fd)
 
 
 def cooldown_info(name: str) -> Optional[Tuple[int, str]]:
@@ -454,15 +473,16 @@ def usable_names() -> List[str]:
 
 def _effective_cap_for_key(name: str) -> int:
     """Effective per-key cap: 0 for non-429 cooldown; soft cap for 429 cooldown."""
-    cd = cooldown_info(name)
+    rank = cooldown_rank_readonly(name)
     cap = current_per_key_cap()
-    if cd is None:
-        return cap
-    reason = cd[1] if len(cd) > 1 else ""
-    if reason != "http_429":
-        # Non-429 cooldown (401/403/402 etc.) — key is parked, contributes 0.
+    if rank == 3:
+        # Non-429 cooldown (401/403/402 etc.) — key is parked.
         return 0
-    # In 429 cooldown — check soft cap.
+    if rank != 2:
+        # A missing/expired record uses the ordinary cap. Unknown (rank=1)
+        # remains a deprioritized fallback in the broker, not healthy proof.
+        return cap
+    # A live 429 retains the existing reduced soft-cap policy.
     pol = load_policy()
     if not pol.get("soft_cap_on_429", False):
         return cap

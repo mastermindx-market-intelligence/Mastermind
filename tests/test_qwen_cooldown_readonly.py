@@ -100,7 +100,7 @@ class QwenCooldownReadOnly(unittest.TestCase):
     def test_os_open_permission_failure_unknown_not_healthy(self):
         original = self.keys.os.open
         def refused(path, flags, *args, **kwargs):
-            if str(path) == str(self.path):
+            if str(path) == self.path.name and kwargs.get("dir_fd") is not None:
                 raise PermissionError("fixture denied")
             return original(path, flags, *args, **kwargs)
         self.write(f"{int(time.time())+120} http_429\n")
@@ -159,6 +159,83 @@ class QwenCooldownReadOnly(unittest.TestCase):
             f"{int(time.time())+120} http_429\n")
         self.assertEqual(self.broker_pick(), "Ryan")
         self.assertTrue(self.path.is_file())
+
+
+    def broker_cap(self):
+        """Execute the actual Broker._bailian_effective_cap, not a copied formula."""
+        import ast
+        import sys
+        import types
+        from typing import Optional
+        broker_source = SOURCE.parent / "lease_broker.py"
+        tree = ast.parse(broker_source.read_text(), filename=str(broker_source))
+        cls = next(x for x in tree.body if isinstance(x, ast.ClassDef)
+                   and x.name == "Broker")
+        fn = next(x for x in cls.body if isinstance(x, ast.FunctionDef)
+                  and x.name == "_bailian_effective_cap")
+        scope = {"Optional": Optional, "HERE": str(SOURCE.parent), "sys": sys}
+        exec(compile(ast.fix_missing_locations(
+            ast.Module(body=[fn], type_ignores=[])), str(broker_source), "exec"), scope)
+        with (
+            patch.dict(sys.modules, {"bailian_keys": self.keys}),
+            patch.object(sys, "path", [str(SOURCE.parent), *sys.path]),
+            patch.object(self.keys, "current_per_key_cap", return_value=7),
+            patch.object(self.keys, "load_policy", return_value={"soft_cap_on_429": True}),
+            patch.object(self.keys, "_read_soft_cap", return_value=5),
+            patch.object(self.keys.os, "unlink") as deletion,
+        ):
+            cap = scope["_bailian_effective_cap"](
+                types.SimpleNamespace(external_gates=True), "Ryan", 7
+            )
+            deletion.assert_not_called()
+            return cap
+
+    def test_broker_actual_capacity_path_does_not_unlink_expired(self):
+        self.write("1 http_429\n")
+        self.assertEqual(self.broker_cap(), 7)
+        self.assertTrue(self.path.is_file())
+
+    def test_broker_actual_capacity_soft_429_remains_reduced(self):
+        self.write(f"{int(time.time())+120} http_429\n")
+        self.assertEqual(self.broker_cap(), 4)
+
+    def test_broker_actual_capacity_hard_denial_not_grantable(self):
+        self.write(f"{int(time.time())+120} access_denied\n")
+        self.assertIsNone(self.broker_cap())
+
+    def test_trusted_intermediate_state_link_matches_installed_layout(self):
+        self.write(f"{int(time.time())+120} http_429\n")
+        parent = Path(self.tmp.name) / "native" / "ext"
+        parent.mkdir(parents=True)
+        (parent / "slots").symlink_to(Path(self.tmp.name), target_is_directory=True)
+        # ext/slots is an authorized intermediate release state link, while
+        # the *final* bailian directory must remain an owned physical folder.
+        with patch.object(self.keys, "SLOTS_ROOT", str(parent / "slots" / "slots")):
+            self.assertEqual(self.rank(), 2)
+
+    def test_symlinked_cooldown_root_refused(self):
+        self.write(f"{int(time.time())+120} access_denied\n")
+        other = self.root.with_name("real_slots")
+        self.root.rename(other)
+        self.root.symlink_to(other, target_is_directory=True)
+        self.assertEqual(self.rank(), 1)
+
+    def test_directory_replacement_during_read_refused(self):
+        self.write(f"{int(time.time())+120} http_429\n")
+        original_read = self.keys.os.read
+        moved = {"done": False}
+        def replace_while_reading(fd, length):
+            if not moved["done"]:
+                moved["done"] = True
+                self.root.rename(self.root.with_name("old_slots"))
+                self.root.mkdir(mode=0o700)
+            return original_read(fd, length)
+        with patch.object(self.keys.os, "read", side_effect=replace_while_reading):
+            self.assertEqual(self.rank(), 1)
+        self.assertTrue(moved["done"])
+
+    def test_account_name_path_escape_refused(self):
+        self.assertEqual(self.keys.cooldown_rank_readonly("../other"), 1)
 
 
 if __name__ == "__main__":

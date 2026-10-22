@@ -367,15 +367,14 @@ class Broker:
                 sys.path.insert(0, HERE)
             import bailian_keys
 
-            cd = bailian_keys.cooldown_info(name)
-            if cd is None:
-                return min(base, int(bailian_keys.current_per_key_cap()))
-            reason = cd[1] if len(cd) > 1 else ""
-            if reason != "http_429":
-                return None
-            return min(base, int(bailian_keys._effective_cap_for_key(name)))
+            effective = int(bailian_keys._effective_cap_for_key(name))
+            # Every capacity observation uses the same non-mutating reader
+            # as unpinned ordering. No grantable-account path may unlink an
+            # expired or concurrently replaced cooldown record.
+            return min(base, effective) if effective > 0 else None
         except Exception:
-            return base
+            # Unavailable or corrupt source cannot establish provider room.
+            return None
 
     def _host_lane_capacity(self, pool: str) -> int:
         """Physical fleet admission envelope, NOT a provider/account slot quota.
