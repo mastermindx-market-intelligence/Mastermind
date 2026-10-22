@@ -121,3 +121,44 @@ def test_lost_post_reconciles_exact_github_review_without_duplicate(tmp_path):
     assert len(history["posts"]) == 1
     assert publish_verified_review(**args).state is PublishState.ALREADY_PUBLISHED
     assert len(history["posts"]) == 1
+
+
+def test_top_level_unavailable_unknown_post_readback_reports_effect_unknown(tmp_path):
+    """A second GitHub GET outage must not misstate an uncertain POST as absent."""
+    from control_plane.github_review_intent_ingress import PublicationEffectUnknown
+
+    runtime, builder, reviewer_job = completed_pair(tmp_path)
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, builder_job_id_for_review=lambda job_id: builder
+    )
+    api, history = git_api()
+    class UnknownPublication:
+        def __init__(self):
+            self.calls = 0
+
+        def published_command_ids(self):
+            return frozenset()
+
+        def publish_review(self, **kwargs):
+            self.calls += 1
+            raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
+
+    class UnavailableReadback:
+        def __init__(self):
+            self.calls = 0
+
+        def read_reviews(self, *, repository, pull_number, commit_id):
+            self.calls += 1
+            assert (repository, pull_number, commit_id) == (REPO, 42, HEAD)
+            raise OSError("lost authenticated GitHub GET")
+
+    publications = UnknownPublication()
+    readback = UnavailableReadback()
+    result = publish_verified_review(
+        decision=decision(), job_id=reviewer_job, results=reader,
+        publications=publications, pull_requests=api, readback=readback,
+    )
+    assert result.state is PublishState.REFUSED
+    assert result.refusal == "PUBLICATION_EFFECT_UNKNOWN"
+    assert publications.calls == readback.calls == 1
+    assert history["posts"] == []
