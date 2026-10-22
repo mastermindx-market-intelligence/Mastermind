@@ -132,7 +132,7 @@ class ReviewHostSettings:
     job_department: str = "engineering"
     job_priority: int = 0
     job_authority_level: str = "A0"
-    job_review_required: bool = True
+    job_review_required: bool = False
 
     def __post_init__(self) -> None:
         for name in ("enabled", "publication_enabled", "require_https", "job_review_required"):
