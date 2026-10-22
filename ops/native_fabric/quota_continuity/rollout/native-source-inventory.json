@@ -114,10 +114,10 @@
       "source": "source/fabric_host_qualification.py"
     },
     "ext/fabric_operator_client.py": {
-      "bytes": 7565,
+      "bytes": 9654,
       "installed_preimage_sha256": "6718ade7a1245c8e5295edaee3ca75330bde4c92fd69c531caeee8d9c6f10d08",
-      "sha256": "6718ade7a1245c8e5295edaee3ca75330bde4c92fd69c531caeee8d9c6f10d08",
-      "source": "source/fabric_operator_client.py"
+      "sha256": "4bb2c134eb500afe6b5c980abecb8d02092fe1462c6b7fcd7f433ff0370746ba",
+      "source": "candidate/fabric_operator_client.py"
     },
     "ext/fabric_operator_contract.py": {
       "bytes": 14358,
