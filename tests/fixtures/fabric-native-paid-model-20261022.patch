@@ -1,0 +1,90 @@
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -686,6 +686,32 @@
+     return layout, packet
+ 
+ 
++def _canonical_model_command(here, packet_path, key, mode, model, env):
++    """Closed trusted program selection; an environment flag grants nothing.
++
++    The actual model client and controller gateway verify the signed capsule
++    and exact body. No CLI, prompt-to-shell, home hooks or model tools execute.
++    """
++    selected = env.get('FABRIC_CANONICAL_PAID_MODE')
++    if selected is None:
++        return None
++    if (selected != 'sealed-model-only-v1' or mode != 'glm'
++            or model not in {'glm-5.3', 'glm-5.3-flash'}
++            or env.get('FABRIC_OPERATOR_CAPSULE')
++            or env.get('FABRIC_OPERATOR_CAPABILITY')
++            or env.get('FABRIC_NEW_MACRO_COMMIT')):
++        raise ValueError('CANONICAL_PAID_MODE_REFUSED')
++    lanes = Path(env.get('REMOTE_SUB_LANES', ''))
++    capsule = Path(env.get('GLM_REMOTE_CAPABILITY_FILE', ''))
++    if (not lanes.is_absolute() or capsule != lanes / 'tmp' / (key + '.glm-cap.json')
++            or packet_path != lanes / 'tmp' / (key + '.txt')):
++        raise ValueError('CANONICAL_PAID_INPUT_REFUSED')
++    client = here / 'paid_glm_model_client.py'
++    if not client.is_file() or client.is_symlink():
++        raise ValueError('CANONICAL_PAID_CLIENT_REFUSED')
++    return [sys.executable, '-I', '-S', '-B', str(client), str(packet_path), str(capsule), model]
++
++
+ def _execute(argv: list[str], state: dict) -> int:
+     if len(argv) != 6:
+         return _fail(
+@@ -795,6 +821,17 @@
+         command.append(model)
+     if mode in native_remote.MODES:
+         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
++    canonical_command = None
++    try:
++        canonical_command = _canonical_model_command(here, packet_path, key, mode, model, os.environ)
++    except (ValueError, OSError):
++        lease.release()
++        return _fail('CANONICAL_PAID_PREFLIGHT_REFUSED before_worker=1', 78)
++    if canonical_command is not None:
++        if artifact_contract is not None:
++            lease.release()
++            return _fail('CANONICAL_PAID_ARTIFACT_REFUSED before_worker=1', 78)
++        command = canonical_command
+     lanes_dir = state_ext / "lanes"
+     child_env = dict(os.environ)
+     if 'commission_deadline_ns' in state:
+@@ -817,6 +854,9 @@
+         if timeout <= 0:
+             lease.release()
+             return _fail("native_remote_lease_expired", 78)
++    if canonical_command is not None:
++        child_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
++                     'PYTHONDONTWRITEBYTECODE': '1'}
+     receipt = lanes_dir / f"{key}.process.jsonl"
+     diagnostic_reader = None
+     if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
+@@ -909,6 +949,9 @@
+                     receipt_path=receipt,
+                     timeout_returncode=124,
+                     receipt_diagnostics=diagnostic_reader,
++                    launch_observer=(None if canonical_command is None else
++                        __import__('paid_model_owner').launch_observer(
++                            here, packet_path, key, model, receipt)),
+                 )
+             except OwnedProcessStartError as exc:
+                 state["started"] = False
+@@ -980,6 +1023,16 @@
+             return _fail("REMOTE_CLEANUP_UNPROVEN " + type(exc).__name__, 76)
+         return _fail("REMOTE_SUB_RUNTIME_ERROR " + type(exc).__name__, 78)
+ 
++    if canonical_command is not None and int(result.returncode) == 0:
++        try:
++            __import__('paid_model_owner').retain_result(receipt,key,result)
++        except (OSError,ValueError,KeyError,UnicodeError):
++            return _fail('CANONICAL_PAID_RESULT_RETENTION_UNCONFIRMED same_run=1',76)
++
++    if canonical_command is not None and (
++            int(result.returncode) != 0 or not result.cleanup_proven
++            or result.stdout_truncated or result.stderr_truncated):
++        display_stdout = ''
+     if display_stdout:
+         sys.stdout.write(display_stdout)
+         sys.stdout.flush()

@@ -34,6 +34,8 @@ sub.sh support_bundle.py host_pull_probe.template yes
 """.split())
 ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
+                      "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
+                      "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py",
                       "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes

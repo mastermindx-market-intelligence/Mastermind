@@ -239,7 +239,7 @@ CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
     "mastermind.executive_control_env_probe/v1"
 )
 _CANONICAL_AGENT_RELAY_SOCKET = Path(
-    "/var/run/mastermind-agent-relay/agent-relay.sock"
+    "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
 )
 _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
@@ -325,6 +325,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bindings_path",
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
+        "canonical_paid_fabric",
         "fabric_attended_probe",
         "native_capacity_v2",
     }
@@ -452,7 +453,9 @@ def _parser() -> argparse.ArgumentParser:
         ("activate-canary", "Validate and activate the current PID-bound canary."),
         ("workers", "List durable worker identities."),
         ("jobs", "List durable Jobs."),
-        ("register-worker", "Register the single configured Codex worker."),
+        ("register-worker", "Register the configured identities; paid source begins OFFLINE."),
+        ("paid-capacity-observe", "Observe existing paid state only; never refresh provider quota."),
+        ("paid-capacity-bootstrap", "Explicit bounded original-owner paid quota status operation."),
         ("create-proof-job", "Create the fixed harmless Phase 1C-A proof Job."),
         ("reconcile", "Reconcile durable attempts without automatic requeue."),
         ("backup", "Create an online DB backup in the configured backup root."),
@@ -1800,6 +1803,7 @@ def _service_from_config(
     fabric_worker_binding_source: Any | None = None,
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
+    paid_worker_binding_source: Any | None = None,
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1853,6 +1857,22 @@ def _service_from_config(
         router = ModelRouter.load()
         for placement in attended_work_placements:
             placement_member(router, placement)
+    paid_work_placements=()
+    if paid_worker_binding_source is not None:
+        from control_plane.executive_paid_fabric_composition import PaidBindingSource,PaidWorkPlacement
+        if (type(paid_worker_binding_source) is not PaidBindingSource
+                or fabric_worker_binding_source is not None or attended_work_placements):
+            raise ServiceError('paid and attended owner compositions cannot mix')
+        paid_worker_binding_source._current()
+        identities=set()
+        placements=[]
+        for physical in paid_worker_binding_source.bindings:
+            if physical.worker_id in identities or physical.worker_id==str(raw.get('worker_id') or 'codex-01'):
+                raise ServiceError('paid physical owner conflicts with another Worker')
+            identities.add(physical.worker_id)
+            placements.append(PaidWorkPlacement('glm.paid.sealed-input',
+                paid_worker_binding_source.quota_for(physical)))
+        paid_work_placements=tuple(dict.fromkeys(placements))
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1955,6 +1975,7 @@ def _service_from_config(
             "coo_operator_harness_armed", False
         ),
         coo_attended_work_placements=attended_work_placements,
+        coo_paid_work_placements=paid_work_placements,
         coo_tick_interval_seconds=float(
             raw.get("coo_tick_interval_seconds", 15.0)
         ),
@@ -2126,6 +2147,27 @@ def _service_from_config(
             product_acceptance_context_reader=(product_acceptance_basis_reader()
                 if product_acceptance_context_owner is not None else None),
         )
+        if paid_worker_binding_source is not None:
+            from control_plane.executive_paid_fabric_adapter import CanonicalPaidFabricWorkerAdapter
+            from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+            paid_adapter=CanonicalPaidFabricWorkerAdapter(runtime,paid_worker_binding_source)
+            owners={config.worker_id:primary}
+            for physical in paid_worker_binding_source.bindings:
+                owners[physical.worker_id]=ExecutiveSupervisor(runtime,paid_adapter,
+                    runs_root=raw['worker_runs_root'],
+                    isolation_roots=(raw['proof_workspace_root'],raw['worker_runs_root']),
+                    receipts_root=raw['receipts_root'],worker_user=physical.worker_user,
+                    worker_uid=physical.worker_uid,worker_gid=physical.worker_gid,
+                    shared_run_gid=None,secret_canary_verdict=None,
+                    require_complete_launch_attestation=True,
+                    cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+                    process_controller=paid_adapter,instance_id=primary.instance_id,
+                    product_acceptance_macro_root=product_acceptance_macro_root,
+                    product_acceptance_context_reader=(product_acceptance_basis_reader()
+                        if product_acceptance_context_owner is not None else None))
+            mixed=MixedExecutionOwnerSupervisor(primary,owners)
+            recovery_controller['owners']=mixed.owners
+            return mixed
         if fabric_worker_binding_source is None:
             return primary
         from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
@@ -2742,6 +2784,7 @@ def _service_from_config(
         config,
         supervisor_factory=supervisor_factory,
         attended_worker_registration=attended_registration,
+        paid_worker_binding_source=paid_worker_binding_source,
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
         proof_capacity_recovery_worker_uid=(
@@ -2848,6 +2891,10 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     # Only a fixed host composition may select typed placements. Merely
     # staging a file or setting a JSON flag cannot activate its worker owners.
     physical_source = _staged_fabric_binding_source(raw)
+    from control_plane.executive_paid_fabric_composition import installed_paid_source
+    paid_source=installed_paid_source(raw,installed_control=_installed_control)
+    if paid_source is not None and (physical_source is not None or attended_work_placements):
+        raise ServiceError('installed paid source cannot replace or mix an attended owner')
     if _installed_control:
         if attended_work_placements:
             raise ServiceError('installed Control cannot replace its fixed source composition')
@@ -2991,6 +3038,7 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
     service = _service_from_config(
         raw,
         fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        paid_worker_binding_source=paid_source,
         attended_work_placements=attended_work_placements,
         fabric_attended_probe_source=(
             AttendedControlProbeSource.from_startup(config_path, raw, control_attestation)
@@ -3030,6 +3078,8 @@ def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
         "workers",
         "jobs",
         "register-worker",
+        "paid-capacity-observe",
+        "paid-capacity-bootstrap",
         "create-proof-job",
         "reconcile",
         "backup",

@@ -22,7 +22,10 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
-COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PRE_PAID_MODEL_COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PAID_MODEL_PATCH = ROOT / "tests/fixtures/fabric-native-paid-model-20261022.patch"
+PAID_MODEL_PATCH_SHA = "586ecf8646d33f295cb866a33ecf517874eb3b89f4ad29adc4e62ccc6e18c37a"
+COMPOSED_SHA = "47c74d056a92d61d9a05516f4200d419634fbb755bac8400a0b2fc927d985251"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -30,11 +33,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 85-file closure composes protected physical-root admission and canonical
-# slot diagnostics with retention recovery and explicit acquisition correlation.
-# Historical executor, donor, quota, deadline and root transformations stay pinned.
-EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "51838ae74216c772d1f1e43ec087402a77685aab9e0003dd4657d8e654c2f8eb"
+# The 92-file closure adds the closed paid model-only path to the protected
+# physical-root, diagnostics and retention composition. Historical donor, quota,
+# deadline and root transformations remain pinned before the explicit paid patch.
+EXPECTED_NATIVE_FILES = 92
+NATIVE_MANIFEST_SHA = "3bb291fe80323233a88b9809b156a3b0ab0c71fc1992be5dee4bb0955846f8af"
 
 
 def _sha(raw):
@@ -73,6 +76,10 @@ def _composition(directory):
     assert _sha(PHYSICAL_ROOT_PATCH.read_bytes()) == PHYSICAL_ROOT_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(PHYSICAL_ROOT_PATCH))
     donor_contract._git(directory, "apply", str(PHYSICAL_ROOT_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PAID_MODEL_COMPOSED_SHA
+    assert _sha(PAID_MODEL_PATCH.read_bytes()) == PAID_MODEL_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PAID_MODEL_PATCH))
+    donor_contract._git(directory, "apply", str(PAID_MODEL_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed

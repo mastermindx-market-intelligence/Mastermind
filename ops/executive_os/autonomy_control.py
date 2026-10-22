@@ -100,6 +100,12 @@ _FINITE_RECEIPT_FIELDS = frozenset({
     "finite_target_receipt_sha256",
 })
 
+_PAID_RECEIPT_ARCHIVE = "prior-paid-disarmed-receipt.json"
+_PAID_RECEIPT_FIELDS = frozenset({
+    "paid_prior_receipt_present", "paid_prior_receipt_sha256",
+    "paid_target_receipt_sha256", "paid_definition_sha256",
+})
+
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
     r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled|true|false)$'
@@ -197,7 +203,7 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -767,6 +773,12 @@ def _parser() -> argparse.ArgumentParser:
     finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
     finite_reconcile = sub.add_parser('finite-control-stage-reconcile', help='Prove an already-published finite stage without replay.')
     finite_reconcile.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+    for command in ('paid-control-stage','paid-control-stage-reconcile'):
+        paid=sub.add_parser(command,help='Stage or reconcile the qualified disarmed paid source.')
+        paid.add_argument('--expected-sha',type=_exact_sha,action=_StoreOnce,required=True)
+        paid.add_argument('--expected-definition-sha256',action=_StoreOnce,required=True)
+        if command=='paid-control-stage':
+            paid.add_argument('--expected-control-sha256',action=_StoreOnce,required=True)
     return parser
 
 
@@ -3072,6 +3084,13 @@ class ProductionTransactionHost(ProductionArmHost):
                            for field in _FINITE_RECEIPT_FIELDS - {"finite_prior_receipt_present"})):
                 raise TransactionEffectUnknown()
             required |= _FINITE_RECEIPT_FIELDS
+        if set(value) & _PAID_RECEIPT_FIELDS:
+            if (value.get("operation") != "PAID_CONTROL_STAGE"
+                    or type(value.get("paid_prior_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _PAID_RECEIPT_FIELDS - {"paid_prior_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _PAID_RECEIPT_FIELDS
         if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             required |= _CANARY_MANIFEST_FIELDS
             if (
@@ -3150,6 +3169,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _COEXISTENCE_MANIFEST_FIELDS})
         if current is not None and set(current) & _FINITE_RECEIPT_FIELDS:
             value.update({key: current[key] for key in _FINITE_RECEIPT_FIELDS})
+        if current is not None and set(current) & _PAID_RECEIPT_FIELDS:
+            value.update({key: current[key] for key in _PAID_RECEIPT_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -3811,6 +3832,9 @@ class ProductionTransactionHost(ProductionArmHost):
         if set(manifest) & _FINITE_RECEIPT_FIELDS:
             expected.add(_FINITE_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _FINITE_RECEIPT_ARCHIVE)
+        if set(manifest) & _PAID_RECEIPT_FIELDS:
+            expected.add(_PAID_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _PAID_RECEIPT_ARCHIVE)
         if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             expected.add(_CANARY_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
@@ -5253,6 +5277,10 @@ def main(
     if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
         from ops.executive_os.attended_control_staging import run_command
         return run_command(args, host=host)
+
+    if args.command in {'paid-control-stage','paid-control-stage-reconcile'}:
+        from ops.executive_os.paid_control_staging import run_command
+        return run_command(args,host=host)
 
     transaction_host = ProductionTransactionHost() if host is None else host
     try:
