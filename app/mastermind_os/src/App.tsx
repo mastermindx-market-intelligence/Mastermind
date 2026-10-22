@@ -59,6 +59,8 @@ import {
 } from "./mission";
 import { type ControlRoomState } from "./control-room";
 import { ControlRoomPanel } from "./ControlRoomPanel";
+import { useControlRoomSurfaceControls } from "./useControlRoomSurfaceControls";
+import { ControlRoomSurfaceControls } from "./ControlRoomSurfaceControls";
 import {
   decodeResultEnvelope,
   normalizeResultSelection,
@@ -1163,6 +1165,7 @@ function Conversation({
   selection,
   association,
   contentAvailable,
+  locale = "en",
 }: {
   document?: WindowDocument | null;
   pending?: boolean;
@@ -1170,6 +1173,7 @@ function Conversation({
   selection?: MissionSelection | null;
   association?: ObservedMissionAssociation | null;
   contentAvailable?: boolean;
+  locale?: "en" | "zh-CN";
 }) {
   const refreshControl = (
     <button onClick={refresh} disabled={!!pending || !contentAvailable}>
@@ -1256,7 +1260,11 @@ function Conversation({
       </p>
       <Empty>
         {window.MastermindMissionHost?.readCurrentWindow
-          ? "Sign in with permitted conversation access, then open this view again."
+          ? contentAvailable
+            ? locale === "zh-CN"
+              ? "对话来源暂不可用。服务或来源恢复后，请刷新。"
+              : "The conversation source is unavailable. Refresh after the service or source becomes available."
+            : "Sign in with permitted conversation access, then open this view again."
           : "No conversation content is shown until a connected source is installed. Existing owner and effect boundaries remain unchanged."}
       </Empty>
       <details className="reason-details">
@@ -1296,6 +1304,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       state: "UNAVAILABLE", reason: "NOT_READ", ownerRevision: -1,
     }),
     [controlRoomRevision, setControlRoomRevision] = useState(0),
+    controlRoomAuthEpoch = useRef(0),
     [workState, setWorkState] = useState<WorkState>({ kind: "PENDING" }),
     [workRevision, setWorkRevision] = useState(0),
     [mission, setMission] = useState<MissionDocument | UnavailableMission>(() =>
@@ -1396,6 +1405,10 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           program.rootState === "RESOLVED" &&
           program.rootJobId === selection.rootJobId,
       );
+  const controlRoomSurfaceControls = useControlRoomSurfaceControls({
+    selection, selectionSeq, authEpoch: controlRoomAuthEpoch, authRevision,
+    active: active === "Control Room",
+  });
   const office = useOfficeProjection(authRevision, selection);
   const observedConversation = useObservedConversation(
     authRevision,
@@ -1721,6 +1734,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           return;
         previousAuth.current = serialized;
         previousHostGeneration.current = generation;
+        // Invalidate old surface presentation at notification time while the
+        // App-owned pending/unknown action continues to retain its own result.
+        controlRoomAuthEpoch.current += 1;
         office.invalidateAuth();
         observedConversation.invalidateAuth();
         commandSlot.current?.controller.invalidate();
@@ -3344,11 +3360,18 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Control Room")
     content = (
-      <ControlRoomPanel key={authRevision} state={currentControlRoom}
-        canRefresh={Boolean(authState?.acquisition) &&
-          typeof window.MastermindMissionHost?.readControlRoomState === "function"}
-        onRefresh={() => setControlRoomRevision(revision => revision + 1)}
-        onOpen={open} />
+      <>
+        <ControlRoomPanel key={authRevision} state={currentControlRoom}
+          canRefresh={Boolean(authState?.acquisition) &&
+            typeof window.MastermindMissionHost?.readControlRoomState === "function"}
+          onRefresh={() => setControlRoomRevision(revision => revision + 1)}
+          onOpen={open} />
+        <ControlRoomSurfaceControls key={"surface-controls:" + authRevision}
+          navigation={currentControlRoom.state === "AVAILABLE"
+            ? currentControlRoom.navigation : null}
+          locale={locale}
+          {...controlRoomSurfaceControls} />
+      </>
     );
   else if (active === "Work")
     content = (
@@ -3396,6 +3419,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
           selection={selection}
           association={association}
           contentAvailable={!!authState?.content}
+          locale={locale}
         />
       </>
     );
@@ -3513,7 +3537,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
   else if (active === "Activity") content = <Activity d={d} />;
   else if (active === "Connections") content = <Connections d={d} />;
   else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
-  else content = <Conversation />;
+  else content = <Conversation locale={locale} />;
   return (
     <div className="shell" data-theme={theme} data-active-route={active} lang={locale}>
       <a className="skip" href="#content" onClick={event => {

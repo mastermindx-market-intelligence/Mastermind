@@ -27,6 +27,7 @@ import {
 } from "./result";
 import { decodeWorkDocument, type WorkDocument } from "./work";
 import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
+import { decodeControlRoomDiscovery, type ControlRoomDiscovery } from "./control-room-navigation";
 import {
   completeOrchestratorCommandBinding,
   type OrchestratorCommandBinding,
@@ -41,7 +42,12 @@ export interface AuthState {
   content: boolean;
 }
 import type { ResearchEvidenceTransport } from "./research/evidence-contract";
-import { decodeControlRoomRead, type ControlRoomRead } from "./control-room";
+import {
+  decodeControlRoomRead, type ControlRoomRead,
+  decodeControlRoomActionPayload, decodeControlRoomActionResult,
+  ControlRoomActionTransportError,
+  type ControlRoomOperation, type ControlRoomActionResult,
+} from "./control-room";
 
 export interface RawClient {
   /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
@@ -65,6 +71,13 @@ export interface RawClient {
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
   /** Fixed authenticated one-cache Control Room state; no operator writes. */
   readControlRoomState?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Independent read with a separately sealed Discovery grant; never an action grant. */
+  readControlRoomDiscovery?(request: { signal: AbortSignal }): Promise<unknown>;
+  /** Each original mutation has one fixed, optional host method and one owner. */
+  openControlRoomSurface?(request: { payload: Readonly<Record<string, unknown>>; signal: AbortSignal }): Promise<unknown>;
+  bindControlRoomSurface?(request: { payload: Readonly<Record<string, unknown>>; signal: AbortSignal }): Promise<unknown>;
+  unbindControlRoomSurface?(request: { payload: Readonly<Record<string, unknown>>; signal: AbortSignal }): Promise<unknown>;
+  refreshControlRoomBuilds?(request: { signal: AbortSignal }): Promise<unknown>;
   readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
@@ -111,6 +124,11 @@ export interface MissionHost {
   readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readPrograms?: ProgramRead;
   readControlRoomState?: (request: { signal: AbortSignal }) => Promise<ControlRoomRead>;
+  readControlRoomDiscovery?: (request: { signal: AbortSignal }) => Promise<ControlRoomDiscovery>;
+  openControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
+  bindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
+  unbindControlRoomSurface?: (request: { payload: Record<string, unknown>; signal: AbortSignal }) => Promise<ControlRoomActionResult>;
+  refreshControlRoomBuilds?: (request: { signal: AbortSignal }) => Promise<ControlRoomActionResult>;
   /** Same fixed Programs acquisition, retaining its collection owner receipt. */
   readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
   readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
@@ -158,6 +176,73 @@ export function bindMissionHost(
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
+  // Capture the actual fixed owner method once. Any replacement before invocation
+  // refuses pre-dispatch; a lost result AFTER invoking it is EFFECT_UNKNOWN.
+  // Caller cancellation or auth changes after the call cannot erase the owner's return.
+  function bindAction(
+    operation: ControlRoomOperation,
+    method: "openControlRoomSurface" | "bindControlRoomSurface"
+      | "unbindControlRoomSurface" | "refreshControlRoomBuilds",
+  ) {
+    const raw = client[method];
+    if (typeof raw !== "function") return null;
+    const withPayload = operation !== "refresh-builds";
+    return async (request: { payload?: Record<string, unknown>; signal: AbortSignal }): Promise<ControlRoomActionResult> => {
+      const admitted = (() => {
+        try {
+          // Capture authority before request decoding or any state callback can
+          // reenter authentication. The final epoch check follows every callback.
+          const started = epoch;
+          const getState = client.getState;
+          const getGeneration = client.invalidationGeneration;
+          const source = getGeneration?.call(client);
+          const signal = request.signal;
+          if (!signal || signal.aborted) throw new Error("PRE_DISPATCH_CANCELLED");
+          const payload = decodeControlRoomActionPayload(
+            withPayload ? request.payload : {}, operation,
+          );
+          const state = getState.call(client);
+          const authorized = state.status === "signed_in" && state.acquisition;
+          const currentSource = getGeneration?.call(client);
+          if (!authorized || source !== currentSource
+              || client.getState !== getState
+              || client.invalidationGeneration !== getGeneration
+              || client[method] !== raw || signal.aborted || started !== epoch)
+            throw new Error("ACTION_NOT_ADMITTED");
+          return { payload, signal };
+        } catch {
+          throw new ControlRoomActionTransportError(operation, "NOT_DISPATCHED");
+        }
+      })();
+      let result: unknown;
+      try {
+        result = withPayload
+          ? await (raw as NonNullable<RawClient["openControlRoomSurface"]>)
+            .call(client, admitted)
+          : await (raw as NonNullable<RawClient["refreshControlRoomBuilds"]>)
+            .call(client, { signal: admitted.signal });
+      } catch (error) {
+        // Only this exact delegated owner may establish that its own fetch did
+        // not start. No other operation or error phase supplies that evidence.
+        let disposition: "NOT_DISPATCHED" | "EFFECT_UNKNOWN" = "EFFECT_UNKNOWN";
+        try {
+          if (error instanceof ControlRoomActionTransportError
+              && error.operation === operation
+              && (error.disposition === "NOT_DISPATCHED"
+                || error.disposition === "EFFECT_UNKNOWN"))
+            disposition = error.disposition;
+        } catch { /* An uninspectable dependency error remains uncertain. */ }
+        throw new ControlRoomActionTransportError(operation, disposition);
+      }
+      try {
+        const httpStatus = result && typeof result === "object" && !Array.isArray(result)
+          ? (result as { status?: number }).status : NaN;
+        return decodeControlRoomActionResult(result, operation, httpStatus as number);
+      } catch {
+        throw new ControlRoomActionTransportError(operation, "EFFECT_UNKNOWN");
+      }
+    };
+  }
   const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     invalidationGeneration: () => epoch,
@@ -252,6 +337,32 @@ export function bindMissionHost(
         check(signal, started);
         return decodeControlRoomRead(raw);
       },
+    } : {}),
+    ...(client.readControlRoomDiscovery ? {
+      async readControlRoomDiscovery({ signal }: { signal: AbortSignal }) {
+        const started = epoch;
+        check(signal, started);
+        const state = client.getState();
+        if (state.status !== "signed_in" || !state.acquisition)
+          throw new Error("DISCOVERY_READ_UNAUTHORIZED");
+        const raw = await client.readControlRoomDiscovery!({ signal });
+        check(signal, started);
+        const decoded = decodeControlRoomDiscovery(raw);
+        check(signal, started);
+        return decoded;
+      },
+    } : {}),
+    ...(client.openControlRoomSurface ? {
+      openControlRoomSurface: bindAction("open", "openControlRoomSurface")!,
+    } : {}),
+    ...(client.bindControlRoomSurface ? {
+      bindControlRoomSurface: bindAction("bind", "bindControlRoomSurface")!,
+    } : {}),
+    ...(client.unbindControlRoomSurface ? {
+      unbindControlRoomSurface: bindAction("unbind", "unbindControlRoomSurface")!,
+    } : {}),
+    ...(client.refreshControlRoomBuilds ? {
+      refreshControlRoomBuilds: bindAction("refresh-builds", "refreshControlRoomBuilds")!,
     } : {}),
     async readProgramsObservation({ signal }) {
       const started = epoch;

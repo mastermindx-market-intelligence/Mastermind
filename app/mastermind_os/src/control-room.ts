@@ -3,6 +3,7 @@
  * Runtime status and action authorization remain with their existing owners.
  */
 import { programsFromControlRoom, type ProgramCard } from "./mission";
+import { decodeControlRoomNavigation, type ControlRoomNavigation } from "./control-room-navigation";
 
 const FIELDS = [
   "control_room",
@@ -16,6 +17,7 @@ const FIELDS = [
 export type ControlRoomRead = {
   readonly state: "AVAILABLE";
   readonly programs: readonly Readonly<ProgramCard>[];
+  readonly navigation: ControlRoomNavigation;
   readonly observedAt: string | null;
   readonly liveBuildsActive: boolean;
   readonly refreshInFlight: boolean;
@@ -53,8 +55,7 @@ export function decodeControlRoomRead(raw: unknown): ControlRoomRead {
       raw.state_refresh_error === null ||
       typeof raw.state_refresh_error === "string"
     ) ||
-    !record(raw.source_validity) ||
-    !record(raw.capabilities)
+    !record(raw.source_validity)
   )
     throw new Error("CONTROL_ROOM_RESPONSE_INVALID");
   // The upstream owner rejects a failed cache. Keep the same fail-closed
@@ -74,6 +75,7 @@ export function decodeControlRoomRead(raw: unknown): ControlRoomRead {
   // Only the publication sequence is displayed; operational truth is unchanged.
   return Object.freeze({
     state: "AVAILABLE",
+    navigation: decodeControlRoomNavigation(raw.control_room, raw.capabilities),
     programs: Object.freeze(
       parsed.programs.map((p) =>
         Object.freeze({
@@ -91,3 +93,11 @@ export function decodeControlRoomRead(raw: unknown): ControlRoomRead {
     publicationSeq: qualified ? (validity.publication_seq as number) : null,
   });
 }
+
+// The accepted read decoder and fixed effect-aware action contract share one module entry.
+export {
+  CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES, CONTROL_ROOM_UNKNOWN_OUTCOME,
+  ControlRoomActionTransportError, controlRoomActionIsUncertain,
+  decodeControlRoomActionPayload, decodeControlRoomActionResult, decodeControlRoomActionJson,
+} from "./control-room-actions";
+export type { ControlRoomOperation, ControlRoomDisposition, ControlRoomActionResult } from "./control-room-actions";
