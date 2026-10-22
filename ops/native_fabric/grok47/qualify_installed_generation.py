@@ -33,7 +33,7 @@ spec.loader.exec_module(generation)
 def sha(raw): return hashlib.sha256(raw).hexdigest()
 
 
-def qualify(store: Path):
+def qualify(store: Path, release_stage: Path | None = None):
     store = store.resolve(strict=True)
     before = (store/'CURRENT.json').read_bytes()
     selected = generation.current(store)
@@ -43,6 +43,12 @@ def qualify(store: Path):
     overlay_names = {'ext/'+p.name for p in (HERE/'overlay').iterdir() if p.is_file()}
     if overlay_names != OVERLAYS:
         raise ValueError('overlay file set is not reviewed')
+    if release_stage is not None:
+        release_stage = release_stage.absolute()
+        # This task can prepare source under the approved workspaces root only.
+        if (release_stage.parent.resolve(strict=True) != HERE.parents[3].resolve(strict=True)
+                or release_stage.exists() or release_stage.is_symlink()):
+            raise ValueError('release stage must be a fresh sibling workspace path')
     with tempfile.TemporaryDirectory(prefix='grok47-native-qualification-') as temp:
         temp = Path(temp).resolve(strict=True)
         source, stable_ext = temp/'source', temp/'fake-owner'/'ext'
@@ -90,6 +96,21 @@ def qualify(store: Path):
                   'code_manifest_sha256':sha(generation.canonical(new_hashes)),
                   'isolated_publish_verified':True,
                   'isolated_select_verified':True}
+        if release_stage is not None:
+            # Stage reviewed bytes only. The installed publisher and pointer are untouched.
+            pending = Path(tempfile.mkdtemp(prefix='.grok47-pending-', dir=release_stage.parent))
+            try:
+                shutil.copytree(source, pending/'source')
+                shutil.copy2(manifest, pending/'manifest.json')
+                (pending/'qualification.json').write_text(json.dumps(result, sort_keys=True)+'\n')
+                for rel, wanted in new_hashes.items():
+                    if sha((pending/'source'/rel).read_bytes()) != wanted:
+                        raise ValueError('copied staged file digest mismatch '+rel)
+                os.rename(pending, release_stage)
+            finally:
+                if pending.exists():
+                    shutil.rmtree(pending)
+            result['release_stage'] = str(release_stage)
     if (store/'CURRENT.json').read_bytes() != before:
         raise ValueError('live selection changed during qualification')
     return result
@@ -97,5 +118,7 @@ def qualify(store: Path):
 if __name__ == '__main__':
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--installed-store', type=Path, required=True)
+    parser.add_argument('--release-stage', type=Path, default=None,
+                        help='optional fresh sibling workspace for owner-run publication')
     args=parser.parse_args()
-    print(json.dumps(qualify(args.installed_store), sort_keys=True))
+    print(json.dumps(qualify(args.installed_store, args.release_stage), sort_keys=True))
