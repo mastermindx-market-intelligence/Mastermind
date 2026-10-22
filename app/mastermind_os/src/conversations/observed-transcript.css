@@ -19,3 +19,5 @@
 .observed-transcript-footer { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; align-items:center; color:var(--muted); font-size:12px; line-height:1.6; }
 @media(max-width:600px) { .observed-transcript-toolbar { align-items:stretch; } .observed-transcript-toolbar>button { width:100%; } .observed-transcript-viewport { max-height:60dvh; padding-right:8px; } .observed-transcript-viewport .conversation-response { padding:14px; } }
 @media(prefers-reduced-motion:reduce) { .observed-transcript * { scroll-behavior:auto; } }
+
+.observed-response-format { min-width:0; max-width:100%; }

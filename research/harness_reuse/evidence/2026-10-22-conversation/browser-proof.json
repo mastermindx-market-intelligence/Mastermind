@@ -19,6 +19,7 @@
       "withdrawn_source_hidden": true,
       "inert_markdown": true,
       "horizontal_overflow": false,
+      "transcript_horizontal_overflow": false,
       "dark_background": "rgb(8, 8, 8)",
       "light_background": "rgb(247, 248, 250)",
       "page_errors": [],
@@ -37,6 +38,7 @@
       "withdrawn_source_hidden": true,
       "inert_markdown": true,
       "horizontal_overflow": false,
+      "transcript_horizontal_overflow": false,
       "dark_background": "rgb(8, 8, 8)",
       "light_background": "rgb(247, 248, 250)",
       "page_errors": [],
@@ -45,9 +47,9 @@
   ],
   "screenshot_sha256": {
     "desktop-dark.png": "cc65104d131d76edda7c9d568ecd4dbce3762eadb6506c9a58d5bfb6887f975d",
-    "desktop-light.png": "44358ed23c285bbe4f4745773ec1dde05cfd950c381b5c1636590efa2487887e",
-    "mobile-dark.png": "c2357ed98f7baf661f38deb9709d4c628cf890573ed57dd39a20ab02df8de2af",
-    "mobile-light.png": "a32b06ec88c904e6f6dfe1e0c643b0c392c9d007d76dad86a4eef4ba06d009e2",
+    "desktop-light.png": "2127dd879677153b8909bff6045a53a65c6bc01eaebe88dff3b2b4f51f51e664",
+    "mobile-dark.png": "4513cdc3be846a496bf7126e2ac96b0e4c26894b9d07b6e95ad82842bb780700",
+    "mobile-light.png": "5e06edacdaa0aed589b2f12f6168762cec69149b8c49d22c5e1c4e7999242233",
     "mobile-zh.png": "6520d33bae732685df3ab65180bf0b06e4b2440db15764947e7b13a56f201613"
   }
 }

@@ -52,3 +52,35 @@ The original PR1723 CI observer PID67383 completed exit0; all11 exact-head check
 2. Publish/review this exact registered continuation, bind its hosted checks, and integrate the first-slice squash only when an actual semantic ancestry conflict requires it. Preserve the tested postimage rather than copying another branch over it.
 3. Deliver this bounded source result to the existing ecosystem programme and Agent OS. Publication is not receiver pickup or runtime consumption.
 4. Resolve the existing bridge, Content producer/publication and ACP custody/materialization gates on their original carriers. Then prove the authenticated project/session -> single governed send -> native work -> original reply -> evidence -> original-parent consumption/reload journey. More presentation cannot substitute for that proof.
+
+## Capacity and current-design qualification amendment
+
+A maximum-sized synthetic window exposed a real eager-formatting amplification: 256 rows,
+1,025,757 source bytes, and 255,510 formatted descendant elements. The observed all-response
+format/render time was3.331seconds. This is a local measurement, not a production SLA.
+
+The same original PR1727 now defers each response's rich parser until its actual scrollport
+intersection or deliberate per-response request. Exact raw source remains readable, searchable
+and copyable before formatting. Browsers without IntersectionObserver use explicit per-response
+demand rather than eagerly parsing every row. Source withdrawal disconnects old observers.
+This is lazy display admission, not a new history store or network/source permission.
+
+The repaired compiled fixture initially renders two rich responses/2,004 descendant elements,
+leaving253 response previews deferred. An offscreen response formats on actual scroll; returning
+to exact-source mode restores all1,025,757 original bytes. Timings and exact final counts are in
+capacity-proof.json; they measure first-visible rich content, not all-response completion, so
+never report an equivalent-work universal speedup. Full source suite:1754PASS/one existingSKIP,
+80files; nine new demand-driven tests. TypeScript, final normal build and compiled desktop/mobile
+browser proof pass. Visual inspection also found and repaired the deferred wrapper's grid
+minimum-width issue; browser qualification now asserts both document AND internal transcript
+horizontal-overflow absence. Tables/code retain their own deliberately scrollable containers.
+
+Current Paper reference was recovered through the direct read-only Paper app, not an unrelated
+open market file: Mastermind OS file01M3NRCX55B452A12819WNE1RH, Chat Atelier pagep-C-0,
+CH1desktopIZB-0 and CH6mobileK5X-0. Both real screenshots were inspected; tokensf3c5ac93 and
+catalog1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db were observed.
+The implementation retains the existing Noir/Manrope/Inter theme and44px controls. This source
+reader is not the complete designed conversation directory, authenticated sender or native-send
+experience. No Paper content or focus mutation occurred, and prior KD01/UX09 unknown edits were
+not replayed or declared reconciled. Full recipient/session and source-origin actions still need
+the original runtime qualifications before the complete CH1/CH6 journey can be claimed.

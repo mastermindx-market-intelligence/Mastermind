@@ -75,13 +75,15 @@ def main() -> None:
             page.get_by_role("button", name="Fixture: toggle withheld", exact=True).click()
             page.get_by_role("searchbox").wait_for()
             page.get_by_role("button", name="Formatted responses", exact=True).click()
-            page.get_by_role("heading", name="Observation 2-1", exact=True).wait_for()
             viewport.evaluate("e=>{e.scrollTop=0;}")
+            page.get_by_role("heading", name="Observation 2-1", exact=True).wait_for()
             page.get_by_text("Reading earlier responses", exact=True).wait_for()
             page.evaluate("window.scrollTo(0,0)")
             dark = page.locator("main.shell").evaluate("e=>getComputedStyle(e).backgroundColor")
             overflow = page.evaluate("document.documentElement.scrollWidth>innerWidth+1")
             assert not overflow
+            internal_overflow = viewport.evaluate("e=>e.scrollWidth>e.clientWidth+1")
+            assert not internal_overflow, "The transcript must not hide content behind horizontal viewport scrolling"
             page.screenshot(path=str(args.output / f"{name}-dark.png"), full_page=True)
             page.get_by_role("button", name="Fixture: toggle theme", exact=True).click()
             light = page.locator("main.shell").evaluate("e=>getComputedStyle(e).backgroundColor")
@@ -97,7 +99,7 @@ def main() -> None:
                 "preserved_reading_top_before": before, "preserved_reading_top_after": after,
                 "jump_to_latest": True, "search_and_literal_scope": True, "notes_unchanged": True,
                 "source_epoch_resets_search": True, "withdrawn_source_hidden": True,
-                "inert_markdown": True, "horizontal_overflow": overflow,
+                "inert_markdown": True, "horizontal_overflow": overflow, "transcript_horizontal_overflow": internal_overflow,
                 "dark_background": dark, "light_background": light,
                 "page_errors": errors, "external_requests": external})
             context.close()

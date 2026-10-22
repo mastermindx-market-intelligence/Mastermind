@@ -16,7 +16,8 @@ const markdown = (i: number, generation: number) => `## Observation ${generation
 function Fixture({ original }: { original: WindowDocumentV2 }) {
   const [theme, setTheme] = useState<"dark" | "light">("dark");
   const [locale, setLocale] = useState<"en" | "zh-CN">("en");
-  const [count, setCount] = useState(18), [generation, setGeneration] = useState(1);
+  const stress = new URLSearchParams(location.search).get("stress") === "bounded-markdown";
+  const [count, setCount] = useState(stress ? 255 : 18), [generation, setGeneration] = useState(1);
   const [hidden, setHidden] = useState(false), [draft, setDraft] = useState("Retained unsent notes. Search and formatting never edit this text.");
   const projection = useMemo(() => {
     const window = structuredClone(original);
@@ -25,7 +26,8 @@ function Fixture({ original }: { original: WindowDocumentV2 }) {
     // These synthetic rows are not attributed to an installed producer.
     window.view.items = Array.from({ length: count }, (_, i): WindowItem => ({
       ...original.view.items[0], id: `fixture-${generation}-${i}`, source_sequence: i,
-      text: markdown(i, generation), state: i === count - 1 ? "partial" : "completed",
+      text: stress ? `## Bounded stress ${i + 1}\n\n${"*x* ".repeat(1000)}` : markdown(i, generation),
+      state: i === count - 1 ? "partial" : "completed",
     }));
     window.view.items.splice(2, 0, { ...original.view.items[0], id: "fixture-withheld",
       text: null, kind: "withheld", representation: "WITHHELD", display_sha256: null });
@@ -37,7 +39,7 @@ function Fixture({ original }: { original: WindowDocumentV2 }) {
       conversation: { context: currentContext, source: { ...source, owner: "CURRENT_WINDOW", ref: "fixture:window", revision: `w${count}`,
         coverage: "OBSERVED_WINDOW", state: hidden ? "WITHHELD" : "CURRENT" }, value: window } };
     return projectOffice(reads, currentContext);
-  }, [original, count, generation, hidden]);
+  }, [original, count, generation, hidden, stress]);
   return <main className="shell" data-theme={theme} style={{ display: "block", padding: "24px clamp(14px, 4vw, 64px)", minHeight: "100vh" }}>
     <header style={{ maxWidth: 880, margin: "0 auto 24px", display: "flex", flexWrap: "wrap", gap: 10 }}>
       <button onClick={() => setTheme(value => value === "dark" ? "light" : "dark")}>Fixture: toggle theme</button>

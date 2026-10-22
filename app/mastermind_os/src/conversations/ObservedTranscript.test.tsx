@@ -125,6 +125,8 @@ describe("observed transcript over the existing qualified window", () => {
     const original = "# Research\n\n| Item | Value |\n| --- | --- |\n| A | 2 |\n\n[x](https://example.invalid) ![private](https://example.invalid/image)";
     const view = render(<ObservedTranscript items={[item("1", original, { state: "partial" })]} />);
     fireEvent.click(screen.getByRole("button", { name: "Formatted responses" }));
+    // jsdom has no IntersectionObserver: the exact source remains until explicit demand.
+    fireEvent.click(screen.getByRole("button", { name: "Format this response" }));
     await screen.findByRole("heading", { name: "Research" });
     expect(screen.getByRole("table")).toBeTruthy();
     expect(view.container.querySelectorAll("a,img,iframe")).toHaveLength(0);

@@ -1,9 +1,9 @@
-import { Component, Suspense, lazy, useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { WindowItem } from "../workspace-contract";
 import { useObservedTranscriptScroll } from "./useObservedTranscriptScroll";
+import { ObservedResponseMarkdown } from "./ObservedResponseMarkdown";
 import "./observed-transcript.css";
 
-const SourceMarkdown = lazy(() => import("./SourceMarkdown").then(module => ({ default: module.SourceMarkdown })));
 type Locale = "en" | "zh-CN";
 const labels = {
   "Observed responses": "已观察的回复",
@@ -33,15 +33,6 @@ const labels = {
 } as const;
 const t = (locale: Locale, text: keyof typeof labels) => locale === "zh-CN" ? labels[text] : text;
 const visible = (item: WindowItem) => item.kind === "visible-response" && item.representation !== "WITHHELD";
-
-class FormattingBoundary extends Component<{ children: ReactNode; source: string; locale: Locale }, { failed: boolean }> {
-  state = { failed: false };
-  static getDerivedStateFromError() { return { failed: true }; }
-  render() {
-    return this.state.failed ? <><p className="muted">{t(this.props.locale, "Formatting unavailable. Exact source follows.")}</p>
-      <p className="conversation-answer">{this.props.source}</p></> : this.props.children;
-  }
-}
 
 /** Mounted for one exact text value. Changing source or scope unmounts pending feedback. */
 function ResponseCopy({ text, ordinal, locale }: { text: string; ordinal: number; locale: Locale }) {
@@ -130,11 +121,8 @@ export function ObservedTranscript({ items, locale = "en" }: ObservedTranscriptP
           </header>
           {!visible(item) ? <p>{t(locale, "Content withheld by its owner.")}</p>
             : item.text == null || item.text === "" ? <p>{t(locale, "No visible text was supplied.")}</p>
-            : formatted ? <FormattingBoundary source={item.text} locale={locale}>
-              <Suspense fallback={<p className="muted">{t(locale, "Loading formatted response…")}</p>}>
-                <SourceMarkdown source={item.text} streaming={item.state === "partial"} locale={locale} />
-              </Suspense>
-            </FormattingBoundary> : <p className="conversation-answer">{item.text}</p>}
+            : formatted ? <ObservedResponseMarkdown source={item.text} streaming={item.state === "partial"}
+              locale={locale} viewport={scroll.viewport} /> : <p className="conversation-answer">{item.text}</p>}
         </article>)}
         {items.length === 0 && <p>{t(locale, "No visible response was supplied in this observed window.")}</p>}
         {normalized && matches.length === 0 && <p>{t(locale, "No visible responses match this search.")}</p>}
