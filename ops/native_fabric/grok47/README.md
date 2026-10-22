@@ -33,3 +33,9 @@ result identity after routing capacity permits it. Never force Grok despite the
 existing weekly exhaustion/cooldown marker or rewrite old 4.6 receipts.
 
 Release stage `-001` is superseded by `-002` after the Cursor Grok 4.6-specific quality-floor correction. Never publish `-001`.
+
+## Expanded routing and native-harness audit (2026-10-22)
+
+See [NATIVE_HARNESS_TRANSITION_20261022.md](NATIVE_HARNESS_TRANSITION_20261022.md) for the current observations, proposed capability/expiry policy, existing-owner integration map and production acceptance scenarios. The Cursor default edit is held by an action-scoped platform safety denial; this audit does not deploy or bypass it.
+
+`analyze_pool_stats.py <canonical-stats-export>` reads an existing `pool stats --class ...` export and highlights missing outcomes, inadequate evaluated samples and separate admission failures. It contacts no provider, writes no registry and changes no routing. Its 10 tests supplement the original 12 model-compatibility tests, yielding 22 focused tests; the existing repository CI entrypoint discovers both. A report is not a causal cross-model benchmark or a quota/spend authorisation.
