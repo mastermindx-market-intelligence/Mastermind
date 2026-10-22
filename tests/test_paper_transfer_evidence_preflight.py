@@ -12,11 +12,7 @@ from paper_migration_planner import inventory_fingerprint, InventoryError
 
 FIX = ROOT / "docs/paper_migrations"
 INVENTORY = json.loads((FIX / "MASTERMIND_PAGES_INVENTORY_2026-10-22.json").read_text())
-DELTA = {"schema": "mastermind.paper-source-visibility-drift.v1",
-         "classification": "READ_ONLY_DELTA_NOT_PROOF_OF_MOVE_DELETE_OR_LOSSLESS_COPY",
-         "source_file_id": INVENTORY["source_file_id"], "baseline_page_count": 63,
-         "current_visible_page_count": 57, "added_visible_page_ids": [],
-         "unobserved_baseline_pages": [{"source_page_id": x} for x in ["p-21-0", "p-1V-0", "p-1O-0", "p-1G-0", "p-1D-0", "p-1C-0"]]}
+DELTA = json.loads((FIX / "MASTERMIND_PAGES_DRIFT_2026-10-22.json").read_text())
 HEAVY = {"schema": "mastermind.paper-oversize-artboard-index.v1", "source_file_id": INVENTORY["source_file_id"],
          "pages": [{"source_page_id": "p-N-1", "artboard_count": 2,
                     "artboards": [{"source_artboard_id": x} for x in ["1AMJ-1", "6NKK-0"]]}]}
