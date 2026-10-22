@@ -339,8 +339,19 @@ def parse_grok_billing_payload(
     period = config.get("currentPeriod")
     if not isinstance(period, dict) or period.get("type") != "USAGE_PERIOD_TYPE_WEEKLY":
         return []
-    start = _iso(period.get("start"))
-    end = _iso(period.get("end"))
+    # Never reinterpret a provider timestamp lacking a timezone in the
+    # local host timezone. That would move the reset and model a false window.
+    raw_start, raw_end = period.get("start"), period.get("end")
+    if type(raw_start) is not str or type(raw_end) is not str:
+        return []
+    try:
+        if (datetime.fromisoformat(raw_start.replace("Z", "+00:00")).utcoffset() is None
+                or datetime.fromisoformat(raw_end.replace("Z", "+00:00")).utcoffset() is None):
+            return []
+    except ValueError:
+        return []
+    start = _iso(raw_start)
+    end = _iso(raw_end)
     observed = _iso(observed_at)
     if not all((start, end, observed)):
         return []
@@ -428,6 +439,8 @@ def _live_grok() -> List[ProviderQuotaState]:
                 "terminal": False,
             },
         })
+        # Verified on installed M2 Grok CLI 2026-10-22: x.ai/billing
+        # returned method-not-found (-32601), _x.ai/billing succeeded.
         return parse_grok_billing_payload(
             rpc("_x.ai/billing", 2, 20., {}), _utc_now(),
         )
@@ -447,6 +460,9 @@ def _live_grok() -> List[ProviderQuotaState]:
                         os.killpg(proc.pid, signal.SIGKILL)
                     except ProcessLookupError:
                         pass
+                    # SIGKILL is only process termination; reap its child to
+                    # avoid a zombie while this long-lived broker host runs.
+                    proc.wait(timeout=3)
             for stream in (proc.stdin, proc.stdout):
                 if stream is not None:
                     try:
@@ -579,7 +595,11 @@ def read_provider(provider: str, force: bool = False,
         # Unlike other pools, an older cached positive balance can never
         # release a later 402. This read is manual and never mutates marker.
         try:
-            return READERS["grok"]()
+            states = READERS["grok"]()
+            if (len(states) != 1 or states[0].provider != "grok"
+                    or states[0].window != "weekly"):
+                raise ValueError("grok_billing_window_unusable")
+            return states
         except Exception:
             return [_state(
                 "grok", "weekly", None, None, None, None, "UNKNOWN",

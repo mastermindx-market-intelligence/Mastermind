@@ -2,6 +2,7 @@
 import importlib.util
 import io
 import json
+import subprocess
 import os
 from pathlib import Path
 import sys
@@ -78,6 +79,8 @@ class QuotaBillingTests(unittest.TestCase):
             billing(1, end="2026-10-19T03:00:00Z"),
             billing(1, end="2027-01-01T00:00:00Z"),
             billing(1, start="garbage"),
+            billing(1, start="2026-10-19T05:54:40"),
+            billing(1, end="2026-10-26T05:54:40"),
         ]
         for value in variants:
             with self.subTest(value=value):
@@ -95,6 +98,15 @@ class QuotaBillingTests(unittest.TestCase):
         self.assertEqual(len(result), 1)
         self.assertIsNone(result[0].remaining_pct)
         self.assertEqual(result[0].source, "UNKNOWN")
+
+    def test_unusable_billing_reader_returns_explicit_unknown(self):
+        module = load("candidate")
+        with patch.dict(module.READERS, {"grok": lambda: []}):
+            rows = module.read_provider("grok")
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0].provider, "grok")
+        self.assertEqual(rows[0].source, "UNKNOWN")
+        self.assertIsNone(rows[0].remaining_pct)
 
     def test_acp_performs_only_initialize_and_billing_no_model_prompt(self):
         module = load("candidate")
@@ -118,16 +130,22 @@ class QuotaBillingTests(unittest.TestCase):
             stdin = Writer()
             stdout = os.fdopen(read_fd, "rb", buffering=0)
             pid = 12345678
+            wait_calls = 0
             def poll(self):
                 return None
             def wait(self, timeout=None):
+                self.wait_calls += 1
+                if self.wait_calls == 1:
+                    raise subprocess.TimeoutExpired(cmd="grok", timeout=timeout)
                 return 0
         fake = Process()
         try:
             with patch.object(module.shutil, "which", return_value="/fake/grok"), \
                  patch.object(module.subprocess, "Popen", return_value=fake) as launched, \
-                 patch.object(module.os, "killpg", return_value=None):
+                 patch.object(module.os, "killpg", return_value=None) as killed:
                 rows = module._live_grok()
+            self.assertEqual(fake.wait_calls, 2, "SIGKILL escalation must reap subprocess")
+            self.assertEqual(killed.call_count, 2)
             self.assertEqual(launched.call_args.args[0], ["/fake/grok", "agent", "stdio"])
             self.assertEqual([x["method"] for x in sent], ["initialize", "_x.ai/billing"])
             self.assertFalse(sent[0]["params"]["clientCapabilities"]["fs"]["readTextFile"])
