@@ -64,6 +64,9 @@ REVIEWED_GENERATIONS = {
     "v13": {
         "bridge.py": "1c1512a5e7891abcbe2929875937d1f9792b074932a5d7c9c2ca06c67f3be6d0",
     },
+    "v14": {
+        "bridge.py": "d950c09a076c87f6c555b59ff59ac563bbcc3a1760eec1a0b7b261ee59fd8e29",
+    },
 }
 
 

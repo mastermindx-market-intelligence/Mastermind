@@ -29,6 +29,12 @@ DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
 SUPPORTED_SERVER = ("paper-desktop", None)
 SUPPORTED_CATALOG_SHA256 = "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db"
+# Independently reviewed Paper Desktop 0.5.15 catalog: same 37 tools,
+# only get_jsx's format-default description and enum ordering changed.
+# Keep exact full-catalog fingerprint admission, not schema-subset matching.
+REVIEWED_CATALOG_SHA256_ALTERNATES = frozenset({
+    "f3483e001d4f07f5a49144ca52a4f9e14ba046e35546dda05d6cd37c9d2b4728",
+})
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
     "get_tree_summary", "get_screenshot", "get_jsx", "get_computed_styles",
@@ -416,14 +422,18 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
     # Paper's release version is diagnostic metadata, not a write-compatibility
     # boundary. Exact reviewed tool schemas remain the fail-closed write gate.
     server_version_ok = expected_version is None or actual["server_version"] == expected_version
-    catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
+    catalog_ok = (catalog_pin is None or actual["catalog_sha256"] == catalog_pin
+                  or (catalog_pin == SUPPORTED_CATALOG_SHA256
+                      and actual["catalog_sha256"] in REVIEWED_CATALOG_SHA256_ALTERNATES))
     return {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
             "expected_server": [expected_name, expected_version] if server_pin else None,
             "server_name_compatible": server_name_ok,
             "server_version_compatible": server_version_ok,
             "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
             "catalog_compatible": catalog_ok,
-            "expected_catalog_sha256": catalog_pin}
+            "expected_catalog_sha256": catalog_pin,
+            "additional_reviewed_catalog_sha256": sorted(REVIEWED_CATALOG_SHA256_ALTERNATES)
+            if catalog_pin == SUPPORTED_CATALOG_SHA256 else []}
 
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
