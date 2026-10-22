@@ -179,7 +179,7 @@ def make_plan(inventory: dict, node_target: int = DEFAULT_NODE_TARGET,
         "source_file_id": SOURCE_FILE_ID,
         "source_inventory_sha256": inventory_fingerprint(inventory),
         "source_visibility_delta_sha256": inventory_fingerprint(visibility_delta) if visibility_delta else None,
-        "source_visibility_is_currently_unverified": visibility_delta is None,
+        "source_visibility_is_currently_unverified": True,  # A dated delta is never a current live Paper read.
         "source_observed_date": inventory.get("observed_date"),
         "source_warning": inventory.get("warning_observed"),
         "planning_heuristics_not_vendor_limits": {
