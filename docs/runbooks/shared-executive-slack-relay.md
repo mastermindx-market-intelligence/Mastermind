@@ -55,17 +55,19 @@ inventory, Workflow Builder actions, DM/private histories and other-host
 sender credentials were not fully attested. Recent bot channel joins are
 membership activity, not evidence of an actual dialogue writer.
 
-**Disposition: KEEP INSTALLED; DISCOURAGE NEW DEDICATED ENROLLMENT.**
+**Disposition: KEEP INSTALLED; BLOCK NEW DEDICATED ENROLLMENT.**
 No unattended remove, token rotation, channel leave or bot substitution is
-admitted by this runbook. The A2 native `enroll-shared` remains the normal
-path. The legacy `enroll` subcommand now refuses by default *before* TTY
-inspection or token consumption. Only a separate deliberate invocation with
-`--acknowledge-legacy-dedicated-app` can reach its existing narrow
-two-scope, root/TTY/host-disarmed identity-verification ceremony. The flag
-**is not** an approval to create another app or to bypass the Executive
-lifecycle owner. It applies to `enroll` only; already installed legacy A2
-enrollments still use the normal `verify` / `rebind-release` paths and
-their original identity/credential. Never reenroll to force convergence.
+admitted by this runbook. The accepted A2 new-enrollment route is only the
+native `enroll-shared` operation. The historical `enroll` subcommand now
+always refuses with `A2_ENROLLMENT_ARGUMENTS_REFUSED` before any TTY,
+credential, host or writer effect, even if W3C is requested. There is **no
+command-line opt-in** capable of reopening dedicated enrollment. A later
+Chairman decision reselecting the dedicated app must be expressed in
+the canonical Agent OS decision and an independently reviewed source change,
+with Slack-admin credential-surface proof, rather than an operator-supplied
+flag or token. Existing dedicated A2 enrollments can still follow their
+original `verify` / `rebind-release` paths without token changes.
+Never reenroll to force convergence.
 
 A later Slack-admin **retirement** must be a separate approved effect, after
 all of these are independently evidenced:

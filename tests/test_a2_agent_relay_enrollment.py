@@ -93,12 +93,7 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
     parsed = parser.parse_args(["enroll", "--expected-bot-user-id", BOT])
     assert parsed.command == "enroll"
     assert parsed.expected_bot_user_id == BOT
-    assert parsed.acknowledge_legacy_dedicated_app is False
-    enabled = parser.parse_args([
-        "enroll", "--expected-bot-user-id", BOT,
-        "--acknowledge-legacy-dedicated-app",
-    ])
-    assert enabled.acknowledge_legacy_dedicated_app is True
+    assert not hasattr(parsed, "acknowledge_legacy_dedicated_app")
 
     options = {
         option
@@ -113,14 +108,14 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
         }
     assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release"}
     assert "--expected-bot-user-id" in options
-    assert "--acknowledge-legacy-dedicated-app" in options
+    assert "--acknowledge-legacy-dedicated-app" not in options
     assert {"--token", "--workspace", "--channel", "--config", "--plist"}.isdisjoint(
         options
     )
 
 
 @pytest.mark.parametrize("enable_w3c", [False, True])
-def test_legacy_dedicated_enrollment_requires_explicit_ack_before_any_input(
+def test_new_dedicated_enrollment_is_closed_before_any_input(
     monkeypatch, enable_w3c: bool
 ):
     enrollment = _module()
@@ -147,8 +142,8 @@ def test_legacy_dedicated_enrollment_requires_explicit_ack_before_any_input(
     assert TOKEN not in stdout.getvalue()
 
 
-@pytest.mark.parametrize("verb", ["enroll-shared", "verify", "rebind-release"])
-def test_dedicated_ack_flag_cannot_apply_to_shared_or_existing_enrollment(
+@pytest.mark.parametrize("verb", ["enroll", "enroll-shared", "verify", "rebind-release"])
+def test_removed_legacy_ack_flag_cannot_reactivate_any_enrollment_verb(
     verb: str,
 ):
     enrollment = _module()
@@ -219,8 +214,7 @@ def test_production_main_refuses_piped_enroll_before_enroll(monkeypatch):
             monkeypatch.setattr(
                 enrollment.sys,
                 "argv",
-                ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT,
-                 "--acknowledge-legacy-dedicated-app"],
+                ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
             )
             monkeypatch.setattr(
                 enrollment.sys,
@@ -236,7 +230,7 @@ def test_production_main_refuses_piped_enroll_before_enroll(monkeypatch):
 
     assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "ERROR",
     }
@@ -258,8 +252,7 @@ def test_production_main_refuses_missing_or_raising_fileno(
     monkeypatch.setattr(
         enrollment.sys,
         "argv",
-        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT,
-                 "--acknowledge-legacy-dedicated-app"],
+        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
     )
     monkeypatch.setattr(
         enrollment.sys,
@@ -272,13 +265,13 @@ def test_production_main_refuses_missing_or_raising_fileno(
     assert enrollment.main() == 2
     assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "error": "A2_ENROLLMENT_INPUT_REFUSED",
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
         "status": "ERROR",
     }
 
 
-def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
+def test_production_main_refuses_new_dedicated_enroll_even_with_tty(monkeypatch):
     enrollment = _module()
     stdout = io.StringIO()
     stdin = SimpleNamespace(fileno=lambda: 23)
@@ -291,8 +284,7 @@ def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
     monkeypatch.setattr(
         enrollment.sys,
         "argv",
-        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT,
-                 "--acknowledge-legacy-dedicated-app"],
+        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
     )
     monkeypatch.setattr(enrollment.sys, "stdin", SimpleNamespace(buffer=stdin))
     monkeypatch.setattr(enrollment.sys, "stdout", stdout)
@@ -300,13 +292,12 @@ def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
     monkeypatch.setattr(enrollment.os, "isatty", lambda descriptor: descriptor == 23)
     monkeypatch.setattr(enrollment, "_enroll", fake_enroll)
 
-    assert enrollment.main() == 0
-    assert enroll_calls == [(BOT, stdin)]
+    assert enrollment.main() == 2
+    assert enroll_calls == []
     assert json.loads(stdout.getvalue()) == {
-        "action": "enrolled",
-        "release_sha": "e" * 40,
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
         "schema": "mastermind.a2_agent_relay_enrollment.v1",
-        "status": "PASS",
+        "status": "ERROR",
     }
 
 
@@ -391,7 +382,7 @@ def test_existing_c1_shared_token_requires_same_bot_identity(monkeypatch):
         enrollment._existing_c1_shared_token(bot_user_id=BOT)  # noqa: SLF001
 
 
-def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
+def test_injected_run_cannot_reactivate_new_dedicated_enroll(monkeypatch):
     enrollment = _module()
     stdin = io.BytesIO(b"hermetic-input\n")
     stdout = io.StringIO()
@@ -405,19 +396,18 @@ def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
 
     assert (
         enrollment.run(
-            ["enroll", "--expected-bot-user-id", BOT,
-             "--acknowledge-legacy-dedicated-app"],
+            ["enroll", "--expected-bot-user-id", BOT],
             stdin=stdin,
             stdout=stdout,
             environ={"SAFE": "1"},
         )
-        == 0
+        == 2
     )
-    assert enroll_calls == [(BOT, stdin)]
-    assert json.loads(stdout.getvalue())["status"] == "PASS"
+    assert enroll_calls == []
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
-def test_enable_w3c_flag_reaches_only_the_enrollment_composition(monkeypatch):
+def test_enable_w3c_flag_cannot_reactivate_dedicated_enrollment(monkeypatch):
     enrollment = _module()
     stdin = io.BytesIO(b"hermetic-input\n")
     stdout = io.StringIO()
@@ -431,15 +421,15 @@ def test_enable_w3c_flag_reaches_only_the_enrollment_composition(monkeypatch):
 
     assert (
         enrollment.run(
-            ["enroll", "--expected-bot-user-id", BOT, "--enable-w3c",
-             "--acknowledge-legacy-dedicated-app"],
+            ["enroll", "--expected-bot-user-id", BOT, "--enable-w3c"],
             stdin=stdin,
             stdout=stdout,
             environ={"SAFE": "1"},
         )
-        == 0
+        == 2
     )
-    assert enroll_calls == [(BOT, stdin, True)]
+    assert enroll_calls == []
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
 def test_fixed_policy_document_and_plist_are_release_bound_and_secret_free():
