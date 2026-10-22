@@ -25,6 +25,9 @@ RELAY_USER="_mastermind_agent_relay"
 RELAY_GROUP="_mastermind_agent_relay"
 RELAY_UID="457"
 RELAY_GID="457"
+# POSIX directory permission mode (not an account/group identity).
+# Enforced by preflight, install, enrollment and negative mode tests.
+PARENT_DIRECTORY_PERMISSION_MODE=710
 EXEC_USER="_mastermind_exec"
 EXEC_UID="450"
 EXEC_GID="450"
@@ -255,8 +258,8 @@ if [ "$SOCKET_ONLY_UPGRADE" = true ]; then
       *+) refuse "enrolled file has a filesystem ACL" ;;
     esac
   done
-  preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" 710
-  ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 710
+  preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
+  ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
   /bin/echo "A2 persistent socket directory ready; no service or enrollment effect"
   exit 0
 fi
@@ -271,7 +274,7 @@ preflight_directory "$SYSTEM_ROOT" 0 0 755
 preflight_directory "$CONFIG_ROOT" 0 0 755
 preflight_directory "$RUNTIME_ROOT" 0 0 711
 preflight_directory "$RELAY_HOME" "$RELAY_UID" "$RELAY_GID" 700
-preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" 710
+preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
 ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
 ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
 
@@ -292,7 +295,7 @@ ensure_directory "$SYSTEM_ROOT" root wheel 0 0 755
 ensure_directory "$CONFIG_ROOT" root wheel 0 0 755
 ensure_directory "$RUNTIME_ROOT" root wheel 0 0 711
 ensure_directory "$RELAY_HOME" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 700
-ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 710
+ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"
 
 assert_relay_unloaded
 

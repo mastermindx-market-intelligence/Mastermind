@@ -13,6 +13,19 @@ ROOT = Path(__file__).resolve().parents[1]
 PREP = ROOT / "ops" / "executive_os" / "prepare-a2-agent-relay-host.sh"
 
 
+def test_fixed_socket_permission_mode_is_pinned_and_not_an_identity_value():
+    source = PREP.read_text(encoding="utf-8")
+    assert source.count("PARENT_DIRECTORY_PERMISSION_MODE=710") == 1
+    assert source.count(
+        'preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"'
+    ) == 2
+    assert source.count(
+        'ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" "$PARENT_DIRECTORY_PERMISSION_MODE"'
+    ) == 2
+    for unapproved in ("700", "750", "770", "777"):
+        assert f"PARENT_DIRECTORY_PERMISSION_MODE={unapproved}" not in source
+
+
 def test_enrollment_gate_requires_exact_prepared_socket_parent(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ):

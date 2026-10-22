@@ -1341,8 +1341,12 @@ def _metadata_contract(path: str) -> dict[str, int | str | None]:
             0o660,
         ),
         "/var/run/mastermind-agent-relay/agent-relay.sock": (457, 457, 0o660),
-        "/var/db/mastermind-agent-relay/socket/agent-relay.sock": (457, 457, 0o660),
     }
+    # Old and durable A2 socket identities are the same security contract;
+    # do not introduce a second principal or independent mode constant.
+    socket_contracts["/var/db/mastermind-agent-relay/socket/agent-relay.sock"] = (
+        socket_contracts["/var/run/mastermind-agent-relay/agent-relay.sock"]
+    )
     if path in socket_contracts:
         uid, gid, mode = socket_contracts[path]
         return {
