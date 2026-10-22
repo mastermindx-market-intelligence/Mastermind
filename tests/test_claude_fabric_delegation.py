@@ -99,3 +99,57 @@ def test_unadmitted_grok_47_cannot_mint_child_capability() -> None:
              "POOL_TASK_CLASS": "domain_orchestration"},
             "run1", "grok", "grok-4.7", b"packet",
         )
+
+
+def test_claude_fabric_only_installer_preserves_existing_native_twelve(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    provider = home / ".claude"
+    provider.mkdir(parents=True)
+    original = {"env": {
+        "CLAUDE_CODE_MAX_CONCURRENT_SUBAGENTS": "12",
+        "CLAUDE_CODE_MAX_SUBAGENT_SPAWN_DEPTH": "1",
+    }, "permissions": {"defaultMode": "bypassPermissions"}, "hooks": {
+        "PreToolUse": [{"matcher": "Bash", "hooks": [{"type": "command", "command": "/private/existing-guard"}]}],
+    }}
+    settings = provider / "settings.json"
+    settings.write_text(json.dumps(original, sort_keys=True) + "\n")
+    original_settings = settings.read_bytes()
+    claude_doc = provider / "CLAUDE.md"
+    claude_doc.write_text("# Existing custom Claude guidance\n\nKeep my parallel sessions intact.\n")
+    result = policy.apply_claude_fabric_entrypoint(home)
+    assert result["state"] == "READY"
+    assert result["native_capacity_modified"] is False
+    assert result["provider_settings_modified"] is False
+    assert settings.read_bytes() == original_settings
+    assert not (home / ".codex").exists()
+    assert not (provider / "hooks").exists()
+    text = claude_doc.read_text()
+    assert "Keep my parallel sessions intact." in text
+    assert text.count(policy.FABRIC_ENTRY_BEGIN) == text.count(policy.FABRIC_ENTRY_END) == 1
+    skill = provider / "skills/mastermind-claude-fabric-delegation/SKILL.md"
+    assert skill.read_bytes() == policy._canonical_claude_fabric_skill()
+    assert policy.verify_claude_fabric_entrypoint(home)["state"] == "READY"
+
+    before = claude_doc.read_bytes()
+    again = policy.apply_claude_fabric_entrypoint(home)
+    assert again["state"] == "READY"
+    assert claude_doc.read_bytes() == before
+    assert settings.read_bytes() == original_settings
+
+    skill.write_bytes(skill.read_bytes() + b"\nUntrusted edit\n")
+    observed = policy.verify_claude_fabric_entrypoint(home)
+    assert observed["state"] == "DRIFT"
+    assert "claude_fabric_skill.digest" in observed["issues"]
+
+
+def test_claude_fabric_only_installer_rejects_ambiguous_marker_before_writing(tmp_path: Path) -> None:
+    home = tmp_path / "home"
+    d = home / ".claude"
+    d.mkdir(parents=True)
+    source = d / "CLAUDE.md"
+    bad = policy.FABRIC_ENTRY_BEGIN + "\n" + policy.FABRIC_ENTRY_BEGIN
+    source.write_text(bad)
+    with pytest.raises(policy.OrchestratorPolicyError, match="markers ambiguous"):
+        policy.apply_claude_fabric_entrypoint(home)
+    assert source.read_text() == bad
+    assert not (d / "skills").exists()
