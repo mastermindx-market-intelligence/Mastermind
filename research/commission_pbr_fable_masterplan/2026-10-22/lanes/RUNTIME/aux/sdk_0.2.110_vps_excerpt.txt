@@ -1,0 +1,114 @@
+# source: /opt/mastermind/.venv/lib/python3.12/site-packages/claude_agent_sdk/_internal/query.py (claude-agent-sdk """Version information for claude-agent-sdk."""__version__ = "0.2.110")
+   290	                    if self._transcript_mirror_batcher is not None:
+   291	                        self._transcript_mirror_batcher.enqueue(
+   292	                            message["filePath"], message["entries"]
+   293	                        )
+   294	                    continue
+   295	
+   296	                # Track results for proper stream closure
+   297	                if msg_type == "result":
+   298	                    # Flush pending transcript mirror entries before yielding
+   299	                    # result so consumers observing the result can rely on the
+   300	                    # SessionStore being up to date for this turn.
+   301	                    if self._transcript_mirror_batcher is not None:
+   302	                        await self._transcript_mirror_batcher.flush()
+   303	                    self._first_result_event.set()
+   304	                    if message.get("is_error"):
+   305	                        errors = message.get("errors") or []
+   306	                        self._last_error_result_text = "; ".join(errors) or str(
+   307	                            message.get("subtype", "unknown error")
+   308	                        )
+   309	                    else:
+   310	                        self._last_error_result_text = None
+   311	                elif not (
+   312	                    msg_type == "system"
+   313	                    and message.get("subtype") == "session_state_changed"
+   314	                ):
+   315	                    # Anything other than the post-turn session_state_changed
+   316	                    # marker means the conversation moved on; a ProcessError
+   317	                    # now is a fresh crash, not the expected exit from a prior
+   318	                    # error result. Mirrors the TypeScript SDK's reset logic.
+   319	                    self._last_error_result_text = None
+   320	
+   321	                # Regular SDK messages go to the stream
+   322	                await self._message_send.send(message)
+   323	
+   324	        except anyio.get_cancelled_exc_class():
+   325	            # Task was cancelled - this is expected behavior
+   326	            logger.debug("Read task cancelled")
+   327	            raise  # Re-raise to properly handle cancellation
+   328	        except Exception as e:
+   329	            # Signal all pending control requests so they fail fast instead of timing out
+   330	            for request_id, event in list(self.pending_control_responses.items()):
+   331	                if request_id not in self.pending_control_results:
+   332	                    self.pending_control_results[request_id] = e
+   333	                    event.set()
+   334	            # When the CLI emits a result with is_error=True (e.g.
+   335	            # error_max_turns, error_during_execution) it then exits non-zero
+   336	            # on purpose, for shell-script consumers. The trailing ProcessError
+   337	            # carries no information beyond "exit code 1" — replace it with the
+   338	            # structured error the CLI already reported so the exception is
+   339	            # actionable. Mirrors the TypeScript SDK (Query.ts readMessages).
+   340	            if isinstance(e, ProcessError) and self._last_error_result_text is not None:
+   341	                error_text = (
+   342	                    f"Claude Code returned an error result: "
+   343	                    f"{self._last_error_result_text}"
+   344	                )
+   345	                logger.debug(
+   346	                    "Replacing ProcessError (exit code %s) with result error text",
+   347	                    e.exit_code,
+   348	                )
+   349	            else:
+   350	                error_text = str(e)
+
+# grep authentication_failed / error field in types.py
+334:    error: str
+727:    error: NotRequired[str]
+1005:    "authentication_failed",
+1025:class AssistantMessage:
+1031:    error: AssistantMessageError | None = None
+1182:    error: str = ""
+2093:    error: str
+  1000	)
+  1001	
+  1002	
+  1003	# Message types
+  1004	AssistantMessageError = Literal[
+  1005	    "authentication_failed",
+  1006	    "billing_error",
+  1007	    "rate_limit",
+  1008	    "invalid_request",
+  1009	    "server_error",
+  1010	    "unknown",
+  1011	]
+  1012	
+  1013	
+  1014	@dataclass
+  1015	class UserMessage:
+  1016	    """User message."""
+  1017	
+  1018	    content: str | list[ContentBlock]
+  1019	    uuid: str | None = None
+  1020	    parent_tool_use_id: str | None = None
+  1021	    tool_use_result: dict[str, Any] | None = None
+  1022	
+  1023	
+  1024	@dataclass
+  1025	class AssistantMessage:
+  1026	    """Assistant message with content blocks."""
+  1027	
+  1028	    content: list[ContentBlock]
+  1029	    model: str
+  1030	    parent_tool_use_id: str | None = None
+  1031	    error: AssistantMessageError | None = None
+  1032	    usage: dict[str, Any] | None = None
+  1033	    message_id: str | None = None
+  1034	    stop_reason: str | None = None
+  1035	    session_id: str | None = None
+  1036	    uuid: str | None = None
+  1037	
+  1038	
+  1039	@dataclass
+  1040	class SystemMessage:
+177:                    error=data.get("error"),
+259:                            error=data.get("error", ""),

@@ -1,0 +1,5 @@
+{"_meta": {"run_id": "2026-10-14T23-10-11-819Z00-00", "ts": "2026-10-14T23:10:11.819+00:00", "kind": "research", "title": "# US Brain v2 — nightly stock-selection decision for 2026-10-14\n\nMacro regime (in-house read): REGIME LABEL: Reflation, ", "n_steps": 0, "cost_usd": null, "summary": ""}}
+{"ts": "2026-10-14T23:10:11.820+00:00", "type": "reasoning", "title": "session start", "detail": "prompt=# US Brain v2 — nightly stock-selection decision for 2026-10-14\n\nMacro regime (in-house read): REGIME LABEL: Reflation, liquidity contracting\nlabel confi...[+188]"}
+{"ts": "2026-10-14T23:10:16.348+00:00", "type": "reasoning", "title": "assistant text", "detail": "Failed to authenticate. API Error: 401 OAuth access token has been revoked."}
+{"ts": "2026-10-14T23:10:16.774+00:00", "type": "reasoning", "title": "sdk error", "detail": "Exception('Claude Code returned an error result: success')"}
+{"ts": "2026-10-14T23:10:16.774+00:00", "type": "reasoning", "title": "result", "detail": ""}

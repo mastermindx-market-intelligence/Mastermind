@@ -1,0 +1,32 @@
+2026-10-21T12:40:24.088025+00:00 ubuntu-s-mastermindx systemd[1]: Stopping mastermind.service - Mastermind authoritative scheduler and dashboard...
+2026-10-21T12:40:24.368838+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Deactivated successfully.
+2026-10-21T12:40:24.369576+00:00 ubuntu-s-mastermindx systemd[1]: Stopped mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T12:40:24.371249+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Consumed 2min 9.523s CPU time, 563.3M memory peak, 225.9M memory swap peak.
+2026-10-21T12:40:34.189519+00:00 ubuntu-s-mastermindx systemd[1]: Started mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T12:40:36.938402+00:00 ubuntu-s-mastermindx uvicorn[4193946]: INFO:     Waiting for application startup.
+2026-10-21T14:19:41.939622+00:00 ubuntu-s-mastermindx systemd[1]: Stopping mastermind.service - Mastermind authoritative scheduler and dashboard...
+2026-10-21T14:19:42.524236+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Deactivated successfully.
+2026-10-21T14:19:42.526353+00:00 ubuntu-s-mastermindx systemd[1]: Stopped mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T14:19:42.526794+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Consumed 1min 7.545s CPU time, 462.8M memory peak, 222.7M memory swap peak.
+2026-10-21T14:20:04.721584+00:00 ubuntu-s-mastermindx systemd[1]: Started mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T14:21:11.009721+00:00 ubuntu-s-mastermindx systemd[1]: Stopping mastermind.service - Mastermind authoritative scheduler and dashboard...
+2026-10-21T14:22:07.807752+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Deactivated successfully.
+2026-10-21T14:22:07.808726+00:00 ubuntu-s-mastermindx systemd[1]: Stopped mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T14:22:07.810069+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Consumed 53.536s CPU time, 195.7M memory peak, 0B memory swap peak.
+2026-10-21T14:22:25.441572+00:00 ubuntu-s-mastermindx systemd[1]: Started mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T15:32:10.041513+00:00 ubuntu-s-mastermindx systemd[1]: Stopping mastermind.service - Mastermind authoritative scheduler and dashboard...
+2026-10-21T15:32:10.270264+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Deactivated successfully.
+2026-10-21T15:32:10.272022+00:00 ubuntu-s-mastermindx systemd[1]: Stopped mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T15:32:10.273306+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Consumed 51.824s CPU time, 309.3M memory peak, 86.8M memory swap peak.
+2026-10-21T15:32:20.597524+00:00 ubuntu-s-mastermindx systemd[1]: Started mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T15:32:25.842908+00:00 ubuntu-s-mastermindx uvicorn[156279]: INFO:     Uvicorn running on http://<ip>:8001 (Press CTRL+C to quit)
+2026-10-21T15:54:35.276220+00:00 ubuntu-s-mastermindx systemd[1]: Stopping mastermind.service - Mastermind authoritative scheduler and dashboard...
+2026-10-21T15:54:37.046214+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Deactivated successfully.
+2026-10-21T15:54:37.049147+00:00 ubuntu-s-mastermindx systemd[1]: Stopped mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-21T15:54:37.051360+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Consumed 12.919s CPU time, 269.6M memory peak, 146.2M memory swap peak.
+2026-10-21T15:55:39.080198+00:00 ubuntu-s-mastermindx systemd[1]: Started mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-22T06:02:14.331942+00:00 ubuntu-s-mastermindx systemd[1]: Stopping mastermind.service - Mastermind authoritative scheduler and dashboard...
+2026-10-22T06:02:15.669313+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Deactivated successfully.
+2026-10-22T06:02:15.669690+00:00 ubuntu-s-mastermindx systemd[1]: Stopped mastermind.service - Mastermind authoritative scheduler and dashboard.
+2026-10-22T06:02:15.669783+00:00 ubuntu-s-mastermindx systemd[1]: mastermind.service: Consumed 12min 14.917s CPU time, 623.2M memory peak, 447.7M memory swap peak.
+2026-10-22T06:02:15.681539+00:00 ubuntu-s-mastermindx systemd[1]: Started mastermind.service - Mastermind authoritative scheduler and dashboard.
