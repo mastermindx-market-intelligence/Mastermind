@@ -135,6 +135,7 @@ class PaperMigrationPlanTests(unittest.TestCase):
         missing = self._six_terminal_page_delta()
         plan = planner.make_plan(self.original, visibility_delta=missing)
         self.assertEqual(plan["counts"]["last_observed_visible_pages"], 57)
+        self.assertTrue(plan["source_visibility_is_currently_unverified"])
         self.assertEqual(plan["counts"]["whole_page_planning_candidates"], 51)
         self.assertEqual(plan["counts"]["externally_absent_pages"], 6)
         ids = {p["source_page_id"] for p in plan["externally_absent_unproven_pages"]}
