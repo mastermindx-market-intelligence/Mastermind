@@ -52,6 +52,7 @@ _V = _ROOT / "vendor" / "macro"
 
 MAX_SOURCE_BYTES = c.MAX_SOURCE_BYTES
 MAX_JSONL_TAIL_ROWS = c.MAX_JSONL_TAIL_ROWS
+MAX_JSONL_TAIL_BYTES = c.MAX_JSONL_TAIL_BYTES
 MAX_SECTION_ROWS = c.MAX_SECTION_ROWS
 MAX_MANIFEST_METADATA_BYTES = c.MAX_MANIFEST_METADATA_BYTES
 
@@ -713,16 +714,46 @@ def _settlement_generation(*, status: str, eligible: Sequence[Mapping[str, Any]]
     })
 
 
-def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dict[str, Any]:
+def _parse_jsonl_tail(
+    raw: bytes,
+    *,
+    max_rows: int = MAX_JSONL_TAIL_ROWS,
+    max_bytes: int = MAX_JSONL_TAIL_BYTES,
+) -> dict[str, Any]:
     """Parse a bounded JSONL tail from bytes already produced by a single stable read.
 
     Never re-reads or re-stats the source: rows, the caller's digest, and the caller's
     file-write clock must all describe the exact same bytes. Invalid lines increment
     ``omitted_rows`` rather than vanishing from coverage — including a row carrying a
     non-finite number, which the canonical serializer would refuse at seal time.
+
+    Retention is bounded by row count *and* canonical bytes. Valid rows are admitted
+    newest-first and kept only while their cumulative size — measured with the same
+    canonical serializer the seal uses (``c.canonical_json_bytes``, i.e.
+    ``control_plane.wake_events.canonical_json_bytes``, control_plane/wake_events.py:167;
+    ``seal_snapshot`` sizes the whole snapshot with it) — stays within ``max_bytes`` and
+    their count stays within ``max_rows``; the returned order stays oldest→newest. Every
+    dropped row — invalid, non-object, count-capped, or byte-budgeted — counts in
+    ``omitted_rows`` under the same coverage semantics (``rows_total - rows_returned ==
+    omitted_rows`` always). If at least one valid row exists but the newest valid row alone
+    exceeds ``max_bytes``, the result carries ``error_code="OVERSIZE"`` instead of a
+    zero-row COMPLETE claim; the caller routes the source through the same fail-closed
+    OVERSIZE status the read path uses for a ``MAX_SOURCE_BYTES`` overflow.
+
+    Byte-budget arithmetic: ``historical_memory`` admits at most two JSONL tails
+    (``book.decisions`` and ``book.fills``), each retained only up to
+    ``MAX_JSONL_TAIL_BYTES`` = 65,536 canonical bytes, so both tails together can never
+    exceed ~131,072 of the ``MAX_SNAPSHOT_BYTES`` = 262,144-byte seal ceiling (plus only
+    the small per-row ',' separators and the section envelope), leaving the other half of
+    the snapshot budget to every other section. Residual: a single non-JSONL object (the
+    raw-object rows are bounded only by ``MAX_SOURCE_BYTES``) larger than its share of the
+    snapshot still fails closed at seal — ``seal_snapshot`` raises
+    "snapshot exceeds 262144-byte limit". That residual is deliberate and is not repaired
+    here.
     """
     text = raw.decode("utf-8", errors="replace")
     valid: list[Any] = []
+    encodings: list[bytes] = []
     omitted = 0
     for line in text.splitlines():
         line = line.strip()
@@ -737,12 +768,37 @@ def _parse_jsonl_tail(raw: bytes, *, max_rows: int = MAX_JSONL_TAIL_ROWS) -> dic
             omitted += 1
             continue
         valid.append(obj)
-    tail = valid[-max_rows:] if max_rows else []
+        encodings.append(c.canonical_json_bytes(obj))
+
+    kept: list[Any] = []
+    # The canonical serialization of a kept-row list is exactly
+    # b"[" + b",".join(row encodings) + b"]" (compact separators in the serializer), so the
+    # running size below is the list's true canonical byte size: 2 framing bytes plus one
+    # extra byte per already-kept row.
+    kept_bytes = 2
+    oversize_newest = False
+    for obj, encoded in zip(reversed(valid), reversed(encodings)):
+        if len(kept) >= max_rows:
+            break
+        candidate = kept_bytes + len(encoded) + (1 if kept else 0)
+        if candidate > max_bytes:
+            if not kept:
+                oversize_newest = True
+            break
+        kept.append(obj)
+        kept_bytes = candidate
+    kept.reverse()  # oldest→newest, as before
+
+    error_code: str | None = None
+    if oversize_newest:
+        error_code = "OVERSIZE"
+        kept = []
     return {
-        "rows": tail,
+        "rows": kept,
         "rows_total": len(valid) + omitted,
-        "rows_returned": len(tail),
-        "omitted_rows": omitted + (len(valid) - len(tail)),
+        "rows_returned": len(kept),
+        "omitted_rows": omitted + (len(valid) - len(kept)),
+        "error_code": error_code,
     }
 
 
@@ -1085,6 +1141,35 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             continue
 
         tail = _parse_jsonl_tail(raw)
+        if tail["error_code"] is not None:
+            # At least one valid row exists, but even the newest one alone exceeds the
+            # bounded-tail byte budget. Refuse the source exactly like a MAX_SOURCE_BYTES
+            # read overflow (the OVERSIZE branch above): never a COMPLETE claim carried by
+            # zero retained rows. Unlike that branch these bytes *were* read stably, so the
+            # known_at / clock_basis / artifact_digest set above stand, and the generation
+            # is keyed on those bytes — the same stable-bytes family as the
+            # FUTURE_AT_CUTOFF and MALFORMED branches.
+            receipt["status"] = tail["error_code"]
+            receipt["error_code"] = tail["error_code"]
+            receipt["coverage_state"] = "BLOCKED"
+            receipt["correction_generation"] = c.content_digest({
+                "generation_kind": "SOURCE_BYTES",
+                "status": receipt["status"],
+                "artifact_digest": receipt["artifact_digest"],
+                "mtime_ns": int(stat_after.st_mtime_ns),
+            })
+            gap = _gap(
+                tail["error_code"], source_id=source_id, section_id=section_id,
+                detail=(
+                    f"newest valid row alone exceeds the "
+                    f"{MAX_JSONL_TAIL_BYTES}-byte JSONL tail budget"
+                ),
+            )
+            gaps_out.append(gap)
+            _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
+                                 omitted_rows=0, gaps=[gap])
+            sources_out.append(receipt)
+            continue
         # Stable bytes exist, so the generation is those bytes. A JSONL tail declares no
         # revision field, so there is nothing else it could lawfully rest on.
         receipt["correction_generation"] = receipt["artifact_digest"]
