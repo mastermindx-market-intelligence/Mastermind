@@ -309,7 +309,7 @@ def test_expired_unclaimed_action_does_not_dispatch(tmp_path: Path):
         port._clock_ms = lambda: 6000  # action expires at 5000, resource at 8000
         with pytest.raises(BrowserPortRefused, match="BROWSER_ACTION_INVALID"):
             port.run_action(caller, browser_ref, action_ref)
-        assert port.reconcile_action(caller, browser_ref, action_ref)["effect_state"] == "NOT_APPLIED"
+        assert port.reconcile_action(caller, browser_ref, action_ref)["effect_state"] == "EFFECT_UNKNOWN"
         assert list((tmp_path / "artifacts").iterdir()) == []
     finally:
         os.close(fd)

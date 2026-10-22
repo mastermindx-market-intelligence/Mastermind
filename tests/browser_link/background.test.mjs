@@ -6,13 +6,13 @@ const event = () => ({ listeners: [], addListener(fn) { this.listeners.push(fn);
 const tick = () => new Promise(resolve => setImmediate(resolve));
 const ALARM = 'browser-link-reconnect';
 
-function fixture(storage = {}) {
+function fixture(storage = {}, expectedNativeHost = 'com.mastermind.browser_link') {
   const messages = [], ports = [], alarmRows = new Map(), created = [], badges = [], detached = [];
   const chrome = {
     runtime: { id: 'a'.repeat(32), getURL: p => `chrome-extension://${'a'.repeat(32)}/${p}`,
       onMessage: event(), onInstalled: event(), onStartup: event(),
       connectNative(name) {
-        assert.equal(name, 'com.mastermind.browser_link');
+        assert.equal(name, expectedNativeHost);
         const port = { onDisconnect: event(), onMessage: event(), closed: 0,
           postMessage(m) { if (port.failSend) throw new Error('host lost'); messages.push(m); },
           // Deliberately no local onDisconnect: exercises Chrome's local-close path.
@@ -146,3 +146,30 @@ for (const replacementReady of [false, true]) {
     await f.drop();
   });
 }
+
+test('installed profiles bind the full instance identity to their own native host', async () => {
+  const instance='c'.repeat(64), host='com.mastermind.browser_link.'+instance.slice(0,24);
+  const f=fixture({},host);
+  startBrowserLink({chrome:f.chrome,nativeHost:host,instanceRef:instance});
+  await tick();
+  assert.equal(f.hello().instance_ref,instance);
+  assert.deepEqual(f.storage,{});
+  await f.drop();
+  assert.throws(()=>startBrowserLink({chrome:fixture().chrome,instanceRef:'malformed'}),TypeError);
+});
+
+test('pending navigation cannot grant consent and completion retires intermediate revisions', async () => {
+  const f=fixture(); startBrowserLink({chrome:f.chrome}); await tick(); f.ready();
+  f.chrome.tabs.query=async()=>[{id:7,url:'https://example.test/path',pendingUrl:'https://other.test/'}];
+  assert.deepEqual(await f.request({kind:'share_current'}),{error:'TARGET_NAVIGATING'});
+  f.chrome.tabs.query=async()=>[{id:7,url:'https://example.test/path',status:'complete'}];
+  assert.equal((await f.request({kind:'share_current'})).shared,true);
+  f.chrome.tabs.onUpdated.emit(7,{status:'loading'});
+  const loading=(await f.request({kind:'status'})).shared_tabs[0];
+  assert.equal(loading.state,'navigating');
+  f.chrome.tabs.onUpdated.emit(7,{status:'complete'});
+  const complete=(await f.request({kind:'status'})).shared_tabs[0];
+  assert.equal(complete.state,'shared');
+  assert.ok(complete.document_revision>loading.document_revision);
+  await f.drop();
+});

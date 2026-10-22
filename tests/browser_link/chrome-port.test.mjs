@@ -104,3 +104,22 @@ test('fixed typing function rechecks field sensitivity after focus handlers run'
   `, { InputEvent: class {}, Event: class {} });
   assert.equal(behavior.refused, true); assert.equal(behavior.writes, 0); assert.equal(behavior.events, 0);
 });
+
+test('fixed click function refuses a target that became sensitive after lookup', async () => {
+  const {runInNewContext}=await import('node:vm');
+  const s=setup(); const out=await s.port.read(s.request('snapshot'),s.guard);
+  await s.port.mutate(s.request('click',{element_ref:out.nodes[0].element_ref}),s.guard);
+  const declaration=s.state.effects[0].args.functionDeclaration;
+  for (const attributes of [{type:'password'},{type:'file'},{autocomplete:'one-time-code'},{disabled:true}]) {
+    const behavior=runInNewContext(`
+      let clicks=0;
+      class HTMLElement {click(){clicks++;}}
+      const node=Object.assign(new HTMLElement(),{isConnected:true,disabled:false,
+        getAttribute(name){return this[name]??null;}},attributes);
+      let refused=false;
+      try {(${declaration}).call(node);} catch {refused=true;}
+      ({refused,clicks});
+    `,{attributes});
+    assert.equal(behavior.refused,true); assert.equal(behavior.clicks,0);
+  }
+});

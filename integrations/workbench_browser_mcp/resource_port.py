@@ -49,6 +49,10 @@ from .contracts import (
     PreparedBrowserStart,
 )
 from .relay import RELAY_REQUEST_SCHEMA, BrowserRelayError, relay_request
+from integrations.mastermind_browser_link.native_channel import LinkProtocolError
+from integrations.mastermind_browser_link.native_bridge import private_parent
+from integrations.mastermind_browser_link.profile_grant import LinkProfileGrant
+from integrations.mastermind_browser_link.tool_contract import LINK_TOOL_SCHEMA_DIGEST, LINK_TOOLS
 
 
 class BrowserResourceRefused(RuntimeError):
@@ -62,16 +66,17 @@ class BrowserResourceRefused(RuntimeError):
 ResolveBinding = Callable[[ActionCaller, str], ProjectActionBinding | None]
 ProfileResolver = Callable[
     [str],
-    "PersistentBrowserProfileGrant | SharedHumanBrowserProfileGrant | None",
+    "PersistentBrowserProfileGrant | SharedHumanBrowserProfileGrant | LinkProfileGrant | None",
 ]
 RelayRequester = Callable[..., dict[str, Any]]
 RelayCommandBuilder = Callable[..., Sequence[str]]
 
-_RELAY_BOOTSTRAP = r"""import runpy,sys
+_RELAY_BOOTSTRAP = r"""import sys
 root=sys.argv[1]
 sys.path.insert(0,root)
 sys.argv=["mastermind-workbench-browser-relay",*sys.argv[2:]]
-runpy.run_module("integrations.workbench_browser_mcp.relay",run_name="__main__")
+from integrations.workbench_browser_mcp.relay import main
+raise SystemExit(main())
 """
 
 
@@ -121,6 +126,16 @@ class BrowserHostConfig:
     startup_timeout_seconds: float = 10.0
 
 
+@dataclasses.dataclass(frozen=True)
+class BrowserLinkHostConfig:
+    source_root: Path
+    python_executable: str
+    relay_root: Path
+    output_root: Path
+    startup_timeout_seconds: float = 10.0
+    expected_tool_schema_digest: str = dataclasses.field(default=LINK_TOOL_SCHEMA_DIGEST, init=False)
+
+
 def _absolute(value: str, name: str) -> str:
     if type(value) is not str or not value.startswith("/") or "\x00" in value:
         raise BrowserResourceRefused(f"{name.upper()}_INVALID")
@@ -147,19 +162,18 @@ def _private_directory(path: Path, name: str) -> None:
 
 
 def validate_host_config(value: object) -> BrowserHostConfig:
-    if type(value) is not BrowserHostConfig:
+    if type(value) not in {BrowserHostConfig, BrowserLinkHostConfig}:
         raise BrowserResourceRefused("HOST_CONFIG_INVALID")
     _private_directory(value.source_root, "source_root")
     _private_directory(value.relay_root, "relay_root")
     _private_directory(value.output_root, "output_root")
-    for name in (
-        "python_executable",
-        "node_executable",
-        "mcp_cli_path",
-        "chrome_executable",
-        "home_dir",
-        "tmp_dir",
-    ):
+    names = ("python_executable",) if type(value) is BrowserLinkHostConfig else (
+        "python_executable", "node_executable", "mcp_cli_path",
+        "chrome_executable", "home_dir", "tmp_dir",
+    )
+    if type(value) is BrowserHostConfig and value.expected_tool_schema_digest == LINK_TOOL_SCHEMA_DIGEST:
+        raise BrowserResourceRefused("HOST_CONFIG_INVALID")
+    for name in names:
         _absolute(getattr(value, name), name)
     if (
         type(value.expected_tool_schema_digest) is not str
@@ -183,7 +197,25 @@ def default_relay_command(
     socket_path: Path,
     output_dir: Path,
     profile_dir: Path | None,
+    profile_grant: LinkProfileGrant | None = None,
 ) -> tuple[str, ...]:
+    if type(config) is BrowserLinkHostConfig:
+        if type(profile_grant) is not LinkProfileGrant or profile_dir is not None or prepared.mode != BrowserMode.EXTENSION.value:
+            raise BrowserResourceRefused("LINK_PROFILE_GRANT_INVALID")
+        profile_grant.__post_init__()
+        return (
+            config.python_executable, "-I", "-S", "-c", _RELAY_BOOTSTRAP, str(config.source_root),
+            "--backend", "browser-link", "--resource-id", prepared.action_id,
+            "--socket-path", str(socket_path), "--mode", prepared.mode,
+            "--barrier-fd", str(barrier_fd), "--expires-at-ms", str(prepared.resource_expires_at_ms),
+            "--link-extension-id", profile_grant.enrollment.extension_id,
+            "--link-instance-id", profile_grant.enrollment.instance_id,
+            "--link-socket-path", str(profile_grant.enrollment.socket_path),
+            "--link-chrome-pid", str(profile_grant.chrome_pid),
+            "--link-chrome-start", profile_grant.chrome_start_identity,
+        )
+    if profile_grant is not None:
+        raise BrowserResourceRefused("HOST_CONFIG_INVALID")
     return (
         config.python_executable,
         "-I",
@@ -295,7 +327,37 @@ class BrowserResourcePort:
             and scope.generation == start.generation
         )
 
+    def _link_profile(self, start: PreparedBrowserStart) -> LinkProfileGrant:
+        if start.mode != BrowserMode.EXTENSION.value or start.profile_ref is None:
+            raise BrowserResourceRefused("LINK_MODE_INVALID")
+        value = self._profile_resolver(start.profile_ref)
+        if type(value) is not LinkProfileGrant:
+            raise BrowserResourceRefused("LINK_PROFILE_GRANT_INVALID")
+        try:
+            value.__post_init__()
+            private_parent(value.enrollment.socket_path.parent, os.geteuid())
+        except (ValueError, OSError) as error:
+            raise BrowserResourceRefused("LINK_PROFILE_GRANT_INVALID") from error
+        if (value.profile_ref != start.profile_ref or value.owner_ref != start.owner_ref
+                or value.operation_ref != start.operation_ref or value.generation != start.generation
+                or value.host_id != start.host_id or value.boot_session_id != start.boot_session_id
+                or value.expires_at_ms < start.resource_expires_at_ms
+                or self._now() >= value.expires_at_ms):
+            raise BrowserResourceRefused("LINK_PROFILE_GRANT_MISMATCH")
+        try:
+            chrome = self._inspector.inspect(value.chrome_pid)
+        except (ProcessIdentityError, OSError, ValueError) as error:
+            raise BrowserResourceRefused("LINK_CHROME_UNAVAILABLE") from error
+        if (chrome.start_identity != value.chrome_start_identity
+                or chrome.real_uid != os.getuid() or chrome.effective_uid != os.geteuid()):
+            raise BrowserResourceRefused("LINK_CHROME_CHANGED")
+        return value
+
     def _profile_path(self, start: PreparedBrowserStart) -> Path | None:
+        if type(self._config) is BrowserLinkHostConfig:
+            self._link_profile(start)
+            return None
+
         if start.mode == BrowserMode.ISOLATED.value:
             return None
         if start.profile_ref is None:
@@ -334,6 +396,8 @@ class BrowserResourcePort:
         profile_ref: str | None = None,
     ) -> str:
         binding = self._binding(caller, project_ref)
+        if type(self._config) is BrowserLinkHostConfig and mode != BrowserMode.EXTENSION.value:
+            raise BrowserResourceRefused("LINK_MODE_INVALID")
         now_ms = self._now()
         resource_expires_at_ms = binding.scope.expires_at_ms
         if resource_expires_at_ms <= now_ms:
@@ -514,6 +578,10 @@ class BrowserResourcePort:
             or response.get("ok") is not True
             or response.get("tool_schema_digest")
             != self._config.expected_tool_schema_digest
+        ):
+            raise BrowserResourceRefused("BROWSER_RELAY_BINDING_CHANGED")
+        if type(self._config) is BrowserLinkHostConfig and (
+            response.get("child_pid") != process.pid or response.get("allowed_tools") != sorted(LINK_TOOLS)
         ):
             raise BrowserResourceRefused("BROWSER_RELAY_BINDING_CHANGED")
         return response
@@ -780,6 +848,7 @@ class BrowserResourcePort:
                 }
             output_path.mkdir(mode=stat.S_IRWXU)
             profile_path = self._profile_path(start)
+            link_grant = self._link_profile(start) if type(self._config) is BrowserLinkHostConfig else None
 
             read_fd, write_fd = os.pipe()
             os.set_inheritable(read_fd, False)
@@ -795,6 +864,7 @@ class BrowserResourcePort:
                         socket_path=socket_path,
                         output_dir=output_path,
                         profile_dir=profile_path,
+                        **({"profile_grant": link_grant} if link_grant is not None else {}),
                     )
                 )
                 if not command or not os.path.isabs(command[0]):
@@ -843,6 +913,8 @@ class BrowserResourcePort:
                     or self._now() >= start.expires_at_ms
                 ):
                     raise BrowserResourceRefused("BROWSER_START_BINDING_CHANGED")
+                if link_grant is not None and self._link_profile(start) != link_grant:
+                    raise BrowserResourceRefused("LINK_PROFILE_GRANT_CHANGED")
                 os.write(write_fd, b"\x01")
                 os.close(write_fd)
                 write_fd = -1

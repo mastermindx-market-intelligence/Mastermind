@@ -200,6 +200,50 @@ class WorkbenchManagedProjector:
         raise OwnerRefused("ACTION_BACKEND_UNSUPPORTED")
 
 
+class BrowserLinkProjector(WorkbenchManagedProjector):
+    """Project only signed exact-tab Link targets into the internal owner tools."""
+
+    @staticmethod
+    def _call(tab, action, args, *, read):
+        from integrations.mastermind_browser_link.tool_contract import (
+            ACTION_TOOL, READ_TOOL, LINK_TOOL_SCHEMA_DIGEST,
+        )
+        if (type(tab) is not BrowserTabRef or tab.backend != TabBackend.SHARED_HUMAN.value
+                or tab.backend_schema_digest != LINK_TOOL_SCHEMA_DIGEST or tab.consent_ref is None
+                or any(type(value) is not int or not 0 <= value <= 2**53 - 1
+                       for value in (tab.tab_locator, tab.document_revision, tab.expires_at_ms))):
+            raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        return OwnerToolCall(READ_TOOL if read else ACTION_TOOL, {
+            "target": {"connection_generation": tab.connection_generation, "tab_id": tab.tab_locator,
+                       "consent_id": tab.consent_ref, "document_revision": tab.document_revision},
+            "expires_at_ms": tab.expires_at_ms, "command": action, "args": args,
+        })
+
+    def project_read(self, tab, action, arguments):
+        if action not in {"snapshot", "screenshot"}:
+            raise OwnerRefused("ACTION_BACKEND_UNSUPPORTED")
+        return self._call(tab, action, self._arguments(arguments, frozenset()), read=True)
+
+    def project_action(self, tab, action, arguments):
+        if action == "click":
+            args = self._arguments(arguments, frozenset({"element_ref"}))
+            self._element_ref(args["element_ref"])
+        elif action == "type":
+            args = self._arguments(arguments, frozenset({"element_ref", "text"}))
+            self._element_ref(args["element_ref"])
+            self._text(args["text"])
+        elif action == "navigate":
+            args = self._arguments(arguments, frozenset({"url"}))
+            self._url(args["url"])
+        elif action == "scroll":
+            args = self._arguments(arguments, frozenset({"delta_x", "delta_y"}))
+            if any(type(value) is not int or abs(value) > 2000 for value in args.values()):
+                raise OwnerRefused("BACKEND_PROJECTION_INVALID")
+        else:
+            raise OwnerRefused("ACTION_BACKEND_UNSUPPORTED")
+        return self._call(tab, action, args, read=False)
+
+
 async def _maybe(value: Any) -> Any:
     return await value if inspect.isawaitable(value) else value
 
@@ -456,12 +500,11 @@ class ManagedBrowserOwnerAdapter:
 
 
 class SharedHumanBrowserOwnerAdapter(ManagedBrowserOwnerAdapter):
-    """Multiplex external callers over one owner-bound Playwright extension broker.
+    """Multiplex external callers over one owner-bound shared browser broker.
 
-    The official Playwright extension gives one MCP client one user-selected tab
-    group. Mastermind keeps exactly one broker MCP resource for that group and
-    issues separate signed BrowserTabRef capabilities to admitted callers above
-    it. The durable Workbench action owner continues to own all browser effects.
+    Each admitted caller receives a signed exact-tab capability. The selected
+    backend enforces its targeting and local-consent contract; the durable
+    Workbench action owner continues to own every browser effect.
     """
 
     def __init__(self, *, broker_caller: Any, **kwargs: Any) -> None:

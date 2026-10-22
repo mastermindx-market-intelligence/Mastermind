@@ -2,7 +2,13 @@
 import { boundedJSON, httpURL, refuse } from './protocol.mjs';
 
 const ACTIONABLE = new Set(['button', 'link', 'textbox', 'searchbox', 'checkbox', 'radio', 'combobox', 'switch', 'menuitem', 'tab']);
-const CLICK = 'function(){ if (!(this instanceof HTMLElement) || !this.isConnected) throw new Error("TARGET_UNAVAILABLE"); HTMLElement.prototype.click.call(this); return true; }';
+const CLICK = String.raw`function(){
+  if (!(this instanceof HTMLElement) || !this.isConnected || this.disabled) throw new Error("TARGET_UNAVAILABLE");
+  const type = (this.getAttribute("type") || "").toLowerCase();
+  const autocomplete = (this.getAttribute("autocomplete") || "").toLowerCase();
+  if (type === "password" || type === "file" || /(?:^|\s)(?:current-password|new-password|one-time-code|cc-[a-z-]+)(?:\s|$)/u.test(autocomplete)) throw new Error("SENSITIVE_TARGET");
+  HTMLElement.prototype.click.call(this); return true;
+}`;
 const TYPE = String.raw`function(value){
   const assertTarget = () => {
     if (!this.isConnected || this.disabled || this.readOnly) throw new Error("TARGET_UNAVAILABLE");
@@ -41,6 +47,7 @@ export class ChromePort {
   }
   async #origin(request, guard) {
     const tab = await this.chrome.tabs.get(request.tab_id);
+    if (tab.status === 'loading' || (typeof tab.pendingUrl === 'string' && tab.pendingUrl)) refuse('TARGET_NAVIGATING');
     if (httpURL(tab.url).origin !== guard.origin) refuse('ORIGIN_NOT_SHARED');
     guard.assertCurrent(); return tab;
   }

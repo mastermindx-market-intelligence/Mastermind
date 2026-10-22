@@ -88,6 +88,11 @@ _BROWSER_KEYS = frozenset(
         "startup_timeout_seconds",
     }
 )
+_LINK_BROWSER_SCHEMA = "mastermind.workbench_browser_link_service.v1"
+_LINK_BROWSER_KEYS = frozenset({
+    "schema", "source_root", "python_executable", "relay_root", "output_root",
+    "startup_timeout_seconds", "profiles_file",
+})
 _LEASE_KEYS = frozenset(
     {
         "expected_subject_digest",
@@ -149,6 +154,17 @@ class BrowserServiceConfig:
 
 
 @dataclasses.dataclass(frozen=True)
+class BrowserLinkServiceConfig:
+    source_root: str
+    python_executable: str
+    relay_root: str
+    output_root: str
+    startup_timeout_seconds: float
+    profiles_file: str
+    mount_path: str = "/browser"
+
+
+@dataclasses.dataclass(frozen=True)
 class ServiceConfig:
     schema: str
     policy_file: str
@@ -165,7 +181,7 @@ class ServiceConfig:
     close_timeout_seconds: float
     action_ttl_ms: int
     lease: StableWorkbenchActionLease
-    browser: BrowserServiceConfig | None = None
+    browser: BrowserServiceConfig | BrowserLinkServiceConfig | None = None
     browser_fabric_policy_file: str | None = None
     browser_fabric_audit_directory: str | None = None
 
@@ -279,6 +295,25 @@ def parse_browser_service_config(value: object) -> BrowserServiceConfig:
     )
 
 
+def parse_link_browser_service_config(value: object) -> BrowserLinkServiceConfig:
+    if type(value) is not dict or set(value) != _LINK_BROWSER_KEYS or value.get("schema") != _LINK_BROWSER_SCHEMA:
+        _refuse()
+    return BrowserLinkServiceConfig(
+        source_root=_absolute_path(value["source_root"]),
+        python_executable=_absolute_path(value["python_executable"]),
+        relay_root=_absolute_path(value["relay_root"]),
+        output_root=_absolute_path(value["output_root"]),
+        startup_timeout_seconds=_bounded_timeout(value["startup_timeout_seconds"]),
+        profiles_file=_absolute_path(value["profiles_file"]),
+    )
+
+
+def _browser_backend_digest(config):
+    from control_plane.browser_resource_contract import WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
+    from integrations.mastermind_browser_link.tool_contract import LINK_TOOL_SCHEMA_DIGEST
+    return LINK_TOOL_SCHEMA_DIGEST if type(config) is BrowserLinkServiceConfig else WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST
+
+
 def _lease(value: object) -> StableWorkbenchActionLease:
     if not isinstance(value, dict) or set(value) != _LEASE_KEYS:
         _refuse()
@@ -341,7 +376,10 @@ def parse_service_config(value: object) -> ServiceConfig:
     elif schema == SERVICE_SCHEMA_V3:
         if set(value) != _CONFIG_KEYS_V3:
             _refuse()
-        browser = parse_browser_service_config(value.get("browser"))
+        selected = value.get("browser")
+        browser = (parse_link_browser_service_config(selected)
+                   if type(selected) is dict and selected.get("schema") == _LINK_BROWSER_SCHEMA
+                   else parse_browser_service_config(selected))
         browser_fabric_policy_file = _absolute_path(
             value.get("browser_fabric_policy_file")
         )
@@ -809,8 +847,26 @@ def create_browser_sibling(
         return None
     try:
         from integrations.workbench_browser_mcp.deployment import create_browser_deployment
-        from integrations.workbench_browser_mcp.resource_port import BrowserHostConfig
+        from integrations.workbench_browser_mcp.resource_port import BrowserHostConfig, BrowserLinkHostConfig
 
+        if type(selected) is BrowserLinkServiceConfig:
+            from integrations.mastermind_browser_link.profile_grant import parse_profile_grants
+            from integrations.mastermind_browser_link.tool_contract import tool_catalog
+            grants = parse_profile_grants(
+                _secure_json(selected.profiles_file, maximum=256 * 1024),
+                lease=config.lease, host_binding=runtime.services.host_binding,
+            )
+            return create_browser_deployment(
+                services=runtime.services,
+                host_config=BrowserLinkHostConfig(
+                    source_root=Path(selected.source_root), python_executable=selected.python_executable,
+                    relay_root=Path(selected.relay_root), output_root=Path(selected.output_root),
+                    startup_timeout_seconds=selected.startup_timeout_seconds,
+                ),
+                tool_catalog=tool_catalog(), profile_resolver=grants.get,
+            )
+        if type(selected) is not BrowserServiceConfig:
+            _refuse()
         catalog = _secure_json(
             selected.tool_catalog_file,
             maximum=MAX_BROWSER_CATALOG_BYTES,
@@ -996,7 +1052,7 @@ def create_browser_fabric_sibling(
             auth_challenge=auth_challenge,
             allowed_hosts=list(runtime.services.allowed_hosts),
             allowed_origins=runtime.services.allowed_origins,
-            expected_backend_schema_digest=WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST,
+            expected_backend_schema_digest=_browser_backend_digest(config.browser),
         )
     except ServiceConfigurationError:
         raise

@@ -9,7 +9,11 @@ const HANDSHAKE_TIMEOUT_MS = 5000;
 
 // Each extension profile owns one connection. Embedders retain their own worker,
 // popup, native messaging protocol, and toolbar badge.
-export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popup.html', showBadge = true } = {}) {
+export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popup.html', showBadge = true,
+  nativeHost = NATIVE_HOST, instanceRef: fixedInstanceRef = null } = {}) {
+  if (fixedInstanceRef !== null && (typeof fixedInstanceRef !== 'string' || !/^[0-9a-f]{64}$/.test(fixedInstanceRef))) throw new TypeError('Invalid fixed profile identity');
+  if (nativeHost !== NATIVE_HOST && (typeof fixedInstanceRef !== 'string' || !/^[0-9a-f]{64}$/.test(fixedInstanceRef) ||
+      nativeHost !== `${NATIVE_HOST}.${fixedInstanceRef.slice(0, 24)}`)) throw new TypeError('Invalid profile-bound native host');
   let nativePort = null, controller = null, adapter = null, ready = false;
   let disconnecting = false, connecting = false, closeConnection = null;
   const popupURL = chrome.runtime.getURL(popupPath);
@@ -18,11 +22,12 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
     // Never replay commands or results. The durable owner reconciles effects.
     port.postMessage(data);
   }
-  function inventory() {
+  function inventory(requestId = null) {
     if (!ready || !nativePort || !controller) return;
     try {
       send(nativePort, { schema: 'mastermind.browser_link.inventory.v1',
-        connection_generation: controller.connectionGeneration, shared_tabs: controller.inventory() });
+        connection_generation: controller.connectionGeneration, shared_tabs: controller.inventory(),
+        ...(requestId === null ? {} : { request_id: requestId }) });
     } catch { closeConnection?.(); }
   }
   function badge() {
@@ -34,7 +39,7 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
     try {
       // Discovery correlation only: never credentials, consent, or authority.
       const key = 'browserLinkInstanceRef';
-      let instanceRef = (await chrome.storage.local.get(key))[key];
+      let instanceRef = fixedInstanceRef ?? (await chrome.storage.local.get(key))[key];
       if (typeof instanceRef !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(instanceRef)) {
         instanceRef = crypto.randomUUID();
         await chrome.storage.local.set({ [key]: instanceRef });
@@ -42,7 +47,7 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
       const generation = crypto.randomUUID();
       const nextAdapter = new ChromePort({ chrome });
       const nextController = new SharedTabController({ adapter: nextAdapter, connectionGeneration: generation });
-      const port = chrome.runtime.connectNative(NATIVE_HOST);
+      const port = chrome.runtime.connectNative(nativeHost);
       let handshakeTimer = null;
       nativePort = port; controller = nextController; adapter = nextAdapter; ready = false;
       function cleanup() {
@@ -75,6 +80,12 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
             clearTimeout(handshakeTimer); handshakeTimer = null;
             ready = true; inventory(); badge(); return;
           }
+          if (ready && message?.schema === 'mastermind.browser_link.observe.v1' &&
+              Object.keys(message).sort().join(',') === 'connection_generation,request_id,schema' &&
+              message.connection_generation === generation && typeof message.request_id === 'string' &&
+              /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(message.request_id)) {
+            inventory(message.request_id); return;
+          }
           if (!ready || message?.schema !== COMMAND_SCHEMA) { close(); return; }
           nextController.execute(message).then(result => {
             if (nativePort === port) { send(port, result); inventory(); badge(); }
@@ -104,6 +115,7 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
         const [tab] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
         if (!ready || controller !== requestedController || nativePort !== requestedPort) throw new BrowserLinkError('LINK_NOT_READY');
         if (!tab || !Number.isSafeInteger(tab.id)) throw new BrowserLinkError('TARGET_UNAVAILABLE');
+        if (tab.status === 'loading' || (typeof tab.pendingUrl === 'string' && tab.pendingUrl)) throw new BrowserLinkError('TARGET_NAVIGATING');
         controller.share(tab.id, httpURL(tab.url).origin); inventory(); badge();
         return { shared: true, tab_id: tab.id };
       }
@@ -116,14 +128,22 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
   });
 
   chrome.tabs.onRemoved.addListener(tabId => { controller?.revoke(tabId); adapter?.detached(tabId); inventory(); badge(); });
+  chrome.tabs.onReplaced?.addListener((_addedTabId, removedTabId) => {
+    controller?.revoke(removedTabId); adapter?.detached(removedTabId); inventory(); badge();
+  });
   chrome.tabs.onUpdated.addListener((tabId, change) => {
-    if (!change.url || !controller) return;
+    if (!controller) return;
     const shared = controller.inventory().find(tab => tab.tab_id === tabId);
     if (!shared) return;
-    try {
-      if (httpURL(change.url).origin !== shared.origin) { controller.revoke(tabId); void adapter.detach(tabId); }
-      else controller.invalidate(tabId);
-    } catch { controller.revoke(tabId); void adapter.detach(tabId); }
+    if (change.url) {
+      try {
+        if (httpURL(change.url).origin !== shared.origin) { controller.revoke(tabId); void adapter.detach(tabId); }
+        else controller.invalidate(tabId);
+      } catch { controller.revoke(tabId); void adapter.detach(tabId); }
+    }
+    if (change.status === 'loading' || change.status === 'complete') {
+      controller.navigation(tabId, change.status === 'loading');
+    }
     inventory(); badge();
   });
   chrome.debugger.onDetach.addListener(source => {
@@ -132,10 +152,13 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
   });
   chrome.debugger.onEvent.addListener((source, method, params) => {
     if (!Number.isSafeInteger(source.tabId)) return;
+    if (!controller?.inventory().some(tab => tab.tab_id === source.tabId)) return;
     if (method === 'Page.frameNavigated' && params.frame?.parentId) return;
-    if (['Page.frameNavigated', 'Page.navigatedWithinDocument', 'DOM.documentUpdated', 'DOM.childNodeRemoved', 'DOM.attributeModified', 'DOM.characterDataModified'].includes(method)) {
-      controller?.invalidate(source.tabId);
+    if (['Page.frameNavigated', 'Page.navigatedWithinDocument', 'DOM.documentUpdated'].includes(method)) {
+      controller?.invalidate(source.tabId); inventory();
     }
+    // Element identity is checked again at the actuator. Ordinary live DOM
+    // changes do not turn every tab reference into a different document.
   });
   async function ensureReconnectAlarm() {
     const alarm = await chrome.alarms.get(RECONNECT_ALARM);

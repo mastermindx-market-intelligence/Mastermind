@@ -392,9 +392,13 @@ def claim_action(
     *,
     claimed_at_ms: int,
 ) -> ClaimOutcome:
-    """Durable O_EXCL claim. Caller holds the store writer for the whole action.
+    """Durable O_EXCL claim; the caller holds the store writer while claiming.
 
-    Existing, one-sided, or uncertain evidence is never overwritten or replayed.
+    Existing owners retain their whole-action lock protocol. Browser actions
+    may release it for external I/O only when created=True; duplicates never
+    dispatch, and the creator reacquires the writer and qualifies this exact
+    claim before finalization. Existing, one-sided, or uncertain evidence is
+    never overwritten or replayed.
     """
 
     store = revalidate_artifact_store(store)

@@ -67,6 +67,7 @@ class BrowserDeployment:
     cleanup_resource: Callable[..., Any]
     observe_active_resources: Callable[..., Any]
     observe_tab_group: Callable[..., Any]
+    observe_connection: Callable[..., Any]
 
 
 async def _run_existing(services: RuntimeServices, operation: Callable[[], object]) -> object:
@@ -306,6 +307,11 @@ def create_browser_deployment(
 
         return await _run_existing(services, project)
 
+    async def observe_connection(caller: ActionCaller, browser_ref: str):
+        return await _run_existing(
+            services, lambda: action_port.observe_connection(caller, browser_ref)
+        )
+
     async def observe_tab_group(caller: ActionCaller, browser_ref: str):
         return await _run_existing(
             services,
@@ -400,6 +406,7 @@ def create_browser_deployment(
         cleanup_resource=cleanup_resource,
         observe_active_resources=observe_active_resources,
         observe_tab_group=observe_tab_group,
+        observe_connection=observe_connection,
     )
 
 

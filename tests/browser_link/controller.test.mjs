@@ -219,3 +219,13 @@ test('shared inventory cannot exceed native protocol limit', () => {
   assert.equal(c.inventory().length,64);
   c.share(0,'https://example.test');assert.equal(c.inventory().length,64);
 });
+
+test('a reference minted during loading cannot act on the completed same-URL document', async () => {
+  const s=setup(); s.control.navigation(7,true);
+  const loading=s.control.inventory()[0];
+  const request=s.command('scroll',{delta_x:0,delta_y:100},{document_revision:loading.document_revision});
+  assert.equal((await s.control.execute(request)).code,'TARGET_NAVIGATING');
+  s.control.navigation(7,false);
+  assert.equal((await s.control.execute(request)).code,'STALE_DOCUMENT');
+  assert.equal(s.counts().writes,0);
+});

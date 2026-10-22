@@ -23,7 +23,8 @@ test('classic build is deterministic, self-contained, and coexists with Web Sol 
     alarms:{onAlarm:event(),async get(){return {periodInMinutes:1};},async create(){}},
     action:{async setBadgeText(){assert.fail('Link must not take over the Web Sol badge');}},
   };
-  const context=createContext({chrome,crypto:webcrypto,setTimeout,clearTimeout,TextEncoder,URL});
+  const context=createContext({chrome,crypto:webcrypto,setTimeout,clearTimeout,TextEncoder,URL,
+    MMX_WEB_SOL_INSTANCE:Object.freeze({instanceId:'c'.repeat(64)})});
   // Execute as a classic script in an already-populated Web Sol global scope.
   new Script("const nativePort='existing-web-sol'; const controller='existing-web-sol';").runInContext(context);
   new Script(first.assets['browser-link/worker.bundle.js'].toString('utf8')).runInContext(context);

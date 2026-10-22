@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import time
 from collections.abc import Callable, Mapping
 from typing import Any
 
@@ -55,6 +56,12 @@ from .relay import (
     RELAY_RESPONSE_SCHEMA,
     BrowserRelayError,
     relay_request,
+)
+
+
+from integrations.mastermind_browser_link.tool_contract import (
+    LINK_TOOLS, LINK_READ_TOOLS, LINK_TOOL_SCHEMA_DIGEST, INVENTORY_TOOL,
+    OWNER_RESULT_SCHEMA, OWNER_CONNECTION_SCHEMA, backend_tool_policy,
 )
 
 
@@ -317,6 +324,36 @@ class BrowserActionPort:
         )
         return browser
 
+    def observe_connection(self, caller: ActionCaller, browser_ref: object) -> Mapping[str, Any]:
+        browser, _binding, socket_path = self._resource(caller, browser_ref, require_fresh=True)
+        if browser.tool_schema_digest != LINK_TOOL_SCHEMA_DIGEST:
+            raise BrowserPortRefused("BROWSER_BACKEND_UNSUPPORTED")
+        request_id = secrets.token_hex(16)
+        response = self._relay_requester(socket_path, {
+            "schema": RELAY_REQUEST_SCHEMA, "kind": "status", "request_id": request_id,
+            "resource_id": browser.start_action_id,
+        }, timeout=min(2.0, self._relay_timeout))
+        if (type(response) is not dict or response.get("schema") != RELAY_RESPONSE_SCHEMA
+                or response.get("request_id") != request_id or response.get("resource_id") != browser.start_action_id
+                or response.get("ok") is not True or response.get("tool_schema_digest") != LINK_TOOL_SCHEMA_DIGEST
+                or response.get("child_pid") != browser.relay_pid
+                or response.get("allowed_tools") != sorted(LINK_TOOLS)):
+            raise BrowserPortRefused("BROWSER_CONNECTION_UNAVAILABLE")
+        data = response.get("connection_status")
+        from integrations.mastermind_browser_link.native_channel import record, reference, native_host_name
+        try:
+            record(data, {"schema", "instance_id", "connected"}, {"connection_generation"})
+            native_host_name(data["instance_id"])
+            if data["schema"] != OWNER_CONNECTION_SCHEMA or type(data["connected"]) is not bool:
+                raise ValueError("invalid connection status")
+            if data["connected"]:
+                reference(data.get("connection_generation"))
+            elif "connection_generation" in data:
+                raise ValueError("disconnected generation")
+        except (ValueError, TypeError) as exc:
+            raise BrowserPortRefused("BROWSER_CONNECTION_UNAVAILABLE") from exc
+        return dict(data)
+
     def observe_tab_group(
         self,
         caller: ActionCaller,
@@ -337,8 +374,8 @@ class BrowserActionPort:
                 socket_path=socket_path,
                 browser=browser,
                 request_id=request_id,
-                tool="browser_tabs",
-                arguments={"action": "list"},
+                tool=INVENTORY_TOOL if browser.tool_schema_digest == LINK_TOOL_SCHEMA_DIGEST else "browser_tabs",
+                arguments={} if browser.tool_schema_digest == LINK_TOOL_SCHEMA_DIGEST else {"action": "list"},
             )
         except BrowserRelayError as error:
             raise BrowserPortRefused(
@@ -360,7 +397,7 @@ class BrowserActionPort:
         tool: str,
         arguments: Mapping[str, Any],
     ) -> Mapping[str, Any]:
-        if tool not in READ_ONLY_BROWSER_TOOLS:
+        if tool not in READ_ONLY_BROWSER_TOOLS | LINK_READ_TOOLS:
             raise BrowserPortRefused("MUTATING_TOOL_REQUIRES_ACTION_REF")
         try:
             canonical = canonical_browser_arguments(arguments)
@@ -372,6 +409,8 @@ class BrowserActionPort:
         browser, _binding, socket_path = self._resource(
             caller, browser_ref, require_fresh=False
         )
+        if tool not in backend_tool_policy(browser.tool_schema_digest)[1]:
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         request_id = secrets.token_hex(16)
         try:
             response = self._relay(
@@ -394,13 +433,15 @@ class BrowserActionPort:
         tool: str,
         arguments: Mapping[str, Any],
     ) -> str:
-        if tool not in ALLOWED_BROWSER_TOOLS:
+        if tool not in ALLOWED_BROWSER_TOOLS | LINK_TOOLS:
             raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
-        if tool in READ_ONLY_BROWSER_TOOLS:
+        if tool in READ_ONLY_BROWSER_TOOLS | LINK_READ_TOOLS:
             raise BrowserPortRefused("READ_ONLY_TOOL_NEEDS_NO_ACTION_REF")
         if type(browser_ref) is not str:
             raise BrowserPortRefused("BROWSER_REF_INVALID")
         browser, binding, _socket_path = self._resource(caller, browser_ref)
+        if tool not in backend_tool_policy(browser.tool_schema_digest)[0]:
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         try:
             arguments_json = canonical_browser_arguments(arguments)
         except BrowserContractError as error:
@@ -508,6 +549,8 @@ class BrowserActionPort:
             or prepared.boot_session_id != browser.boot_session_id
         ):
             raise BrowserPortRefused("BROWSER_ACTION_BINDING_CHANGED")
+        if prepared.tool_name not in backend_tool_policy(browser.tool_schema_digest)[0]:
+            raise BrowserPortRefused("BROWSER_TOOL_NOT_GRANTED")
         return browser, binding, socket_path, prepared
 
     @staticmethod
@@ -533,13 +576,8 @@ class BrowserActionPort:
         classified = classify_action(self._store, identity)
         if classified.evidence_status == "qualified":
             return self._classification_receipt(classified, reconciled=True)
-        if classified.evidence_status == "absent":
-            return {
-                "status": "OK",
-                "effect_state": "NOT_APPLIED",
-                "observed_sha256": None,
-                "reconciled": True,
-            }
+        # Absence alone is not a terminal no-effect proof: the original
+        # invocation could still be waiting to acquire its durable claim.
         return {
             "status": "OK",
             "effect_state": "EFFECT_UNKNOWN",
@@ -547,11 +585,60 @@ class BrowserActionPort:
             "reconciled": True,
         }
 
+    @staticmethod
+    def _unknown(*, reconciled: bool = False) -> dict[str, Any]:
+        return {"status": "OK", "effect_state": "EFFECT_UNKNOWN",
+                "observed_sha256": None, "reconciled": reconciled}
+
+    def _action_writer(self):
+        # Wait only for a short store transaction, never repeat browser I/O.
+        deadline = time.monotonic() + 0.75
+        while True:
+            try:
+                return acquire_store_writer(self._store)
+            except ActionArtifactBusy:
+                if time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
+
+    def _finalize_claimed(self, identity, claim, **values):
+        with self._action_writer():
+            classified = classify_action(self._store, identity)
+            if classified.evidence_status == "qualified":
+                result = classified.result
+                if (result.effect_state == values["effect_state"]
+                        and result.observed_sha256 == values["observed_sha256"]):
+                    return result
+                raise ActionArtifactUncertain("browser completion evidence conflicts")
+            if classified.evidence_status != "pending" or classified.claim != claim:
+                raise ActionArtifactUncertain("original browser claim changed")
+            return finalize_action(self._store, identity, **values)
+
+    @staticmethod
+    def _result_effect(browser, prepared, result):
+        if browser.tool_schema_digest != LINK_TOOL_SCHEMA_DIGEST:
+            return "APPLIED" if result.get("isError") is False else "EFFECT_UNKNOWN"
+        metadata = result.get("structuredContent")
+        if (type(metadata) is not dict or not {"schema", "request_id", "effect_state", "status"} <= metadata.keys()
+                or metadata.keys() - {"schema", "request_id", "effect_state", "status", "code", "document_revision"}
+                or metadata.get("schema") != OWNER_RESULT_SCHEMA
+                or metadata.get("request_id") != prepared.action_id
+                or type(result.get("isError")) is not bool):
+            return None
+        combination = (metadata.get("status"), metadata.get("effect_state"), result["isError"])
+        if any(type(item) is not str for item in combination[:2]):
+            return None
+        if combination not in {
+            ("completed", "APPLIED", False),
+            ("refused", "NOT_APPLIED", True),
+            ("refused", "EFFECT_UNKNOWN", True),
+            ("pending", "EFFECT_UNKNOWN", True),
+        }:
+            return None
+        return metadata["effect_state"]
+
     def run_action(
-        self,
-        caller: ActionCaller,
-        browser_ref: object,
-        action_ref: object,
+        self, caller: ActionCaller, browser_ref: object, action_ref: object,
     ) -> dict[str, Any]:
         browser, binding, socket_path, prepared = self._decode_action(
             caller, browser_ref, action_ref, require_live=False
@@ -559,184 +646,87 @@ class BrowserActionPort:
         identity = self._action_identity(browser, binding, prepared)
         original_binding = _binding_key(binding)
         try:
-            writer = acquire_store_writer(self._store)
-        except ActionArtifactBusy as error:
-            raise BrowserPortRefused("BROWSER_ACTION_BUSY") from error
-        except ActionArtifactUncertain as error:
-            raise BrowserPortRefused("BROWSER_ACTION_UNAVAILABLE") from error
+            writer = self._action_writer()
+        except (ActionArtifactBusy, ActionArtifactUncertain):
+            # Another invocation could already have claimed this original ID.
+            return self._unknown(reconciled=True)
         with writer:
             classified = classify_action(self._store, identity)
             if classified.evidence_status == "qualified":
                 return self._classification_receipt(classified, reconciled=True)
             if classified.evidence_status != "absent":
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "observed_sha256": None,
-                    "reconciled": True,
-                }
-            # No durable receipt exists. Fresh action authority and the exact
-            # live relay are required before claiming or dispatching a click.
+                return self._unknown(reconciled=True)
             fresh_browser, fresh_binding, fresh_socket, fresh_prepared = self._decode_action(
                 caller, browser_ref, action_ref
             )
-            if (
-                fresh_browser != browser
-                or _binding_key(fresh_binding) != original_binding
-                or fresh_socket != socket_path
-                or fresh_prepared != prepared
-            ):
+            if (fresh_browser != browser or _binding_key(fresh_binding) != original_binding
+                    or fresh_socket != socket_path or fresh_prepared != prepared):
                 raise BrowserPortRefused("BROWSER_ACTION_BINDING_CHANGED")
-            outcome = claim_action(
-                self._store,
-                identity,
-                claimed_at_ms=self._now(),
-            )
+            outcome = claim_action(self._store, identity, claimed_at_ms=self._now())
             if not outcome.created:
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "observed_sha256": None,
-                    "reconciled": True,
-                }
+                return self._unknown(reconciled=True)
 
-            # Revalidate the owner and exact relay process immediately before
-            # crossing the browser-effect boundary.
-            try:
-                current_browser, current_binding, current_socket = self._resource(
-                    caller, browser_ref
-                )
-            except BrowserPortRefused:
-                # Only this invocation's new claim, before any relay dispatch.
-                # Clock or persistence failures must remain observable.
-                finalize_action(
-                    self._store,
-                    identity,
-                    effect_state="NOT_APPLIED",
-                    observed_sha256=None,
-                    completed_at_ms=self._now(),
-                    durability="durable",
-                    details={"reason": "binding_refused_before_dispatch"},
-                )
-                return {
-                    "status": "OK",
-                    "effect_state": "NOT_APPLIED",
-                    "observed_sha256": None,
-                    "reconciled": False,
-                }
-            if (
-                _binding_key(current_binding) != original_binding
-                or current_browser != browser
-                or current_socket != socket_path
-                or self._now() >= prepared.expires_at_ms
-            ):
-                finalize_action(
-                    self._store,
-                    identity,
-                    effect_state="NOT_APPLIED",
-                    observed_sha256=None,
-                    completed_at_ms=self._now(),
-                    durability="durable",
-                    details={"reason": "binding_changed_before_dispatch"},
-                )
-                return {
-                    "status": "OK",
-                    "effect_state": "NOT_APPLIED",
-                    "observed_sha256": None,
-                    "reconciled": False,
-                }
+        # Only this invocation created the durable claim. Release the shared
+        # store lock while Chrome works; duplicates only observe the claim.
+        reason = None
+        try:
+            current_browser, current_binding, current_socket = self._resource(caller, browser_ref)
+        except BrowserPortRefused:
+            reason = "binding_refused_before_dispatch"
+        else:
+            if (_binding_key(current_binding) != original_binding or current_browser != browser
+                    or current_socket != socket_path or self._now() >= prepared.expires_at_ms):
+                reason = "binding_changed_before_dispatch"
+        if reason is not None:
+            self._finalize_claimed(
+                identity, outcome.claim, effect_state="NOT_APPLIED", observed_sha256=None,
+                completed_at_ms=self._now(), durability="durable", details={"reason": reason},
+            )
+            return {"status": "OK", "effect_state": "NOT_APPLIED",
+                    "observed_sha256": None, "reconciled": False}
+        try:
+            response = self._relay(
+                socket_path=socket_path, browser=browser, request_id=prepared.action_id,
+                tool=prepared.tool_name, arguments=json.loads(prepared.arguments_json),
+            )
+        except BrowserRelayError:
+            return self._unknown()
 
-            try:
-                response = self._relay(
-                    socket_path=socket_path,
-                    browser=browser,
-                    request_id=prepared.action_id,
-                    tool=prepared.tool_name,
-                    arguments=json.loads(prepared.arguments_json),
-                )
-            except BrowserRelayError:
-                # The durable claim already exists. A transport failure after
-                # dispatch can never be converted into a retry.
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "observed_sha256": None,
-                    "reconciled": False,
-                }
-
-            if response["ok"] is not True:
-                error = response.get("error")
-                if error != "REQUEST_REFUSED":
-                    return {
-                        "status": "OK",
-                        "effect_state": "EFFECT_UNKNOWN",
-                        "observed_sha256": None,
-                        "reconciled": False,
-                    }
-                result_record = finalize_action(
-                    self._store,
-                    identity,
-                    effect_state="NOT_APPLIED",
-                    observed_sha256=None,
-                    completed_at_ms=self._now(),
-                    durability="durable",
-                    details={"relay_error": "REQUEST_REFUSED"},
-                )
-                return {
-                    "status": "OK",
-                    "effect_state": result_record.effect_state,
-                    "observed_sha256": None,
-                    "reconciled": False,
-                }
-
+        observed_sha256 = None
+        result = None
+        if response["ok"] is not True:
+            if response.get("error") != "REQUEST_REFUSED":
+                return self._unknown()
+            effect_state = "NOT_APPLIED"
+            details = {"relay_error": "REQUEST_REFUSED"}
+        else:
             result = response.get("result")
             if type(result) is not dict:
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "observed_sha256": None,
-                    "reconciled": False,
-                }
+                return self._unknown()
+            effect_state = self._result_effect(browser, prepared, result)
+            if effect_state is None:
+                return self._unknown()
             try:
-                result_bytes = json.dumps(
-                    result,
-                    sort_keys=True,
-                    separators=(",", ":"),
-                    ensure_ascii=False,
-                    allow_nan=False,
-                ).encode("utf-8")
+                result_bytes = json.dumps(result, sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False, allow_nan=False).encode("utf-8")
             except (TypeError, ValueError):
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "observed_sha256": None,
-                    "reconciled": False,
-                }
+                return self._unknown()
             observed_sha256 = hashlib.sha256(result_bytes).hexdigest()
-            effect_state = (
-                "APPLIED" if result.get("isError") is False else "EFFECT_UNKNOWN"
+            details = {"tool": prepared.tool_name, "browser_tool_effect_only": True}
+        try:
+            # Persist the exact original effect even if its lease has since
+            # expired. Saving evidence requires no new browser authority.
+            result_record = self._finalize_claimed(
+                identity, outcome.claim, effect_state=effect_state, observed_sha256=observed_sha256,
+                completed_at_ms=self._now(), durability="durable", details=details,
             )
-            result_record = finalize_action(
-                self._store,
-                identity,
-                effect_state=effect_state,
-                observed_sha256=observed_sha256,
-                completed_at_ms=self._now(),
-                durability="durable",
-                details={
-                    "tool": prepared.tool_name,
-                    "browser_tool_effect_only": True,
-                },
-            )
-            response_receipt: dict[str, Any] = {
-                "status": "OK",
-                "effect_state": result_record.effect_state,
-                "observed_sha256": observed_sha256,
-                "reconciled": False,
-            }
-            if effect_state == "APPLIED":
-                response_receipt["result"] = result
-            return response_receipt
+        except (ActionArtifactBusy, ActionArtifactUncertain, OSError):
+            return self._unknown()
+        receipt = {"status": "OK", "effect_state": result_record.effect_state,
+                   "observed_sha256": result_record.observed_sha256, "reconciled": False}
+        if result is not None and result_record.effect_state == "APPLIED":
+            receipt["result"] = result
+        return receipt
 
 
 __all__ = [

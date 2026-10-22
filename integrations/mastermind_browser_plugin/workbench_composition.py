@@ -121,7 +121,11 @@ def compose_browser_owner_from_workbench(
 ) -> BrowserOwnerComposition:
     """Join one Workbench deployment to the external Browser owner surface."""
 
-    projection = WorkbenchDeploymentInventoryProjection(
+    from integrations.mastermind_browser_link.tool_contract import LINK_TOOL_SCHEMA_DIGEST
+    from .link_inventory import LinkWorkbenchInventoryProjection
+    projection_type = (LinkWorkbenchInventoryProjection if expected_backend_schema_digest == LINK_TOOL_SCHEMA_DIGEST
+                       else WorkbenchDeploymentInventoryProjection)
+    projection = projection_type(
         deployment=deployment,
         broker_caller=broker_caller,
         clock_ms=clock_ms,
@@ -135,6 +139,8 @@ def compose_browser_owner_from_workbench(
         clock_ms=clock_ms,
         caller_binding=caller_binding,
         resource_reader=projection.resource_reader,
+        resource_lookup=(projection.resource_lookup
+                         if expected_backend_schema_digest == LINK_TOOL_SCHEMA_DIGEST else None),
         tab_reader=projection.tab_reader,
         managed_effect_port=effect_port,
         shared_effect_port=effect_port,

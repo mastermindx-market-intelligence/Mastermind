@@ -16,6 +16,7 @@ from .owner_adapter import (
     ManagedBrowserOwnerAdapter,
     SharedHumanBrowserOwnerAdapter,
     WorkbenchManagedProjector,
+    BrowserLinkProjector,
 )
 from .owner_router import BrowserOwnerRouter
 from .tab_ref import BrowserTabRefCodec
@@ -50,6 +51,7 @@ def compose_browser_owner(
     managed_backend_schema_digest: str,
     shared_backend_schema_digest: str,
     managed_broker_caller: Any | None = None,
+    resource_lookup: Callable[..., Any] | None = None,
 ) -> BrowserOwnerComposition:
     """Join already-owned Browser seams without adding another control plane."""
 
@@ -64,10 +66,14 @@ def compose_browser_owner(
         clock_ms=clock_ms,
         caller_binding=caller_binding,
         resource_reader=resource_reader,
+        resource_lookup=resource_lookup,
         tab_reader=tab_reader,
         expected_catalog_schema_digest=expected_catalog_schema_digest,
     )
+    from integrations.mastermind_browser_link.tool_contract import LINK_TOOL_SCHEMA_DIGEST
     projector = WorkbenchManagedProjector()
+    shared_projector = (BrowserLinkProjector() if shared_backend_schema_digest == LINK_TOOL_SCHEMA_DIGEST
+                        else projector)
     managed_type = (
         ManagedBrowserOwnerAdapter
         if managed_broker_caller is None
@@ -99,7 +105,7 @@ def compose_browser_owner(
         caller_binding=caller_binding,
         revalidate_tab=inventory.revalidate_tab,
         effect_port=shared_effect_port,
-        projector=projector,
+        projector=shared_projector,
         fleet_reader=inventory.browser_fleet,
         tabs_reader=inventory.browser_tabs,
         expected_catalog_schema_digest=expected_catalog_schema_digest,

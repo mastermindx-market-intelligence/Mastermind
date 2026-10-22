@@ -26,19 +26,26 @@ export class SharedTabController {
     // Physical in-flight state survives local consent revocation/re-sharing.
     const lock = this.#locks.get(tabId) ?? { readers: 0, busy: false, fence: -1, holder: null };
     this.#locks.set(tabId, lock);
-    const tab = { tab_id: tabId, origin: url.origin, consent_id: this.nonce(), document_revision: 0, lock };
+    const tab = { tab_id: tabId, origin: url.origin, consent_id: this.nonce(), document_revision: 0, navigating: false, lock };
     this.#tabs.set(tabId, tab);
     return this.#view(tab);
   }
   #view(tab) {
     return Object.freeze({ tab_id: tab.tab_id, origin: tab.origin, consent_id: tab.consent_id, document_revision: tab.document_revision,
-      state: this.#uncertain.has(tab.tab_id) ? 'effect_unresolved' : tab.lock.busy ? 'busy' : 'shared' });
+      state: this.#uncertain.has(tab.tab_id) ? 'effect_unresolved' : tab.lock.busy ? 'busy' : tab.navigating ? 'navigating' : 'shared' });
   }
   inventory() { return [...this.#tabs.values()].map(tab => this.#view(tab)); }
   invalidate(tabId) {
     const tab = this.#tabs.get(tabId);
     if (tab) { if (tab.document_revision === Number.MAX_SAFE_INTEGER) this.revoke(tabId); else tab.document_revision++; }
     this.adapter.invalidate?.(tabId);
+  }
+  navigation(tabId, navigating) {
+    const tab = this.#tabs.get(tabId);
+    if (!tab) return;
+    tab.navigating = navigating;
+    // Completion is a new document boundary even for a same-URL reload.
+    this.invalidate(tabId);
   }
   revoke(tabId) { this.#tabs.delete(tabId); this.adapter.invalidate?.(tabId); }
   disconnect() { this.#connected = false; for (const id of [...this.#tabs.keys()]) this.revoke(id); }
@@ -48,6 +55,7 @@ export class SharedTabController {
     const tab = this.#tabs.get(request.tab_id);
     if (!tab) refuse('TAB_NOT_SHARED');
     if (request.consent_id !== tab.consent_id) refuse('CONSENT_MISMATCH');
+    if (tab.navigating) refuse('TARGET_NAVIGATING');
     if (this.now() >= request.expires_at_ms) refuse('EXPIRED');
     return tab;
   }

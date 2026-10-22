@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 from .catalog import SCHEMA_DIGEST
+from integrations.mastermind_browser_link.tool_contract import LINK_TOOL_SCHEMA_DIGEST
 from .facade import OwnerRefused
 from .owner_adapter import BrowserCallerBinding
 from .tab_ref import (
@@ -160,6 +161,9 @@ class BrowserTabObservation:
     url: str
     observed_at_ms: int
     expires_at_ms: int
+    connection_generation: str | None = None
+    consent_ref: str | None = None
+    allowed_actions: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         _browser_ref(self.browser_ref)
@@ -171,6 +175,10 @@ class BrowserTabObservation:
         expires = _integer(self.expires_at_ms, "expires_at_ms")
         if expires <= observed:
             raise ValueError("tab observation validity window is invalid")
+        if any(value is not None for value in (self.connection_generation, self.consent_ref, self.allowed_actions)):
+            _token(self.connection_generation, "connection_generation")
+            _token(self.consent_ref, "consent_ref")
+            _actions(self.allowed_actions)
 
 
 async def _maybe(value: Any) -> Any:
@@ -189,6 +197,7 @@ class BrowserInventoryOwner:
         resource_reader: Callable[[Any, int], Any],
         tab_reader: Callable[[Any, ActiveBrowserResource], Any],
         expected_catalog_schema_digest: str = SCHEMA_DIGEST,
+        resource_lookup: Callable[[Any, str], Any] | None = None,
     ) -> None:
         if type(codec) is not BrowserTabRefCodec:
             raise TypeError("signed Browser ref codec is required")
@@ -205,6 +214,9 @@ class BrowserInventoryOwner:
         self._codec = codec
         self._clock_ms = clock_ms
         self._caller_binding = caller_binding
+        if resource_lookup is not None and not callable(resource_lookup):
+            raise TypeError("exact resource lookup is invalid")
+        self._resource_lookup = resource_lookup
         self._resource_reader = resource_reader
         self._tab_reader = tab_reader
         self._catalog_digest = expected_catalog_schema_digest
@@ -245,6 +257,7 @@ class BrowserInventoryOwner:
             or len(raw) > limit
         ):
             raise OwnerRefused("INVENTORY_INVALID")
+        now_ms = self._now()
         rows: list[ActiveBrowserResource] = []
         seen: set[str] = set()
         for item in raw:
@@ -265,6 +278,11 @@ class BrowserInventoryOwner:
         return tuple(rows)
 
     @staticmethod
+    def _is_link(resource: ActiveBrowserResource) -> bool:
+        return (resource.backend == TabBackend.SHARED_HUMAN.value
+                and resource.backend_schema_digest == LINK_TOOL_SCHEMA_DIGEST)
+
+    @staticmethod
     def _same_resource(
         resource: ActiveBrowserResource,
         session: BrowserSessionRef | BrowserTabRef,
@@ -277,8 +295,12 @@ class BrowserInventoryOwner:
             and resource.profile_ref == session.profile_ref
             and resource.browser_instance_ref == session.browser_instance_ref
             and resource.connection_generation == session.connection_generation
-            and resource.consent_ref == session.consent_ref
-            and resource.allowed_actions == session.allowed_actions
+            and (
+                (type(session) is BrowserTabRef and BrowserInventoryOwner._is_link(resource)
+                 and set(session.allowed_actions) <= set(resource.allowed_actions))
+                or (resource.consent_ref == session.consent_ref
+                    and resource.allowed_actions == session.allowed_actions)
+            )
             and resource.catalog_schema_digest == session.catalog_schema_digest
             and resource.backend_schema_digest == session.backend_schema_digest
         )
@@ -290,46 +312,83 @@ class BrowserInventoryOwner:
         *,
         now_ms: int,
     ) -> ActiveBrowserResource:
-        rows = await self._resources(caller, limit=50, now_ms=now_ms)
-        matches = [row for row in rows if row.browser_ref == session.browser_ref]
+        if self._resource_lookup is None:
+            rows = await self._resources(caller, limit=50, now_ms=now_ms)
+            matches = [row for row in rows if row.browser_ref == session.browser_ref]
+        else:
+            try:
+                selected = await _maybe(self._resource_lookup(caller, session.browser_ref))
+                if selected is not None:
+                    if type(selected) is not ActiveBrowserResource:
+                        raise ValueError("invalid exact resource")
+                    selected.__post_init__()
+                matches = ([selected] if selected is not None
+                           and selected.browser_ref == session.browser_ref
+                           and selected.expires_at_ms > self._now()
+                           and selected.catalog_schema_digest == self._catalog_digest else [])
+            except OwnerRefused:
+                raise
+            except Exception as exc:
+                raise OwnerRefused("INVENTORY_UNAVAILABLE") from exc
         if len(matches) != 1 or not self._same_resource(matches[0], session):
             raise OwnerRefused("BROWSER_BINDING_CHANGED")
         return matches[0]
 
-    async def _current_tab(
-        self,
-        caller: Any,
-        resource: ActiveBrowserResource,
-        *,
-        now_ms: int,
-    ) -> BrowserTabObservation:
+    async def _current_tabs(
+        self, caller: Any, resource: ActiveBrowserResource, *, now_ms: int,
+    ) -> tuple[BrowserTabObservation, ...]:
         try:
             raw = await _maybe(self._tab_reader(caller, resource))
         except OwnerRefused:
             raise
         except Exception as exc:
             raise OwnerRefused("TAB_UNAVAILABLE") from exc
-        if isinstance(raw, (str, bytes, bytearray)) or not isinstance(raw, Sequence):
+        if isinstance(raw, (str, bytes, bytearray)) or not isinstance(raw, Sequence) or len(raw) > 64:
             raise OwnerRefused("TAB_UNAVAILABLE")
-        if len(raw) == 0:
-            raise OwnerRefused("TAB_UNAVAILABLE")
-        if len(raw) != 1:
-            raise OwnerRefused("TAB_GROUP_NOT_EXCLUSIVE")
-        observed = raw[0]
-        if type(observed) is not BrowserTabObservation:
-            raise OwnerRefused("TAB_UNAVAILABLE")
-        try:
-            observed.__post_init__()
-        except ValueError as exc:
-            raise OwnerRefused("TAB_UNAVAILABLE") from exc
-        if observed.browser_ref != resource.browser_ref:
-            raise OwnerRefused("TAB_BINDING_CHANGED")
-        if (
-            observed.observed_at_ms > now_ms
-            or now_ms >= observed.expires_at_ms
-        ):
-            raise OwnerRefused("TAB_OBSERVATION_NOT_CURRENT")
-        return observed
+        now_ms = self._now()  # observation may have awaited real native I/O
+        link = self._is_link(resource)
+        if not link:
+            if len(raw) == 0:
+                raise OwnerRefused("TAB_UNAVAILABLE")
+            if len(raw) != 1:
+                raise OwnerRefused("TAB_GROUP_NOT_EXCLUSIVE")
+        seen = set()
+        result = []
+        for observed in raw:
+            if type(observed) is not BrowserTabObservation:
+                raise OwnerRefused("TAB_UNAVAILABLE")
+            try:
+                observed.__post_init__()
+            except ValueError as exc:
+                raise OwnerRefused("TAB_UNAVAILABLE") from exc
+            if observed.browser_ref != resource.browser_ref or observed.tab_locator in seen:
+                raise OwnerRefused("TAB_BINDING_CHANGED")
+            seen.add(observed.tab_locator)
+            if observed.observed_at_ms > now_ms or now_ms >= observed.expires_at_ms:
+                raise OwnerRefused("TAB_OBSERVATION_NOT_CURRENT")
+            if link:
+                if (observed.tab_locator > 2**53 - 1 or observed.document_revision > 2**53 - 1
+                        or observed.connection_generation != resource.connection_generation
+                        or observed.consent_ref is None or observed.allowed_actions is None
+                        or not set(observed.allowed_actions) <= set(resource.allowed_actions)):
+                    raise OwnerRefused("TAB_BINDING_CHANGED")
+            elif any(value is not None for value in (
+                    observed.connection_generation, observed.consent_ref, observed.allowed_actions)):
+                raise OwnerRefused("TAB_BINDING_CHANGED")
+            result.append(observed)
+        return tuple(result)
+
+    async def _current_tab(
+        self, caller: Any, resource: ActiveBrowserResource, *, now_ms: int,
+        tab_locator: int | None = None,
+    ) -> BrowserTabObservation:
+        rows = await self._current_tabs(caller, resource, now_ms=now_ms)
+        if self._is_link(resource):
+            selected = [row for row in rows if row.tab_locator == tab_locator]
+            if len(selected) != 1:
+                raise OwnerRefused("TAB_UNAVAILABLE")
+            return selected[0]
+        return rows[0]
 
     @staticmethod
     def _display_url(value: str) -> str:
@@ -345,6 +404,7 @@ class BrowserInventoryOwner:
         binding = await self._caller(caller)
         now = self._now()
         rows = await self._resources(caller, limit=limit, now_ms=now)
+        now = self._now()
         browsers = []
         for resource in rows:
             expires = min(
@@ -400,44 +460,30 @@ class BrowserInventoryOwner:
         except BrowserTabRefError as exc:
             raise OwnerRefused(str(exc)) from exc
         resource = await self._current_resource(caller, session, now_ms=now)
-        observed = await self._current_tab(caller, resource, now_ms=now)
-        expires = min(
-            resource.expires_at_ms,
-            observed.expires_at_ms,
-            now + MAX_TAB_REF_LIFETIME_MS,
-        )
-        if expires <= now:
-            raise OwnerRefused("TAB_OBSERVATION_NOT_CURRENT")
-        signed = BrowserTabRef(
-            schema=TAB_REF_SCHEMA,
-            backend=resource.backend,
-            browser_ref=resource.browser_ref,
-            subject_digest=binding.subject_digest,
-            client_ref=binding.client_ref,
-            resource=binding.resource,
-            host_ref=resource.host_ref,
-            boot_ref=resource.boot_ref,
-            profile_ref=resource.profile_ref,
-            browser_instance_ref=resource.browser_instance_ref,
-            connection_generation=resource.connection_generation,
-            tab_locator=observed.tab_locator,
-            document_revision=observed.document_revision,
-            consent_ref=resource.consent_ref,
-            allowed_actions=resource.allowed_actions,
-            catalog_schema_digest=resource.catalog_schema_digest,
-            backend_schema_digest=resource.backend_schema_digest,
-            issued_at_ms=now,
-            expires_at_ms=expires,
-        )
-        return {
-            "tabs": [
-                {
-                    "tab_ref": self._codec.encode(signed),
-                    "title": observed.title,
-                    "url": self._display_url(observed.url),
-                }
-            ]
-        }
+        observations = await self._current_tabs(caller, resource, now_ms=now)
+        now = self._now()
+        tabs = []
+        for observed in observations:
+            expires = min(resource.expires_at_ms, session.expires_at_ms,
+                          observed.expires_at_ms, now + MAX_TAB_REF_LIFETIME_MS)
+            if expires <= now:
+                raise OwnerRefused("TAB_OBSERVATION_NOT_CURRENT")
+            signed = BrowserTabRef(
+                schema=TAB_REF_SCHEMA, backend=resource.backend, browser_ref=resource.browser_ref,
+                subject_digest=binding.subject_digest, client_ref=binding.client_ref, resource=binding.resource,
+                host_ref=resource.host_ref, boot_ref=resource.boot_ref, profile_ref=resource.profile_ref,
+                browser_instance_ref=resource.browser_instance_ref,
+                connection_generation=resource.connection_generation,
+                tab_locator=observed.tab_locator, document_revision=observed.document_revision,
+                consent_ref=observed.consent_ref if self._is_link(resource) else resource.consent_ref,
+                allowed_actions=observed.allowed_actions if self._is_link(resource) else resource.allowed_actions,
+                catalog_schema_digest=resource.catalog_schema_digest,
+                backend_schema_digest=resource.backend_schema_digest,
+                issued_at_ms=now, expires_at_ms=expires,
+            )
+            tabs.append({"tab_ref": self._codec.encode(signed), "title": observed.title,
+                         "url": self._display_url(observed.url)})
+        return {"tabs": tabs}
 
     async def revalidate_tab(self, caller: Any, tab: BrowserTabRef) -> bool:
         if type(tab) is not BrowserTabRef:
@@ -458,7 +504,7 @@ class BrowserInventoryOwner:
             return False
         try:
             resource = await self._current_resource(caller, tab, now_ms=now)
-            observed = await self._current_tab(caller, resource, now_ms=now)
+            observed = await self._current_tab(caller, resource, now_ms=now, tab_locator=tab.tab_locator)
         except OwnerRefused as exc:
             if exc.code in {
                 "BROWSER_BINDING_CHANGED",
@@ -470,8 +516,13 @@ class BrowserInventoryOwner:
                 return False
             raise
         return (
-            observed.tab_locator == tab.tab_locator
+            self._now() < min(tab.expires_at_ms, resource.expires_at_ms, observed.expires_at_ms)
+            and observed.tab_locator == tab.tab_locator
             and observed.document_revision == tab.document_revision
+            and (not self._is_link(resource) or (
+                observed.consent_ref == tab.consent_ref
+                and observed.connection_generation == tab.connection_generation
+                and observed.allowed_actions == tab.allowed_actions))
         )
 
 
