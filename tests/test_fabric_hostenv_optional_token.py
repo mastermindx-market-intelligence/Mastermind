@@ -100,3 +100,47 @@ def test_present_good_optional_script_is_sourced(tmp_path):
     r = _run(hostenv, env,
         '. "$HOME/lanes/ext/HOST_ENV.sh" && test "${MMX_FIXTURE_MARKER:-}" = present')
     assert r.returncode == 0, r.stderr
+
+
+def test_existing_minimax_source_gate_succeeds_only_with_exact_immutable_checkout(tmp_path):
+    hostenv, env = _hostenv(tmp_path)
+    checkout = (Path(env["HOME"]) / "lanes/authority"
+                / "mastermind-minimax-4d1f45bf600afc2d264a74852c69887084aa52ff")
+    checkout.mkdir(parents=True)
+    # Directory without the exact .git authority is insufficient.
+    assert _run(hostenv, env,
+        '. "$HOME/lanes/ext/HOST_ENV.sh" && '
+        'test -z "${MINIMAX_GIT_OBJECT_ROOT:-}"').returncode == 0
+    (checkout / ".git").mkdir()
+    qualified = _run(hostenv, env,
+        '. "$HOME/lanes/ext/HOST_ENV.sh" && '
+        'test "$MINIMAX_GIT_OBJECT_ROOT" = '
+        '"$HOME/lanes/authority/mastermind-minimax-4d1f45bf600afc2d264a74852c69887084aa52ff"')
+    assert qualified.returncode == 0, qualified.stderr
+
+
+def test_emitted_environment_preserves_preexisting_authority_lines(tmp_path):
+    hostenv, _ = _hostenv(tmp_path)
+    # Exact immutable source and existing GLM endpoint lines are a separate
+    # guard from the repaired *last* optional credential source statement.
+    lines = hostenv.read_text(encoding="utf-8").splitlines()
+    assert lines[:5] == [
+        'export PATH=$HOME/.npm-global/bin:$HOME/.local/bin:/opt/homebrew/bin:$HOME/lanes/venv/bin:$PATH',
+        'export GLM_SHIM_URL=http://127.0.0.1:4141',
+        '# Bind MiniMax admission to the *real* immutable source commit on Ubuntu.',
+        '# An absent checkout leaves the source gate closed; no fallback or bypass.',
+        '[ -d "$HOME/lanes/authority/mastermind-minimax-4d1f45bf600afc2d264a74852c69887084aa52ff/.git" ] && export MINIMAX_GIT_OBJECT_ROOT="$HOME/lanes/authority/mastermind-minimax-4d1f45bf600afc2d264a74852c69887084aa52ff"',
+    ]
+    assert 'if [ -f "$HOME/lanes/ext/.host_glm_token.sh" ]; then' in lines
+    assert '  . "$HOME/lanes/ext/.host_glm_token.sh"' in lines
+    assert lines[-1] == 'fi'
+
+
+def test_dangling_optional_token_symlink_classifies_as_absent(tmp_path):
+    hostenv, env = _hostenv(tmp_path)
+    token = hostenv.parent / ".host_glm_token.sh"
+    token.symlink_to(hostenv.parent / "nonexistent-optional-token")
+    observed = _run(hostenv, env,
+        '. "$HOME/lanes/ext/HOST_ENV.sh" && '
+        'test -z "${GLM_SHIM_TOKEN:-}"')
+    assert observed.returncode == 0, observed.stderr
