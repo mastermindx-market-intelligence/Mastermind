@@ -82,6 +82,20 @@ coo_cycle_policy:
   review_job_attempt_limit: 1
   allowed_child_cost_classes: [default, small]
 
+# Versioned opt-in for nested coordinators. Existing roots retain the v1 hash.
+# The 16-Job allowance is shared by all descendants, including planning,
+# reviews and repairs; it is never multiplied by the number of coordinators.
+coo_hierarchy_policy:
+  schema_version: 2
+  max_fan_out_per_parent: 16
+  max_depth: 3
+  max_repair_rounds: 2
+  max_review_attempts_per_job: 2
+  max_children_total: 16
+  max_attempts_per_orchestration_job: 2
+  review_job_attempt_limit: 1
+  allowed_child_cost_classes: [default, small]
+
 # FLAGS
 # ───────────────────────────────────────────────────────────────────────────────
 flags:

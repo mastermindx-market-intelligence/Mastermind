@@ -1777,7 +1777,7 @@ for key, default in {
         value.setdefault(key, default)
 terminal_return_defaults = {
     "terminal_return_armed": False,
-    "terminal_return_socket_path": "/var/run/mastermind-agent-relay/agent-relay.sock",
+    "terminal_return_socket_path": "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
 }
 terminal_schema = set(terminal_return_defaults) & schema_keys
 if terminal_schema and terminal_schema != set(terminal_return_defaults):
@@ -1787,6 +1787,18 @@ if terminal_present and terminal_present != set(terminal_return_defaults):
     raise SystemExit("partial terminal-return control-config source")
 if terminal_schema and not terminal_present:
     value.update(terminal_return_defaults)
+if terminal_schema and terminal_present:
+    prior_socket = "/var/run/mastermind-agent-relay/agent-relay.sock"
+    target_socket = terminal_return_defaults["terminal_return_socket_path"]
+    if value["terminal_return_socket_path"] == prior_socket:
+        # An existing disarmed host may have the pre-fix socket in its
+        # preserved source config. Migrate only that exact historical value,
+        # never an armed live consumer or an arbitrary caller-supplied path.
+        if value["terminal_return_armed"] is not False:
+            raise SystemExit("armed terminal-return socket migration refused")
+        value["terminal_return_socket_path"] = target_socket
+    elif value["terminal_return_socket_path"] != target_socket:
+        raise SystemExit("unrecognized terminal-return socket path refused")
 
 for key, derived in readiness_expected.items():
     if key in value and (type(value[key]) is not type(derived) or value[key] != derived):

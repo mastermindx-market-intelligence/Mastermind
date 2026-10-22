@@ -23,3 +23,5 @@ Keep the donor revision distinct from the older ACP proof/research pins in the s
 ## Distribution
 
 The production public assets retain the exact DeepSeek MIT license at `third-party/deepseek-harness-LICENSE.txt` and full license texts for all 58 newly introduced runtime dependency packages at `third-party/deepseek-client-dependency-NOTICES.txt`. Every enumerated package declares MIT at this pinned lockfile. The provenance test binds the distributed notice bytes; the source-only fixture is not a production entrypoint.
+
+The third byte-identical module, `use-scroll-follow.ts`, is from `packages/client/ui-chat/src/client/chat/use-scroll-follow.ts` at the same pinned revision. It is consumed by the observed-window reader only; no upstream session store or runtime is imported.

@@ -1,0 +1,72 @@
+{
+  "effect_exclusions": [
+    "no host installation",
+    "no Caddy update",
+    "no runtime Job or Attempt",
+    "no session provider request",
+    "no merge to protected master"
+  ],
+  "merged_protected_master": "05a9eb52a54e29fb7bbd0d40813ed12623b176c7",
+  "original_head": "2121bf0103cca5b21957d2a62af5c0f5dd5e3202",
+  "original_pr": 1733,
+  "profiles": {
+    "asset_file_count": [
+      3,
+      9,
+      11,
+      13
+    ],
+    "manifest_inclusive_index_count": [
+      4,
+      10,
+      12,
+      14
+    ],
+    "older_11_kept": true,
+    "rich_13_added": true,
+    "wildcard_asset_names": false
+  },
+  "proof_ceiling": "local original-workspace source and inert publication simulation; no live install, session SEND, worker, parent consumption",
+  "release_scenarios": [
+    "legacy 3 and Noir 9 supported",
+    "licensed Noir 11 supported",
+    "rich Noir 13 supported",
+    "9-to-13 stage prepare cutover finalize",
+    "11-to-13 stage prepare cutover finalize",
+    "3-to-11, 11-to-3, 11-to-11 protected tests retained"
+  ],
+  "required_next": [
+    "original PR candidate commit/publish",
+    "new exact-head hosted CI",
+    "security/release review as required",
+    "native merge-group qualification",
+    "incumbent sealed release installation and authenticated real-path proof"
+  ],
+  "schema": "mastermind.deepseek_client.protected_four_profile_integration.v1",
+  "source_sha256": {
+    "integrations/mastermind_executive_app/os_assets.py": "8b12d393e7b07d2029165b54ff6df7566865f3a95bc60a6f8320b4b6a80d7b13",
+    "ops/executive_os/executive_mcp_entry.py": "2f24b3b8ec829742f63478310abf10c1a9bf3f13a8610cb8858a090560a0ffee",
+    "ops/executive_os/os_public_edge_publication.py": "d51417fea73c23beb72ed67a66e0d5f46ec89e30bdc9dac4547cf3ef9166d0d3",
+    "tests/test_deepseek_os_asset_layout.py": "5e382826f4a8c2d108dcb2a2c4a01fb305c3279fc33b5d736825491d8797ac1f",
+    "tests/test_os_public_edge_publication.py": "25bd55889b3cd36cfb35220f70c7c4567c98c665d69992f14b5fdbbbfa9c3269"
+  },
+  "source_workspace_operation": "deepseek-client-release-assets-20261022-web-001",
+  "status": "SOURCE_TESTED_PENDING_COMMIT_CI_REVIEW",
+  "tests": {
+    "collect_log_sha256": "e9b374de789d5a70a7c2f648636c443c81358b103ad2c542a00e79287f9dc1b4",
+    "collected": 419,
+    "failed_mark_count": 0,
+    "log_sha256": "03caceaeccc9745ccac2e6e6db2c3348b3197df1b369cb0780d35a10e2f95b9b",
+    "passed_mark_count": 419,
+    "shell_exit": 0,
+    "skipped_mark_count": 0,
+    "test_modules": {
+      "tests/test_deepseek_os_asset_layout.py": 60,
+      "tests/test_executive_workspace_mount.py": 75,
+      "tests/test_os_public_edge.py": 33,
+      "tests/test_os_public_edge_publication.py": 66,
+      "tests/test_os_public_edge_transition.py": 63,
+      "tests/test_os_release_assets.py": 122
+    }
+  }
+}
