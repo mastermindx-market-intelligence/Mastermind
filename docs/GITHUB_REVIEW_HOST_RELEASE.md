@@ -299,3 +299,33 @@ the PR. The public webhook cannot access Executive Runtime SQLite directly,
 nor select the return source mode. No GitHub App enrollment, actual worker
 START, webhook delivery, GitHub formal review or Slack thread production
 receipt is proven.
+
+## Latest exact-head reviewer return — security09 (2026-10-22)
+
+Fabric `mmx-gh-review-20261022-security09` inspected the pushed
+`a5528a560801d1b38d59fb167f080ff3fec3c50e` in an independent detached
+checkout and reported PASS SOURCE SLICE, 283 review tests passing and additional
+stale-head/self-publisher/source-drift probes. **This is not accepted security
+review evidence:** although the text had no blocking findings, the Fabric
+controller ended `rc=1` / `PROVIDER_TERMINAL kind=permission` with
+`claude-code:unrecognized_model` for `MiniMax-M3`. Its status remains
+`acceptance_state=UNVERIFIED`. Do not equate the source narrative with a
+successfully accepted reviewer receipt or launch a duplicate worker through
+another provider/account to evade that denial. A legitimately repaired
+provider configuration and an explicitly authorized fresh exact-head review
+are prerequisites to crossing the independent-review gate.
+
+Follow-up local hardening, **not installed and not covered by security09**:
+- The Executive-owned `for_authorized_source` factory requires the
+  **exact** enrolled `GitHubReviewAPI` implementation rather than trusting
+  a subclass override of the identity-bearing `publisher_login` property.
+- Regression tests assert exact refusal codes for omitted/string/mixed modes
+  and unarmed source, reject an overriding API subclass, malformed owners,
+  self-publisher PRs and a changed submitter between source read and effect
+  preflight. A denied input causes no review POST.
+
+This is source hardening only. The incumbent authenticated Executive socket
+service handler remains previously platform safety-denied and **unmodified**;
+its original dormant local worktree diff remains excluded. Neither advisory
+GitHub submitter identity nor a PASS narrative attests a real builder worker,
+live GitHub App/webhook deployment, formal review acceptance, or Slack return.

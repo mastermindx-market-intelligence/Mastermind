@@ -182,13 +182,15 @@ def test_return_binding_refuses_implicit_or_mixed_source_modes(tmp_path):
         runtime=runtime, github=github,
         publication_guard=lambda: None,
     )
-    for mode, builder_ref in (
-        ("EXTERNAL_GITHUB_ADVISORY", None),
-        (None, None),
-        (ReviewReturnSourceMode.EXECUTIVE_BUILDER, None),
-        (ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY, lambda _: builder),
+    for mode, builder_ref, expected_refusal in (
+        ("EXTERNAL_GITHUB_ADVISORY", None, "SOURCE_MODE_INVALID"),
+        (None, None, "SOURCE_MODE_INVALID"),
+        (ReviewReturnSourceMode.EXECUTIVE_BUILDER, None,
+         "BUILDER_SOURCE_UNBOUND"),
+        (ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY, lambda _: builder,
+         "SOURCE_MODES_MIXED"),
     ):
-        with pytest.raises(ReviewVerificationRefused):
+        with pytest.raises(ReviewVerificationRefused, match=expected_refusal):
             GitHubReviewReturn.for_authorized_source(
                 **common, source_mode=mode,
                 builder_job_id_for_review=builder_ref,
@@ -212,4 +214,89 @@ def test_external_return_refuses_stale_github_head_before_post(tmp_path):
     )
     receipt = handler.deliver(decision=decision(), job_id=review)
     assert receipt.publication.state is PublishState.REFUSED
+    assert history["posts"] == []
+
+
+def test_return_factory_rejects_publisher_spoofing_api_subclass(tmp_path):
+    import httpx
+    import pytest
+    from control_plane.github_review_intent_ingress import ReviewVerificationRefused
+    from integrations.github_review_api import GitHubReviewAPI
+    from integrations.github_review_return import ReviewReturnSourceMode
+    from test_github_review_publish_workflow import Tokens
+
+    class ForgedPublisher(GitHubReviewAPI):
+        @property
+        def publisher_login(self):
+            return "alice"  # PR submitter, not the real App bot
+
+    runtime, builder, reviewer = completed_pair(tmp_path)
+    forged = ForgedPublisher(
+        repository="example/repo", installation_id=4242,
+        publisher_login="reviewer-bot[bot]", token_source=Tokens(),
+        client=httpx.Client(transport=httpx.MockTransport(
+            lambda req: httpx.Response(200, json={})
+        )),
+    )
+    assert forged.publisher_login == "alice"
+    with pytest.raises(ReviewVerificationRefused, match="OWNER_UNBOUND"):
+        GitHubReviewReturn.for_authorized_source(
+            runtime=runtime, github=forged, publication_guard=lambda: None,
+            source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+        )
+
+
+def test_return_factory_rejects_malformed_host_owner(tmp_path):
+    import pytest
+    from control_plane.github_review_intent_ingress import ReviewVerificationRefused
+    from integrations.github_review_return import ReviewReturnSourceMode
+    runtime, builder, reviewer = completed_pair(tmp_path)
+    github, history = git_api()
+    for bound_runtime, bound_github in ((None, github), (runtime, None)):
+        with pytest.raises(ReviewVerificationRefused, match="OWNER_UNBOUND"):
+            GitHubReviewReturn.for_authorized_source(
+                runtime=bound_runtime, github=bound_github,
+                publication_guard=lambda: None,
+                source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+            )
+    assert history["posts"] == []
+
+
+def test_return_factory_refuses_publisher_self_review_without_post(tmp_path):
+    import httpx
+    from integrations.github_review_return import ReviewReturnSourceMode
+    from test_github_review_api import pr, source
+
+    runtime, builder, review = completed_pair(tmp_path)
+    attempted = []
+    def github_wire(request):
+        attempted.append((request.method, request.url.path))
+        assert request.method == "GET"
+        current = pr()
+        current["user"] = {"login": "reviewer-bot[bot]", "id": 999}
+        return httpx.Response(200, json=current)
+
+    github, source_tokens = source(github_wire)
+    handler = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+    )
+    outcome = handler.deliver(decision=decision(), job_id=review)
+    assert outcome.publication.state is PublishState.REFUSED
+    assert attempted == [("GET", "/repos/example/repo/pulls/42")]
+    assert source_tokens.calls == 1
+
+
+def test_return_factory_refuses_submitter_drift_before_post(tmp_path):
+    from integrations.github_review_return import ReviewReturnSourceMode
+
+    runtime, builder, review = completed_pair(tmp_path)
+    github, history = git_api(changed_submitter=True)
+    handler = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+    )
+    outcome = handler.deliver(decision=decision(), job_id=review)
+    assert outcome.publication.state is PublishState.REFUSED
+    assert outcome.publication.refusal == "EXTERNAL_SOURCE_DRIFT"
     assert history["posts"] == []

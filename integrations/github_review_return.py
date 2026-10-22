@@ -68,7 +68,10 @@ class GitHubReviewReturn:
         owner. It has no webhook-side fallback, scheduler, new identity store,
         or implicit opt-in: caller must explicitly select and arm one mode.
         """
-        if not isinstance(runtime, Runtime) or not isinstance(github, GitHubReviewAPI):
+        if not isinstance(runtime, Runtime) or type(github) is not GitHubReviewAPI:
+            # Close the host-selected source adapter to the exact validated
+            # implementation. A subclass may override publisher_login or
+            # read_external_source and falsely make self-review independent.
             raise ReviewVerificationRefused("REVIEW_RETURN_OWNER_UNBOUND")
         if not callable(publication_guard):
             raise ReviewVerificationRefused("REVIEW_RETURN_PUBLICATION_UNARMED")
