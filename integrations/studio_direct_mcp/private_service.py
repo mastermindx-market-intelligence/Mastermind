@@ -844,10 +844,12 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
             # selected, exact historical cohort. Normal start/stop/seal must
             # respect the same inode. Existing Fabric-backend seats retain
             # their own outer decorator and are not double-locked here.
-            locked_accounts = PAPER_RUNTIME_UPGRADE_ACCOUNTS | frozenset(
-                FABRIC_POOL_PIN_MIGRATION,
+            pin_lifecycle = (
+                function.__name__ in {"cmd_start", "cmd_stop", "cmd_seal_runtime"}
+                and args.account in FABRIC_POOL_PIN_MIGRATION
             )
-            if (args.account not in locked_accounts
+            if ((args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS
+                    and not pin_lifecycle)
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
