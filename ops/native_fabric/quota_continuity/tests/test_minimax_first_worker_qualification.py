@@ -21,7 +21,7 @@ _host.HOSTS_STATE_DIR = "fixture-states"
 _pick = ModuleType("pick")
 _pick.format_pick = lambda *_a, **_k: "NONE reason=fixture"
 _spec = importlib.util.spec_from_file_location(
-    "minimax_first_worker_source_under_test", ROOT / "source/fabric_host_qualification.py")
+    "minimax_first_worker_source_under_test", ROOT / "candidate/fabric_host_qualification.py")
 qualification = importlib.util.module_from_spec(_spec)
 with patch.dict(sys.modules, {"host_pick": _host, "pick": _pick}):
     _spec.loader.exec_module(qualification)
@@ -133,13 +133,21 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "QUALIFICATION_PROVIDER_REFUSED"):
             self.route("m1", response="POOL=glm MODEL=glm-5.3-flash REASON=fallback")
 
-    def test_both_existing_fabric_task_entrypoints_forward_pool_without_other_bypasses(self):
-        for name in ("source", "candidate"):
-            with self.subTest(entrypoint=name):
-                text = (ROOT / name / "fabric_task.py").read_text()
-                self.assertIn('if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:', text)
-                self.assertIn('qualification_host, pool=pool, task_class=task_class, complexity=complexity,', text)
-                self.assertEqual(text.count('qualification_host, pool=pool, task_class=task_class, complexity=complexity,'), 1)
+    def test_candidate_task_entrypoint_routes_minimax_without_mutating_source_preimage(self):
+        candidate = (ROOT / "candidate/fabric_task.py").read_text()
+        source = (ROOT / "source/fabric_task.py").read_text()
+        self.assertIn('if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:', candidate)
+        self.assertIn('qualification_host, pool=pool, task_class=task_class, complexity=complexity,', candidate)
+        self.assertEqual(candidate.count('qualification_host, pool=pool, task_class=task_class, complexity=complexity,'), 1)
+        self.assertIn('if pool != "grok" or artifact_names or native_return or requested_model or prefer:', source)
+        self.assertNotIn('qualification_host, pool=pool, task_class=task_class, complexity=complexity,', source)
+        # The immutable source preimages stay intact for the native staging owner.
+        import hashlib
+        import json
+        preimages = json.loads((ROOT / "rollout/native-preimages.json").read_text())["files"]
+        for name in ("fabric_task.py", "fabric_host_qualification.py"):
+            raw = (ROOT / "source" / name).read_bytes()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), preimages[name])
 
 
 if __name__ == "__main__":
