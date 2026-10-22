@@ -493,6 +493,8 @@ function fabricRow(host, mode, {
   seat = false,
   eligible = true,
   candidateExcluded = false,
+  ageSeconds = 12,
+  capacityRemaining,
 } = {}) {
   return {
     host,
@@ -500,13 +502,14 @@ function fabricRow(host, mode, {
     seat,
     ssh_alias: host === 'm2' ? null : host,
     score: eligible ? 0.75 : null,
-    age: 12,
+    age: ageSeconds,
+    ...(capacityRemaining === undefined ? {} : { capacity_remaining: capacityRemaining }),
     gates: [
       fabricGate(host, 'roles', roles.includes('lanes') || seat ? 'PASS' : 'FAIL', roles.join(',')),
       fabricGate(host, 'mode', 'PASS', mode),
       fabricGate(host, 'automatic-qualification', 'PASS', 'not-held'),
       fabricGate(host, 'excluded', 'PASS', ''),
-      fabricGate(host, 'fresh', 'PASS', 'age=12s'),
+      fabricGate(host, 'fresh', ageSeconds > 86_400 ? 'FAIL' : 'PASS', 'age=' + ageSeconds + 's'),
       fabricGate(host, 'reachable', 'PASS', ''),
       fabricGate(host, 'window', 'PASS', 'OPEN'),
       fabricGate(host, 'load', 'PASS', '2.5<12'),
@@ -540,7 +543,7 @@ function fabricView(mode, rows) {
   };
 }
 
-async function fabricFixture(owner) {
+async function fabricFixture(owner, decorateRows = (rows) => rows) {
   const dir = await mkdtemp(join(tmpdir(), 'studio-fleet-physical-'));
   const launcher = join(dir, 'studio-direct');
   await writeFile(launcher, `#!/bin/sh\nprintf '%s\\n' '${JSON.stringify(owner)}'\n`);
@@ -549,17 +552,15 @@ async function fabricFixture(owner) {
   const fabric = join(dir, 'pool');
   const cases = ['go-codex', 'glm', 'minimax', 'grok', 'cursor', 'oc-free']
     .map((mode) => {
-      const view = fabricView(mode, [
+      const view = fabricView(mode, decorateRows([
         fabricRow('m2', mode, {roles:['seat'], seat:true, eligible:mode === 'grok'}),
-        fabricRow('mb', mode, {roles:['candidate'], eligible:false, candidateExcluded:true}),
+        fabricRow('mb', mode, {roles:['candidate'], eligible:false, candidateExcluded:true, ageSeconds:974_554, capacityRemaining:null}),
         fabricRow('mini1', mode, {roles:['lanes'], eligible:mode === 'go-codex'}),
-        fabricRow('ubuntu3', mode, {roles:['candidate'], eligible:false, candidateExcluded:true}),
+        fabricRow('ubuntu3', mode, {roles:['candidate'], eligible:false, candidateExcluded:true, capacityRemaining:13}),
         fabricRow('bm1', mode, {roles:['lanes-shadow'], eligible:false, candidateExcluded:true}),
-        // Current travel policy can temporarily turn the MacBook shadow key
-        // from lanes-shadow into candidate; it must still never project as a
-        // second physical computer.
+        // Historical aliases must never turn into additional physical hosts.
         fabricRow('bmb', mode, {roles:['candidate'], eligible:false, candidateExcluded:true}),
-      ]);
+      ], mode));
       return `${mode}) printf '%s\\n' '${JSON.stringify(view)}' ;;\n`;
     })
     .join('');
@@ -603,6 +604,9 @@ test('physical fleet projection is advisory, bounded, and hides owner internals'
   );
   const macbook = result.physicalFleet.hosts.find((row) => row.hostRef === 'mb');
   assert.equal(macbook.title, 'MacBook Pro — Mobile Computer');
+  assert.equal(macbook.fresh, false);
+  assert.equal(macbook.freshAgeSeconds, 974_554);
+  assert.equal(macbook.modes.grok.eligible, false);
   const ubuntu3 = result.physicalFleet.hosts.find((row) => row.hostRef === 'ubuntu3');
   assert.equal(ubuntu3.title, 'Ubuntu 3 — Compute Worker');
   assert.equal(ubuntu3.roles.includes('candidate'), true);
@@ -630,6 +634,7 @@ test('physical fleet projection is advisory, bounded, and hides owner internals'
     '/private/owner/path-that-must-never-project',
     'ssh_alias',
     'telemetry_source',
+    'capacity_remaining',
   ]) {
     assert.equal(rendered.includes(forbidden), false, `leaked fabric owner field: ${forbidden}`);
   }
@@ -670,4 +675,36 @@ test('fabric config is all-or-nothing and fail closed', () => {
     }),
     /fabricTimeoutMs/,
   );
+});
+
+
+// Modern native placement retains arbitrarily stale registered hosts, but
+// those rows must not be transformed into fresh or runnable capacity.
+test('native placement drift is bounded and cannot produce false fresh or execution authority', async t => {
+  const owner = ownerFor([statusRow('chatgpt1', true)]);
+  const cases = [
+    ['negative capacity', r => ({...r, capacity_remaining: -1})],
+    ['oversized capacity', r => ({...r, capacity_remaining: 100_001})],
+    ['untyped capacity', r => ({...r, capacity_remaining: '13'})],
+    ['stale host marked fresh', r => ({...r, age: 974_554})],
+    ['stale host marked eligible', r => ({
+      ...r, age: 974_554, eligible: true,
+      gates: r.gates.map(g => g.gate === 'fresh' ? {...g, result:'FAIL'} : g),
+    })],
+    ['age exceeds finite limit', r => ({
+      ...r, age: 315_360_001,
+      gates: r.gates.map(g => g.gate === 'fresh' ? {...g, result:'FAIL'} : g),
+    })],
+    ['unknown producer field', r => ({...r, unsanctioned_hint: 'private'})],
+  ];
+  for (const [name, mutate] of cases) {
+    const fx = await fabricFixture(owner, rows => rows.map(row =>
+      row.host === 'ubuntu3' ? mutate(row) : row));
+    t.after(() => rm(fx.dir, {recursive:true, force:true}));
+    const result = await createFleetStatus(fx.config).status();
+    assert.equal(result.state, 'DEGRADED', name);
+    assert.equal(result.physicalFleet, null, name);
+    assert.deepEqual(result.issues, ['FLEET_STATUS_FABRIC_UNAVAILABLE'], name);
+    assert.equal(result.readyCount, 1, name); // owner truth is preserved
+  }
 });
