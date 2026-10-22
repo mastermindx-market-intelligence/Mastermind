@@ -9,14 +9,16 @@ import sys
 import unittest
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parent
+IMMUTABLE_NATIVE = ROOT.parent.parent / "quota_continuity"
 START = "2026-10-19T05:54:40Z"
 END = "2026-10-26T05:54:40Z"
 NOW = "2026-10-22T18:43:43Z"
 
 
 def load(which):
-    path = ROOT / which / "quota_remote.py"
+    assert which == "overlay"
+    path = ROOT / "quota_remote.py"
     name = "grok_evidence_" + which
     spec = importlib.util.spec_from_file_location(name, path)
     module = importlib.util.module_from_spec(spec)
@@ -36,19 +38,27 @@ def billing(pct="MISSING", start=START, end=END, ptype="USAGE_PERIOD_TYPE_WEEKLY
 
 
 class QuotaBillingTests(unittest.TestCase):
-    def test_frozen_installed_preimage_and_reviewed_candidate_are_separate(self):
+    def test_original_inventory_and_separate_overlay_bytes(self):
         import hashlib
-        inventory = json.loads((ROOT / "rollout" / "native-preimages.json").read_text())
-        original = (ROOT / "source" / "quota_remote.py").read_bytes()
-        candidate = (ROOT / "candidate" / "quota_remote.py").read_bytes()
-        self.assertEqual(hashlib.sha256(original).hexdigest(),
+        inventory = json.loads(
+            (IMMUTABLE_NATIVE / "rollout" / "native-preimages.json").read_text()
+        )
+        source = (IMMUTABLE_NATIVE / "source" / "quota_remote.py").read_bytes()
+        candidate = (IMMUTABLE_NATIVE / "candidate" / "quota_remote.py").read_bytes()
+        selected = (ROOT / "quota_remote.py").read_bytes()
+        static = json.loads(
+            (IMMUTABLE_NATIVE / "rollout" / "native-manifest.json").read_text()
+        )
+        self.assertEqual(hashlib.sha256(source).hexdigest(),
                          inventory["files"]["quota_remote.py"])
-        self.assertNotEqual(original, candidate)
-        self.assertIn(b"CACHE_PATH = os.path.realpath(", candidate)
-        self.assertIn(b"def parse_grok_billing_payload(", candidate)
+        self.assertEqual(hashlib.sha256(candidate).hexdigest(),
+                         static["ext/quota_remote.py"])
+        self.assertNotEqual(candidate, selected)
+        self.assertIn(b"CACHE_PATH = os.path.realpath(", selected)
+        self.assertIn(b"def parse_grok_billing_payload(", selected)
 
     def test_explicit_percent_is_valid_and_observation_is_weekly(self):
-        module = load("candidate")
+        module = load("overlay")
         rows = module.parse_grok_billing_payload(billing(27.5), NOW)
         self.assertEqual(len(rows), 1)
         row = rows[0]
@@ -60,7 +70,7 @@ class QuotaBillingTests(unittest.TestCase):
         self.assertEqual(row.source, "GROK_BUILD_ACP_BILLING")
 
     def test_missing_percent_is_unknown_not_zero(self):
-        module = load("candidate")
+        module = load("overlay")
         for pct in ("MISSING", "0", True, None, -1, 102, float("nan")):
             with self.subTest(value=repr(pct)):
                 rows = module.parse_grok_billing_payload(billing(pct), NOW)
@@ -75,7 +85,7 @@ class QuotaBillingTests(unittest.TestCase):
         self.assertEqual(exhausted.remaining_pct, 0.0)
 
     def test_bad_period_missing_config_and_future_timestamp_refuse(self):
-        module = load("candidate")
+        module = load("overlay")
         variants = [
             {}, {"config": {}}, billing(1, ptype="USAGE_PERIOD_TYPE_MONTHLY"),
             billing(1, start="2026-10-25T00:00:00Z"),
@@ -90,7 +100,7 @@ class QuotaBillingTests(unittest.TestCase):
                 self.assertEqual(module.parse_grok_billing_payload(value, NOW), [])
 
     def test_grok_reader_never_reads_or_writes_cached_positive(self):
-        module = load("candidate")
+        module = load("overlay")
         valid = module.parse_grok_billing_payload(billing(40), NOW)
         with patch.dict(module.READERS, {"grok": lambda: valid}):
             self.assertEqual(module.read_provider("grok", cache_path="/does-not-exist")[0].remaining_pct, 60.0)
@@ -103,7 +113,7 @@ class QuotaBillingTests(unittest.TestCase):
         self.assertEqual(result[0].source, "UNKNOWN")
 
     def test_unusable_billing_reader_returns_explicit_unknown(self):
-        module = load("candidate")
+        module = load("overlay")
         with patch.dict(module.READERS, {"grok": lambda: []}):
             rows = module.read_provider("grok")
         self.assertEqual(len(rows), 1)
@@ -112,7 +122,7 @@ class QuotaBillingTests(unittest.TestCase):
         self.assertIsNone(rows[0].remaining_pct)
 
     def test_acp_performs_only_initialize_and_billing_no_model_prompt(self):
-        module = load("candidate")
+        module = load("overlay")
         read_fd, write_fd = os.pipe()
         sent = []
         class Writer:

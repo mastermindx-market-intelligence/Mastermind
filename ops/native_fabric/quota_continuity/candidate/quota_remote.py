@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import math
-import selectors
-import shutil
-import signal
-import subprocess
 import json
 import os
 import sys
@@ -327,154 +322,9 @@ def _live_minimax() -> List[ProviderQuotaState]:
     return states
 
 
-def parse_grok_billing_payload(
-    payload: Dict[str, Any], observed_at: Any,
-) -> List[ProviderQuotaState]:
-    """First-party ACP weekly evidence; absent usage percent is UNKNOWN."""
-    if not isinstance(payload, dict):
-        return []
-    config = payload.get("config")
-    if not isinstance(config, dict):
-        return []
-    period = config.get("currentPeriod")
-    if not isinstance(period, dict) or period.get("type") != "USAGE_PERIOD_TYPE_WEEKLY":
-        return []
-    # Never reinterpret a provider timestamp lacking a timezone in the
-    # local host timezone. That would move the reset and model a false window.
-    raw_start, raw_end = period.get("start"), period.get("end")
-    if type(raw_start) is not str or type(raw_end) is not str:
-        return []
-    try:
-        if (datetime.fromisoformat(raw_start.replace("Z", "+00:00")).utcoffset() is None
-                or datetime.fromisoformat(raw_end.replace("Z", "+00:00")).utcoffset() is None):
-            return []
-    except ValueError:
-        return []
-    start = _iso(raw_start)
-    end = _iso(raw_end)
-    observed = _iso(observed_at)
-    if not all((start, end, observed)):
-        return []
-    try:
-        def seconds(v: str) -> float:
-            return datetime.fromisoformat(v.replace("Z", "+00:00")).timestamp()
-        start_s, end_s, obs_s = map(seconds, (start, end, observed))
-    except (ValueError, OverflowError):
-        return []
-    if not (4 * 86400 <= end_s - start_s <= 12 * 86400
-            and start_s <= obs_s < end_s):
-        return []
-    pct = config.get("creditUsagePercent")
-    if type(pct) in (int, float) and math.isfinite(pct) and 0 <= pct <= 100:
-        used, remaining, cap = float(pct), 100.0 - float(pct), 100.0
-    else:
-        used = remaining = cap = None
-    return [_state(
-        "grok", "weekly", used, cap, remaining, end,
-        "GROK_BUILD_ACP_BILLING" if remaining is not None
-        else "GROK_BUILD_ACP_WINDOW_ONLY",
-        observed, 0.95 if remaining is not None else 0.0,
-        "authenticated billing; unified="
-        + str(config.get("isUnifiedBillingUser") is True)
-        + "; period_start=" + start
-        + ("; quota UNKNOWN" if remaining is None else ""),
-    )]
-
-
-def _live_grok() -> List[ProviderQuotaState]:
-    """Read _x.ai/billing without session/new, prompt or paid model turn."""
-    path = shutil.which("grok")
-    if not path:
-        raise RuntimeError("grok_acp_missing")
-    proc = None
-    poller = None
-    try:
-        proc = subprocess.Popen(
-            [path, "agent", "stdio"],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            bufsize=0, start_new_session=True,
-        )
-        if proc.stdin is None or proc.stdout is None:
-            raise RuntimeError("grok_acp_missing_stream")
-        poller = selectors.DefaultSelector()
-        poller.register(proc.stdout, selectors.EVENT_READ)
-        pending = b""
-
-        def rpc(method: str, rid: int, timeout: float, params: dict) -> dict:
-            nonlocal pending
-            proc.stdin.write((json.dumps({
-                "jsonrpc": "2.0", "id": rid, "method": method,
-                "params": params,
-            }, separators=(",", ":")) + "\n").encode())
-            proc.stdin.flush()
-            deadline = time.monotonic() + timeout
-            while time.monotonic() < deadline:
-                if proc.poll() is not None:
-                    raise RuntimeError("grok_acp_exited")
-                for _key, _events in poller.select(
-                        min(.5, max(0., deadline - time.monotonic()))):
-                    data = os.read(proc.stdout.fileno(), 65536)
-                    if not data:
-                        raise RuntimeError("grok_acp_closed")
-                    pending += data
-                    if len(pending) > 1024 * 1024:
-                        raise RuntimeError("grok_acp_oversize")
-                    while b"\n" in pending:
-                        line, pending = pending.split(b"\n", 1)
-                        try:
-                            result = json.loads(line)
-                        except (ValueError, UnicodeDecodeError):
-                            continue
-                        if not isinstance(result, dict) or result.get("id") != rid:
-                            continue
-                        if "error" in result or not isinstance(result.get("result"), dict):
-                            raise RuntimeError("grok_acp_refused")
-                        return result["result"]
-            raise RuntimeError("grok_acp_timeout")
-
-        rpc("initialize", 1, 12., {
-            "protocolVersion": 1,
-            "clientCapabilities": {
-                "fs": {"readTextFile": False, "writeTextFile": False},
-                "terminal": False,
-            },
-        })
-        # Verified on installed M2 Grok CLI 2026-10-22: x.ai/billing
-        # returned method-not-found (-32601), _x.ai/billing succeeded.
-        return parse_grok_billing_payload(
-            rpc("_x.ai/billing", 2, 20., {}), _utc_now(),
-        )
-    finally:
-        if poller is not None:
-            poller.close()
-        if proc is not None:
-            if proc.poll() is None:
-                try:
-                    os.killpg(proc.pid, signal.SIGTERM)
-                except ProcessLookupError:
-                    pass
-                try:
-                    proc.wait(timeout=3)
-                except subprocess.TimeoutExpired:
-                    try:
-                        os.killpg(proc.pid, signal.SIGKILL)
-                    except ProcessLookupError:
-                        pass
-                    # SIGKILL is only process termination; reap its child to
-                    # avoid a zombie while this long-lived broker host runs.
-                    proc.wait(timeout=3)
-            for stream in (proc.stdin, proc.stdout):
-                if stream is not None:
-                    try:
-                        stream.close()
-                    except OSError:
-                        pass
-
-
 READERS: Dict[str, Callable[[], List[ProviderQuotaState]]] = {
     "glm": _live_glm_no_args,
     "minimax": _live_minimax,
-    "grok": _live_grok,
 }
 
 
@@ -589,22 +439,8 @@ def read_provider(provider: str, force: bool = False,
                   now_ts: Optional[float] = None,
                   cache_path: Optional[str] = None) -> List[ProviderQuotaState]:
     provider = provider.lower()
-    if provider not in {"glm", "minimax", "bailian", "grok"}:
+    if provider not in {"glm", "minimax", "bailian"}:
         raise ValueError("unknown provider")
-    if provider == "grok":
-        # Unlike other pools, an older cached positive balance can never
-        # release a later 402. This read is manual and never mutates marker.
-        try:
-            states = READERS["grok"]()
-            if (len(states) != 1 or states[0].provider != "grok"
-                    or states[0].window != "weekly"):
-                raise ValueError("grok_billing_window_unusable")
-            return states
-        except Exception:
-            return [_state(
-                "grok", "weekly", None, None, None, None, "UNKNOWN",
-                _utc_now(), 0.0, "billing unavailable; marker unchanged",
-            )]
     path = cache_path or CACHE_PATH
     now = _utc_now().timestamp() if now_ts is None else float(now_ts)
     if provider == "glm":
@@ -1109,7 +945,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="command", required=True)
     show = sub.add_parser("show")
-    show.add_argument("--provider", choices=("glm", "minimax", "bailian", "grok"))
+    show.add_argument("--provider", choices=("glm", "minimax", "bailian"))
     show.add_argument("--force", action="store_true")
     show.add_argument("--json", action="store_true")
     args = parser.parse_args(argv)
