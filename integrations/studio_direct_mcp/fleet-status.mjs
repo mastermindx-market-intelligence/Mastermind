@@ -11,6 +11,8 @@ const RESULT_SCHEMA = 'mastermind.studio_fleet_status_tool.v2';
 const FABRIC_VIEW_SCHEMA = 'placement-view.private-candidate.v1';
 const MAX_OUTPUT_BYTES = 256 * 1024;
 const MAX_FABRIC_HOSTS = 32;
+const MAX_FABRIC_AGE_SECONDS = 315_360_000; // finite 10-year stale registry cap
+const MAX_FABRIC_CAPACITY = 100_000; // observed only; never execution authority
 const FABRIC_MODES = Object.freeze([
   'go-codex',
   'glm',
@@ -390,17 +392,25 @@ function projectFabricRow(row, mode) {
   exactKeys(
     row,
     ['host', 'eligible', 'seat', 'ssh_alias', 'score', 'age', 'gates'],
-    ['candidate_excluded', 'identity_shadowed', 'telemetry_source'],
+    ['candidate_excluded', 'identity_shadowed', 'telemetry_source', 'capacity_remaining'],
   );
   if (typeof row.host !== 'string' || !HOST_REF.test(row.host)) invalidOwner();
   expectBoolean(row.eligible);
   expectBoolean(row.seat);
   if (row.ssh_alias !== null && typeof row.ssh_alias !== 'string') invalidOwner();
   if (row.score !== null) expectFiniteNumber(row.score, -1000, 1000);
-  const age = row.age === null ? null : expectBoundedInteger(row.age, 0, 86_400);
+  // The native placement owner retains retired/stale hosts for the historical
+  // fleet inventory. A stale observation is a visibility row, not readiness.
+  const age = row.age === null ? null :
+    expectBoundedInteger(row.age, 0, MAX_FABRIC_AGE_SECONDS);
+  if (row.capacity_remaining !== undefined && row.capacity_remaining !== null) {
+    expectBoundedInteger(row.capacity_remaining, 0, MAX_FABRIC_CAPACITY);
+  }
   if (row.candidate_excluded !== undefined) expectBoolean(row.candidate_excluded);
   if (row.identity_shadowed !== undefined) expectBoolean(row.identity_shadowed);
   const gates = gateMap(row);
+  if (age !== null && age > 86_400
+      && (gates.get('fresh')?.result !== 'FAIL' || row.eligible)) invalidOwner();
   const roles = normalizeRoles(gates.get('roles')?.detail ?? '');
   const [load1] = parseGatePair(gates.get('load')?.detail, '<');
   const [activeLanes, laneCeiling] = parseGatePair(gates.get('lane-ceiling')?.detail, '<');
