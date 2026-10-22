@@ -276,10 +276,10 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 86194,
+      "bytes": 87084,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "source": "source/lane_runtime.py"
+      "sha256": "f70deb4161362c39ec37a1b8f6d68b63b75706318c417d1518f5163989529115",
+      "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
       "bytes": 69174,
@@ -498,9 +498,9 @@
       "source": "candidate/run_observation_delivery.py"
     },
     "ext/slot.py": {
-      "bytes": 54398,
+      "bytes": 56208,
       "installed_preimage_sha256": "02f779f4c11e7023448cdb22201f66c3041a9675ea403333deee94e3d57fbe4f",
-      "sha256": "84a56ad2086d0fe131aba3a2af981a8bf8839ce834ef3ee1f02ca68dbe182435",
+      "sha256": "4edfed01136259dd45bd5a8d049961161af0953e9f97e30fcddab1ba1164c34f",
       "source": "candidate/slot.py"
     },
     "ext/studio_mcp_projection.sh": {
