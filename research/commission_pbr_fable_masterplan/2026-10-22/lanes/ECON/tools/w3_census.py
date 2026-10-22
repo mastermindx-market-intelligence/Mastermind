@@ -751,7 +751,7 @@ def t5(capture: Path) -> tuple[list[dict], list[str]]:
             "code_ref": CODE_REF[name],
             "evidence": "; ".join(ev_note),
         })
-        notes.append(f"{name} [{book}] snapshot@{sd}: {json.dumps(snap_account, default=str)[:400]}")
+        notes.append(f"{name} [{book}] snapshot@{sd}: {json.dumps(snap_account, default=str)[:300]}")
     return rows_out, notes
 
 
