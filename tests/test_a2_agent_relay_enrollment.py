@@ -1010,6 +1010,10 @@ def test_enroll_rollback_refuses_replaced_plist_and_cleans_bound_files(
         path.unlink()
         path.write_bytes(payload)
         path.chmod(mode)
+        # macOS temporary directories may be group-owned by wheel.
+        # Restore the expected group so the changed inode, not a stray gid,
+        # is what the rollback safety guard must refuse.
+        os.chown(path, -1, gid)
         replacement = path.stat()
         assert replacement.st_uid == uid
         assert replacement.st_gid == gid
@@ -1175,6 +1179,11 @@ def test_verify_is_read_only_and_requalifies_release_identity(monkeypatch, tmp_p
     config_path.chmod(0o400)
     plist_path.write_bytes(enrollment.render_plist(bot_user_id=BOT, release_sha=release_sha))
     plist_path.chmod(0o644)
+    # The verify-only input must meet the installed exact uid/gid/mode
+    # contract. Files created below /private/tmp can inherit wheel gid.
+    os.chown(token_path, -1, enrollment.RELAY_GID)
+    os.chown(config_path, -1, enrollment.RELAY_GID)
+    os.chown(plist_path, -1, enrollment.PLIST_GID)
     before = {path: (path.stat().st_ino, path.read_bytes()) for path in paths}
 
     receipt = asyncio.run(enrollment._verify(bot_user_id=BOT))  # noqa: SLF001
