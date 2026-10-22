@@ -1169,6 +1169,13 @@ def _read_manifest(
         expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
         if _sha256_file(manifest_path) != expected_bytes_sha:
             raise SystemExit("corrupt manifest")
+    # If a seat carries the explicitly reviewed successor configHash, the
+    # manifest must be *exactly* that reviewed successor, even when its generic
+    # historical fileset would otherwise pass an older permissive validator.
+    pins = FABRIC_POOL_PIN_MIGRATION.get(account)
+    if (pins is not None and data.get("configHash") == pins[3]
+            and not _sealed_fabric_pool_pin_successor(data, account)):
+        raise SystemExit("corrupt manifest")
     if _sealed_fabric_pool_pin_successor(data, account):
         if _stable_regular_file_hash(manifest_path, label="manifest") != FABRIC_POOL_PIN_MIGRATION[account][2]:
             raise SystemExit("corrupt manifest")
@@ -2583,8 +2590,10 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
         except (UnicodeError, ValueError) as exc:
             raise SystemExit("Fabric pool pin: original config unreadable") from exc
         expected_pool = _user_root() / ".local" / "bin" / "pool"
+        if type(current) is not dict:
+            raise SystemExit("Fabric pool pin: original owner contract drift")
         status = current.get("fleetStatus")
-        if (type(current) is not dict or current.get("accountLabel") != account
+        if (current.get("accountLabel") != account
                 or type(status) is not dict
                 or status.get("enabled") is not True
                 or status.get("fabricLauncherPath") != str(expected_pool)
@@ -2614,8 +2623,9 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
                 or not _valid_manifest(successor_manifest, account, label)):
             raise SystemExit("Fabric pool pin: target differs from reviewed exact seal")
         # Both source and target agree on every field except the one pin.
-        assert set(successor_config) == set(current)
-        assert set(successor_manifest) == set(prior)
+        if (set(successor_config) != set(current)
+                or set(successor_manifest) != set(prior)):
+            raise SystemExit("Fabric pool pin: unrelated keys changed")
         receipt = {
             "schema": "mastermind.studio_fabric_pool_pin_migration.v1",
             "account": account,
@@ -2647,11 +2657,15 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
             _atomic_write_bytes(config_path, config_bytes)
             if (_stable_regular_file_hash(manifest_path, label="installed manifest") != pins[0]
                     or _stable_regular_file_hash(config_path, label="installed config") != pins[3]
+                    or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
+                        != FABRIC_POOL_SELECTED_SHA256
                     or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
                 raise RuntimeError("original changed before manifest commit")
             _atomic_write_bytes(manifest_path, manifest_bytes)
             if (_stable_regular_file_hash(manifest_path, label="installed manifest") != pins[2]
                     or _stable_regular_file_hash(config_path, label="installed config") != pins[3]
+                    or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
+                        != FABRIC_POOL_SELECTED_SHA256
                     or _verify_staged_install(account, label, roots, require_runtime_seal=True)
                         != successor_manifest
                     or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
