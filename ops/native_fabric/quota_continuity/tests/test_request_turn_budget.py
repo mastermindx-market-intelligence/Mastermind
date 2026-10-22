@@ -188,5 +188,42 @@ class ContinuationTurnBudget(unittest.TestCase):
         self.assertFalse(self.f.path('origin', '.successor.json').exists())
 
 
+class OwnedWrapperCeiling(unittest.TestCase):
+    def test_actual_executor_and_provider_wrappers_forward_tightened_cli_limit(self):
+        import test_owned_wrapper_outcome as owned
+        f = owned.OwnedWrapperOutcome(
+            methodName='test_real_success_receipts_bind_after_task_cli_execution')
+        f.setUp()
+        self.addCleanup(f.doCleanups)
+        f.reply = (200, {'type': 'message'}, {})
+        original_env = f.env
+        incumbent = None
+        def bounded_env():
+            env = original_env()
+            env.pop('POOL_MAX_TURNS', None)
+            env['POOL_REQUEST_MAX_TURNS'] = '25'
+            if incumbent is not None:
+                env['POOL_MAX_TURNS'] = str(incumbent)
+            return env
+        f.env = bounded_env
+        f.script(f.bin / 'claude', '#!' + sys.executable + '\n'
+            'import os,sys,json\nfrom pathlib import Path\n'
+            'a=sys.argv[1:]\n'
+            'assert a.count("--max-turns")==1\n'
+            'value=int(a[a.index("--max-turns")+1])\n'
+            'Path(os.environ["FIXTURE_CLI_STARTED"]).write_text(str(value))\n'
+            'print(json.dumps({"type":"result","subtype":"success",'
+            '"is_error":False,"result":"STATUS: COMPLETE\\n"}))\n')
+        for incumbent in (None, 8):
+            for provider in ('glm', 'minimax'):
+                with self.subTest(provider=provider, incumbent=incumbent):
+                    result, outcome, marker = f.execute(provider)
+                    self.assertEqual(result.returncode, 0, result.stderr.decode())
+                    self.assertEqual(marker.read_text(), '25' if incumbent is None else '8')
+                    self.assertEqual(outcome['kind'], 'success')
+                    self.assertFalse(outcome['initial_rejection'])
+                    self.assertNotIn(b'inert-fixture-key', result.stdout + result.stderr)
+
+
 if __name__ == '__main__':
     unittest.main()

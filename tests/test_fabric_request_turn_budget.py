@@ -8,14 +8,16 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def _run(argv, *, timeout=60):
+def _run(argv, *, timeout=60, extra_env=None):
     env = {k: v for k, v in os.environ.items()
            if not k.startswith(('POOL_', 'REMOTE_SUB_', 'FABRIC_'))}
     env['PYTHONDONTWRITEBYTECODE'] = '1'
+    env.update(extra_env or {})
     result = subprocess.run(argv, cwd=ROOT, env=env, text=True,
                             capture_output=True, timeout=timeout)
     assert result.returncode == 0, (result.stdout + result.stderr)[-12000:]
@@ -41,8 +43,14 @@ def test_web_ceiling_and_original_facade():
 def test_existing_commission_deadlines_remain_binding():
     # Preserve the original inner deadlines. Hosted qualification must exercise
     # this affected transport contract, not silently omit local timing failures.
-    output = _run([sys.executable, '-m', 'unittest', 'discover', '-s',
-        'ops/native_fabric/quota_continuity/tests', '-p', 'test_commission_deadline.py'],
-        timeout=240)
+    # The strict no-follow readers intentionally reject a symlinked /tmp on
+    # macOS and world-writable temporary ancestors on every platform. Keep the
+    # fixture beneath the private home, not the source tree or shared /tmp.
+    # Production checks stay intact.
+    with tempfile.TemporaryDirectory(prefix='.fabric-deadline-ci-', dir=Path.home()) as temporary:
+        output = _run([sys.executable, '-m', 'unittest', 'discover', '-s',
+            'ops/native_fabric/quota_continuity/tests', '-p', 'test_commission_deadline.py'],
+            timeout=240, extra_env={
+                'NATIVE_ROLLOUT_TEST_ROOT': str(Path(temporary).resolve(strict=True))})
     assert 'Ran ' in output and 'Ran 0 tests' not in output
     assert 'OK' in output

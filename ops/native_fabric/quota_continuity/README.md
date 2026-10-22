@@ -412,9 +412,41 @@ The existing 19-case commission-deadline suite returned two failures on M2, with
 retained evidence of an expired original deadline during routing-env processing.
 No timeout was relaxed and causation is not established. A subsequent isolated
 Ubuntu qualification transport was refused by the platform before dispatch; it
-was not replayed through another connector. The repository CI wrapper now includes
-the unchanged deadline suite so a protected release cannot silently omit it.
+was not replayed through another connector. The repository CI wrapper includes the existing deadline suite so a protected
+release cannot silently omit it; the follow-up fixture changes below preserve
+all original short-expiry assertions.
 Local regression artifacts remain at
 `/Volumes/Mastermind/evidence/fabric-request-turn-budget-20261022-c3/native-regression`.
 Full current-head hosted CI, native selection and live Web/native consumption
 remain unproven. This candidate is source-only until those release gates clear.
+
+### Follow-up: private fixtures and actual worker-wrapper ceiling
+
+The two positive transport-identity cases now allow finite 30-second startup
+headroom (40-second outer test timeout); they do not test host speed. Every short
+negative expiry case and the frozen original 31.5-second end-to-end assertion
+remain unchanged. The normal CI wrapper supplies the existing test-root seam
+with a canonical private directory beneath the test user's home. Shared `/tmp`
+was correctly rejected by the no-follow/ancestor-mode checks; no permissions or
+production guard was changed to admit it.
+
+All five targeted positive/tamper/expiry cases passed in that private directory.
+The complete CI-facing wrapper then returned two passed and one failed: within
+its 19-case deadline suite, the frozen original case measured 31.660543 seconds
+against 31.5. This remains a failed check, not a waived threshold or a proven
+cause. No further unchanged timing retry was made. Hosted exact-head qualification
+remains required and this source candidate remains DRAFT/HOLD.
+
+An additional real executor -> provider wrapper -> inert CLI regression now
+verifies both GLM and MiniMax receive max-turns25, and that an existing limit8
+remains8. It checks actual process/output binding and cleanup through existing
+owners, with only loopback provider and fake credential fixtures. The native
+ceiling suite now passes13 tests; the Web facade suite passes43. A disposable
+source-only composition of #1720's corrected private metadata projection with
+this ceiling implementation passed the nine metadata and twelve then-existing
+ceiling cases. These are compatibility tests, not deployment or live acceptance.
+
+The existing deadline assertion is not removed, weakened or marked expected to
+fail. Runtime source and the 85-file native manifest are unchanged by these
+fixture improvements. Evidence remains in this operation's native-regression
+directory; production selection and both owning release processes remain pending.
