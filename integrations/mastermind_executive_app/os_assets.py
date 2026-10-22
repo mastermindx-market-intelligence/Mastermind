@@ -16,6 +16,13 @@ _NOIR = (
     (r"assets/Manrope-Variable-[A-Za-z0-9_-]+\.ttf", "font/ttf"),
     (r"assets/Inter-Variable-[A-Za-z0-9_-]+\.woff2", "font/woff2"),
 )
+# The lazy Markdown renderer now has one Vite-emitted JS/CSS chunk pair.
+# Explicitly name both patterns: never open arbitrary chunk names or accept
+# one without its matching counterpart.
+_MARKDOWN = (
+    (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.js", "text/javascript; charset=utf-8"),
+    (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.css", "text/css; charset=utf-8"),
+)
 _LICENSES = (
     "licenses/fonts/Inter-OFL.txt",
     "licenses/fonts/Manrope-OFL.txt",
@@ -28,20 +35,24 @@ _THIRD_PARTY_NOTICES = (
 
 
 def os_asset_mimes(names) -> dict[str, str]:
-    """Exactly legacy three, Noir nine, or Noir eleven including both notices."""
+    """Exactly legacy 3, Noir 9/11, or Noir 13 with both Markdown chunks."""
     names = tuple(names)
     if (any(type(name) is not str for name in names)
-            or len(names) not in (3, 9, 11) or len(set(names)) != len(names)):
+            or len(names) not in (3, 9, 11, 13) or len(set(names)) != len(names)):
         raise ValueError("fixed OS asset set required")
     expected = {"index.html": "text/html; charset=utf-8"}
-    for pattern, mime in _BASE + (_NOIR if len(names) in (9, 11) else ()):
+    for pattern, mime in (
+        _BASE
+        + (_NOIR if len(names) in (9, 11, 13) else ())
+        + (_MARKDOWN if len(names) == 13 else ())
+    ):
         matches = [name for name in names if re.fullmatch(pattern, name)]
         if len(matches) != 1:
             raise ValueError("fixed OS asset set required")
         expected[matches[0]] = mime
-    if len(names) in (9, 11):
+    if len(names) in (9, 11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _LICENSES})
-    if len(names) == 11:
+    if len(names) in (11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _THIRD_PARTY_NOTICES})
     if set(names) != set(expected):
         raise ValueError("fixed OS asset set required")

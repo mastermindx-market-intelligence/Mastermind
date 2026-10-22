@@ -48,7 +48,7 @@ NOTICE_BYTES = {
 }
 
 
-def built_dist(app, *, noir_notices=False):
+def built_dist(app, *, noir_notices=False, markdown_chunks=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text('<script src="/os/assets/index-a.js"></script><link href="/os/assets/index-a.css">')
@@ -64,6 +64,11 @@ def built_dist(app, *, noir_notices=False):
             "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
             **NOTICE_BYTES,
         }
+        if markdown_chunks:
+            extra.update({
+                "assets/SourceMarkdown-a.js": b"export const render = () => null;",
+                "assets/SourceMarkdown-b.css": b".source-markdown{}",
+            })
         for name, data in extra.items():
             path = dist / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -80,7 +85,8 @@ def bundle(tmp_path, source, monkeypatch, request):
     monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(mod, "_require_root", lambda: None)
     monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(
-        app, noir_notices=getattr(request, "param", False)))
+        app, noir_notices=bool(getattr(request, "param", False)),
+        markdown_chunks=getattr(request, "param", False) == "markdown"))
     repo, sha, tree = source
     out = tmp_path / "bundle"
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
@@ -201,6 +207,28 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     with pytest.raises(ValueError):
         mod.import_assets(checked, stage)
     assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("bundle", ["markdown"], indirect=True)
+def test_lazy_markdown_bundle_survives_capture_sealing_import_and_same_source_verification(bundle, tmp_path):
+    mod, out, sha, tree = bundle
+    manifest = json.loads((out / mod.DIST / "asset-manifest.json").read_bytes())
+    files = {entry["path"]: entry for entry in manifest["files"]}
+    assert len(files) == 13
+    expected = {
+        "assets/SourceMarkdown-a.js": ("text/javascript; charset=utf-8", b"export const render = () => null;"),
+        "assets/SourceMarkdown-b.css": ("text/css; charset=utf-8", b".source-markdown{}"),
+    }
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    stage = tmp_path / "markdown-stage"
+    stage.mkdir()
+    mod.import_assets(checked, stage)
+    for name, (mime, data) in expected.items():
+        assert files[name] == {
+            "path": name, "byte_count": len(data), "sha256": hashlib.sha256(data).hexdigest(), "mime": mime,
+        }
+        assert (stage / mod.DIST / name).read_bytes() == data
+    mod.compare_existing(checked, stage)
 
 
 @pytest.mark.parametrize("bundle", [True], indirect=True)

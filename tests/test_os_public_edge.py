@@ -8,7 +8,7 @@ from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os.os_public_edge import asset_routes, render, stage
 
 
-def manifest(noir=False, notices=False):
+def manifest(noir=False, notices=False, markdown=False):
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     if noir:
         names += ["assets/atelier-office-a.jpg", "assets/Manrope-Variable-a.ttf",
@@ -17,6 +17,8 @@ def manifest(noir=False, notices=False):
     if notices:
         names += ["third-party/deepseek-client-dependency-NOTICES.txt",
                   "third-party/deepseek-harness-LICENSE.txt"]
+    if markdown:
+        names += ["assets/SourceMarkdown-a.js", "assets/SourceMarkdown-b.css"]
     return {"schema": "mastermind.os_assets.v1", "files": [
         {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
         for name, mime in os_asset_mimes(names).items()
@@ -60,6 +62,54 @@ def test_notice_layout_remains_closed(damage):
         value["files"][-1]["path"] = "third-party/../deepseek-harness-LICENSE.txt"
     else:
         value["files"][-1]["mime"] = "text/javascript; charset=utf-8"
+    with pytest.raises(ValueError):
+        render(value, 49152)
+
+
+def test_lazy_markdown_pair_has_exact_mimes_and_caddy_routes():
+    value = manifest(True, True, True)
+    routes = asset_routes(value)
+    assert len(value["files"]) == len(routes) == 13
+    expected = {
+        "assets/SourceMarkdown-a.js": "text/javascript; charset=utf-8",
+        "assets/SourceMarkdown-b.css": "text/css; charset=utf-8",
+    }
+    for path, mime in expected.items():
+        assert "/os/" + path in routes
+        assert next(f for f in value["files"] if f["path"] == path)["mime"] == mime
+    text = render(value, 49152)
+    assert all("/os/" + path in text for path in expected)
+
+
+@pytest.mark.parametrize("damage", [
+    "missing_js", "missing_css", "renamed", "extra", "wrong_mime",
+    "path_traversal", "duplicate", "no_notices",
+])
+def test_lazy_markdown_pair_is_closed_and_all_adversarial_variants_refuse(damage):
+    if damage == "no_notices":
+        with pytest.raises(ValueError, match="fixed OS asset set"):
+            manifest(True, False, True)
+        return
+    value = manifest(True, True, True)
+    files = value["files"]
+    markdown_css = next(f for f in files if f["path"].startswith("assets/SourceMarkdown-") and f["path"].endswith(".css"))
+    markdown_js = next(f for f in files if f["path"].startswith("assets/SourceMarkdown-") and f["path"].endswith(".js"))
+    if damage == "missing_js":
+        files[:] = [f for f in files if "SourceMarkdown" not in f["path"] or not f["path"].endswith(".js")]
+    elif damage == "missing_css":
+        files[:] = [f for f in files if "SourceMarkdown" not in f["path"] or not f["path"].endswith(".css")]
+    elif damage == "renamed":
+        markdown_css["path"] = "assets/ArbitraryRenderer-a.css"
+    elif damage == "extra":
+        extra = copy.deepcopy(files[-1])
+        extra["path"] = "assets/injected-x.js"
+        files.append(extra)
+    elif damage == "wrong_mime":
+        markdown_css["mime"] = "text/plain; charset=utf-8"
+    elif damage == "path_traversal":
+        markdown_css["path"] = "assets/../SourceMarkdown-a.css"
+    else:
+        markdown_css.update(copy.deepcopy(markdown_js))
     with pytest.raises(ValueError):
         render(value, 49152)
 
