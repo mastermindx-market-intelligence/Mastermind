@@ -1759,7 +1759,7 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "fabric-pool-pin-migrate", "seal-runtime", "start", "status", "stop"},
         )
 
     def test_stage_requires_all_args(self):
@@ -4398,3 +4398,43 @@ class TestFabricPoolPinMigration(unittest.TestCase):
             dict(self.successor_manifest, files={"other.mjs": "f" * 64}),
             self.account,
         ))
+
+    def test_successor_manifest_tamper_refused_even_on_generic_fleet_fileset(self):
+        # This test intentionally uses the generic chatgpt1 roster, which used
+        # to pass the structural _valid_manifest check on an altered configHash.
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        good = dict(self.successor_manifest)
+        for mutation in (
+            dict(good, port=65500),
+            dict(good, configHash=self.pins[3], files={"malicious.mjs": "f" * 64}),
+        ):
+            self.roots["manifest"].write_bytes(
+                json.dumps(mutation, indent=2, sort_keys=True).encode()
+            )
+            with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+                svc._read_manifest(
+                    self.roots["manifest"], self.account, self.label, required=True,
+                )
+        # Canonically identical text reformatting also fails raw byte pin.
+        self.roots["manifest"].write_bytes(
+            json.dumps(good, sort_keys=True, separators=(",", ":")).encode()
+        )
+        with self.assertRaisesRegex(SystemExit, "corrupt manifest"):
+            svc._read_manifest(
+                self.roots["manifest"], self.account, self.label, required=True,
+            )
+
+    def test_selected_pool_drift_mid_commit_rolls_back_precommit(self):
+        original_write = svc._atomic_write_bytes
+        def mutate_launcher_after_config(path, value, *args, **kwargs):
+            result = original_write(path, value, *args, **kwargs)
+            if Path(path) == self.roots["config"] and value == self.successor_config_bytes:
+                self.pool.write_bytes(b"unreviewed bridge changed during migration")
+            return result
+        with mock.patch.object(
+            svc, "_atomic_write_bytes", side_effect=mutate_launcher_after_config,
+        ):
+            with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
+                svc.cmd_fabric_pool_pin_migrate(self.args())
+        self.assert_original()
