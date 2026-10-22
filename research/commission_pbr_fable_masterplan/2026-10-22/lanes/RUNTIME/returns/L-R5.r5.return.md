@@ -1,0 +1,8 @@
+The plan is complete — one file written, no source edits, all VPS-facing content kept read-only/specification-only, and every mitigation marked as a PROPOSAL for the seat.
+
+RETURN L-R5
+file: research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/INSTALL_PROOF_PLAN.md (196 lines)
+identity tuple: T1 deployable-tree blobs vs accepted commit under the deploy script's exact EXC filter (0 unexplained absences) + T2 `.venv` dependency lock (`claude-agent-sdk`/`anthropic` exact; `*.lock` is deploy-excluded) + T3 unit FragmentPath/DropInPaths names with sha256s (env file names only, never contents) + T4 loaded process start > newest installed-file mtime ∧ `/health.commit`/`reasoning_policy_ok`/`scheduled_runtime_ok` — `.deployed_git_sha` is corroboration, never proof.
+windows: W1 Mon–Fri 04:10–05:40 UTC (primary; between macro_refresh 03:30 and watch_us 06:20, clear of apt activity and the 08:30Z restart timer); W2 Sat–Sun 04:10–05:40 UTC (no manager jobs; first natural cycle = Monday) — weekday fallback 10:05–10:50 UTC only after hk_daily `run_finished` is observed.
+seat decision: Approve Option A — install current `origin/master` d31aade9 (= ff16c192 + #1614 on the manager path) in the next W1 window and run the §4/§5 proof, keeping the CR-RT-3 SDK pin as a separate later T2 change; holding at ff16c192 (Option B) couples the runtime lane to W4's schedule and leaves the accountable-cycle proof on a composition lacking the settle/price-fx evidence path.
+open questions: 4 listed (receipt-v2 gate behavior across #1614 with pending WAL/receipt; needrestart suppression mechanism + apt time-bounding on-host; durable-jobstore safety vs the 2026-07-06 readonly-sqlite incident; auditd installability within the no-unscheduled-modification rule).
