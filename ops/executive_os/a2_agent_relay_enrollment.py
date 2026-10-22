@@ -817,6 +817,26 @@ def _read_bound_exact(
             os.close(descriptor)
 
 
+def _socket_parent_prepared() -> bool:
+    """Only the enrolled service-owned shared socket directory is admissible.
+
+    Host preparation creates this privileged /var/run prerequisite. The A2
+    non-root process cannot create it after enrollment or an OS boot cleanup.
+    Neither this read nor a failed enrollment may try to repair its ownership.
+    """
+    try:
+        info = SOCKET_PATH.parent.lstat()
+    except (OSError, ValueError):
+        return False
+    return (
+        stat.S_ISDIR(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and info.st_uid == RELAY_UID
+        and info.st_gid == RELAY_GID
+        and stat.S_IMODE(info.st_mode) == 0o710
+    )
+
+
 def _assert_host_prepared() -> str:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
@@ -844,6 +864,7 @@ def _assert_host_prepared() -> str:
         or EXEC_GID in relay_gids
         or RELAY_GID not in exec_gids
         or credential_chain is None
+        or not _socket_parent_prepared()
         or not all(
             _principal_can_traverse(path, uid=RELAY_UID, gids=relay_gids)
             for path in credential_chain

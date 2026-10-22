@@ -12,6 +12,36 @@ ROOT = Path(__file__).resolve().parents[1]
 PREP = ROOT / "ops" / "executive_os" / "prepare-a2-agent-relay-host.sh"
 
 
+def test_enrollment_gate_requires_exact_prepared_socket_parent(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    from ops.executive_os import a2_agent_relay_enrollment as enrollment
+    import os
+
+    socket = tmp_path / "runtime" / "agent-relay.sock"
+    monkeypatch.setattr(enrollment, "SOCKET_PATH", socket)
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid())
+    monkeypatch.setattr(enrollment, "RELAY_GID", os.getgid())
+    assert not enrollment._socket_parent_prepared()
+
+    socket.parent.mkdir()
+    socket.parent.chmod(0o710)
+    # macOS may inherit the parent group rather than the invoking process gid.
+    monkeypatch.setattr(enrollment, "RELAY_GID", socket.parent.stat().st_gid)
+    assert enrollment._socket_parent_prepared()
+    socket.parent.chmod(0o770)
+    assert not enrollment._socket_parent_prepared()
+    socket.parent.chmod(0o710)
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid() + 1)
+    assert not enrollment._socket_parent_prepared()
+    monkeypatch.setattr(enrollment, "RELAY_UID", os.getuid())
+    socket.parent.rmdir()
+    target = tmp_path / "elsewhere"
+    target.mkdir(mode=0o710)
+    socket.parent.symlink_to(target, target_is_directory=True)
+    assert not enrollment._socket_parent_prepared()
+
+
 def test_refuses_non_macos_before_any_host_preparation(tmp_path: Path):
     """Removing the production platform guard must fail before argument parsing."""
 
