@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_harness_bindings/v1",
-  "verified_at": "2026-09-15T01:19:02Z",
+  "verified_at": "2026-10-22T17:49:40Z",
   "bindings": {
     "glm-coding-plan.claude-code-anthropic": {
       "profile_id": "glm-coding-plan",

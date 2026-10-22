@@ -468,3 +468,37 @@ def test_byteplus_independent_endpoint_anchor_refuses_profile_mismatch():
     )
     with pytest.raises(HarnessBindingError):
         validate_bindings(broken, profiles_document=profiles)
+
+def test_byteplus_bindings_review_timestamp_is_valid_and_not_stale():
+    profiles = load_profiles()
+    bindings = load_bindings(profiles_document=profiles)
+    assert bindings["verified_at"] >= profiles["verified_at"]
+    for invalid in (
+        None, "", "2026-02-31T04:00:00Z",
+        "2026-09-15T01:19:02Z", "2026-10-22",
+        "2026-10-22T12:00:00+00:00",
+    ):
+        mutated = copy.deepcopy(bindings)
+        mutated["verified_at"] = invalid
+        with pytest.raises(HarnessBindingError, match="verified_at|older than"):
+            validate_bindings(mutated, profiles_document=profiles)
+
+
+def test_byteplus_harness_rejects_unsafe_model_protocol_and_provider_changes():
+    profiles = load_profiles()
+    bindings = load_bindings(profiles_document=profiles)
+    key = "byteplus-coding-plan-personal.claude-code-anthropic"
+    for nested, field, value in (
+        ("", "provider", "glm"),
+        ("", "harness_id", "custom-http"),
+        ("", "adapter_id", "openai-compatible"),
+        ("", "protocol", "openai-chat"),
+        ("endpoint", "source", "profile"),
+        ("endpoint", "base_url", "https://ark.ap-southeast.bytepluses.com/api/v3"),
+    ):
+        changed = copy.deepcopy(bindings)
+        row = changed["bindings"][key]
+        target = row[nested] if nested else row
+        target[field] = value
+        with pytest.raises(HarnessBindingError):
+            validate_bindings(changed, profiles_document=profiles)

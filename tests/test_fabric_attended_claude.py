@@ -21,8 +21,9 @@ from control_plane.fabric_attended_claude import (
     attended_profile_digest,
     prepare_attended_claude_launch,
 )
-from control_plane.subscription_harness_bindings import SubscriptionHarnessBinding
-from control_plane.subscription_provider_profiles import SubscriptionProviderProfile
+from control_plane.subscription_harness_bindings import SubscriptionHarnessBinding, get_binding
+from control_plane.subscription_provider_profiles import SubscriptionProviderProfile, get_profile
+from control_plane.claude_subscription_worker import _usage_policy_satisfied
 from control_plane.worker_execution_contract import BinaryAttestation, WorkerLaunchSpec
 
 PROMPT = "FABRIC-ATTENDED-PROMPT-MARKER-7f3a: audit the login flow only."
@@ -501,6 +502,43 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
             dataclasses.replace(descriptor, start_authorized=True)
         with self.assertRaises((AttendedClaudePreparationError, ValueError)):
             dataclasses.replace(descriptor, preparation_only=False)
+
+    def test_byteplus_real_catalog_prepares_attended_only_without_credential(self) -> None:
+        """Prove the actual BytePlus binding enters the existing Claude compiler.
+
+        This is *preparation*, not authentication, provider execution, quota
+        proof or an autonomous Fabric start.
+        """
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        spec = _spec(model=profile.model_for("routine"))
+        prepared = _prepare(profile=profile, binding=binding, spec=spec, model_class="routine")
+        self.assertEqual(prepared.endpoint, "https://ark.ap-southeast.bytepluses.com/api/coding")
+        self.assertEqual(prepared.model, "glm-5.3-flash")
+        self.assertEqual(prepared.implementation_state, "SPEC_ONLY")
+        self.assertTrue(prepared.preparation_only)
+        self.assertFalse(prepared.start_authorized)
+        self.assertFalse(prepared.binding_autonomous_allowed)
+        self.assertEqual(prepared.profile_usage_policy["interactive_only"], True)
+        self.assertEqual(prepared.profile_usage_policy["single_user_only"], True)
+        self.assertFalse(prepared.profile_usage_policy["unattended_background_allowed"])
+        self.assertFalse(prepared.profile_usage_policy["production_backend_allowed"])
+        self.assertTrue(_usage_policy_satisfied(profile, "interactive_canary"))
+        self.assertFalse(_usage_policy_satisfied(profile, "executive_worker"))
+        self.assertFalse(_usage_policy_satisfied(profile, "automated_fabric"))
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.environment)
+        self.assertNotIn("ANTHROPIC_API_KEY", prepared.environment)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.to_dict())
+
+    def test_byteplus_real_catalog_cannot_prepare_unreviewed_model(self) -> None:
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        with self.assertRaises(AttendedClaudePreparationError):
+            _prepare(
+                profile=profile, binding=binding,
+                spec=_spec(model="glm-5.3"),
+                model_class="routine",
+            )
 
     def test_profile_digest_is_stable_and_sensitive(self) -> None:
         first = attended_profile_digest(_profile())

@@ -1,8 +1,9 @@
 # BytePlus Personal Coding Plan — Fabric enrollment and qualification
 
 **Status:** source-only DRAFT/HOLD; **not a funded/runnable Fabric pool**. The
-Chairman's first personal Pro subscription is purchased. Credential transfer
-and private account state are owned outside this public repository.
+Chairman reports purchasing the first $50 personal Pro subscription. That
+purchase/tier claim is user-reported, **not** provider-console attested. Credential
+transfer and private account state remain outside this public repository.
 Provider login validity, active subscription entitlement, quota balance,
 concurrent worker limit, and model invocation were **not** observed.
 Do not record private enrollment state, a key or personal account identifier
@@ -33,15 +34,17 @@ Exact supported OpenAI-compatible coding endpoint:
 Provider docs: https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-plan-overview
 and https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-ai-claude-code
 
-## Published quotas (estimates, not actual account observations)
+## Published Pro-tier quota estimates (actual subscribed tier not attested)
 
-| Window | Personal Pro advertised up to | Reset basis |
+| Window | Advertised personal Pro capacity, not account measurement | Reset basis |
 | --- | ---: | --- |
 | Five hours | ~9,500 model requests | Sliding window since consumption |
 | Week | ~60,000 model requests | Vendor Monday reset (confirm timezone in account console) |
 | Subscription month | ~120,000 model requests | Subscription-month anniversary |
 
-The actual usable quota and throughput depend on model coefficients, context,
+These advertised amounts must **not** initialize Capacity quota, counters,
+concurrency, eligibility or autonomous admission. The actual usable quota
+and throughput depend on model coefficients, context,
 workload, account, region and provider throttling. No fixed number of
 concurrent workers is proven. A prompt may trigger many model invocations.
 Keep concurrency UNKNOWN until an authorized supported-tool canary and
@@ -53,12 +56,13 @@ bounded 1/2/4/8-worker experiment with real quota and 429 observations.
 - `glm-5.3-flash`, `glm-5.2`
 - `deepseek-v4.1-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`
 
+- `ark-code-latest` (console-selected model or automatic routing)
+
 **Deprecated September 23, 2026:** `bytedance-seed-code`, `glm-5.1`,
 `kimi-k2.5`, and `gpt-oss-120b` must not be durable routing defaults.
 Some broad vendor setup pages still display them. Prefer the more specific
 vendor deprecation notice:
 https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-model-deprecation
-- `ark-code-latest` (console-selected model or automatic routing)
 
 Use the regional console's allowed models as the actual final authority.
 `glm-5.3` full is **not** in the currently published BytePlus catalog;
