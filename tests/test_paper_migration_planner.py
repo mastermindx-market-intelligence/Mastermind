@@ -122,14 +122,7 @@ class PaperMigrationPlanTests(unittest.TestCase):
             self.assertEqual(existing.read_text(encoding="utf-8"), "preserve")
 
     def _six_terminal_page_delta(self):
-        missing = ["p-21-0", "p-1V-0", "p-1O-0", "p-1G-0", "p-1D-0", "p-1C-0"]
-        return {"schema": "mastermind.paper-source-visibility-drift.v1",
-                "classification": "READ_ONLY_DELTA_NOT_PROOF_OF_MOVE_DELETE_OR_LOSSLESS_COPY",
-                "source_file_id": planner.SOURCE_FILE_ID,
-                "baseline_page_count": 63,
-                "current_visible_page_count": 57,
-                "added_visible_page_ids": [],
-                "unobserved_baseline_pages": [{"source_page_id": x} for x in missing]}
+        return json.loads((ROOT / "docs/paper_migrations/MASTERMIND_PAGES_DRIFT_2026-10-22.json").read_text(encoding="utf-8"))
 
     def test_visibility_delta_holds_six_absent_terminal_pages(self):
         missing = self._six_terminal_page_delta()
@@ -142,6 +135,21 @@ class PaperMigrationPlanTests(unittest.TestCase):
         self.assertEqual(ids, {p["source_page_id"] for p in missing["unobserved_baseline_pages"]})
         self.assertFalse(ids.intersection({p["source_page_id"] for p in plan["whole_page_assignments"]}))
         self.assertFalse(plan["source_deletion_authorized"])
+
+    def test_visibility_delta_requires_complete_exact_observation(self):
+        for mutate in (
+            lambda d: d.pop("observed_visible_page_ids"),
+            lambda d: d["observed_visible_page_ids"].pop(),
+            lambda d: d["observed_visible_page_ids"].append(d["observed_visible_page_ids"][0]),
+            lambda d: d.update(visible_page_list_truncated=True),
+            lambda d: d["unobserved_baseline_pages"][0].update(source_url="fake"),
+            lambda d: d["unobserved_baseline_pages"][0].update(baseline_nodes=9),
+            lambda d: d.update(baseline_nodes_associated_with_unobserved_pages=0),
+        ):
+            delta = self._six_terminal_page_delta()
+            mutate(delta)
+            with self.assertRaises(planner.InventoryError):
+                planner.make_plan(self.original, visibility_delta=delta)
 
     def test_tampered_visibility_delta_fail_closed(self):
         for change in ({"current_visible_page_count": 58}, {"added_visible_page_ids": ["p-NEW-0"]},
