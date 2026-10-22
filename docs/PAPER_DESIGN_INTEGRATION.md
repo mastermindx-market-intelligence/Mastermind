@@ -1,5 +1,12 @@
 # Paper.design integration - bounded local and web design capability
 
+## Guarded file/page administration candidate (2026-10-22; NOT installed)
+
+Current exact Paper 0.5.14 catalog includes `list_resources`, `create_file`, `rename_resource`, `arrange_pages`, and `update_pages`, which the prior v12 bridge intentionally blocked. The bounded candidate admits `list_resources` as read, `arrange_pages`/`update_pages` as existing guarded edit, and `create_file`/`rename_resource` via the new modifying `paper_file_manage` native MCP action. It preserves full-catalog SHA pin, existing file snapshot, operation id, desktop mutex, no replay and unknown-effect rules. In this candidate, create_file requires either `cloneFileId` (copy entire file) or `sourceFileId` (guarded context for creating an empty file), plus a name; `sourceFileId` is a bridge-only guard and is never forwarded to Paper. Renaming accepts only exact Paper file IDs, never arbitrary folders. An observed create-file response is explicitly `RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION` until the returned new file ID is separately read and checked; neither a clone nor a successful response means a cross-file page migration occurred.
+
+**Crucial limitation:** Paper's reviewed 37-tool MCP schema does not expose a native move-page-between-files, delete-page, or delete-file operation. The candidate **does not** delete originals or reconstruct pages from JSX and claim a lossless transfer. For the 63-page MASTERMIND PAGES cleanup, make a source inventory, create destinations and whole-file preservation clones, verify every destination's ID and contents, then move a page only through a subsequently verified lossless vendor operation or explicit attended Paper UI transaction with source/destination readback. Preserve original pages pending verification, with no speculative deletion or raw database edits. New bridge source is not an installed runtime, current ChatGPT action snapshot, Executive grant or live production acceptance. A reviewed new immutable runtime generation, tool publication and scratch-file canaries remain separate release gates.
+
+
 ## Mission and frozen boundary
 
 Chairman direction, 2026-09-13: make Paper ready for local agents and ChatGPT Web,
