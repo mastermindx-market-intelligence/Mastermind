@@ -123,6 +123,16 @@ applies, and no prior modifying effect is unresolved. Otherwise preserve the exa
 `EFFECT_UNKNOWN` never permits cross-carrier replay.
 
 
+### `docs/CEO_PROJECT_PLAN_CONTINUITY.md`
+Mandatory repository-source companion whenever a CEO or delegated orchestrator starts or
+recovers a **multi-phase project**, including ChatGPT Web Pro, Astra/Codex, Fable/Claude,
+Grok and future eligible principals. Acquire/reuse the detailed GitHub master plan and the
+single cumulative Agent OS frontier; verify first-save and milestone readbacks, keep
+task/subtask/dependency/proof revisions source-bound, and recover from a fresh chat without
+the predecessor transcript. This is a model-neutral plan/continuation **procedure**, not
+a second task database, Executive admission, provider install or permission grant. Load
+from the same protected commit as this INDEX. Tiny one-phase tasks need no new plan.
+
 ### `WEB_CEO_DELEGATION.md`
 Mandatory companion to `ACTIVE_EXECUTION.md` for substantial Web CEO work that requires
 principal-duty selection, delegation economics, worker packets, capacity-aware routing, or
