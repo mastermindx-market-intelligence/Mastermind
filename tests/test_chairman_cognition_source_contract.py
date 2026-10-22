@@ -303,15 +303,18 @@ def test_program_has_real_vertical_and_completion_not_docs():
         assert marker in plan
 
 
-def test_strategic_state_records_current_chairman_cognition_objective():
+def test_strategic_state_records_current_autonomy_parent_without_erasing_cognition():
     state = yaml.safe_load(_text(_STATE))
-    assert str(state["meta"]["as_of"]) == "2026-08-30"
+    assert str(state["meta"]["as_of"]) == "2026-09-26"
     objectives = {item["id"]: item for item in state["p0"]}
-    objective = objectives["CHAIRMAN_COGNITION_AUTONOMY"]
+    objective = objectives["AUTONOMY_FORCE_MULTIPLIER"]
     assert objective["department"] == "executive"
     assert objective["status"] == "active"
-    assert "Chairman-engineering" in objective["objective"]
-    assert "first_chairman_cognition_supervised_live_cycle" in state["review_triggers"]
+    assert "Chairman" in objective["objective"]
+    legacy = objectives["CHAIRMAN_COGNITION_AUTONOMY"]
+    assert legacy["status"] == "retired"
+    assert "AUTONOMY_FORCE_MULTIPLIER" in legacy["objective"]
+    assert "autonomy_baseline_gate_passed" in state["review_triggers"]
     assert state["constraints"] == _CURRENT_CONSTRAINTS
     assert sum(float(v) for v in state["resource_policy"].values()) == 1.0
 
