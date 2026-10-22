@@ -63,6 +63,9 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 | 11:55 | cleanup | ubuntu0, ubuntu1 | — | r1735, r1701r2, r1701r3-g | CLEANED | — | worktrees and `~/lanes/tmp` dirs removed, including the staged capture files; ubuntu2/3 re-verified at 0 worktrees / 0 tmp |
 | 11:55:52 | merge state | GitHub | — | — | #1701 auto-merge armed, `pytest shard 2` failed, `BEHIND` master | — | #1701 failure diagnosis below |
 | 11:56:07 | #1703 merge | merge queue | — | — | **MERGED** | merge commit `f3435a69d94569f8489bfb8db403ce1515d018d9` | W6 fixtures, SR-1 shape, merged by RESEARCH under its fixtures authority |
+| 11:58 | #1701 CI triage | — | — | run 39769434643 (shard 2) | DIAGNOSED — O-1 flake | failed-job log | sole failure is O-1 again: `test_malformed_forward_slots_are_never_absence[terminal-malformed]`, the only stat difference is index 7 (`st_atime`, +1 s). #1701 is docs-only (one spec file), so unrelated |
+| 11:58:27 | #1701 re-run | GitHub | — | run 39769434643 `--failed` | DONE, shard 2 **success** | — | re-run of the failed job only; observer `bdbr9bs0q` (PR state + run status, 60 s, terminal-only output) |
+| 12:25:05 | #1701 merge | merge queue | — | — | QUEUED (position 9 at 12:37Z) | head `a654035`, auto-merge pinned | merge commit to be read on landing. If the merge-group run hits O-1 again, the PR leaves the queue and needs one re-enqueue with `--match-head-commit a654035` |
 
 ## Findings from the capture (facts, not verdicts)
 
