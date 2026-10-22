@@ -1,4 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState } from "react";
+const SourceMarkdown = lazy(() => import("./SourceMarkdown").then(module => ({ default: module.SourceMarkdown })));
 import type { MissionResultRead } from "../host";
 import { observedMissionAssociation } from "../workspace-contract";
 import { decodeResultEnvelope, normalizeResultSelection, type ResultSelection } from "../result";
@@ -69,6 +70,7 @@ export function ResultSourceReader({ projection, selection, readResult, draftRev
   const t = (text: string) => locale === "zh-CN" ? STATIC_ZH[text] ?? text : text;
   const [read, setRead] = useState<ReadState>({ kind: "loading" });
   const [notice, setNotice] = useState("");
+  const [formatted, setFormatted] = useState(false);
   const originalDraftRevision = useRef(draftRevision);
   const busy = useRef(false), abort = useRef<AbortController | null>(null);
   const region = useRef<HTMLElement>(null);
@@ -78,7 +80,7 @@ export function ResultSourceReader({ projection, selection, readResult, draftRev
     if (busy.current) return;
     busy.current = true;
     const controller = new AbortController(); abort.current = controller;
-    setRead({ kind: "loading" }); setNotice("");
+    setRead({ kind: "loading" }); setNotice(""); setFormatted(false);
     try {
       const exact = normalizeResultSelection(selection);
       const context = structuredClone(projection.context);
@@ -140,7 +142,21 @@ export function ResultSourceReader({ projection, selection, readResult, draftRev
     {read.kind === "loading" ? <p role="status">{t("Reading the exact result…")}</p> : <>
       {!summary ? <p role="status">{t("Result content is unavailable. No excerpt can be added.")}</p> : <>
         <p>{qualified!.source.state} {t("observation · Freshness unverified · Acceptance not projected")}</p>
-        <h3>{t("Exact summary excerpt")}</h3><blockquote className="conversation-source-excerpt">{summary}</blockquote>
+        <h3>{t("Exact summary excerpt")}</h3>
+        <div className="source-preview-controls">
+          <button type="button" aria-pressed={formatted} onClick={() => setFormatted(value => !value)}>
+            {formatted ? (locale === "zh-CN" ? "查看原文" : "View exact source")
+              : (locale === "zh-CN" ? "格式化预览" : "Formatted preview")}
+          </button>
+        </div>
+        {formatted ? <>
+          <p className="source-preview-note">{locale === "zh-CN"
+            ? "仅格式展示。摘录保留原文；图片与链接不会自动加载或打开。"
+            : "Presentation only. Excerpts retain the original text. Images and links do not load or open from this preview."}</p>
+          <Suspense fallback={<p role="status">{locale === "zh-CN" ? "正在加载格式化预览…" : "Loading formatted preview..."}</p>}>
+            <SourceMarkdown source={summary} locale={locale} />
+          </Suspense>
+        </> : <blockquote className="conversation-source-excerpt">{summary}</blockquote>}
         <details><summary>{t("Source label for the draft")}</summary><p>{source!.label}</p></details>
         <button type="button" disabled={!appendAvailable || !!added || !unchanged} onKeyDown={event => {
           if (event.key === "Enter" && (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229)) event.preventDefault();

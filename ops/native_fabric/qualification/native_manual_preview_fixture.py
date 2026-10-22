@@ -79,9 +79,33 @@ class NativeManualPreviewTest(unittest.TestCase):
                 guards.enter_context(patch.object(task.pick,key,return_value=result))
             allowed=task.pick._format_pick("review",pool="grok",requested_model="grok-4.6")
             self.assertTrue(allowed.startswith("POOL=grok"),allowed)
-            denied=task.pick._format_pick("review",pool="grok",requested_model="grok-4.7")
+            admitted=task.pick._format_pick("review",pool="grok",requested_model="grok-4.7")
+            self.assertTrue(admitted.startswith("POOL=grok"),admitted)
+            denied=task.pick._format_pick("review",pool="grok",requested_model="grok-4.8")
             self.assertIn("not admitted for selected pool/task",denied)
-            unscoped=task.pick._format_pick("review",requested_model="grok-4.6")
+            native_grok_affinity=task.pick._format_pick("review",requested_model="grok-4.6")
+            self.assertTrue(native_grok_affinity.startswith("POOL=grok"),native_grok_affinity)
+
+    def test_current_default_model_pin_admits_only_named_provider(self):
+        # Provider-free regression: an explicitly named default is not an
+        # arbitrary model promotion, and an unscoped pin cannot choose a pool.
+        policy={"pools":{"bailian":{"default_model":"qwen3.8-max"}}}
+        from contextlib import ExitStack
+        with ExitStack() as guards:
+            for key,result in {
+                "load_pools":policy, "_glm_models":{},
+                "policy_allows":(True,"admitted"), "_needs_ok":(True,"admitted"),
+                "_subject_ok":(True,"admitted"), "floor_demotes":False,
+                "hard_filter":(True,"admitted"), "is_execute_class":False,
+                "_selection_model":("qwen3.8-max","admitted"),
+                "_emit":"POOL=bailian MODEL=qwen3.8-max HOST=ubuntu1 MODE=qwen",
+            }.items():
+                guards.enter_context(patch.object(task.pick,key,return_value=result))
+            admitted=task.pick._format_pick("review",pool="bailian",requested_model="qwen3.8-max")
+            self.assertTrue(admitted.startswith("POOL=bailian"),admitted)
+            mismatch=task.pick._format_pick("review",pool="bailian",requested_model="qwen3.8-flash")
+            self.assertIn("not admitted for selected pool/task",mismatch)
+            unscoped=task.pick._format_pick("review",requested_model="qwen3.8-max")
             self.assertIn("requires provider pool",unscoped)
 
     def test_future_catalog_default_pins_only_after_catalog_owner_promotes_it(self):

@@ -150,14 +150,14 @@
              if args.follow:
 --- a/ext/pick.py
 +++ b/ext/pick.py
-@@ -2003,24 +2003,37 @@
+@@ -2000,24 +2000,37 @@
          # catalog. Capability/host, economic, quality and independence gates
          # below are still required; catalog presence is not worker admission.
-     if explicit_model and not native_alias:
+     if explicit_model and not native_alias and not grok_pin:
 -        models = {str(value).casefold() for value in _glm_models(doc).values()}
 -        full = (_glm_models(doc).get("reviewer") or _glm_models(doc).get("operator") or "").casefold()
 -        if explicit_model not in models:
--            return f"NONE reason=unknown requested_model ({explicit_model})"
+-            return "NONE reason=unknown requested_model"
 -        effective_pool = ROUTING_TOKEN_POOLS.get(forced, forced)
 -        if forced and effective_pool != "glm":
 -            return f"NONE reason=requested_model contradicts pool={pool!r}"
@@ -196,7 +196,7 @@
 +            forced = "glm"
 +        elif selected_pool:
 +            if selected_pool not in (doc.get("pools") or {}):
-+                return f"NONE reason=unknown forced pool={pool!r}"
++                return "NONE reason=unknown forced pool"
 +            admitted_default, _ = _selection_model(selected_pool, tc, doc)
 +            if not admitted_default or admitted_default.casefold() != explicit_model:
 +                return "NONE reason=requested model not admitted for selected pool/task"

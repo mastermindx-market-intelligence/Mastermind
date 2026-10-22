@@ -7,7 +7,7 @@ import pytest
 ROOT=Path(__file__).resolve().parents[1]
 PATCH=ROOT/"ops/native_fabric/patches/web_fabric_manual_model_20261021.patch"
 SOURCE=ROOT/"integrations/studio_direct_mcp"
-BLOBS={"fabric-backend.mjs":"6c828312a3de711ded1eaa388efaf4fb4fc4a149","fabric-backend.test.mjs":"555d5b89c651c47eb4ed3209063d8bacc7960463"}
+BLOBS={"fabric-backend.mjs":"1dfb573f4db36285e0c8513eaaf583dd38c8ecb7","fabric-backend.test.mjs":"87c2bb7078c2cedf2601e0d000cb4a4e5b9b9f01"}
 
 def test_exact_source_web_fabric_manual_model_pin(tmp_path):
     if not shutil.which("git") or not shutil.which("node"): pytest.skip("Node/git absent")

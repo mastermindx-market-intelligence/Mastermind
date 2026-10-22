@@ -17,18 +17,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-GENERATION = "0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f"
+GENERATION = "09b1ff4204c49acc71bb228751c4efefc22c70c89092734d9ea2fafe3fff1a49"
 INPUT = {
     "ext/fabric_task.py": "2294bbcf537ebc7fb91ab03a71f7de85b4c1c8f697932c9e3c8865983dc2633d",
     "pool": "4026eb128fe803e575151bbeec49a4d8f5838408db1177feedd64ad24f4f2059",
-    "ext/pick.py": "74bd656884739d61e7a1892735fdcf7844e030fa55b2dc51ecaad1b4c8560286",
+    "ext/pick.py": "a776ed140a051e7ac899a5f4b7c641d3d6e46456db287e914a154b3b93e57423",
 }
 OUTPUT = {
     "ext/fabric_task.py": "b5ca574e05245637eb008a7c248fbdd77e808ee458472f621e935f7fc0c6e892",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
-    "ext/pick.py": "f785916dc3a7c876af93beefa02bbb663f81124583f8a691d02b13642f203589",
+    "ext/pick.py": "34cc6c128b52fdc76d8ebf5d652008cc69381fb4eb042768f5fce50d4df322ea",
 }
-PATCH_SHA256 = "53e9c28f43939994f43d6a11018dc0b28cb9eab4d610197cd03c80f94bbeb077"
+PATCH_SHA256 = "917d7a437a0ebfc7d0108879e0b680cac0b16e00262d8edc13809ae4356c86f2"
 REPO = Path(__file__).resolve().parents[2]
 PATCH = REPO / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = REPO / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
@@ -87,8 +87,8 @@ def qualify(generation: Path) -> dict[str, object]:
         env["MMX_NATIVE_PREVIEW_CANDIDATE"] = str(stage)
         result = run([sys.executable, str(FIXTURE)], stage, env)
         test_summary = re.search(r"Ran (\d+) tests", result.stderr)
-        if not test_summary or int(test_summary.group(1)) != 10 or "\nOK\n" not in result.stderr:
-            raise ValueError("native test receipt does not prove the expected ten cases")
+        if not test_summary or int(test_summary.group(1)) != 11 or "\nOK\n" not in result.stderr:
+            raise ValueError("native test receipt does not prove the expected eleven cases")
         for name, sha in INPUT.items():
             file_bytes(generation / name, sha, sealed=True)
     selected = False
@@ -102,7 +102,7 @@ def qualify(generation: Path) -> dict[str, object]:
         "schema": "mastermind.native_manual_preview_source_qualification.v1",
         "state": "SOURCE_ONLY_TESTED", "generation": GENERATION,
         "current_selected_at_end": selected, "source_count": len(INPUT),
-        "patch_sha256": PATCH_SHA256, "tests_passed": 10,
+        "patch_sha256": PATCH_SHA256, "tests_passed": 11,
         "sealed_generation_unchanged": True,
         "live_install_performed": False, "provider_call_performed": False,
         "worker_start_proven": False, "review_required": True,

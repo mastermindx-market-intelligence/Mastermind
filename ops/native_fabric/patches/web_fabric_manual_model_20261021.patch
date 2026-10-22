@@ -1,6 +1,8 @@
+diff --git a/integrations/studio_direct_mcp/fabric-backend.mjs b/integrations/studio_direct_mcp/fabric-backend.mjs
+index 1dfb573..cb4de86 100644
 --- a/integrations/studio_direct_mcp/fabric-backend.mjs
 +++ b/integrations/studio_direct_mcp/fabric-backend.mjs
-@@ -44,6 +44,8 @@
+@@ -50,6 +50,8 @@ export const FABRIC_TOOLS = Object.freeze([
      ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
      work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
      subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
@@ -9,7 +11,7 @@
    }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
    tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
    tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
-@@ -75,6 +77,8 @@
+@@ -89,6 +91,8 @@ function validate(name, args) {
    if (name==='fabric_request') {
      if (Buffer.byteLength(args.work_packet)>MAX_PACKET_BYTES) fail('INVALID_ARGUMENT',{field:'work_packet'});
      if (args.task_complexity==='C3_FRONTIER_JUDGMENT' && !args.escalation_reason?.trim()) fail('INVALID_ARGUMENT',{field:'escalation_reason'});
@@ -18,7 +20,7 @@
    }
  }
  function response(value, isError=false) {
-@@ -232,9 +236,16 @@
+@@ -246,9 +250,16 @@ export function createFabricFacade(engine, options={}) {
        if(name==='fabric_capabilities') {
          const h=await runCapturedShort(['--help']);
          const continuity=await continuityAvailable();
@@ -35,7 +37,7 @@
            worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
            tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
        }
-@@ -248,11 +259,39 @@
+@@ -262,11 +273,39 @@ export function createFabricFacade(engine, options={}) {
          const requestKey=args.run_id;
          if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
          if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
@@ -77,11 +79,13 @@
          if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
          if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
          if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
+diff --git a/integrations/studio_direct_mcp/fabric-backend.test.mjs b/integrations/studio_direct_mcp/fabric-backend.test.mjs
+index 87c2bb7..838f6cd 100644
 --- a/integrations/studio_direct_mcp/fabric-backend.test.mjs
 +++ b/integrations/studio_direct_mcp/fabric-backend.test.mjs
-@@ -444,3 +444,65 @@
-   assert.equal(out.error,expected);assert.equal(out.retry_allowed,false);
-  }
+@@ -479,3 +479,65 @@ test('acceptance evidence codes are closed and consistent with review method',as
+  assert.deepEqual(field.enum,['deterministic_test_evidence','artifact_digest_comparison',
+    'manual_result_review','independent_review_evidence']);
  });
 +
 +const manualPinned={...packet,task_class:'review',task_complexity:'C2_COMPLEX_BOUNDED',pool:'grok',model:'grok-4.7'};
@@ -145,3 +149,4 @@
 +  assert.equal(e.calls.length,2);
 + }
 +});
+
