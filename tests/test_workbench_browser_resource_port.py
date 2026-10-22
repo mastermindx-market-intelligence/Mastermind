@@ -624,3 +624,79 @@ open = _delayed_open
 
     monkeypatch.setattr(Path, "write_text", delayed_child_source)
     test_pre_barrier_inspection_failure_terminates_owned_wrapper_and_is_not_applied(tmp_path)
+
+
+
+def test_reconcile_cannot_finalize_while_startup_holds_the_store_writer(
+    tmp_path: Path, monkeypatch
+):
+    import concurrent.futures
+    import threading
+    import integrations.workbench_browser_mcp.resource_port as module
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    paused = threading.Event()
+    release = threading.Event()
+    original_finalize = module.finalize_action
+    finalizations = []
+    started = None
+
+    def paused_finalize(*args, **kwargs):
+        finalizations.append(kwargs["effect_state"])
+        paused.set()
+        assert release.wait(5), "startup finalization was not released"
+        return original_finalize(*args, **kwargs)
+
+    monkeypatch.setattr(module, "finalize_action", paused_finalize)
+    try:
+        start_ref = port.prepare_resource(
+            caller, project_ref="project:browser", mode="isolated"
+        )
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            pending = executor.submit(port.start_resource, caller, start_ref)
+            try:
+                assert paused.wait(5), "startup did not reach finalization"
+                with pytest.raises(BrowserResourceRefused, match="BROWSER_RECONCILE_BUSY"):
+                    port.reconcile_resource(caller, start_ref)
+            finally:
+                release.set()
+                started = pending.result(timeout=10)
+
+        assert started["effect_state"] == "APPLIED"
+        assert finalizations == ["APPLIED"]
+        reconciled = port.reconcile_resource(caller, start_ref)
+        assert reconciled["effect_state"] == "APPLIED"
+        assert reconciled["browser_ref"] == started["browser_ref"]
+        assert finalizations == ["APPLIED"]
+        resource = port.codec.decode_resource(started["browser_ref"], now_ms=2000)
+        assert ProcessInspector().inspect(resource.relay_pid).start_identity == resource.relay_start_identity
+    finally:
+        release.set()
+        if started is not None and started.get("browser_ref"):
+            port.cleanup_resource(
+                started["browser_ref"], owner_state="released", effect_state="APPLIED"
+            )
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_reconcile_refuses_an_unavailable_store_writer(tmp_path: Path, monkeypatch):
+    import integrations.workbench_browser_mcp.resource_port as module
+    from integrations.workbench_action_mcp.action_artifacts import ActionArtifactUncertain
+
+    fd, caller, port, relay_root = _port(tmp_path)
+    try:
+        start_ref = port.prepare_resource(
+            caller, project_ref="project:browser", mode="isolated"
+        )
+
+        def unavailable(_store):
+            raise ActionArtifactUncertain("writer unavailable")
+
+        monkeypatch.setattr(module, "acquire_store_writer", unavailable)
+        with pytest.raises(BrowserResourceRefused, match="BROWSER_RECONCILE_UNAVAILABLE"):
+            port.reconcile_resource(caller, start_ref)
+        assert list(relay_root.iterdir()) == []
+    finally:
+        os.close(fd)
+        shutil.rmtree(relay_root, ignore_errors=True)

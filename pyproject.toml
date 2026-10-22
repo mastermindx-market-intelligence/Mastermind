@@ -55,7 +55,7 @@ business-mcp = [
 # Browser image decoding is isolated to the Browser MCP service.
 browser-mcp = [
     "mcp==1.28.1",
-    "PyJWT[crypto]==2.13.0",
+    "PyJWT[crypto]==2.14.0",
     "Pillow==12.3.0",
 ]
 

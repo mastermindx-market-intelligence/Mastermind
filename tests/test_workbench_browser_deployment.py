@@ -461,3 +461,166 @@ def test_deployment_projection_is_not_a_persistent_registry(tmp_path: Path):
         assert "_retry_queue" not in names
     finally:
         os.close(fd)
+
+
+
+def test_recreated_facade_rehydrates_only_after_explicit_owner_reconciliation(tmp_path: Path):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        def create():
+            return create_browser_deployment(
+                services=services,
+                host_config=host_config,
+                tool_catalog=catalog,
+                profile_resolver=lambda _ref: None,
+            )
+
+        first = create()
+        resource = _synthetic_live_resource(caller, services)
+        browser_ref = first.resource_port.codec.encode_resource(resource)
+        receipt = {
+            "status": "OK",
+            "effect_state": "APPLIED",
+            "browser_ref": browser_ref,
+            "reconciled": False,
+        }
+        first.resource_port.start_resource = lambda actual, ref: receipt
+        first.action_port.observe_resource = lambda actual, ref: resource
+        asyncio.run(first.start_resource(caller, "original-signed-start"))
+        assert len(asyncio.run(first.observe_active_resources(caller))) == 1
+
+        recreated = create()
+        calls = []
+        reconciled_receipt = {**receipt, "reconciled": True}
+
+        def reconcile(actual, ref):
+            calls.append(("reconcile", actual, ref))
+            return reconciled_receipt
+
+        def observe(actual, ref):
+            calls.append(("observe", actual, ref))
+            return resource
+
+        def must_not_restart(*_args, **_kwargs):
+            raise AssertionError("reconciliation attempted to start a new resource")
+
+        recreated.resource_port.reconcile_resource = reconcile
+        recreated.resource_port.start_resource = must_not_restart
+        recreated.action_port.observe_resource = observe
+        assert recreated.services is first.services
+        assert asyncio.run(recreated.observe_active_resources(caller)) == ()
+        result = asyncio.run(recreated.reconcile_resource(caller, "original-signed-start"))
+        assert result is reconciled_receipt
+        assert calls == [
+            ("reconcile", caller, "original-signed-start"),
+            ("observe", caller, browser_ref),
+        ]
+        projected = asyncio.run(recreated.observe_active_resources(caller))
+        assert len(projected) == 1
+        assert projected[0].browser_ref == browser_ref
+        assert projected[0].resource.expires_at_ms == resource.expires_at_ms
+        foreign = dataclasses.replace(caller, client_ref="different-agent")
+        assert asyncio.run(recreated.observe_active_resources(foreign)) == ()
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("operation", ["start_resource", "reconcile_resource"])
+def test_owner_receipt_survives_refused_fresh_observation(tmp_path: Path, operation: str):
+    import asyncio
+    from integrations.workbench_browser_mcp.browser_port import BrowserPortRefused
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services, host_config=host_config, tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        resource = _synthetic_live_resource(caller, services)
+        receipt = {
+            "status": "OK", "effect_state": "APPLIED",
+            "browser_ref": deployment.resource_port.codec.encode_resource(resource),
+            "reconciled": operation == "reconcile_resource",
+        }
+        setattr(deployment.resource_port, operation, lambda actual, ref: receipt)
+
+        def refused(actual, ref):
+            raise BrowserPortRefused("BROWSER_RELAY_UNAVAILABLE")
+
+        deployment.action_port.observe_resource = refused
+        result = asyncio.run(getattr(deployment, operation)(caller, "signed-start"))
+        assert result is receipt
+        assert asyncio.run(deployment.observe_active_resources(caller)) == ()
+    finally:
+        os.close(fd)
+
+
+@pytest.mark.parametrize("effect_state", ["NOT_APPLIED", "EFFECT_UNKNOWN"])
+def test_unsettled_reconciliation_never_adds_a_fleet_resource(tmp_path: Path, effect_state: str):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services, host_config=host_config, tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        receipt = {
+            "status": "OK", "effect_state": effect_state,
+            "browser_ref": None, "reconciled": True,
+        }
+        deployment.resource_port.reconcile_resource = lambda actual, ref: receipt
+
+        def must_not_observe(*_args):
+            raise AssertionError("unsettled receipt was treated as a live resource")
+
+        deployment.action_port.observe_resource = must_not_observe
+        result = asyncio.run(deployment.reconcile_resource(caller, "signed-start"))
+        assert result is receipt
+        assert asyncio.run(deployment.observe_active_resources(caller)) == ()
+    finally:
+        os.close(fd)
+
+
+
+@pytest.mark.parametrize("operation", ["start_resource", "reconcile_resource"])
+def test_applied_receipt_is_not_masked_by_a_second_runtime_admission(tmp_path: Path, operation: str):
+    import asyncio
+
+    fd, services, host_config, catalog, caller, _run_calls = _fixture(tmp_path)
+    admissions = []
+
+    async def admit_once(callback):
+        admissions.append("admitted")
+        if len(admissions) != 1:
+            raise RuntimeError("runtime closed after the resource effect")
+        return callback()
+
+    services = dataclasses.replace(services, run_io=admit_once)
+    try:
+        deployment = create_browser_deployment(
+            services=services, host_config=host_config, tool_catalog=catalog,
+            profile_resolver=lambda _ref: None,
+        )
+        resource = _synthetic_live_resource(caller, services)
+        receipt = {
+            "status": "OK", "effect_state": "APPLIED",
+            "browser_ref": deployment.resource_port.codec.encode_resource(resource),
+            "reconciled": operation == "reconcile_resource",
+        }
+        observations = []
+        setattr(deployment.resource_port, operation, lambda actual, ref: receipt)
+
+        def observe(actual, ref):
+            observations.append((actual, ref))
+            return resource
+
+        deployment.action_port.observe_resource = observe
+        result = asyncio.run(getattr(deployment, operation)(caller, "signed-start"))
+        assert result is receipt
+        assert admissions == ["admitted"]
+        assert observations == [(caller, receipt["browser_ref"])]
+    finally:
+        os.close(fd)

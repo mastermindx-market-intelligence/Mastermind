@@ -641,8 +641,19 @@ class BrowserResourcePort:
     ) -> dict[str, Any]:
         start, binding = self._decode_start(caller, start_ref, require_fresh=False)
         identity = self._identity(start, binding)
-        classified = classify_action(self._store, identity)
-        return self._reconcile_existing(start, identity, classified)
+        try:
+            writer = acquire_store_writer(self._store)
+        except ActionArtifactBusy as error:
+            raise BrowserResourceRefused("BROWSER_RECONCILE_BUSY") from error
+        except ActionArtifactUncertain as error:
+            raise BrowserResourceRefused("BROWSER_RECONCILE_UNAVAILABLE") from error
+
+        # Reconciliation may finalize a pending start. Use the same writer as
+        # startup and classify only while it is held, so this path cannot race
+        # startup's final receipt and trigger cleanup of an applied resource.
+        with writer:
+            classified = classify_action(self._store, identity)
+            return self._reconcile_existing(start, identity, classified)
 
     @staticmethod
     def _terminate_unrecorded_prebarrier_process(

@@ -40,6 +40,12 @@ Independent read-only review found and drove fixes for the metadata route collis
 
 CI now installs the pinned Link build dependency, builds the bundle, executes the Node tests, and installs `.[dev,browser-mcp]` for Python qualification. Required hosted checks, source integration, and release review remain controlling.
 
+## Owner recovery and CI integration follow-up
+
+Explicit resource reconciliation now acquires the same nonblocking ActionArtifactStore writer as startup, then classifies the original claim under that lock. A deterministic paused-finalization test proves that reconciliation cannot finalize an in-flight start and induce cleanup of an already-applied relay. A recreated facade can repopulate its volatile projection after successful explicit reconciliation under the same retained owner. The optional fresh observation runs inside the original admitted executor callback, so a second admission cannot hide a durable APPLIED receipt. This neither adopts a dead owner's relay nor extends a resource lifetime; automatic durable enumeration remains unfinished.
+
+The merged head's hosted Python shards failed during dependency installation because the new Browser extra pinned JWT 2.13.0 while protected source requires 2.14.0. Browser now matches the protected pin. A parsed-extras regression prevents this disagreement. The combined `.[dev,browser-mcp]` dependency dry-run resolves successfully. Both platform locks already contained the three exact Browser dependencies; a bounded comparison proved unchanged base/dev requirements and unchanged versions, extras, and hashes for all 73 locked packages. Their headers record a closure-equivalence qualification against the new project digest, rather than claiming a new platform compile. Future lock regeneration includes both extras. The recovery/inventory group passed 60 tests; a separate temporary environment with actual PyJWT 2.14.0, MCP 1.28.1, and Pillow 12.3.0 passed 625 auth, startup, recovery, and RWE tests. The shared environment was not modified.
+
 ## Remaining implementation and real-path work
 
 1. Recover and review the original custom native bridge package. The attached `mastermind-browser-candidate` archive and its source manifest were not found in the accessible bounded search. Preserved partial-upload evidence contains no native implementation.

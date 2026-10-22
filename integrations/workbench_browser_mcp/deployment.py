@@ -43,7 +43,7 @@ class BrowserPorts:
 
 @dataclass(frozen=True)
 class ActiveBrowserProjection:
-    """Ephemeral read projection of one exact resource this deployment started."""
+    """Ephemeral read projection of an exact started or reconciled resource."""
 
     browser_ref: str
     resource: BrowserResourceRef
@@ -232,10 +232,7 @@ def create_browser_deployment(
             ),
         )
 
-    async def start_resource(caller, start_ref):
-        receipt = await _run_existing(
-            services, lambda: resource_port.start_resource(caller, start_ref)
-        )
+    def remember_applied_resource(caller, receipt):
         if (
             isinstance(receipt, Mapping)
             and receipt.get("effect_state") == "APPLIED"
@@ -243,10 +240,7 @@ def create_browser_deployment(
         ):
             browser_ref = receipt["browser_ref"]
             try:
-                observed = await _run_existing(
-                    services,
-                    lambda: action_port.observe_resource(caller, browser_ref),
-                )
+                observed = action_port.observe_resource(caller, browser_ref)
             except BrowserPortRefused:
                 # The start receipt remains authoritative. A transient inability
                 # to observe it must not be rewritten as NOT_APPLIED.
@@ -254,11 +248,31 @@ def create_browser_deployment(
             else:
                 if type(observed) is BrowserResourceRef:
                     remember(caller, browser_ref, observed)
+
+    def run_and_remember(caller, operation):
+        receipt = operation()
+        # Stay inside the original admitted executor call: a second admission
+        # could refuse after the owner already persisted an APPLIED receipt.
+        remember_applied_resource(caller, receipt)
         return receipt
 
-    async def reconcile_resource(caller, start_ref):
+    async def start_resource(caller, start_ref):
         return await _run_existing(
-            services, lambda: resource_port.reconcile_resource(caller, start_ref)
+            services,
+            lambda: run_and_remember(
+                caller, lambda: resource_port.start_resource(caller, start_ref)
+            ),
+        )
+
+    async def reconcile_resource(caller, start_ref):
+        # A recreated facade can re-observe a resource under the retained owner.
+        # This does not adopt a relay from a different owner process or extend
+        # the original signed resource lifetime.
+        return await _run_existing(
+            services,
+            lambda: run_and_remember(
+                caller, lambda: resource_port.reconcile_resource(caller, start_ref)
+            ),
         )
 
     async def observe_active_resources(
