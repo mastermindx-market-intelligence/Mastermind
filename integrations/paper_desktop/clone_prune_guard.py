@@ -10,19 +10,14 @@ Use the host's reviewed bridge.py on that same Paper Desktop installation.
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import re
 from pathlib import Path
 from typing import Callable
 
-# The top-level bridge name is also a repository package: never shadow it.
-_bridge_spec = importlib.util.spec_from_file_location(
-    "_mastermind_paper_clone_prune_bridge", Path(__file__).with_name("bridge.py"))
-if _bridge_spec is None or _bridge_spec.loader is None:
-    raise RuntimeError("GUARDED_PAPER_BRIDGE_UNAVAILABLE")
-bridge = importlib.util.module_from_spec(_bridge_spec)
-_bridge_spec.loader.exec_module(bridge)
+# Reuse the repository's existing Paper bridge identity. Executing the helper
+# as a module keeps the unrelated top-level `bridge` package untouched.
+from integrations.paper_desktop import bridge
 
 SCHEMA = "mastermind.paper_clone_prune_evidence.v1"
 FILE_ID_RE = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}\Z")
