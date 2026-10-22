@@ -50,9 +50,9 @@ FORWARD EXECUTION + BLOCKERS
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
 CONTEXT + RECOVERY
-24. Compact frontier: mission, authority, refs, effects, DO_NOT_REDO, blockers, children, next action and capability evidence. No history replay.
+24. Frontier: mission, authority, refs, effects, DO_NOT_REDO, blockers, children, next action. No transcript replay.
 25. Prefer bounded reads, refs, metadata, and concise evidence to full logs/threads/rescans. Keep results, not resolved raw output. Soft compaction/mode switching does not prove old context was removed.
-26. Keep DONE_WHEN and allowed surfaces. Save material results at coherent milestones or before risky interruption; no per-tool checkpoint or time/call-count stop.
+26. Multi-phase work: recover/create versioned granular GitHub plan; link Agent OS. Verify first save before major work; checkpoint material progress and risky boundaries.
 27. Tool failure is not chat corruption. Isolated "Thinking failed" with low context pressure permits one bounded recovery, possibly in Extra High, after effect reconciliation. Cause remains unproven.
 28. HARD_ROTATION after repeated thinking/session failure, or "Thinking failed" in a heavy/unstable chat: stop heavy work; reconcile only if safe; persist frontier; SEAL. Switching is not rotation.
 29. If persistence fails, emit NOT_CANONICALLY_PERSISTED + last durable ref/uncertainties; no write loops. Successor reconciles/persists. Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN.
