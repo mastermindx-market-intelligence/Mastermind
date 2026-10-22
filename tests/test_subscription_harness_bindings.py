@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import dataclasses
 import pytest
 import json
 import unittest
@@ -468,6 +469,37 @@ def test_byteplus_independent_endpoint_anchor_refuses_profile_mismatch():
     )
     with pytest.raises(HarnessBindingError):
         validate_bindings(broken, profiles_document=profiles)
+
+def test_byteplus_literal_endpoint_anchor_rejects_compromised_profile_and_override(monkeypatch):
+    """Mutation-discriminating defense-in-depth test for the literal anchor.
+
+    A normal profile cannot change endpoint without failing its own validator.
+    Here only the downstream trusted profile lookup is compromised in-memory
+    to demonstrate that the *independent binding literal* still refuses PAYG.
+    No file, network, credential or runtime worker is touched.
+    """
+    import control_plane.subscription_harness_bindings as harness
+    profiles = load_profiles()
+    bindings = copy.deepcopy(load_bindings(profiles_document=profiles))
+    key = "byteplus-coding-plan-personal.claude-code-anthropic"
+    payg = "https://ark.ap-southeast.bytepluses.com/api/v3"
+    bindings["bindings"][key]["endpoint"]["base_url"] = payg
+
+    original_get = harness.get_profile
+
+    def compromised_lookup(profile_id, *, document=None):
+        result = original_get(profile_id, document=document)
+        if profile_id == "byteplus-coding-plan-personal":
+            return dataclasses.replace(result, base_url=payg)
+        return result
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(harness, "get_profile", compromised_lookup)
+        # Without the independent endpoint literal, profile == override
+        # would make this fixture spuriously pass validation.
+        with pytest.raises(HarnessBindingError, match="reviewed BytePlus Coding Plan harness/endpoint"):
+            validate_bindings(bindings, profiles_document=profiles)
+
 
 def test_byteplus_bindings_review_timestamp_is_valid_and_not_stale():
     profiles = load_profiles()
