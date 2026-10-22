@@ -16,7 +16,11 @@ from pathlib import Path
 from typing import Any, Mapping
 
 from ops.executive_os.provider_worker_slots import all_slots, get_slot
-from ops.executive_os.provider_identity_policy import COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256
+from ops.executive_os.provider_identity_policy import (
+    COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256,
+    NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256,
+    NATIVE_PROBE_DRIFT_REQUEST_ID,
+)
 
 
 REQUEST_SCHEMA = "mastermind.executive_privileged_action_request.v1"
@@ -184,6 +188,7 @@ def _validate_verify_ready_args(
     requalification_keys = (
         "requalify_terminal_adverse_sha256", "renew_device_revalidation_sha256",
         "requalify_company_device_drift_sha256",
+        "requalify_native_probe_drift_sha256",
     )
     recovery_keys = ("recover_current_pin_grant_sha256", "successor_request_id")
     allowed = (
@@ -214,6 +219,11 @@ def _validate_verify_ready_args(
             if (requalification_key == "requalify_company_device_drift_sha256"
                     and digest != COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256):
                 raise PrivilegedActionError("company-device drift preimage is not the reviewed incident")
+            if requalification_key == "requalify_native_probe_drift_sha256":
+                if digest != NATIVE_PROBE_DRIFT_PREDECESSOR_SHA256:
+                    raise PrivilegedActionError("native-probe drift preimage is not the reviewed incident")
+                if request_id != NATIVE_PROBE_DRIFT_REQUEST_ID:
+                    raise PrivilegedActionError("native-probe drift requires its designated request_id")
             values[requalification_key] = digest
     # The bounded current-pin recovery transition is mutually exclusive with
     # every historical requalification route and must designate itself as the
@@ -364,6 +374,8 @@ def build_argv(request: ValidatedPrivilegedAction, release_root: str | Path) -> 
         argv.extend(("--renew-device-revalidation-sha256", args["renew_device_revalidation_sha256"]))
     if "requalify_company_device_drift_sha256" in args:
         argv.extend(("--requalify-company-device-drift-sha256", args["requalify_company_device_drift_sha256"]))
+    if "requalify_native_probe_drift_sha256" in args:
+        argv.extend(("--requalify-native-probe-drift-sha256", args["requalify_native_probe_drift_sha256"]))
     if "recover_current_pin_grant_sha256" in args:
         argv.extend(("--recover-current-pin-grant-sha256", args["recover_current_pin_grant_sha256"]))
     if "successor_request_id" in args:
