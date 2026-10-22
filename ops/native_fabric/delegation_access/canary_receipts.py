@@ -73,7 +73,7 @@ def _check_run(
     _require(result.get("root_id") == expected_root and
              result.get("accept_run_id", result.get("run_id")) == run_id,
              issues, prefix + ".result_lineage")
-    _require(_good_sha(digest) and isinstance(result.get("response_bytes"), int)
+    _require(_good_sha(digest) and type(result.get("response_bytes")) is int
              and result.get("response_bytes") > 0
              and isinstance(result.get("adapter_response"), str)
              and len(result["adapter_response"].encode("utf-8")) > 0,
@@ -119,6 +119,8 @@ def evaluate(report: object) -> dict[str, object]:
         cases = {}
     all_runs: list[str] = []
     session_ids: list[str] = []
+    case_roots: list[str] = []
+    case_parents: list[str] = []
     for kind in ("claude", "codex"):
         c = cases.get(kind)
         if not isinstance(c, dict):
@@ -129,6 +131,10 @@ def evaluate(report: object) -> dict[str, object]:
         _require(_good_id(root) and _good_id(parent)
                  and c.get("parent_identity_verified") is True,
                  issues, kind + ".verified_original_root_and_parent")
+        if _good_id(root):
+            case_roots.append(root)
+        if _good_id(parent):
+            case_parents.append(parent)
         loaded = c.get("skill_session")
         if not isinstance(loaded, dict):
             loaded = {}
@@ -154,12 +160,16 @@ def evaluate(report: object) -> dict[str, object]:
     _require(_good_id(op_root) and _good_id(op_parent)
              and nested.get("parent_identity_verified") is True,
              issues, "operator.verified_original_root_and_parent")
+    if _good_id(op_root):
+        case_roots.append(op_root)
+    if _good_id(op_parent):
+        case_parents.append(op_parent)
     scope = nested.get("scope")
     if not isinstance(scope, dict):
         scope = {}
     opid = scope.get("operator_run")
     _require(scope.get("root") == op_root and _good_id(opid)
-             and isinstance(scope.get("child_budget_at_admission"), int)
+             and type(scope.get("child_budget_at_admission")) is int
              and scope.get("child_budget_at_admission") > 0
              and scope.get("grant_verified") is True,
              issues, "operator.admitted_scope")
@@ -184,6 +194,12 @@ def evaluate(report: object) -> dict[str, object]:
              issues, "operator.same_parent_child_ack")
     _require(nested.get("principal_adjudicated_operator_result") is True,
              issues, "operator.return_to_original_principal")
+    # These three independently commissioned canaries must not borrow another
+    # principal's root or immediate parent. Distinct run/session IDs alone are
+    # insufficient evidence of independent session lineage.
+    _require(len(case_roots) == 3 and len(set(case_roots)) == 3
+             and len(case_parents) == 3 and len(set(case_parents)) == 3,
+             issues, "distinct_case_identities")
     _require(len(all_runs) == 4 and len(set(all_runs)) == 4,
              issues, "four_distinct_run_ids")
     _require(len(session_ids) == 2 and len(set(session_ids)) == 2,

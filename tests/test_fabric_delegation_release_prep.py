@@ -240,6 +240,60 @@ def test_canary_contract_refuses_missing_or_forged_required_evidence(tamper, rea
     assert result["live_proven"] is False
 
 
+def _rebind_direct_case_identity(case: dict, *, root: str, parent: str) -> None:
+    case["root_id"] = root
+    case["immediate_parent_id"] = parent
+    worker = case["worker"]
+    worker["start_receipt"].update(root_id=root, parent_run_id=parent)
+    worker["status"]["status"].update(root_id=root, parent_run_id=parent)
+    worker["result"]["root_id"] = root
+    worker["parent_return"]["principal_parent_id"] = parent
+
+
+@pytest.mark.parametrize("borrowed", ["root", "parent"])
+def test_canary_refuses_separately_consistent_borrowed_claude_codex_identity(borrowed):
+    data = _valid_receipts()
+    claude = data["cases"]["claude"]
+    codex = data["cases"]["codex"]
+    root = claude["root_id"] if borrowed == "root" else codex["root_id"]
+    parent = claude["immediate_parent_id"] if borrowed == "parent" else codex["immediate_parent_id"]
+    _rebind_direct_case_identity(codex, root=root, parent=parent)
+    result = canary.evaluate(data)
+    assert result["state"] == "REFUSED"
+    assert "distinct_case_identities" in result["issues"]
+
+
+def test_canary_refuses_separately_consistent_operator_borrowed_claude_root():
+    data = _valid_receipts()
+    borrowed = data["cases"]["claude"]["root_id"]
+    operator = data["cases"]["operator"]
+    operator["root_id"] = borrowed
+    operator["scope"]["root"] = borrowed
+    for name in ("operator_run", "child_run"):
+        item = operator[name]
+        item["start_receipt"]["root_id"] = borrowed
+        item["status"]["status"]["root_id"] = borrowed
+        item["result"]["root_id"] = borrowed
+    result = canary.evaluate(data)
+    assert result["state"] == "REFUSED"
+    assert "distinct_case_identities" in result["issues"]
+
+
+@pytest.mark.parametrize("field,expected_issue", [
+    ("response_bytes", "codex.result_payload"),
+    ("child_budget", "operator.admitted_scope"),
+])
+def test_canary_rejects_bool_as_numeric_receipt_field(field, expected_issue):
+    data = _valid_receipts()
+    if field == "response_bytes":
+        data["cases"]["codex"]["worker"]["result"]["response_bytes"] = True
+    else:
+        data["cases"]["operator"]["scope"]["child_budget_at_admission"] = True
+    result = canary.evaluate(data)
+    assert result["state"] == "REFUSED"
+    assert expected_issue in result["issues"]
+
+
 def test_canary_duplicate_json_keys_refused():
     with pytest.raises(ValueError, match="duplicate receipt JSON key"):
         json.loads('{"schema":"one","schema":"two"}',
