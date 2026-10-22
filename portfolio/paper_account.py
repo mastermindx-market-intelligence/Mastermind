@@ -25,7 +25,7 @@ from contextlib import contextmanager
 from datetime import UTC, date, datetime, timedelta, timezone
 from numbers import Real
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any, Callable, NoReturn
 from uuid import uuid4
 
 import bot  # noqa: F401  -> vendor/macro onto sys.path
@@ -204,33 +204,236 @@ def _fresh_account() -> dict[str, Any]:
     }
 
 
+def _is_account_number(value: Any) -> bool:
+    """Schema-level number for account.json: an int or float, NOT a bool, and finite."""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return False
+    try:
+        return math.isfinite(value)
+    except (OverflowError, ValueError):
+        return False
+
+
+def validate_account_state(raw: Any) -> list[str]:
+    """Pure schema check of one parsed account.json document — no I/O, never raises.
+
+    Returns a SORTED list of problem codes; an empty list means VALID.  Extra keys are allowed
+    everywhere (per-position mark metadata, ``spy_shares``, ``benchmark_symbol``,
+    ``cash_yield_through``, ``last_paper_transaction_id``, ...).  Negative cash or negative
+    shares are economic questions, deliberately NOT schema ones: they are VALID here.
+    """
+    try:
+        if not isinstance(raw, dict):
+            return ["not_an_object"]
+        problems: list[str] = []
+        if not _is_account_number(raw.get("cash")):
+            problems.append("cash_invalid")
+        if not _is_account_number(raw.get("starting_nav")) or raw.get("starting_nav") <= 0:
+            problems.append("starting_nav_invalid")
+        positions = raw.get("positions")
+        if not isinstance(positions, dict):
+            problems.append("positions_invalid")
+        else:
+            for key, pos in positions.items():
+                label = key if isinstance(key, str) else repr(key)
+                if not isinstance(key, str) or not key:
+                    problems.append(f"position_key_invalid:{key!r}")
+                if not isinstance(pos, dict):
+                    problems.append(f"position_not_object:{label}")
+                    continue
+                if not _is_account_number(pos.get("shares")):
+                    problems.append(f"position_shares_invalid:{label}")
+                if not _is_account_number(pos.get("avg_cost")):
+                    problems.append(f"position_avg_cost_invalid:{label}")
+        return sorted(problems)
+    except Exception:  # noqa: BLE001 — the validator itself must never become the fault it guards
+        return ["not_an_object"]
+
+
+def _classify_account_bytes(raw_bytes: bytes) -> tuple[list[str], Any, Exception | None]:
+    """Decode, parse and schema-check raw account.json bytes.  Pure — never raises.
+
+    Returns ``(problems, parsed, parse_error)``; ``problems == []`` means VALID.  Undecodable or
+    unparseable bytes (an empty file included) classify as ``["unparseable"]``.
+    """
+    try:
+        parsed = json.loads(raw_bytes.decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 — one INVALID class for undecodable/unparseable bytes
+        return ["unparseable"], None, exc
+    return validate_account_state(parsed), parsed, None
+
+
+def account_file_status(
+    portfolio_id: str | None = None,
+    *,
+    path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Read-only landing-gate classification of one account.json.
+
+    NEVER writes, quarantines or alerts.  ``path`` overrides the registry-resolved account path.
+    Returns ``{status, path, sha256, size, problems}`` with status MISSING | VALID | INVALID;
+    problems is ``["unreadable:<ExcName>"]``, ``["unparseable"]`` or the
+    :func:`validate_account_state` codes.
+    """
+    account_path = Path(path) if path is not None else _paths(portfolio_id)["account"]
+    if not account_path.exists():
+        return {"status": "MISSING", "path": str(account_path), "sha256": None,
+                "size": None, "problems": []}
+    try:
+        raw_bytes = account_path.read_bytes()
+    except Exception as exc:  # noqa: BLE001 — classification must never raise
+        return {"status": "INVALID", "path": str(account_path), "sha256": None,
+                "size": None, "problems": [f"unreadable:{type(exc).__name__}"]}
+    problems, _parsed, _parse_error = _classify_account_bytes(raw_bytes)
+    return {
+        "status": "VALID" if not problems else "INVALID",
+        "path": str(account_path),
+        "sha256": hashlib.sha256(raw_bytes).hexdigest(),
+        "size": len(raw_bytes),
+        "problems": problems,
+    }
+
+
+def _quarantine_invalid_account(
+    portfolio_id: str | None,
+    path: Path,
+    raw_bytes: bytes | None,
+    problems: list[str],
+) -> dict[str, Any]:
+    """Best-effort quarantine of an invalid EXISTING account.json; never stops the caller's raise.
+
+    Writes a byte-for-byte COPY of the original beside it (idempotent per distinct content).  The
+    original itself is never moved, renamed, truncated, rewritten or deleted: a moved account.json
+    would read as missing on the next load and silently seed a fresh book — exactly the defect
+    this closes.  One ledger row plus one governance event per NEWLY written copy (or a failed
+    copy); every detection, repeats included, is logged.  Any failure in here is recorded on the
+    returned record and swallowed.
+    """
+    data_dir = path.parent
+    source_sha256 = (
+        hashlib.sha256(raw_bytes).hexdigest() if raw_bytes is not None else None
+    )
+    record: dict[str, Any] = {
+        "event": "account_state_invalid",
+        "portfolio_id": portfolio_id or "flagship",
+        "path_name": path.name,
+        "source_sha256": source_sha256,
+        "size": len(raw_bytes) if raw_bytes is not None else None,
+        "problems": list(problems),
+        "quarantine_file": None,
+        "status": "quarantine_failed",
+        "detected_at": datetime.now(UTC).isoformat(),
+        "recoverable": True,   # the original stays in place; a human repairs or replaces it
+    }
+    if raw_bytes is not None:
+        candidate = data_dir / f"account.quarantine.{source_sha256[:16]}.json"
+        record["quarantine_file"] = candidate.name
+        if candidate.exists():
+            record["status"] = "already_quarantined"
+        else:
+            try:
+                _atomic_write_bytes(candidate, raw_bytes)
+                record["status"] = "quarantined"
+            except Exception as exc:  # noqa: BLE001 — the caller's raise still happens
+                record["quarantine_error"] = repr(exc)[:300]
+    if record["status"] in {"quarantined", "quarantine_failed"}:
+        try:
+            _append_jsonl(data_dir / "account_quarantine.jsonl", record)
+        except Exception as exc:  # noqa: BLE001 — the shared event below is a second audit sink
+            record["audit_ledger_error"] = repr(exc)[:300]
+        try:
+            from control_plane import run_events
+            run_events.append({
+                "kind": "account_state_invalid",
+                "job": "paper_account",
+                "book": portfolio_id or "flagship",
+                "step": "load_account",
+                "status": "error",
+                "severity": "HARD_STOP",
+                "actor": "deterministic_engine",
+                "extra": {
+                    "problems": record["problems"],
+                    "quarantine_file": record["quarantine_file"],
+                    "quarantine_status": record["status"],
+                    "source_sha256": record["source_sha256"],
+                    "recoverable": record["recoverable"],
+                },
+            })
+        except Exception as exc:  # noqa: BLE001 — event logging never re-enables an invalid book
+            record["event_log_error"] = repr(exc)[:300]
+    logging.getLogger(__name__).error(
+        "account_state_invalid portfolio=%s problems=%s",
+        record["portfolio_id"], record["problems"],
+    )
+    return record
+
+
+def _account_invalid_error(
+    portfolio_id: str | None,
+    problems: list[str],
+    record: dict[str, Any] | None,
+    *,
+    strict: bool = False,
+    read_exc: Exception | None = None,
+) -> "AccountStateInvalid":
+    """Build the fail-closed error; ``strict`` keeps the legacy replay message strings byte-for-byte."""
+    if strict:
+        message = (
+            f"account cannot be read during transaction recovery: {read_exc!r}"
+            if read_exc is not None
+            else "account schema is invalid during transaction recovery"
+        )
+    else:
+        message = f"account state invalid for {portfolio_id or 'flagship'}: {problems}"
+    return AccountStateInvalid(message, record=record)
+
+
+def _raise_invalid_account(
+    portfolio_id: str | None,
+    account_path: Path,
+    raw_bytes: bytes | None,
+    problems: list[str],
+    *,
+    strict: bool = False,
+    cause: Exception | None = None,
+) -> NoReturn:
+    """Quarantine an invalid EXISTING account file, then raise AccountStateInvalid (never returns)."""
+    record = _quarantine_invalid_account(portfolio_id, account_path, raw_bytes, problems)
+    error = _account_invalid_error(portfolio_id, problems, record, strict=strict, read_exc=cause)
+    if cause is not None:
+        raise error from cause
+    raise error
+
+
 def _load_account_file(portfolio_id: str | None = None, *, strict: bool = False) -> dict[str, Any]:
     """Read account.json without invoking transaction recovery.
 
     ``strict`` is used by replay: a corrupt on-disk account must never be mistaken for a fresh book
     and overwritten by a prepared transaction.
+
+    Fail-closed (D-ACCT-1): a MISSING file is still a new book, but an EXISTING file that cannot be
+    read, parsed, or schema-validated is quarantined (byte-for-byte copy beside the original) and
+    raises :class:`AccountStateInvalid`.  It is NEVER replaced by a fresh book — the next save of a
+    fresh book over the real file would silently reset a live paper book.
     """
     _account_path = _paths(portfolio_id)["account"]
+    if not _account_path.exists():
+        return _fresh_account()
     try:
-        if _account_path.exists():
-            raw = json.loads(_account_path.read_text())
-            # basic schema validation
-            if (
-                isinstance(raw.get("cash"), (int, float))
-                and isinstance(raw.get("positions"), dict)
-                and raw.get("starting_nav")
-            ):
-                return raw
-            if strict:
-                raise PaperTransactionConflict("account schema is invalid during transaction recovery")
-    except PaperTransactionConflict:
-        raise
+        raw_bytes = _account_path.read_bytes()
+    except FileNotFoundError:
+        return _fresh_account()
     except Exception as exc:
-        if strict:
-            raise PaperTransactionConflict(
-                f"account cannot be read during transaction recovery: {exc!r}"
-            ) from exc
-    return _fresh_account()
+        _raise_invalid_account(
+            portfolio_id, _account_path, None,
+            [f"unreadable:{type(exc).__name__}"], strict=strict, cause=exc,
+        )
+    problems, parsed, parse_error = _classify_account_bytes(raw_bytes)
+    if not problems:
+        return parsed
+    _raise_invalid_account(
+        portfolio_id, _account_path, raw_bytes, problems, strict=strict, cause=parse_error,
+    )
 
 
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
@@ -278,10 +481,45 @@ def _durable_unlink(path: Path) -> None:
 
 def _save_account(state: dict[str, Any], portfolio_id: str | None = None) -> None:
     _ensure_dir(portfolio_id)
+    # Refuse to PERSIST an invalid in-memory book before anything is written.  The on-disk file
+    # is deliberately NOT quarantined for this case: it is still valid and stays untouched.
+    state_problems = validate_account_state(state)
+    if state_problems:
+        raise AccountStateInvalid(
+            f"refusing to save invalid account state for {portfolio_id or 'flagship'}: "
+            f"{state_problems}"
+        )
+    account_path = _paths(portfolio_id)["account"]
+    if account_path.exists():
+        # Nothing may overwrite an INVALID book (D-ACCT-1): saving a fresh/valid state over it
+        # would silently reset a live paper book.  Quarantine the invalid bytes, then fail
+        # closed — a human repairs the file directly.
+        _assert_existing_account_valid(portfolio_id, account_path, strict=False)
     _atomic_write_bytes(
-        _paths(portfolio_id)["account"],
+        account_path,
         json.dumps(state, indent=2, default=str).encode("utf-8"),
     )
+
+
+def _assert_existing_account_valid(
+    portfolio_id: str | None,
+    account_path: Path,
+    *,
+    strict: bool = False,
+) -> None:
+    """Read + classify the existing account.json; quarantine and raise if it is INVALID."""
+    try:
+        raw_bytes = account_path.read_bytes()
+    except Exception as exc:  # noqa: BLE001 — unreadable bytes are one INVALID class
+        _raise_invalid_account(
+            portfolio_id, account_path, None,
+            [f"unreadable:{type(exc).__name__}"], strict=strict, cause=exc,
+        )
+    problems, _parsed, parse_error = _classify_account_bytes(raw_bytes)
+    if problems:
+        _raise_invalid_account(
+            portfolio_id, account_path, raw_bytes, problems, strict=strict, cause=parse_error,
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -386,6 +624,20 @@ _PERSISTED_FILL_SHARE_QUANTUM = 0.000001
 
 class PaperTransactionConflict(RuntimeError):
     """Prepared paper state cannot be replayed without overwriting unrelated runtime state."""
+
+
+class AccountStateInvalid(PaperTransactionConflict):
+    """An EXISTING account.json is unreadable, unparseable, or schema-invalid.
+
+    Raised INSTEAD of silently seeding a fresh book, whose next save would reset a live paper
+    book (D-ACCT-1).  ``.record`` carries the quarantine/alert record dict when an on-disk file
+    was quarantined; it is None when an invalid in-memory STATE was refused before any file was
+    touched.  Subclassing PaperTransactionConflict keeps every existing hard-stop handler hard.
+    """
+
+    def __init__(self, message: str, *, record: dict[str, Any] | None = None) -> None:
+        super().__init__(message)
+        self.record = record
 
 
 def _transaction_path(portfolio_id: str | None = None) -> Path:
@@ -1666,33 +1918,6 @@ def _benchmark_for(portfolio_id: str | None) -> str:
         return registry.benchmark(portfolio_id)
     except Exception:
         return "SPY"
-
-
-def reset_cost_basis_to_market(prices: dict[str, float] | None = None,
-                               portfolio_id: str | None = None) -> dict[str, float]:
-    """Reset every holding's avg_cost to its CURRENT market price → wipes unrealized P&L.
-
-    Used when the book is marked flat with no trading (e.g. the market has been closed all day):
-    nothing actually traded, so carrying a stale unrealized gain/loss is wrong. Only the cost
-    basis — and therefore unrealized P&L — is reset to zero as of now.
-
-    NAV-safe: a holding is reset ONLY to a real current mark. `prices` (the same marks nav()/
-    positions_pnl() use) is preferred; the stockdata live price is the per-name fallback. A name
-    with NO available mark is SKIPPED (never reset to a stale series value) so the avg_cost — which
-    nav() falls back to when a live quote is missing — can't silently shift the portfolio total.
-    Returns {ticker: new_cost_basis}. Paper-only."""
-    state = _load_account(portfolio_id)
-    prices = prices or {}
-    updated: dict[str, float] = {}
-    for ticker, pos in state.get("positions", {}).items():
-        px = prices.get(ticker)
-        if px is None:
-            px = _live_price(ticker)          # the stockdata mark (consistent with the marks elsewhere)
-        if px and px > 0 and pos.get("shares"):
-            pos["avg_cost"] = round(float(px), 4)
-            updated[ticker] = pos["avg_cost"]
-    _save_account(state, portfolio_id)
-    return updated
 
 
 # ---------------------------------------------------------------------------
