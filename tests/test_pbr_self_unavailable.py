@@ -181,7 +181,7 @@ def test_sd_nav_seed_is_a_neutral_placeholder_not_a_funded_number():
 
     # ... and the reason line sits immediately after it, hidden until a read fails.
     after = HTML[match.end():match.end() + 200]
-    assert '<div class="mm-perf-stat-sub" id="sd-nav-status" hidden></div>' in after
+    assert '<div class="mm-perf-stat-sub" id="sd-nav-status" aria-live="polite" hidden></div>' in after
     assert HTML.count('id="sd-nav-status"') == 1
 
 
@@ -260,8 +260,10 @@ def test_buying_power_and_ticket_refuse_to_render_or_act_on_an_unreadable_accoun
     est_src = est_src[:est_src.index("\nwindow.")]
     assert "cash = (_self || {}).cash || 0" not in est_src
     assert "cashKnown ? fmtNav(rawCash) : t('sd.unavailable')" in est_src
-    assert "buy.disabled = bookUnknown || !canBuy || _selfBusy;" in est_src
-    assert "sell.disabled = bookUnknown || !canSell || _selfBusy;" in est_src
+    # B0 (p3b NIT 3): inert until the book state is 'ok', so the pending window is inert too.
+    assert "var bookNotOk = _selfBookState(_self, _selfSettled) !== 'ok';" in est_src
+    assert "buy.disabled = bookNotOk || !canBuy || _selfBusy;" in est_src
+    assert "sell.disabled = bookNotOk || !canSell || _selfBusy;" in est_src
 
 
 # ── node harness ──────────────────────────────────────────────────────────────
@@ -527,7 +529,7 @@ def test_unavailable_api_payload_renders_unavailable_everywhere(tmp_path, monkey
     assert out["containsFabricatedNav"] is False
 
     # An unknown market is `unavailable`, never an unverified "Closed — next open".
-    assert out["mktLabelUnknown"] == {"cls": "closed", "txt": "sd.mkt.unknown"}
+    assert out["mktLabelUnknown"] == {"cls": "unknown", "txt": "sd.mkt.unknown"}
 
 
 @requires_node
@@ -569,7 +571,7 @@ def test_success_api_payload_renders_the_api_nav_exactly(tmp_path, monkeypatch):
     assert out["containsFabricatedNav"] is False
 
     # A present market still renders its real session.
-    assert out["mktLabelUnknown"] == {"cls": "closed", "txt": "sd.mkt.unknown"}
+    assert out["mktLabelUnknown"] == {"cls": "unknown", "txt": "sd.mkt.unknown"}
 
 
 @requires_node

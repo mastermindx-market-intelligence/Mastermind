@@ -1564,6 +1564,9 @@ body.page-mm.view-self #view-self .mm-section { display: block !important; }
 .mm-sd-mkt.open .dot   { background: var(--up); animation: mmhb 2.4s ease-in-out infinite; }
 .mm-sd-mkt.closed { background: color-mix(in srgb, var(--muted) 14%, var(--panel2)); color: var(--muted); border: 1px solid var(--line); }
 .mm-sd-mkt.closed .dot { background: var(--muted); }
+/* Unknown session: no fill, dashed edge, hollow dot — a shape cue, not only a colour. */
+.mm-sd-mkt.unknown { background: transparent; color: var(--muted); border: 1px dashed var(--line); }
+.mm-sd-mkt.unknown .dot { background: transparent; box-shadow: inset 0 0 0 1.5px var(--muted); }
 
 /* order ticket */
 .mm-sd-ticket { display: grid; grid-template-columns: minmax(0,1.4fr) minmax(0,1fr); gap: 18px; align-items: start; }
@@ -2475,7 +2478,7 @@ html[data-theme="light"] body.page-mm {
 /* ── autonomous book banner + decision log ────────────────────────────────── */
 .mm-pf-awaiting{position:relative;min-height:100px}
 .mm-pf-awaiting > *{visibility:hidden}
-.mm-pf-awaiting::after{content:attr(data-scope-message);position:absolute;top:40px;left:20px;right:20px;color:var(--muted);font-size:12px}
+.mm-pf-awaiting > h2{visibility:visible}
 .mm-eval-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
 .mm-eval-head h2{margin-bottom:8px}
 .mm-eval-badge{flex:none;border:1px solid var(--line);border-radius:20px;padding:3px 9px;font-size:10px;color:var(--muted)}
@@ -2633,6 +2636,78 @@ html[data-theme="light"] body.page-mm {
   background:var(--panel2);color:var(--link);font:inherit;font-size:12px;font-weight:700;
   cursor:pointer;transition:border-color .15s ease,background .15s ease,color .15s ease}
 .mm-dec-more:hover{border-color:var(--link);background:color-mix(in srgb,var(--link) 8%,var(--panel2))}
+/* ── PBR B0 view shell + G5 skeleton — spec §2/§3 ── */
+.mm-viewbar{display:flex;align-items:flex-end;gap:12px;margin-top:18px;border-bottom:1px solid var(--line)}
+.mm-tabset{display:flex;gap:2px;flex:1 1 auto;min-width:0;overflow-x:auto;scrollbar-width:none;-webkit-overflow-scrolling:touch}
+.mm-tabset::-webkit-scrollbar{display:none}
+.mm-tabset a{flex:0 0 auto;display:inline-flex;align-items:center;min-height:40px;padding:0 12px;margin-bottom:-1px;border-bottom:2px solid transparent;color:var(--muted);font-size:13px;font-weight:600;letter-spacing:.01em;text-decoration:none;white-space:nowrap;transition:color .14s ease,border-color .14s ease}
+.mm-tabset a:hover{color:var(--text)}
+.mm-tabset a[aria-current="page"]{color:var(--text);border-bottom-color:var(--text)}
+.mm-tabset a:focus-visible{outline:2px solid var(--focus-ring);outline-offset:-2px;border-radius:var(--radius-sm)}
+.mm-tabset a[hidden]{display:none}
+.mm-viewbar-end{flex:0 0 auto;display:inline-flex;align-items:center;gap:8px;padding-bottom:5px}
+.mm-scope-retry{display:inline-flex;align-items:center;min-height:32px;padding:0 12px;border:1px solid var(--line);border-radius:var(--radius-sm);background:transparent;color:var(--text);font:inherit;font-size:var(--fs-sm,12.5px);font-weight:600;cursor:pointer}
+.mm-scope-retry:hover{border-color:var(--link)}
+.mm-scope-retry:focus-visible{outline:2px solid var(--focus-ring);outline-offset:2px}
+.mm-scope-retry[hidden]{display:none}
+@media (max-width:820px){.mm-scope-retry{min-height:40px}}
+/* the view bar belongs to the dashboard only — Research / Desk / Self keep their own chrome */
+body.page-mm.view-research .mm-viewbar, body.page-mm.view-desk .mm-viewbar, body.page-mm.view-self .mm-viewbar{display:none}
+/* the view axis: with no data-mm-view on body nothing is filtered (master behaviour) */
+body.page-mm[data-mm-view="overview"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="overview"]){display:none!important}
+body.page-mm[data-mm-view="decision"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="decision"]){display:none!important}
+body.page-mm[data-mm-view="pending"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="pending"]){display:none!important}
+body.page-mm[data-mm-view="performance"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="performance"]){display:none!important}
+body.page-mm[data-mm-view="opportunities"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="opportunities"]){display:none!important}
+body.page-mm[data-mm-view="position"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="position"]){display:none!important}
+body.page-mm[data-mm-view="operations"]:not(.view-research):not(.view-desk):not(.view-self) .mm-section[data-mm-views]:not([data-mm-views~="operations"]){display:none!important}
+/* G5 skeleton — true-geometry blocks, static only: no prose, no shimmer, no sweep, no pulse */
+.mm-pf-awaiting.mm-pf-failed::after{content:attr(data-scope-message);position:absolute;top:52px;left:20px;right:20px;color:var(--muted);font-size:var(--fs-sm,12.5px);font-weight:600}
+.mm-pf-awaiting.mm-skel{--mm-skel:color-mix(in srgb,var(--line) 60%,transparent);--mm-skel-soft:color-mix(in srgb,var(--line) 28%,transparent)}
+.mm-pf-awaiting.mm-skel::after{content:'';position:absolute;left:20px;right:20px;top:56px;bottom:20px;background-repeat:no-repeat;pointer-events:none}
+#performance.mm-pf-awaiting{min-height:340px}
+#performance.mm-pf-awaiting::after{
+  background-image:
+    linear-gradient(var(--mm-skel),var(--mm-skel)),
+    repeating-linear-gradient(to right,var(--mm-skel) 0 calc(25% - 12px),transparent calc(25% - 12px) 25%),
+    linear-gradient(var(--mm-skel-soft),var(--mm-skel-soft));
+  background-size:38% 30px,100% 44px,100% 150px;
+  background-position:left top,left 54px,left 118px}
+#positions.mm-pf-awaiting{min-height:320px}
+#positions.mm-pf-awaiting::after{
+  background-image:
+    linear-gradient(var(--mm-skel-soft),var(--mm-skel-soft)),
+    repeating-linear-gradient(to bottom,var(--mm-skel) 0 12px,transparent 12px 40px);
+  background-size:100% 10px,100% 240px;
+  background-position:left top,left 26px}
+#alloc.mm-pf-awaiting{min-height:110px}
+#alloc.mm-pf-awaiting::after{
+  background-image:
+    linear-gradient(var(--mm-skel),var(--mm-skel)),
+    repeating-linear-gradient(to right,var(--mm-skel) 0 18%,transparent 18% 24%);
+  background-size:100% 14px,72% 10px;
+  background-position:left top,left 30px}
+#trades.mm-pf-awaiting{min-height:260px}
+#trades.mm-pf-awaiting::after{
+  background-image:repeating-linear-gradient(to bottom,var(--mm-skel) 0 12px,transparent 12px 36px);
+  background-size:100% 216px;
+  background-position:left top}
+#safety.mm-pf-awaiting{min-height:220px}
+#safety.mm-pf-awaiting::after{
+  background-image:repeating-linear-gradient(to right,var(--mm-skel) 0 calc(50% - 8px),transparent calc(50% - 8px) 50%);
+  background-size:100% 56px,100% 56px;
+  background-position:left top,left 72px}
+#rejected.mm-pf-awaiting{min-height:200px}
+#rejected.mm-pf-awaiting::after{
+  background-image:repeating-linear-gradient(to bottom,var(--mm-skel) 0 12px,transparent 12px 36px);
+  background-size:100% 144px;
+  background-position:left top}
+#rejected.mm-pf-awaiting.mm-collapsed{min-height:0}
+#rejected.mm-pf-awaiting.mm-collapsed::after{display:none}
+/* one reveal easing — the only motion in this shell (spec §3 motion) */
+@keyframes mm-pf-reveal{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.mm-pf-reveal{animation:mm-pf-reveal 140ms cubic-bezier(.2,.7,.2,1) both}
+@media (prefers-reduced-motion:reduce){.mm-pf-reveal{animation:none}}
 </style>
 <div id="mm-nav">
   <!-- Back to the Macro Dashboard — hidden by default; the inline script below un-hides it
@@ -2723,8 +2798,25 @@ html[data-theme="light"] body.page-mm {
 })();
 </script>
 
+<!-- PBR-B0 view bar: the secondary (view) axis; the book switcher in #mm-nav stays primary (spec §2). -->
+<div class="mm-viewbar" id="mm-viewbar">
+  <nav class="mm-tabset" id="mm-tabset" aria-label="View">
+    <a href="#/autonomous/overview" data-mm-view="overview"><span class="l-en">Overview</span><span class="l-zh">总览</span></a>
+    <a href="#/autonomous/decision" data-mm-view="decision"><span class="l-en">Decision</span><span class="l-zh">决策</span></a>
+    <a href="#/autonomous/pending" data-mm-view="pending"><span class="l-en">Pending</span><span class="l-zh">待处理</span></a>
+    <a href="#/autonomous/performance" data-mm-view="performance"><span class="l-en">Performance</span><span class="l-zh">业绩</span></a>
+    <a href="#/autonomous/opportunities" data-mm-view="opportunities"><span class="l-en">Opportunities</span><span class="l-zh">机会</span></a>
+    <a href="#/autonomous/position" data-mm-view="position"><span class="l-en">Position review</span><span class="l-zh">持仓复盘</span></a>
+    <a href="#/autonomous/operations" data-mm-view="operations"><span class="l-en">Operations</span><span class="l-zh">运行状态</span></a>
+  </nav>
+  <span class="mm-viewbar-end">
+    <span class="mm-sr-only" id="mm-scope-status" role="status" aria-live="polite"></span>
+    <button class="mm-scope-retry" id="mm-scope-retry" type="button" hidden onclick="_mmRetryScope()"><span class="l-en">Retry</span><span class="l-zh">重试</span></button>
+  </span>
+</div>
+
 <!-- Decision availability precedes the memo; its clocks are independent of live marks. -->
-<div class="mm-section" id="decision-availability-section" style="display:none">
+<div class="mm-section" id="decision-availability-section" data-mm-views="decision" style="display:none">
   <section class="panel span12" id="decision-availability" aria-live="polite" aria-label="Decision and account status">
     <h2><span class="l-en">Decision and account status</span><span class="l-zh">决策与账户状态</span></h2>
     <div class="mm-empty"><span class="l-en">Reading recorded decisions and account…</span><span class="l-zh">正在读取决策与账户记录…</span></div>
@@ -2732,7 +2824,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── AUTONOMOUS BOOK BANNER (shown only when the autonomous portfolio is active) ── -->
-<div class="grid mm-section" id="auto-banner-sec" style="margin-top:0;display:none">
+<div class="grid mm-section" id="auto-banner-sec" data-mm-views="decision" style="margin-top:0;display:none">
   <div class="panel span12" id="auto-banner">
     <div class="mm-auto-banner">
       <div class="mm-auto-head">
@@ -2751,12 +2843,12 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- Evaluation observations are separate from quote-driven performance. -->
-<div class="mm-section" id="forward-evaluation-section" style="display:none">
+<div class="mm-section" id="forward-evaluation-section" data-mm-views="operations" style="display:none">
   <section class="panel span12" id="forward-evaluation" aria-live="polite" aria-label="Evaluation record"></section>
 </div>
 
 <!-- ── PERFORMANCE HEADER ─────────────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="overview performance">
   <div class="panel span12" id="performance" style="grid-column:span 12">
     <h2><span class="l-en">Performance — Simulated Account</span><span class="l-zh">业绩 — 模拟账户</span></h2>
     <p class="mm-perf-stat-sub" id="perf-evidence" role="status" aria-live="polite"></p>
@@ -2820,7 +2912,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── ALLOCATION ─────────────────────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="overview">
   <div class="panel span12" id="alloc" style="grid-column:span 12">
     <h2><span class="l-en">Allocation</span><span class="l-zh">仓位分配</span></h2>
     <div class="mm-sleeve-bar" id="sleeve-bar">
@@ -2838,7 +2930,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── POSITIONS ──────────────────────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="overview position">
   <div class="panel span12" id="positions" style="grid-column:span 12">
     <h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading positions…</span><span class="l-zh">加载持仓中…</span></div>
@@ -2846,7 +2938,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── TRADE HISTORY ──────────────────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="pending position">
   <div class="panel span12" id="trades" style="grid-column:span 12">
     <h2><span class="l-en">Trade History</span><span class="l-zh">交易历史</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading trades…</span><span class="l-zh">加载交易中…</span></div>
@@ -2854,7 +2946,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── SAFETY (portfolio risk backtest; supporting detail after holdings + fills) ── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="overview">
   <div class="panel span12" id="safety" style="grid-column:span 12">
     <h2><span class="l-en">Portfolio Safety</span><span class="l-zh">组合安全度</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">🛡</span><span class="l-en">Assessing portfolio risk…</span><span class="l-zh">评估组合风险中…</span></div>
@@ -2863,7 +2955,7 @@ html[data-theme="light"] body.page-mm {
 
 <!-- ── BRAIN LOG + RESEARCH (side-by-side on wide screens) ─────────────────── -->
 <!-- ── AUTONOMOUS DAILY DECISION LOG (shown only when the autonomous portfolio is active) ── -->
-<div class="mm-section" id="decisions-sec" style="display:none">
+<div class="mm-section" id="decisions-sec" data-mm-views="decision" style="display:none">
   <div class="panel span12" id="decisions">
     <h2><span class="l-en">Daily Decision Log</span><span class="l-zh">每日决策日志</span></h2>
     <div class="mm-dec-sub" style="color:var(--muted);font-size:12px;margin:-2px 0 12px">
@@ -2882,11 +2974,11 @@ html[data-theme="light"] body.page-mm {
      Forward-graded sizing skill: weight-IC (did bigger bets earn bigger relative returns?),
      book edge, hit-rate, conviction breakdown. Rendered from the book payload's `accountability`
      by renderSizingScorecard(); the section hides itself when the active book has no ledger. -->
-<div class="mm-section" id="sizing-sec" style="display:none">
+<div class="mm-section" id="sizing-sec" data-mm-views="position" style="display:none">
   <div class="panel span12" id="sizing-card"></div>
 </div>
 
-<div class="mm-section grid mm-feeds-row">
+<div class="mm-section grid mm-feeds-row" data-mm-views="decision">
   <div class="panel span6 mm-collapsible" id="brainlog">
     <h2 class="mm-coll-h2" onclick="toggleCollapse('brainlog')"><span class="mm-coll-chev">&#9654;</span><span class="l-en">Brain Log</span><span class="l-zh">脑波日志</span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading activity…</span><span class="l-zh">加载动态中…</span></div>
@@ -2898,7 +2990,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── DEEP ACTIVITY LOG ──────────────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="operations">
   <div class="panel span12 mm-collapsible mm-collapsed" id="runs" style="grid-column:span 12">
     <h2 class="mm-coll-h2" onclick="toggleCollapse('runs')"><span class="mm-coll-chev">&#9654;</span><span class="l-en">Brain Activity &mdash; Full Trace</span><span class="l-zh">脑波活动 &mdash; 完整追踪</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px"><span class="l-en">expand a run for complete step-by-step reasoning</span><span class="l-zh">展开运行记录查看完整推理过程</span></span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading run history…</span><span class="l-zh">加载运行历史中…</span></div>
@@ -2906,7 +2998,7 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── REJECTED NAMES ─────────────────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="rejected" style="grid-column:span 12">
     <h2 class="mm-coll-h2" onclick="toggleCollapse('rejected')"><span class="mm-coll-chev">&#9654;</span><span class="l-en">Evaluated &mdash; Not Held, and Why</span><span class="l-zh">已评估 &mdash; 未持仓及原因</span> <span style="font-weight:400;font-size:11px;color:var(--muted);margin-left:6px"><span class="l-en">the discipline made visible</span><span class="l-zh">让纪律透明化</span></span></h2>
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading rejected names…</span><span class="l-zh">加载剔除标的中…</span></div>
@@ -2914,35 +3006,35 @@ html[data-theme="light"] body.page-mm {
 </div>
 
 <!-- ── SHADOW BOOKS (Policy A/B) ──────────────────────────────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="shadow-books" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading shadow books…</span><span class="l-zh">加载影子组合中…</span></div>
   </div>
 </div>
 
 <!-- ── CROSS-SECTIONAL EDGE (universe-wide prediction log) ─────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="xsec" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading cross-sectional edge…</span><span class="l-zh">加载横截面边际中…</span></div>
   </div>
 </div>
 
 <!-- ── ENGINE BACKTEST VERDICT (historical, leakage-free) ─────────────────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="operations">
   <div class="panel span12 mm-collapsible mm-collapsed" id="engine-bt" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading engine backtest…</span><span class="l-zh">加载引擎回测中…</span></div>
   </div>
 </div>
 
 <!-- ── FACTOR ALPHA LAB (advanced: factor zoo + composite + IC term-structure) ── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="factor-zoo" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading factor alpha lab…</span><span class="l-zh">加载因子阿尔法实验室中…</span></div>
   </div>
 </div>
 
 <!-- ── FUNDAMENTAL FACTORS (PIT value + quality + regime-conditional IC) ─────── -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="opportunities">
   <div class="panel span12 mm-collapsible mm-collapsed" id="fundamentals" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading fundamental factors…</span><span class="l-zh">加载基本面因子中…</span></div>
   </div>
@@ -2952,7 +3044,7 @@ html[data-theme="light"] body.page-mm {
      The self-improving loop's tabular layer: a CatBoost regressor learns which names beat SPY over
      the universe log (the student), and a classifier learns to mimic Opus's buy decisions (distill).
      Read-only status + top predicted edges from /api/student + /api/distill (renderLearningModels). -->
-<div class="mm-section">
+<div class="mm-section" data-mm-views="operations">
   <div class="panel span12 mm-collapsible mm-collapsed" id="learning-models" style="grid-column:span 12">
     <div class="mm-empty"><span class="mm-empty-icon">⊙</span><span class="l-en">Loading learning models…</span><span class="l-zh">加载学习模型中…</span></div>
   </div>
@@ -3116,10 +3208,10 @@ html[data-theme="light"] body.page-mm {
         <div>
           <div class="mm-hero-eyebrow"><span class="mm-hb" id="sd-hb"></span>&nbsp;<span class="l-en">SELF-DIRECTED &mdash; YOUR PAPER BOOK</span><span class="l-zh">自主交易 &mdash; 你的模拟组合</span></div>
           <div class="mm-perf-nav-value" id="sd-nav" style="font-size:32px;margin-top:4px">—</div>
-          <div class="mm-perf-stat-sub" id="sd-nav-status" hidden></div>
+          <div class="mm-perf-stat-sub" id="sd-nav-status" aria-live="polite" hidden></div>
           <div style="margin-top:7px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
             <span class="mm-paper">PAPER</span>
-            <span class="mm-sd-mkt closed" id="sd-mkt"><span class="dot"></span><span id="sd-mkt-txt">—</span></span>
+            <span class="mm-sd-mkt unknown" id="sd-mkt"><span class="dot"></span><span id="sd-mkt-txt">—</span></span>
           </div>
         </div>
         <div id="sd-scorecard" style="margin-left:auto;display:flex;gap:30px;flex-wrap:wrap">
@@ -3221,6 +3313,29 @@ html[data-theme="light"] body.page-mm {
 
 // ── i18n dictionary ──────────────────────────────────────────────────────────
 var I18N = {
+  // PBR-B0-VOCAB:BEGIN — spec §3 state vocabulary (binding strings; do not paraphrase)
+  'state.loading':                { en: 'Loading', zh: '加载中' },
+  'state.empty':                  { en: 'Empty', zh: '暂无' },
+  'state.stale':                  { en: 'Behind', zh: '滞后' },
+  'state.partial':                { en: 'Partial', zh: '部分' },
+  'state.error':                  { en: "Couldn't load", zh: '加载失败' },
+  'state.closed_market':          { en: 'Market closed', zh: '休市' },
+  'state.benchmark_unavailable':  { en: 'Benchmark unavailable', zh: '基准不可用' },
+  'state.provisional':            { en: 'Provisional', zh: '暂定' },
+  'state.withheld':               { en: 'Withheld', zh: '暂不估值' },
+  'state.unverified':             { en: 'Unverified', zh: '未核实' },
+  'state.queued':                 { en: 'Queued', zh: '已排队' },
+  'state.unavailable':            { en: 'Unavailable', zh: '不可用' },
+  'state.qualified':              { en: 'Qualified', zh: '已核实' },
+  'state.retry':                  { en: 'Retry', zh: '重试' },
+  'state.see_all':                { en: 'See all {n}', zh: '查看全部 {n} 项' },
+  'state.risk_unavailable':       { en: 'risk snapshot unavailable', zh: '风险快照不可用' },
+  'state.pricing_partial':        { en: 'pricing summary missing — showing the last complete holdings', zh: '缺少定价汇总 — 显示上次完整持仓' },
+  'state.weight_unavailable':     { en: 'Unavailable', zh: '不可用' },
+  // D-ACCT-1: the account file exists but cannot be read, parsed or validated.
+  'state.book_invalid':           { en: 'Book unavailable — state invalid', zh: '账本不可用 — 状态无效' },
+  'state.quarantine_ref':         { en: 'Quarantine ref {sha}', zh: '隔离编号 {sha}' },
+  // PBR-B0-VOCAB:END
   // Performance section
   'perf.title':           { en: 'Performance — Simulated Account', zh: '业绩 — 模拟账户' },
   'perf.current_nav':     { en: 'NAV', zh: '净值' },
@@ -3591,6 +3706,10 @@ var I18N = {
   'desk.col_fw':          { en: 'Firm wt', zh: '全firm权重' },
   'desk.col_usd':         { en: 'USD', zh: '美元' },
   'desk.col_sector':      { en: 'Sector', zh: '板块' },
+  // PBR-B0-SHELL-KEYS:BEGIN — spec §2 view shell
+  'view.nav_label': { en: 'View', zh: '视图' },
+  'scope.error_detail': { en: 'Couldn\'t load — this panel\'s read failed; other panels still work.', zh: '加载失败 — 此面板读取失败；其他面板仍可用。' },
+  // PBR-B0-SHELL-KEYS:END
 };
 
 function t(key) {
@@ -3599,6 +3718,58 @@ function t(key) {
   if (!entry) return key;
   return entry[lg] || entry['en'] || key;
 }
+
+// PBR-B0-PRIMITIVES:BEGIN — spec §3 vocabulary primitives. Every one of these
+// returns a WORD where a figure would otherwise sit; none of them may render a
+// number, an em dash or a zero. t() resolves the language at call time and the
+// renderers re-run on language change, so no l-en/l-zh spans are needed here.
+function _unavailHtml(reason) {
+  return '<span class="mm-unavail">' + esc(t('state.unavailable')) + '</span>' +
+    (typeof reason === 'string' && reason !== ''
+      ? '<span class="mm-unavail-why">' + esc(reason) + '</span>'
+      : '');
+}
+
+function _overflowHtml(n, href) {
+  return '<a class="mm-overflow" href="' + esc(href) + '">' +
+    esc(String(t('state.see_all')).replace('{n}', String(n))) + '</a>';
+}
+
+function _epiBadgeHtml(kind) {
+  if (kind !== 'qualified' && kind !== 'provisional' && kind !== 'withheld' &&
+      kind !== 'unverified') return '';
+  return '<span class="mm-epi-badge ' + kind + '">' + esc(t('state.' + kind)) + '</span>';
+}
+
+// D-ACCT-1: the account file exists but cannot be read, parsed or validated. One
+// canonical cell carries the quarantine ref so the browser can tell "state
+// invalid" apart from "nothing there" without ever showing a zero NAV, an empty
+// curve or "No positions". The ref is echoed only when it matches the sha16
+// shape the server publishes — an arbitrary string is never interpolated.
+function _bookInvalidHtml(state) {
+  if (!state || state.status !== 'invalid') return '';
+  var sha = state.quarantine_sha16;
+  var hasRef = typeof sha === 'string' && /^[0-9a-f]{16}$/.test(sha);
+  return '<div class="mm-book-invalid" role="status">' +
+    '<span class="mm-book-invalid-glyph" aria-hidden="true">⊘</span>' +
+    '<span class="mm-book-invalid-word">' + esc(t('state.book_invalid')) + '</span>' +
+    (hasRef
+      ? '<span class="mm-book-invalid-ref">' +
+          esc(String(t('state.quarantine_ref')).replace('{sha}', sha)) + '</span>'
+      : '') +
+    '</div>';
+}
+
+// The first active-book payload that reports an invalid account state wins.
+function _accountStateInvalid() {
+  var candidates = [(_perf && _perf.account_state), (_book && _book.account_state),
+                    (_liveMarks && _liveMarks.account_state)];
+  for (var i = 0; i < candidates.length; i++) {
+    if (candidates[i] && candidates[i].status === 'invalid') return candidates[i];
+  }
+  return null;
+}
+// PBR-B0-PRIMITIVES:END
 
 // Security names follow the active UI language while the ticker remains the
 // stable identifier. HK rows carry both `name` (English) and `name_zh` (native).
@@ -3937,6 +4108,11 @@ function renderPerformance() {
   var benchmarkNameZh = p.benchmark_name_zh || benchmarkName;
 
   var isZhPerf = document.documentElement.getAttribute('data-lang') === 'zh';
+  // An unreadable account file is one canonical state, not a set of zeroed slots.
+  var invalidState = _accountStateInvalid();
+  // "No value here" — null, undefined, NaN or infinite. A numeric string is still a
+  // value and formats exactly as it does today; only an absent one becomes a word.
+  var absent = function(v) { return v == null || isNaN(v) || !isFinite(v); };
   var evidenceEl = E('perf-evidence');
   if (evidenceEl) evidenceEl.textContent = _performanceEvidenceText(p, isZhPerf);
   var a = p.availability || {};
@@ -3945,18 +4121,34 @@ function renderPerformance() {
     ? (isZhPerf ? '最近记录净值' : 'Last recorded NAV')
     : (a.status === 'provisional' ? (isZhPerf ? '暂定净值' : 'Provisional NAV') : (isZhPerf ? '净值' : 'NAV'));
 
+  // A payload with no qualification contract of its own is UNVERIFIED, so a frozen
+  // mark is never presented as a current qualified NAV.
+  if (navLabel && !p.availability && !invalidState) {
+    navLabel.innerHTML = esc(navLabel.textContent) + _epiBadgeHtml('unverified');
+  }
+
   // NAV
   var navEl = E('perf-nav');
-  if (navEl) navEl.textContent = fmtNav(p.current_nav);
+  if (navEl) {
+    if (invalidState) navEl.innerHTML = _bookInvalidHtml(invalidState);
+    else if (absent(p.current_nav)) {
+      navEl.innerHTML = _unavailHtml();
+    } else navEl.textContent = fmtNav(p.current_nav);
+  }
 
   // Performance stat labels (re-written each render so langchange updates them)
   var navLblEl = E('perf-nav') && E('perf-nav').previousElementSibling;
   // labels are static HTML with l-en/l-zh spans (handled by CSS), but sub-lines need JS
   var retEl = E('perf-ret');
   if (retEl) {
-    var r = fmtPctSign(p.total_return_pct);
-    retEl.textContent = r.text;
-    retEl.className = 'mm-perf-stat-value ' + r.cls;
+    if (invalidState || absent(p.total_return_pct)) {
+      retEl.innerHTML = _unavailHtml();
+      retEl.className = 'mm-perf-stat-value neu';
+    } else {
+      var r = fmtPctSign(p.total_return_pct);
+      retEl.textContent = r.text;
+      retEl.className = 'mm-perf-stat-value ' + r.cls;
+    }
   }
 
   // Since label
@@ -3975,17 +4167,28 @@ function renderPerformance() {
   var spyEl = E('perf-spy');
   if (spyEl) {
     var relativeReturn = p.vs_benchmark_pct != null ? p.vs_benchmark_pct : p.vs_spy_pct;
-    var s = fmtPctSign(relativeReturn);
-    spyEl.textContent = s.text;
-    spyEl.className = 'mm-perf-stat-value ' + s.cls;
+    if (invalidState || absent(relativeReturn)) {
+      // TR-C: an absent benchmark is a word, never a zero and never a down arrow.
+      spyEl.innerHTML = '<span class="mm-unavail">' + esc(t('state.benchmark_unavailable')) + '</span>';
+      spyEl.className = 'mm-perf-stat-value neu';
+    } else {
+      var s = fmtPctSign(relativeReturn);
+      spyEl.textContent = s.text;
+      spyEl.className = 'mm-perf-stat-value ' + s.cls;
+    }
   }
 
   // Day change
   var dayEl = E('perf-day');
   if (dayEl) {
-    var d = fmtPctSign(p.day_change_pct);
-    dayEl.textContent = d.text;
-    dayEl.className = 'mm-perf-stat-value ' + d.cls;
+    if (invalidState || absent(p.day_change_pct)) {
+      dayEl.innerHTML = _unavailHtml();
+      dayEl.className = 'mm-perf-stat-value neu';
+    } else {
+      var d = fmtPctSign(p.day_change_pct);
+      dayEl.textContent = d.text;
+      dayEl.className = 'mm-perf-stat-value ' + d.cls;
+    }
   }
 
   var dayRangeEl = E('perf-day-range');
@@ -3998,8 +4201,13 @@ function renderPerformance() {
   var ddEl = E('perf-dd');
   if (ddEl) {
     var dd = p.max_drawdown_pct;
-    ddEl.textContent = dd != null ? (dd <= 0 ? dd.toFixed(2) : '-' + dd.toFixed(2)) + '%' : '—';
-    ddEl.className = 'mm-perf-stat-value ' + (dd != null && Math.abs(dd) > 0.5 ? 'neg' : 'neu');
+    if (invalidState || absent(dd)) {
+      ddEl.innerHTML = _unavailHtml();
+      ddEl.className = 'mm-perf-stat-value neu';
+    } else {
+      ddEl.textContent = (dd <= 0 ? dd.toFixed(2) : '-' + dd.toFixed(2)) + '%';
+      ddEl.className = 'mm-perf-stat-value ' + (Math.abs(dd) > 0.5 ? 'neg' : 'neu');
+    }
   }
 
   var ddRangeEl = E('perf-dd-range');
@@ -4011,7 +4219,9 @@ function renderPerformance() {
   // cash sub-label
   var cashLbl = E('perf-cash-lbl');
   if (cashLbl) {
-    cashLbl.textContent = t('perf.cash_lbl') + ' ' + fmtNav(p.cash);
+    cashLbl.textContent = t('perf.cash_lbl') + ' ' +
+      ((invalidState || absent(p.cash))
+        ? t('state.unavailable') : fmtNav(p.cash));
   }
 }
 
@@ -4035,12 +4245,40 @@ function renderEquityCurve() {
     var rsDate = p && p.realized_since ? p.realized_since.slice(0,10) : '—';
     legPortEl.textContent = t('ec.portfolio_live') + ' ' + rsDate + (isZhEc ? '）' : ')');
   }
+
+  // TR-C: name a reference series only when one is actually drawn. An absent
+  // benchmark is the word, and its legend swatch has no line to describe.
+  var hasBench = series.some(function(s) {
+    return typeof s.spy_nav === 'number' && Number.isFinite(s.spy_nav);
+  });
   var legBenchEl = E('ec-leg-bench');
-  if (legBenchEl) legBenchEl.textContent = benchDisplay + (isZhEc ? '（参考序列）' : ' (reference series)');
+  if (legBenchEl) {
+    legBenchEl.textContent = hasBench
+      ? benchDisplay + (isZhEc ? '（参考序列）' : ' (reference series)')
+      : t('state.benchmark_unavailable');
+  }
+  var legBenchLine = legBenchEl && legBenchEl.previousElementSibling;
+  if (legBenchLine && legBenchLine.className &&
+      legBenchLine.className.indexOf('mm-ec-leg-line') >= 0) {
+    legBenchLine.style.display = hasBench ? '' : 'none';
+  }
 
   // Range label
   var rangeEl = E('ec-range-label');
   if (rangeEl) rangeEl.textContent = series.length ? series[0].date + ' → ' + series[series.length-1].date : '';
+
+  // An unreadable account is one canonical cell — never an empty frame with a flat
+  // line, which reads as a real all-cash record. Keep the chart's height so the
+  // panel below does not jump.
+  var invalidState = _accountStateInvalid();
+  var legendEl = E('ec-legend');
+  if (legendEl) legendEl.style.display = invalidState ? 'none' : '';
+  if (invalidState) {
+    wrap.innerHTML = '<div style="min-height:220px;display:flex;align-items:center;' +
+      'justify-content:center;padding:20px 0">' + _bookInvalidHtml(invalidState) + '</div>' +
+      '<div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+    return;
+  }
 
   if (!series.length) {
     wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0"><span class="mm-empty-icon">◌</span>' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
@@ -4081,13 +4319,26 @@ function renderEquityCurve() {
   var IH = H - PAD.t - PAD.b;
 
   // data extents — use actual (not clamped) nav vals for range, then overlay flat
-  var realNavVals = series.map(function(s) { return s.nav; });
+  // Row 8: a pre-inception / hypothetical point is a synthetic capital reference, not
+  // a record of this book. Letting its flat $1M tail into the extent compresses the
+  // realised range into a visually flat line, which reads as low volatility. The
+  // extent therefore comes from realised NAV points plus finite spy_nav only.
+  var isSynthetic = function(s) { return s.kind === 'pre_inception' || s.kind === 'hypothetical'; };
   // drop null / NaN points before computing the extent — a single missing nav or
   // spy_nav would otherwise poison Math.min/max into NaN and blank the whole chart
-  var allVals = realNavVals.concat(spyVals).filter(function(v) { return typeof v === 'number' && Number.isFinite(v); });
+  var allVals = series.filter(function(s) { return !isSynthetic(s); })
+    .map(function(s) { return s.nav; })
+    .concat(spyVals)
+    .filter(function(v) { return typeof v === 'number' && Number.isFinite(v); });
   if (!allVals.length) {
-    wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0">' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
-    return;
+    // No realised value at all. The synthetic reference still needs a range to be
+    // drawn on; the empty state below only applies when there is genuinely nothing.
+    if (series.some(isSynthetic) && startNav != null) {
+      allVals = [startNav];
+    } else {
+      wrap.innerHTML = '<div class="mm-empty" style="padding:40px 0">' + t('ec.no_data') + '</div><div class="mm-ec-tooltip" id="ec-tooltip"></div>';
+      return;
+    }
   }
   var minV = Math.min.apply(null, allVals);
   var maxV = Math.max.apply(null, allVals);
@@ -4176,13 +4427,18 @@ function renderEquityCurve() {
 
   svg += '<g clip-path="url(#clip-inner-' + uid + ')">';
 
-  // Dashed native-benchmark reference line.
-  var spyPath = pathStr(spyVals, 0, n-1);
-  svg += '<path d="' + spyPath + '" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.5"/>';
+  // Dashed native-benchmark reference line. With no finite spy_nav anywhere there is
+// no reference series to draw, so no path is emitted at all (TR-C).
+  if (hasBench) {
+    var spyPath = pathStr(spyVals, 0, n-1);
+    svg += '<path d="' + spyPath + '" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="5 3" opacity="0.5"/>';
+  }
 
-  // Pre-inception: flat line at $1M (solid, no fill, muted)
+  // Row 8: the pre-inception flat line is a SYNTHETIC capital reference, not a
+  // record of this book. Dashed and muted so it can never be read as a measured
+  // low-volatility track — a solid --up line is exactly the reward being removed.
   if (realIdx > 0) {
-    svg += '<path d="' + pathStr(navVals, 0, realIdx) + '" fill="none" stroke="var(--up)" stroke-width="1.8" opacity="0.5"/>';
+    svg += '<path d="' + pathStr(navVals, 0, realIdx) + '" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.7"/>';
   }
 
   // Realized: solid line + area fill
@@ -4190,8 +4446,14 @@ function renderEquityCurve() {
     svg += '<path d="' + areaPath + '" fill="url(#grad-up-' + uid + ')"/>';
     svg += '<path d="' + pathStr(navVals, areaStart, n-1) + '" fill="none" stroke="var(--up)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>';
   } else if (realIdx < 0) {
-    // all data is pre-inception/flat — draw as flat solid line anyway
-    svg += '<path d="' + pathStr(navVals, 0, n-1) + '" fill="none" stroke="var(--up)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>';
+    if (series.every(isSynthetic)) {
+      // Every point is synthetic: draw the same dashed muted reference rather than a
+      // solid --up line, which would dress an invented record as a real one.
+      svg += '<path d="' + pathStr(navVals, 0, n-1) + '" fill="none" stroke="var(--muted)" stroke-width="1.5" stroke-dasharray="4 3" opacity="0.7"/>';
+    } else {
+      // all data is pre-inception/flat — draw as flat solid line anyway
+      svg += '<path d="' + pathStr(navVals, 0, n-1) + '" fill="none" stroke="var(--up)" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.45"/>';
+    }
   }
 
   // Isolated observed points remain visible when gaps prevent a connecting line.
@@ -4523,22 +4785,27 @@ function renderRejected() {
 function renderAllocation() {
   var b = _book || {};
   var sl = b.sleeves || {};
-  var lead = (sl.leadership || 0) * 100;
-  var conv = (sl.conviction || 0) * 100;
-  var cash = (sl.cash || 0) * 100;
+  var absent = function(v) { return v == null || isNaN(v) || !isFinite(v); };
 
-  E('seg-lead').style.width = lead.toFixed(1) + '%';
-  E('seg-lead').textContent = lead >= 5 ? lead.toFixed(0) + '%' : '';
+  // Row 2: an absent weight draws NO segment and its legend reads the word. Coercing
+  // it to 0 made a partial payload look like a definite 0% split and a bar summing
+  // to 100% when the denominator is not known.
+  function sleeve(segId, lblId, key, value) {
+    var seg = E(segId), lbl = E(lblId);
+    if (absent(value)) {
+      if (seg) { seg.style.display = 'none'; seg.style.width = ''; seg.textContent = ''; }
+      if (lbl) lbl.textContent = t('alloc.' + key) + ' ' + t('state.unavailable');
+      return;
+    }
+    var pct = value * 100;
+    if (seg) { seg.style.display = ''; seg.style.width = pct.toFixed(1) + '%'; seg.textContent = pct >= 5 ? pct.toFixed(0) + '%' : ''; }
+    if (lbl) lbl.textContent = t('alloc.' + key) + ' ' + pct.toFixed(0) + '%';
+  }
 
-  E('seg-conv').style.width = conv.toFixed(1) + '%';
-  E('seg-conv').textContent = conv >= 5 ? conv.toFixed(0) + '%' : '';
+  sleeve('seg-lead', 'lbl-lead', 'leadership', sl.leadership);
+  sleeve('seg-conv', 'lbl-conv', 'conviction', sl.conviction);
+  sleeve('seg-cash', 'lbl-cash', 'cash', sl.cash);
 
-  E('seg-cash').style.width = cash.toFixed(1) + '%';
-  E('seg-cash').textContent = cash >= 5 ? cash.toFixed(0) + '%' : '';
-
-  E('lbl-lead').textContent = t('alloc.leadership') + ' ' + lead.toFixed(0) + '%';
-  E('lbl-conv').textContent = t('alloc.conviction') + ' ' + conv.toFixed(0) + '%';
-  E('lbl-cash').textContent = t('alloc.cash') + ' ' + cash.toFixed(0) + '%';
   E('lbl-gross').textContent = b.gross != null ? pctInt(b.gross) + ' ' + t('alloc.gross') : '';
 }
 
@@ -4598,11 +4865,18 @@ function renderSafety() {
 
   // ---- metric tiles -------------------------------------------------------------
   var tile = function(label, value, sub, color) {
+    // Row 3: num()/pc() return the null marker '—'. That is the signal that this
+    // metric has no value, so it renders the §3 word and names the missing
+    // snapshot instead of a coerced 0 that reads as a measured risk.
+    var missing = (value === '—');
+    var shownColor = missing ? 'var(--muted)' : (color || 'var(--text)');
+    var shownValue = missing ? _unavailHtml() : value;
+    var shownSub = sub || (missing ? t('state.risk_unavailable') : '');
     return '<div style="flex:1 1 130px;min-width:120px;background:var(--panel2);border:1px solid var(--line);' +
       'border-radius:10px;padding:9px 11px">' +
       '<div style="font-size:11px;color:var(--muted)">' + label + '</div>' +
-      '<div style="font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;color:' + (color || 'var(--text)') + '">' + value + '</div>' +
-      (sub ? '<div style="font-size:10px;color:var(--muted);margin-top:1px">' + sub + '</div>' : '') + '</div>';
+      '<div style="font-size:19px;font-weight:700;font-variant-numeric:tabular-nums;color:' + shownColor + '">' + shownValue + '</div>' +
+      (shownSub ? '<div style="font-size:10px;color:var(--muted);margin-top:1px">' + shownSub + '</div>' : '') + '</div>';
   };
   var ddCI = m.max_drawdown_ci_pct;
   var ddSub = (ddCI && ddCI.length === 3) ? (isZh ? '最坏 ' : 'worst ') + num(ddCI[0], 0) + '%' : '';
@@ -4613,11 +4887,12 @@ function renderSafety() {
       tile(H('Max drawdown', '最大回撤'), pc(m.max_drawdown_pct), ddSub, 'var(--down)') +
       tile(H('Volatility (ann.)', '年化波动'), pc(m.ann_volatility_pct)) +
       tile(H('Beta vs SPY', '市场Beta'), num(m.beta_spy), betaSub) +
-      tile(H('Effective names', '有效持仓数'), num(m.effective_n, 1), (m.n_names || 0) + (isZh ? ' 实际' : ' actual')) +
+      tile(H('Effective names', '有效持仓数'), num(m.effective_n, 1),
+        (m.n_names != null ? m.n_names + (isZh ? ' 实际' : ' actual') : '')) +
       tile(H('Mean corr', '平均相关'), num(m.mean_pairwise_corr), H('absorption ', '吸收 ') + num(m.absorption_ratio)) +
       tile(H('1-day 95% CVaR', '单日95% CVaR'), pc(m.cvar95_1d_pct), 'VaR ' + pc(m.var95_1d_pct), 'var(--down)') +
       tile(H('Sharpe (hist.)', '历史夏普'), num(m.sharpe, 2), shSub) +
-      tile(H('Cash buffer', '现金缓冲'), pc((d.cash_weight || 0) * 100)) +
+      tile(H('Cash buffer', '现金缓冲'), (d.cash_weight != null ? pc(d.cash_weight * 100) : '—')) +
     '</div>';
 
   // ---- sub-score bars -----------------------------------------------------------
@@ -4793,6 +5068,16 @@ function renderPositions() {
   var positions = b.positions || [];
   var el = E('positions');
 
+  // An unreadable account file is one canonical cell in place of the table AND in
+  // place of "No positions" — the last-published rows are not current holdings when
+  // the account cannot be read.
+  var invalidState = _accountStateInvalid();
+  if (invalidState) {
+    el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2>' +
+      '<div style="padding:12px 0">' + _bookInvalidHtml(invalidState) + '</div>';
+    return;
+  }
+
   if (!positions.length) {
     el.innerHTML = '<h2><span class="l-en">Positions</span><span class="l-zh">持仓</span></h2><div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('pos.empty') + '</div>';
     return;
@@ -4811,7 +5096,12 @@ function renderPositions() {
                    : (isConv ? t('alloc.conviction')
                    : (isAccount ? '<span class="l-en">Account</span><span class="l-zh">账户</span>'
                    : t('alloc.leadership')));
-    var verdict = (p.verdict || 'hold').toLowerCase();
+    // Row 13: defaulting an absent verdict to 'hold' fabricated a manager stance
+    // the account never carried. An explicit 'hold' (account-only rows do carry
+    // one) renders exactly as before; an absent one renders the §3 word.
+    var verdictField = p['verdict'];
+    var rawVerdict = (verdictField == null ? '' : String(verdictField)).toLowerCase();
+    var verdict = rawVerdict || '';
     var tf = p.thesis_full || {};
     var heldStr = '';
     if (p.pending) {
@@ -4839,7 +5129,10 @@ function renderPositions() {
     // row stay exactly as they are, because nothing is filled until the next open.
     var qc = p.pending ? null : _heldPendingChange(p.ticker, _trades);
     var qAttr = '';
-    var verdictCell = '<td><span class="mm-verdict-chip ' + verdict + '">' + vLabel + '</span></td>';
+    var verdictCell = rawVerdict
+      ? '<td><span class="mm-verdict-chip ' + verdict + '">' + vLabel + '</span></td>'
+      // No verdict in the payload: the cell says so instead of asserting HOLDING.
+      : '<td class="neu">' + _unavailHtml() + '</td>';
     if (qc) {
       var qCls = { exit: 'exit_pending', trim: 'trim', add: 'add', unclassified: 'hold' }[qc.kind] || 'hold';
       var qKey = { exit: 'pos.q_exit', trim: 'pos.q_trim', add: 'pos.q_add', unclassified: 'pos.q_unclassified' }[qc.kind] || 'pos.q_unclassified';
@@ -6139,21 +6432,26 @@ function renderSelfHeader() {
 }
 
 function _mktLabel(m) {
-  if (!m || !m.session) return { cls: 'closed', txt: t('sd.mkt.unknown') };
-  if (m.session === 'open') return { cls: 'open', txt: t('sd.mkt.open') };
+  // The four market_clock sessions. Anything else is unknown: its own neutral pill
+  // (`unknown`), never painted as "closed" (spec §6 row 14, self-directed sibling).
+  if (m && m.session === 'open') return { cls: 'open', txt: t('sd.mkt.open') };
+  var key = m ? { pre: 'sd.mkt.pre', post: 'sd.mkt.post', closed: 'sd.mkt.closed' }[m.session] : null;
+  if (!key) return { cls: 'unknown', txt: t('sd.mkt.unknown') };
   var no = m.next_open ? (' ' + String(m.next_open).replace('T', ' ') + ' ET') : '';
-  var key = m.session === 'pre' ? 'sd.mkt.pre' : m.session === 'post' ? 'sd.mkt.post' : 'sd.mkt.closed';
   return { cls: 'closed', txt: t(key) + no };
 }
 
 function renderSelfMarket() {
+  // Live-marks session states that are a real closed market; an unmapped state is unknown.
+  var liveClosed = { lunch_break: 1, early_close: 1, holiday: 1, weekend: 1 };
   var m = (_self || {}).market || {};
   var liveSession = (_liveMarks && _liveMarks.portfolio === 'self_directed') ? _liveMarks.session : null;
   if (liveSession) {
     m = {
       session: liveSession.is_open ? 'open' :
         (liveSession.state === 'pre_open' ? 'pre' :
-        (liveSession.state === 'post_close' ? 'post' : 'closed')),
+        (liveSession.state === 'post_close' ? 'post' :
+        (liveClosed[liveSession.state] ? 'closed' : null))),
       next_open: liveSession.next_open
     };
   }
@@ -6429,7 +6727,7 @@ window.selfUpdateEst = function() {
   var s = _selfSel, amt = parseFloat((E('sd-shares') || {}).value);
   if (!s) { est.textContent = ''; if (buy) buy.disabled = true; if (sell) sell.disabled = true; return; }
   var px = s.price, held = _heldShares(s.ticker), rawCash = (_self || {}).cash;
-  var bookUnknown = _selfBookState(_self, _selfSettled) === 'unavailable';
+  var bookNotOk = _selfBookState(_self, _selfSettled) !== 'ok';
   var cashKnown = typeof rawCash === 'number' && isFinite(rawCash);
   var dollars = _selfUnit === 'dollars';
   var shares = (px != null && amt > 0) ? (dollars ? amt / px : amt) : 0;
@@ -6442,9 +6740,10 @@ window.selfUpdateEst = function() {
   if (held > 0) parts.push(t('sd.you_hold') + ' ' + fmtShares(held) + ' ' + t('sd.shares_unit'));
   est.textContent = parts.join(' · ');
   var canBuy = px != null && amt > 0, canSell = px != null && amt > 0 && held > 0;
-  // An account we cannot read must not trade blind: the ticket stays inert until it settles readable.
-  if (buy) buy.disabled = bookUnknown || !canBuy || _selfBusy;
-  if (sell) sell.disabled = bookUnknown || !canSell || _selfBusy;
+  // An account we cannot read must not trade blind: the ticket stays inert until it settles
+  // readable ('ok'), so the pending window before the first read is inert too.
+  if (buy) buy.disabled = bookNotOk || !canBuy || _selfBusy;
+  if (sell) sell.disabled = bookNotOk || !canSell || _selfBusy;
 };
 
 function _selfMsg(cls, txt) { var el = E('sd-msg'); if (el) { el.className = 'mm-sd-msg ' + cls; el.innerHTML = txt; } }
@@ -6508,6 +6807,167 @@ document.addEventListener('click', function(e) {
   if (wrap && !wrap.contains(e.target)) { var host = E('sd-results'); if (host) host.innerHTML = ''; }
 });
 
+// PBR-B0-ROUTER:BEGIN — spec §2 hash routes
+// The view axis is the SECONDARY axis: the book switcher in #mm-nav stays primary. Routes are
+// `#/<book>/<view>` and `#/<book>/position/<TICKER>`; the fragment never reaches the server, so
+// every view is linkable and browser-back works without app/web.py gaining a route.
+var MM_VIEWS = ['overview', 'decision', 'pending', 'performance', 'opportunities', 'position', 'operations'];
+var _mmView = 'overview';
+var _mmPositionTicker = null;
+var _mmHashActive = false;   // a hash route is in the URL (deep link or an explicit selection)
+var _hashOwnsBook = false;   // a deep link or an explicit selection chose the book; the registry default must not override it
+var _mmPositionApplied = ''; // '<book>:<ticker>' already opened + scrolled, so repaints do not re-scroll
+
+function _mmKnownBook(id) {
+  if (!id) return false;
+  if (_portfolios && _portfolios.length) {
+    return _portfolios.some(function(p) { return p && p.id === id; });
+  }
+  return _PF_ORDER.indexOf(id) !== -1;
+}
+
+function _parseHash(h) {
+  var out = {book: '', view: 'overview', ticker: null, valid: false};
+  if (typeof h !== 'string') return out;
+  var m = /^#\/([a-z_]+)(?:\/([a-z]+)(?:\/([^\/?#]+))?)?\/?$/.exec(h);
+  if (!m) return out;
+  if (!_mmKnownBook(m[1])) return out;
+  out.valid = true;
+  out.book = m[1];
+  out.view = (m[2] && MM_VIEWS.indexOf(m[2]) !== -1) ? m[2] : 'overview';
+  if (out.view === 'position' && m[3]) {
+    var raw = null;
+    try { raw = decodeURIComponent(m[3]); } catch (e) { raw = null; }
+    out.ticker = (raw && /^[A-Z0-9.\-\^]{1,15}$/i.test(raw)) ? raw.toUpperCase() : null;
+  }
+  return out;
+}
+
+function _formatHash(book, view, ticker) {
+  var v = (view && MM_VIEWS.indexOf(view) !== -1) ? view : 'overview';
+  var h = '#/' + book + '/' + v;
+  if (v === 'position' && ticker) h += '/' + encodeURIComponent(ticker);
+  return h;
+}
+
+function _mmWriteHash(push) {
+  if (_currentView !== 'dashboard') return;
+  var h = _formatHash(_portfolio, _mmView, _mmPositionTicker);
+  _mmHashActive = true;
+  if (location.hash === h) return;
+  try {
+    if (push) history.pushState(null, '', '/' + h);
+    else history.replaceState(null, '', '/' + h);
+  } catch (e) {}
+}
+
+function _mmIsArchived(id) {
+  if (_portfolios && _portfolios.length) {
+    var p = _portfolios.filter(function(x) { return x && x.id === id; })[0];
+    if (p) return p.lifecycle === 'archived' || p.active === false;
+  }
+  // Before /api/portfolios lands the registry defaults are the only archived books we know.
+  return id === 'flagship' || id === 'heavyweight' || id === 'etf';
+}
+
+function _mmViewAvailable(view) {
+  // Archived books are read-only: there is no pending activity to show.
+  if (view === 'pending' && _mmIsArchived(_portfolio)) return false;
+  var nodes = document.querySelectorAll('.mm-section[data-mm-views~="' + view + '"]');
+  for (var i = 0; i < nodes.length; i++) {
+    if (nodes[i].style.display !== 'none') return true;
+  }
+  return false;
+}
+
+function _mmSyncTabs() {
+  if (!_mmViewAvailable(_mmView)) {
+    _mmView = 'overview';
+    _mmPositionTicker = null;
+  }
+  document.body.setAttribute('data-mm-view', _mmView);
+  var links = document.querySelectorAll('#mm-tabset a[data-mm-view]');
+  for (var i = 0; i < links.length; i++) {
+    var a = links[i];
+    var slug = a.getAttribute('data-mm-view');
+    a.setAttribute('href', _formatHash(_portfolio, slug, null));
+    a.hidden = !_mmViewAvailable(slug);
+    if (slug === _mmView) a.setAttribute('aria-current', 'page');
+    else a.removeAttribute('aria-current');
+  }
+  var nav = document.getElementById('mm-tabset');
+  if (nav) nav.setAttribute('aria-label', t('view.nav_label'));
+  // Narrow screens scroll the strip; recentre the active tab with revealActivePortfolioTab's idiom.
+  if (!window.requestAnimationFrame) return;
+  window.requestAnimationFrame(function() {
+    if (!window.matchMedia || !window.matchMedia('(max-width: 820px)').matches) return;
+    var host = document.getElementById('mm-tabset');
+    if (!host) return;
+    var active = host.querySelector('a[aria-current="page"]');
+    if (!active || host.scrollWidth <= host.clientWidth) return;
+    var target = Math.max(0, active.offsetLeft - (host.clientWidth - active.offsetWidth) / 2);
+    var reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (typeof host.scrollTo === 'function') host.scrollTo({left: target, behavior: reduce ? 'auto' : 'smooth'});
+    else host.scrollLeft = target;
+  });
+}
+
+function _mmApplyPositionRoute() {
+  if (_mmView !== 'position' || !_mmPositionTicker) return;
+  if (!_book || !_book.positions) return;
+  var key = _portfolio + ':' + _mmPositionTicker;
+  if (key === _mmPositionApplied) return;   // a live repaint must not re-open or re-scroll
+  var i = -1;
+  for (var n = 0; n < _book.positions.length; n++) {
+    if (String(_book.positions[n].ticker).toUpperCase() === _mmPositionTicker) { i = n; break; }
+  }
+  if (i < 0) {
+    _mmPositionTicker = null;               // the book does not hold it — the URL may not claim it
+    _mmWriteHash(false);
+    return;
+  }
+  if (_expandedIdx !== i) window.toggleExpand(i);
+  var row = document.querySelector('tr.pos-row[data-idx="' + i + '"]');
+  if (row && row.scrollIntoView) {
+    var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    row.scrollIntoView({block: 'nearest', behavior: reduce ? 'auto' : 'smooth'});
+  }
+  _mmPositionApplied = key;
+}
+
+function _mmOnRoute() {
+  // hashchange AND popstate both fire for back/forward, so this must be idempotent.
+  var h = _parseHash(location.hash);
+  if (!h.valid) return;
+  _mmHashActive = true;
+  var viewChanged = h.view !== _mmView;
+  _mmView = h.view;
+  if (h.ticker !== _mmPositionTicker) _mmPositionApplied = '';
+  _mmPositionTicker = h.ticker;
+  if (h.book !== _portfolio) {
+    _hashOwnsBook = true;
+    setPortfolio(h.book, { fromHash: true });
+  }
+  if (_currentView !== 'dashboard') showView('dashboard');
+  _mmSyncTabs();
+  _mmWriteHash(false);
+  _mmApplyPositionRoute();
+  if (viewChanged && !_mmPositionTicker) window.scrollTo(0, 0);
+}
+
+function _invalidateBookScopedState() {
+  _book = null; _perf = null; _trades = null; _risk = null; _decisions = []; _rejected = [];
+  _decisionAvailability = null; _forwardEvaluation = null; _liveMarks = null;
+  _expandedIdx = null; _tradesPage = 0;
+  _decisionsExpanded = false; _autoThesisExpanded = false;
+  _mmPositionApplied = '';
+}
+
+function _mmRetryScope() {
+  fetchAll({ scopedOnly: true, showBar: true });
+}
+// PBR-B0-ROUTER:END
+
 window.showView = function(view) {
   // Dashboard / Desk / Research are top-nav views. The Self-Directed book is NOT a view — it's a
   // portfolio in the switcher (see applyPortfolioScope, which drives body.view-self).
@@ -6521,9 +6981,11 @@ window.showView = function(view) {
   if (nd) nd.toggleAttribute('aria-current', _currentView === 'dashboard');
   if (nr) nr.toggleAttribute('aria-current', _currentView === 'research');
   if (nk) nk.toggleAttribute('aria-current', _currentView === 'desk');
+  if (_currentView === 'dashboard') _mmSyncTabs();
   try {
     history.replaceState(null, '',
-      _currentView === 'research' ? '/research' : (_currentView === 'desk' ? '/desk' : '/'));
+      _currentView === 'research' ? '/research' : (_currentView === 'desk' ? '/desk'
+        : ('/' + (_mmHashActive ? _formatHash(_portfolio, _mmView, _mmPositionTicker) : ''))));
   } catch (e) {}
   if (_currentView === 'research') {
     _ensureResearchPapers();
@@ -6623,35 +7085,63 @@ function applyPortfolioScope() {
   // Desk and Research are Flagship artifacts. Never leave a Brain or Self-Directed
   // tab selected while the viewport silently shows Flagship-only data.
   if (!flagship && _currentView !== 'dashboard') showView('dashboard');
+  _mmSyncTabs();
 }
 
 function _updateScopedPanelAvailability(pending) {
-  var isZh = document.documentElement.getAttribute('data-lang') === 'zh';
+  var anyFailed = false, anyMissing = false;
   [['performance', _perf], ['positions', _book], ['alloc', _book],
    ['trades', _trades], ['safety', _risk], ['rejected', _book]].forEach(function(pair) {
     var panel = E(pair[0]); if (!panel) return;
-    panel.classList.toggle('mm-pf-awaiting', pair[1] == null);
-    panel.setAttribute('data-scope-message', pending
-      ? (isZh ? '正在读取此账本…' : 'Reading this book…')
-      : (isZh ? '此账本的数据不可用。' : 'Data unavailable for this book.'));
+    var missing = pair[1] == null;
+    var failed = missing && !pending;
+    var wasAwaiting = panel.classList.contains('mm-pf-awaiting');
+    if (missing) anyMissing = true;
+    if (failed) anyFailed = true;
+    // loading = skeleton (true geometry, no prose); failed = one named, muted reason line.
+    panel.classList.toggle('mm-pf-awaiting', missing);
+    panel.classList.toggle('mm-skel', missing && pending);
+    panel.classList.toggle('mm-pf-failed', failed);
+    if (missing && pending) panel.setAttribute('aria-busy', 'true');
+    else panel.removeAttribute('aria-busy');
+    panel.setAttribute('data-scope-message', failed ? t('scope.error_detail') : '');
+    if (!missing && wasAwaiting) {
+      panel.classList.remove('mm-pf-reveal');
+      void panel.offsetWidth;   // restart the single reveal easing
+      panel.classList.add('mm-pf-reveal');
+      panel.addEventListener('animationend', function() {
+        panel.classList.remove('mm-pf-reveal');
+      }, { once: true });
+    }
   });
+  var self = _portfolio === 'self_directed';
+  var retry = E('mm-scope-retry');
+  if (retry) retry.hidden = (self || !anyFailed);
+  var status = E('mm-scope-status');
+  if (status) {
+    if (self) status.textContent = '';
+    else if (anyFailed) status.textContent = t('state.error');
+    else if (pending && anyMissing) status.textContent = t('state.loading');
+    else status.textContent = '';
+  }
 }
-window.setPortfolio = function(id) {
+window.setPortfolio = function(id, opts) {
+  opts = opts || {};
   if (!id) return;
   clearTimeout(_liveTimer);
   _liveFetchSeq += 1;
   _liveMarks = null;
   if (id !== _portfolio) {
-    _decisionsExpanded = false;
-    _book = null; _perf = null; _trades = null; _risk = null; _decisions = []; _rejected = [];
-    _decisionAvailability = null;
-    _forwardEvaluation = null;
+    _invalidateBookScopedState();
+    if (!opts.fromHash) _mmPositionTicker = null;
   }
   _portfolio = id;
   _decisionAvailabilityPending = _isAvailabilityBook(id);
   _forwardEvaluationPending = _isAvailabilityBook(id);
   renderPortfolioSwitch();
   applyPortfolioScope();
+  _hashOwnsBook = true;
+  if (opts.fromHash) _mmWriteHash(false); else _mmWriteHash(!opts.replace);
   _updateScopedPanelAvailability(true);
   _safeRender('decision-availability-switch', renderDecisionAvailability);
   _safeRender('forward-evaluation-switch', renderForwardEvaluation);
@@ -6674,13 +7164,18 @@ async function loadPortfolios() {
       // The registry owns the product default. Explicit historical/workspace URLs keep their
       // selected book, while the root dashboard follows the backend contract instead of a second
       // hard-coded default that can drift during a future portfolio migration.
-      var routeOwnsBook = _path0 === '/research' || _path0 === '/desk' || _path0 === '/self';
+      var routeOwnsBook = _path0 === '/research' || _path0 === '/desk' || _path0 === '/self' || _hashOwnsBook;
       if (!routeOwnsBook && d.default && _portfolios.some(function(p){ return p.id === d.default; })) {
         _portfolio = d.default;
       }
       renderPortfolioSwitch();
+      // A deep link chose the book; the registry may not contain it, and its default must not win.
+      if (_hashOwnsBook && !_portfolios.some(function(p) { return p.id === _portfolio; })
+          && d.default && _portfolios.some(function(p) { return p.id === d.default; })) {
+        setPortfolio(d.default, { replace: true });
+      }
       if (_pendingSelfSelect && _portfolios.some(function(p){ return p.id === 'self_directed'; })) {
-        _pendingSelfSelect = false; setPortfolio('self_directed');
+        _pendingSelfSelect = false; setPortfolio('self_directed', { replace: true });
       }
       _schedulePortfolioPrefetch();
     }
@@ -8799,16 +9294,20 @@ function renderLiveMarksStatus() {
     open: 'open', pre_open: 'pre-market', post_close: 'closed',
     lunch_break: 'lunch break', early_close: 'early close',
     holiday: 'holiday', weekend: 'weekend'
-  }[s.state] || 'closed';
+  }[s.state] || t('state.unavailable');
   var stateZh = {
     open: '开市', pre_open: '盘前', post_close: '收市',
     lunch_break: '午间休市', early_close: '提前收市',
     holiday: '假日休市', weekend: '周末休市'
-  }[s.state] || '休市';
+  }[s.state] || t('state.unavailable');
   var parts = [];
+  // Row 12: an absent pricing block means the holdings shown are the LAST COMPLETE
+  // set, not the current one. Name the exclusion instead of asserting completeness.
+  if (d.pricing_partial) parts.push(t('state.partial') + ' — ' + t('state.pricing_partial'));
   parts.push((s.market || '') + ' ' + (isZh ? stateZh : stateEn));
   if (s.is_open) {
-    if (!pricing.total_positions) {
+    // With no pricing block the count is unknown, not zero: never claim "no held tickers".
+    if (!pricing.total_positions && !d.pricing_partial) {
       parts.push(isZh ? '暂无持仓需要报价' : 'no held tickers to price');
     } else if (pricing.complete && !hasSnapshot && !hasPersisted) {
       parts.push((isZh ? '实时行情源检查于 ' : 'live feed checked ') + _liveTime(latest, s.timezone));
@@ -8849,6 +9348,17 @@ function _mergeLiveMarks(data) {
   } else {
     var byTicker = {};
     (data.positions || []).forEach(function(row) { byTicker[row.ticker] = row; });
+    // D-ACCT-1: an invalid account state carries no marks at all. `_liveMarks` (this
+    // payload) holds the flag; merge nothing into the book, leave every performance
+    // value as it was, and let the renderers show the one canonical cell. The flag is
+    // never copied onto _perf/_book, so the next valid tick clears it on its own.
+    if (data.account_state) {
+      _safeRender('performance-live', renderPerformance);
+      _safeRender('equity-curve-live', renderEquityCurve);
+      _safeRender('positions-live', renderPositions);
+      renderLiveMarksStatus();
+      return;
+    }
     if (_book) {
       var published = _book.positions || [];
       var seen = {};
@@ -8872,10 +9382,15 @@ function _mergeLiveMarks(data) {
           }, mark));
         }
       });
-      var pricing = data.pricing || {};
-      var holdingsComplete = !data.error &&
-        Number(pricing.total_positions || 0) === (data.positions || []).length;
+      // Row 12: with no pricing block, `0 === 0` declared the cached holdings complete.
+      // Completeness requires the block to be PRESENT; without it the SPA keeps its
+      // cached positions and records the partial state so the status line can name
+      // the exclusion.
+      var hasPricing = data.pricing != null && typeof data.pricing === 'object';
+      var holdingsComplete = !data.error && hasPricing && Number(data.pricing.total_positions || 0) === (data.positions || []).length;
       if (holdingsComplete) _book.positions = reconciled;
+      // Without the block, the cached rows stay and the gap is named in the status line.
+      if (!hasPricing) _liveMarks.pricing_partial = true;
     }
     if (!_perf) _perf = { series: [] };
     Object.assign(_perf, data.performance || {});
@@ -9024,6 +9539,9 @@ function _paintPortfolioSnapshot(snapshot, requestLive) {
   _applyPortfolioSnapshot(snapshot);
   _renderScoped();
   applyColl('rejected');
+  _mmSyncTabs();
+  if (_mmHashActive) _mmWriteHash(false);
+  _mmApplyPositionRoute();
   return requestLive !== false ? refreshLiveMarks() : Promise.resolve();
 }
 
@@ -9186,6 +9704,7 @@ document.addEventListener('langchange', function() {
     var ts = updEl.textContent.replace(/^[^0-9]*/, '');
     updEl.textContent = t('hero.updated') + ' ' + ts;
   }
+  _mmSyncTabs();   // refreshes the view-bar nav label in the new language
 });
 
 // open the Research / Desk view directly when the page is loaded at /research or /desk
@@ -9194,8 +9713,20 @@ if (_path0 === '/research') { _portfolio = 'flagship'; showView('research'); }
 else if (_path0 === '/desk') { _portfolio = 'flagship'; showView('desk'); }
 // /self can select its book before the deferred switcher metadata arrives.
 else if (_path0 === '/self') { _portfolio = 'self_directed'; _pendingSelfSelect = false; }
+// A deep link owns the book, the view and the opened position before the first paint. A plain `/`
+// with no hash writes nothing and keeps master's default selection.
+else if (_path0 === '') {
+  var _h0 = _parseHash(location.hash);
+  if (_h0.valid) {
+    _portfolio = _h0.book; _mmView = _h0.view; _mmPositionTicker = _h0.ticker;
+    _hashOwnsBook = true; _mmHashActive = true;
+  }
+}
+window.addEventListener('hashchange', _mmOnRoute);
+window.addEventListener('popstate', _mmOnRoute);
 
 applyPortfolioScope();   // root defaults to active US Brain; historical routes select Flagship explicitly
+if (_mmHashActive) _mmWriteHash(false);   // normalise an unknown view / an unheld ticker in a deep link
 _updateScopedPanelAvailability(true); // initial placeholders are not observed account values
 fetchAll({ showBar: true });            // initial full load (shows the loading bar)
 document.addEventListener('visibilitychange', function() {
