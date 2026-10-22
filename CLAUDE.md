@@ -50,6 +50,19 @@ changes; do not rebuild an existing system without evidence it is unusable.
 **Completion.** Writing code does not complete a job. The job's stated acceptance
 evidence completes it.
 
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+existing versioned GitHub master plan and one Agent OS cumulative frontier; if none
+exists, create and read back a useful plan with stable task/subtask IDs, dependencies,
+acceptance evidence and next action **before major delegation or implementation**.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
+
 ### Start assigned work; do not wait for administrative ceremony
 
 A current explicit handoff is sufficient assignment at the human/session layer; record pickup
