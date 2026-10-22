@@ -115,7 +115,7 @@ def _policy_weight(policy: dict, r: dict) -> float:
     if not comm:                                           # committee didn't run for this name
         wp = r.get("weight_prod")
         return round(float(wp if wp is not None else wf), 4)
-    if policy["calibration"]:                              # exactly what prod did (calib on)
+    if policy["calibration"]:                              # exactly what prod did (committee+calib on)
         return round(float(r.get("weight_prod") or 0.0), 4)
     # calibration OFF but committee ON → re-derive NEXUS from SENTINEL's RAW confidence (pure fn)
     sent = r.get("sentinel") or {}
