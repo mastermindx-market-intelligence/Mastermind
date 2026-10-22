@@ -55,6 +55,11 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         return ("", None) if raw.lstrip().startswith(("{", "[")) else (raw, None)
     if not isinstance(parsed, dict):
         return "", None
+    # Model conflict must be checked before any optional or malformed final
+    # fields, not only after usage/session parsing or visible text extraction.
+    reported_model = parsed.get("model")
+    if reported_model is not None and reported_model != model:
+        raise ValueError("grok_final_model_conflict")
     text = parsed.get("text")
     if not isinstance(text, str):
         return "", None
@@ -74,9 +79,6 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         return text, None
     # A CLI pin is a requested model, not a witnessed served-model identity.
     # Some native JSON finals omit a model entirely. Do not invent one.
-    reported_model = parsed.get("model")
-    if reported_model is not None and reported_model != model:
-        raise ValueError("grok_final_model_conflict")
     has_reported_model = type(reported_model) is str and reported_model == model
     return text, {
         "schema": "mastermind.grok_usage.v2",

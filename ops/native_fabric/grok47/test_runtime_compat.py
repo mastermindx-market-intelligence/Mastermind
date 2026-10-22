@@ -92,6 +92,20 @@ class Grok47WorkerContracts(unittest.TestCase):
         self.assertIn('GROK_NATIVE_FINAL_MODEL_CONFLICT',body)
         self.assertIn('if not result.cleanup_proven:',body)
 
+    def test_conflicting_final_model_refuses_even_when_usage_is_missing(self):
+        worker=worker_functions()
+        raw={'text':'RESULT','model':'grok-4.6','privateReasoning':'DO_NOT_REVEAL'}
+        with self.assertRaisesRegex(ValueError,'grok_final_model_conflict'):
+            worker.grok_plaintext_and_usage(json.dumps(raw),'run-missing','grok-4.7')
+        raw['text']=None
+        with self.assertRaisesRegex(ValueError,'grok_final_model_conflict'):
+            worker.grok_plaintext_and_usage(json.dumps(raw),'run-notext','grok-4.7')
+        raw['text']='RESULT'
+        raw['usage']={'input_tokens':1,'cache_read_input_tokens':0,
+                      'output_tokens':1,'total_tokens':2}
+        with self.assertRaisesRegex(ValueError,'grok_final_model_conflict'):
+            worker.grok_plaintext_and_usage(json.dumps(raw),'run-nosession','grok-4.7')
+
     def test_v2_usage_validator_requires_truthful_requested_and_observed_identity(self):
         valid={'schema':'mastermind.grok_usage.v2','status':'observed',
                'reason':'native_headless_final','session_ids':['s1'],

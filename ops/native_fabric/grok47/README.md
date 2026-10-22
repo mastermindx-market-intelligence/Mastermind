@@ -123,3 +123,27 @@ original owner's *predicted, unpublished* native generation ID
 `f17209d31c3c268337e403ac97a0412a8e5e195e5c75b8c343699b774015d43e`.
 Stages -001 through -005 must NOT be published. The earlier release-stage
 entries in this history record older qualification, not current targets.
+
+
+## Definitive observed-model conflict ordering — stage -007
+
+Release review uncovered another fail-open sequence: the normalized final JSON
+originally checked `usage`/`sessionId` (and then visible `text`) before examining
+its model field. A conflicting native-final model with missing usage or text
+could therefore reach an rc=0 return. The new producer now checks any observed
+model conflict **immediately after parsing a JSON object**, before extracting
+visible text, session or optional token counters. It emits the same typed
+`GROK_NATIVE_FINAL_MODEL_CONFLICT` refusal and never returns private JSON.
+One additional focused regression covers missing usage, missing session and
+malformed visible text; focused total **37/37**.
+
+Only the verified stage
+`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-007`
+may be submitted for authorized release review. 85 source files, 9 overlays;
+source-manifest SHA256
+`b7fdea364aec6d06e2b5e08df751925fda0d37986fb867ae6ff134cf4609235a`;
+original owner's predicted (NOT PUBLISHED) native-generation ID
+`aadb1d5db43ae253e7823f05f8587afe393aa9b9f8b833bceb2a6534272d4e27`.
+All previous stage targets -001 through -006 are superseded/retired. Original
+selected M2 native generation and 14th sequence remain unchanged. This is
+source quality, not the held Cursor-default activation or live model proof.

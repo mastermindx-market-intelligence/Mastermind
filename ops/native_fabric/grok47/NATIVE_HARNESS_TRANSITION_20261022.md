@@ -282,3 +282,19 @@ predicted unpublished native generation
 `f17209d31c3c268337e403ac97a0412a8e5e195e5c75b8c343699b774015d43e`.
 Local focused suite 36/36, with exact controller legacy-mode regressions.
 No live publisher/select, provider usage, Executive admittance or OS root START.
+
+
+### Final normalized-model conflict ordering and stage -007
+
+For new native Grok JSON final responses, any explicitly reported model
+conflict is now examined before text/usage/session validation. Missing counters,
+missing session IDs or malformed visible text cannot conceal a known conflict.
+A typed refusal is produced after original process cleanup, without exposing
+private JSON. The full 37-test focused offline suite includes these cases.
+Only verified immutable stage -007 is the release candidate (85 source files,
+manifest `b7fdea364aec6d06e2b5e08df751925fda0d37986fb867ae6ff134cf4609235a`;
+predicted unpublished generation
+`aadb1d5db43ae253e7823f05f8587afe393aa9b9f8b833bceb2a6534272d4e27`).
+Earlier -001..-006 source stages are retired. This does not clear original
+Cursor 4.7 safety refusals, CI, independent review, quota/account admission,
+or real native-OS acceptance gates.
