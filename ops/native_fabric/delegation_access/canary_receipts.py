@@ -8,12 +8,24 @@ canonical Fabric owner. Successful shape validation does NOT prove live runtime.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 from pathlib import Path
 import re
 import sys
 
 SCHEMA = "mastermind.fabric_access_canary_receipts.v1"
+# Fixed, harmless C0 worker inputs. The return must contain ONLY the computed
+# digest (surrounding whitespace permitted), not a prompt echo or claim of rc=0.
+CANARY_INPUTS = {
+    "claude": "MMX_FABRIC_CLAUDE_CANARY_V1",
+    "codex": "MMX_FABRIC_CODEX_CANARY_V1",
+    "operator.child": "MMX_FABRIC_OPERATOR_CHILD_CANARY_V1",
+}
+EXPECTED_COMPUTATIONS = {
+    case: hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    for case, payload in CANARY_INPUTS.items()
+}
 HEX40 = re.compile(r"^[a-f0-9]{40}$")
 HEX64 = re.compile(r"^[a-f0-9]{64}$")
 ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,95}$")
@@ -45,6 +57,7 @@ def _status_envelope(value: object) -> tuple[dict, bool]:
 def _check_run(
     record: object, issues: list[str], prefix: str, *,
     expected_root: str, expected_parent: str, expected_generation: str,
+    expected_computation: str | None = None,
 ) -> tuple[str | None, str | None]:
     if not isinstance(record, dict):
         issues.append(prefix + ".missing")
@@ -64,7 +77,8 @@ def _check_run(
              issues, prefix + ".root_verified")
     _require(status.get("run_id") == run_id, issues, prefix + ".status_run_id")
     _require(status.get("parent_run_id") == expected_parent, issues, prefix + ".parent")
-    _require(status.get("state") == "TERMINAL" and status.get("rc") == 0
+    _require(status.get("state") == "TERMINAL"
+             and type(status.get("rc")) is int and status["rc"] == 0
              and status.get("result_available") is True, issues, prefix + ".terminal_result")
     result = record.get("result")
     if not isinstance(result, dict):
@@ -80,6 +94,14 @@ def _check_run(
              issues, prefix + ".result_payload")
     # The adapter can hash a framed CLI response; do not infer that response_sha256
     # equals SHA256 of adapter_response's human-facing text preview.
+    # C0 answers, in contrast, are constrained to an exact SHA256 calculation.
+    # Checking the returned answer's *content* prevents receipt-only success.
+    if expected_computation is not None:
+        _require(
+            isinstance(result.get("adapter_response"), str)
+            and result["adapter_response"].strip() == expected_computation,
+            issues, prefix + ".computed_task_result",
+        )
     parent_return = record.get("parent_return")
     if not isinstance(parent_return, dict):
         parent_return = {}
@@ -147,7 +169,8 @@ def evaluate(report: object) -> dict[str, object]:
             session_ids.append(loaded["session_id"])
         run, _ = _check_run(c.get("worker"), issues, kind,
                             expected_root=root, expected_parent=parent,
-                            expected_generation=generation)
+                            expected_generation=generation,
+                            expected_computation=EXPECTED_COMPUTATIONS[kind])
         if run:
             all_runs.append(run)
 
@@ -181,7 +204,18 @@ def evaluate(report: object) -> dict[str, object]:
     _require(operator == opid, issues, "operator.scope_parent_identity")
     child, child_digest = _check_run(nested.get("child_run"), issues, "operator.child",
                                        expected_root=op_root, expected_parent=opid,
-                                       expected_generation=generation)
+                                       expected_generation=generation,
+                                       expected_computation=EXPECTED_COMPUTATIONS["operator.child"])
+    # The operator must return the *child transport digest* to the original
+    # principal, not merely a claim of having delegated. This still requires
+    # canonical Fabric readback; the JSON report itself is not authenticated.
+    operator_record = nested.get("operator_run")
+    operator_result = operator_record.get("result") if isinstance(operator_record, dict) else {}
+    operator_response = operator_result.get("adapter_response") if isinstance(operator_result, dict) else None
+    _require(isinstance(operator_response, str) and _good_sha(child_digest)
+             and re.search(r"(?<![0-9a-f])" + re.escape(child_digest) + r"(?![0-9a-f])",
+                           operator_response) is not None,
+             issues, "operator.child_digest_returned_to_principal")
     if child:
         all_runs.append(child)
     ack = nested.get("child_acknowledgment")

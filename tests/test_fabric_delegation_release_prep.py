@@ -139,7 +139,7 @@ def test_staging_is_new_sibling_and_never_selects_live_generation(installed, tmp
                  merged_repo=ROOT, merged_ref="synthetic-test")
 
 
-def _run(run_id: str, parent: str, root: str, generation: str) -> dict:
+def _run(run_id: str, parent: str, root: str, generation: str, *, answer: str = "verified returned result") -> dict:
     sha = "b" * 64
     return {
         "run_id": run_id,
@@ -155,7 +155,7 @@ def _run(run_id: str, parent: str, root: str, generation: str) -> dict:
         },
         "result": {"root_id": root, "accept_run_id": run_id,
                    "response_sha256": sha, "response_bytes": 35,
-                   "adapter_response": "verified returned result"},
+                   "adapter_response": answer},
         "parent_return": {"run_id": run_id, "principal_parent_id": parent,
                           "result_sha256": sha, "reviewed": True},
         "acceptance": {"accepted": True, "accepted_by": "reviewer",
@@ -182,22 +182,26 @@ def _valid_receipts() -> dict:
                 "parent_identity_verified":True,
                 "skill_session": {"principal":"claude", "loaded":True,
                                   "session_id":"fresh-claude", "skill_sha256":"a"*64},
-                "worker": _run("claude-readonly-leaf", claude_parent, claude_root, generation),
+                "worker": _run("claude-readonly-leaf", claude_parent, claude_root, generation,
+                               answer=canary.EXPECTED_COMPUTATIONS["claude"]),
             },
             "codex": {
                 "root_id":codex_root, "immediate_parent_id":codex_parent,
                 "parent_identity_verified":True,
                 "skill_session": {"principal":"codex", "loaded":True,
                                   "session_id":"fresh-codex", "skill_sha256":"a"*64},
-                "worker": _run("codex-readonly-leaf", codex_parent, codex_root, generation),
+                "worker": _run("codex-readonly-leaf", codex_parent, codex_root, generation,
+                               answer=canary.EXPECTED_COMPUTATIONS["codex"]),
             },
             "operator": {
                 "root_id":operator_root,"immediate_parent_id":operator_parent,
                 "parent_identity_verified":True,
                 "scope": {"root":operator_root, "operator_run":operator,
                           "child_budget_at_admission":1, "grant_verified":True},
-                "operator_run":_run(operator,operator_parent,operator_root,generation),
-                "child_run":_run(child,operator,operator_root,generation),
+                "operator_run":_run(operator,operator_parent,operator_root,generation,
+                                    answer="Reviewed child transport digest: " + "b"*64),
+                "child_run":_run(child,operator,operator_root,generation,
+                                 answer=canary.EXPECTED_COMPUTATIONS["operator.child"]),
                 "child_acknowledgment":{"run_id":child,"parent_run_id":operator,
                                         "acknowledged":True,"sha256":"b"*64},
                 "principal_adjudicated_operator_result":True,
@@ -292,6 +296,57 @@ def test_canary_rejects_bool_as_numeric_receipt_field(field, expected_issue):
     result = canary.evaluate(data)
     assert result["state"] == "REFUSED"
     assert expected_issue in result["issues"]
+
+
+def test_canary_expected_digest_literals_match_runbook():
+    import hashlib
+    doc = (ROOT / "docs/release/FABRIC_DELEGATION_1694_ROLLOUT.md").read_text()
+    for kind, payload in canary.CANARY_INPUTS.items():
+        digest = hashlib.sha256(payload.encode("utf-8")).hexdigest()
+        assert digest == canary.EXPECTED_COMPUTATIONS[kind]
+        assert payload in doc and digest in doc
+
+
+@pytest.mark.parametrize("kind", ["claude", "codex", "operator.child"])
+def test_canary_refuses_wrong_computed_work_even_when_task_terminal_accepted(kind):
+    report = _valid_receipts()
+    record = (report["cases"]["operator"]["child_run"] if kind == "operator.child"
+              else report["cases"][kind]["worker"])
+    record["result"]["adapter_response"] = "0" * 64
+    result = canary.evaluate(report)
+    assert result["state"] == "REFUSED"
+    assert kind + ".computed_task_result" in result["issues"]
+    assert result["live_proven"] is False
+
+
+def test_canary_refuses_digest_present_only_in_extra_echo_text():
+    report = _valid_receipts()
+    value = canary.EXPECTED_COMPUTATIONS["claude"]
+    report["cases"]["claude"]["worker"]["result"]["adapter_response"] = (
+        "The task request includes this expected digest: " + value
+    )
+    result = canary.evaluate(report)
+    assert result["state"] == "REFUSED"
+    assert "claude.computed_task_result" in result["issues"]
+
+
+def test_canary_refuses_operator_return_without_exact_child_transport_digest():
+    report = _valid_receipts()
+    report["cases"]["operator"]["operator_run"]["result"]["adapter_response"] = (
+        "Child completed, no digest included"
+    )
+    result = canary.evaluate(report)
+    assert result["state"] == "REFUSED"
+    assert "operator.child_digest_returned_to_principal" in result["issues"]
+
+
+@pytest.mark.parametrize("invalid_rc", [False, 0.0])
+def test_canary_refuses_falsey_noninteger_worker_exit_code(invalid_rc):
+    report = _valid_receipts()
+    report["cases"]["codex"]["worker"]["status"]["status"]["rc"] = invalid_rc
+    result = canary.evaluate(report)
+    assert result["state"] == "REFUSED"
+    assert "codex.terminal_result" in result["issues"]
 
 
 def test_canary_duplicate_json_keys_refused():

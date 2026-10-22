@@ -105,7 +105,11 @@ Preflight **after actual runtime selection**. Each canary has its **own verified
 | Codex leaf | `MMX_FABRIC_CODEX_CANARY_V1` | `15fc52bc48590eb30bcbcf3505d86ed4d9d158e9b155d22695e51ff20d7f96c1` |
 | Operator child | `MMX_FABRIC_OPERATOR_CHILD_CANARY_V1` | `20d6c967652b58207515e1c78c052d9f2612bc175bfd581eca03d58279a41d34` |
 
-Each principal must independently compare the worker's *actual response content* with the expected digest before acknowledging or accepting. The operator must perform this check before `fabric_child_acknowledge`; incorrect computation or a missing return is a failed canary, even if the adapter reports `rc=0`. A success-shaped JSON fixture is not test evidence.
+**C0 packet response contract:** Each commissioned leaf must calculate SHA-256 of the exact literal ASCII/UTF-8 input above (no extra newline) and return **only one lowercase 64-character hexadecimal digest**, with no prose, labels, Markdown, JSON, or quoted prompt. This makes the worker's actual `adapter_response.strip()` directly verifiable against `sha256(literal.encode("utf-8")).hexdigest()`. A response that merely echoes the known expected hash in commentary is **not** acceptable. The parent must compare that exact answer with its independently computed constant and the canonical Fabric result before acceptance.
+
+**Nested operator response contract:** After `fabric_child_result` and `fabric_child_acknowledge`, the operator must return the child's **transport `response_sha256`** in its own final `adapter_response` as a full standalone 64-digit token, along with its concise adjudication. This is distinct from the child canary's *computed literal digest*. The parent must verify both against their respective canonical results and the operator's own acceptance; mere text claims in a report never attest provenance.
+
+Each principal must independently compare the worker's *actual response content* with the expected computed digest before acknowledging or accepting. The operator must perform this check before `fabric_child_acknowledge`; incorrect computation or a missing return is a failed canary, even if the adapter reports `rc=0`. `canary_receipts.py` now refuses success-shaped metadata with the wrong answer or absent nested child digest, and refuses `false` or `0.0` as a fake zero exit code. A success-shaped JSON fixture is not live test evidence.
 
 **Minimum canary proof:**
 
