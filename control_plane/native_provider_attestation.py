@@ -19,13 +19,14 @@ from control_plane.codex_provider_realm import _native_open, ProviderRealmError
 from control_plane.fs_security import has_macos_acl, FilesystemSecurityError
 from control_plane.worker_execution_contract import BinaryAttestation
 
-SCHEMA = "mastermind.native_claude_attestation/v1"
+SCHEMA = "mastermind.native_claude_attestation/v2"
 CLAUDE_TEAM = "Q6L2SF6YDW"
 CLI_VERSION = "2.1.275"
 SDK_VERSION = "0.2.160"
 _ROOT_UID = 0
 _LIMIT = 65536
 _IDENTITY = ("device", "inode", "size", "mode", "uid", "gid", "mtime_ns", "ctime_ns")
+_DURABLE_IDENTITY = ("inode", "size", "mode", "uid", "gid", "mtime_ns", "ctime_ns")
 
 
 class NativeAttestationError(ValueError):
@@ -43,6 +44,17 @@ def _canonical(value):
 def _identity(info):
     return dict(zip(_IDENTITY, (info.st_dev, info.st_ino, info.st_size,
         stat.S_IMODE(info.st_mode), info.st_uid, info.st_gid, info.st_mtime_ns, info.st_ctime_ns)))
+
+
+def _durable_identity(info):
+    full = _identity(info)
+    return {key: full[key] for key in _DURABLE_IDENTITY}
+
+
+def _runtime_identity(path):
+    with _native_open(Path(path)) as (fd, info):
+        _check_entry(Path(path), fd, info)
+        return _identity(info)
 
 
 def _check_entry(path, fd, info, directory=False):
@@ -93,7 +105,7 @@ def _json_receipt(path, *, mode, gid=None, digest=None):
 def _file_observation(path, *, content=False):
     with _native_open(Path(path)) as (fd, info):
         _check_entry(Path(path), fd, info)
-        result = {"path": str(path), "identity": _identity(info)}
+        result = {"path": str(path), "identity": _durable_identity(info)}
         if content:
             if not 0 < info.st_size <= 512 * 1024 * 1024:
                 _fail("native executable size is invalid")
@@ -112,7 +124,7 @@ def _sdk_tree(root, *, content=False):
         nonlocal total_bytes
         before = os.fstat(fd)
         _check_entry(path, fd, before, directory=True)
-        identities.append([relative, "directory", _identity(before)])
+        identities.append([relative, "directory", _durable_identity(before)])
         with os.scandir(fd) as entries:
             names = sorted(entry.name for entry in entries)
         for name in names:
@@ -133,7 +145,7 @@ def _sdk_tree(root, *, content=False):
                 if directory:
                     visit(child, child_path, rel)
                 else:
-                    identities.append([rel, "file", _identity(current)])
+                    identities.append([rel, "file", _durable_identity(current)])
                     total_bytes += current.st_size
                     if total_bytes > 4 * 1024**3:
                         _fail("native SDK tree exceeds byte bound")
@@ -178,7 +190,11 @@ def build_native_claude_attestation(*, binary_path: Path, sdk_python: Path,
         _fail("native provision evidence is not the qualified installation")
     cli = _file_observation(binary_path, content=True)
     python = _file_observation(sdk_python, content=True)
-    if (cli["sha256"] != cli_source.get("binary_sha256")
+    cli_runtime = _runtime_identity(binary_path)
+    python_runtime = _runtime_identity(sdk_python)
+    if ({key: cli_runtime[key] for key in _DURABLE_IDENTITY} != cli["identity"]
+            or {key: python_runtime[key] for key in _DURABLE_IDENTITY} != python["identity"]
+            or cli["sha256"] != cli_source.get("binary_sha256")
             or python["sha256"] != sdk_source.get("python_sha256")
             or not cli["identity"]["mode"] & 0o111
             or not python["identity"]["mode"] & 0o111):
@@ -194,9 +210,9 @@ def build_native_claude_attestation(*, binary_path: Path, sdk_python: Path,
     if sdk_source.get("target") != str(sdk_root):
         _fail("SDK root differs from provisioned target")
     tree = _sdk_tree(sdk_root, content=True)
-    if _file_observation(binary_path)["identity"] != cli["identity"]:
+    if _runtime_identity(binary_path) != cli_runtime:
         _fail("native CLI changed during attestation")
-    if _file_observation(sdk_python)["identity"] != python["identity"]:
+    if _runtime_identity(sdk_python) != python_runtime:
         _fail("native SDK interpreter changed during attestation")
     cli.update(version=CLI_VERSION, team_identifier=CLAUDE_TEAM)
     return {"schema_version": SCHEMA, "recorded_at": datetime.now(timezone.utc).isoformat(),
@@ -215,7 +231,7 @@ def _require_shape(document):
         _fail("native attestation fields differ")
     for executable in (cli, sdk["python"]):
         identity = executable["identity"]
-        if (not isinstance(identity, dict) or set(identity) != set(_IDENTITY)
+        if (not isinstance(identity, dict) or set(identity) != set(_DURABLE_IDENTITY)
                 or any(type(v) is not int or v < 0 for v in identity.values())
                 or identity["uid"] != _ROOT_UID or identity["mode"] & 0o022 or not identity["mode"] & 0o111):
             _fail("native executable identity is malformed")
@@ -264,9 +280,11 @@ def load_native_claude_attestation(receipt_path: Path, *, expected_binary_path: 
         for executable in (cli, sdk["python"]):
             if _file_observation(Path(executable["path"]))["identity"] != executable["identity"]:
                 _fail("native executable changed during SDK observation")
-        identity = cli["identity"]
+        runtime_identity = _runtime_identity(Path(cli["path"]))
+        if {key: runtime_identity[key] for key in _DURABLE_IDENTITY} != cli["identity"]:
+            _fail("native executable changed during final attestation")
         return BinaryAttestation(path=cli["path"], real_path=cli["path"], version=cli["version"],
             sha256=cli["sha256"], team_identifier=cli["team_identifier"],
-            **{key: identity[key] for key in ("size", "device", "inode", "mode", "uid", "gid", "mtime_ns")})
+            **{key: runtime_identity[key] for key in ("size", "device", "inode", "mode", "uid", "gid", "mtime_ns")})
     except (OSError, ProviderRealmError, FilesystemSecurityError, KeyError, TypeError, UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise NativeAttestationError("native attestation is unavailable or invalid") from exc
