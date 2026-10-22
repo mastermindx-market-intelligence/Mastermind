@@ -64,7 +64,7 @@
   "ext/original_delivery_collector.py": "263ffcd0bebb03b840f4e0cc9b4097d5445b0831026449bde68f760164f96d0a",
   "ext/original_result_delivery.py": "0e19a7f50d19a94e1d9a5c72184509f8c1748991420437a41cf278ac647c0887",
   "ext/original_result_read.py": "31836841e7043c81ff175a737227e50b6d41fd2f4a2202ceb44a560410bb3371",
-  "ext/pick.py": "a776ed140a051e7ac899a5f4b7c641d3d6e46456db287e914a154b3b93e57423",
+  "ext/pick.py": "02afff09760a98d593f6bb25c4e6a41e2d7bd4d450d0c668b63c5d4aedf8e0e6",
   "ext/placement_view.py": "315519caa4644f9b6a431153556c5ce2080f921ce9ec4b0ddbff172517e3feb3",
   "ext/pool_ledger.py": "85d40296487f1f040ef3597b8110966e36a9b6ebee781e05a5e6172b8610d78e",
   "ext/pool_status.py": "494bcc3a0115ba98160139bdc1452a8b8850b966844fcc2634fe0fdeffaa9111",

@@ -414,9 +414,9 @@
       "source": "source/original_result_read.py"
     },
     "ext/pick.py": {
-      "bytes": 115302,
+      "bytes": 115738,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "a776ed140a051e7ac899a5f4b7c641d3d6e46456db287e914a154b3b93e57423",
+      "sha256": "02afff09760a98d593f6bb25c4e6a41e2d7bd4d450d0c668b63c5d4aedf8e0e6",
       "source": "../grok47/overlay/pick.py"
     },
     "ext/placement_view.py": {
