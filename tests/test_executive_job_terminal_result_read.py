@@ -171,6 +171,9 @@ def test_requeued_job_rejects_any_earlier_live_attempt(tmp_path, status):
     history.insert(0, first)
     document["data"]["job"]["attempt_count"] = 2
     document["data"]["attempt_count"] = 2
+    # The synthetic second Attempt must retain a lawful third-attempt budget.
+    document["data"]["job"]["attempt_limit"] = 3
+    document["data"]["attempt_limit"] = 3
     # Confirm this synthetic multi-attempt history is otherwise readable.
     first["status"] = "LOST"
     first["error"] = copy.deepcopy(history[-1]["error"])
@@ -200,6 +203,215 @@ def test_requeued_lost_history_rejects_divergence(tmp_path, mutation):
         latest["error"]["private"] = "not-a-runtime-error"
         document["data"]["attempts"][-1]["error"]["private"] = "not-a-runtime-error"
     assert not _accepted(document)
+
+
+def test_real_lost_history_survives_reclaim_and_completion(tmp_path):
+    """Real Runtime LOST history remains readable after a subsequent Attempt."""
+    from control_plane.executive_runtime import JobPayload
+    from tests.test_remote_attempt_transport import (
+        _lost_requeued_runtime, QUOTA, PROVIDER, _join,
+    )
+
+    runtime, job, _lost = _lost_requeued_runtime(tmp_path)
+    assert _accepted(_produced_job(runtime, job.job_id, tmp_path))
+    runtime.workers.register_worker(
+        "worker-b", provider=PROVIDER, account_label="second",
+        worker_type="fixture", capabilities=["research"],
+        quota_classes={
+            QUOTA: {"capabilities": ["research"],
+                    "metadata": {"capacity_join": _join("host-b")}},
+        },
+    )
+    lease = runtime.attempts.claim_job(
+        job.job_id, worker_id="worker-b", quota_class=QUOTA,
+        lease_owner="second",
+    )
+    assert lease is not None
+    assert _accepted(_produced_job(runtime, job.job_id, tmp_path))
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token, provider_session_id="second-session",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    assert _accepted(_produced_job(runtime, job.job_id, tmp_path))
+    runtime.attempts.complete_attempt(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        payload=JobPayload(summary="done", current_state="finished"),
+    )
+    terminal = _produced_job(runtime, job.job_id, tmp_path)
+    assert terminal["data"]["job"]["status"] == "COMPLETED"
+    assert terminal["data"]["attempts"][0]["status"] == "LOST"
+    assert _accepted(terminal)
+
+
+def test_real_remote_pin_readable_before_process_start_and_before_requeue(
+    tmp_path,
+):
+    """The Runtime pin is an opaque read value, not an invocation receipt."""
+    from tests.test_remote_attempt_transport import (
+        _claimed_runtime, _host_binding, _pin_remote_claim,
+    )
+
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
+    pinned = _produced_job(runtime, job.job_id, tmp_path)
+    assert pinned["data"]["job"]["status"] == "RUNNING"
+    assert pinned["data"]["latest_attempt"]["status"] == "CLAIMED"
+    assert _accepted(pinned)
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token, provider_session_id="live",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    assert _accepted(_produced_job(runtime, job.job_id, tmp_path))
+    runtime.attempts.mark_lost(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        reason="process identity absent during supervisor restart",
+        verified_process_absent=True,
+    )
+    before_requeue = _produced_job(runtime, job.job_id, tmp_path)
+    assert before_requeue["data"]["job"]["status"] == "LOST"
+    assert _accepted(before_requeue)
+
+
+@pytest.mark.parametrize("mutation", [
+    "exhausted", "completed_history", "latest_divergence",
+])
+def test_requeued_history_refuses_impossible_runtime_topology(
+    tmp_path, mutation,
+):
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, _ = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert _accepted(document)
+    data = document["data"]
+    if mutation == "exhausted":
+        data["job"]["attempt_limit"] = data["job"]["attempt_count"]
+        data["attempt_limit"] = data["job"]["attempt_limit"]
+    elif mutation == "completed_history":
+        data["attempts"][0]["status"] = "COMPLETED"
+        data["latest_attempt"]["status"] = "COMPLETED"
+    else:
+        data["latest_attempt"]["worker_id"] = "foreign-worker"
+    assert not _accepted(document)
+
+
+@pytest.mark.parametrize("predecessor", ["FAILED", "RATE_LIMITED"])
+def test_real_requeue_terminal_variants_remain_readable(tmp_path, predecessor):
+    from control_plane.executive_runtime import JobPayload, WorkerStatus
+
+    runtime = Runtime.at(tmp_path / "runtime")
+    quota = "codex-native"
+    worker = "worker-a"
+    runtime.workers.register_worker(
+        worker, provider="codex", account_label="fixture",
+        worker_type="fixture", capabilities=["research"],
+        quota_classes={quota: {
+            "capabilities": ["research"],
+            "metadata": {"capacity_join": {
+                "host_ref": "host-a", "worker_id": worker, "quota_class": quota,
+            }},
+        }},
+    )
+    job = runtime.jobs.create_job(
+        "terminal retry variant", requested_authorities=["READ"],
+        constraints={"eligible_quota_classes": [quota]}, attempt_limit=3,
+    )
+    if predecessor == "RATE_LIMITED":
+        runtime.jobs.assign_job(job.job_id, worker, quota_class=quota)
+        runtime.jobs.checkpoint_job(
+            job.job_id, JobPayload(summary="partial", current_state="retryable"),
+        )
+        runtime.workers.set_worker_status(
+            worker, WorkerStatus.RATE_LIMITED, quota_class=quota,
+        )
+    else:
+        lease = runtime.attempts.claim_job(
+            job.job_id, worker_id=worker, quota_class=quota,
+            lease_owner="fixture",
+        )
+        assert lease is not None
+        runtime.attempts.record_process(
+            lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token, provider_session_id="session",
+        )
+        runtime.attempts.mark_running(
+            lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+        )
+        runtime.attempts.fail_attempt(
+            lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+            payload=JobPayload(summary="partial", current_state="retryable"),
+        )
+    runtime.jobs.requeue_job(job.job_id)
+    doc = _produced_job(runtime, job.job_id, tmp_path)
+    assert doc["data"]["job"]["status"] == "QUEUED"
+    assert doc["data"]["latest_attempt"]["status"] == predecessor
+    assert _accepted(doc)
+
+
+def test_bounded_real_lost_checkpoint_retains_projection_parity(tmp_path):
+    """A receipt's field path differs across duplicate historical projections."""
+    from control_plane.executive_runtime import JobPayload
+    from tests.test_remote_attempt_transport import _claimed_runtime
+
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token, provider_session_id="large-session",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    runtime.attempts.checkpoint_attempt(
+        lease.attempt.attempt_id, fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        payload=JobPayload(
+            summary="large checkpoint", current_state="working",
+            completed_steps=[
+                f"step-{n:06d} " + "x" * 200 for n in range(1400)
+            ],
+        ),
+    )
+    runtime.attempts.reconcile_expired(
+        now_ms=runtime.store.now_ms() + 120_000,
+    )
+    runtime.jobs.requeue_job(job.job_id)
+    doc = _produced_job(runtime, job.job_id, tmp_path)
+    assert doc["bounded"]
+    assert not (doc["data"]["attempts"][-1] ==
+                doc["data"]["latest_attempt"])
+    assert _accepted(doc)
+    # A forged returned preview may not match its duplicated projection.
+    fake = copy.deepcopy(doc)
+    for name in ("attempts[0].checkpoint", "latest_attempt.checkpoint"):
+        found = next((entry for entry in fake["bounded"]
+                      if entry["field"] == name), None)
+        if found is not None:
+            node = (fake["data"]["attempts"][0]["checkpoint"]
+                    if name.startswith("attempts") else
+                    fake["data"]["latest_attempt"]["checkpoint"])
+            assert node["bounded"] is True
+            node["preview"] = "foreign" + node["preview"][7:]
+            assert not _accepted(fake)
+            break
+    else:
+        raise AssertionError("expected bounded Attempt checkpoint receipt")
 
 
 def test_canonical_sealed_worker_result_and_launch_survive_job_reader(

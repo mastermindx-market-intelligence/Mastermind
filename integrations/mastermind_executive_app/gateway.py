@@ -1441,11 +1441,11 @@ class CeoIngressReadGateway:
             return False
 
     @staticmethod
-    def _valid_requeued_remote_launch_pin(attempt: Mapping[str, Any]) -> bool:
-        """Read only the exact Remote Runtime pre-start pin after verified LOST.
+    def _valid_runtime_remote_launch_pin(attempt: Mapping[str, Any]) -> bool:
+        """Read the Runtime's exact opaque remote launch pin in any lifecycle phase.
 
-        A remote pre-start pin is not a sealed-worker launch attestation, and
-        admitting its historical digest never authorizes a new start or send.
+        A pre-start pin is never a sealed-worker launch attestation or start
+        authority.  The lifecycle's active lease remains owned by Runtime.
         """
         from control_plane.executive_runtime import (
             REMOTE_LAUNCH_IDENTITY_KEY, REMOTE_LAUNCH_IDENTITY_SCHEMA,
@@ -1454,7 +1454,6 @@ class CeoIngressReadGateway:
         metadata = attempt.get("launch_metadata")
         if not (
             attempt.get("execution_mode") == "SEALED_WORKER"
-            and attempt.get("status") == "LOST"
             and attempt.get("result") is None
             and type(metadata) is dict
             and set(metadata) == {REMOTE_LAUNCH_IDENTITY_KEY}
@@ -1467,6 +1466,74 @@ class CeoIngressReadGateway:
             and pin["schema_version"] == REMOTE_LAUNCH_IDENTITY_SCHEMA
             and CeoIngressReadGateway._valid_sha256(pin["sha256"])
         )
+
+    @staticmethod
+    def _same_attempt_projection(
+        history: object, latest: object,
+    ) -> bool:
+        """Require the two Runtime projections to agree despite separate bounds.
+
+        The canonical MCP producer repeats the same Attempt, but bounds the
+        paths independently.  A wrapper's path is not semantic payload; its
+        preview and exact byte counts must match the unbounded counterpart or
+        the other's separately receipted wrapper.  Each projection and receipt
+        is independently validated by _valid_attempt_row before this check.
+        """
+        from integrations.executive_mcp.schemas import (
+            BOUND_PREVIEW_CHARS, canonical_json,
+        )
+
+        if type(history) is not dict or type(latest) is not dict:
+            return False
+        if set(history) != set(latest):
+            return False
+        aggregate_fields = {
+            "checkpoint", "result", "error", "launch_metadata",
+            "requested_execution_profile", "effective_grant",
+            "placement_snapshot", "execution_principal_snapshot",
+        }
+        wrapper_keys = {
+            "bounded", "original_bytes", "returned_bytes",
+            "field", "preview",
+        }
+
+        def is_wrapper(value: object) -> bool:
+            return (
+                type(value) is dict
+                and set(value) == wrapper_keys
+                and value["bounded"] is True
+            )
+
+        for field, old in history.items():
+            new = latest[field]
+            if old == new:
+                continue
+            if field not in aggregate_fields:
+                return False
+            old_bounded, new_bounded = is_wrapper(old), is_wrapper(new)
+            if not old_bounded and not new_bounded:
+                return False
+            if old_bounded and new_bounded:
+                if any(
+                    old[key] != new[key]
+                    for key in ("bounded", "original_bytes",
+                                "returned_bytes", "preview")
+                ):
+                    return False
+                continue
+            wrapper = old if old_bounded else new
+            original = new if old_bounded else old
+            if type(original) not in {dict, list}:
+                return False
+            encoded = canonical_json(original)
+            preview = encoded.decode("utf-8")[:BOUND_PREVIEW_CHARS]
+            if (
+                wrapper["original_bytes"] != len(encoded)
+                or wrapper["preview"] != preview
+                or wrapper["returned_bytes"] != len(preview.encode("utf-8"))
+            ):
+                return False
+        return True
 
     @staticmethod
     def _valid_requested_profile(value: object, digest: object) -> bool:
@@ -1690,7 +1757,6 @@ class CeoIngressReadGateway:
                 continue
             if (
                 field == "error"
-                and job.get("status") == "QUEUED"
                 and attempt.get("status") == "LOST"
                 and CeoIngressReadGateway._valid_requeued_lost_error(
                     attempt.get("error")
@@ -1709,10 +1775,7 @@ class CeoIngressReadGateway:
         if not (
             launch_metadata == {}
             or CeoIngressReadGateway._valid_sealed_launch_metadata(attempt)
-            or (
-                job.get("status") == "QUEUED"
-                and CeoIngressReadGateway._valid_requeued_remote_launch_pin(attempt)
-            )
+            or CeoIngressReadGateway._valid_runtime_remote_launch_pin(attempt)
             or CeoIngressReadGateway._valid_bounded_aggregate(
                 launch_metadata,
                 field=f"{prefix}.launch_metadata",
@@ -1946,10 +2009,15 @@ class CeoIngressReadGateway:
                     and job.get("assigned_worker_id") is None
                     and job.get("assigned_quota_class") is None
                     and job.get("result") is None
-                    and attempts[-1].get("status") == "LOST"
-                    # Both independent history projections must agree exactly.
-                    # Arbitrary live leases cannot hide behind a null pointer.
-                    and latest == attempts[-1]
+                    and attempts[-1].get("status") in {
+                        "LOST", "FAILED", "RATE_LIMITED"
+                    }
+                    and job["attempt_count"] < job["attempt_limit"]
+                    # A successful Attempt must not be re-presented as QUEUED.
+                    and all(
+                        row.get("status") not in {"COMPLETED"}
+                        for row in attempts
+                    )
                     and all(
                         row.get("status") not in {
                             status.value for status in _LEASE_ACTIVE_ATTEMPT_STATUSES
@@ -1966,6 +2034,9 @@ class CeoIngressReadGateway:
                 expected_number=attempts[-1]["attempt_number"],
                 receipts=receipts,
                 consumed=consumed,
+            )
+            and CeoIngressReadGateway._same_attempt_projection(
+                attempts[-1], latest,
             )
         ):
             return False
