@@ -53,7 +53,16 @@ SECTION_IDS = (
 )
 
 FRESHNESS_STATES = frozenset({"FRESH", "STALE", "UNKNOWN"})
-RIGHTS_CLASSES = frozenset({"FIRST_PARTY_INTERNAL", "MACRO_VENDORED"})
+RIGHTS_CLASSES = frozenset({
+    "FIRST_PARTY_INTERNAL",
+    "MACRO_VENDORED",
+    "UNKNOWN",
+    "BLOCKED",
+})
+# Rights classes on which an AVAILABLE receipt may rest. UNKNOWN and BLOCKED are lawful
+# values only for degraded states (e.g. RIGHTS_BLOCKED), never for a present-and-current
+# claim.
+QUALIFIED_RIGHTS_CLASSES = frozenset({"FIRST_PARTY_INTERNAL", "MACRO_VENDORED"})
 AUTHORITY_CLASSES = frozenset({
     "BOOK_STATE",
     "RISK_STATE",
@@ -65,11 +74,14 @@ AUTHORITY_CLASSES = frozenset({
 })
 CLOCK_BASES = frozenset({
     "FILE_MTIME_FIRST_PARTY_STATE",
-    "SOURCE_DECLARED",
-    "CALLER_SUPPLIED",
-    "UNKNOWN",
     "DECLARED_SOURCE_FIELD",
     "UNQUALIFIED_EXTERNAL_CLOCK",
+    "UNKNOWN",
+})
+# Clock bases on which an AVAILABLE receipt may rest — an allowlist, not a denylist.
+QUALIFIED_CLOCK_BASES = frozenset({
+    "FILE_MTIME_FIRST_PARTY_STATE",
+    "DECLARED_SOURCE_FIELD",
 })
 CORRECTION_STATUSES = frozenset({"ORIGINAL", "CORRECTED", "SUPERSEDED"})
 
@@ -79,17 +91,20 @@ MAX_SECTION_ROWS = 100
 MAX_SOURCE_BYTES = 8_388_608
 MAX_JSONL_TAIL_ROWS = 100
 # Ceiling on the canonical bytes a single JSONL tail source may retain into a snapshot.
-# It must stay >= the largest single lawful row (a larger row fails its source closed as
-# OVERSIZE rather than being truncated) and small enough that the worst-case pair of JSONL
-# tails (decisions + fills, at most 2x this value) cannot alone exceed MAX_SNAPSHOT_BYTES.
+# Retention measures the kept-row *list* encoding (2 framing bytes plus one separator byte
+# per already-kept row), so the effective single-row ceiling is MAX_JSONL_TAIL_BYTES - 2:
+# a larger row fails its source closed as OVERSIZE rather than being truncated. It must
+# also stay small enough that the worst-case pair of JSONL tails (decisions + fills, at
+# most 2x this value) cannot alone exceed MAX_SNAPSHOT_BYTES.
 MAX_JSONL_TAIL_BYTES = 65_536
 # Ceiling on the total encoded filename metadata a single directory manifest may carry.
 # Deliberately far below MAX_SOURCE_BYTES: a manifest is metadata about an unbounded
 # directory, and an unbounded name census is not bounded capture.
 MAX_MANIFEST_METADATA_BYTES = 65_536
 
-# Clock bases that do not establish point-in-time knowledge of the source's content.
-UNQUALIFIED_CLOCK_BASES = frozenset({"UNKNOWN", "UNQUALIFIED_EXTERNAL_CLOCK"})
+# Clock bases that do not establish point-in-time knowledge of the source's content —
+# kept as the exact complement of QUALIFIED_CLOCK_BASES for existing readers.
+UNQUALIFIED_CLOCK_BASES = frozenset(CLOCK_BASES - QUALIFIED_CLOCK_BASES)
 
 _DIGEST_PREFIX = "sha256:"
 _DIGEST_HEX_LEN = 64
@@ -263,17 +278,24 @@ def validate_source_receipt(receipt: Mapping[str, Any]) -> None:
         value = receipt.get(field)
         if value is not None:
             _require_canonical_utc(value, field=f"{what}.{field}")
-    # AVAILABLE is a *point-in-time* claim: the snapshot asserts this source's content was
-    # true as of a knowable instant at or before the decision cutoff. A null known_at or an
-    # unqualified clock basis means no such instant is known, so the state may not be
-    # AVAILABLE — it must degrade to UNQUALIFIED_CLOCK or another lawful status instead.
+    # AVAILABLE is a *point-in-time, rights-cleared* claim: the snapshot asserts this
+    # source's content was true as of a knowable instant at or before the decision cutoff.
+    # A null known_at, a clock basis outside the qualified allowlist, or a rights class
+    # outside the qualified set means no such instant (or no cleared rights) is known, so
+    # the state may not be AVAILABLE — it must degrade to UNQUALIFIED_CLOCK,
+    # RIGHTS_BLOCKED, or another lawful status instead.
     if receipt.get("status") == "AVAILABLE":
         if receipt.get("known_at") is None:
             _fail(f"{what}.status=AVAILABLE requires a non-null known_at")
-        if receipt.get("clock_basis") in UNQUALIFIED_CLOCK_BASES:
+        if receipt.get("clock_basis") not in QUALIFIED_CLOCK_BASES:
             _fail(
                 f"{what}.status=AVAILABLE cannot rest on "
                 f"clock_basis={receipt.get('clock_basis')!r}"
+            )
+        if receipt.get("rights_class") not in QUALIFIED_RIGHTS_CLASSES:
+            _fail(
+                f"{what}.status=AVAILABLE cannot rest on "
+                f"rights_class={receipt.get('rights_class')!r}"
             )
 
 
