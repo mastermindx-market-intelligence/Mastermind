@@ -39,6 +39,22 @@ ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
 # still have to match the installed preimage before the secure overlay is used.
 PREIMAGE_ONLY = {"bailian_keys.py": "bailian_keys.py.preimage"}
+# Canonical protected merged Mastermind PR #1691 provides these nine Grok
+# Build 4.7 runtime files. They are ALREADY selected in native sequence 16.
+# Keep the byte-verified accepted source instead of reintroducing seq-15 files.
+# Never derive these names from a runtime scan or mutable published stage.
+GROK47_MERGED_SOURCE_DIGESTS = {
+    'artifact_delivery.py': '447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3',
+    'fabric_operator_client.py': '8473ba07f597d84605940897cb0f4047a9ad7458380be10d4e122456e88a0645',
+    'fabric_operator_contract.py': 'e642e36ef99d2c40b1254975b9ad3cc218fb9ef81c4ce87f3c7b6e7be0808c6a',
+    'native_remote.py': '388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e',
+    'pick.py': 'a776ed140a051e7ac899a5f4b7c641d3d6e46456db287e914a154b3b93e57423',
+    'remote_sub.sh': '0211c94f6669a66200f8c7a47f2cd85a43675acb1b8049896d921096c57391d6',
+    'remote_sub_exec.py': 'afa10b7c6298f53fd214cb436d489119eb4caba3155903e7d1be45713dfb8c05',
+    'remote_sub_helpers.py': '075108ad8c2ea69ce4af0ff93ba55484cb135342b0096d536c1bec72637df295',
+    'sub.sh': '72b3d9f7d7eec22f3cffb768f4795e144737623f1a46f5a59f4e9951a19df817',
+}
+
 EXTRA_PREIMAGES = {
     "yes": "b4f5e5353392e8ff4adc4158e1064243d0d7241333e9a891e05c1866b421813a",
     "host_pull_probe.template": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
@@ -67,12 +83,18 @@ def main():
     manifest = {}
     files = {}
     for name in sorted(BASE_FILES | ADDITIONS):
-        choices = (root / "candidate" / name,)
-        if name not in PREIMAGE_ONLY:
-            choices += (root / "source" / name,)
-        source = next((p for p in choices if p.is_file()), None)
-        if source is None or source.is_symlink():
-            raise ValueError("missing explicit regular code dependency: " + name)
+        if name in GROK47_MERGED_SOURCE_DIGESTS:
+            source = root.parent / "grok47" / "overlay" / name
+            if (source.is_symlink() or not source.is_file()
+                    or sha(source.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+                raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+        else:
+            choices = (root / "candidate" / name,)
+            if name not in PREIMAGE_ONLY:
+                choices += (root / "source" / name,)
+            source = next((p for p in choices if p.is_file()), None)
+            if source is None or source.is_symlink():
+                raise ValueError("missing explicit regular code dependency: " + name)
         preimage = rows.get(name)
         if name in BASE_FILES:
             original = root / "source" / PREIMAGE_ONLY.get(name, name)
@@ -83,8 +105,10 @@ def main():
         relative = "ext/" + name
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)
-        files[relative] = {"source": str(source.relative_to(root)), "sha256": sha(raw),
-                          "installed_preimage_sha256": preimage, "bytes": len(raw)}
+        source_ref = ("../grok47/overlay/" + name if name in GROK47_MERGED_SOURCE_DIGESTS
+                      else str(source.relative_to(root)))
+        files[relative] = {"source": source_ref, "sha256": sha(raw),
+                           "installed_preimage_sha256": preimage, "bytes": len(raw)}
     source = root / "candidate/pool_launcher.sh"
     if source.is_symlink() or sha((root/'source/pool_launcher.sh').read_bytes()) != rows['pool_launcher.sh']:
         raise ValueError('installed pool launcher preimage mismatch')
