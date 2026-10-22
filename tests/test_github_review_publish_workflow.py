@@ -20,15 +20,21 @@ class Tokens:
         return "bounded-test-token"
 
 
-def git_api(*, moved_head=False, unknown_post=False):
-    state = {"posts": [], "reviews": []}
+def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False):
+    state = {"posts": [], "reviews": [], "source_reads": 0}
 
     def handler(req):
         assert req.url.host == "api.github.com"
         assert req.headers["authorization"] == "Bearer bounded-test-token"
         if req.url.path.endswith("/pulls/42"):
+            state["source_reads"] += 1
+            current_submitter_id = (
+                315 if changed_submitter and state["source_reads"] >= 2
+                else 314
+            )
             return httpx.Response(200, json={
                 "number": 42, "state": "open", "draft": False,
+                "user": {"login": "alice", "id": current_submitter_id},
                 "head": {"sha": ("b" if moved_head else "a") * 40,
                          "repo": {"full_name": REPO}},
                 "base": {"sha": "c" * 40, "repo": {"full_name": REPO}},
@@ -161,4 +167,139 @@ def test_top_level_unavailable_unknown_post_readback_reports_effect_unknown(tmp_
     assert result.state is PublishState.REFUSED
     assert result.refusal == "PUBLICATION_EFFECT_UNKNOWN"
     assert publications.calls == readback.calls == 1
+    assert history["posts"] == []
+
+
+def test_external_github_pr_without_builder_job_publishes_labeled_advisory_comment(tmp_path):
+    """External authenticated submitter is NOT misrepresented as a Fabric builder."""
+    from integrations.github_review_return import GitHubReviewReturn
+    runtime, builder, review_job = completed_pair(tmp_path)
+    github, history = git_api()
+    results = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=github,
+        publisher_login="reviewer-bot[bot]",
+    )
+    observed = results.load_verified_result(job_id=review_job)
+    assert observed is not None
+    assert observed.builder_worker_id == ""
+    assert observed.source_basis == "EXTERNAL_GITHUB_SUBMITTER"
+    assert observed.source_github_submitter_id == 314
+    handler = GitHubReviewReturn(
+        runtime=runtime, github=github, results=results,
+        publication_guard=lambda: None,
+    )
+    first = handler.deliver(decision=decision(), job_id=review_job)
+    assert first.publication.state is PublishState.PUBLISHED
+    assert first.publication.review_id == "789"
+    assert len(history["posts"]) == 1
+    assert history["posts"][0]["event"] == "COMMENT"
+    body = history["posts"][0]["body"]
+    assert "Automated advisory review" in body
+    assert "NOT attested" in body
+    assert "GitHub PR submitter: alice (account ID 314)" in body
+    assert "Builder worker:" not in body
+    assert handler.deliver(
+        decision=decision(), job_id=review_job
+    ).publication.state is PublishState.ALREADY_PUBLISHED
+    assert len(history["posts"]) == 1
+
+
+def test_external_request_changes_verdict_cannot_request_changes_github_verb(tmp_path):
+    from integrations.github_review_return import GitHubReviewReturn
+    runtime, builder, review_job = completed_pair(tmp_path, review_verdict="reject")
+    github, history = git_api()
+    results = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=github,
+        publisher_login="reviewer-bot[bot]",
+    )
+    handler = GitHubReviewReturn(
+        runtime=runtime, github=github, results=results,
+        publication_guard=lambda: None,
+    )
+    receipt = handler.deliver(decision=decision(), job_id=review_job)
+    assert receipt.publication.state is PublishState.PUBLISHED
+    assert len(history["posts"]) == 1
+    assert history["posts"][0]["event"] == "COMMENT"
+    assert "Verdict: REQUEST_CHANGES (advisory)" in history["posts"][0]["body"]
+
+
+def test_external_submitter_identity_changes_before_publication_refuses(tmp_path):
+    runtime, builder, review_job = completed_pair(tmp_path)
+    github, history = git_api(changed_submitter=True)
+    results = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=github,
+        publisher_login="reviewer-bot[bot]",
+    )
+    pub = ExecutiveReviewPublicationRecord(
+        runtime=runtime, transport=github, job_id=review_job,
+        publication_guard=lambda: None,
+    )
+    receipt = publish_verified_review(
+        decision=decision(), job_id=review_job, results=results,
+        publications=pub, pull_requests=github, readback=github,
+    )
+    assert receipt.state is PublishState.REFUSED
+    assert receipt.refusal == "EXTERNAL_SOURCE_DRIFT"
+    assert history["posts"] == []
+
+
+def test_external_mode_and_native_builder_mode_are_mutually_exclusive(tmp_path):
+    import pytest
+    runtime, builder, review_job = completed_pair(tmp_path)
+    github, history = git_api()
+    with pytest.raises(TypeError):
+        ExecutiveVerifiedReviewResults(
+            runtime=runtime, external_source=github,
+            builder_job_id_for_review=lambda _: builder,
+            publisher_login="reviewer-bot[bot]",
+        )
+    with pytest.raises(TypeError):
+        ExecutiveVerifiedReviewResults(
+            runtime=runtime, publisher_login="reviewer-bot[bot]",
+        )
+
+
+def test_external_origin_without_publication_source_port_refuses_before_post(tmp_path):
+    runtime, builder, review_job = completed_pair(tmp_path)
+    github, history = git_api()
+    results = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=github,
+        publisher_login="reviewer-bot[bot]",
+    )
+    class PRHeadOnly:
+        def read_pull_request(self, *, repository, pull_number):
+            return github.read_pull_request(
+                repository=repository, pull_number=pull_number
+            )
+    pub = ExecutiveReviewPublicationRecord(
+        runtime=runtime, transport=github, job_id=review_job,
+        publication_guard=lambda: None,
+    )
+    receipt = publish_verified_review(
+        decision=decision(), job_id=review_job, results=results,
+        publications=pub, pull_requests=PRHeadOnly(), readback=github,
+    )
+    assert receipt.state is PublishState.REFUSED
+    assert receipt.refusal == "EXTERNAL_SOURCE_PORT_UNBOUND"
+    assert history["posts"] == []
+
+
+def test_external_moved_head_is_not_given_a_builder_identity(tmp_path):
+    runtime, builder, review_job = completed_pair(tmp_path)
+    github, history = git_api(moved_head=True)
+    results = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=github,
+        publisher_login="reviewer-bot[bot]",
+    )
+    assert results.load_verified_result(job_id=review_job) is None
+    pub = ExecutiveReviewPublicationRecord(
+        runtime=runtime, transport=github, job_id=review_job,
+        publication_guard=lambda: None,
+    )
+    receipt = publish_verified_review(
+        decision=decision(), job_id=review_job, results=results,
+        publications=pub, pull_requests=github, readback=github,
+    )
+    assert receipt.state is PublishState.REFUSED
+    assert receipt.refusal == "RESULT_NOT_VERIFIED"
     assert history["posts"] == []

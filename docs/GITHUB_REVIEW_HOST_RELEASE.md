@@ -198,3 +198,39 @@ signature refusal. This is **hermetic source-path proof only**, not evidence
 that the installed `ExecutiveControlService` accepts the new review frame.
 The legacy 21-line dormant Executive binding worktree diff remains excluded
 from this PR because the production handler modification was platform-denied.
+
+
+## Source provenance modes for external pull requests
+
+The earlier independent review identified that an ordinary GitHub PR can have
+**no Executive builder Job**. The original two-worker contract deliberately
+refused formal publication rather than inventing that Job. That stricter
+contract **remains intact** for `EXECUTIVE_BUILDER` source.
+
+A separately selected `EXTERNAL_GITHUB_SUBMITTER` mode now allows a bounded
+**advisory COMMENT** after:
+1. A real terminal, read-only Executive reviewer Job and immutable original
+   `JOB_CREATED` source receipt are verified.
+2. The host explicitly provides its installation-scoped
+   `GitHubReviewAPI.read_external_source` port and configured publisher login.
+   Mixed external/native builder sources are refused.
+3. An authenticated GitHub GET verifies the actual PR, head SHA, non-draft,
+   same-repository source and stable GitHub submitter login/account ID.
+   Submitter matching the publisher bot is refused.
+4. The source ID/login are freshly **re-read** at the publication boundary
+   and checked against the result and frozen head. A changed submitter or
+   head refuses without a review POST.
+5. All external-origin verdicts publish only GitHub `COMMENT`, never
+   `REQUEST_CHANGES` or `APPROVE`. The body explicitly warns that the
+   submitter is not an attested code-builder and native two-worker
+   independence has not been proven. It cannot become a release approval,
+   automatic merge, or an independently verified builder-worker completion.
+
+This produces useful external PR analysis without masquerading as an internal
+builder worker. It is **not** a substitute for a production builder-attestation
+writer if strict two-worker review is required. External provenance is
+default-off because `ExecutiveVerifiedReviewResults` must be explicitly
+constructed with `external_source` and `publisher_login`; the current
+installed Executive service has no delivery/return binding for it.
+Hermetic tests do not prove the GitHub App, source owner, or production
+authentication is installed.

@@ -1,9 +1,10 @@
 """Strict terminal review extraction from canonical Executive Job/Attempt/Event facts.
 
-This adapter cannot infer the reviewed builder from a GitHub comment or PR
-description. The installed builder source must identify a *real* existing
-Executive builder Job for the same exact PR/head; unknown provenance refuses.
-No lifecycle, Job status, worker or verdict is constructed here.
+This adapter never fabricates a builder worker. Native Executive review
+requires a *real* separate completed builder Job for the exact PR/head.
+Optional external GitHub PR source is a freshly authenticated PR submitter,
+not a code-builder attestation, and allows only clearly labeled advisory
+comments after source revalidation. No lifecycle, worker, or verdict invented.
 """
 from __future__ import annotations
 
@@ -13,7 +14,9 @@ from collections.abc import Callable
 
 from control_plane.executive_runtime import AttemptStatus, JobStatus, Runtime
 from control_plane.github_review_intent import assert_untrusted_text_admissible
-from control_plane.github_review_intent_ingress import VerifiedReviewResult
+from control_plane.github_review_intent_ingress import (
+    ExternalGitHubSourceFacts, ExternalGitHubSourcePort, VerifiedReviewResult,
+)
 
 _SCHEMA = "mastermind.github_review_runtime_admission.v1"
 _RESULT_VERDICTS = {"approve": "PASS", "reject": "REQUEST_CHANGES"}
@@ -27,11 +30,23 @@ class ExecutiveVerifiedReviewResults:
         *,
         runtime: Runtime,
         builder_job_id_for_review: Callable[[str], str | None] | None = None,
+        external_source: ExternalGitHubSourcePort | None = None,
+        publisher_login: str | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("canonical Runtime required")
+        if external_source is not None:
+            if (builder_job_id_for_review is not None
+                    or not isinstance(external_source, ExternalGitHubSourcePort)
+                    or not isinstance(publisher_login, str)
+                    or not publisher_login or len(publisher_login) > 50):
+                raise TypeError("external PR evidence requires one dedicated source")
+        elif publisher_login is not None:
+            raise TypeError("publisher cannot be bound without an external source")
         self._runtime = runtime
         self._builder_source = builder_job_id_for_review
+        self._external_source = external_source
+        self._publisher_login = publisher_login.casefold() if publisher_login else None
 
     def load_verified_result(self, *, job_id: str) -> VerifiedReviewResult | None:
         if not isinstance(job_id, str) or not job_id:
@@ -75,6 +90,63 @@ class ExecutiveVerifiedReviewResults:
             or provenance.get("job_id") not in {None, job_id}
         ):
             return None
+
+        # External GitHub PRs ordinarily have NO Executive builder Job. The
+        # only permitted alternate provenance is an installation-authenticated
+        # current PR submitter, expressly NOT a verified code-builder worker.
+        # It allows a COMMENT-only advisory review, never native independent
+        # review acceptance, approval, or a fabricated worker identity.
+        if self._external_source is not None:
+            try:
+                source = self._external_source.read_external_source(
+                    repository=provenance["repository"],
+                    pull_number=provenance["pull_number"],
+                )
+            except Exception:
+                return None
+            if (
+                not isinstance(source, ExternalGitHubSourceFacts)
+                or source.repository != provenance.get("repository")
+                or source.pull_number != provenance.get("pull_number")
+                or source.head_sha != provenance.get("frozen_head_sha")
+                or type(source.submitter_id) is not int
+                or source.submitter_id <= 0
+                or not isinstance(source.submitter_login, str)
+                or not source.submitter_login
+                or len(source.submitter_login) > 50
+                or source.submitter_login.casefold() == self._publisher_login
+            ):
+                return None
+            verdict = job.result.get("verdict")
+            summary = job.result.get("summary")
+            if (
+                not isinstance(verdict, str)
+                or verdict not in _RESULT_VERDICTS
+                or not isinstance(summary, str)
+                or not summary.strip() or len(summary) > 16000
+            ):
+                return None
+            try:
+                summary = assert_untrusted_text_admissible(
+                    summary, name="review summary"
+                )
+                material = json.dumps(
+                    job.result, sort_keys=True, ensure_ascii=False,
+                    separators=(",", ":"), allow_nan=False,
+                ).encode("utf-8")
+            except Exception:
+                return None
+            return VerifiedReviewResult(
+                job_id=job_id, attempt_id=attempt.attempt_id,
+                verdict=_RESULT_VERDICTS[verdict],
+                reviewer_worker_id=attempt.worker_id,
+                builder_worker_id="",
+                summary=summary,
+                result_digest=hashlib.sha256(material).hexdigest(),
+                source_basis="EXTERNAL_GITHUB_SUBMITTER",
+                source_github_submitter_login=source.submitter_login,
+                source_github_submitter_id=source.submitter_id,
+            )
 
         # A verified reviewer without a verified *different* builder is not
         # independent. Never invent a builder Job for an external GitHub PR.

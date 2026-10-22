@@ -14,6 +14,7 @@ import httpx
 
 from control_plane.github_review_intent import PullRequestFacts
 from control_plane.github_review_intent_ingress import (
+    ExternalGitHubSourceFacts,
     PublishedReviewFacts,
     PublicationEffectUnknown,
 )
@@ -165,6 +166,45 @@ class GitHubReviewAPI:
             head_repository=_repo_name(head_repo.get("full_name")),
             base_repository=_repo_name(base_repo.get("full_name")),
             base_sha=base_sha, title=title[:16000], body=(body or "")[:16000],
+        )
+
+    def read_external_source(
+        self, *, repository: str, pull_number: int
+    ) -> ExternalGitHubSourceFacts:
+        """Current App-authenticated submitter identity, NOT actual builder.
+
+        Only explicit external-review mode consumes these facts. Unlike
+        webhook.user text, this identity is freshly read from GitHub.
+        A source requiring native two-worker evidence must never use it.
+        """
+        route = self._check(repository, pull_number)
+        obj = _obj(self._request("GET", route))
+        if (
+            _number(obj.get("number")) != pull_number
+            or obj.get("state") != "open"
+            or obj.get("draft") is not False
+        ):
+            raise GitHubReviewAPIUnavailable("GITHUB_EXTERNAL_SOURCE_UNAVAILABLE")
+        head = _obj(obj.get("head"))
+        base = _obj(obj.get("base"))
+        if (
+            _repo_name(_obj(head.get("repo")).get("full_name")) != repository
+            or _repo_name(_obj(base.get("repo")).get("full_name")) != repository
+        ):
+            raise GitHubReviewAPIUnavailable("GITHUB_EXTERNAL_REPO_MISMATCH")
+        sha = _text(head.get("sha"), length=40)
+        if _SHA_RE.fullmatch(sha) is None:
+            raise GitHubReviewAPIUnavailable("GITHUB_EXTERNAL_SHA_INVALID")
+        submitter = _obj(obj.get("user"))
+        login = _text(submitter.get("login"), length=50)
+        if _LOGIN_RE.fullmatch(login) is None:
+            raise GitHubReviewAPIUnavailable("GITHUB_EXTERNAL_LOGIN_INVALID")
+        if login.casefold() == self._publisher:
+            raise GitHubReviewAPIUnavailable("GITHUB_EXTERNAL_SELF_REVIEW_REFUSED")
+        return ExternalGitHubSourceFacts(
+            repository=repository, pull_number=pull_number,
+            head_sha=sha, submitter_login=login,
+            submitter_id=_number(submitter.get("id")),
         )
 
     def read_current_permission(self, *, repository: str, login: str) -> str | None:

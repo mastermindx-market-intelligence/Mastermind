@@ -234,3 +234,35 @@ def test_preflight_read_unavailable_is_typed_effect_unknown_without_post():
             event="COMMENT", body="outage preflight",
         )
     assert posts == []
+
+
+def test_external_source_is_verified_app_pr_submitter_not_webhook_claim():
+    def authenticated(req):
+        obj = pr()
+        obj["user"] = {"login": "alice", "id": 314}
+        return httpx.Response(200, json=obj)
+    api, tokens = source(authenticated)
+    origin = api.read_external_source(repository=REPO, pull_number=42)
+    assert origin.repository == REPO
+    assert origin.pull_number == 42 and origin.head_sha == SHA
+    assert origin.submitter_login == "alice" and origin.submitter_id == 314
+    assert tokens.calls == 1
+
+
+@pytest.mark.parametrize("mutator", [
+    lambda obj: obj.pop("user", None),
+    lambda obj: obj["user"].update({"id": 0}),
+    lambda obj: obj["user"].update({"login": "reviewer-bot[bot]"}),
+    lambda obj: obj.update({"draft": True}),
+    lambda obj: obj["head"]["repo"].update({"full_name": "fork/other"}),
+    lambda obj: obj["head"].update({"sha": "not-a-valid-sha"}),
+])
+def test_external_source_refuses_unverified_invalid_or_self_origin(mutator):
+    def authenticated(req):
+        obj = pr()
+        obj["user"] = {"login": "alice", "id": 314}
+        mutator(obj)
+        return httpx.Response(200, json=obj)
+    api, _ = source(authenticated)
+    with pytest.raises(GitHubReviewAPIUnavailable):
+        api.read_external_source(repository=REPO, pull_number=42)
