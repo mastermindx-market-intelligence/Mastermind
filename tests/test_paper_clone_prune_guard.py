@@ -80,6 +80,52 @@ class ClonePruneGuardTests(unittest.TestCase):
             diff, source_postimages={path: source},
         ), [])
 
+    def test_native_page_reads_requested_tool_result_not_active_snapshot(self):
+        # A real v14 Paper response carries p-L-0 (Commodities) in its
+        # content, but the bridge's document snapshot describes the active
+        # p-A-0. Selecting that snapshot can falsely certify a lossy clone.
+        from unittest.mock import patch
+        import json
+
+        page = {"id": "p-L-0", "name": "Commodities", "type": "page"}
+        def observed(actual_page):
+            return {
+                "state": "OBSERVED",
+                "document": {"basic_info": {
+                    "fileId": SRC, "pageId": "p-A-0",
+                    "pageName": "International", "nodeCount": 1102,
+                }},
+                "result": {"content": [
+                    {"type": "text", "text": json.dumps({
+                        "file": {"id": SRC, "name": "Source"},
+                        "contentHash": {"tokens": "abc"},
+                    })},
+                    {"type": "text", "text": "Warning: large file"},
+                    {"type": "text", "text": json.dumps({
+                        "fileName": "Source", "pageName": "Commodities",
+                        "pageId": actual_page, "nodeCount": 6078,
+                        "artboardCount": 1,
+                        "artboards": [{"id": "L-A", "name": "Futures",
+                                       "childCount": 20}],
+                        "fontFamilies": ["Inter"], "pages": [page],
+                    })},
+                ]},
+            }
+
+        with patch.object(g.bridge, "execute", return_value=observed("p-L-0")) as execute:
+            native = g._read_native_page(SRC, page)
+            self.assertEqual(native["page_id"], "p-L-0")
+            self.assertEqual(native["node_count"], 6078)
+            self.assertEqual(native["artboard_count"], 1)
+            execute.assert_called_once_with(
+                "read", tool="get_basic_info",
+                arguments={"fileId": SRC, "pageId": "p-L-0"},
+            )
+
+        with patch.object(g.bridge, "execute", return_value=observed("p-A-0")):
+            with self.assertRaisesRegex(g.bridge.Refusal, "NATIVE_PAGE_IDENTITY_MISMATCH"):
+                g._read_native_page(SRC, page)
+
     def test_exact_two_file_scratch_clone_prune_readback(self):
         fixture = Copy()
         plan = fixture.plan()
