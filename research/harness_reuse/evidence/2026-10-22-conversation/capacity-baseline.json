@@ -1,0 +1,10 @@
+{
+  "proof_scope": "SOURCE_FIXTURE_ONLY",
+  "source_head": "7d2bba943d66550485d524e080dea889f2111f7f",
+  "fixture_only_stress_change": true,
+  "source_rows": 256,
+  "source_text_bytes": 1025757,
+  "formatted_nodes": 255510,
+  "format_and_render_seconds": 3.331,
+  "errors": []
+}

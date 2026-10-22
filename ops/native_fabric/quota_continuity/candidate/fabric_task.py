@@ -775,11 +775,11 @@ def request(
         if artifact_names:
             import artifact_production
         if qualification_host:
-            if pool != "grok" or artifact_names or native_return or requested_model or prefer:
+            if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:
                 raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
             import fabric_host_qualification
             route = _parse_route(fabric_host_qualification.qualification_route(
-                qualification_host, task_class=task_class, complexity=complexity,
+                qualification_host, pool=pool, task_class=task_class, complexity=complexity,
                 reason=reason, subject_pool=subject_pool,
                 root=observed_root, parent=parent_run_id,
             ))

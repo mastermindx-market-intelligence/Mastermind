@@ -290,7 +290,12 @@ function activeSnapshot(value) {
 
 function definitelySuccessful(value) {
   const state = resultState(value);
-  return state === null || ['CONNECTED', 'OBSERVED', 'APPLIED_RESPONSE_OBSERVED'].includes(state);
+  // File creation may be observed before its returned destination is read back.
+  // This is not a dispatch error and must never invite an automatic retry.
+  return state === null || [
+    'CONNECTED', 'OBSERVED', 'APPLIED_RESPONSE_OBSERVED',
+    'RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION',
+  ].includes(state);
 }
 
 function sanitizeMcpContent(value) {

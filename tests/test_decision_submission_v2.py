@@ -186,7 +186,16 @@ def test_trim_without_evidence_fails_closed_to_hold(monkeypatch):
     assert audit["blocked_actions"][0]["reason"] == "trim_requires_why_now_and_evidence"
 
 
-def test_actual_account_recovers_quote_outage_with_avg_cost(tmp_path, monkeypatch):
+def test_actual_account_freezes_a_quote_outage_instead_of_using_avg_cost(
+    tmp_path, monkeypatch
+):
+    """A quote outage is not recoverable from cost basis.
+
+    This previously asserted that an absent quote was replaced by ``avg_cost`` and consumed as
+    a current weight. That substitution fabricated the current book — the resulting weight was
+    a pure function of an old fill price, not of the market — so the boundary now freezes.
+    Full contract + caller-level proof: ``tests/test_decision_submission_mark_authority.py``.
+    """
     from portfolio import paper_account, registry
 
     (tmp_path / "latest.json").write_text(
@@ -212,10 +221,10 @@ def test_actual_account_recovers_quote_outage_with_avg_cost(tmp_path, monkeypatc
         },
     )
     monkeypatch.setattr(paper_account, "_current_price", lambda ticker: None)
-    rows = ds._latest_holdings("autonomous")
-    assert rows["BIIB"]["weight"] == pytest.approx(0.5)
-    assert rows["BIIB"]["holding_mark_source"] == "account_avg_cost_fallback"
-    assert rows["BIIB"]["rationale"] == "published thesis"
+    with pytest.raises(
+        ds.DecisionBoundaryFreeze, match="unpriceable_held_position:BIIB"
+    ):
+        ds._latest_holdings("autonomous")
 
 
 def test_actual_account_missing_quote_and_cost_freezes(monkeypatch):

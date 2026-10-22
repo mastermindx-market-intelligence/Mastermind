@@ -20,6 +20,7 @@ pool can never disarm another. See ``_minimax_safe_pool_slug``,
 ``_minimax_resolve_pool_path`` and ``_minimax_binding_row_absent``.
 """
 import os
+import errno
 import fcntl, math, os, signal, socket, subprocess, sys, threading, time
 from dataclasses import dataclass
 from enum import Enum
@@ -196,6 +197,39 @@ def _child_runtime_limit():
         minimum=1.0,
         maximum=MAX_CHILD_TIMEOUT_S,
         key="SLOT_CHILD_TIMEOUT_SECONDS",
+    )
+
+
+@dataclass(frozen=True)
+class ChildOutcome:
+    """Settlement disposition for this slot's explicit broker release only.
+
+    This is not a durable reconciliation hold: process exit releases the local
+    flock, and the broker may expire a lease after its PID or heartbeat ends.
+    """
+    returncode: int
+    release_safe: bool
+    cleanup: dict | None = None
+
+
+def _qualified_child_exec_failure(cmd, exc):
+    """Recognize the standard direct-argv exec-error-pipe failure shape only.
+
+    Popen can raise a parent-side OSError after forking. Its fd/read/close
+    failures do not prove no child started. With no shell or preexec callback,
+    these matching executable errors identify the failed-exec path instead.
+    """
+    return (
+        type(cmd) in (list, tuple)
+        and bool(cmd)
+        and all(type(arg) is str for arg in cmd)
+        and (
+            (type(exc) is FileNotFoundError and exc.errno == errno.ENOENT)
+            or (type(exc) is PermissionError and exc.errno == errno.EACCES)
+        )
+        and type(exc.filename) is str
+        and exc.filename == cmd[0]
+        and exc.filename2 is None
     )
 
 
@@ -1179,22 +1213,22 @@ def _start_heartbeat(lease_id, interval=45):
     return stop, lease_lost, hb
 
 
-def _settle_child_session(child, reason, grace=None):
+def _settle_child_session(child, reason, *, returncode, grace=None):
     receipt = settle_owned_process_session(
         child,
         grace=SIGKILL_GRACE_S if grace is None else float(grace),
         reason=reason,
     )
-    if cleanup_receipt_is_proven(receipt):
-        return True
-    label = (os.environ.get("SLOT_POOL_LABEL") or "slot").strip()
-    print(
-        "%s CHILD_CLEANUP_UNPROVEN status=%s error=%s"
-        % (label, receipt.get("status"), receipt.get("error_code")),
-        file=sys.stderr,
-        flush=True,
-    )
-    return False
+    proven = cleanup_receipt_is_proven(receipt)
+    if not proven:
+        label = (os.environ.get("SLOT_POOL_LABEL") or "slot").strip()
+        print(
+            "%s CHILD_CLEANUP_UNPROVEN status=%s error=%s"
+            % (label, receipt.get("status"), receipt.get("error_code")),
+            file=sys.stderr,
+            flush=True,
+        )
+    return ChildOutcome(returncode if proven else LEASE_LOST_RC, proven, receipt)
 
 
 def _run_child_with_lease_monitor(cmd, lease_lost):
@@ -1221,13 +1255,17 @@ def _run_child_with_lease_monitor(cmd, lease_lost):
     try:
         try:
             child = subprocess.Popen(cmd, start_new_session=True)
+        except OSError as exc:
+            return ChildOutcome(1, _qualified_child_exec_failure(cmd, exc))
         except Exception:
-            return 1
+            # Preserve the existing failure result without inventing no-effect
+            # evidence for an unqualified constructor exception.
+            return ChildOutcome(1, False)
         started = time.monotonic()
         while True:
             rc = child.poll()
             if rc is not None:
-                return rc if _settle_child_session(child, "normal_completion") else LEASE_LOST_RC
+                return _settle_child_session(child, "normal_completion", returncode=rc)
             if parent_stop.is_set():
                 signum = int(getattr(parent_stop, "signum", 0) or signal.SIGTERM)
                 if label:
@@ -1236,13 +1274,12 @@ def _run_child_with_lease_monitor(cmd, lease_lost):
                         file=sys.stderr,
                         flush=True,
                     )
-                if not _settle_child_session(
+                return _settle_child_session(
                     child,
                     "parent_signal",
+                    returncode=128 + signum,
                     grace=PARENT_SIGNAL_SETTLE_GRACE_S,
-                ):
-                    return LEASE_LOST_RC
-                return 128 + signum
+                )
             if lease_lost.is_set():
                 if label:
                     print(
@@ -1251,9 +1288,7 @@ def _run_child_with_lease_monitor(cmd, lease_lost):
                         file=sys.stderr,
                         flush=True,
                     )
-                if not _settle_child_session(child, "lease_lost"):
-                    return LEASE_LOST_RC
-                return LEASE_LOST_RC
+                return _settle_child_session(child, "lease_lost", returncode=LEASE_LOST_RC)
             if time.monotonic() - started >= timeout_s:
                 if label:
                     print(
@@ -1261,9 +1296,7 @@ def _run_child_with_lease_monitor(cmd, lease_lost):
                         file=sys.stderr,
                         flush=True,
                     )
-                if not _settle_child_session(child, "timeout"):
-                    return LEASE_LOST_RC
-                return CHILD_TIMEOUT_RC
+                return _settle_child_session(child, "timeout", returncode=CHILD_TIMEOUT_RC)
             time.sleep(LEASE_MONITOR_POLL_S)
     finally:
         for signum, previous in old_handlers.items():
@@ -1356,18 +1389,25 @@ def main(argv=None):
     # W4-K2 R24: heartbeat starts immediately after lease grant.
     stop, lease_lost, _hb = _start_heartbeat(lease_id, interval=45)
 
+    # An exception after a possible spawn leaves settlement unknown. An exit
+    # code alone, including 76, never authorizes an explicit broker release.
+    outcome = None
     try:
-        rc = _run_child_with_lease_monitor(cmd, lease_lost)
-        if rc == LEASE_LOST_RC:
+        outcome = _run_child_with_lease_monitor(cmd, lease_lost)
+        if outcome.returncode == LEASE_LOST_RC:
             _record_lease_lost(pool, getattr(lease_lost, "reason", "revoked"))
-        return rc
+        return outcome.returncode
     finally:
-        stop.set()
-        current = (os.environ.get("POOL_LEASE_ID") or lease_id or "").strip()
-        _broker_cmd("release", current)
-        if lease_id and current and current != lease_id:
-            _broker_cmd("release", lease_id)
-        _release_flock(fh)
+        try:
+            stop.set()
+            if outcome is not None and outcome.release_safe is True:
+                current = (os.environ.get("POOL_LEASE_ID") or lease_id or "").strip()
+                _broker_cmd("release", current)
+                if lease_id and current and current != lease_id:
+                    _broker_cmd("release", lease_id)
+        finally:
+            # Closing this process-owned lock is not a durable admission hold.
+            _release_flock(fh)
 
 
 if __name__ == "__main__":
