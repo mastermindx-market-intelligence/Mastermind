@@ -1,0 +1,53 @@
+{
+  "schema": "mastermind.observed_transcript.browser_fixture.v1",
+  "proof_scope": "SOURCE_FIXTURE_ONLY",
+  "production_authentication": false,
+  "real_provider_calls": 0,
+  "real_send": false,
+  "parent_consumption": false,
+  "results": [
+    {
+      "viewport": "desktop",
+      "width": 1440,
+      "height": 1100,
+      "preserved_reading_top_before": 200,
+      "preserved_reading_top_after": 200,
+      "jump_to_latest": true,
+      "search_and_literal_scope": true,
+      "notes_unchanged": true,
+      "source_epoch_resets_search": true,
+      "withdrawn_source_hidden": true,
+      "inert_markdown": true,
+      "horizontal_overflow": false,
+      "dark_background": "rgb(8, 8, 8)",
+      "light_background": "rgb(247, 248, 250)",
+      "page_errors": [],
+      "external_requests": []
+    },
+    {
+      "viewport": "mobile",
+      "width": 390,
+      "height": 844,
+      "preserved_reading_top_before": 200,
+      "preserved_reading_top_after": 200,
+      "jump_to_latest": true,
+      "search_and_literal_scope": true,
+      "notes_unchanged": true,
+      "source_epoch_resets_search": true,
+      "withdrawn_source_hidden": true,
+      "inert_markdown": true,
+      "horizontal_overflow": false,
+      "dark_background": "rgb(8, 8, 8)",
+      "light_background": "rgb(247, 248, 250)",
+      "page_errors": [],
+      "external_requests": []
+    }
+  ],
+  "screenshot_sha256": {
+    "desktop-dark.png": "cc65104d131d76edda7c9d568ecd4dbce3762eadb6506c9a58d5bfb6887f975d",
+    "desktop-light.png": "44358ed23c285bbe4f4745773ec1dde05cfd950c381b5c1636590efa2487887e",
+    "mobile-dark.png": "c2357ed98f7baf661f38deb9709d4c628cf890573ed57dd39a20ab02df8de2af",
+    "mobile-light.png": "a32b06ec88c904e6f6dfe1e0c643b0c392c9d007d76dad86a4eef4ba06d009e2",
+    "mobile-zh.png": "6520d33bae732685df3ab65180bf0b06e4b2440db15764947e7b13a56f201613"
+  }
+}

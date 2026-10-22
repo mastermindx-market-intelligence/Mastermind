@@ -1,0 +1,59 @@
+{
+  "schema": "mastermind.deepseek_conversation_reading.verification.v1",
+  "base_sha": "0cdb2360992918c06aaf5a4b1bebd3458fea29cf",
+  "upstream_sha": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "full_frontend": {
+    "passed": 1745,
+    "skipped": 1,
+    "files": 79,
+    "scope": "full source suite before import-order-only compatibility adjustment"
+  },
+  "final_consumer_integration": {
+    "passed": 37,
+    "files": 3
+  },
+  "provenance_tests": {
+    "passed": 4
+  },
+  "typecheck": "PASS",
+  "production_build": "PASS",
+  "fixture_excluded_from_production": true,
+  "compiled_browser": "PASS_SOURCE_FIXTURE_ONLY",
+  "bridge_1362_exact_head": "dd9f1bbc61a5413b09d98edea7ff81f0f72427b1",
+  "bridge_consumer_patch_check": "PASS_NO_BRANCH_OR_WORKSPACE_WRITE",
+  "source_sha256": {
+    "app/mastermind_os/.gitignore": "957a3e545f3e7afa54edcf75152be936016c3d0137ca43adb8598ee3088571f3",
+    "app/mastermind_os/conversation-reading-proof.html": "1c20d527d59848ade2f997213a993c642708e020fb0cf67cf68842dd1bcb2a0d",
+    "app/mastermind_os/src/conversation-reading-proof.tsx": "910a7193a9fe5c6b5bd9d3d1a601ac5c181c8dade0ad22e75cadd975c35c7323",
+    "app/mastermind_os/src/conversations/ConversationWindow.reading.test.tsx": "c433638310c2a0ece1269c167c95d22b664d4820bb96ffe00d0db6cee7e5ecfd",
+    "app/mastermind_os/src/conversations/ConversationWindow.tsx": "3995ede7e145ca85b530e0016c4a7571ed635df3277192e50d8377d46649fb9b",
+    "app/mastermind_os/src/conversations/ObservedTranscript.test.tsx": "4e7972990ce4e03fae57ea46ef30eadce22f2364be63490936adeb5f58fa6189",
+    "app/mastermind_os/src/conversations/ObservedTranscript.tsx": "34e28c73c87658072f24a1f6603c151880319f7f12d250a25af50ef088105985",
+    "app/mastermind_os/src/conversations/observed-transcript.css": "41489af9dfd02125a78db6dfb26e6f2a4fae71840eafce69aa000961b1952842",
+    "app/mastermind_os/src/conversations/useObservedTranscriptScroll.test.tsx": "fef6cf8d7c216201f6b98d7d549ae65ae1dd22dd480954dd405c478aafec31ed",
+    "app/mastermind_os/src/conversations/useObservedTranscriptScroll.ts": "f59c10ff3f18d763cca1894afc33ebda5cc7fc055457c34f1f82998047a3710d",
+    "app/mastermind_os/src/vendor/deepseek/NOTICE.md": "07bd39c39a439eaf2703fec447b74f7ac41942fa5055924b77709a90246221c8",
+    "app/mastermind_os/src/vendor/deepseek/manifest.json": "75fcfd1fcf7a80a323fa835500faf041bd9259027fa0c3c6eb6875f536490264",
+    "app/mastermind_os/src/vendor/deepseek/use-scroll-follow.ts": "fd0734320e326292e614991476c1ffe492a40b90e44534b47a0368528a9415f0",
+    "app/mastermind_os/tools/qualify_conversation_reading.py": "a03fbfe9c467bb1ac97b2408d019bca461255fdb71940dd606c49e4302387723",
+    "app/mastermind_os/vite.conversation-proof.config.ts": "f39ae65de50db675bf582acc7b74c08d4bfa3813b5deddcb9972dbacb1a82108",
+    "research/harness_reuse/2026-10-22-conversation-reading-frontier.md": "12d1b4d6892319429710e0aa40b2c6add20646589b1e2b3ad693300d4252a34a",
+    "research/harness_reuse/evidence/2026-10-22-conversation/browser-proof.json": "9e34c599ae18aeea337297fcd0ee3e67b5a336551c791dd81d0ce4faad6878c9",
+    "research/harness_reuse/evidence/2026-10-22-conversation/desktop-dark.png": "cc65104d131d76edda7c9d568ecd4dbce3762eadb6506c9a58d5bfb6887f975d",
+    "research/harness_reuse/evidence/2026-10-22-conversation/desktop-light.png": "44358ed23c285bbe4f4745773ec1dde05cfd950c381b5c1636590efa2487887e",
+    "research/harness_reuse/evidence/2026-10-22-conversation/mobile-dark.png": "c2357ed98f7baf661f38deb9709d4c628cf890573ed57dd39a20ab02df8de2af",
+    "research/harness_reuse/evidence/2026-10-22-conversation/mobile-light.png": "a32b06ec88c904e6f6dfe1e0c643b0c392c9d007d76dad86a4eef4ba06d009e2",
+    "research/harness_reuse/evidence/2026-10-22-conversation/mobile-zh.png": "6520d33bae732685df3ab65180bf0b06e4b2440db15764947e7b13a56f201613",
+    "tests/test_deepseek_client_provenance.py": "e20f2e4f074bbc8fcc0d631b0591278bd7e12034682ae8ffbbc7046720ddd023"
+  },
+  "fixture_artifact_sha256": {
+    "dist-conversation-proof/os/conversation-reading-proof.html": "aede2f239176d9bb4b924c5b02a890089b53838cd6beb40122a9ca1a0cb7e2e3",
+    "dist-conversation-proof/os/assets/conversation-reading-proof-CkJpRdCe.js": "e1251300767a1fa4089a197bc17e8c9f82a494a718eb7b78e8e881c4a26e6f2a",
+    "dist-conversation-proof/os/assets/SourceMarkdown-_Pti-jmH.css": "4f8df832714e53269f28e990c2fb2ba8652edf6158956b4a162642bc7fc22893",
+    "dist-conversation-proof/os/assets/conversation-reading-proof-DGhN8AH4.css": "8fcb91f592d2d2fa654c9595965f568057b1f9bf5c435452e026090cb2959302",
+    "dist-conversation-proof/os/assets/SourceMarkdown-BWydIG3u.js": "f2db4ac60a2e8764ae0b7ddad85dd40ad79185525560bace6d39b4c1ab1ca4f8"
+  },
+  "production_acceptance": false,
+  "real_send": false,
+  "provider_calls": 0
+}

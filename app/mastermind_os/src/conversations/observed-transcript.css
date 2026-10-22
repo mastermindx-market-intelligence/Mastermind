@@ -1,0 +1,21 @@
+.observed-transcript { display:grid; gap:14px; min-width:0; }
+.observed-transcript-toolbar { display:flex; align-items:end; flex-wrap:wrap; gap:12px; }
+.observed-search { flex:1 1 240px; min-width:0; display:grid; gap:6px; }
+.observed-search label { color:var(--muted); font-size:13px; line-height:1.5; }
+.observed-search-input { display:flex; align-items:center; gap:8px; min-width:0; }
+.observed-search input { width:100%; min-width:0; min-height:44px; padding:10px 12px; border:1px solid var(--faint); border-radius:8px; color:var(--text); background:var(--panel); font:inherit; }
+.observed-search input::placeholder { color:var(--muted); }
+.observed-transcript button { min-height:44px; max-width:100%; border:1px solid var(--faint); border-radius:8px; padding:8px 12px; background:var(--panel); color:var(--text); font-size:13px; line-height:1.4; white-space:normal; cursor:pointer; }
+.observed-transcript button:disabled { cursor:not-allowed; color:var(--muted); background:var(--raised); }
+.observed-transcript button[aria-pressed="true"] { border-color:var(--brass); background:var(--raised); }
+.observed-transcript :is(button,input,[tabindex="0"]):focus-visible { outline:2px solid var(--brass); outline-offset:3px; }
+.observed-transcript-coverage,.observed-transcript-count { margin:0; font-size:12px; line-height:1.6; color:var(--muted); }
+.observed-transcript-viewport { min-width:0; max-height:min(65dvh,720px); overflow:auto; scrollbar-gutter:stable; overscroll-behavior:contain; overflow-anchor:none; padding:12px 14px 12px 0; }
+.observed-transcript-viewport .conversation-transcript { min-width:0; gap:24px; }
+.observed-transcript-viewport .conversation-response { min-width:0; padding:16px; border:1px solid var(--border); border-radius:12px; background:var(--panel); gap:12px; }
+.observed-response-header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; justify-content:space-between; }
+.observed-response-header .conversation-eyebrow { margin:0; }
+.observed-transcript-viewport .conversation-answer { margin:0; overflow-wrap:anywhere; }
+.observed-transcript-footer { display:flex; flex-wrap:wrap; gap:8px; justify-content:space-between; align-items:center; color:var(--muted); font-size:12px; line-height:1.6; }
+@media(max-width:600px) { .observed-transcript-toolbar { align-items:stretch; } .observed-transcript-toolbar>button { width:100%; } .observed-transcript-viewport { max-height:60dvh; padding-right:8px; } .observed-transcript-viewport .conversation-response { padding:14px; } }
+@media(prefers-reduced-motion:reduce) { .observed-transcript * { scroll-behavior:auto; } }
