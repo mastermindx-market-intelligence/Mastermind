@@ -1738,12 +1738,14 @@ def valuation(prices: dict[str, float], asof: str, portfolio_id: str | None = No
       finite persisted ``current_price`` whose ``current_price_asof`` is within
       ``stale_max`` days of ``asof`` and not in the future (a mark newer than
       ``asof`` must never value an older date).
-    - UNATTESTED — a valid input price with no evidence entry for it, or whose
+    - UNATTESTED — a valid input price with no evidence entry for it, whose
       otherwise-current evidence says ``close_qualified is False`` (an intraday
-      print, a seed, an injected float, an adjusted historical close): the value
-      is used but the line cannot qualify.
+      print, a seed, an injected float, an adjusted historical close), or whose
+      ``stale_days`` is present but not a finite number (the age is unreadable):
+      the value is used but the line cannot qualify.
     - UNPRICED — anything else. Never booked at cost basis and never zero: the
-      line's value is None and the whole account is WITHHELD.
+      line's value is None, the whole account is WITHHELD, and ``mark()`` does not
+      persist the rejected input as the position's last observed mark.
 
     Status: QUALIFIED when every held line is FRESH (or the book holds nothing),
     WITHHELD when any line is UNPRICED, else PROVISIONAL. ``nav``/``invested``
@@ -1795,15 +1797,27 @@ def valuation(prices: dict[str, float], asof: str, portfolio_id: str | None = No
             else:
                 ev_source = str(ev.get("source") or "")
                 raw_stale = ev.get("stale_days")
-                try:
-                    stale_days = int(raw_stale) if raw_stale is not None else None
-                except (TypeError, ValueError):
-                    stale_days = None
+                # A present stale_days that is not a finite number cannot attest freshness:
+                # it may value the line (UNATTESTED) but never qualify it. A fractional age
+                # rounds away from zero, so any non-zero age stays non-zero.
+                stale_days: int | None = None
+                stale_garbled = False
+                if raw_stale is not None:
+                    try:
+                        if isinstance(raw_stale, bool):
+                            raise TypeError("bool is not an age")
+                        stale_f = float(raw_stale)
+                        if not math.isfinite(stale_f):
+                            raise ValueError("non-finite age")
+                        stale_days = math.ceil(stale_f) if stale_f >= 0 else math.floor(stale_f)
+                    except (TypeError, ValueError, OverflowError):
+                        stale_garbled = True
                 observed = str(ev.get("observed_asof") or "")[:10]
                 observed_day = _valuation_day(observed) if observed else None
                 says_carry = "carry" in ev_source.lower()
-                if stale_days in (None, 0) and not says_carry and (
-                        not observed or observed == asof_str):
+                observed_current = not observed or observed == asof_str
+                if (stale_days in (None, 0) and not stale_garbled and not says_carry
+                        and observed_current):
                     # close_qualified is optional (today's mark_symbols() shape omits it);
                     # only an explicit False demotes the line — it can value, never qualify.
                     if ev.get("close_qualified") is False:
@@ -1819,6 +1833,8 @@ def valuation(prices: dict[str, float], asof: str, portfolio_id: str | None = No
                         price_asof = (asof_day - timedelta(days=max(stale_days or 0, 0))).isoformat()
                     observed_day = _valuation_day(price_asof)
                     age_days = (asof_day - observed_day).days if observed_day else None
+                elif stale_garbled and observed_current:
+                    cls, price, source = "UNATTESTED", px, (ev_source or None)
                 else:
                     cls = "UNPRICED"  # e.g. an observation dated after asof — direction matters
         else:
@@ -3621,6 +3637,10 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         if px is None or not math.isfinite(px) or px <= 0:
             continue
         line = v["lines"].get(ticker)
+        if line is not None and line["class"] == "UNPRICED":
+            # The qualification rejected this input (e.g. observed after asof): it is not an
+            # observed mark for this date, so it must not become the persisted last mark.
+            continue
         if line is not None and line["class"] == "CARRIED" and line.get("price_asof"):
             stamp_asof = str(line["price_asof"])[:10]
             stamp_source = line.get("source") or _mark_source

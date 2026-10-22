@@ -587,3 +587,115 @@ def test_mark_writes_unattested_close_unqualified_line(tmp_account: Path) -> Non
     assert rows[0]["nav_status"] == "PROVISIONAL"
     assert rows[0]["nav_qualified"] is None
     assert rows[0]["unattested"] == ["AAPL"]
+
+
+# ---------------------------------------------------------------------------
+# lr-a02-r1 finding 1: an unreadable stale_days can value a line, never qualify it
+# ---------------------------------------------------------------------------
+
+_ONE_LINE = {"cash": 0.0, "positions": {"AAPL": {"shares": 10.0, "avg_cost": 150.0}}}
+
+
+@pytest.mark.parametrize("raw_stale", [
+    "not-a-number", "", True, False, float("nan"), float("inf"), "-inf", [1], {"d": 1},
+])
+def test_unreadable_stale_days_is_unattested_not_fresh(tmp_account: Path, raw_stale) -> None:
+    from portfolio import paper_account
+
+    evidence = {"AAPL": {"source": "polygon-eod", "price": 200.0, "stale_days": raw_stale,
+                         "observed_asof": _D}}
+    v = paper_account.valuation({"AAPL": 200.0}, _D, state=_ONE_LINE, price_evidence=evidence)
+    assert v["lines"]["AAPL"]["class"] == "UNATTESTED"
+    assert v["lines"]["AAPL"]["value"] == pytest.approx(2_000.0)
+    assert v["lines"]["AAPL"]["source"] == "polygon-eod"
+    assert v["nav_status"] == "PROVISIONAL"
+    assert v["nav_qualified"] is None
+
+
+@pytest.mark.parametrize("raw_stale,age", [("2.9", 3), (2.9, 3), (0.4, 1), ("3", 3)])
+def test_numeric_stale_days_rounds_away_from_zero_to_carried(
+        tmp_account: Path, raw_stale, age: int) -> None:
+    from portfolio import paper_account
+
+    evidence = {"AAPL": {"source": "polygon-eod", "price": 200.0, "stale_days": raw_stale}}
+    v = paper_account.valuation({"AAPL": 200.0}, _D, state=_ONE_LINE, price_evidence=evidence)
+    line = v["lines"]["AAPL"]
+    assert line["class"] == "CARRIED"
+    assert line["age_days"] == age
+    assert line["price_asof"] == (date.fromisoformat(_D) - timedelta(days=age)).isoformat()
+    assert v["nav_status"] == "PROVISIONAL"
+
+
+def test_negative_fractional_stale_days_is_unpriced(tmp_account: Path) -> None:
+    from portfolio import paper_account
+
+    evidence = {"AAPL": {"source": "polygon-eod", "price": 200.0, "stale_days": -0.5}}
+    v = paper_account.valuation({"AAPL": 200.0}, _D, state=_ONE_LINE, price_evidence=evidence)
+    assert v["lines"]["AAPL"]["class"] == "UNPRICED"
+    assert v["nav_status"] == "WITHHELD"
+    assert v["nav"] is None
+
+
+def test_unreadable_stale_days_does_not_override_direction_or_carry(tmp_account: Path) -> None:
+    from portfolio import paper_account
+
+    future = (date.fromisoformat(_D) + timedelta(days=1)).isoformat()
+    after = {"AAPL": {"source": "polygon-eod", "price": 200.0, "stale_days": "x",
+                      "observed_asof": future}}
+    v = paper_account.valuation({"AAPL": 200.0}, _D, state=_ONE_LINE, price_evidence=after)
+    assert v["lines"]["AAPL"]["class"] == "UNPRICED"
+    assert v["nav_status"] == "WITHHELD"
+
+    carry = {"AAPL": {"source": "last-good-carry", "price": 200.0, "stale_days": "x",
+                      "observed_asof": "2026-03-06"}}
+    v = paper_account.valuation({"AAPL": 200.0}, _D, state=_ONE_LINE, price_evidence=carry)
+    assert v["lines"]["AAPL"]["class"] == "CARRIED"
+    assert v["lines"]["AAPL"]["price_asof"] == "2026-03-06"
+    assert v["lines"]["AAPL"]["age_days"] == 4
+
+
+# ---------------------------------------------------------------------------
+# lr-a02-r1 finding 2: mark() never persists an input the qualification rejected
+# ---------------------------------------------------------------------------
+
+def test_mark_does_not_persist_an_unpriced_input(tmp_account: Path) -> None:
+    from portfolio import paper_account
+
+    _book()
+    _strip_persisted_marks()
+    future = (date.fromisoformat(_D) + timedelta(days=2)).isoformat()
+    evidence = dict(_FRESH_EV)
+    evidence["AAPL"] = {"source": "polygon-eod", "price": 200.0, "stale_days": None,
+                        "observed_asof": future}
+    v = paper_account.mark(_PRICES, _D, price_evidence=evidence)
+    assert v["lines"]["AAPL"]["class"] == "UNPRICED"
+    assert v["nav_status"] == "WITHHELD"
+
+    positions = paper_account._load_account()["positions"]
+    assert "current_price" not in positions["AAPL"]
+    assert "current_price_asof" not in positions["AAPL"]
+    assert positions["MSFT"]["current_price"] == pytest.approx(400.0)
+    assert positions["MSFT"]["current_price_asof"] == _D
+    assert paper_account._load_jsonl(paper_account._NAV_PATH) == []
+
+
+def test_mark_keeps_the_prior_persisted_mark_when_input_is_unpriced(tmp_account: Path) -> None:
+    from portfolio import paper_account
+
+    _book()
+    _strip_persisted_marks()
+    prior = (date.fromisoformat(_D) - timedelta(days=1)).isoformat()
+    state = paper_account._load_account()
+    state["positions"]["AAPL"].update({"current_price": 190.0, "current_price_asof": prior,
+                                       "current_price_source": "polygon-eod"})
+    paper_account._save_account(state)
+
+    future = (date.fromisoformat(_D) + timedelta(days=2)).isoformat()
+    evidence = dict(_FRESH_EV)
+    evidence["AAPL"] = {"source": "polygon-eod", "price": 250.0, "stale_days": None,
+                        "observed_asof": future}
+    paper_account.mark({**_PRICES, "AAPL": 250.0}, _D, price_evidence=evidence)
+    aapl = paper_account._load_account()["positions"]["AAPL"]
+    assert aapl["current_price"] == pytest.approx(190.0)
+    assert aapl["current_price_asof"] == prior
+    assert aapl["current_price_source"] == "polygon-eod"
