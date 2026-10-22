@@ -145,6 +145,8 @@ class PaperMigrationPlanTests(unittest.TestCase):
             lambda d: d["unobserved_baseline_pages"][0].update(source_url="fake"),
             lambda d: d["unobserved_baseline_pages"][0].update(baseline_nodes=9),
             lambda d: d.update(baseline_nodes_associated_with_unobserved_pages=0),
+            lambda d: d["observed_visible_page_ids"].append({"invalid": "unhashable"}),
+            lambda d: d["unobserved_baseline_pages"][0].update(source_page_id=["unhashable"]),
         ):
             delta = self._six_terminal_page_delta()
             mutate(delta)
