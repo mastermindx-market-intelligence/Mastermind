@@ -36,7 +36,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 EXPECTED_NATIVE_FILES = 85
 # Include the reviewed historical-denial outcome correction; executor and donor
 # transformation pins above remain unchanged.
-NATIVE_MANIFEST_SHA = "5700e98e7788d32674c6e28fcdde75eec3d080975eab412395220a0f4a0a7e05"
+NATIVE_MANIFEST_SHA = "725ea71b73446b8a6dd6381d3635eb26db18a7089804cefb416c4d2701c8296e"
 
 
 def _sha(raw):

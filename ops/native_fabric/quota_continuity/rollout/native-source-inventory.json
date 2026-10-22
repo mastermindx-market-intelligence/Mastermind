@@ -492,10 +492,10 @@
       "source": "candidate/run_observation.py"
     },
     "ext/run_observation_delivery.py": {
-      "bytes": 35705,
+      "bytes": 40482,
       "installed_preimage_sha256": "db54aa15630e29535980e0fccb406c3904cc7df92c66d17ec520f40d4fd5447b",
-      "sha256": "db54aa15630e29535980e0fccb406c3904cc7df92c66d17ec520f40d4fd5447b",
-      "source": "source/run_observation_delivery.py"
+      "sha256": "eba658de92294a833108c83804c2b237ef9be0356bbc0158ff5709755e8bb147",
+      "source": "candidate/run_observation_delivery.py"
     },
     "ext/slot.py": {
       "bytes": 54398,

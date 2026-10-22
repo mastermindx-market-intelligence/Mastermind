@@ -77,7 +77,7 @@
   "ext/remote_sub_exec.py": "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef",
   "ext/remote_sub_helpers.py": "d1aeb8861dd722faeb767a0894ff4ecccc56576ed41ab5156d1c9bd74f87ad5d",
   "ext/run_observation.py": "0984a7a221e7d79e30e3c0c0a7cb7425e9f762d73f2946df1d28283f36f85809",
-  "ext/run_observation_delivery.py": "db54aa15630e29535980e0fccb406c3904cc7df92c66d17ec520f40d4fd5447b",
+  "ext/run_observation_delivery.py": "eba658de92294a833108c83804c2b237ef9be0356bbc0158ff5709755e8bb147",
   "ext/slot.py": "84a56ad2086d0fe131aba3a2af981a8bf8839ce834ef3ee1f02ca68dbe182435",
   "ext/studio_mcp_projection.sh": "098bd6d97a1375e5b7304cd85eadbe82a2d1519a334679d1d7dec39d987f97ec",
   "ext/sub.sh": "73a60636ce5adaf3f839eac6b9ae5c8217aa4b6d6751c538be108011f9253d9a",
