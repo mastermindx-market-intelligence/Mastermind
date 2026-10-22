@@ -1,0 +1,175 @@
+--- a/ext/fabric_task.py
++++ b/ext/fabric_task.py
+@@ -655,6 +655,76 @@
+     return result.stdout.strip()
+ 
+ 
++def _manual_token(value: str | None) -> str | None:
++    """A literal preference is not an admission or quota grant."""
++    if value is None:
++        return None
++    if type(value) is not str:
++        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
++    token = value.strip()
++    if not token or token.casefold() == "auto":
++        return None
++    if re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", token) is None:
++        raise FabricTaskError("MANUAL_SELECTOR_INVALID")
++    return token
++
++
++def _enforce_manual_route(route: dict[str, str], pool: str | None, model: str | None) -> None:
++    """Match the reselected *actual* worker route before native launch effects."""
++    named_pool = _manual_token(pool)
++    if named_pool is None:
++        raise FabricTaskError("MANUAL_POOL_REQUIRED")
++    canonical = pick.canonical_pool(named_pool)
++    canonical = pick.ROUTING_TOKEN_POOLS.get(canonical, canonical)
++    if route.get("POOL") != canonical:
++        raise FabricTaskError("MANUAL_POOL_ROUTE_MISMATCH")
++    named_model = _manual_token(model)
++    if named_model is not None and route.get("MODEL", "").casefold() != named_model.casefold():
++        raise FabricTaskError("MANUAL_MODEL_ROUTE_MISMATCH")
++
++
++def preview_route(
++    run_id: str,
++    task_class: str,
++    *,
++    pool: str | None = None,
++    model: str | None = None,
++    prefer: str | None = None,
++    subject_pool: str | None = None,
++    task_complexity: str = "",
++    escalation_reason: str = "",
++) -> dict[str, object]:
++    """Read-only incumbent picker and economic preflight; no lease, packet or worker."""
++    rid = validate_run_id(run_id)
++    selected_pool = _manual_token(pool)
++    selected_model = _manual_token(model)
++    if selected_model is not None and selected_pool is None:
++        raise FabricTaskError("MANUAL_MODEL_REQUIRES_POOL")
++    route = _parse_route(pick.format_pick(
++        task_class, host="auto", pool=selected_pool,
++        prefer=_manual_token(prefer),
++        **({"subject_pool": subject_pool} if subject_pool is not None else {}),
++        task_complexity=task_complexity, escalation_reason=escalation_reason,
++        requested_model=selected_model, route_key=rid,
++    ))
++    if selected_pool is not None:
++        _enforce_manual_route(route, selected_pool, selected_model)
++    policy = pick.launch_policy(
++        route["MODE"], task_class, route["MODEL"],
++        escalation_reason=escalation_reason, task_complexity=task_complexity,
++    )
++    if not policy.get("allowed"):
++        raise FabricTaskError("ECONOMIC_POLICY_REFUSED: " + str(policy.get("reason")))
++    return {
++        "state": "PREVIEW_ONLY", "reserved": False, "run_id": rid,
++        "pool": route["POOL"], "model": route["MODEL"],
++        "host": route["HOST"], "mode": route["MODE"],
++        "reason": route.get("REASON") or "",
++        "selection_rechecked_at_request": True,
++        "strict_pin_enforced_at_request": selected_pool is not None,
++    }
++
++
+ def request(
+     run_id: str,
+     task_class: str,
+@@ -678,6 +748,7 @@
+     request_remaining_seconds: int | None = None,
+     request_capacity_preflight: bool = False,
+     request_deadline_ns: int | None = None,
++    strict_manual_pin: bool = False,
+ ) -> int:
+     rid = validate_run_id(run_id)
+     if bool(packet) == bool(stdin_bytes is not None):
+@@ -781,6 +852,8 @@
+             route = _parse_route(
+                 _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
+                 if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
++        if strict_manual_pin:
++            _enforce_manual_route(route, pool, requested_model)
+         check_deadline()
+         guard = pick.launch_policy(
+             route["MODE"], task_class, route["MODEL"],
+@@ -1180,6 +1253,17 @@
+     p_packet_reconcile.add_argument("--root", required=True)
+     p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
+ 
++
++    p_preview = sub.add_parser("preview", help="read-only incumbent model and provider selection")
++    p_preview.add_argument("--id", required=True)
++    p_preview.add_argument("--class", dest="task_class", required=True)
++    p_preview.add_argument("--pool", default="auto")
++    p_preview.add_argument("--model", dest="requested_model", default="auto")
++    p_preview.add_argument("--prefer")
++    p_preview.add_argument("--subject-pool")
++    p_preview.add_argument("--task-complexity", default="")
++    p_preview.add_argument("--escalation-reason", default="")
++
+     p_request = sub.add_parser("request")
+     p_request.add_argument("--id", required=True)
+     p_request.add_argument("--class", dest="task_class", required=True)
+@@ -1194,6 +1278,7 @@
+     packet_group.add_argument("--packet")
+     packet_group.add_argument("--stdin", action="store_true")
+     p_request.add_argument("--pool")
++    p_request.add_argument("--strict-manual-pin", action="store_true", help="fail closed if provider or model changes after preview")
+     p_request.add_argument("--qualification-host", choices=("mb", "m1"), help="Explicit first Grok worker on a pending qualified Mac; no enrollment")
+     p_request.add_argument("--prefer")
+     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
+@@ -1441,7 +1526,19 @@
+             except (prestart_reconcile.PrestartReconcileError, OSError, ValueError) as exc:
+                 print(str(exc), file=sys.stderr)
+                 return 78
++
++        if args.cmd == "preview":
++            _json(preview_route(
++                args.id, args.task_class, pool=args.pool,
++                model=args.requested_model, prefer=args.prefer,
++                subject_pool=args.subject_pool,
++                task_complexity=args.task_complexity,
++                escalation_reason=args.escalation_reason,
++            ))
++            return 0
+         if args.cmd == "request":
++            if args.strict_manual_pin and args.quota_fallback:
++                raise FabricTaskError("MANUAL_PIN_QUOTA_FALLBACK_REFUSED")
+             stdin_bytes = sys.stdin.buffer.read() if args.stdin else None
+             request_fn = request
+             if args.quota_fallback:
+@@ -1466,6 +1563,7 @@
+                 qualification_host=args.qualification_host,
+                 new_macro_worktree=args.new_macro_worktree,
+                 cpu_scope_percent=args.cpu_scope_percent,
++                strict_manual_pin=args.strict_manual_pin,
+             )
+         if args.cmd == "status":
+             if args.follow:
+--- a/pool
++++ b/pool
+@@ -12,10 +12,12 @@
+ LEDGER="$KIT_DIR/ext/pool_ledger.py"
+ 
+ usage() {
+-  echo "usage: pool <run|remote|onboard|hosts|placement|refresh|pick|status|plan|stats|ledger> [args...]" >&2
++  echo "usage: pool <preview|request|run|remote|onboard|hosts|placement|refresh|pick|status|plan|stats|ledger> [args...]" >&2
+   echo "  run    <grok|cursor|qwen|minimax|glm|glm-codex|minimax-codex|go-codex|go-claude|oc-free> \"<prompt>\" [cwd] [model]" >&2
+   echo "  remote <host|auto> <mode> <packet_file> <remote_cwd> [model] [--out F] [--dry-run]   # R34 remote placement" >&2
+   echo "  hosts  <mode> [--seat-ok]        # host eligibility table (R34 remote-first)" >&2
++  echo "  preview --id ID --class CLASS [--pool auto|POOL] [--model auto|MODEL]  # NO EFFECT" >&2
++  echo "  request --id ID --class CLASS --stdin [--pool POOL] [--model MODEL] [--strict-manual-pin]" >&2
+   echo "  pick   <task-class> [--prefer <pool>] [--pool <pool>] [--needs vision] [--subject-pool <pool>]" >&2
+   echo "  placement --mode <mode> [--json]  # read-only host/provider/route boundaries" >&2
+   echo "  refresh HOST [HOST...]            # bounded selected-host telemetry refresh" >&2
+@@ -34,6 +36,8 @@
+ CMD="$1"; shift
+ 
+ case "$CMD" in
++  preview) exec python3 "$KIT_DIR/ext/fabric_task.py" preview "$@" ;;
++  request) exec python3 "$KIT_DIR/ext/fabric_task.py" request "$@" ;;
+   run)
+     POOL="${1:?pool}"; PROMPT="${2:?prompt}"; CWD="${3:-$PWD}"; MODEL="${4:-}"
+     exec bash "$SUB" "$POOL" "$PROMPT" "$CWD" "$MODEL" ;;
