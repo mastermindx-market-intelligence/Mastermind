@@ -2544,21 +2544,32 @@ def _upgrade_c2_personal_git_timeout_only(
 
 
 def cmd_fabric_pool_pin_migrate(args) -> int:
-    """A single stopped-seat CAS pin migration owned by Studio Direct.
+    """One source-pinned stopped-seat CAS migration, forward or exact rollback.
 
-    The ten original config/manifest raw byte hashes and their exact successors
-    are in reviewed source. This command never stops/starts a service, rewrites
-    the global Fabric wrapper, changes any grant, or processes caller paths.
-    The existing per-seat lifecycle lock serializes owner mutations.
+    No provider, credential, grant, global wrapper or service lifecycle action.
+    The same original Studio publication owner/lock serves both directions.
     """
     account = args.account
     _validate_account_label(account)
     pins = FABRIC_POOL_PIN_MIGRATION.get(account)
-    if pins is None or args.expected_manifest_sha256 != pins[0]:
+    reverse = getattr(args, "rollback", False)
+    if type(reverse) is not bool:
+        raise SystemExit("Fabric pool pin: invalid direction")
+    if pins is None:
+        raise SystemExit("Fabric pool pin: unrecognized account")
+    original_manifest_sha, original_config_sha, selected_manifest_sha, selected_config_sha, _ = pins
+    before_manifest_sha = selected_manifest_sha if reverse else original_manifest_sha
+    before_config_sha = selected_config_sha if reverse else original_config_sha
+    target_manifest_sha = original_manifest_sha if reverse else selected_manifest_sha
+    target_config_sha = original_config_sha if reverse else selected_config_sha
+    before_launcher_sha = FABRIC_POOL_SELECTED_SHA256 if reverse else FABRIC_POOL_ORIGINAL_SHA256
+    target_launcher_sha = FABRIC_POOL_ORIGINAL_SHA256 if reverse else FABRIC_POOL_SELECTED_SHA256
+    if args.expected_manifest_sha256 != before_manifest_sha:
         raise SystemExit("Fabric pool pin: unrecognized original account/manifest CAS")
-    if not args.preflight_only and args.expected_target_manifest_sha256 != pins[2]:
+    if not args.preflight_only and args.expected_target_manifest_sha256 != target_manifest_sha:
         raise SystemExit("Fabric pool pin: exact reviewed target manifest required")
-    if args.expected_target_manifest_sha256 is not None and args.expected_target_manifest_sha256 != pins[2]:
+    if (args.expected_target_manifest_sha256 is not None
+            and args.expected_target_manifest_sha256 != target_manifest_sha):
         raise SystemExit("Fabric pool pin: proposed target seal mismatch")
 
     def run() -> int:
@@ -2567,37 +2578,33 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
         config_path, manifest_path = roots["config"], roots["manifest"]
         for dest in (config_path, manifest_path):
             _assert_dest_safe(dest)
-        original_manifest_sha = _stable_regular_file_hash(
-            manifest_path, label="installed manifest",
-        )
-        original_config_sha = _stable_regular_file_hash(
-            config_path, label="installed config",
-        )
-        if original_manifest_sha != pins[0] or original_config_sha != pins[1]:
+        if (_stable_regular_file_hash(manifest_path, label="installed manifest")
+                != before_manifest_sha
+                or _stable_regular_file_hash(config_path, label="installed config")
+                != before_config_sha):
             raise SystemExit("Fabric pool pin: original sealed generation no longer matches")
-        prior = _verify_staged_install(
+        before_manifest = _verify_staged_install(
             account, label, roots, require_runtime_seal=True,
         )
-        if prior["configHash"] != pins[1]:
+        if before_manifest["configHash"] != before_config_sha:
             raise SystemExit("Fabric pool pin: existing manifest/config disagree")
-        original_config, original_manifest = config_path.read_bytes(), manifest_path.read_bytes()
-        if (hashlib.sha256(original_config).hexdigest() != pins[1]
-                or hashlib.sha256(original_manifest).hexdigest() != pins[0]):
+        before_config_bytes, before_manifest_bytes = config_path.read_bytes(), manifest_path.read_bytes()
+        if (hashlib.sha256(before_config_bytes).hexdigest() != before_config_sha
+                or hashlib.sha256(before_manifest_bytes).hexdigest() != before_manifest_sha):
             raise SystemExit("Fabric pool pin: original snapshot changed")
 
         try:
-            current = json.loads(original_config)
+            current = json.loads(before_config_bytes)
         except (UnicodeError, ValueError) as exc:
             raise SystemExit("Fabric pool pin: original config unreadable") from exc
-        expected_pool = _user_root() / ".local" / "bin" / "pool"
         if type(current) is not dict:
             raise SystemExit("Fabric pool pin: original owner contract drift")
+        expected_pool = _user_root() / ".local" / "bin" / "pool"
         status = current.get("fleetStatus")
         if (current.get("accountLabel") != account
-                or type(status) is not dict
-                or status.get("enabled") is not True
+                or type(status) is not dict or status.get("enabled") is not True
                 or status.get("fabricLauncherPath") != str(expected_pool)
-                or status.get("fabricLauncherSha256") != FABRIC_POOL_ORIGINAL_SHA256):
+                or status.get("fabricLauncherSha256") != before_launcher_sha):
             raise SystemExit("Fabric pool pin: original owner contract drift")
         _assert_no_symlink_ancestors(expected_pool)
         if (_stable_regular_file_hash(
@@ -2605,33 +2612,41 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
             ) != FABRIC_POOL_SELECTED_SHA256):
             raise SystemExit("Fabric pool pin: selected native launcher bytes drifted")
 
-        successor_config = dict(current)
-        successor_config["fleetStatus"] = dict(
-            status, fabricLauncherSha256=FABRIC_POOL_SELECTED_SHA256,
+        next_config = dict(current)
+        next_config["fleetStatus"] = dict(
+            status, fabricLauncherSha256=target_launcher_sha,
         )
         config_bytes = json.dumps(
-            successor_config, indent=2, sort_keys=True,
+            next_config, indent=2, sort_keys=True,
         ).encode("utf-8")
-        successor_manifest = dict(prior)
-        successor_manifest["configHash"] = hashlib.sha256(config_bytes).hexdigest()
+        next_manifest = dict(before_manifest)
+        next_manifest["configHash"] = hashlib.sha256(config_bytes).hexdigest()
         manifest_bytes = json.dumps(
-            successor_manifest, indent=2, sort_keys=True,
+            next_manifest, indent=2, sort_keys=True,
         ).encode("utf-8")
-        if (hashlib.sha256(config_bytes).hexdigest() != pins[3]
-                or hashlib.sha256(manifest_bytes).hexdigest() != pins[2]
-                or not _sealed_fabric_pool_pin_successor(successor_manifest, account)
-                or not _valid_manifest(successor_manifest, account, label)):
+        if (hashlib.sha256(config_bytes).hexdigest() != target_config_sha
+                or hashlib.sha256(manifest_bytes).hexdigest() != target_manifest_sha
+                or not _valid_manifest(next_manifest, account, label)):
             raise SystemExit("Fabric pool pin: target differs from reviewed exact seal")
-        # Both source and target agree on every field except the one pin.
-        if (set(successor_config) != set(current)
-                or set(successor_manifest) != set(prior)):
+        if reverse:
+            # The original generation is an immutable sealed historical record.
+            # For ordinary generic filesets the raw successor hash is still
+            # bound to this original byte-pinned input/source in the constants.
+            if (account in SEALED_V2_FLEET_GATEWAY_PREDECESSORS
+                    and not _sealed_v2_fleet_gateway_predecessor(next_manifest, account)):
+                raise SystemExit("Fabric pool pin: original sealed predecessor not recognized")
+        elif not _sealed_fabric_pool_pin_successor(next_manifest, account):
+            raise SystemExit("Fabric pool pin: successor seal not recognized")
+        if (set(next_config) != set(current)
+                or set(next_manifest) != set(before_manifest)):
             raise SystemExit("Fabric pool pin: unrelated keys changed")
         receipt = {
             "schema": "mastermind.studio_fabric_pool_pin_migration.v1",
             "account": account,
-            "originalManifestSha256": pins[0],
-            "targetManifestSha256": pins[2],
-            "targetConfigSha256": pins[3],
+            "direction": "restore-original" if reverse else "selected-native",
+            "originalManifestSha256": before_manifest_sha,
+            "targetManifestSha256": target_manifest_sha,
+            "targetConfigSha256": target_config_sha,
             "gatewayModulesPreserved": True,
             "tunnelsPreserved": True,
             "grantsPreserved": True,
@@ -2643,70 +2658,73 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
             }, sort_keys=True))
             return 0
 
-        # Positive launchd identity or exact trusted absence; a running/waiting
-        # instance is never quiesced automatically by this migration.
         if _lifecycle_inspect(account, label, roots, require_positive=True) is not None:
             raise SystemExit("Fabric pool pin: service is loaded; stop exact seat first")
-        if (_stable_regular_file_hash(manifest_path, label="installed manifest") != pins[0]
-                or _stable_regular_file_hash(config_path, label="installed config") != pins[1]
+        if (_stable_regular_file_hash(manifest_path, label="installed manifest")
+                != before_manifest_sha
+                or _stable_regular_file_hash(config_path, label="installed config")
+                    != before_config_sha
                 or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
                     != FABRIC_POOL_SELECTED_SHA256):
             raise SystemExit("Fabric pool pin: concurrent source/preimage change")
 
         try:
             _atomic_write_bytes(config_path, config_bytes)
-            if (_stable_regular_file_hash(manifest_path, label="installed manifest") != pins[0]
-                    or _stable_regular_file_hash(config_path, label="installed config") != pins[3]
+            if (_stable_regular_file_hash(manifest_path, label="installed manifest")
+                    != before_manifest_sha
+                    or _stable_regular_file_hash(config_path, label="installed config")
+                        != target_config_sha
                     or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
                         != FABRIC_POOL_SELECTED_SHA256
                     or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
                 raise RuntimeError("original changed before manifest commit")
             _atomic_write_bytes(manifest_path, manifest_bytes)
-            if (_stable_regular_file_hash(manifest_path, label="installed manifest") != pins[2]
-                    or _stable_regular_file_hash(config_path, label="installed config") != pins[3]
+            if (_stable_regular_file_hash(manifest_path, label="installed manifest")
+                    != target_manifest_sha
+                    or _stable_regular_file_hash(config_path, label="installed config")
+                        != target_config_sha
                     or _stable_regular_file_hash(expected_pool, label="selected native Fabric launcher")
                         != FABRIC_POOL_SELECTED_SHA256
                     or _verify_staged_install(account, label, roots, require_runtime_seal=True)
-                        != successor_manifest
+                        != next_manifest
                     or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
-                raise RuntimeError("committed successor differs from reviewed target")
+                raise RuntimeError("committed target differs from reviewed seal")
         except BaseException as exc:
-            # After a possible manifest commit we must NOT overwrite state.
-            # On a proven original manifest, restoring the original config
-            # is the sole bounded rollback; unknown foreign changes freeze.
+            # Never revert a possibly committed manifest. Only a proven
+            # original manifest permits restoring the original config.
             restored = False
             try:
                 if (_lifecycle_inspect(account, label, roots, require_positive=True) is not None
                         or _stable_regular_file_hash(manifest_path, label="installed manifest")
-                            != pins[0]):
-                    raise RuntimeError("manifest committed or service state changed")
-                current_config_sha = _stable_regular_file_hash(
-                    config_path, label="installed config",
-                )
-                if current_config_sha not in (pins[1], pins[3]):
-                    raise RuntimeError("foreign config changes")
-                if current_config_sha == pins[3]:
-                    _atomic_write_bytes(config_path, original_config)
-                if (_stable_regular_file_hash(manifest_path, label="installed manifest") != pins[0]
-                        or _stable_regular_file_hash(config_path, label="installed config") != pins[1]
+                            != before_manifest_sha):
+                    raise RuntimeError("manifest committed or service changed")
+                observed = _stable_regular_file_hash(config_path, label="installed config")
+                if observed not in (before_config_sha, target_config_sha):
+                    raise RuntimeError("foreign configuration appeared")
+                if observed == target_config_sha:
+                    _atomic_write_bytes(config_path, before_config_bytes)
+                if (_stable_regular_file_hash(manifest_path, label="installed manifest")
+                        != before_manifest_sha
+                        or _stable_regular_file_hash(config_path, label="installed config")
+                            != before_config_sha
                         or _verify_staged_install(account, label, roots, require_runtime_seal=True)
-                            != prior
+                            != before_manifest
                         or _lifecycle_inspect(account, label, roots, require_positive=True) is not None):
-                    raise RuntimeError("original state restoration unverified")
+                    raise RuntimeError("original restoration unverified")
                 restored = True
             except BaseException:
                 pass
             if restored:
                 raise SystemExit("Fabric pool pin: NOT_APPLIED original state restored") from exc
             raise SystemExit(
-                "Fabric pool pin: EFFECT_UNKNOWN; preserve original account, inspect exact manifest and config"
+                "Fabric pool pin: EFFECT_UNKNOWN; preserve original account and inspect exact config/manifest"
             ) from exc
         print(json.dumps({
-            **receipt, "preflight": False, "effect": "APPLIED",
+            **receipt, "preflight": False,
+            "effect": "ROLLED_BACK" if reverse else "APPLIED",
         }, sort_keys=True))
         return 0
 
-    # Preflight never obtains or creates a lock; live readiness stays intact.
     if args.preflight_only:
         return run()
     with _c2_lifecycle_mutex(account):
@@ -3505,6 +3523,8 @@ def build_parser() -> argparse.ArgumentParser:
     pool_pin.add_argument("--expected-manifest-sha256", required=True)
     pool_pin.add_argument("--expected-target-manifest-sha256")
     pool_pin.add_argument("--preflight-only", action="store_true")
+    pool_pin.add_argument("--rollback", action="store_true",
+                          help="exact stopped-seat successor->original reversal; no global wrapper mutation")
     pool_pin.set_defaults(func=cmd_fabric_pool_pin_migrate)
 
     for name in ("stage", "upgrade"):
