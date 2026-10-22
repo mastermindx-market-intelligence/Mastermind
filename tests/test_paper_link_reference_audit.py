@@ -69,6 +69,18 @@ class LinkAuditTests(unittest.TestCase):
         with self.assertRaises(scan.AuditError):
             scan.run(INVENTORY, [f"f={self.root}", f"f={self.root}"])
 
+    def test_cli_cannot_write_report_into_scanned_repo(self):
+        self.put("README.md", "01M2WGNCX9475G79JRKJTCM08P")
+        cli = ROOT / "scripts/paper_link_reference_audit.py"
+        inv = ROOT / "docs/paper_migrations/MASTERMIND_PAGES_INVENTORY_2026-10-22.json"
+        forbidden = self.root / "report.json"
+        result = subprocess.run([sys.executable, str(cli), "--inventory", str(inv),
+                                 "--root", f"fixture={self.root}", "--out", str(forbidden)],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 2)
+        self.assertFalse(forbidden.exists())
+        self.assertIn("PAPER_LINK_AUDIT_REFUSED", result.stderr)
+
     def test_does_not_modify_tracked_files(self):
         target = 'file/01M2WGNCX9475G79JRKJTCM08P/p-21-0\n'
         self.put("info.md", target)
