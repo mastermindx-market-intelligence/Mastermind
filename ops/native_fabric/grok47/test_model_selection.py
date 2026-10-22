@@ -2,7 +2,7 @@ import importlib.util
 from pathlib import Path
 import unittest
 import sys
-sys.path.insert(0, str(Path.home()/".claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/native-code-releases/0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f/ext"))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "quota_continuity" / "source"))
 
 HERE = Path(__file__).parent / 'overlay'
 
