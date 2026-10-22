@@ -209,6 +209,7 @@ def build_e1_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
 
     if not getattr(settings, "read_only", False):
         raise ValueError("E1 MCP requires read-only app settings")
+    _refuse_public_policies(settings, "the E1 MCP builder")
     inner_app = build_e1_app(settings)
     read_authenticator, _submit_authenticator = make_jwt_authenticators(
         settings.policies, jwks_cache=settings.jwks_cache
@@ -374,6 +375,7 @@ def build_personal_read_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
         settings, "read_from_ceo_ingress", False
     ):
         raise ValueError("Personal read MCP requires installed CeoIngress settings")
+    _refuse_public_policies(settings, "the personal-read MCP builder")
     _, metadata_path = _metadata_policy_and_path(settings.policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
@@ -541,14 +543,27 @@ class _ExecutivePolicyVerifiers:
         return None
 
 
+def _refuse_public_policies(settings: Any, builder: str) -> None:
+    """Never admit the public ``/mcp`` audience at an unrestricted outer layer.
+
+    Only the Web-CEO v3 profile builder knows how to confine the public audience
+    to ``POST /mcp`` (#1656).  Every other composition would otherwise verify it
+    through the shared inner app on a route that was never meant to accept it.
+    """
+
+    if getattr(settings, "public_policies", None) is not None:
+        raise ValueError(f"public MCP audience is not supported by {builder}")
+
+
 class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
     def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None,
-                 os_executive_transport=None, os_session_transport=None):
+                 os_executive_transport=None, os_session_transport=None, reconcile_route: bool = True):
         self._app = app
-        self._routes = {metadata_path: "GET", "/mcp": "POST",
-                        "/v1/tools/submit_ceo_intent/reconcile": "POST"}
+        self._routes = {metadata_path: "GET", "/mcp": "POST"}
+        if reconcile_route:
+            self._routes["/v1/tools/submit_ceo_intent/reconcile"] = "POST"
         self._query_routes = set()
         self._workspace_routes = set()
         self._public_routes = set()
@@ -833,6 +848,7 @@ def _build_profile_mcp_app(
     os_commission_preparer: Any | None = None,
     os_session_bridge_client: Any | None = None,
     reconcile_tool_name: str | None = None,
+    public_mcp: bool = False,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
 
@@ -840,6 +856,16 @@ def _build_profile_mcp_app(
     Submit and status use only the App's dedicated CeoIngress client. Every
     tool call forwards its current raw bearer for independent App verification.
     No installed configuration, public listener, or fixture write is implied.
+
+    ``public_mcp`` is passed only by the Web-CEO v3 builder. When the settings
+    carry ``public_policies`` it selects the exclusive public ``/mcp`` mode: the
+    outer ``/mcp`` verifier, the direct-tool authenticators, the 401/403
+    challenges and the protected-resource metadata admit and advertise only the
+    public resource ``https://mcp.mastermind-x.com/mcp``; every other configured
+    audience (OS, tunnel) is refused there. The OS transport routes keep using
+    the full variant set, so the public audience is refused on them by the OS
+    pair's own exact-resource authenticator. Without ``public_policies`` this
+    parameter changes nothing.
 
     The OS Executive transport is opt-in via ``enable_os_executive_transport``;
     when enabled it requires the exact installed v3 composition (server 1.4.0/1.5.0,
@@ -903,22 +929,36 @@ def _build_profile_mcp_app(
             or (bool(direct_tool_names) != callable(direct_handler))
             or (bool(direct_tool_names) != callable(direct_error_factory))):
         raise ValueError("direct MCP tool composition is invalid")
-    _, metadata_path = _metadata_policy_and_path(settings.policies)
+    public_policies = getattr(settings, "public_policies", None)
+    public_mode = public_policies is not None
+    if type(public_mcp) is not bool:
+        raise ValueError("public MCP toggle must be boolean")
+    if public_mode and not public_mcp:
+        raise ValueError("public MCP audience is not supported by this profile builder")
+    if public_mode and release_profile:
+        raise ValueError("release control profile refuses the public MCP audience")
+    # The challenge/metadata policies are the ones clients are told to use:
+    # the public pair in public mode, otherwise the primary pair as before.
+    challenge_policies = public_policies if public_mode else settings.policies
+    _, metadata_path = _metadata_policy_and_path(challenge_policies)
     if metadata_path == "/mcp":
         raise ValueError("metadata route collides with MCP transport")
     if type(settings.additional_policies) is not tuple or len(
         settings.additional_policies
-    ) >= _MAX_EXECUTIVE_OAUTH_RESOURCES:
+    ) + (1 if public_mode else 0) >= _MAX_EXECUTIVE_OAUTH_RESOURCES:
         raise ValueError("Executive OAuth resource composition must contain 1 to 17 resources")
     configured = dataclasses.replace(settings, allow_submit_authorized_reads=True)
     if configured.jwks_cache is None:
         shared_cache = make_shared_jwks_cache(configured.policies)
         if shared_cache is not None:
             configured = dataclasses.replace(configured, jwks_cache=shared_cache)
-    policy_variants = (configured.policies, *configured.additional_policies)
+    # The public pair, when present, is always the LAST variant (the same order
+    # ``_create_profile_app`` uses for the inner App), so ``[-1]`` selects it.
+    public_extra = (public_policies,) if public_mode else ()
+    policy_variants = (configured.policies, *configured.additional_policies, *public_extra)
     authenticator_variants = make_jwt_authenticator_variants(
         configured.policies,
-        configured.additional_policies,
+        (*configured.additional_policies, *public_extra),
         primary_jwks_cache=configured.jwks_cache,
     )
     verifier_pairs = tuple(
@@ -937,9 +977,23 @@ def _build_profile_mcp_app(
             authenticator_variants, policy_variants
         )
     )
-    verifier = _ExecutivePolicyVerifiers(*verifier_pairs)
     read_authenticators = tuple(pair[0] for pair in authenticator_variants)
     submit_authenticators = tuple(pair[1] for pair in authenticator_variants)
+    if public_mode:
+        # Audience confinement: ``/mcp`` and the direct-tool authentication
+        # admit ONLY the public pair. ``_ExecutivePolicyVerifiers`` and
+        # ``_verify_exact_resource_set`` advance across variants on
+        # RESOURCE_REFUSED, so confinement is done by never offering them the
+        # OS or tunnel pairs here. The full ``verifier_pairs`` and
+        # ``*_authenticators`` stay available to the OS transport blocks below.
+        mcp_verifier_pairs = (verifier_pairs[-1],)
+        mcp_read_authenticators = (read_authenticators[-1],)
+        mcp_submit_authenticators = (submit_authenticators[-1],)
+    else:
+        mcp_verifier_pairs = verifier_pairs
+        mcp_read_authenticators = read_authenticators
+        mcp_submit_authenticators = submit_authenticators
+    verifier = _ExecutivePolicyVerifiers(*mcp_verifier_pairs)
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
     # of no effect: all unrecognized submit replies become same-request UNKNOWN.
     inner_app = BoundedE1App(profile_create_app(configured))
@@ -961,10 +1015,14 @@ def _build_profile_mcp_app(
         ):
             raise ValueError("OS Executive transport requires exact installed v3 composition")
 
+        # The public pair is the last variant in public mode and is never an OS
+        # transport pair: the OS routes must not be reachable with the public
+        # audience even when a caller names that resource as the OS resource.
+        os_variant_count = len(policy_variants) - len(public_extra)
         os_pairs = tuple(
             (index, authenticator, policy)
             for index, (authenticator, policy) in enumerate(
-                zip(submit_authenticators, policy_variants)
+                zip(submit_authenticators[:os_variant_count], policy_variants[:os_variant_count])
             )
             if policy.submit.resource == os_executive_resource
         )
@@ -1007,11 +1065,11 @@ def _build_profile_mcp_app(
     server: Server = Server(profile_server_name, version=profile_server_version)
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
-            configured.policies.submit
+            challenge_policies.submit
             if (release_profile or tool.name in release_tool_names
                 or tool.name in direct_submit_names or tool.name == "submit_ceo_intent"
                 or tool.name == reconcile_tool_name)
-            else configured.policies.read
+            else challenge_policies.read
         )
         schemes = oauth_security_schemes(policy.required_scopes)
         return tool.model_copy(update={
@@ -1086,13 +1144,14 @@ def _build_profile_mcp_app(
         if is_reconcile:
             request_ref = validated["request_ref"]
         if is_direct:
-            active = submit_authenticators if name in direct_submit_names else read_authenticators
+            active = (mcp_submit_authenticators if name in direct_submit_names
+                      else mcp_read_authenticators)
             principal_or_response = await _authenticate(
                 request, active, clock=configured.clock,
                 # Match the existing read gateway: a combined read/submit
                 # token still undergoes the exact submit policy's checks.
                 submit_fallback=(
-                    submit_authenticators if name not in direct_submit_names
+                    mcp_submit_authenticators if name not in direct_submit_names
                     and configured.allow_submit_authorized_reads else None
                 ),
             )
@@ -1102,8 +1161,8 @@ def _build_profile_mcp_app(
                 if (name in direct_submit_names
                         and payload.get("error", {}).get("code") == "scope_refused"):
                     challenge = mcp_auth_error_result(
-                        configured.policies.submit, AuthError(AuthErrorCode.SCOPE_REFUSED),
-                        required_scopes=configured.policies.submit.required_scopes,
+                        challenge_policies.submit, AuthError(AuthErrorCode.SCOPE_REFUSED),
+                        required_scopes=challenge_policies.submit.required_scopes,
                     )["_meta"]["mcp/www_authenticate"][0]
                 return result(payload, challenge=challenge)
             direct_submit = name in direct_submit_names
@@ -1151,24 +1210,30 @@ def _build_profile_mcp_app(
             canonical_json(payload)
             challenge = response.headers.get("www-authenticate")
             if response.status_code in (401, 403) and challenge:
-                if is_release or is_reconcile:
+                if is_release or is_reconcile or public_mode:
                     # Only the existing fixed auth refusal may cross this
                     # boundary. Rebuild the challenge; never relay arbitrary
                     # inner diagnostic text or a header carrying private data.
+                    # In public mode the inner App's own challenge names the
+                    # primary (tunnel) resource, so it is never relayed either.
                     auth_error = AuthError(AuthErrorCode(payload["error"]["code"]))
                     expected = {"ok": False, "error": {"code": auth_error.code.value,
                                                       "message": auth_error.public_message}}
                     expected_status = 403 if auth_error.code == AuthErrorCode.SCOPE_REFUSED else 401
                     if payload != expected or response.status_code != expected_status:
-                        return result(unknown(request_ref, is_release=is_release))
-                    challenge = mcp_auth_error_result(configured.policies.submit,
+                        if is_release or is_reconcile or is_submit:
+                            return result(unknown(request_ref, is_release=is_release))
+                        raise ValueError("unexpected Executive authentication refusal")
+                    challenge = mcp_auth_error_result(
+                        challenge_policies.submit if (is_submit or is_release or is_reconcile)
+                        else challenge_policies.read,
                         auth_error)["_meta"]["mcp/www_authenticate"][0]
                 if (is_submit or is_release or is_reconcile) and payload.get("error", {}).get("code") == "scope_refused":
                     # The direct App's challenge intentionally omits requested
                     # scopes. Use its existing A1 helper for the MCP upgrade.
-                    challenge = mcp_auth_error_result(configured.policies.submit,
+                    challenge = mcp_auth_error_result(challenge_policies.submit,
                         AuthError(AuthErrorCode.SCOPE_REFUSED),
-                        required_scopes=configured.policies.submit.required_scopes,
+                        required_scopes=challenge_policies.submit.required_scopes,
                     )["_meta"]["mcp/www_authenticate"][0]
                 return result(payload, challenge=challenge)
             if is_release:
@@ -1223,8 +1288,8 @@ def _build_profile_mcp_app(
     authenticated = PreAuthMcpBodyApp(
         AuthenticationMiddleware(
             RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
-                required_scopes=list((configured.policies.submit if release_profile else configured.policies.read).required_scopes),
-                resource_metadata_url=configured.policies.read.resource_metadata_url),
+                required_scopes=list((challenge_policies.submit if release_profile else challenge_policies.read).required_scopes),
+                resource_metadata_url=challenge_policies.read.resource_metadata_url),
             backend=BearerAuthBackend(verifier),
         ),
         foreground_requests="session_summon" in direct_tool_names,
@@ -1244,13 +1309,16 @@ def _build_profile_mcp_app(
             await inner_app.aclose()
 
     async def metadata(_request: Request) -> JSONResponse:
-        return JSONResponse(protected_resource_metadata(configured.policies.submit))
+        return JSONResponse(protected_resource_metadata(challenge_policies.submit))
 
     outer_routes = [
         Route(metadata_path, metadata, methods=["GET"]),
         Route("/mcp", authenticated, methods=["POST"]),
     ]
-    if not release_profile:
+    # The outer reconcile route forwards a raw bearer to the inner App, which
+    # verifies against every variant; the public mode exposes reconciliation
+    # only through the MCP tool, never as a second HTTP surface.
+    if not release_profile and not public_mode:
         outer_routes.append(Route("/v1/tools/submit_ceo_intent/reconcile", inner_app, methods=["POST"]))
     if workspace_app is not None:
         outer_routes.extend(Route(path, workspace_app, methods=["GET"]) for path in
@@ -1285,7 +1353,8 @@ def _build_profile_mcp_app(
         fenced_app=_ExecutivePathFence(outer_app, metadata_path, workspace_app=workspace_app,
                                       content_app=content_app, os_app=os_app,
                                       os_executive_transport=os_transport_handler,
-                                      os_session_transport=os_session_transport_handler))
+                                      os_session_transport=os_session_transport_handler,
+                                      reconcile_route=not public_mode))
     guard.os_transport = os_transport_handler
     guard.os_session_transport = os_session_transport_handler
     return guard
@@ -1627,7 +1696,7 @@ def build_web_ceo_v3_mcp_app(
                     "reply read must read the same installed Session Bridge client"
                 )
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
-    return _build_profile_mcp_app(settings, **configuration)
+    return _build_profile_mcp_app(settings, public_mcp=True, **configuration)
 
 
 def build_web_ceo_v3_with_coo_mcp_app(
@@ -1656,6 +1725,7 @@ def build_web_ceo_v3_with_coo_mcp_app(
 
     if type(coo_settings) is not CooAppSettings or coo_settings.executive != settings:
         raise ValueError("COO and CEO must use the exact same installed Executive settings")
+    _refuse_public_policies(settings, "the Web-CEO v3 COO composition")
     cache = settings.jwks_cache or make_shared_jwks_cache(settings.policies)
     if cache is None:
         raise ValueError("a shared Executive JWKS authority is required")
@@ -1899,6 +1969,7 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target
     )
     from integrations.mastermind_executive_app.coo import create_coo_app, unknown
 
+    _refuse_public_policies(getattr(settings, "executive", None), "the COO MCP builder")
     core = create_coo_app(settings, audit_sink=audit_sink)
     inner = BoundedE1App(core)
     oauth = MastermindTokenVerifier(authenticator=core.authenticator, policy=settings.policy,
@@ -2201,6 +2272,7 @@ def build_web_ceo_v2_with_coo_mcp_app(settings: Any, *, coo_settings: Any, audit
     from integrations.mastermind_executive_app.gateway import make_shared_jwks_cache
     if type(coo_settings) is not CooAppSettings or coo_settings.executive != settings:
         raise ValueError("COO and CEO must use the exact same installed Executive settings")
+    _refuse_public_policies(settings, "the Web-CEO v2 COO composition")
     cache = settings.jwks_cache or make_shared_jwks_cache(settings.policies)
     if cache is None:
         raise ValueError("a shared Executive JWKS authority is required")

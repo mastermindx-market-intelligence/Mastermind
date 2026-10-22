@@ -24,6 +24,7 @@ from control_plane import executive_installed_peer as installed
 from integrations.mastermind_executive_app.gateway import load_app_policies
 from ops.executive_os.executive_mcp_entry import (
     build_additional_policies,
+    build_public_policies,
     validate_document,
 )
 
@@ -48,7 +49,10 @@ def _semantic_config(document: object, expected_sha: str) -> dict:
         # Reuse the launcher's single canonical resource owner. It validates
         # connector tunnels, the optional OS Executive resource, collisions
         # with both primary resources, and every derived policy variant.
-        build_additional_policies(value, policies)
+        additional = build_additional_policies(value, policies)
+        # The opt-in public MCP audience is derived and collision-checked by the
+        # same owner; an absent key returns None and changes nothing.
+        build_public_policies(value, policies, additional)
     except GatewayRefreshPreflightError:
         raise
     except Exception:

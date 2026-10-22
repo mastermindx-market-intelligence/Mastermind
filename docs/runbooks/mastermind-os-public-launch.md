@@ -116,13 +116,18 @@ mcp.mastermind-x.com (Chairman decision on #1656): exactly GET
 authentication: the gateway still returns the 401 challenge and validates every
 token. /mcp is proxied with a loopback Host because the gateway's DNS-rebinding
 fence admits only loopback hosts. Staging this route does not make the endpoint
-usable, and installing it is not neutral: the gateway verifier accepts a token for
-any configured resource (OS and tunnel audiences included), so installation waits
-for the gateway to restrict /mcp to the public resource, advertise this host with
-a per-host resource_metadata challenge, and for the Auth0 API audience to exist
-(see docs/EXECUTIVE_MCP.md section 8). A Caddy-only install yields a 401 whose
-challenge points at the tunnel resource, or an OAuth discovery failure, while
-still admitting those other audiences.
+usable, and installing it is not neutral: without the gateway's opt-in
+public_mcp_resource key the verifier accepts a token for any configured resource
+(OS and tunnel audiences included). Installation therefore waits for (1) the
+installed gateway to run with public_mcp_resource set to exactly
+https://mcp.mastermind-x.com/mcp, which restricts /mcp to that audience and
+advertises this host with a per-host resource_metadata challenge, (2) the sealed
+M2 installed-config change that adds the key (the preflight refuses a bad value),
+and (3) the Auth0 API audience to exist (see docs/EXECUTIVE_MCP.md section 8). The
+mode is exclusive per gateway process, so the OpenAI tunnel entrypoint stays
+reachable only through a second gateway instance with its own sealed config. A
+Caddy-only install yields a 401 whose challenge points at the tunnel resource, or
+an OAuth discovery failure, while still admitting those other audiences.
 
 The intended DNS A record is mcp.mastermind-x.com → 146.190.142.17.
 Do not claim DNS/certificate/routing readiness from rendered configuration.

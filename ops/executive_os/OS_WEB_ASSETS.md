@@ -104,7 +104,10 @@ CDN client-identity headers, the rewritten X-Forwarded-For/-Proto, and the
 branch's own upstream Host (loopback for `/mcp`, the public host for the rest).
 A wildcard, extra path or method, a missing, duplicated or reordered MCP branch,
 a different body limit, an unexpected upstream or any extra or missing proxy
-field refuses.
+field refuses. The planner only proves the Caddy shape; it does not prove the
+gateway behind it. The MCP branches are safe to install only after the installed
+gateway runs with the sealed `public_mcp_resource` key (see
+`docs/EXECUTIVE_MCP.md` section 8), which is outside this planner.
 
 `prepare-config` admits the sorted unique union of the retired and candidate
 asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
