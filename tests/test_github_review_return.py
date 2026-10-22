@@ -112,3 +112,104 @@ def test_review_job_from_pr_a_cannot_publish_on_pr_b(tmp_path):
     with pytest.raises(ReviewVerificationRefused, match="SOURCE_IDENTITY_MISMATCH"):
         handler.deliver(decision=tampered, job_id=review)
     assert gh_history["posts"] == []
+
+
+def test_authorized_external_return_binds_app_submitter_and_comment_only(tmp_path):
+    from integrations.github_review_return import ReviewReturnSourceMode
+    runtime, builder, review = completed_pair(
+        tmp_path, review_verdict="reject",
+    )
+    github, history = git_api()
+    handler = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+    )
+    assert handler._results.load_verified_result(job_id=review).source_basis == (
+        "EXTERNAL_GITHUB_SUBMITTER"
+    )
+    first = handler.deliver(decision=decision(), job_id=review)
+    assert first.publication.state is PublishState.PUBLISHED
+    assert first.publication.review_id == "789"
+    assert len(history["posts"]) == 1
+    assert history["posts"][0]["event"] == "COMMENT"
+    assert "not attested" in history["posts"][0]["body"].lower()
+    assert "GitHub PR submitter: alice (account ID 314)" in history["posts"][0]["body"]
+    assert handler.deliver(
+        decision=decision(), job_id=review,
+    ).publication.state is PublishState.ALREADY_PUBLISHED
+    assert len(history["posts"]) == 1
+
+
+def test_authorized_native_return_requires_real_distinct_builder(tmp_path):
+    from integrations.github_review_return import ReviewReturnSourceMode
+    runtime, builder, review = completed_pair(tmp_path)
+    github, history = git_api()
+    handler = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXECUTIVE_BUILDER,
+        builder_job_id_for_review=lambda _: builder,
+    )
+    receipt = handler.deliver(decision=decision(), job_id=review)
+    assert receipt.publication.state is PublishState.PUBLISHED
+    assert "Builder worker: builder-01" in history["posts"][0]["body"]
+    assert "GitHub PR submitter:" not in history["posts"][0]["body"]
+
+
+def test_native_mode_rejects_unrelated_builder_under_host_binding(tmp_path):
+    from integrations.github_review_return import ReviewReturnSourceMode
+    runtime, builder, review = completed_pair(
+        tmp_path, builder_repository="other/repo",
+    )
+    github, history = git_api()
+    handler = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXECUTIVE_BUILDER,
+        builder_job_id_for_review=lambda _: builder,
+    )
+    receipt = handler.deliver(decision=decision(), job_id=review)
+    assert receipt.publication.state is PublishState.REFUSED
+    assert not history["posts"]
+
+
+def test_return_binding_refuses_implicit_or_mixed_source_modes(tmp_path):
+    import pytest
+    from control_plane.github_review_intent_ingress import ReviewVerificationRefused
+    from integrations.github_review_return import ReviewReturnSourceMode
+
+    runtime, builder, review = completed_pair(tmp_path)
+    github, history = git_api()
+    common = dict(
+        runtime=runtime, github=github,
+        publication_guard=lambda: None,
+    )
+    for mode, builder_ref in (
+        ("EXTERNAL_GITHUB_ADVISORY", None),
+        (None, None),
+        (ReviewReturnSourceMode.EXECUTIVE_BUILDER, None),
+        (ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY, lambda _: builder),
+    ):
+        with pytest.raises(ReviewVerificationRefused):
+            GitHubReviewReturn.for_authorized_source(
+                **common, source_mode=mode,
+                builder_job_id_for_review=builder_ref,
+            )
+    with pytest.raises(ReviewVerificationRefused, match="UNARMED"):
+        GitHubReviewReturn.for_authorized_source(
+            runtime=runtime, github=github, publication_guard=None,
+            source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+        )
+    assert history["posts"] == []
+
+
+def test_external_return_refuses_stale_github_head_before_post(tmp_path):
+    from integrations.github_review_return import ReviewReturnSourceMode
+
+    runtime, builder, review = completed_pair(tmp_path)
+    github, history = git_api(moved_head=True)
+    handler = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+    )
+    receipt = handler.deliver(decision=decision(), job_id=review)
+    assert receipt.publication.state is PublishState.REFUSED
+    assert history["posts"] == []

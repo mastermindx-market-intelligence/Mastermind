@@ -259,3 +259,43 @@ Production remains default-off: source/security test evidence is not a
 substitute for authorized incumbent Executive socket dispatch, a real
 worker's terminal receipt, external source binding, or actual GitHub App
 review/Slack thread return.
+
+## External PR review return — explicit existing Executive-host binding
+
+The opt-in external GitHub submitter path is no longer just a standalone
+source-reader constructor. The incumbent `GitHubReviewReturn` now provides
+`for_authorized_source(...)`, a **pure and default-off host-side composition
+step** for the canonical Executive Runtime owner. The host must pass its
+existing `Runtime`, authenticated installation-scoped `GitHubReviewAPI`,
+and callable publication authorization guard, then choose one closed
+`ReviewReturnSourceMode`:
+
+- `EXECUTIVE_BUILDER`: requires a supplied, source-verified
+  `builder_job_id_for_review`. The result reader still enforces a genuinely
+  completed **distinct** builder Job with immutable matching repo/PR/head
+  provenance. Missing/unrelated builder evidence refuses.
+- `EXTERNAL_GITHUB_ADVISORY`: prohibits any builder-Job resolver, binds
+  the authenticated `GitHubReviewAPI` itself as the fresh submitter reader,
+  and derives the publisher account from that *same validated App port*.
+  A reviewed external PR may produce only a clearly labeled advisory
+  GitHub `COMMENT`; it never claims an attested builder, never uses
+  `APPROVE`, `REQUEST_CHANGES` as a GitHub event, or merges.
+
+Strings, omitted source mode, mixed source modes, missing native builder
+resolver and unbound publisher guard are refused **before a network write**.
+The existing return consumer remains one-shot, invoked only after the
+Executive owner's real Job/Attempt completion; this factory neither starts a
+worker nor creates a watcher, queue, token store or separate database. Tests
+exercise both modes through the real in-memory SQLite Executive Runtime,
+including external `REQUEST_CHANGES` verdict downgrade to COMMENT, exact
+submitter-account readback, native builder checks, invalid selection and
+moved-SHA refusal.
+
+This is **source wiring only**. The installed Executive service's
+authenticated CEO Unix socket review-frame dispatch has **not** been
+installed, the original explicit platform safety denial has **not** been
+cleared, and its 21-line dormant local source diff remains excluded from
+the PR. The public webhook cannot access Executive Runtime SQLite directly,
+nor select the return source mode. No GitHub App enrollment, actual worker
+START, webhook delivery, GitHub formal review or Slack thread production
+receipt is proven.

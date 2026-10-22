@@ -8,7 +8,8 @@ from __future__ import annotations
 
 import dataclasses
 import re
-from typing import Protocol
+from collections.abc import Callable
+from enum import Enum
 
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_intent import ReviewIntentDecision
@@ -19,10 +20,22 @@ from control_plane.github_review_intent_ingress import (
 from control_plane.github_review_publication_record import (
     ExecutiveReviewPublicationRecord,
 )
+from control_plane.github_review_result_reader import ExecutiveVerifiedReviewResults
 from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_slack_thread import (
     SlackReviewResultNotifier, SlackReviewThreadUnavailable,
 )
+
+
+class ReviewReturnSourceMode(str, Enum):
+    """Explicit Executive host authority to select a provenance basis.
+
+    No mode is inferred from a GitHub webhook, PR text, reviewer result or
+    absent builder Job. An authorized host selects exactly one source.
+    """
+
+    EXECUTIVE_BUILDER = "EXECUTIVE_BUILDER"
+    EXTERNAL_GITHUB_ADVISORY = "EXTERNAL_GITHUB_ADVISORY"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -39,6 +52,53 @@ class ReviewReturnReceipt:
 
 
 class GitHubReviewReturn:
+    @classmethod
+    def for_authorized_source(
+        cls, *,
+        runtime: Runtime,
+        github: GitHubReviewAPI,
+        publication_guard: Callable[[], None],
+        source_mode: ReviewReturnSourceMode,
+        builder_job_id_for_review: Callable[[str], str | None] | None = None,
+        slack: SlackReviewResultNotifier | None = None,
+    ) -> GitHubReviewReturn:
+        """Construct a host-owned return consumer, never launch a background job.
+
+        This is a pure composition step for the existing Executive Runtime
+        owner. It has no webhook-side fallback, scheduler, new identity store,
+        or implicit opt-in: caller must explicitly select and arm one mode.
+        """
+        if not isinstance(runtime, Runtime) or not isinstance(github, GitHubReviewAPI):
+            raise ReviewVerificationRefused("REVIEW_RETURN_OWNER_UNBOUND")
+        if not callable(publication_guard):
+            raise ReviewVerificationRefused("REVIEW_RETURN_PUBLICATION_UNARMED")
+        if type(source_mode) is not ReviewReturnSourceMode:
+            raise ReviewVerificationRefused("REVIEW_RETURN_SOURCE_MODE_INVALID")
+        if source_mode is ReviewReturnSourceMode.EXECUTIVE_BUILDER:
+            if not callable(builder_job_id_for_review):
+                raise ReviewVerificationRefused("REVIEW_RETURN_BUILDER_SOURCE_UNBOUND")
+            reader = ExecutiveVerifiedReviewResults(
+                runtime=runtime,
+                builder_job_id_for_review=builder_job_id_for_review,
+            )
+        elif source_mode is ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY:
+            if builder_job_id_for_review is not None:
+                raise ReviewVerificationRefused("REVIEW_RETURN_SOURCE_MODES_MIXED")
+            # The publisher is the validated identity owned by the installed
+            # GitHub App port; no independent string from webhook text can
+            # impersonate a distinct source.
+            reader = ExecutiveVerifiedReviewResults(
+                runtime=runtime,
+                external_source=github,
+                publisher_login=github.publisher_login,
+            )
+        else:
+            raise ReviewVerificationRefused("REVIEW_RETURN_SOURCE_MODE_INVALID")
+        return cls(
+            runtime=runtime, github=github, results=reader,
+            publication_guard=publication_guard, slack=slack,
+        )
+
     def __init__(
         self, *,
         runtime: Runtime,

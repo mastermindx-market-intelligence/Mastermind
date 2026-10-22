@@ -86,6 +86,11 @@ class GitHubReviewAPI:
             timeout=httpx.Timeout(3.0), follow_redirects=False
         )
 
+    @property
+    def publisher_login(self) -> str:
+        """Validated immutable publication account for Executive return binding."""
+        return self._publisher
+
     def _request(self, method: str, path: str, *, payload: dict | None = None) -> object:
         if method not in {"GET", "POST"} or not path.startswith(
             f"/repos/{self._repository}/"
