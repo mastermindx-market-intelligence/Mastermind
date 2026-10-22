@@ -7,7 +7,6 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 PAPER = ROOT / "integrations" / "paper_desktop"
-sys.path.insert(0, str(PAPER))
 spec = importlib.util.spec_from_file_location("clone_prune_guard_test", PAPER / "clone_prune_guard.py")
 g = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(g)
@@ -42,6 +41,14 @@ class Copy:
 
 
 class ClonePruneGuardTests(unittest.TestCase):
+    def test_bridge_import_is_private_and_does_not_shadow_package(self):
+        self.assertEqual(g.bridge.__name__, "_mastermind_paper_clone_prune_bridge")
+        self.assertNotIn(str(PAPER), sys.path)
+        ambient = sys.modules.get("bridge")
+        if ambient is not None:
+            self.assertNotEqual(Path(getattr(ambient, "__file__", "/")).resolve(),
+                                (PAPER / "bridge.py").resolve())
+
     def test_exact_two_file_scratch_clone_prune_readback(self):
         fixture = Copy()
         plan = fixture.plan()
