@@ -16,9 +16,9 @@ class GrokUpgrade(unittest.TestCase):
     def test_default_model_is_47(self):
         picker = load('pick')
         self.assertEqual(picker._default_model('grok'), 'grok-4.7')
-    def test_ledger_model_is_47(self):
-        source = (HERE/'pool_ledger.py').read_text()
-        self.assertIn('"grok": "grok-4.7"',source)
+    def test_legacy_ledger_fallback_unchanged(self):
+        source = (HERE.parent.parent/'quota_continuity/source/pool_ledger.py').read_text()
+        self.assertIn('"grok": "grok-4.6"', source)
     def test_both_grok_models_are_accepted(self):
         remote = load('native_remote')
         for name in ('grok-4.6','grok-4.7'):

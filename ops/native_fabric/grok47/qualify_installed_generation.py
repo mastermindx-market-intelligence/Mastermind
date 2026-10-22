@@ -1,0 +1,101 @@
+#!/usr/bin/env python3
+"""Read-only qualification of pinned M2 Fabric generation and a 4.7 overlay.
+
+Publication and selection occur exclusively in a fresh temporary fake owner,
+never in the provided installed store. No provider, broker, or worker is started.
+"""
+from __future__ import annotations
+import argparse
+import hashlib
+import importlib.util
+import json
+from pathlib import Path
+import shutil
+import os
+import subprocess
+import sys
+import tempfile
+
+BASE = '0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f'
+OVERLAYS = frozenset({
+    'ext/artifact_delivery.py', 'ext/fabric_operator_client.py',
+    'ext/fabric_operator_contract.py', 'ext/native_remote.py',
+    'ext/pick.py', 'ext/remote_sub.sh',
+    'ext/remote_sub_exec.py', 'ext/remote_sub_helpers.py',
+})
+HERE = Path(__file__).resolve().parent
+GEN = HERE.parent / 'quota_continuity/rollout/native_generation.py'
+spec = importlib.util.spec_from_file_location('qualified_native_generation', GEN)
+generation = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(generation)
+
+
+def sha(raw): return hashlib.sha256(raw).hexdigest()
+
+
+def qualify(store: Path):
+    store = store.resolve(strict=True)
+    before = (store/'CURRENT.json').read_bytes()
+    selected = generation.current(store)
+    if selected is None or selected['generation'] != BASE:
+        raise ValueError('selected native generation differs from pinned source')
+    base_root, original = generation.verify(store, BASE)
+    overlay_names = {'ext/'+p.name for p in (HERE/'overlay').iterdir() if p.is_file()}
+    if overlay_names != OVERLAYS:
+        raise ValueError('overlay file set is not reviewed')
+    with tempfile.TemporaryDirectory(prefix='grok47-native-qualification-') as temp:
+        temp = Path(temp).resolve(strict=True)
+        source, stable_ext = temp/'source', temp/'fake-owner'/'ext'
+        (source/'ext').mkdir(parents=True)
+        stable_ext.mkdir(parents=True)
+        new_hashes = {}
+        changed = []
+        for rel, original_sha in original['files'].items():
+            old = (base_root/rel).read_bytes()
+            if sha(old) != original_sha:
+                raise ValueError('source preimage hash mismatch '+rel)
+            raw = (HERE/'overlay'/Path(rel).name).read_bytes() if rel in OVERLAYS else old
+            if rel in OVERLAYS:
+                if raw == old:
+                    raise ValueError('overlay did not change '+rel)
+                changed.append(rel)
+            target = source/rel
+            target.parent.mkdir(exist_ok=True, parents=True)
+            target.write_bytes(raw)
+            new_hashes[rel] = sha(raw)
+        manifest = temp/'manifest.json'
+        manifest.write_text(json.dumps(new_hashes, sort_keys=True))
+        issued = generation.publish(source, stable_ext, new_hashes)
+        root, qualified = generation.verify(stable_ext.parent/'native-code-releases', issued.name)
+        if root != issued or qualified['files'] != new_hashes:
+            raise ValueError('qualification manifest mismatch')
+        pointed = generation.select(stable_ext.parent/'native-code-releases', issued.name, None)
+        if pointed['generation'] != issued.name or pointed['sequence'] != 1:
+            raise ValueError('isolated selection mismatch')
+        # Real import from the complete 85-file published clone. No worker start.
+        code = ("import native_remote, remote_sub_exec; "
+                "cmd=native_remote.command('grok','grok-4.7','offline-probe','/tmp',validated=True); "
+                "assert cmd[cmd.index('-m')+1]=='grok-4.7'; "
+                "assert native_remote.MODELS['grok']=={'grok-4.6','grok-4.7'}; "
+                "print('NATIVE_IMPORT_GROK47_PASS')")
+        probe = subprocess.run([sys.executable,'-c',code], cwd=temp, timeout=10,
+            env={'PATH':os.environ.get('PATH',''),
+                 'PYTHONPATH':str(root/'ext'), 'PYTHONDONTWRITEBYTECODE':'1'},
+            capture_output=True, text=True)
+        if probe.returncode != 0 or probe.stdout.strip() != 'NATIVE_IMPORT_GROK47_PASS':
+            raise ValueError('isolated native import failed: '+probe.stderr[-700:])
+        result = {'state':'QUALIFIED_ISOLATED_ONLY', 'base_generation':BASE,
+                  'offline_executor_import_verified':True,
+                  'files_verified':len(new_hashes), 'overlaid_files':changed,
+                  'code_manifest_sha256':sha(generation.canonical(new_hashes)),
+                  'isolated_publish_verified':True,
+                  'isolated_select_verified':True}
+    if (store/'CURRENT.json').read_bytes() != before:
+        raise ValueError('live selection changed during qualification')
+    return result
+
+if __name__ == '__main__':
+    parser=argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--installed-store', type=Path, required=True)
+    args=parser.parse_args()
+    print(json.dumps(qualify(args.installed_store), sort_keys=True))
