@@ -97,7 +97,10 @@
         "routine": "glm-5.3-flash",
         "hard": "dola-seed-2.0-pro",
         "fast": "dola-seed-2.0-lite",
-        "subagent": "glm-5.3-flash"
+        "subagent": "glm-5.3-flash",
+        "backend_coding": "deepseek-v4.1-flash",
+        "frontend_visual": "dola-seed-2.0-code",
+        "adversarial_review": "deepseek-v4-pro"
       },
       "default_model_class": "routine",
       "supported_tool_only": true,

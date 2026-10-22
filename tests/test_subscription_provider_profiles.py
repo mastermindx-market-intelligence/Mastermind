@@ -473,3 +473,18 @@ def test_byteplus_deprecated_models_are_unselectable(deprecated):
     changed["profiles"]["byteplus-coding-plan-personal"]["models"]["hard"] = deprecated
     with pytest.raises(ProviderProfileError, match="unsupported BytePlus Coding Plan model"):
         validate_profiles(changed)
+
+
+
+def test_byteplus_specialist_models_are_selectable_only_inside_explicit_harness_roles():
+    profile = get_profile("byteplus-coding-plan-personal")
+    assert profile.model_for("backend_coding") == "deepseek-v4.1-flash"
+    assert profile.model_for("frontend_visual") == "dola-seed-2.0-code"
+    assert profile.model_for("adversarial_review") == "deepseek-v4-pro"
+    assert profile.model_for("routine") == profile.model_for("subagent") == "glm-5.3-flash"
+    assert not profile.autonomous_allowed
+    # Specialist model classes do not become universal subscriptions roles.
+    mutated = _catalog()
+    mutated["profiles"]["glm-coding-plan"]["models"]["backend_coding"] = "GLM-5.3"
+    with pytest.raises(ProviderProfileError, match="BytePlus specialist"):
+        validate_profiles(mutated)

@@ -530,6 +530,29 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
         self.assertNotIn("ANTHROPIC_API_KEY", prepared.environment)
         self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.to_dict())
 
+    def test_byteplus_specialist_models_prepare_supported_claude_only(self) -> None:
+        from control_plane.subscription_provider_profiles import get_profile
+        from control_plane.subscription_harness_bindings import get_binding
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        for model_class, model in (
+            ("backend_coding", "deepseek-v4.1-flash"),
+            ("frontend_visual", "dola-seed-2.0-code"),
+            ("adversarial_review", "deepseek-v4-pro"),
+        ):
+            prepared = _prepare(
+                spec=_spec(model=model), profile=profile,
+                binding=binding, model_class=model_class,
+            )
+            self.assertEqual(prepared.model, model)
+            self.assertEqual(prepared.model_class, model_class)
+            self.assertEqual(prepared.endpoint, "https://ark.ap-southeast.bytepluses.com/api/coding")
+            self.assertTrue(prepared.preparation_only)
+            self.assertFalse(prepared.start_authorized)
+            self.assertEqual(prepared.implementation_state, "SPEC_ONLY")
+            self.assertFalse(prepared.binding_autonomous_allowed)
+            self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.environment)
+
     def test_byteplus_real_catalog_cannot_prepare_unreviewed_model(self) -> None:
         profile = get_profile("byteplus-coding-plan-personal")
         binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")

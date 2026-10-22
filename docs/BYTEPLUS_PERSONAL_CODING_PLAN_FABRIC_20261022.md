@@ -224,6 +224,64 @@ possible. No baseline quality/accepted-outcome comparison with BytePlus exists.
 `bailian` and `qwen` both refer to the Alibaba family and must not be
 double-counted as independent subscription pools.
 
+### Critical accounting distinction: Alibaba Token Plan is not Coding Plan
+
+The three Alibaba subscriptions described by Chairman are treated as
+**Alibaba Token Plan** subscriptions until individual account evidence
+shows otherwise. This is NOT the old Alibaba Coding Plan with
+request-based five-hour/weekly/monthly quotas. Official current Token
+Plan documentation (including a September 22, 2026 removal of the
+weekly Token Plan allowance) defines a **monthly Credits quota**,
+varying by subscribed tier and account. Personal Pro currently
+advertises 180,000 monthly Credits; **do not** claim all three actual
+accounts have this tier, enough remaining Credits or 6–8 real worker
+slots. An account can exhaust its monthly quota before renewal and
+extra bundles are separate capacity.
+
+Nighttime discount for **specific Alibaba Token Plan models** is
+documented as a time-limited promotion: at 22:00–08:00 Asia/Shanghai
+(UTC+8), Qwen3.8-Max and Qwen3.8-Flash consume 40% of normal Credits
+(60% off); DeepSeek-V4.1-Flash and selected DeepSeek-V4 models consume
+50% of normal Credits (50% off). This is distinct from the earlier
+Alibaba Coding Plan, from the Z.AI Devpack discount, and from
+BytePlus's Personal Pro. Observe the real vendor activation window,
+model version and account plan before using a promotional weight.
+Source: https://docs.agent.bailian.aliyun.com/en/token-plan/token-plan-overview
+and https://docs.bailian.console.aliyun.com/en/model-studio/token-plan-personal-overview
+
+The actual live Fabric log labels `bailian` and `qwen` refer to the
+**same Alibaba plan family**; the underlying account owner, not the
+alias, must identify the particular one of three entitlements. No
+extra account or separate quota is created when a model alias differs.
+
+### Correct clock-aware cross-provider decision windows
+
+All times below are **Asia/Singapore / Asia/Shanghai (UTC+8)**.
+Availability and first-lawful suitability are gates before cost
+comparison; this table is advisory, not executable routing authority.
+
+| Period | Z.AI current models | Alibaba Token Plan selected models | BytePlus Personal Pro |
+| --- | --- | --- | --- |
+| Weekdays 14:00–18:00 | Normal 1.0x weighted Credits | Normal daytime Credits | No published time discount; only eligible attended coding tools |
+| 08:00–14:00 and 18:00–22:00 | Off-peak 0.5x Credits | Normal daytime Credits | Same limited coding-tool scope |
+| 22:00–08:00 | Off-peak 0.5x Credits | Limited-time Qwen3.8 0.4x / selected DeepSeek 0.5x Credits | Same limited coding-tool scope |
+| Weekend outside Alibaba night | Off-peak 0.5x Credits | Normal Credits | Same limited coding-tool scope |
+
+During the Z.AI weekday peak, Alibaba is **not automatically
+discounted**; do not route there based solely on Z.AI being at 1.0x.
+On an eligible coding task, BytePlus may relieve a scarce Z.AI plan
+only if its actual task-success and remaining allowance justify it.
+At night the Alibaba discount may outcompete Z.AI on credit
+conservation **within each provider's own unit and quota horizon**,
+but provider Credits cannot be arithmetically equated.
+Eligibility, quality, review independence, and already-paid quota
+expiries remain first-class decisions.
+
+Model suitability and selection are distinct from temporal economics:
+a provider may have lower headline Credits but fail coding quality,
+lack vision/tool support, or be disallowed for the intended harness.
+No global forced peak blacklisting of GLM is recommended.
+
 ### Proposed decision matrix (not autonomous activation)
 
 | Original job | Preferred eligible candidate | Scarcity and qualification rule |
@@ -251,6 +309,29 @@ coding-tool** job can lawfully consume it. Never apply Z.AI's discount
 to BytePlus GLM Flash or Alibaba GLM.
 
 Reference: https://docs.z.ai/devpack/overview
+
+### Selectable specialist candidates already wired into the held harness binding
+
+The existing `byteplus-coding-plan-personal.claude-code-anthropic` binding
+now exposes three **explicit specialist model classes** in addition to its
+unchanged routine/hard/fast/subagent defaults:
+
+| Manual supported-tool model class | Exact vendor-supported model | Gate |
+| --- | --- | --- |
+| `backend_coding` | `deepseek-v4.1-flash` | Bounded backend/debug benchmark |
+| `frontend_visual` | `dola-seed-2.0-code` | Tool/screenshot-to-code benchmark |
+| `adversarial_review` | `deepseek-v4-pro` | Exceptional high-quota-burn review only |
+
+The selected class resolves to the exact model through the **incumbent**
+`SubscriptionProviderProfile` and the existing Claude Code preparation
+compiler. This is a catalog/runtime *preparation* capability: it does not
+create a global Fabric worker route, expand the first lawful Model Router
+tier, set account quotas, read credentials or authorize process START.
+All three remain `SPEC_ONLY` until actual specialist-task quality,
+tool rights, account eligibility and provider use are proven. Unselected
+models such as GLM-5.2 / DeepSeek V4 Flash remain recognized by the
+published BytePlus allowlist but are not promoted into default worker
+roles. Deprecated models are rejected.
 
 ### Required load-balancing invariants
 

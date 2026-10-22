@@ -23,7 +23,13 @@ from control_plane.provider_protocols import PROVIDER_PROTOCOLS as _ALLOWED_PROT
 
 SCHEMA = "mastermind.subscription_provider_profiles/v1"
 DEFAULT_PROFILES_PATH = Path(__file__).resolve().parents[1] / "config" / "subscription_provider_profiles.v1.json"
-_ALLOWED_MODEL_CLASSES = frozenset({"routine", "hard", "fast", "subagent"})
+_ALLOWED_MODEL_CLASSES = frozenset({
+    "routine", "hard", "fast", "subagent",
+    "backend_coding", "frontend_visual", "adversarial_review",
+})
+_BYTEPLUS_SPECIALIST_CLASSES = frozenset({
+    "backend_coding", "frontend_visual", "adversarial_review",
+})
 
 # Current non-deprecated BytePlus Personal Coding Plan coding-tool models.
 # The dedicated vendor deprecation notice removes bytedance-seed-code,
@@ -350,6 +356,8 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
         _raise(f"profile {profile_id!r} leaks credential authority")
     _exact_string(mapping.get("credential_binding"), f"{path}.credential_binding")
     models = _validate_models(mapping.get("models"), f"{path}.models")
+    if not byteplus_plan and _BYTEPLUS_SPECIALIST_CLASSES.intersection(models):
+        _raise(f"{path}.models: BytePlus specialist classes are not permitted here")
     if byteplus_plan:
         for model_class, item in models.items():
             model = _model_identifier(item, f"{path}.models.{model_class}")

@@ -167,7 +167,10 @@
         "routine",
         "hard",
         "fast",
-        "subagent"
+        "subagent",
+        "backend_coding",
+        "frontend_visual",
+        "adversarial_review"
       ],
       "implementation_state": "SPEC_ONLY",
       "autonomous_allowed": false,
