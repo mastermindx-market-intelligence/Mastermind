@@ -24,6 +24,8 @@ primary-source research are appropriate when the problem needs them, not mandato
 stages for every fix. Implement, verify, save the material delta and start the next
 safe ready phase in the same healthy turn. A checkpoint is a save, not a stop.
 
+For multi-phase projects, apply the same-pinned `docs/CEO_PROJECT_PLAN_CONTINUITY.md` before substantial delegation: reuse or establish one versioned GitHub master plan with granular task/subtask IDs, dependencies, acceptance proof and confirmed first-save receipt; link the existing Agent OS workstream/cumulative frontier through its authorized writer when available. Update material nodes and checkpoint at meaningful boundaries; a save never grants execution authority or ends a healthy turn. If the plan or Agent OS write cannot be verified, report the exact gap rather than relying on chat context. This is compatible with choosing the *smallest useful* plan for the project, not an excuse to overplan trivial work.
+
 ## A role is not a persistent conversation
 
 Chairman intent assigns responsibility. The active assigned principal owns delivery;
