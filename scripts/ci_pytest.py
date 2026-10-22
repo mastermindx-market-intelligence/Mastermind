@@ -210,14 +210,12 @@ def pytest_argv(
 
 
 _MEASURED_THREE_JOB_PLACEMENT = {
-    # Union of independently measured hosted placements: preserve the three
-    # protected-master hot-module pins and the accepted separate-runner
-    # capacity-host/trend balance. Every unlisted module retains SHA-256
-    # placement and every test still runs exactly once.
+    # Keep the measured protected-master hot-module pins. The capacity-host and
+    # walkforward swap is retired: the observed queue profile shows it overloads
+    # shard 1 with cold setup. Unlisted modules retain SHA-256 placement, and
+    # every test still runs exactly once.
     "tests/test_executive_runtime_bounded_acquisition.py": 1,
     "tests/test_mastermind_window_reader_static_fences.py": 1,
-    "tests/test_capacity_host_artifacts.py": 1,
-    "tests/test_trend_persistence_walkforward.py": 0,
     # The protected one-runner CI gate measured these further slow modules.
     "tests/test_market_view.py": 1,
     "tests/test_product_acceptance_original_selector.py": 1,
