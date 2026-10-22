@@ -83,6 +83,21 @@ def test_canonical_receipt_is_finite_sorted_compact_utf8_with_one_newline():
         assert error.value.code == "NONFINITE_RECEIPT"
 
 
+def test_legacy_and_durable_agent_socket_share_pinned_identity_contract():
+    module = subject()
+    legacy = module._metadata_contract("/var/run/mastermind-agent-relay/agent-relay.sock")
+    durable = module._metadata_contract("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+    assert legacy == durable == {
+        "type": "socket",
+        "uid": 457,
+        "gid": 457,
+        "mode": 0o660,
+        "required_mode": 0,
+        "forbidden_mode": 0,
+        "link_count": None,
+    }
+
+
 def test_public_contract_enums_are_closed():
     module = subject()
     assert module.SCHEMA == "mastermind.c1_private_preimage/v1"
@@ -917,7 +932,7 @@ class InstalledFilesystem:
                     "-B",
                     f"{release_root}/scripts/slack_agent_dialogue_service.py",
                     "--socket-path",
-                    "/var/run/mastermind-agent-relay/agent-relay.sock",
+                    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
                     "--token-file",
                     f"{module.SYSTEM_ROOT}/config/agent-relay.token",
                     "--workspace-id",

@@ -239,7 +239,7 @@ CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
     "mastermind.executive_control_env_probe/v1"
 )
 _CANONICAL_AGENT_RELAY_SOCKET = Path(
-    "/var/run/mastermind-agent-relay/agent-relay.sock"
+    "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
 )
 _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"

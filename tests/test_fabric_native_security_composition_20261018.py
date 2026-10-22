@@ -34,9 +34,10 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # slot diagnostics with retention recovery and explicit acquisition correlation.
 # Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-# Candidate operator-instruction overlay updates only ext/fabric_operator_client.py;
-# historical executor/donor/quota/root pins above remain unchanged.
-NATIVE_MANIFEST_SHA = "8378a26b9691dfb38cbf2192ac2dd7c41bef14678638195c922dce370341aac0"
+# Merge current protected native overlays (slot/lane/runtime observation) with
+# PR #1694's candidate operator instructions, preserving all installed preimages.
+# Generated and byte-compared against the exact integrated 85-file stage.
+NATIVE_MANIFEST_SHA = "06157fd40c5c0fec2d557b3500110a0fa49245f684992c9c70dfa2a8c077e36a"
 
 
 def _sha(raw):
