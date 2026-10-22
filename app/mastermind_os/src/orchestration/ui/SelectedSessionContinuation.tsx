@@ -306,7 +306,7 @@ export function SelectedSessionContinuation({
             <p id={`${formId}-bounds`} className="session-bounds">{ui(locale, "Use 1–700 characters.")} ({instructionPoints}/700 · {conditionPoints}/700)</p>
             <div className="form-actions">
               <button type="submit" disabled={!canContinue} className="primary">
-                {dispatchBusy ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
+                {sending || inFlight ? ui(locale, "Sending\u2026") : ui(locale, "Send")}
               </button>
             </div>
           </form>
