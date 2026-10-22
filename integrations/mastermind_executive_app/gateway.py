@@ -1252,6 +1252,32 @@ class CeoIngressReadGateway:
             return False
 
     @staticmethod
+    def _valid_requeued_lost_error(value: object) -> bool:
+        """Admit only the Runtime's bounded, typed LOST reconciliation errors.
+
+        They are not JobPayload documents and do not relax sealed results.
+        """
+        if type(value) is not dict:
+            return False
+        reason = value.get("reason")
+        if not (
+            type(reason) is str
+            and 0 < len(reason) <= 1024
+            and reason == reason.strip()
+            and all(character.isprintable() for character in reason)
+        ):
+            return False
+        if set(value) == {"reason", "expired_at_ms"}:
+            return (
+                reason in {"lease_expired", "ohf_lease_expired_fenced"}
+                and type(value["expired_at_ms"]) is int
+                and 0 <= value["expired_at_ms"] < 2**63
+            )
+        if set(value) == {"reason", "verified_process_absent"}:
+            return value["verified_process_absent"] is True
+        return False
+
+    @staticmethod
     def _valid_sha256(value: object) -> bool:
         import re
         return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
@@ -1413,6 +1439,34 @@ class CeoIngressReadGateway:
             return True
         except (PersistenceError, StateConflict, KeyError, TypeError, ValueError):
             return False
+
+    @staticmethod
+    def _valid_requeued_remote_launch_pin(attempt: Mapping[str, Any]) -> bool:
+        """Read only the exact Remote Runtime pre-start pin after verified LOST.
+
+        A remote pre-start pin is not a sealed-worker launch attestation, and
+        admitting its historical digest never authorizes a new start or send.
+        """
+        from control_plane.executive_runtime import (
+            REMOTE_LAUNCH_IDENTITY_KEY, REMOTE_LAUNCH_IDENTITY_SCHEMA,
+        )
+
+        metadata = attempt.get("launch_metadata")
+        if not (
+            attempt.get("execution_mode") == "SEALED_WORKER"
+            and attempt.get("status") == "LOST"
+            and attempt.get("result") is None
+            and type(metadata) is dict
+            and set(metadata) == {REMOTE_LAUNCH_IDENTITY_KEY}
+        ):
+            return False
+        pin = metadata[REMOTE_LAUNCH_IDENTITY_KEY]
+        return (
+            type(pin) is dict
+            and set(pin) == {"schema_version", "sha256"}
+            and pin["schema_version"] == REMOTE_LAUNCH_IDENTITY_SCHEMA
+            and CeoIngressReadGateway._valid_sha256(pin["sha256"])
+        )
 
     @staticmethod
     def _valid_requested_profile(value: object, digest: object) -> bool:
@@ -1634,6 +1688,15 @@ class CeoIngressReadGateway:
                 attempt.get(field), job=job, attempt=attempt,
             ):
                 continue
+            if (
+                field == "error"
+                and job.get("status") == "QUEUED"
+                and attempt.get("status") == "LOST"
+                and CeoIngressReadGateway._valid_requeued_lost_error(
+                    attempt.get("error")
+                )
+            ):
+                continue
             if not CeoIngressReadGateway._valid_payload_or_bound(
                 attempt.get(field),
                 field=f"{prefix}.{field}",
@@ -1646,6 +1709,10 @@ class CeoIngressReadGateway:
         if not (
             launch_metadata == {}
             or CeoIngressReadGateway._valid_sealed_launch_metadata(attempt)
+            or (
+                job.get("status") == "QUEUED"
+                and CeoIngressReadGateway._valid_requeued_remote_launch_pin(attempt)
+            )
             or CeoIngressReadGateway._valid_bounded_aggregate(
                 launch_metadata,
                 field=f"{prefix}.launch_metadata",
@@ -1696,7 +1763,7 @@ class CeoIngressReadGateway:
         import dataclasses
         import re
         from control_plane.executive_runtime import (
-            Attempt, Job, JobStatus,
+            Attempt, Job, JobStatus, _LEASE_ACTIVE_ATTEMPT_STATUSES,
         )
 
         if (
@@ -1876,8 +1943,19 @@ class CeoIngressReadGateway:
                     # Attempt for READ without presenting it as still active.
                     job.get("current_attempt_id") is None
                     and job.get("status") == "QUEUED"
+                    and job.get("assigned_worker_id") is None
+                    and job.get("assigned_quota_class") is None
+                    and job.get("result") is None
                     and attempts[-1].get("status") == "LOST"
-                    and all(row.get("status") != "RUNNING" for row in attempts)
+                    # Both independent history projections must agree exactly.
+                    # Arbitrary live leases cannot hide behind a null pointer.
+                    and latest == attempts[-1]
+                    and all(
+                        row.get("status") not in {
+                            status.value for status in _LEASE_ACTIVE_ATTEMPT_STATUSES
+                        }
+                        for row in attempts
+                    )
                 )
             )
             and CeoIngressReadGateway._valid_attempt_row(

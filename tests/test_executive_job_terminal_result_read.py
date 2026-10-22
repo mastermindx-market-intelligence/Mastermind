@@ -72,6 +72,8 @@ def test_requeued_lost_attempt_is_history_not_an_active_claim(operator_job):
     job["status"] = "QUEUED"
     job["result"] = None
     job["current_attempt_id"] = None
+    job["assigned_worker_id"] = None
+    job["assigned_quota_class"] = None
     for attempt in data["data"]["attempts"]:
         attempt["status"] = "LOST"
         attempt["result"] = None
@@ -92,6 +94,112 @@ def test_requeued_lost_attempt_is_history_not_an_active_claim(operator_job):
         else:
             foreign["data"]["job"]["status"] = "FAILED"
         assert not _accepted(foreign), variant
+
+
+def test_real_runtime_lost_requeue_roundtrip(tmp_path):
+    """A real LOST->QUEUED transition must survive Runtime, MCP, and Web reader."""
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, lost = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert document["bounded"] == []
+    assert document["data"]["job"]["status"] == "QUEUED"
+    assert document["data"]["job"]["current_attempt_id"] is None
+    assert document["data"]["job"]["assigned_worker_id"] is None
+    assert document["data"]["job"]["assigned_quota_class"] is None
+    assert document["data"]["latest_attempt"]["status"] == "LOST"
+    assert document["data"]["latest_attempt"]["error"] == {
+        "reason": "process identity absent during supervisor restart",
+        "verified_process_absent": True,
+    }
+    assert _accepted(document)
+
+
+@pytest.mark.parametrize("bad_pin", [
+    "bad_digest", "bad_schema", "foreign_field", "active_status",
+])
+def test_real_remote_lost_pin_never_reinterprets_active_or_foreign_launch(
+    tmp_path, bad_pin,
+):
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, lost = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    pin = document["data"]["latest_attempt"]["launch_metadata"][
+        "remote_launch_identity"
+    ]
+    if bad_pin == "bad_digest":
+        pin["sha256"] = "not-hex"
+    elif bad_pin == "bad_schema":
+        pin["schema_version"] = "foreign-schema"
+    elif bad_pin == "foreign_field":
+        pin["foreign"] = True
+    else:
+        document["data"]["latest_attempt"]["status"] = "RUNNING"
+        document["data"]["attempts"][0]["status"] = "RUNNING"
+    assert not _accepted(document)
+
+
+def test_real_runtime_lease_expiry_requeue_roundtrip(tmp_path):
+    from tests.test_remote_attempt_transport import _claimed_runtime
+
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    runtime.attempts.reconcile_expired(now_ms=runtime.store.now_ms() + 120_000)
+    runtime.jobs.requeue_job(job.job_id)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert document["data"]["job"]["status"] == "QUEUED"
+    assert document["data"]["latest_attempt"]["error"]["reason"] == "lease_expired"
+    assert _accepted(document)
+
+
+@pytest.mark.parametrize("status", [
+    "CLAIMED", "RUNNING", "CHECKPOINTED", "CANCEL_REQUESTED",
+])
+def test_requeued_job_rejects_any_earlier_live_attempt(tmp_path, status):
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, lost = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    history = document["data"]["attempts"]
+    first = copy.deepcopy(history[-1])
+    first["attempt_id"] = "ATT-" + "b" * 32
+    first["attempt_number"] = 1
+    first["status"] = status
+    first["error"] = None
+    history[-1]["attempt_number"] = 2
+    document["data"]["latest_attempt"]["attempt_number"] = 2
+    history.insert(0, first)
+    document["data"]["job"]["attempt_count"] = 2
+    document["data"]["attempt_count"] = 2
+    # Confirm this synthetic multi-attempt history is otherwise readable.
+    first["status"] = "LOST"
+    first["error"] = copy.deepcopy(history[-1]["error"])
+    assert _accepted(document)
+    first["status"] = status
+    first["error"] = None
+    assert not _accepted(document)
+
+
+@pytest.mark.parametrize("mutation", [
+    "latest_status", "latest_error", "foreign_assignment", "extra_error_key",
+])
+def test_requeued_lost_history_rejects_divergence(tmp_path, mutation):
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, lost = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    latest = document["data"]["latest_attempt"]
+    if mutation == "latest_status":
+        latest["status"] = "CLAIMED"
+    elif mutation == "latest_error":
+        latest["error"]["reason"] = "changed-but-valid"
+    elif mutation == "foreign_assignment":
+        document["data"]["job"]["assigned_worker_id"] = "worker-a"
+        document["data"]["job"]["assigned_quota_class"] = "default"
+    else:
+        latest["error"]["private"] = "not-a-runtime-error"
+        document["data"]["attempts"][-1]["error"]["private"] = "not-a-runtime-error"
+    assert not _accepted(document)
 
 
 def test_canonical_sealed_worker_result_and_launch_survive_job_reader(
