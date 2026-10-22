@@ -1,0 +1,204 @@
+{
+  "schema": "mastermind.deepseek_client_asset_compatibility.v1",
+  "proof_scope": "ACTUAL_LOCAL_BUILD_AND_EXISTING_SOURCE_OWNERS_NOT_INSTALLED",
+  "client_workspace_head_observed": "056e6c4bffa7e9e017967e7ac12bb56bf3874f65",
+  "client_build_is_sealed_release_artifact": false,
+  "asset_manifest": {
+    "schema": "mastermind.os_assets.v1",
+    "files": [
+      {
+        "path": "assets/Inter-Variable-DiVDrmQJ.woff2",
+        "byte_count": 352240,
+        "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+        "mime": "font/woff2"
+      },
+      {
+        "path": "assets/Manrope-Variable-FzEoaBTQ.ttf",
+        "byte_count": 165420,
+        "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+        "mime": "font/ttf"
+      },
+      {
+        "path": "assets/SourceMarkdown-BLxxEkyB.js",
+        "byte_count": 88295,
+        "sha256": "e1bf34357e59bc3b2d8d70ab0122f68e6708fff42cd14d65d59a25f050dcba22",
+        "mime": "text/javascript; charset=utf-8"
+      },
+      {
+        "path": "assets/SourceMarkdown-_Pti-jmH.css",
+        "byte_count": 2815,
+        "sha256": "4f8df832714e53269f28e990c2fb2ba8652edf6158956b4a162642bc7fc22893",
+        "mime": "text/css; charset=utf-8"
+      },
+      {
+        "path": "assets/atelier-office-poIrp4_y.jpg",
+        "byte_count": 27302,
+        "sha256": "5ffdd2a6a1296a0565d495756010d8c3f68d9c787b4061e29324b286bab70b62",
+        "mime": "image/jpeg"
+      },
+      {
+        "path": "assets/index-BZzhCBQR.css",
+        "byte_count": 62143,
+        "sha256": "6d3ba4d456c289c6689fbd8f49b8fd245537524ae81b2e525431239355f9b633",
+        "mime": "text/css; charset=utf-8"
+      },
+      {
+        "path": "assets/index-DGyw0NzW.js",
+        "byte_count": 577650,
+        "sha256": "2aa211f33cbf77956fcb096c2790facbad27b3ee2190ec344d3d6790274cf9b0",
+        "mime": "text/javascript; charset=utf-8"
+      },
+      {
+        "path": "index.html",
+        "byte_count": 366,
+        "sha256": "b284588ff04fd7dd5f006961b91e916d01ee66e6ef42b703a44600709515af96",
+        "mime": "text/html; charset=utf-8"
+      },
+      {
+        "path": "licenses/fonts/Inter-OFL.txt",
+        "byte_count": 4380,
+        "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "licenses/fonts/Manrope-FONTLOG.txt",
+        "byte_count": 3075,
+        "sha256": "b6b54bcc1dbd1b18d5afd087ec0b578097644b1c9ec3e0a642d4df7808f449c2",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "licenses/fonts/Manrope-OFL.txt",
+        "byte_count": 4384,
+        "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "third-party/deepseek-client-dependency-NOTICES.txt",
+        "byte_count": 70364,
+        "sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4",
+        "mime": "text/plain; charset=utf-8"
+      },
+      {
+        "path": "third-party/deepseek-harness-LICENSE.txt",
+        "byte_count": 1065,
+        "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+        "mime": "text/plain; charset=utf-8"
+      }
+    ]
+  },
+  "capture_roundtrip": "PASS",
+  "static_http_results": [
+    {
+      "route": "/os/assets/Inter-Variable-DiVDrmQJ.woff2",
+      "status": 200,
+      "bytes": 352240,
+      "sha256": "693b77d4f32ee9b8bfc995589b5fad5e99adf2832738661f5402f9978429a8e3",
+      "mime": "font/woff2"
+    },
+    {
+      "route": "/os/assets/Manrope-Variable-FzEoaBTQ.ttf",
+      "status": 200,
+      "bytes": 165420,
+      "sha256": "d0639be45d0af36e798172419d7bd173c4bd4f29e2b76cbb69db1d11bf8b0a40",
+      "mime": "font/ttf"
+    },
+    {
+      "route": "/os/assets/SourceMarkdown-BLxxEkyB.js",
+      "status": 200,
+      "bytes": 88295,
+      "sha256": "e1bf34357e59bc3b2d8d70ab0122f68e6708fff42cd14d65d59a25f050dcba22",
+      "mime": "text/javascript; charset=utf-8"
+    },
+    {
+      "route": "/os/assets/SourceMarkdown-_Pti-jmH.css",
+      "status": 200,
+      "bytes": 2815,
+      "sha256": "4f8df832714e53269f28e990c2fb2ba8652edf6158956b4a162642bc7fc22893",
+      "mime": "text/css; charset=utf-8"
+    },
+    {
+      "route": "/os/assets/atelier-office-poIrp4_y.jpg",
+      "status": 200,
+      "bytes": 27302,
+      "sha256": "5ffdd2a6a1296a0565d495756010d8c3f68d9c787b4061e29324b286bab70b62",
+      "mime": "image/jpeg"
+    },
+    {
+      "route": "/os/assets/index-BZzhCBQR.css",
+      "status": 200,
+      "bytes": 62143,
+      "sha256": "6d3ba4d456c289c6689fbd8f49b8fd245537524ae81b2e525431239355f9b633",
+      "mime": "text/css; charset=utf-8"
+    },
+    {
+      "route": "/os/assets/index-DGyw0NzW.js",
+      "status": 200,
+      "bytes": 577650,
+      "sha256": "2aa211f33cbf77956fcb096c2790facbad27b3ee2190ec344d3d6790274cf9b0",
+      "mime": "text/javascript; charset=utf-8"
+    },
+    {
+      "route": "/os/",
+      "status": 200,
+      "bytes": 366,
+      "sha256": "b284588ff04fd7dd5f006961b91e916d01ee66e6ef42b703a44600709515af96",
+      "mime": "text/html; charset=utf-8"
+    },
+    {
+      "route": "/os/licenses/fonts/Inter-OFL.txt",
+      "status": 200,
+      "bytes": 4380,
+      "sha256": "262481e844521b326f5ecd053e59b98c8b2da78c8ee1bdbb6e8174305e54935a",
+      "mime": "text/plain; charset=utf-8"
+    },
+    {
+      "route": "/os/licenses/fonts/Manrope-FONTLOG.txt",
+      "status": 200,
+      "bytes": 3075,
+      "sha256": "b6b54bcc1dbd1b18d5afd087ec0b578097644b1c9ec3e0a642d4df7808f449c2",
+      "mime": "text/plain; charset=utf-8"
+    },
+    {
+      "route": "/os/licenses/fonts/Manrope-OFL.txt",
+      "status": 200,
+      "bytes": 4384,
+      "sha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+      "mime": "text/plain; charset=utf-8"
+    },
+    {
+      "route": "/os/third-party/deepseek-client-dependency-NOTICES.txt",
+      "status": 200,
+      "bytes": 70364,
+      "sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4",
+      "mime": "text/plain; charset=utf-8"
+    },
+    {
+      "route": "/os/third-party/deepseek-harness-LICENSE.txt",
+      "status": 200,
+      "bytes": 1065,
+      "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be",
+      "mime": "text/plain; charset=utf-8"
+    }
+  ],
+  "unlisted_and_dynamic_routes_refused": true,
+  "edge_exact_asset_routes": [
+    "/os/",
+    "/os/assets/Inter-Variable-DiVDrmQJ.woff2",
+    "/os/assets/Manrope-Variable-FzEoaBTQ.ttf",
+    "/os/assets/SourceMarkdown-BLxxEkyB.js",
+    "/os/assets/SourceMarkdown-_Pti-jmH.css",
+    "/os/assets/atelier-office-poIrp4_y.jpg",
+    "/os/assets/index-BZzhCBQR.css",
+    "/os/assets/index-DGyw0NzW.js",
+    "/os/licenses/fonts/Inter-OFL.txt",
+    "/os/licenses/fonts/Manrope-FONTLOG.txt",
+    "/os/licenses/fonts/Manrope-OFL.txt",
+    "/os/third-party/deepseek-client-dependency-NOTICES.txt",
+    "/os/third-party/deepseek-harness-LICENSE.txt"
+  ],
+  "edge_render_sha256": "f438dabd5cd09f4c2a27e58d3b6ca67870d81e6a875d3025706a480d10ef87d2",
+  "input_manifest_unchanged_after_qualification": true,
+  "production_mutations": 0,
+  "installed": false,
+  "published": false
+}

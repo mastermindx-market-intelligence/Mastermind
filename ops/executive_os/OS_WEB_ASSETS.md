@@ -41,7 +41,7 @@ sudo '<qualified Executive Python>' -I -S -B \
 ```
 
 The resulting artifact contains only `app/mastermind_os/dist` and
-`build-receipt.json`. The incumbent asset validator enforces its three/nine-file
+`build-receipt.json`. The incumbent asset validator enforces its closed three/nine/thirteen-file
 layout, MIME set, `/os/` index references, hashes and budgets. The receipt binds
 the source commit/tree, lockfile/build configuration/helper hashes, public build
 input, non-root builder/tool metadata and asset manifest. Root-sealed paths,
@@ -140,3 +140,23 @@ config, the host switch, and the final cleanup, under full request equality,
 custody checks and no replay after uncertainty. This staging is preparation
 only: it does not compose, install or publish a production release, and it
 adds no new policy approval gate.
+
+
+## Rich client artifact profile
+
+The thirteen-file profile extends the complete nine-file Noir layout with exactly
+one `assets/SourceMarkdown-<hash>.js`, one matching-name-family CSS chunk, and the
+two fixed plain-text notices `third-party/deepseek-harness-LICENSE.txt` and
+`third-party/deepseek-client-dependency-NOTICES.txt`. Both chunks and both notices
+are required together. The JS and CSS content hashes are independent; no invented
+same-hash constraint is applied. No other feature chunk, source map, secret,
+license name, partial set or directory is admitted. Index HTML still references
+only the existing index JS/CSS; those load the lazy reader through its existing
+bundle. The launcher derives required directories from the already-admitted names
+and retains all current immutable byte/hash, symlink, seal and budget checks.
+
+The existing public-edge planner and static application consume that same closed
+name/MIME owner; adding this profile does not introduce wildcard HTTP routes or
+change authentication, request methods, CSP, provider admission or service arming.
+It repairs source/build compatibility only. Production packaging/publication must
+still use the existing accepted release owner and all of its custody gates.
