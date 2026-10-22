@@ -12,9 +12,20 @@ from pathlib import Path
 import pytest
 
 from ops.executive_os import provider_orchestrator_policy as policy
-from ops.native_fabric.quota_continuity.source import fabric_operator_client as operator
+from ops.native_fabric.quota_continuity.candidate import fabric_operator_client as operator
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_operator_staged_overlay_preserves_installed_source_preimage() -> None:
+    native = ROOT / "ops/native_fabric/quota_continuity"
+    pinned = json.loads((native / "rollout/native-preimages.json").read_text())
+    source = (native / "source/fabric_operator_client.py").read_bytes()
+    candidate = (native / "candidate/fabric_operator_client.py").read_bytes()
+    assert hashlib.sha256(source).hexdigest() == pinned["files"]["fabric_operator_client.py"]
+    assert b"mastermind.fabric_operator_child_request.v1" not in source
+    assert b"mastermind.fabric_operator_child_request.v1" in candidate
+    assert candidate != source
 
 
 def test_claude_fabric_skill_is_exact_source_blob() -> None:
