@@ -431,15 +431,23 @@ non-colour cue**, so the state survives greyscale, colour-blindness and a screen
 | queued (pending while held) | Queued | 已排队 | the held row keeps its shares and shows the #1707 chip + timing line |
 | unavailable | Unavailable | 不可用 | the word in the value slot, muted, never a number |
 
-**Shipped strings that predate this table.** Four shipped empty strings open with a bespoke phrase
-instead of the `Empty` / `暂无` label: `pos.empty` (`index.html:3250`), `pend.none` (`:3297`),
-`ec.no_data` (`:3235`) and `rej.empty` (`:3395`). Each view cites the shipped string only as the
-current state and specifies its replacement as a **copy request** (i18n strings are PRODUCT's write
-scope); the replacement lands in that view's build PR with an EN/ZH agreement test named in that
-view's Acceptance checklist. No view treats a shipped bespoke string as accepted copy. **One
-rendering form for every empty state:** the label, an em dash, then the reason, on one full-weight
-line — `Empty — <reason>` / `暂无 — <reason>`. Where a view's States table writes the label and the
-reason as separate pieces (V6, V7), they render in this same one-line form.
+**Shipped strings that predate this table.** Five shipped empty strings that a view's States table
+names open with a bespoke phrase instead of the `Empty` / `暂无` label: `pos.empty`
+(`index.html:3250`), `pend.none` (`:3297`), `ec.no_data` (`:3235`), `rej.empty` (`:3395`) and
+`runs.empty` (`:3383`). Each view cites the shipped string only as the current state and specifies
+its replacement as a **copy request** (i18n strings are PRODUCT's write scope); the replacement lands
+in that view's build PR with an EN/ZH agreement test named in that view's Acceptance checklist. No
+view treats a shipped bespoke string as accepted copy. **One rendering form for every empty state a
+V1–V7 build renders:** the label, an em dash, then the reason in lower case, on one full-weight line
+— `Empty — <reason>` / `暂无 — <reason>`; the ZH reason does not repeat `暂无`. Where a view's States
+table writes the label and the reason as separate pieces (V6, V7), they render in this same one-line
+form. The shipped app has more bespoke empty lines inside the views' surfaces than those five (V5's
+research surfaces render `rp.empty`, `cal.no_data`, `cal.lens_empty` and `cal.log_empty`; V7's desk
+renders `desk.wl_empty` and `desk.cio_empty`; V5 item 7 and V7 item 14 give their copy), so every
+V1–V7 build PR also carries one shared **empty-form closure** test: with each module of the view
+seeded empty, every rendered `.mm-empty` that is not a `Loading` line starts with `Empty — ` /
+`暂无 — `, in EN and ZH. Surfaces that §2 does not place in V1–V7 (`#brainlog`, `#research`,
+`#view-self`) are outside this freeze; the rule binds each one when a view absorbs it.
 
 What each state still does — the honest reading of the table:
 
@@ -1903,9 +1911,19 @@ arrive with its interpretation). L1 caps: 8 finalist rows, 6 rejected cards, the
    reachable from 375; keyboard-only path reaches every card and disclosure, the ladder exposes
    per-cell counts, contrast is ≥ 4.5:1 for card text in all four theme-language combinations, and no
    meaning is carried by colour alone.
-6. **Empty copy request.** A fixture with no rejected names renders `Empty — no rejected names: this
+6. **Empty copy request.** A fixture with `rejected[]` empty and no finalist rows (the States-row trigger) renders `Empty — no rejected names: this
    book has not run yet, or every evaluated name passed.` / `暂无 — 无剔除标的：本组合尚未运行，或所有标的均通过评估。`
    at full weight, and the shipped `rej.empty` text no longer renders. *Test: EN/ZH agreement test on the pair (§3).*
+7. **Empty-form closure (§3).** Fixtures with no research papers, no graded calls, no lens edge and
+   no resolved thesis render `Empty — no research papers yet; each appears when the bot evaluates a
+   buy.` / `暂无 — 尚无研究论文；机器人评估买入后将显示。`, `Empty — no graded calls yet.` /
+   `暂无 — 尚无已评分的判断。`, `Empty — no lens edge yet; it appears once calls resolve.` /
+   `暂无 — 尚无视角优势；判断兑现后将显示。` and `Empty — no thesis has resolved yet.` /
+   `暂无 — 尚无已了结的论点。` at full weight. They replace `rp.empty` (`index.html:3321`),
+   `cal.no_data` (`:3347`), `cal.lens_empty` (`:3366`) and `cal.log_empty` (`:3378`). The
+   `cal.log_empty` line carries no fixed date: the shipped text hard-codes a first-resolve date
+   (`~2026-07-17`) that has already passed. *Test: EN/ZH agreement test on each pair, plus the shared
+   empty-form closure test (§3).*
 
 ### V6 Position review
 
@@ -2000,7 +2018,7 @@ Every state below names a **field-level trigger**, the exact EN + ZH copy from t
 | State | Trigger (field-level) | EN / ZH copy + visual treatment | What still works |
 |---|---|---|---|
 | **loading** | any of `/api/portfolio`, `/api/live_marks`, `/api/trades` unresolved for this ticker | `Loading` / `加载中`; skeleton at the final geometry of the header and the blotter; **no placeholder prose** — no `—`, no `$0.00`, no sample thesis | the G-shell since-stamp and the book switcher |
-| **empty** | `_trades.history[]` has no row for this ticker and the lot has no fill evidence (a lot seeded by account-only injection, `app/web.py:1388-1420`) | `Empty` / `暂无` + "This holding has no recorded fills on this book." / "该持仓在本组合没有成交记录。" Full-weight sentence, never an empty table frame | position identity, weight, mark, P&L, thesis, queued chip — everything except the fill column |
+| **empty** | `_trades.history[]` has no row for this ticker and the lot has no fill evidence (a lot seeded by account-only injection, `app/web.py:1388-1420`) | `Empty` / `暂无` + "this holding has no recorded fills on this book." / "该持仓在本组合没有成交记录。" Full-weight sentence, never an empty table frame | position identity, weight, mark, P&L, thesis, queued chip — everything except the fill column |
 | **stale** | `quote_stale_days ≥ 1`, or `positions[]` is older than the page stamp | `Behind` / `滞后` + the last settled as-of (`quote_as_of`) + the age in days; no colour change on the number itself | the last settled observation, with its date, per §3 |
 | **partial** | some Tier-2/3 sources resolved and others did not (e.g. `/api/trades` ok, `/api/live_marks` failed) | `Partial` / `部分` + **what is excluded**, named: "Contribution and fills are unavailable; the holding and its thesis are current." | everything not named in the sentence; the view never implies the missing part is zero |
 | **error** | the read for this ticker failed (`data.error` on `/api/trades`, `app/web.py:2386`) | `Couldn't load` / `加载失败` + what failed + what still works + a **retry** control that refetches this ticker only | the rest of the book in V1; the retry never reloads the page |
@@ -2172,7 +2190,7 @@ Every Tier-3 module has a named landing: **Operator detail → Run traces · Sch
 | State | Trigger (field-level) | EN / ZH copy + visual treatment | What still works |
 |---|---|---|---|
 | **loading** | `/api/runs` or `/api/scheduler` in flight | `Loading` / `加载中`; skeleton at the disposition strip's final geometry | the G-shell book stamp and navigation |
-| **empty** | `runs == []` and `jobs == []` | `Empty` / `暂无` + the reason: "No runs recorded for this book yet." / "本组合暂无运行记录。" — the existing `.mm-empty` + `runs.empty` treatment (`index.html:4308-4310`, key at `:3383`), which already names the reason | the disposition strip still renders its `unavailable` word for the lifecycle projection |
+| **empty** | `runs == []` and `jobs == []` | `Empty` / `暂无` + the reason: "no runs recorded for this book yet." / "本组合尚无运行记录。" — rendered in the existing `.mm-empty` container (`index.html:4308-4310`); a copy request replacing the shipped `runs.empty` text (`:3383`, §3), acceptance item 14 | the disposition strip still renders its `unavailable` word for the lifecycle projection |
 | **stale** | `latest_attempt_at` older than the expected cadence, or the evaluation record's `status: stale_after_error` | `Behind` / `滞后` + the last settled as-of; **no green** — staleness here is a schedule fact, not a health verdict | the last settled observation, dated; the change list keeps its prior rows |
 | **partial** | some Tier-2/3 sources resolved and others did not (e.g. runs ok, scheduler failed) | `Partial` / `部分` + what is excluded: "Scheduler detail is unavailable; run history is current." | everything not named |
 | **error** | `/api/runs` returns 500 (`app/web.py:3093`), or a 404 `{available:false,note}` from `/api/market_view` or `/api/agenda` | `Couldn't load` / `加载失败` + what failed + what still works + retry | the book stamp; the disposition strip, which is fed by R1, not by `/api/runs` |
@@ -2292,6 +2310,7 @@ bind this view.
 11. **EN/ZH** — all eight dispositions plus `Unavailable` render in both languages; `failed` and `incomplete_uncertain` do **not** change ink with language; ids stay Latin in ZH.
 12. **Accessibility** — keyboard-only path from the book switcher into every Tier-2/3 disclosure, visible `--focus-ring` on each, every disposition legible with colour removed, 200% zoom at 375 preserving the task, ≥4.5:1 text and ≥3:1 boundaries in dark and light.
 13. **Narrative containment** — with `/api/activity` returning flagship-tree content while the product book is active, that narrative does not appear under this book's stamp — seeded-payload DOM test.
+14. **Empty copy request + empty-form closure (§3).** With `runs == []` and `jobs == []`, an empty watchlist and no CIO note, the view renders `Empty — no runs recorded for this book yet.` / `暂无 — 本组合尚无运行记录。`, `Empty — no names are parked on the watchlist.` / `暂无 — 观察清单中没有暂缓标的。` and `Empty — no CIO note has been written yet.` / `暂无 — 首席投资官尚未撰写复盘。` at full weight. They replace `runs.empty` (`index.html:3383`), `desk.wl_empty` (`:3541`) and `desk.cio_empty` (`:3556`, plus its static seed at `:3088`), and none of the shipped texts renders — EN/ZH agreement test on each pair, plus the shared empty-form closure test.
 
 ---
 

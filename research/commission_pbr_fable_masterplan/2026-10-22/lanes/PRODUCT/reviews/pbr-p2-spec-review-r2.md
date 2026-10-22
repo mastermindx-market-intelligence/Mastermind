@@ -7,7 +7,7 @@
 
 ## Reviewer output (verbatim)
 
-```text
+````text
 I have completed the verification. Here is the r2 review.
 
 **Verification performed:** all 131 unique `file:line` targets appearing on `+` lines of the repair diff were read against this checkout; all 21 r1 findings were re-checked against the spec at HEAD; the five disposition overrides were independently adjudicated; the §3 preamble's insertion-offset claim was reproduced from `git diff 230e9a301 db5a001b -- app/static/index.html` (+4/+9/+73/+88 — exactly as stated); `git diff dce821e0 db5a001b -- app/ portfolio/` is empty, confirming the byte-identical claim.
@@ -129,7 +129,7 @@ overrides:
 
 checklist: 1=ok 2=issue 3=issue 4=ok 5=ok 6=issue
 ```
-```
+````
 
 ## Disposition per finding
 
