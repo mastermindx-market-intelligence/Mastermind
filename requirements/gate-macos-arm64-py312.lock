@@ -2,9 +2,10 @@
 # Platform: Darwin / arm64
 # Interpreter: CPython 3.12.13; isolated official pip-tools7.6.1
 # Source: pyproject.toml (extra "dev")
-# pyproject.toml sha256: cef07e7a78f3a00cddb269c09f6b76232582eee27ced048f658a9287ff5c0c46
-# Regenerated from the existing lock for PyJWT 2.14.0 security repair; unrelated pin/hash sets compared.
-# Regenerate: pip-compile --quiet --generate-hashes --no-emit-index-url --no-emit-trusted-host --upgrade-package pyjwt==2.14.0 --extra dev --output-file requirements/gate-macos-arm64-py312.lock pyproject.toml
+# pyproject.toml sha256: cf7ee1019f822fbd6e327b779ad0b7503a6fe5779a6bae525080eca658abb3a6
+# Regenerated from the existing lock for the claude-agent-sdk>=0.2.151 floor (#1714); the
+# resolved pin/hash body is byte-identical to the previous lock (0.2.151 was already pinned).
+# Regenerate: pip-compile --quiet --generate-hashes --no-emit-index-url --no-emit-trusted-host --extra dev --output-file requirements/gate-macos-arm64-py312.lock pyproject.toml
 # Official default PyPI index used with isolated PIP_CONFIG_FILE=/dev/null.
 # pip-tools7.6.1 may retain a spurious --no-index command comment; no such flag was supplied.
 #
