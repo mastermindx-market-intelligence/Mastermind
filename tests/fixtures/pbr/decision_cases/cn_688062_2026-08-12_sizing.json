@@ -1,0 +1,1391 @@
+{
+  "capture": {
+    "capture_dir": "/Volumes/Mastermind/evidence/pbr/research-capture-20261022T073549Z",
+    "captured_utc": "2026-10-22T07:35:49Z",
+    "manifest_sha256": "4c55f3f8df454ecfcb2742b0b7bec5043ac35d4919a66026888541fa4bf976aa"
+  },
+  "case_id": "cn_688062_2026-08-12_sizing",
+  "case_role": "regression",
+  "defect_ref": "A16",
+  "derived": {
+    "cap_reference": {
+      "caps": {
+        "high": 0.18,
+        "low": 0.06,
+        "medium": 0.12
+      },
+      "file": "brain/decision_submission.py",
+      "line": 450,
+      "policy_name": "deterministic_incremental_regional_allocator.v1",
+      "quote": "        \"conviction_caps\": {\"high\": 0.18, \"medium\": 0.12, \"low\": 0.06},",
+      "verification": "read verbatim from the worktree file at fixture authoring time (origin/master 230e9a301); not imported, executed, or re-read by this builder"
+    }
+  },
+  "external_facts": [],
+  "fills": [
+    {
+      "line_index_0based": 87,
+      "line_sha256": "351032bae1db70083cd681708dea1f430c1cc6fa95fb9d71a34ce99659f6a03d",
+      "linked_decision_ids": [],
+      "row": {
+        "date": "2026-08-13",
+        "fill_id": "c88ac1d2fce0b401857bb39ba7018a39b9bded4767c14aa979fc8836328f9a94",
+        "price": 32.65,
+        "shares": 3716.0,
+        "side": "buy",
+        "ticker": "688062.SS",
+        "transaction_id": "f08775171be0364d047fea1597c629314bd7224d9afd84a2669339f05baaf9c4",
+        "value": 121327.41
+      }
+    },
+    {
+      "line_index_0based": 92,
+      "line_sha256": "9dba1bda3688f6c128de70869911061ca11956a1a223f9e924dddfb678b567fc",
+      "linked_decision_ids": [],
+      "row": {
+        "date": "2026-08-25",
+        "fill_id": "431b36be0eb25578a35e36b866f4416e1c7afcbea03629105ed1fc13ecf46dba",
+        "price": 29.23,
+        "shares": 1486.244233,
+        "side": "sell",
+        "ticker": "688062.SS",
+        "transaction_id": "f7c926f66dd0ac4a97170cf1e2e384a2b294ff14d32e0dbc63881486f21341b2",
+        "value": 43442.92
+      }
+    },
+    {
+      "line_index_0based": 99,
+      "line_sha256": "27ebc9e25e781104ffe9358071953010d5c971a2b77a515268b56ba2bede2320",
+      "linked_decision_ids": [],
+      "row": {
+        "date": "2026-09-18",
+        "fill_id": "2c2d5daa2809ca031f2173ad01de031442c6ac1a70431d996e540d6ba32911e1",
+        "price": 25.73,
+        "shares": 476.81948,
+        "side": "sell",
+        "ticker": "688062.SS",
+        "transaction_id": "389a71e49c38165705d9b606066d4ac5e8ea0a3420aab831d1ebb5d56d71666e",
+        "value": 12268.57
+      }
+    },
+    {
+      "line_index_0based": 101,
+      "line_sha256": "ae2cda1261ced2a98c4deca3760a4497ab3f3bbb73888d648bca3368502e5906",
+      "linked_decision_ids": [],
+      "row": {
+        "date": "2026-09-21",
+        "fill_id": "70b40c53b15e0f065fb5f6ae92cdffdf7a4167eff8982f549bc0802577ff750c",
+        "price": 26.62,
+        "shares": 391.652718,
+        "side": "sell",
+        "ticker": "688062.SS",
+        "transaction_id": "9b2d29a2ae204a25c75c4285eeedbe6c3697080c7aac7f9e4225e4c75ead6dfc",
+        "value": 10425.8
+      }
+    },
+    {
+      "line_index_0based": 108,
+      "line_sha256": "388bbc832de72bf93ccebd4d347dfdfa6ce07e0afe988f9ab26ee220cc1086d5",
+      "linked_decision_ids": [],
+      "row": {
+        "date": "2026-10-08",
+        "fill_id": "23cfb2b8157d1e16fc71cc386728e1ebb01a7a80b400e0d026820db41f9cbea6",
+        "price": 27.04,
+        "shares": 490.067616,
+        "side": "sell",
+        "ticker": "688062.SS",
+        "transaction_id": "524c90afcf8ab667229cc82f0da7e60e67a17987da8f135d6f5ed49377a2d08d",
+        "value": 13251.43
+      }
+    }
+  ],
+  "linkage_note": "china fills.jsonl 2026-08-13 688062.SS buy 3716 sh @ 32.65 (fill c88ac1d2..., txn f0877517...) - UNLINKED to any decision row (same gap).",
+  "provenance": [
+    {
+      "decision_id": "decision.v1.d1f14bdd0e04d6d379f17efe",
+      "line_index_0based": 35,
+      "line_sha256": "9e3fe9e2b1ef4d405739af85b54a940f9e1bac375dd4d27fe1b123845445db82",
+      "source_book": "china",
+      "source_file_sha256": "d8d274a4a2199204a1179eaf0cab29e021bbed2c225a12d9a5910591572d7157",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/china/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/china/decisions.jsonl"
+    },
+    {
+      "decision_id": "decision.v1.85921831a0252fec3afb46a2",
+      "line_index_0based": 36,
+      "line_sha256": "2dd37adc0c392ebb30343c01b69e8317c1172524f3632cc48c675651a921babd",
+      "source_book": "china",
+      "source_file_sha256": "d8d274a4a2199204a1179eaf0cab29e021bbed2c225a12d9a5910591572d7157",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/china/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/china/decisions.jsonl"
+    },
+    {
+      "decision_id": "decision.v1.91cc93129955be21e1590c18",
+      "line_index_0based": 37,
+      "line_sha256": "83e632664ff62e245634c3ce33ecf411c3fc34842ffbc8f634eb70a391ee7408",
+      "source_book": "china",
+      "source_file_sha256": "d8d274a4a2199204a1179eaf0cab29e021bbed2c225a12d9a5910591572d7157",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/china/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/china/decisions.jsonl"
+    }
+  ],
+  "records": [
+    {
+      "case_effective_holding": {
+        "action_effective": "add",
+        "action_requested": "add",
+        "conviction": "medium",
+        "evidence": [
+          "迈威生物 (688062.SS) is trusted, eligible, priceable, and quoted at CNY 33.19.",
+          "迈威生物 (688062.SS) ranks first in the unified intake with a 0.93 score.",
+          "迈威生物 (688062.SS) is the only researched candidate classified BUY ZONE now.",
+          "Healthcare leads China sector relative strength.",
+          "Technical coverage is degraded and the signal is single-source."
+        ],
+        "exit_plan": "Treat 迈威生物 (688062.SS) as a measured starter; review trim-and-trail first, but exit if the buy-zone gate disappears with weakening healthcare momentum or if trusted eligibility or priceability fails.",
+        "expected_horizon": "Medium term starter; first review 2026-08-19.",
+        "falsifier": "The buy-zone gate for 迈威生物 (688062.SS) disappears, trusted eligibility or priceability fails, or healthcare 20-day momentum turns negative.",
+        "identity_status": "trusted_regional_stock_heatmap.v1",
+        "proposed_weight": null,
+        "rationale": "迈威生物 (688062.SS), ordinal conviction 4, is added at a trusted CNY 33.19 because it ranks first in the unified intake with a 0.93 score and is the only researched candidate explicitly classified BUY ZONE now. Its healthcare exposure fits the locally confirmed defensive rotation, but single-source evidence, degraded technical coverage, and an advisory Neural Web kernel that is not FDR-cleared require a measured starter rather than a high-concentration assertion. Thesis probability is estimated at 62%, with review by 2026-08-19.",
+        "source_provenance": [
+          "Trusted quote verification",
+          "Unified corroborated China A-share intake artifact",
+          "China healthcare sector-relative-strength evidence",
+          "Delegated read-only research artifact, independently validated"
+        ],
+        "ticker": "688062.SS",
+        "venue": "A-share",
+        "weight": 0.12,
+        "weight_source": "deterministic_incremental_regional_allocator.v1",
+        "why_now": "Add 迈威生物 (688062.SS) now because it is the strongest corroborated intake candidate aligned with local defensive healthcare leadership, while sizing remains constrained by evidence quality and the caution regime."
+      },
+      "case_holding": {
+        "action_effective": "add",
+        "action_requested": "add",
+        "conviction": "medium",
+        "evidence": [
+          "迈威生物 (688062.SS) is trusted, eligible, priceable, and quoted at CNY 33.19.",
+          "迈威生物 (688062.SS) ranks first in the unified intake with a 0.93 score.",
+          "迈威生物 (688062.SS) is the only researched candidate classified BUY ZONE now.",
+          "Healthcare leads China sector relative strength.",
+          "Technical coverage is degraded and the signal is single-source."
+        ],
+        "exit_plan": "Treat 迈威生物 (688062.SS) as a measured starter; review trim-and-trail first, but exit if the buy-zone gate disappears with weakening healthcare momentum or if trusted eligibility or priceability fails.",
+        "expected_horizon": "Medium term starter; first review 2026-08-19.",
+        "falsifier": "The buy-zone gate for 迈威生物 (688062.SS) disappears, trusted eligibility or priceability fails, or healthcare 20-day momentum turns negative.",
+        "identity_status": "trusted_regional_stock_heatmap.v1",
+        "name": "迈威生物",
+        "proposed_weight": null,
+        "rationale": "迈威生物 (688062.SS), ordinal conviction 4, is added at a trusted CNY 33.19 because it ranks first in the unified intake with a 0.93 score and is the only researched candidate explicitly classified BUY ZONE now. Its healthcare exposure fits the locally confirmed defensive rotation, but single-source evidence, degraded technical coverage, and an advisory Neural Web kernel that is not FDR-cleared require a measured starter rather than a high-concentration assertion. Thesis probability is estimated at 62%, with review by 2026-08-19.",
+        "source_provenance": [
+          "Trusted quote verification",
+          "Unified corroborated China A-share intake artifact",
+          "China healthcare sector-relative-strength evidence",
+          "Delegated read-only research artifact, independently validated"
+        ],
+        "ticker": "688062.SS",
+        "venue": "A-share",
+        "weight": 0.12,
+        "weight_source": "deterministic_incremental_regional_allocator.v1",
+        "why_now": "Add 迈威生物 (688062.SS) now because it is the strongest corroborated intake candidate aligned with local defensive healthcare leadership, while sizing remains constrained by evidence quality and the caution regime."
+      },
+      "case_row_falsifiers": [
+        "Reverse the selective-add posture within five days if 迈威生物 (688062.SS) loses its buy-zone gate or becomes ineligible or unpriceable."
+      ],
+      "decision_id": "decision.v1.d1f14bdd0e04d6d379f17efe",
+      "line_index_0based": 35,
+      "row": {
+        "allocation_review": {
+          "cash": 0.3961,
+          "cash_rationale_present": true,
+          "cash_rationale_required": false,
+          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+        },
+        "asof": "2026-08-12",
+        "brain_text": "Submitted the complete China A-share book for next-open settlement.\n\n- 9 holdings\n- 60.39% gross, approximately 39.61% cash\n- ADD: 迈威生物 (688062.SS)\n- HOLD: 京新药业 (002020.SZ), 陕西煤业 (601225.SS), 国电电力 (600795.SS), 振德医疗 (603301.SS), 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), 中际旭创 (300308.SZ)\n- No trims or exits\n\nThe revision reflects mixed overnight conditions: stronger US futures, Nikkei, and lower VIX, offset by weaker Shanghai and Hang Seng markets plus contracting PBoC liquidity. The resulting book remains within the 75% gross cap and above the 25% cash floor.",
+        "cash_rationale": "Retain a substantial cash reserve and require the deterministic allocator to preserve the 25% cash floor because the Shanghai market is down 0.82%, the Hang Seng is down 1.10%, China remains in a growth-scare regime, and PBoC liquidity is contracting. Cash above 40% is not being treated as a rewarded default: the deeper review selected a measured entry in 迈威生物 (688062.SS), but rejected 国际复材 (301526.SZ) because its alpha evidence is single-source, non-defensive, and technically degraded; rejected 均胜电子 (600699.SS) because its cyclical exposure is poorly aligned with the local regime and lacks top-intake corroboration; rejected adding to 振德医疗 (603301.SS) because of existing concentration; rejected adding to 京新药业 (002020.SZ) because fresh company-level intake evidence is absent; and rejected rebuilding 陕西煤业 (601225.SS) immediately after its recent trim. The accepted opportunity cost is underperformance versus the CSI 300 if mainland risk appetite rebounds rapidly.",
+        "cost_usd": null,
+        "decision_effective": true,
+        "decision_id": "decision.v1.d1f14bdd0e04d6d379f17efe",
+        "decision_memo": {
+          "alternatives": {
+            "broad_derisk": "Rejected because US futures, Nikkei, and volatility are stabilizing and no verified crash condition is present.",
+            "broad_re_risk": "Rejected because mainland and Hong Kong equities are falling while domestic liquidity contracts.",
+            "chosen": "Selective defensive add with incumbent holds and a large liquidity reserve.",
+            "hold_queued_target_as_is": "Rejected because the trusted book reports no pending orders and the current mixed tape warrants a fresh complete target."
+          },
+          "candidate_funnel": {
+            "eligibility_check": "Every selected company was independently confirmed by the trusted quote service as an eligible, priceable mainland A-share quoted in CNY.",
+            "intake_conclusion": "The unified intake and sector evidence support a measured healthcare addition while preserving incumbents whose explicit falsifiers have not fired."
+          },
+          "changes": {
+            "action": "Add 迈威生物 (688062.SS); hold all eight current companies; no trims and no exits.",
+            "cash_policy": "Cash floor 0.25; no mechanical gross filling.",
+            "current_state_validation": "Trusted book shows eight holdings, CNY 519,428.12 cash, CNY 1,006,473.38 NAV, and no pending orders.",
+            "gross_policy": "Hard gross cap 0.75; trusted deterministic allocator owns exact weights."
+          },
+          "context_gaps": [
+            "The in-house dashboard is stale relative to the supplied live overnight tape.",
+            "Candidate evidence is predominantly single-source.",
+            "Per-name technical packets are degraded.",
+            "The Neural Web kernel is advisory and not FDR-cleared."
+          ],
+          "delegation_summary": "A delegated read-only artifact proposed the nine-name book. It was treated as untrusted evidence, checked against the trusted current book, and each selected company was independently revalidated for identity, eligibility, venue, CNY pricing, and priceability before submission.",
+          "lessons_applied": [
+            "lesson.v1.CN_ONLY.cash_opportunity_cost",
+            "lesson.v1.CN_ONLY.churn_hysteresis"
+          ],
+          "market_frame": {
+            "as_of": "2026-08-12",
+            "conclusion": "Global risk has stabilized, but China-specific weakness and contracting liquidity favor one corroborated healthcare addition rather than broad re-risking.",
+            "decision": "REVISE",
+            "overnight_tape": "Mixed rather than global liquidation: S&P 500 futures +0.34%, Nasdaq-100 futures +0.80%, Dow futures +0.05%, Russell 2000 futures +0.66%, Nikkei 225 +2.08%, VIX -5.50%, but Shanghai -0.82%, Hang Seng -1.10%, US dollar +0.18%, and major European indices modestly lower.",
+            "regime": "China growth scare with contracting PBoC liquidity"
+          },
+          "rejected": [
+            {
+              "candidate": "国际复材 (301526.SZ)",
+              "reason": "High-ranked alpha evidence is single-source, lacks defensive corroboration, and has degraded technical coverage."
+            },
+            {
+              "candidate": "均胜电子 (600699.SS)",
+              "reason": "Constructive uptrend is outweighed by cyclical exposure that is poorly aligned with the local growth scare and by absent top-intake corroboration."
+            },
+            {
+              "candidate": "振德医疗 (603301.SS) incremental add",
+              "reason": "Existing concentration, current drawdown, and degraded technical coverage make averaging down unattractive."
+            },
+            {
+              "candidate": "京新药业 (002020.SZ) incremental add",
+              "reason": "Sector leadership supports holding, but no fresh company-level intake evidence supports adding."
+            },
+            {
+              "candidate": "陕西煤业 (601225.SS) incremental add",
+              "reason": "Rebuilding immediately after a recent partial trim would reverse a reviewed decision without material new evidence."
+            }
+          ],
+          "risk_deliberation": {
+            "exit_review": "No explicit hard falsifier, technical break, stop breach, or material thesis change justifies a full exit.",
+            "opportunity_cost": "The cash reserve can lag the CSI 300 in a fast mainland rebound; this is accepted given weak local tape and degraded per-name technical packets.",
+            "risk_posture": "CAUTION_WITH_SELECTIVE_DEFENSIVE_ADD",
+            "trim_review": "No incumbent has met evidence for a light, standard, or deep trim."
+          },
+          "selected": [
+            "京新药业 (002020.SZ) HOLD, ordinal conviction 1",
+            "陕西煤业 (601225.SS) HOLD, ordinal conviction 2",
+            "国电电力 (600795.SS) HOLD, ordinal conviction 3",
+            "迈威生物 (688062.SS) ADD, ordinal conviction 4",
+            "振德医疗 (603301.SS) HOLD, ordinal conviction 5",
+            "宏和科技 (603256.SS) HOLD, ordinal conviction 6",
+            "金海通 (603061.SS) HOLD, ordinal conviction 7",
+            "冰轮环境 (000811.SZ) HOLD, ordinal conviction 8",
+            "中际旭创 (300308.SZ) HOLD, ordinal conviction 9"
+          ],
+          "timing": {
+            "longer_review_date": "2026-08-21",
+            "primary_review_date": "2026-08-19",
+            "settlement": "Target settles at the next mainland open."
+          }
+        },
+        "effective_holdings": [
+          {
+            "action_effective": "add",
+            "action_requested": "add",
+            "conviction": "medium",
+            "evidence": [
+              "迈威生物 (688062.SS) is trusted, eligible, priceable, and quoted at CNY 33.19.",
+              "迈威生物 (688062.SS) ranks first in the unified intake with a 0.93 score.",
+              "迈威生物 (688062.SS) is the only researched candidate classified BUY ZONE now.",
+              "Healthcare leads China sector relative strength.",
+              "Technical coverage is degraded and the signal is single-source."
+            ],
+            "exit_plan": "Treat 迈威生物 (688062.SS) as a measured starter; review trim-and-trail first, but exit if the buy-zone gate disappears with weakening healthcare momentum or if trusted eligibility or priceability fails.",
+            "expected_horizon": "Medium term starter; first review 2026-08-19.",
+            "falsifier": "The buy-zone gate for 迈威生物 (688062.SS) disappears, trusted eligibility or priceability fails, or healthcare 20-day momentum turns negative.",
+            "identity_status": "trusted_regional_stock_heatmap.v1",
+            "proposed_weight": null,
+            "rationale": "迈威生物 (688062.SS), ordinal conviction 4, is added at a trusted CNY 33.19 because it ranks first in the unified intake with a 0.93 score and is the only researched candidate explicitly classified BUY ZONE now. Its healthcare exposure fits the locally confirmed defensive rotation, but single-source evidence, degraded technical coverage, and an advisory Neural Web kernel that is not FDR-cleared require a measured starter rather than a high-concentration assertion. Thesis probability is estimated at 62%, with review by 2026-08-19.",
+            "source_provenance": [
+              "Trusted quote verification",
+              "Unified corroborated China A-share intake artifact",
+              "China healthcare sector-relative-strength evidence",
+              "Delegated read-only research artifact, independently validated"
+            ],
+            "ticker": "688062.SS",
+            "venue": "A-share",
+            "weight": 0.12,
+            "weight_source": "deterministic_incremental_regional_allocator.v1",
+            "why_now": "Add 迈威生物 (688062.SS) now because it is the strongest corroborated intake candidate aligned with local defensive healthcare leadership, while sizing remains constrained by evidence quality and the caution regime."
+          }
+        ],
+        "error": null,
+        "evidence_planes": [
+          "Trusted China current-book state and live CNY marks",
+          "Trusted China quote identity, venue, eligibility, and priceability checks",
+          "Unified corroborated China A-share intake artifact",
+          "China sector-relative-strength and defensive-leadership evidence",
+          "Supplied live overnight cross-asset tape",
+          "In-house China macro regime and PBoC liquidity state",
+          "Measured China-book cash-opportunity-cost and churn-hysteresis lessons"
+        ],
+        "executed": [],
+        "exit_decisions": [],
+        "expected_failure_mode": "The most likely loss path is that contracting domestic liquidity and weak mainland breadth overwhelm healthcare and defensive relative strength, causing the new 迈威生物 (688062.SS) entry and the higher-beta intake names—宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), and 中际旭创 (300308.SZ)—to decline together before their single-source signals can be disproved cleanly.",
+        "falsifiers": [
+          "Reverse the selective-add posture within five days if 迈威生物 (688062.SS) loses its buy-zone gate or becomes ineligible or unpriceable.",
+          "Reassess the healthcare cluster within five days if healthcare 20-day momentum turns negative and 京新药业 (002020.SZ) or 振德医疗 (603301.SS) breaches its stated price falsifier.",
+          "De-risk within five days if mainland drawdown stress rises materially while China remains in contracting liquidity and 国电电力 (600795.SS) records two consecutive closes below CNY 4.9311.",
+          "Reassess the cyclical and technology sleeve within five days if 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), or 中际旭创 (300308.SZ) leaves the intake and simultaneously triggers its company-level price or momentum falsifier."
+        ],
+        "feed_health": {
+          "asof": "2026-08-12",
+          "feed": "yahoo",
+          "status": "up",
+          "venue": "A-share"
+        },
+        "holdings": [
+          {
+            "action_effective": "add",
+            "action_requested": "add",
+            "conviction": "medium",
+            "evidence": [
+              "迈威生物 (688062.SS) is trusted, eligible, priceable, and quoted at CNY 33.19.",
+              "迈威生物 (688062.SS) ranks first in the unified intake with a 0.93 score.",
+              "迈威生物 (688062.SS) is the only researched candidate classified BUY ZONE now.",
+              "Healthcare leads China sector relative strength.",
+              "Technical coverage is degraded and the signal is single-source."
+            ],
+            "exit_plan": "Treat 迈威生物 (688062.SS) as a measured starter; review trim-and-trail first, but exit if the buy-zone gate disappears with weakening healthcare momentum or if trusted eligibility or priceability fails.",
+            "expected_horizon": "Medium term starter; first review 2026-08-19.",
+            "falsifier": "The buy-zone gate for 迈威生物 (688062.SS) disappears, trusted eligibility or priceability fails, or healthcare 20-day momentum turns negative.",
+            "identity_status": "trusted_regional_stock_heatmap.v1",
+            "name": "迈威生物",
+            "proposed_weight": null,
+            "rationale": "迈威生物 (688062.SS), ordinal conviction 4, is added at a trusted CNY 33.19 because it ranks first in the unified intake with a 0.93 score and is the only researched candidate explicitly classified BUY ZONE now. Its healthcare exposure fits the locally confirmed defensive rotation, but single-source evidence, degraded technical coverage, and an advisory Neural Web kernel that is not FDR-cleared require a measured starter rather than a high-concentration assertion. Thesis probability is estimated at 62%, with review by 2026-08-19.",
+            "source_provenance": [
+              "Trusted quote verification",
+              "Unified corroborated China A-share intake artifact",
+              "China healthcare sector-relative-strength evidence",
+              "Delegated read-only research artifact, independently validated"
+            ],
+            "ticker": "688062.SS",
+            "venue": "A-share",
+            "weight": 0.12,
+            "weight_source": "deterministic_incremental_regional_allocator.v1",
+            "why_now": "Add 迈威生物 (688062.SS) now because it is the strongest corroborated intake candidate aligned with local defensive healthcare leadership, while sizing remains constrained by evidence quality and the caution regime."
+          }
+        ],
+        "lesson_application_ids": [
+          "application.v1.d56bc1ab77e055f7835ebfde"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.CN_ONLY.cash_opportunity_cost",
+          "lesson.v1.CN_ONLY.churn_hysteresis"
+        ],
+        "lesson_presentation_id": "presentation.v1.83162b3c1926984787cdde8a",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_queued",
+        "liquidity_notes": "All nine selected companies are trusted, eligible, priceable mainland single-company A-shares with CNY quotes. Exact weights, lot treatment, incremental capital assignment, the 0.75 hard gross cap, and the 0.25 cash floor are owned by the trusted allocator.",
+        "model": "gpt-5.6-sol",
+        "packet_id": "cc69eb5511e5e433",
+        "requested_exit_decisions": [],
+        "risk_posture": "caution",
+        "run_id": null,
+        "schema": "mastermind.target_book.v2",
+        "skipped_unpriceable": [],
+        "sold_note": "No company is trimmed or fully exited. Every incumbent remains in the complete target because no hard falsifier, technical break, stop breach, or material thesis change has fired; the newly selected healthcare exposure is incremental and measured.",
+        "source_provenance": [
+          "Trusted China current-book read on 2026-08-12",
+          "Trusted China quote checks for all nine selected A-share companies on 2026-08-12",
+          "Delegated read-only research artifact, treated as untrusted and independently validated",
+          "Supplied live overnight cross-asset tape",
+          "In-house China growth-scare regime and contracting PBoC liquidity",
+          "Unified corroborated China A-share intake and sector-strength evidence",
+          "China-book measured behavior lessons supplied in the task"
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "002020.SZ",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "601225.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "600795.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "688062.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603301.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603256.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603061.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "000811.SZ",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "300308.SZ",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.18,
+              "low": 0.06,
+              "medium": 0.12
+            },
+            "max_single_weight": 0.18,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_incremental_regional_allocator.v1",
+            "posture_target_gross": 0.65,
+            "protected_gross": 0.483913,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.603912,
+              "raw_gross": 0.6039127135656588
+            }
+          },
+          "unallocated_adds": []
+        },
+        "summary": "REVISE the next-open target under CAUTION: add a measured starter in 迈威生物 (688062.SS); hold 京新药业 (002020.SZ), 陕西煤业 (601225.SS), 国电电力 (600795.SS), 振德医疗 (603301.SS), 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), and 中际旭创 (300308.SZ); make no trim or exit. The live tape is mixed rather than a global liquidation—US futures, Nikkei, and volatility are constructive, while Shanghai and Hang Seng are weaker—so the book makes one locally aligned healthcare addition without broad re-risking. The trusted allocator must keep gross at or below 75% and cash at or above 25%, preserving liquidity against China’s growth scare and contracting PBoC liquidity.",
+        "target_status": "queued",
+        "tools_used": [
+          "get_my_book",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "get_quote",
+          "submit_book"
+        ],
+        "ts": "2026-08-12T20:25:22.195049+00:00"
+      }
+    },
+    {
+      "case_effective_holding": {
+        "action_effective": "hold",
+        "action_requested": "hold",
+        "conviction": "high",
+        "evidence": [
+          "迈威生物 (688062.SS) was trusted and priceable at CNY 34.12.",
+          "迈威生物 (688062.SS) led the reviewed intake at 0.93 and was the only reviewed company classified BUY ZONE now.",
+          "Innovative-drug and healthcare leadership remains locally confirmed."
+        ],
+        "exit_plan": "Review trim-and-trail first; exit only if 迈威生物 (688062.SS) loses BUY ZONE status while healthcare relative strength reverses, or if a material company-specific thesis break emerges.",
+        "expected_horizon": "Medium/long term; next formal check by 2026-08-19.",
+        "falsifier": "The thesis fails if 迈威生物 (688062.SS) loses BUY ZONE status while local healthcare relative strength also reverses.",
+        "holding_mark_source": "live_quote",
+        "identity_status": "trusted_regional_stock_heatmap.v1",
+        "proposed_weight": null,
+        "rationale": "迈威生物 (688062.SS) is ordinal conviction rank 1 and remains the strongest reviewed intake signal at 0.93, the only reviewed name classified BUY ZONE now, with innovative-drug and healthcare leadership locally confirmed. Its existing position is already meaningful, evidence is still single-source, and dependable company-level technical confirmation is unavailable, so HOLD is preferable to ADD. Estimated thesis probability is 65%, with review by 2026-08-19.",
+        "source_provenance": [
+          "Trusted China quote read",
+          "In-house China intake and standout boards dated 2026-08-12",
+          "In-house China sector momentum context"
+        ],
+        "ticker": "688062.SS",
+        "venue": "A-share",
+        "weight": 0.124775,
+        "weight_source": "deterministic_existing_hold.v1",
+        "why_now": "迈威生物 (688062.SS) retains the best confirmed local setup, but contracting liquidity and incomplete technical corroboration argue for preserving rather than enlarging exposure."
+      },
+      "case_holding": {
+        "action_effective": "hold",
+        "action_requested": "hold",
+        "conviction": "high",
+        "evidence": [
+          "迈威生物 (688062.SS) was trusted and priceable at CNY 34.12.",
+          "迈威生物 (688062.SS) led the reviewed intake at 0.93 and was the only reviewed company classified BUY ZONE now.",
+          "Innovative-drug and healthcare leadership remains locally confirmed."
+        ],
+        "exit_plan": "Review trim-and-trail first; exit only if 迈威生物 (688062.SS) loses BUY ZONE status while healthcare relative strength reverses, or if a material company-specific thesis break emerges.",
+        "expected_horizon": "Medium/long term; next formal check by 2026-08-19.",
+        "falsifier": "The thesis fails if 迈威生物 (688062.SS) loses BUY ZONE status while local healthcare relative strength also reverses.",
+        "holding_mark_source": "live_quote",
+        "identity_status": "trusted_regional_stock_heatmap.v1",
+        "name": "迈威生物",
+        "proposed_weight": null,
+        "rationale": "迈威生物 (688062.SS) is ordinal conviction rank 1 and remains the strongest reviewed intake signal at 0.93, the only reviewed name classified BUY ZONE now, with innovative-drug and healthcare leadership locally confirmed. Its existing position is already meaningful, evidence is still single-source, and dependable company-level technical confirmation is unavailable, so HOLD is preferable to ADD. Estimated thesis probability is 65%, with review by 2026-08-19.",
+        "source_provenance": [
+          "Trusted China quote read",
+          "In-house China intake and standout boards dated 2026-08-12",
+          "In-house China sector momentum context"
+        ],
+        "ticker": "688062.SS",
+        "venue": "A-share",
+        "weight": 0.124775,
+        "weight_source": "deterministic_existing_hold.v1",
+        "why_now": "迈威生物 (688062.SS) retains the best confirmed local setup, but contracting liquidity and incomplete technical corroboration argue for preserving rather than enlarging exposure."
+      },
+      "case_row_falsifiers": [
+        "Reverse the healthcare-defense preference if 迈威生物 (688062.SS) loses BUY ZONE status and both 迈威生物 (688062.SS) and 振德医疗 (603301.SS) lose intake leadership while local healthcare relative strength reverses."
+      ],
+      "decision_id": "decision.v1.85921831a0252fec3afb46a2",
+      "line_index_0based": 36,
+      "row": {
+        "accepted_asof": "2026-08-13",
+        "allocation_review": {
+          "cash": 0.3919,
+          "cash_rationale_present": true,
+          "cash_rationale_required": false,
+          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+        },
+        "asof": "2026-08-13",
+        "brain_text": "China A-share book submitted successfully once.\n\n- 9 HOLDs, no ADDs, TRIMs, or exits\n- 60.81% invested, approximately 39% cash\n- Cautious posture under contracting PBoC liquidity\n- Conviction order: 迈威生物 (688062.SS), 京新药业 (002020.SZ), 陕西煤业 (601225.SS), 国电电力 (600795.SS), 振德医疗 (603301.SS), 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), 中际旭创 (300308.SZ)\n- Rebalance will occur at the next paper-account mark.",
+        "cash_rationale": "The target retains about 39.2% cash, below the 40% deeper-search threshold, as dry powder under a growth-scare regime with contracting PBoC liquidity. Cash is not the default: reviewed alternatives including 国际复材 (301526.SZ), 均胜电子 (600699.SS), and 松发股份 (603268.SS) were rejected because their evidence was predominantly single-source, their regime fit was weaker than the incumbents, or their cyclical exposure lacked corroboration. The accepted opportunity cost is possible underperformance if broad breadth develops into sustained cyclical leadership.",
+        "cost_usd": null,
+        "decision_effective": true,
+        "decision_id": "decision.v1.85921831a0252fec3afb46a2",
+        "decision_memo": {
+          "alternatives": {
+            "add_defensive_leader": "Rejected because no newly reviewed defensive candidate had enough corroboration to improve the incumbent book.",
+            "increase_cash": "Rejected because current cash is already substantial and no verified crash or broad feed degradation is present.",
+            "reduce_recent_starters": "Rejected because no explicit falsifier, hard technical break, or material thesis change has fired."
+          },
+          "candidate_funnel": {
+            "new_entries": 0,
+            "retained_incumbents": 9,
+            "reviewed_rejections": [
+              "国际复材 (301526.SZ)",
+              "均胜电子 (600699.SS)",
+              "松发股份 (603268.SS)"
+            ]
+          },
+          "changes": {
+            "adds": [],
+            "exits": [],
+            "holds": 9,
+            "trims": []
+          },
+          "context_gaps": [
+            "Most intake evidence is single-source.",
+            "Reliable company-level technical confirmation is degraded or unavailable for several holdings.",
+            "The qualitative China brief and Neural Web packet are stale and were used only as context."
+          ],
+          "delegation_summary": "The delegated artifact was treated as untrusted evidence and checked against the original mandate and typed current-book state. It proposed nine holds, no adds, trims, or exits, and approximately 39.2% cash.",
+          "lessons_applied": [
+            "lesson.v1.CN_ONLY.churn_hysteresis"
+          ],
+          "market_frame": {
+            "book": "China A-share paper portfolio",
+            "currency": "CNY",
+            "decision_date": "2026-08-13",
+            "objective": "Preserve capital while retaining locally confirmed sources of alpha versus the CSI 300.",
+            "posture": "caution",
+            "regime": "Growth scare with contracting PBoC liquidity; cautious defensive rotation, but no verified crash condition."
+          },
+          "rejected": [
+            {
+              "candidate": "国际复材 (301526.SZ)",
+              "reason": "Eligible and priceable at CNY 36.44 with an intact alpha entry, but single-source evidence and cyclical exposure are insufficient under contracting liquidity."
+            },
+            {
+              "candidate": "均胜电子 (600699.SS)",
+              "reason": "Eligible and priceable at CNY 20.95 and the strongest reviewed buy-board uptrend, but consumer-cyclical exposure lacks enough corroboration to displace cash or an incumbent."
+            },
+            {
+              "candidate": "松发股份 (603268.SS)",
+              "reason": "Eligible and priceable at CNY 173.26 with an intact alpha entry, but evidence is single-source and lacks sufficiently strong regime fit."
+            },
+            {
+              "candidate_group": "Remaining buy-board opportunities",
+              "reason": "Predominantly low-conviction, unconfirmed countertrend turns."
+            }
+          ],
+          "risk_deliberation": {
+            "crash_assessment": "No verified crash condition and no broad feed failure; caution is warranted, but a primarily-cash retreat is not.",
+            "inference_unverified": [
+              "Defensive healthcare, coal, and utility leadership is more likely than broad cyclical leadership to persist until liquidity transmission improves.",
+              "Increasing cash would impose excessive opportunity cost without verified crash conditions."
+            ],
+            "observed": [
+              "The in-house regime read is a growth scare with contracting PBoC liquidity and confidence near 0.508.",
+              "Risk-off confirmation is divergent at five of eight indicators rather than consensual.",
+              "Calibrated drawdown risk is low at 28.1, while breadth remains risk-on.",
+              "Innovative drugs and healthcare lead local sector momentum and remain above their 200-day trends.",
+              "Technology remains above its 200-day trend but has declined 7.42% over 20 days.",
+              "The current trusted book read shows CNY 398,183.16 cash, about 39.2% of CNY 1,016,147.59 NAV.",
+              "All nine retained companies were confirmed by trusted quote reads as eligible, priceable mainland single-company A-shares quoted in CNY."
+            ]
+          },
+          "selected": {
+            "complete_book_count": 9,
+            "conclusion": "Hold all nine incumbents; do not add, trim, or exit today. The deterministic allocator retains authority over exact CNY weights.",
+            "intents": {
+              "add": 0,
+              "exit": 0,
+              "hold": 9,
+              "trim": 0
+            },
+            "ordinal_order": [
+              "迈威生物 (688062.SS)",
+              "京新药业 (002020.SZ)",
+              "陕西煤业 (601225.SS)",
+              "国电电力 (600795.SS)",
+              "振德医疗 (603301.SS)",
+              "宏和科技 (603256.SS)",
+              "金海通 (603061.SS)",
+              "冰轮环境 (000811.SZ)",
+              "中际旭创 (300308.SZ)"
+            ]
+          },
+          "timing": {
+            "immediate": "Preserve the current book after the 2026-08-13 close.",
+            "next_reviews": "Review the intake-sensitive holdings by 2026-08-19 and the mature defensive holdings by 2026-08-21."
+          }
+        },
+        "effective_holdings": [
+          {
+            "action_effective": "hold",
+            "action_requested": "hold",
+            "conviction": "high",
+            "evidence": [
+              "迈威生物 (688062.SS) was trusted and priceable at CNY 34.12.",
+              "迈威生物 (688062.SS) led the reviewed intake at 0.93 and was the only reviewed company classified BUY ZONE now.",
+              "Innovative-drug and healthcare leadership remains locally confirmed."
+            ],
+            "exit_plan": "Review trim-and-trail first; exit only if 迈威生物 (688062.SS) loses BUY ZONE status while healthcare relative strength reverses, or if a material company-specific thesis break emerges.",
+            "expected_horizon": "Medium/long term; next formal check by 2026-08-19.",
+            "falsifier": "The thesis fails if 迈威生物 (688062.SS) loses BUY ZONE status while local healthcare relative strength also reverses.",
+            "holding_mark_source": "live_quote",
+            "identity_status": "trusted_regional_stock_heatmap.v1",
+            "proposed_weight": null,
+            "rationale": "迈威生物 (688062.SS) is ordinal conviction rank 1 and remains the strongest reviewed intake signal at 0.93, the only reviewed name classified BUY ZONE now, with innovative-drug and healthcare leadership locally confirmed. Its existing position is already meaningful, evidence is still single-source, and dependable company-level technical confirmation is unavailable, so HOLD is preferable to ADD. Estimated thesis probability is 65%, with review by 2026-08-19.",
+            "source_provenance": [
+              "Trusted China quote read",
+              "In-house China intake and standout boards dated 2026-08-12",
+              "In-house China sector momentum context"
+            ],
+            "ticker": "688062.SS",
+            "venue": "A-share",
+            "weight": 0.124775,
+            "weight_source": "deterministic_existing_hold.v1",
+            "why_now": "迈威生物 (688062.SS) retains the best confirmed local setup, but contracting liquidity and incomplete technical corroboration argue for preserving rather than enlarging exposure."
+          }
+        ],
+        "error": null,
+        "evidence_planes": [
+          "Trusted China current-book read with live CNY marks and prior rationales",
+          "Trusted China quote identity, eligibility, venue, and priceability checks",
+          "In-house China regime read covering the macro quadrant and PBoC liquidity",
+          "In-house unified China intake funnel, alpha leaders, reversal watch, and standout boards dated 2026-08-12",
+          "Portfolio meta-memory for cash opportunity cost and churn hysteresis"
+        ],
+        "executed": [],
+        "exit_decisions": [],
+        "expected_failure_mode": "The most likely loss path is that contracting liquidity overwhelms apparently firm breadth: high-beta pullback names such as 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), and 中际旭创 (300308.SZ) de-rate before defensive exposure in 迈威生物 (688062.SS), 京新药业 (002020.SZ), 陕西煤业 (601225.SS), and 国电电力 (600795.SS) can offset the drawdown.",
+        "falsifiers": [
+          "Reverse the healthcare-defense preference if 迈威生物 (688062.SS) loses BUY ZONE status and both 迈威生物 (688062.SS) and 振德医疗 (603301.SS) lose intake leadership while local healthcare relative strength reverses.",
+          "Reduce cyclical and technology risk if 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), or 中际旭创 (300308.SZ) loses alpha-leader status together with a confirmed company-level technical break.",
+          "Move toward crash posture only if breadth, calibrated drawdown risk, and risk-off confirmation become consensually adverse or trusted pricing and intake feeds materially degrade.",
+          "Reassess the full book if contracting PBoC liquidity intensifies and the CSI 300 develops a confirmed broad technical breakdown."
+        ],
+        "feed_health": {
+          "asof": "2026-08-13",
+          "feed": "yahoo",
+          "status": "up",
+          "venue": "A-share"
+        },
+        "holdings": [
+          {
+            "action_effective": "hold",
+            "action_requested": "hold",
+            "conviction": "high",
+            "evidence": [
+              "迈威生物 (688062.SS) was trusted and priceable at CNY 34.12.",
+              "迈威生物 (688062.SS) led the reviewed intake at 0.93 and was the only reviewed company classified BUY ZONE now.",
+              "Innovative-drug and healthcare leadership remains locally confirmed."
+            ],
+            "exit_plan": "Review trim-and-trail first; exit only if 迈威生物 (688062.SS) loses BUY ZONE status while healthcare relative strength reverses, or if a material company-specific thesis break emerges.",
+            "expected_horizon": "Medium/long term; next formal check by 2026-08-19.",
+            "falsifier": "The thesis fails if 迈威生物 (688062.SS) loses BUY ZONE status while local healthcare relative strength also reverses.",
+            "holding_mark_source": "live_quote",
+            "identity_status": "trusted_regional_stock_heatmap.v1",
+            "name": "迈威生物",
+            "proposed_weight": null,
+            "rationale": "迈威生物 (688062.SS) is ordinal conviction rank 1 and remains the strongest reviewed intake signal at 0.93, the only reviewed name classified BUY ZONE now, with innovative-drug and healthcare leadership locally confirmed. Its existing position is already meaningful, evidence is still single-source, and dependable company-level technical confirmation is unavailable, so HOLD is preferable to ADD. Estimated thesis probability is 65%, with review by 2026-08-19.",
+            "source_provenance": [
+              "Trusted China quote read",
+              "In-house China intake and standout boards dated 2026-08-12",
+              "In-house China sector momentum context"
+            ],
+            "ticker": "688062.SS",
+            "venue": "A-share",
+            "weight": 0.124775,
+            "weight_source": "deterministic_existing_hold.v1",
+            "why_now": "迈威生物 (688062.SS) retains the best confirmed local setup, but contracting liquidity and incomplete technical corroboration argue for preserving rather than enlarging exposure."
+          }
+        ],
+        "lesson_application_ids": [
+          "application.v1.862d3fa0284cc51e34805671"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.CN_ONLY.churn_hysteresis"
+        ],
+        "lesson_presentation_id": "presentation.v1.a5ffd7e51f64ad27beb030d1",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_queued",
+        "liquidity_notes": "Contracting PBoC liquidity argues against enlarging single-source pullback positions. All retained holdings were reported priceable in CNY by trusted quote reads; exact liquidity, sizing, and transaction outputs remain allocator-owned.",
+        "model": "gpt-5.6-sol",
+        "packet_id": "6fb0a8b265d32b65",
+        "requested_exit_decisions": [],
+        "risk_posture": "caution",
+        "run_id": null,
+        "schema": "mastermind.target_book.v2",
+        "skipped_unpriceable": [],
+        "sold_note": "",
+        "source_provenance": [
+          "Trusted current China paper-book state and live CNY P&L",
+          "Trusted China quote checks for all nine retained holdings and three explicitly rejected candidates",
+          "In-house China regime, intake, standout, alpha-leader, reversal-watch, and sector-momentum reads dated 2026-08-12",
+          "Portfolio meta-memory and recent exit/trim audit supplied with the task",
+          "Delegated research artifact, treated as untrusted synthesis and validated against the mandate and typed book state"
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "688062.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "002020.SZ",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "601225.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "600795.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603301.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603256.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603061.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "000811.SZ",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "300308.SZ",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.18,
+              "low": 0.06,
+              "medium": 0.12
+            },
+            "max_single_weight": 0.18,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_incremental_regional_allocator.v1",
+            "posture_target_gross": 0.65,
+            "protected_gross": 0.608144,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.608144,
+              "raw_gross": 0.6081443604331661
+            }
+          },
+          "unallocated_adds": []
+        },
+        "submission_sha256": "84622c7244204483891968bc6cdcfd282020bd0ccbf02f70911bf744ff78c21e",
+        "summary": "The complete 2026-08-13 target book holds all nine incumbents with no adds, trims, or exits: defensive leadership is concentrated in 迈威生物 (688062.SS), 京新药业 (002020.SZ), 陕西煤业 (601225.SS), and 国电电力 (600795.SS); healthcare and selective alpha exposure remains through 振德医疗 (603301.SS); and smaller, lower-conviction pullback or technology exposure remains in 宏和科技 (603256.SS), 金海通 (603061.SS), 冰轮环境 (000811.SZ), and 中际旭创 (300308.SZ). The posture is cautious because growth is weak and PBoC liquidity is contracting, but firm breadth and low calibrated drawdown risk do not confirm a crash. About 39.2% cash preserves optionality without making cash the primary position, and exact CNY weights remain the deterministic allocator's authority.",
+        "target_sha256": "7787e659047d6a9d9f6efa7dcd7c026227f741014eefc1b4f3291c58d550e284",
+        "target_status": "queued",
+        "tools_used": [
+          "submit_book"
+        ],
+        "ts": "2026-08-13T08:05:27.040807+00:00"
+      }
+    },
+    {
+      "case_effective_holding": {
+        "action_effective": "hold",
+        "action_requested": "hold",
+        "conviction": "high",
+        "evidence": [
+          "china_intake reviewed signal 0.93 BUY ZONE",
+          "regime sector_rs Innovative Drugs rank 1 (mom_60d +21.74%)",
+          "unrealized +4.5%"
+        ],
+        "exit_plan": "Trim on loss of BUY ZONE/RS leadership or a confirmed technical break; review 2026-08-19.",
+        "expected_horizon": "4-8 weeks",
+        "falsifier": "Innovative Drugs RS loses #1 rank or 688062 breaks below entry base on volume, or intake BUY ZONE status is lost.",
+        "holding_mark_source": "live_quote",
+        "identity_status": "trusted_regional_stock_heatmap.v1",
+        "proposed_weight": null,
+        "rationale": "迈威生物 (688062.SS) is the book's top-ranked reviewed intake signal (0.93) and the only reviewed name flagged BUY ZONE, sitting in the regime's #1 RS sector (Innovative Drugs, 60d +21.7%). It carries a ~4.5% gain and is already the largest weight (~12.5%). Evidence remains single-plane and reliable company-level technical confirmation is unavailable, so HOLD is preferred to ADD despite the strong signal.",
+        "source_provenance": [
+          "mcp__china__get_china_regime",
+          "mcp__china__get_my_book"
+        ],
+        "ticker": "688062.SS",
+        "venue": "A-share",
+        "weight": 0.124767,
+        "weight_source": "deterministic_existing_hold.v1",
+        "why_now": "Overnight Asia stabilized (Shanghai +0.32%); innovative-drug leadership intact and position already meaningful — no reason to chase or cut."
+      },
+      "case_holding": {
+        "action_effective": "hold",
+        "action_requested": "hold",
+        "conviction": "high",
+        "evidence": [
+          "china_intake reviewed signal 0.93 BUY ZONE",
+          "regime sector_rs Innovative Drugs rank 1 (mom_60d +21.74%)",
+          "unrealized +4.5%"
+        ],
+        "exit_plan": "Trim on loss of BUY ZONE/RS leadership or a confirmed technical break; review 2026-08-19.",
+        "expected_horizon": "4-8 weeks",
+        "falsifier": "Innovative Drugs RS loses #1 rank or 688062 breaks below entry base on volume, or intake BUY ZONE status is lost.",
+        "holding_mark_source": "live_quote",
+        "identity_status": "trusted_regional_stock_heatmap.v1",
+        "name": "迈威生物",
+        "proposed_weight": null,
+        "rationale": "迈威生物 (688062.SS) is the book's top-ranked reviewed intake signal (0.93) and the only reviewed name flagged BUY ZONE, sitting in the regime's #1 RS sector (Innovative Drugs, 60d +21.7%). It carries a ~4.5% gain and is already the largest weight (~12.5%). Evidence remains single-plane and reliable company-level technical confirmation is unavailable, so HOLD is preferred to ADD despite the strong signal.",
+        "source_provenance": [
+          "mcp__china__get_china_regime",
+          "mcp__china__get_my_book"
+        ],
+        "ticker": "688062.SS",
+        "venue": "A-share",
+        "weight": 0.124767,
+        "weight_source": "deterministic_existing_hold.v1",
+        "why_now": "Overnight Asia stabilized (Shanghai +0.32%); innovative-drug leadership intact and position already meaningful — no reason to chase or cut."
+      },
+      "case_row_falsifiers": [],
+      "decision_id": "decision.v1.91cc93129955be21e1590c18",
+      "line_index_0based": 37,
+      "row": {
+        "accepted_asof": "2026-08-14",
+        "allocation_review": {
+          "cash": 0.3919,
+          "cash_rationale_present": true,
+          "cash_rationale_required": false,
+          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+        },
+        "asof": "2026-08-14",
+        "brain_text": "Book submitted — 9 holdings, ~61% gross / ~39% cash, settling at the open.\n\n## Decision: HOLD the entire book unchanged\n\n**What the live overnight tape is actually doing (and why it drove no trade):** For a mainland A-share book the Asia panel is what matters, and it *stabilized rather than sold off* — **Shanghai +0.32%** (green), **Nikkei +2.56%**, **KOSPI +3.68%** (Korea-semis led), with **Hang Seng −0.83%** the lone soft print. US futures firm (S&P +0.72%, NDX +1.20%), 10Y −0.88%, VIX only +0.55%, USD −0.10%. That is a \"no rout / no clean rip\" tape — it neither forces de-risking nor licenses leaning back into beta.\n\n**Why no forced de-risk despite CAUTION:** the book is already gross **60.8%** / cash **39.2%** — under the hard 0.75 gross cap and well above the 25% cash floor — and already tilted into the exact regime RS leaders the macro officer's broad-derisk tilt wants: Innovative Drugs #1 (迈威生物 688062, 京新药业 002020), Healthcare #2, Coal #5 (陕西煤业 601225), plus utility ballast (国电电力 600795). The defensive posture is satisfied *without* trading.\n\n**Why no lean-back-in:** adding beta into growth-scare + contracting PBoC liquidity + CAUTION fights both the macro officer and the regime. KOSPI's strength is Korea-semiconductor specific, not a China green light. The new standouts board is almost entirely \"unconfirmed turn / not a base yet\" (low band) — no defensive ADD clears the bar.\n\n**Governance/compliance:**\n- Gross 61% < 0.75 cap ✓ | Cash 39% > 25% floor ✓ | Defensive tilt already in place ✓\n- All 9 names re-verified priceable single-company A-shares via `get_quote` ✓\n- Anti-churn lesson `lesson.v1.CN_ONLY.churn_hysteresis` applied — several <3-session starters (金海通, 冰轮环境, 宏和科技, 迈威生物) have no fired falsifier, so no trims ✓\n- No exits (`exit_decisions: []`); cash held as deliberate dry powder for a *confirmed* turn.\n\n**Primary risk I'm accepting:** a false stabilization — Asia opens firm but A-shares reverse intraday as liquidity/growth-scare reassert, dragging the healthcare/coal/utility cluster together (39% cash cushions but won't fully offset a CSI 300–relative drawdown).",
+        "cash_rationale": "Cash ~39% (¥398k) sits above the macro 25% floor and keeps gross ~61%, comfortably under the 0.75 CAUTION cap. I am intentionally not deploying further: contracting liquidity + growth scare + CAUTION argue against adding beta, and the qualifying intake names are already held. This is deliberate dry powder for a confirmed turn, not a lack of ideas — searched intake/standouts and found no defensive ADD compelling enough to override the caution regime.",
+        "cost_usd": 0.859362,
+        "decision_effective": true,
+        "decision_id": "decision.v1.91cc93129955be21e1590c18",
+        "decision_memo": {
+          "alternatives": "(1) De-risk to cash floor — rejected: Asia held, no sell-off, cash already 39%. (2) Lean back into tech/beta on KOSPI strength — rejected: Korea-semis specific, fights CAUTION + contracting liquidity. (3) Add to healthcare leaders (688062/002020) — rejected: single-plane evidence, no company-level technical confirmation, caution regime.",
+          "candidate_funnel": "Reviewed 9 held names (all priceable) + 20 standouts + regime sector RS; no name cleared the bar to change the book.",
+          "changes": "None — no adds, no trims, no exits. Queued book carried as-is.",
+          "context_gaps": "In-house dashboard dated 2026-08-13 (stale vs live tape); company-level technical confirmation thin on several names; intake evidence largely single-plane.",
+          "delegation_summary": "Handled inline; regime + standouts + book + quotes sufficient for a no-change overnight decision.",
+          "lessons_applied": [
+            "lesson.v1.CN_ONLY.churn_hysteresis"
+          ],
+          "market_frame": "Growth-scare Q4, contracting PBoC liquidity, macro officer CAUTION (gross cap 0.75, cash floor 25%, broad-derisk tilt). Overnight Asia stabilized: Shanghai +0.32%, Nikkei +2.56%, KOSPI +3.68%, Hang Seng -0.83%; US futures firm, 10Y -0.88%, VIX +0.55%.",
+          "rejected": "New intake standouts are almost all 'UNCONFIRMED TURN / countertrend bounce, not a base yet' (low conviction band) — none qualify as a defensive ADD in a caution regime.",
+          "risk_deliberation": "Weighed forced de-risking vs anti-churn: tape did not sell off and cash exceeds floor, so no forced de-risk; several holdings are <3-session starters with no fired falsifier, so trimming would breach the churn-hysteresis lesson. Held.",
+          "selected": "HOLD all 9 holdings unchanged.",
+          "timing": "Overnight review ahead of the open; no rout to de-risk into, no clean China rip to chase. Book already gross ~61%/cash ~39% and defensively tilted into RS leaders."
+        },
+        "effective_holdings": [
+          {
+            "action_effective": "hold",
+            "action_requested": "hold",
+            "conviction": "high",
+            "evidence": [
+              "china_intake reviewed signal 0.93 BUY ZONE",
+              "regime sector_rs Innovative Drugs rank 1 (mom_60d +21.74%)",
+              "unrealized +4.5%"
+            ],
+            "exit_plan": "Trim on loss of BUY ZONE/RS leadership or a confirmed technical break; review 2026-08-19.",
+            "expected_horizon": "4-8 weeks",
+            "falsifier": "Innovative Drugs RS loses #1 rank or 688062 breaks below entry base on volume, or intake BUY ZONE status is lost.",
+            "holding_mark_source": "live_quote",
+            "identity_status": "trusted_regional_stock_heatmap.v1",
+            "proposed_weight": null,
+            "rationale": "迈威生物 (688062.SS) is the book's top-ranked reviewed intake signal (0.93) and the only reviewed name flagged BUY ZONE, sitting in the regime's #1 RS sector (Innovative Drugs, 60d +21.7%). It carries a ~4.5% gain and is already the largest weight (~12.5%). Evidence remains single-plane and reliable company-level technical confirmation is unavailable, so HOLD is preferred to ADD despite the strong signal.",
+            "source_provenance": [
+              "mcp__china__get_china_regime",
+              "mcp__china__get_my_book"
+            ],
+            "ticker": "688062.SS",
+            "venue": "A-share",
+            "weight": 0.124767,
+            "weight_source": "deterministic_existing_hold.v1",
+            "why_now": "Overnight Asia stabilized (Shanghai +0.32%); innovative-drug leadership intact and position already meaningful — no reason to chase or cut."
+          }
+        ],
+        "error": null,
+        "evidence_planes": [
+          "China macro regime (quad, sector RS, liquidity overlay)",
+          "China unified intake / standouts boards",
+          "Live overnight tape (Asia indices, US futures, FX/rates)",
+          "Current book marks and unrealized P&L",
+          "Portfolio meta-memory (churn hysteresis lesson)"
+        ],
+        "executed": [],
+        "exit_decisions": [],
+        "expected_failure_mode": "A false stabilization: Asia opens firm but China A-shares reverse intraday as contracting PBoC liquidity and the growth scare reassert, dragging the healthcare/coal/utility tilt down together while ~39% cash cushions but does not prevent an NAV drawdown vs CSI 300. Secondary risk: the small tech remainder (300308) continues de-rating.",
+        "falsifiers": [
+          "Asia risk sentiment reverses hard at the open (Shanghai/CSI 300 gaps down >1.5% with breadth collapse), turning stabilization into a rout",
+          "Healthcare/Innovative-Drugs RS leadership (the book's core tilt) rolls out of the top ranks",
+          "Macro officer escalates from CAUTION to CRASH or cuts the gross cap below current ~0.61 gross",
+          "Multiple held names fire individual falsifiers (base breaks / loss of intake status) simultaneously",
+          "A decisive, confirmed risk-on regime flip that makes the defensive/ballast tilt a material drag"
+        ],
+        "feed_health": {
+          "asof": "2026-08-14",
+          "feed": "yahoo",
+          "status": "up",
+          "venue": "A-share"
+        },
+        "holdings": [
+          {
+            "action_effective": "hold",
+            "action_requested": "hold",
+            "conviction": "high",
+            "evidence": [
+              "china_intake reviewed signal 0.93 BUY ZONE",
+              "regime sector_rs Innovative Drugs rank 1 (mom_60d +21.74%)",
+              "unrealized +4.5%"
+            ],
+            "exit_plan": "Trim on loss of BUY ZONE/RS leadership or a confirmed technical break; review 2026-08-19.",
+            "expected_horizon": "4-8 weeks",
+            "falsifier": "Innovative Drugs RS loses #1 rank or 688062 breaks below entry base on volume, or intake BUY ZONE status is lost.",
+            "holding_mark_source": "live_quote",
+            "identity_status": "trusted_regional_stock_heatmap.v1",
+            "name": "迈威生物",
+            "proposed_weight": null,
+            "rationale": "迈威生物 (688062.SS) is the book's top-ranked reviewed intake signal (0.93) and the only reviewed name flagged BUY ZONE, sitting in the regime's #1 RS sector (Innovative Drugs, 60d +21.7%). It carries a ~4.5% gain and is already the largest weight (~12.5%). Evidence remains single-plane and reliable company-level technical confirmation is unavailable, so HOLD is preferred to ADD despite the strong signal.",
+            "source_provenance": [
+              "mcp__china__get_china_regime",
+              "mcp__china__get_my_book"
+            ],
+            "ticker": "688062.SS",
+            "venue": "A-share",
+            "weight": 0.124767,
+            "weight_source": "deterministic_existing_hold.v1",
+            "why_now": "Overnight Asia stabilized (Shanghai +0.32%); innovative-drug leadership intact and position already meaningful — no reason to chase or cut."
+          }
+        ],
+        "lesson_application_ids": [
+          "application.v1.df48a1384581e68feb4a63b6"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.CN_ONLY.churn_hysteresis"
+        ],
+        "lesson_presentation_id": "presentation.v1.d4a8de02876538aef1b580b1",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_executed",
+        "model": "opus",
+        "packet_id": "d6f61a31f1b7b7ca",
+        "requested_exit_decisions": [],
+        "risk_posture": "caution",
+        "run_id": "2026-08-14T00-20-09-116Z00-00",
+        "schema": "mastermind.target_book.v2",
+        "settled_asof": "2026-08-14",
+        "settlement_fill_ids": [],
+        "settlement_receipt_sha256": "64ee9287a1dedc0ac43d9f29dd0b1a0db31e248025383b2d63a9bcac66265a04",
+        "settlement_transaction_id": "f81a5497ab4b2fa5e66c56ee0eb9f2629173f728995b4a35f4cadee62feedf5a",
+        "skipped_unpriceable": [],
+        "sold_note": "",
+        "source_provenance": [
+          "mcp__china__get_china_regime",
+          "mcp__china__get_china_standouts",
+          "mcp__china__get_my_book",
+          "mcp__china__get_quote",
+          "overnight_tape (priority directive)"
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "688062.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "002020.SZ",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "601225.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "600795.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603256.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603061.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "000811.SZ",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "603301.SS",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "market": "china",
+              "status": "trusted_regional_stock_heatmap.v1",
+              "ticker": "300308.SZ",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.18,
+              "low": 0.06,
+              "medium": 0.12
+            },
+            "max_single_weight": 0.18,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_incremental_regional_allocator.v1",
+            "posture_target_gross": 0.65,
+            "protected_gross": 0.608107,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.608106,
+              "raw_gross": 0.6081065354346826
+            }
+          },
+          "unallocated_adds": []
+        },
+        "submission_sha256": "54c56a68c359aefaf749f9c91e1ab639524f7205c8fee35a70de39422bedd9e0",
+        "summary": "Growth-scare Q4 with contracting PBoC liquidity; macro officer CAUTION (gross cap 0.75, cash floor 25%, broad-derisk tilt). Overnight Asia stabilized rather than sold off — Shanghai +0.32%, Nikkei +2.56%, KOSPI +3.68%, only Hang Seng soft (-0.83%); US futures firm and 10Y lower. The book is already gross ~61% / cash ~39% and tilted into the regime's own RS leaders — 迈威生物 (688062.SS) and 京新药业 (002020.SZ) in innovative-drug/pharma (RS #1/#2), 陕西煤业 (601225.SS) coal (RS #5), 国电电力 (600795.SS) utility ballast — so the defensive posture is satisfied without trading. I HOLD all nine: no rout demands forced de-risking, no clean China rip justifies adding beta into a caution regime, and several names are <3-session starters with no fired falsifier (anti-churn lesson binds). Cash ~39% stays as dry powder for a confirmed turn.",
+        "target_sha256": "e0ea4278be3a7ea097ee60fe53e038e68767a5939354c7851f3a80177ffa5ca9",
+        "target_status": "executed",
+        "tools_used": [
+          "ToolSearch",
+          "mcp__china__get_my_book",
+          "mcp__china__get_china_regime",
+          "mcp__china__get_china_standouts",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__get_quote",
+          "mcp__china__submit_book"
+        ],
+        "ts": "2026-08-14T00:22:36.640108+00:00"
+      }
+    }
+  ],
+  "records_sha256": "24bdeeb270a051ead5636f8e8eaaa9b047f28b03af66c80ba9df1b16d90f99a4",
+  "redaction": {
+    "dropped_row_fields": [
+      {
+        "dropped_fields": [],
+        "line_index_0based": 35
+      },
+      {
+        "dropped_fields": [],
+        "line_index_0based": 36
+      },
+      {
+        "dropped_fields": [],
+        "line_index_0based": 37
+      }
+    ],
+    "other_holdings": [
+      {
+        "conviction": "high",
+        "line_index_0based": 35,
+        "ticker": "002020.SZ",
+        "weight": 0.079995
+      },
+      {
+        "conviction": "high",
+        "line_index_0based": 35,
+        "ticker": "601225.SS",
+        "weight": 0.05998
+      },
+      {
+        "conviction": "high",
+        "line_index_0based": 35,
+        "ticker": "600795.SS",
+        "weight": 0.061431
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 35,
+        "ticker": "603301.SS",
+        "weight": 0.091487
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 35,
+        "ticker": "603256.SS",
+        "weight": 0.06119
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 35,
+        "ticker": "603061.SS",
+        "weight": 0.049836
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 35,
+        "ticker": "000811.SZ",
+        "weight": 0.049993
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 35,
+        "ticker": "300308.SZ",
+        "weight": 0.03
+      },
+      {
+        "conviction": "high",
+        "line_index_0based": 36,
+        "ticker": "002020.SZ",
+        "weight": 0.080124
+      },
+      {
+        "conviction": "high",
+        "line_index_0based": 36,
+        "ticker": "601225.SS",
+        "weight": 0.057462
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 36,
+        "ticker": "600795.SS",
+        "weight": 0.060966
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 36,
+        "ticker": "603301.SS",
+        "weight": 0.092855
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 36,
+        "ticker": "603256.SS",
+        "weight": 0.060156
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 36,
+        "ticker": "603061.SS",
+        "weight": 0.052219
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 36,
+        "ticker": "000811.SZ",
+        "weight": 0.048731
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 36,
+        "ticker": "300308.SZ",
+        "weight": 0.030856
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "002020.SZ",
+        "weight": 0.080119
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "601225.SS",
+        "weight": 0.057458
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "600795.SS",
+        "weight": 0.060962
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "603256.SS",
+        "weight": 0.060152
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "603061.SS",
+        "weight": 0.052216
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "000811.SZ",
+        "weight": 0.048728
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 37,
+        "ticker": "603301.SS",
+        "weight": 0.09285
+      },
+      {
+        "conviction": "low",
+        "line_index_0based": 37,
+        "ticker": "300308.SZ",
+        "weight": 0.030854
+      }
+    ],
+    "policy": "retain all row-level fields verbatim except: drop perception_input; filter holdings and effective_holdings to the case ticker"
+  },
+  "schema": "pbr.decision_case_fixture.v1",
+  "ticker": "688062.SS"
+}

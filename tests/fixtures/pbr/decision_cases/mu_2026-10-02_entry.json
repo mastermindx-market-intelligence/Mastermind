@@ -1,0 +1,399 @@
+{
+  "capture": {
+    "capture_dir": "/Volumes/Mastermind/evidence/pbr/research-capture-20261022T073549Z",
+    "captured_utc": "2026-10-22T07:35:49Z",
+    "manifest_sha256": "4c55f3f8df454ecfcb2742b0b7bec5043ac35d4919a66026888541fa4bf976aa"
+  },
+  "case_id": "mu_2026-10-02_entry",
+  "case_role": "regression",
+  "defect_ref": "A14",
+  "derived": {
+    "settlement_fill_ids_absent_from_capture": [
+      "2501e62b953c2b6166c641bfe389dc24aa4ab9981e5ed4f6f288597cd673e811"
+    ]
+  },
+  "external_facts": [
+    {
+      "event_date": "2026-09-30",
+      "fact": "Micron announced on 2026-08-26 that fiscal Q4 2026 results would be reported on 2026-09-30",
+      "published": "2026-08-26",
+      "url": "https://investors.micron.com/news/press-release/2026/Micron-Technology-to-Report-Fiscal-Fourth-Quarter-Results-on-September-30-2026/default.aspx",
+      "verification_status": "cited_by_audit_not_refetched"
+    },
+    {
+      "event_date": "2026-09-30",
+      "fact": "Micron reported fiscal Q4 and full-year 2026 results on 2026-09-30",
+      "published": "2026-09-30",
+      "url": "https://investors.micron.com/news/press-release/2026/Micron-Technology-Inc--Reports-Record-Fiscal-Fourth-Quarter-and-Full-Year-2026-Results/",
+      "verification_status": "cited_by_audit_not_refetched"
+    },
+    {
+      "fact": "SEC-hosted fiscal Q4 2026 results release (exhibit 99.1)",
+      "published": "2026-09-30",
+      "url": "https://www.sec.gov/Archives/edgar/data/723125/000072312526000018/a2026q4ex991-pressrelease.htm",
+      "verification_status": "cited_by_audit_not_refetched"
+    }
+  ],
+  "fills": [
+    {
+      "line_index_0based": 91,
+      "line_sha256": "ffc9ece7eb2a3f7b5fe5958f419f7f79ed7b8895af6cbc750e18200d3f946b79",
+      "linked_decision_ids": [
+        "decision.v1.8d700b90434853b846f2ef2e"
+      ],
+      "row": {
+        "date": "2026-10-05",
+        "fill_id": "c9ec0d95c95320ead67363ccc42e3bb20ef1c9fa08878248a0a36e9287e901d9",
+        "price": 1069.68,
+        "shares": 92.0,
+        "side": "buy",
+        "ticker": "MU",
+        "transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+        "value": 98410.56
+      }
+    }
+  ],
+  "linkage_note": "decision.v1.8d700b90434853b846f2ef2e settled_asof 2026-10-05, settlement_fill_ids[0]=c9ec0d95... = fills.jsonl MU buy 92 sh @ 1069.68 value 98410.56, transaction_id b222043d...",
+  "provenance": [
+    {
+      "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+      "line_index_0based": 75,
+      "line_sha256": "de8f662f6c8fac99b418850ae58ec1498102c16c057db052dd77c113ed2ac8f1",
+      "source_book": "autonomous",
+      "source_file_sha256": "c82e2270adf611919118175b50313a1b5bb8ce9238e676f2ba734a3547e37f76",
+      "source_host_path": "/opt/mastermind-live-data/portfolios/autonomous/decisions.jsonl",
+      "source_in_service_path": "/opt/mastermind/data/portfolios/autonomous/decisions.jsonl"
+    }
+  ],
+  "records": [
+    {
+      "case_effective_holding": {
+        "action_effective": "add",
+        "action_requested": "add",
+        "conviction": "medium",
+        "evidence": [
+          "intake_candidates: MU score 0.96, sources altdata/briefing/news, lean +1 conf 0.875",
+          "decision_matrix MU: stage 3 markup, 5/6 confirmation dims confirmed, crowding 0.71 elevated-but-below-peers",
+          "fundamentals: rev +38% yoy, HBM share 22% vs 9% prior, fwd P/E 15.2, guidance raised; Q3 GM% 34.7% missed 36.5% est (unconfirmed dim)",
+          "regime sector_rs: XLK rank2 pctile99, SMH rank3 mom20d +12%; market driver AI/semis"
+        ],
+        "exit_plan": "Exit on GM% miss <35.5% on 10/22, crowding >0.82, or confirmed Samsung HBM yield recovery closing the gap. Trail stop near 107.5 (50d MA / first support) once sized. Sub-full until the earnings catalyst clears.",
+        "expected_horizon": "6-12 months (HBM mix-shift and DRAM ASP cycle through FY2027)",
+        "falsifier": "Q4 FY2026 gross margin (reported 2026-10-22) prints below 35.5%, confirming the Q3 revenue-beat/margin-miss pattern is structural not transitional; or crowding crosses ~0.82 into the DELL/EME crowded-top band.",
+        "identity_status": "trusted_company_profile.v1",
+        "proposed_weight": 0.08,
+        "rationale": "Top of the corroborated candidate funnel (0.96, 4 independent engines). radar CONFIRMED_UP, alt-data ACCUMULATE 86 across gov_grant/insider_mspr/patent_cluster, DRAM spot in a confirmed 3rd-monthly uptick (+18% off trough), Samsung HBM yield struggles preserving MU's AI-memory share, HBM4 hyperscaler agreement disclosed, 3 analyst PT raises to 130-140. 5 of 6 confirmation dims confirmed (tape above 200d +19%, SMH breadth expanding, smart-money/alt, options call-skew, positive news). This is confirmation over prediction — the semis/AI leg has already turned and MU is in it; it fits the AI/semis market driver and XLK/SMH sector leadership.",
+        "source_provenance": [
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_daily_briefing",
+          "narrative-analyst finalist pass (decision_matrix/fundamentals/options/anticipation/technical_lab/news)"
+        ],
+        "ticker": "MU",
+        "weight": 0.1,
+        "weight_source": "deterministic_conviction_allocator.v2",
+        "why_now": "DRAM ASP inflection and preserved HBM share are showing up in flows and news now, with a 10/22 earnings catalyst that can gate full size if gross-margin actuals finally confirm."
+      },
+      "case_holding": {
+        "action_effective": "add",
+        "action_requested": "add",
+        "conviction": "medium",
+        "evidence": [
+          "intake_candidates: MU score 0.96, sources altdata/briefing/news, lean +1 conf 0.875",
+          "decision_matrix MU: stage 3 markup, 5/6 confirmation dims confirmed, crowding 0.71 elevated-but-below-peers",
+          "fundamentals: rev +38% yoy, HBM share 22% vs 9% prior, fwd P/E 15.2, guidance raised; Q3 GM% 34.7% missed 36.5% est (unconfirmed dim)",
+          "regime sector_rs: XLK rank2 pctile99, SMH rank3 mom20d +12%; market driver AI/semis"
+        ],
+        "exit_plan": "Exit on GM% miss <35.5% on 10/22, crowding >0.82, or confirmed Samsung HBM yield recovery closing the gap. Trail stop near 107.5 (50d MA / first support) once sized. Sub-full until the earnings catalyst clears.",
+        "expected_horizon": "6-12 months (HBM mix-shift and DRAM ASP cycle through FY2027)",
+        "falsifier": "Q4 FY2026 gross margin (reported 2026-10-22) prints below 35.5%, confirming the Q3 revenue-beat/margin-miss pattern is structural not transitional; or crowding crosses ~0.82 into the DELL/EME crowded-top band.",
+        "identity_status": "trusted_company_profile.v1",
+        "proposed_weight": 0.08,
+        "rationale": "Top of the corroborated candidate funnel (0.96, 4 independent engines). radar CONFIRMED_UP, alt-data ACCUMULATE 86 across gov_grant/insider_mspr/patent_cluster, DRAM spot in a confirmed 3rd-monthly uptick (+18% off trough), Samsung HBM yield struggles preserving MU's AI-memory share, HBM4 hyperscaler agreement disclosed, 3 analyst PT raises to 130-140. 5 of 6 confirmation dims confirmed (tape above 200d +19%, SMH breadth expanding, smart-money/alt, options call-skew, positive news). This is confirmation over prediction — the semis/AI leg has already turned and MU is in it; it fits the AI/semis market driver and XLK/SMH sector leadership.",
+        "source_provenance": [
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_daily_briefing",
+          "narrative-analyst finalist pass (decision_matrix/fundamentals/options/anticipation/technical_lab/news)"
+        ],
+        "ticker": "MU",
+        "weight": 0.1,
+        "weight_source": "deterministic_conviction_allocator.v2",
+        "why_now": "DRAM ASP inflection and preserved HBM share are showing up in flows and news now, with a 10/22 earnings catalyst that can gate full size if gross-margin actuals finally confirm."
+      },
+      "case_row_falsifiers": [
+        "MU gross-margin actuals miss below 35.5% on 2026-10-22, breaking the central re-rating thesis for the one offensive add",
+        "The bubble/blow-off unwind flagged by risk_radar (71/100) triggers a broad AI/semis rotation of >10%, dragging MU/MSFT/AAPL together"
+      ],
+      "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+      "line_index_0based": 75,
+      "row": {
+        "accepted_asof": "2026-10-02",
+        "allocation_review": {
+          "cash": 0.6568,
+          "cash_rationale_present": true,
+          "cash_rationale_required": true,
+          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+        },
+        "asof": "2026-10-02",
+        "brain_text": "Submitted. Book moved from 22.4% → 34.3% invested (cash 77.6% → ~66%), 4 holdings.\n\n## Tonight's decision — 2026-10-02\n\n**Frame:** Q2 Reflation, governor-confirmed risk-on, but TRANSITIONING with a bubble/blow-off CAUTION overlay (71/100), elevated-drawdown (60/100), contracting liquidity and narrow AI/semis breadth. Posture: deploy selectively into *confirmed* leaders, don't chase crowded tops, keep ballast + dry powder.\n\n**Changes:**\n- **ADD MU** (new, medium) — top of the corroborated funnel (0.96, 4 engines). 5/6 confirmation dims confirmed (tape, breadth, alt86 ACCUMULATE w/ gov-grant+insider, options, news); only gross-margin actuals unconfirmed → sub-full ahead of the 10/22 earnings catalyst. Fits the AI/semis driver + XLK/SMH leadership. This is confirmation over prediction — the semis leg has already turned.\n- **ADD MSFT** (dip-add, low) — sector RS 99th pctile, alt-74 *accumulation building* (early-edge, not crowded like META), clean pullback entry. Modest, not a conviction bet.\n- **HOLD XOM** — energy is the rank-1 RS sector; ballast that diversifies away from AI crowding.\n- **HOLD AAPL** — quality tech, +9.9%, no sell signal.\n\n**Rejected after deeper search (cash-lesson record):** META (crowded/extended +17.7% vs SPY, retail-channel saturation, bubble overlay); DELL/EME/LLY (crowded_top); EXLS/WDAY/MSTR/MRK (negative smart-money divergence). Only MU cleared the bar with conviction — I didn't manufacture conviction to hit a cash target.\n\n**Elevated cash justified** by the genuine caution/degraded risk state + documented rejects, per `lesson.v1.US_ONLY.cash_opportunity_cost`.\n\n**Biggest risk:** concentration into the AI/semis leg where the blow-off risk lives — specifically a MU GM% miss on 10/22 into a crowded, low-short-interest tape dragging the mega-cap tech names together; XOM only partially offsets a broad risk-off rotation.\n\n**Book-level falsifiers:** MU GM% <35.5% on 10/22 · AI/semis unwind >10% · regime flips risk-off · XLE loses rank-1 RS.",
+        "cash_rationale": "Cash is deliberately reduced from 77.6% via one conviction add (MU) and a modest dip-add (MSFT), but remains elevated by design. Explicit justification per the cash-opportunity-cost lesson: (1) degraded/caution risk state — risk_radar CAUTION bubble/blow-off 71/100, sector-rotation ELEVATED drawdown risk 60/100, liquidity_quality contracting, regime TRANSITIONING with LOW label confidence and contradicting breadth legs (iwm_spy, breadth_direction); (2) a documented record of finalists rejected after deeper search: META (crowded, +17.7% vs SPY, retail-channel saturation), DELL/EME/LLY (crowded_top divergences), EXLS/WDAY/MSTR/MRK (negative-divergence / smart-money fading, lean -1). Only MU cleared the confirmation bar with conviction, so I deployed into it rather than manufacturing conviction to hit a cash target — the lesson is advisory, not sizing authority.",
+        "cost_usd": 1.542436,
+        "decision_effective": true,
+        "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
+        "decision_memo": {
+          "alternatives": "Early-edge defensive divergences (AWK, D, ES — positive divergence, tape quiet) noted as watch candidates that fit the ROTATE_DEFENSIVE shadow posture, but conviction/strength too low (0.18-0.25) to finalist without deeper research. Candidates for next cycle if breadth deteriorates.",
+          "candidate_funnel": "328-name universe -> intake funnel ACT tier: MU (0.96), EXLS (0.95, lean -1), META (0.82); WATCH: AMZN, MRK, BKE; DIVERGENT/crowded_top: DELL, EME, LLY. Finalists taken to deep research: MU, META. Holds reviewed: MSFT (decision matrix), XOM, AAPL.",
+          "changes": "Added MU (new). Upgraded MSFT hold->modest add on the pullback. XOM and AAPL held unchanged. No exits/trims.",
+          "context_gaps": "neural_web lobes stale (17 stale); 13F flows lagged to 2026-06-30; MU gross-margin actuals unconfirmed until 10/22. Label confidence low on one read (0.068) though HMM probabilistic state is Q2 0.97 — label itself treated as suspect per the brief.",
+          "lessons_applied": [
+            "lesson.v1.US_ONLY.cash_opportunity_cost"
+          ],
+          "market_frame": "Q2 Reflation, governor-confirmed risk_on (risk_radar+mtf+cycles), but TRANSITIONING with LOW label confidence and a bubble/blow-off CAUTION overlay (71/100), elevated-drawdown (60/100), contracting liquidity quality and narrow AI/semis breadth. Charter P1 satisfied: adds are backed by cycles (8/11 sectors entry-favored) + sector RS leadership + the AI/semis market driver, not the label alone.",
+          "rejected": "META — crowded/extended (+17.7% vs SPY, retail-channel saturation, bubble overlay), PASS high-conviction. EXLS/WDAY/MSTR/MRK — negative smart-money divergence / fading, lean -1. DELL/EME/LLY — crowded_top divergences. AMZN/BKE — insufficient corroboration/pre-trigger.",
+          "risk_deliberation": "Primary risk is concentration into the AI/semis leg precisely where blow-off risk is flagged. Mitigated by: keeping MU sub-full ahead of binary earnings, making MSFT only a modest dip-add (not chasing), retaining XOM energy ballast as uncorrelated reflation exposure, and holding elevated cash as dry powder. Declined to force cash down by buying crowded tops.",
+          "selected": "MU (new add, medium), MSFT (dip-add, low), XOM (hold ballast), AAPL (hold).",
+          "timing": "MU earnings 2026-10-22 is the key catalyst/risk — sized sub-full until GM% confirms. ISM Services 10/05 and jobs 10/02 frame the macro. Deploying into confirmed leaders now rather than waiting for prophecy."
+        },
+        "effective_holdings": [
+          {
+            "action_effective": "add",
+            "action_requested": "add",
+            "conviction": "medium",
+            "evidence": [
+              "intake_candidates: MU score 0.96, sources altdata/briefing/news, lean +1 conf 0.875",
+              "decision_matrix MU: stage 3 markup, 5/6 confirmation dims confirmed, crowding 0.71 elevated-but-below-peers",
+              "fundamentals: rev +38% yoy, HBM share 22% vs 9% prior, fwd P/E 15.2, guidance raised; Q3 GM% 34.7% missed 36.5% est (unconfirmed dim)",
+              "regime sector_rs: XLK rank2 pctile99, SMH rank3 mom20d +12%; market driver AI/semis"
+            ],
+            "exit_plan": "Exit on GM% miss <35.5% on 10/22, crowding >0.82, or confirmed Samsung HBM yield recovery closing the gap. Trail stop near 107.5 (50d MA / first support) once sized. Sub-full until the earnings catalyst clears.",
+            "expected_horizon": "6-12 months (HBM mix-shift and DRAM ASP cycle through FY2027)",
+            "falsifier": "Q4 FY2026 gross margin (reported 2026-10-22) prints below 35.5%, confirming the Q3 revenue-beat/margin-miss pattern is structural not transitional; or crowding crosses ~0.82 into the DELL/EME crowded-top band.",
+            "identity_status": "trusted_company_profile.v1",
+            "proposed_weight": 0.08,
+            "rationale": "Top of the corroborated candidate funnel (0.96, 4 independent engines). radar CONFIRMED_UP, alt-data ACCUMULATE 86 across gov_grant/insider_mspr/patent_cluster, DRAM spot in a confirmed 3rd-monthly uptick (+18% off trough), Samsung HBM yield struggles preserving MU's AI-memory share, HBM4 hyperscaler agreement disclosed, 3 analyst PT raises to 130-140. 5 of 6 confirmation dims confirmed (tape above 200d +19%, SMH breadth expanding, smart-money/alt, options call-skew, positive news). This is confirmation over prediction — the semis/AI leg has already turned and MU is in it; it fits the AI/semis market driver and XLK/SMH sector leadership.",
+            "source_provenance": [
+              "mcp__bot__get_intake_candidates",
+              "mcp__bot__get_daily_briefing",
+              "narrative-analyst finalist pass (decision_matrix/fundamentals/options/anticipation/technical_lab/news)"
+            ],
+            "ticker": "MU",
+            "weight": 0.1,
+            "weight_source": "deterministic_conviction_allocator.v2",
+            "why_now": "DRAM ASP inflection and preserved HBM share are showing up in flows and news now, with a 10/22 earnings catalyst that can gate full size if gross-margin actuals finally confirm."
+          }
+        ],
+        "error": null,
+        "evidence_planes": [
+          "in-house regime (data/regime/latest.json, Q2 Reflation, governor confirmed risk_on)",
+          "sector rotation / Sector Central (XLE rank1, XLK pctile99, SMH)",
+          "unified intake candidate funnel (corroboration across altdata/briefing/news/radar/divergence engines)",
+          "decision matrices (MU, MSFT)",
+          "risk_radar / distribution_tells / liquidity_quality perception planes",
+          "Prophet board (context/display)",
+          "portfolio book + meta-memory"
+        ],
+        "executed": [
+          {
+            "fill_id": "c9ec0d95c95320ead67363ccc42e3bb20ef1c9fa08878248a0a36e9287e901d9",
+            "fill_price_source": "polygon_open",
+            "price": 1069.68,
+            "shares": 92.0,
+            "side": "buy",
+            "ticker": "MU",
+            "transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+            "value": 98410.56
+          },
+          {
+            "fill_id": "2501e62b953c2b6166c641bfe389dc24aa4ab9981e5ed4f6f288597cd673e811",
+            "fill_price_source": "polygon_open",
+            "price": 521.62,
+            "shares": 34.0,
+            "side": "buy",
+            "ticker": "MSFT",
+            "transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+            "value": 17735.08
+          }
+        ],
+        "exit_decisions": [],
+        "expected_failure_mode": "The AI/semis leg I'm adding into (MU, and to a lesser extent MSFT/AAPL) is where the flagged bubble/blow-off risk lives. The most likely loss: MU misses gross margin on 10/22 into a low-short-interest, crowded-long tape, triggering a fast momentum unwind that also drags the correlated mega-cap tech names, while XOM's energy ballast only partially offsets a broad risk-off rotation.",
+        "falsifiers": [
+          "MU gross-margin actuals miss below 35.5% on 2026-10-22, breaking the central re-rating thesis for the one offensive add",
+          "The bubble/blow-off unwind flagged by risk_radar (71/100) triggers a broad AI/semis rotation of >10%, dragging MU/MSFT/AAPL together",
+          "Regime flips out of Q2 risk-on (governor consensus turns risk_off / cycles stops favoring entry), invalidating the deploy-into-leaders posture",
+          "XLE loses rank-1 sector RS and its 200d trend, removing the energy-ballast rationale for XOM"
+        ],
+        "holdings": [
+          {
+            "action_effective": "add",
+            "action_requested": "add",
+            "conviction": "medium",
+            "evidence": [
+              "intake_candidates: MU score 0.96, sources altdata/briefing/news, lean +1 conf 0.875",
+              "decision_matrix MU: stage 3 markup, 5/6 confirmation dims confirmed, crowding 0.71 elevated-but-below-peers",
+              "fundamentals: rev +38% yoy, HBM share 22% vs 9% prior, fwd P/E 15.2, guidance raised; Q3 GM% 34.7% missed 36.5% est (unconfirmed dim)",
+              "regime sector_rs: XLK rank2 pctile99, SMH rank3 mom20d +12%; market driver AI/semis"
+            ],
+            "exit_plan": "Exit on GM% miss <35.5% on 10/22, crowding >0.82, or confirmed Samsung HBM yield recovery closing the gap. Trail stop near 107.5 (50d MA / first support) once sized. Sub-full until the earnings catalyst clears.",
+            "expected_horizon": "6-12 months (HBM mix-shift and DRAM ASP cycle through FY2027)",
+            "falsifier": "Q4 FY2026 gross margin (reported 2026-10-22) prints below 35.5%, confirming the Q3 revenue-beat/margin-miss pattern is structural not transitional; or crowding crosses ~0.82 into the DELL/EME crowded-top band.",
+            "identity_status": "trusted_company_profile.v1",
+            "proposed_weight": 0.08,
+            "rationale": "Top of the corroborated candidate funnel (0.96, 4 independent engines). radar CONFIRMED_UP, alt-data ACCUMULATE 86 across gov_grant/insider_mspr/patent_cluster, DRAM spot in a confirmed 3rd-monthly uptick (+18% off trough), Samsung HBM yield struggles preserving MU's AI-memory share, HBM4 hyperscaler agreement disclosed, 3 analyst PT raises to 130-140. 5 of 6 confirmation dims confirmed (tape above 200d +19%, SMH breadth expanding, smart-money/alt, options call-skew, positive news). This is confirmation over prediction — the semis/AI leg has already turned and MU is in it; it fits the AI/semis market driver and XLK/SMH sector leadership.",
+            "source_provenance": [
+              "mcp__bot__get_intake_candidates",
+              "mcp__bot__get_daily_briefing",
+              "narrative-analyst finalist pass (decision_matrix/fundamentals/options/anticipation/technical_lab/news)"
+            ],
+            "ticker": "MU",
+            "weight": 0.1,
+            "weight_source": "deterministic_conviction_allocator.v2",
+            "why_now": "DRAM ASP inflection and preserved HBM share are showing up in flows and news now, with a 10/22 earnings catalyst that can gate full size if gross-margin actuals finally confirm."
+          }
+        ],
+        "lesson_application_ids": [
+          "application.v1.a8dfc0303d8494fc4842be1e"
+        ],
+        "lesson_ids_cited": [
+          "lesson.v1.US_ONLY.cash_opportunity_cost"
+        ],
+        "lesson_presentation_id": "presentation.v1.b2b6bee5b05abed3074e456c",
+        "lesson_trace_cohort": "portfolio_v2_lesson_trace",
+        "lesson_trace_status": "accepted_executed",
+        "liquidity_notes": "All four names are large/mega-cap with deep liquidity (MU ADV ~48M shares; MSFT/AAPL/XOM mega-cap). No liquidity constraints on entry or exit. ETFs intentionally excluded (prohibited).",
+        "model": "opus",
+        "packet_id": "e1152cde0a41a952",
+        "requested_exit_decisions": [],
+        "risk_posture": "caution",
+        "run_id": "2026-10-02T23-10-07-010Z00-00",
+        "schema": "mastermind.target_book.v2",
+        "settled_asof": "2026-10-05",
+        "settlement_fill_ids": [
+          "c9ec0d95c95320ead67363ccc42e3bb20ef1c9fa08878248a0a36e9287e901d9",
+          "2501e62b953c2b6166c641bfe389dc24aa4ab9981e5ed4f6f288597cd673e811"
+        ],
+        "settlement_receipt_sha256": "b4a7bb95a3b93ea6f5f30947cd4953aa87408bff612a5b6cc77e657567fdb53f",
+        "settlement_transaction_id": "b222043d08f9b091bbeea96bf59bac2ab6b67ccdc2448923afb5c7e0000c0eb8",
+        "skipped_unpriceable": [],
+        "sold_note": "No exits or trims this cycle. All three inherited holdings are common stock in leading/ballast sectors with intact theses; none triggered a hard falsifier, technical break, or distribution flag.",
+        "source_provenance": [
+          "mcp__desk__get_my_book",
+          "mcp__desk__get_market_packet",
+          "mcp__bot__get_daily_briefing",
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_standouts",
+          "mcp__bot__get_regime",
+          "mcp__bot__get_decision_matrix",
+          "narrative-analyst finalist research (MU, META)"
+        ],
+        "submission_audit": {
+          "blocked_actions": [],
+          "blocked_early_exits": [],
+          "blocked_exits": [],
+          "carried": [],
+          "identity": [
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MU",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "MSFT",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "XOM",
+              "verified": true
+            },
+            {
+              "kind": "common_stock",
+              "status": "trusted_company_profile.v1",
+              "ticker": "AAPL",
+              "verified": true
+            }
+          ],
+          "ignored_exit_requests": [],
+          "invalid_exit_requests": [],
+          "mandatory_instrument_migrations": [],
+          "quarantined": [],
+          "quote_fallback_holdings": [],
+          "rejected": [],
+          "sizing": {
+            "conviction_caps": {
+              "high": 0.15,
+              "low": 0.05,
+              "medium": 0.1
+            },
+            "max_single_weight": 0.15,
+            "model_weight_is_advisory_only": true,
+            "no_forced_marginal_names": true,
+            "policy": "deterministic_conviction_allocator.v2",
+            "posture_target_gross": 0.6,
+            "protected_gross": 0.225111,
+            "weight_quantization": {
+              "digits": 6,
+              "gross_increased": false,
+              "quantized_gross": 0.34322400000000003,
+              "raw_gross": 0.3432249219705277
+            }
+          },
+          "unallocated_adds": []
+        },
+        "submission_sha256": "ab82fb59cb7df55d13aab28c03a07bb86b01bd2ed404f4ce29ae66877f7654d4",
+        "summary": "Reflation/Q2 risk-on is governor-confirmed (risk_radar+mtf+cycles) but carries a bubble/blow-off CAUTION overlay (71/100), elevated-drawdown (60/100), contracting liquidity quality and narrow AI/semis breadth. Posture: deploy selectively into CONFIRMED leaders, not chase crowded tops. One new offensive add (MU, top of the corroborated funnel at 0.96, CONFIRMED_UP + alt86 ACCUMULATE), a modest dip-add to MSFT (sector RS 99th pctile, alt-accumulation, clean pullback), energy ballast held (XOM, RS rank-1 sector) to offset AI crowding, and a quality tech hold (AAPL). Cash stays elevated but deliberately lower, justified by the risk overlay and a documented record of rejected finalists.",
+        "target_sha256": "8142aaeebf95e1562e8b75a83d4fc576f4dc140f3b5f7c1484b9159e7d5e2128",
+        "target_status": "executed",
+        "tools_used": [
+          "ToolSearch",
+          "ToolSearch",
+          "mcp__desk__get_my_book",
+          "mcp__desk__get_market_packet",
+          "mcp__bot__get_daily_briefing",
+          "mcp__bot__get_intake_candidates",
+          "mcp__bot__get_standouts",
+          "mcp__bot__get_regime",
+          "Agent",
+          "Agent",
+          "mcp__bot__get_decision_matrix",
+          "mcp__desk__submit_book"
+        ],
+        "ts": "2026-10-02T23:15:13.743114+00:00"
+      }
+    }
+  ],
+  "records_sha256": "2fd00d902353cd09380bca21dc4db721002f8b235bb3b5ab9642d6740971cbca",
+  "redaction": {
+    "dropped_row_fields": [
+      {
+        "dropped_fields": [],
+        "line_index_0based": 75
+      }
+    ],
+    "other_holdings": [
+      {
+        "conviction": "low",
+        "line_index_0based": 75,
+        "ticker": "MSFT",
+        "weight": 0.05
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 75,
+        "ticker": "XOM",
+        "weight": 0.151395
+      },
+      {
+        "conviction": "medium",
+        "line_index_0based": 75,
+        "ticker": "AAPL",
+        "weight": 0.041829
+      }
+    ],
+    "policy": "retain all row-level fields verbatim except: drop perception_input; filter holdings and effective_holdings to the case ticker"
+  },
+  "schema": "pbr.decision_case_fixture.v1",
+  "ticker": "MU"
+}
