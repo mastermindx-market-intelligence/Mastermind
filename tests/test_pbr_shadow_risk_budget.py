@@ -304,6 +304,82 @@ def test_xom_positive_control_remains_eligible():
     assert facts.VerificationOutcome.BASIS_UNRECONCILED in evidence_step["drivers"]["blocking_verdicts"]
 
 
+def test_unreconciled_fact_factor_read_from_config():
+    """R-1750 F2: the evidence step READS its configured
+    ``unreconciled_fact_factor`` rather than a hard-coded zero.  The mutated
+    params live only in a deep-copied dict — the frozen config file is never
+    rewritten."""
+    import brain.facts as facts
+    import brain.shadow_risk_budget as shadow_risk_budget
+
+    cfg = shadow_risk_budget.load_params(CONFIG)
+    fix = _load(XOM_CONTROL)
+    record = _record_by_line(fix, 38)
+    digest = record["case_holding"]["falsifier"]
+    claim = "<redacted synthetic perturbation: level a tenth of the qualified mark, no bridge>"
+    instrument = {"ticker": "XOM", "book": "autonomous", "venue": None,
+                  "identity_status": record["case_holding"]["identity_status"]}
+    fact = {
+        "fact_id": facts.fact_id_for(claim, instrument, "price_level", "synthetic-factor-probe"),
+        "claim_text": claim,
+        "kind": "price_level",
+        "instrument": instrument,
+        "value": 15.83,  # a tenth of the mark: out of band, no bridge
+        "unit": "price_per_share",
+        "currency": "USD",
+        "period": None,
+        "published_at": None,
+        "available_at": None,
+        "observed_at": None,
+        "basis": {"adjustment": "unadjusted_close", "split_assumption": "current_shares", "currency": "USD"},
+        "source_class": "model_interpretation",
+        "source_family": "decision_package",
+        "source_ref": "synthetic-factor-probe",
+        "decision_asof": record["row"]["asof"],
+    }
+    mark = {
+        "schema": facts.REFERENCE_MARK_SCHEMA,
+        "value": 158.03,
+        "currency": "USD",
+        "basis": {"adjustment": "unadjusted_close", "split_assumption": "current_shares"},
+        "symbol": "XOM",
+        "asof": record["row"]["asof"],
+        "source": facts.MARK_SOURCE_ECON_UNION_MARK,
+        "store_ref": "test-double",
+        "mark_source": "test-double",
+    }
+    outcome = facts.verify_fact(fact, reference_mark=mark, config=cfg)
+    assert outcome["verdict"] == facts.VerificationOutcome.BASIS_UNRECONCILED
+
+    inputs = _inputs(XOM_CONTROL, "XOM", "autonomous", fact_outcomes=[outcome])
+    # The frozen params keep the hard zero (0.0): eligible weight is zeroed.
+    frozen = shadow_risk_budget.assess(inputs, cfg)
+    frozen_step = frozen["waterfall"][2]
+    assert frozen_step["drivers"]["blocking_verdicts"]
+    assert frozen_step["drivers"]["unreconciled_fact_factor"] == 0.0
+    assert frozen_step["drivers"]["fact_factor"] == 0.0
+    assert frozen_step["multiplier"] == 0.0
+    assert frozen["eligible_weight"] == 0.0
+
+    # The same blocking evidence under an in-memory-modified factor 0.5: the
+    # evidence step must follow the config (multiplier = clamped composition
+    # x 0.5), not stay at zero.
+    tuned = copy.deepcopy(cfg)
+    tuned["evidence_multiplier"]["unreconciled_fact_factor"]["value"] = 0.5
+    adjusted = shadow_risk_budget.assess(inputs, tuned)
+    step = adjusted["waterfall"][2]
+    drivers = step["drivers"]
+    clamped = max(drivers["multiplier_floor"], min(1.0, drivers["composition_multiplier"]))
+    assert drivers["unreconciled_fact_factor"] == 0.5
+    assert drivers["fact_factor"] == pytest.approx(0.5)
+    assert step["multiplier"] == pytest.approx(clamped * 0.5)
+    assert step["multiplier"] > 0
+    assert step["value"] > 0
+    running = min(frozen["waterfall"][0]["value"], frozen["waterfall"][1]["value"])
+    assert step["value"] == pytest.approx(round(running * clamped * 0.5, 6))
+    assert adjusted["eligible_weight"] > 0
+
+
 def test_config_frozen_ex_ante_and_versioned(tmp_path):
     import brain.shadow_risk_budget as shadow_risk_budget
 
@@ -335,6 +411,35 @@ def test_config_frozen_ex_ante_and_versioned(tmp_path):
     path.write_text(yaml.safe_dump(mutated), encoding="utf-8")
     with pytest.raises(shadow_risk_budget.ParamsError):
         shadow_risk_budget.load_params(path)
+
+
+def test_bare_numeric_param_rejected(tmp_path):
+    """R-1750 F5: a bare numeric/boolean scalar outside a ``{value,
+    justification}`` wrapper is refused by dotted path — no unjustified knob
+    may hide in the config tree.  The mutated mappings live only in memory and
+    are written ONLY to pytest tmp_path files; the frozen file is untouched
+    and still loads."""
+    import brain.shadow_risk_budget as shadow_risk_budget
+
+    # The frozen config itself carries no bare numeric besides version.
+    shadow_risk_budget.load_params(CONFIG)
+
+    raw = _config_raw()
+    mutated = copy.deepcopy(raw)
+    mutated["evidence_multiplier"]["smuggled_knob"] = 0.42
+    path = tmp_path / "smuggled_numeric.yml"
+    path.write_text(yaml.safe_dump(mutated), encoding="utf-8")
+    with pytest.raises(shadow_risk_budget.ParamsError) as excinfo:
+        shadow_risk_budget.load_params(path)
+    assert "evidence_multiplier.smuggled_knob" in str(excinfo.value)
+
+    mutated = copy.deepcopy(raw)
+    mutated["concentration"]["smuggled_flag"] = True
+    path = tmp_path / "smuggled_bool.yml"
+    path.write_text(yaml.safe_dump(mutated), encoding="utf-8")
+    with pytest.raises(shadow_risk_budget.ParamsError) as excinfo:
+        shadow_risk_budget.load_params(path)
+    assert "concentration.smuggled_flag" in str(excinfo.value)
 
 
 def test_config_names_no_case_ticker():

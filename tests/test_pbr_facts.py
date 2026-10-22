@@ -277,7 +277,21 @@ def _mu_catalyst_components(fix):
             assert digest["iso_dates"] == ["2026-10-22"], (name, digest["iso_dates"])
             value = digest["iso_dates"][0]  # SR-1 rule (2)
         components.append(
-            (name, _fact(fix, record, digest, kind="event_date", value=value, source_ref=f"records@75.{path}"))
+            (
+                name,
+                _fact(
+                    fix,
+                    record,
+                    digest,
+                    kind="event_date",
+                    value=value,
+                    source_ref=f"records@75.{path}",
+                    # SR-1 rule (3) declared identity: the claimed catalyst is
+                    # the fiscal Q4 2026 results release; the fixture digests
+                    # carry no period_labels.
+                    period="FY2026-Q4",
+                ),
+            )
         )
     return record, components
 
@@ -382,7 +396,10 @@ def test_mu_entry_catalyst_contradicted_in_every_component():
     record, components = _mu_catalyst_components(fix)
     assert record["row"]["asof"] == MU_DECISION_ASOF
     external = [
-        {**fact_item, "source_class": "company_release"}
+        # SR-1 rule (3) declared identity: the fixture external facts concern
+        # the fiscal Q4 2026 results release dated 2026-09-30 (the same event
+        # as the claimed catalyst); the fixture carries no period label on them.
+        {**fact_item, "source_class": "company_release", "period": "FY2026-Q4"}
         for fact_item in fix["external_facts"]
         if fact_item.get("event_date")
     ]
@@ -406,11 +423,183 @@ def test_mu_perturbation_event_after_asof_not_contradicted():
     fix = _load(MU_ENTRY)
     record, components = _mu_catalyst_components(fix)
     _, fact = components[0]
-    perturbed = [{"event_date": "2026-10-30", "source_class": "company_release"}]
+    perturbed = [
+        # Same declared identity as the claim (SR-1 rule (3)): the fiscal Q4
+        # 2026 results release, perturbed to after the decision asof.
+        {"event_date": "2026-10-30", "source_class": "company_release", "period": "FY2026-Q4"}
+    ]
     outcome = facts.verify_fact(fact, primary_evidence=perturbed, config=cfg)
     assert outcome["verdict"] == facts.VerificationOutcome.VERIFIED
     assert outcome["verdict"] != facts.VerificationOutcome.CONTRADICTED
     assert outcome["compared"]["primary_event_dates"] == ["2026-10-30"]
+
+
+def _probe_event_fact(claimed, asof, *, period="FY2026-Q4", event=None):
+    """Hand-built event_date probe fact (typed test data; no PM prose)."""
+    import brain.facts as facts
+
+    instrument = {"ticker": "PROBE", "book": "test", "venue": None, "identity_status": None}
+    claim = f"declared probe claim: event dated {claimed} for period {period}"
+    return {
+        "fact_id": facts.fact_id_for(
+            claim, instrument, "event_date", f"probe:{claimed}:{asof}:{period}:{event}"
+        ),
+        "claim_text": claim,
+        "kind": "event_date",
+        "instrument": instrument,
+        "value": claimed,
+        "unit": None,
+        "currency": None,
+        "period": period,
+        "event": event,
+        "published_at": None,
+        "available_at": None,
+        "observed_at": None,
+        "basis": None,
+        "source_class": "model_interpretation",
+        "source_family": "decision_package",
+        "source_ref": "probe",
+        "decision_asof": asof,
+    }
+
+
+def _probe_record(event_date, period=None, *, source_class="company_release", event=None):
+    """Hand-built primary-evidence probe record (typed test data)."""
+    record = {"event_date": event_date, "source_class": source_class}
+    if period is not None:
+        record["period"] = period
+    if event is not None:
+        record["event"] = event
+    return record
+
+
+def test_event_date_unrelated_period_never_contradicts():
+    """R-1750 F1: an unrelated past release of a different period never
+    contradicts a correct forward claim — only a SAME-event record can."""
+    import brain.facts as facts
+    import brain.shadow_risk_budget as shadow_risk_budget
+
+    cfg = shadow_risk_budget.load_params(CONFIG)
+    fact = _probe_event_fact("2026-10-22", "2026-10-02", period="FY2026-Q4")
+    evidence = [_probe_record("2026-08-26", "FY2026-Q3")]
+    outcome = facts.verify_fact(fact, primary_evidence=evidence, config=cfg)
+    assert outcome["verdict"] == facts.VerificationOutcome.UNVERIFIED
+    assert outcome["verdict"] != facts.VerificationOutcome.CONTRADICTED
+    assert outcome["reason"] == "no_identity_matched_primary_record"
+    compared = outcome["compared"]
+    assert compared["claimed_period"] == "FY2026-Q4"
+    assert compared["matched_record_count"] == 0
+    assert compared["other_identity_record_count"] == 1
+    assert compared["primary_event_dates"] == []
+
+
+def test_event_date_unrelated_past_record_does_not_mask_matching_forward_record():
+    """R-1750 F1: an unrelated past release must not mask a same-event record
+    that confirms the forward catalyst."""
+    import brain.facts as facts
+    import brain.shadow_risk_budget as shadow_risk_budget
+
+    cfg = shadow_risk_budget.load_params(CONFIG)
+    fact = _probe_event_fact("2026-10-22", "2026-10-02", period="FY2026-Q4")
+    evidence = [
+        _probe_record("2026-08-26", "FY2026-Q3"),
+        _probe_record("2026-10-22", "FY2026-Q4"),
+    ]
+    outcome = facts.verify_fact(fact, primary_evidence=evidence, config=cfg)
+    assert outcome["verdict"] == facts.VerificationOutcome.VERIFIED
+    assert outcome["reason"] == "forward_catalyst_confirmed_by_primary"
+    compared = outcome["compared"]
+    assert compared["primary_event_dates"] == ["2026-10-22"]
+    assert compared["matched_record_count"] == 1
+    assert compared["other_identity_record_count"] == 1
+
+
+def test_event_date_requires_identity_and_primary_class():
+    """R-1750 F1: identity and primary class gate every date comparison."""
+    import brain.facts as facts
+    import brain.shadow_risk_budget as shadow_risk_budget
+
+    cfg = shadow_risk_budget.load_params(CONFIG)
+    fact = _probe_event_fact("2026-10-22", "2026-10-02", period="FY2026-Q4")
+
+    # (a) A dated record without a period identity is unidentified: it never
+    # matches, so it can neither contradict nor confirm.
+    outcome = facts.verify_fact(
+        fact, primary_evidence=[_probe_record("2026-09-30", None)], config=cfg
+    )
+    assert outcome["verdict"] == facts.VerificationOutcome.UNVERIFIED
+    assert outcome["reason"] == "no_identity_matched_primary_record"
+    assert outcome["compared"]["unidentified_record_count"] == 1
+
+    # (b) A same-period record without a source_class is not primary evidence:
+    # it is excluded and counted, and never contradicts.
+    outcome = facts.verify_fact(
+        fact,
+        primary_evidence=[{"event_date": "2026-09-30", "period": "FY2026-Q4"}],
+        config=cfg,
+    )
+    assert outcome["verdict"] != facts.VerificationOutcome.CONTRADICTED
+    assert outcome["compared"]["classless_record_count"] == 1
+    assert outcome["compared"]["matched_record_count"] == 0
+
+    # (c) A fact with no period identity of its own is recorded unverified.
+    fact_no_period = _probe_event_fact("2026-10-22", "2026-10-02", period=None)
+    outcome = facts.verify_fact(
+        fact_no_period,
+        primary_evidence=[_probe_record("2026-09-30", "FY2026-Q4")],
+        config=cfg,
+    )
+    assert outcome["verdict"] == facts.VerificationOutcome.UNVERIFIED
+    assert outcome["reason"] == "event_identity_absent"
+
+    # (d) A conflicting short event label on both sides breaks identity too.
+    labelled = _probe_event_fact(
+        "2026-10-22", "2026-10-02", period="FY2026-Q4", event="earnings_release"
+    )
+    outcome = facts.verify_fact(
+        labelled,
+        primary_evidence=[
+            _probe_record("2026-09-30", "FY2026-Q4", event="guidance_update")
+        ],
+        config=cfg,
+    )
+    assert outcome["verdict"] != facts.VerificationOutcome.CONTRADICTED
+    assert outcome["reason"] == "no_identity_matched_primary_record"
+
+
+def test_event_date_past_claim_checked_only_against_same_identity():
+    """R-1750 F1 item 3b: the <=-asof contradiction applies to FORWARD claims
+    only; a past claim is confirmed by its own event, contradicted only by a
+    SAME-event record dating it differently."""
+    import brain.facts as facts
+    import brain.shadow_risk_budget as shadow_risk_budget
+
+    cfg = shadow_risk_budget.load_params(CONFIG)
+    asof = "2026-10-02"
+
+    # (a) A same-period record dating the past event differently contradicts.
+    fact = _probe_event_fact("2026-09-15", asof, period="FY2026-Q4")
+    outcome = facts.verify_fact(
+        fact, primary_evidence=[_probe_record("2026-09-30", "FY2026-Q4")], config=cfg
+    )
+    assert outcome["verdict"] == facts.VerificationOutcome.CONTRADICTED
+    assert outcome["reason"] == "primary_dates_past_event_differently"
+
+    # (b) A different-period record never contradicts a past claim either.
+    outcome = facts.verify_fact(
+        fact, primary_evidence=[_probe_record("2026-08-26", "FY2026-Q3")], config=cfg
+    )
+    assert outcome["verdict"] == facts.VerificationOutcome.UNVERIFIED
+    assert outcome["reason"] == "no_identity_matched_primary_record"
+
+    # (c) A past claim confirmed by its own same-event record: a correct past
+    # claim is not "already published before asof".
+    fact = _probe_event_fact("2026-09-30", asof, period="FY2026-Q4")
+    outcome = facts.verify_fact(
+        fact, primary_evidence=[_probe_record("2026-09-30", "FY2026-Q4")], config=cfg
+    )
+    assert outcome["verdict"] == facts.VerificationOutcome.VERIFIED
+    assert outcome["reason"] == "past_event_confirmed_by_primary"
 
 
 def test_mu_price_claims_basis_unreconciled():
@@ -503,7 +692,10 @@ def test_risk_increase_ineligible_when_any_supporting_fact_bad():
     record, components = _mu_catalyst_components(fix)
     mark = _econ_union_mark_double(1069.68, fix["ticker"], MU_DECISION_ASOF)
     external = [
-        {**item, "source_class": "company_release"}
+        # SR-1 rule (3) declared identity: the fixture external facts concern
+        # the fiscal Q4 2026 results release dated 2026-09-30 (the same event
+        # as the claimed catalyst); the fixture carries no period label on them.
+        {**item, "source_class": "company_release", "period": "FY2026-Q4"}
         for item in fix["external_facts"]
         if item.get("event_date")
     ]

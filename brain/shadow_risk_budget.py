@@ -28,9 +28,10 @@ a plain dict; it vetoes nothing live.
 Blocking fact outcomes (seat ruling Q2): a supporting fact that is
 CONTRADICTED, or BASIS_UNRECONCILED against a *qualified* reference mark
 (``brain.facts`` owns the typed-mark qualification), multiplies the evidence
-step by the configured ``unreconciled_fact_factor`` (0.0) — contradiction is
-not averaged away, and the rule is conditional on the recorded evidence, never
-on the instrument.
+step by the configured ``unreconciled_fact_factor`` (0.0 in the frozen
+config; the value is read from the config, never hard-coded — review
+R-1750 F2) — contradiction is not averaged away, and the rule is conditional
+on the recorded evidence, never on the instrument.
 """
 
 from __future__ import annotations
@@ -87,7 +88,18 @@ def _pv(params: Mapping, dotted: str) -> Any:
 
 
 def _check_justifications(node: Any, path: str = "") -> int:
-    """Every leaf parameter ({value, justification}) needs a written justification."""
+    """Every numeric leaf needs the ``{value, justification}`` wrapper + justification.
+
+    Every ``{value, justification}`` leaf parameter needs a written
+    justification, and — review R-1750 F5 — a bare scalar (``int``, ``float``
+    or ``bool``) outside such a wrapper escapes the justification regime
+    entirely, so it is rejected by dotted path ("a parameter without a
+    justification is invalid", the config header's own contract).  Bare
+    strings (descriptions, notes, ``schema``, ``frozen_at``, ``freeze_owner``,
+    ``freeze_record.*``, ``justification_policy``) stay allowed, list items
+    are walked under the same rule, and the top-level ``version`` is a bare
+    int by design.
+    """
     checked = 0
     if isinstance(node, Mapping):
         if "value" in node:
@@ -108,7 +120,22 @@ def _check_justifications(node: Any, path: str = "") -> int:
                 ) from exc
             return 1
         for key, child in node.items():
-            checked += _check_justifications(child, f"{path}.{key}" if path else str(key))
+            child_path = f"{path}.{key}" if path else str(key)
+            if path == "" and key == "version":
+                # The freeze version is a bare int by design (validated in
+                # load_params); every other numeric leaf must be wrapped.
+                continue
+            checked += _check_justifications(child, child_path)
+    elif isinstance(node, (list, tuple)):
+        for index, item in enumerate(node):
+            checked += _check_justifications(item, f"{path}[{index}]")
+    elif isinstance(node, (bool, int, float)):
+        kind = "boolean" if isinstance(node, bool) else "numeric"
+        raise ParamsError(
+            f"parameter {path or '<root>'!r} is a bare {kind} scalar outside a "
+            "{value, justification} wrapper (a parameter without a justification "
+            "is invalid)"
+        )
     return checked
 
 
@@ -262,8 +289,14 @@ def _evidence_step(inputs: Mapping, params: Mapping, running: float) -> tuple[di
         }
     )
     # A CONTRADICTED or BASIS_UNRECONCILED supporting fact bypasses the
-    # composition floor entirely: the fact factor is a hard zero.
-    fact_factor = 0.0 if blocking_verdicts else 1.0
+    # composition floor entirely: the fact factor reads its configured
+    # unreconciled_fact_factor (0.0 in the frozen config — a hard zero there),
+    # never a hard-coded number (review R-1750 F2).
+    fact_factor = (
+        float(_pv(params, "evidence_multiplier.unreconciled_fact_factor"))
+        if blocking_verdicts
+        else 1.0
+    )
     multiplier = clamped * fact_factor
     drivers.update(
         {
@@ -287,9 +320,10 @@ def _evidence_step(inputs: Mapping, params: Mapping, running: float) -> tuple[di
         explanation = (
             "supporting facts carry "
             f"{', '.join(blocking_verdicts)} outcomes: contradiction is not averaged "
-            "away, so the evidence step multiplies by zero and no eligible weight "
-            "remains for a risk-increasing action (conditional on the recorded "
-            "evidence, never on the instrument)"
+            "away, so the evidence step multiplies by the configured "
+            f"unreconciled_fact_factor ({fact_factor}); at the frozen 0.0 no "
+            "eligible weight remains for a risk-increasing action (conditional "
+            "on the recorded evidence, never on the instrument)"
         )
     else:
         explanation = (

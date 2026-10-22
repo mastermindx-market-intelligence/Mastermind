@@ -865,3 +865,43 @@ def test_xom_thesis_episode_positive_control(tmp_path):
         cfg,
     )
     assert assessment["eligible_weight"] > 0
+
+
+def test_falsy_thesis_id_backfilled_with_derived_id(tmp_path):
+    """R-1750 F4: a present-but-falsy ``thesis_id`` ("" or None) is treated as
+    absent — the derived episode id is backfilled, never the falsy value."""
+    import brain.thesis_store as thesis_store
+
+    fix = _load(MU_ENTRY)
+    record = fix["records"][0]
+    holding = record["case_holding"]
+    fill = fix["fills"][0]["row"]
+    derived = thesis_store.make_thesis_id(
+        _book_of(fix), fix["ticker"], fill["date"], record["decision_id"]
+    )
+
+    def _payload(thesis_id):
+        return {
+            "thesis_id": thesis_id,
+            "book": _book_of(fix),
+            "ticker": fix["ticker"],
+            "episode_open_date": fill["date"],
+            "entry_fill_ids": [fill["fill_id"]],
+            "why_now": _placeholder(holding["why_now"]),
+            "fact_ids": [],
+            "horizon": _placeholder(holding["expected_horizon"]),
+            "falsifiers": [_placeholder(holding["falsifier"])],
+            "exit_conditions": [_placeholder(holding["exit_plan"])],
+            "position_role": "starter",
+            "originating_decision_id": record["decision_id"],
+            "created_at": record["row"]["ts"],
+        }
+
+    for falsy in (None, ""):
+        store = tmp_path / ("store_" + ("none" if falsy is None else "empty"))
+        stored = thesis_store.record_thesis(store, _payload(falsy))
+        assert stored["thesis_id"] == derived, falsy
+        retrieved = thesis_store.thesis_for_episode(
+            store, _book_of(fix), fix["ticker"], fill["date"]
+        )
+        assert retrieved["thesis_id"] == derived, falsy

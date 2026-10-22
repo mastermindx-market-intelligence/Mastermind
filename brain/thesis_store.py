@@ -1,7 +1,7 @@
 """Durable episode thesis + amendment records for PBR (shadow, append-only).
 
-Spec: ``docs/superpowers/specs/2026-10-22-pbr-pm-facts-thesis-risk-budget.md``
-§3 (``pbr.thesis.v1`` / ``pbr.thesis_amendment.v1``), amended by the seat
+Spec: the PBR facts/thesis/risk-budget spec (PR #1701), §3
+(``pbr.thesis.v1`` / ``pbr.thesis_amendment.v1``), amended by the seat
 rulings of 2026-10-22 (Q1 amendment watching / conviction observations; Q4
 amendment reason codes).
 
@@ -289,14 +289,15 @@ def record_thesis(store_dir: Path, record: Mapping) -> ThesisRecord:
         raise ThesisStoreError(
             f"schema must be {SCHEMA_VERSION}", code="invalid_thesis_record"
         )
-    out.setdefault(
-        "thesis_id",
-        make_thesis_id(
-            str(out["book"]),
-            str(out["ticker"]),
-            str(out["episode_open_date"]),
-            str(out["originating_decision_id"]),
-        ),
+    # A present-but-falsy thesis_id ("" or None) is treated as absent and
+    # backfilled with the derived episode id (review R-1750 F4) — a null-id
+    # record would be unretrievable for amendment and collide in duplicate
+    # detection.
+    out["thesis_id"] = out.get("thesis_id") or make_thesis_id(
+        str(out["book"]),
+        str(out["ticker"]),
+        str(out["episode_open_date"]),
+        str(out["originating_decision_id"]),
     )
     out["entry_fill_ids"] = [str(x) for x in (out.get("entry_fill_ids") or [])]
     out["fact_ids"] = [str(x) for x in (out.get("fact_ids") or [])]

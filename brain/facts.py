@@ -1,10 +1,20 @@
 """Typed fact records and verification rules for PBR decision materials.
 
-Spec: ``docs/superpowers/specs/2026-10-22-pbr-pm-facts-thesis-risk-budget.md``
-§2 (``pbr.fact.v1``).  A fact is a single verifiable claim lifted verbatim from
+Spec: the PBR facts/thesis/risk-budget spec (PR #1701), §2 (``pbr.fact.v1``).
+A fact is a single verifiable claim lifted verbatim from
 decision materials (why-now, falsifier, exit plan, rationale, memo, top-level
 falsifiers), carrying its source class/family, its point-in-time stamps and —
 for price kinds — its price/adjustment basis.
+
+Rule (i) as implemented (spec §2.2(i) as narrowed by reviews R-1701 F1 and
+R-1750 F1): a primary record of the SAME event — identity agreement on
+``period``, and on the short ``event`` label when both the fact and the
+record carry one — dated ≤ ``decision_asof`` contradicts a claim that asserts
+a *future* catalyst relative to the decision asof.  Only identity-matched
+records whose ``source_class`` is a primary evidence class participate in any
+date comparison: a record of a different event, an unidentified record, a
+class-less record — and, for a past claim, the mere fact that a same-event
+record is dated ≤ asof — never contradicts.
 
 This module is verification and findings ONLY:
 
@@ -333,22 +343,42 @@ def _outcome(fact: Mapping, verdict: str, reason: str, compared: Mapping) -> Out
     }
 
 
-def _primary_records(primary_evidence: Sequence[Mapping]) -> list[dict]:
-    """Normalize caller evidence records to primary records with a resolved event date.
+def _period_label(value: Any) -> str | None:
+    """Normalized event-identity period label (``FY2026-Q4`` form), or None."""
+    text = str(value or "").strip().upper()
+    return text or None
 
-    A record qualifies when its ``source_class`` is a primary class (or it
-    carries no class but does carry a date — fixture evidence is supplied by
-    the caller and is primary by construction).  The event date is
-    ``event_date`` when present, else ``published_at``/``published``, else
-    ``available_at``: a release's publication *is* its event when no separate
-    event date is stated.
+
+def _event_label(value: Any) -> str | None:
+    """Normalized short event kind label (compared case-insensitively), or None."""
+    text = str(value or "").strip().lower()
+    return text or None
+
+
+def _primary_records(primary_evidence: Sequence[Mapping]) -> tuple[list[dict], int]:
+    """Normalize caller evidence records to primary records with identity + event date.
+
+    A record qualifies as primary evidence only when its ``source_class``
+    names a primary class (``primary_filing``/``company_release``); a
+    class-less or non-primary record is excluded and counted (reviews
+    R-1701 F1 / R-1750 F1 — a class-less dated record is not primary evidence
+    and never contradicts anything).  Each admitted record carries its
+    optional event identity — ``period`` (the same label form as the fact's
+    ``period``) and, when both sides carry one, a short ``event`` kind label.
+    The event date is ``event_date`` when present, else
+    ``published_at``/``published``, else ``available_at``: a release's
+    publication *is* its event when no separate event date is stated.
+
+    Returns ``(records, classless_record_count)``.
     """
     out: list[dict] = []
+    classless = 0
     for raw in primary_evidence or ():
         if not isinstance(raw, Mapping):
             continue
         source_class = str(raw.get("source_class") or "").strip()
-        if source_class and source_class not in PRIMARY_EVIDENCE_CLASSES:
+        if source_class not in PRIMARY_EVIDENCE_CLASSES:
+            classless += 1
             continue
         event = _parse_date(
             raw.get("event_date")
@@ -361,11 +391,13 @@ def _primary_records(primary_evidence: Sequence[Mapping]) -> list[dict]:
         out.append(
             {
                 "event_date": event,
-                "source_class": source_class or PRIMARY_EVIDENCE_CLASSES[1],
+                "source_class": source_class,
+                "period": _period_label(raw.get("period")),
+                "event": _event_label(raw.get("event")),
                 "source_ref": str(raw.get("source_ref") or raw.get("url") or ""),
             }
         )
-    return out
+    return out, classless
 
 
 def _band(config: Mapping) -> tuple[float, float]:
@@ -401,20 +433,58 @@ def _basis_matches(fact: Mapping, mark: Mapping) -> tuple[bool, str]:
     return True, ""
 
 
-def _verify_event_date(fact: Mapping, primary: list[dict]) -> Outcome:
-    """Rule (i): a dated catalyst claimed ahead of the decision must still be ahead.
+def _verify_event_date(
+    fact: Mapping, primary: list[dict], classless_record_count: int
+) -> Outcome:
+    """Rule (i): a primary record of the SAME event dated <= asof contradicts a forward claim.
 
-    Fires on every event_date fact extracted from the entry package — the rule
-    is keyed on the fact's kind and value, never on which component
+    Spec §2.2(i) as narrowed by reviews R-1701 F1 and R-1750 F1: a primary
+    record of the SAME event — identity agreement on ``period``, and on the
+    short ``event`` label when both the fact and the record carry one — dated
+    ≤ ``decision_asof`` contradicts a claim that asserts a *future* catalyst
+    relative to the decision asof.  The ≤-asof comparison therefore runs only
+    on the forward branch, so a correct past claim can still be confirmed by
+    its own event.  Only identity-matched primary-class records participate in
+    any date comparison: a record of a different period never contradicts
+    (an unrelated past release says nothing about this claim), an unidentified
+    record (no ``period``) never matches, and a fact with no period identity
+    of its own is recorded unverified rather than compared.  Fires on every
+    event_date fact extracted from the entry package — the rule is keyed on
+    the fact's kind and value, never on which component
     (why_now / falsifier / exit_plan / rationale / memo) carried it.  Reasons
     are stable short codes; the human-readable detail travels on ``compared``.
     """
     claimed = _parse_date(fact.get("value"))
     asof = _parse_date(fact.get("decision_asof"))
-    compared = {
+    claimed_period = _period_label(fact.get("period"))
+    claimed_event = _event_label(fact.get("event"))
+    matched: list[dict] = []
+    other_identity: list[dict] = []
+    unidentified: list[dict] = []
+    for record in primary:
+        if record["period"] is None:
+            unidentified.append(record)
+        elif (
+            claimed_period is not None
+            and record["period"] == claimed_period
+            and (
+                record["event"] is None
+                or claimed_event is None
+                or record["event"] == claimed_event
+            )
+        ):
+            matched.append(record)
+        else:
+            other_identity.append(record)
+    compared: dict[str, Any] = {
         "claimed_event_date": claimed.isoformat() if claimed else None,
         "decision_asof": asof.isoformat() if asof else None,
-        "primary_event_dates": sorted(r["event_date"].isoformat() for r in primary),
+        "claimed_period": claimed_period,
+        "primary_event_dates": sorted(r["event_date"].isoformat() for r in matched),
+        "matched_record_count": len(matched),
+        "other_identity_record_count": len(other_identity),
+        "unidentified_record_count": len(unidentified),
+        "classless_record_count": classless_record_count,
     }
 
     def _reason(verdict: str, reason: str, detail: str) -> Outcome:
@@ -428,55 +498,77 @@ def _verify_event_date(fact: Mapping, primary: list[dict]) -> Outcome:
             "event_date fact lacks a parseable claimed date or decision_asof; "
             "recorded, not discarded",
         )
-    if primary:
-        already = [r for r in primary if r["event_date"] <= asof]
+    if not primary:
+        # No primary evidence at all: recorded, never discarded (unchanged).
+        if claimed > asof:
+            return _reason(
+                VerificationOutcome.UNVERIFIED,
+                "forward_catalyst_without_primary_evidence",
+                "forward-dated catalyst with no primary evidence; recorded, not discarded",
+            )
+        return _reason(
+            VerificationOutcome.UNVERIFIED,
+            "past_event_without_primary_evidence",
+            "past-dated claim with no primary evidence; recorded, not discarded",
+        )
+    if claimed_period is None:
+        return _reason(
+            VerificationOutcome.UNVERIFIED,
+            "event_identity_absent",
+            (
+                f"the event_date fact declares no period identity while "
+                f"{len(primary)} primary evidence records exist; without event "
+                "identity no date comparison is sound, so the fact is recorded "
+                "unverified"
+            ),
+        )
+    if not matched:
+        return _reason(
+            VerificationOutcome.UNVERIFIED,
+            "no_identity_matched_primary_record",
+            (
+                f"{len(primary)} primary evidence records exist but none matches the "
+                f"claimed event identity (period {claimed_period}); a record of a "
+                "different event never contradicts this claim"
+            ),
+        )
+    if claimed > asof:
+        already = [r for r in matched if r["event_date"] <= asof]
         if already:
             return _reason(
                 VerificationOutcome.CONTRADICTED,
                 "catalyst_already_published_before_asof",
                 (
-                    "primary evidence shows the claimed catalyst was already published "
-                    f"on/before the decision asof ({already[0]['event_date'].isoformat()} "
-                    f"<= {asof.isoformat()}); a decision may not lean on an "
-                    "already-reported catalyst as a forward gate"
-                ),
-            )
-    if claimed > asof:
-        if primary:
-            return _reason(
-                VerificationOutcome.VERIFIED,
-                "forward_catalyst_confirmed_by_primary",
-                (
-                    "primary evidence dates the catalyst after the decision asof; the "
-                    "forward-catalyst claim stands as of the decision"
+                    "primary evidence of the SAME event shows the claimed forward "
+                    "catalyst was already published on/before the decision asof "
+                    f"({already[0]['event_date'].isoformat()} <= {asof.isoformat()}); "
+                    "a decision may not lean on an already-reported catalyst as a "
+                    "forward gate"
                 ),
             )
         return _reason(
-            VerificationOutcome.UNVERIFIED,
-            "forward_catalyst_without_primary_evidence",
-            "forward-dated catalyst with no primary evidence; recorded, not discarded",
+            VerificationOutcome.VERIFIED,
+            "forward_catalyst_confirmed_by_primary",
+            (
+                "primary evidence of the SAME event dates the catalyst after the "
+                "decision asof; the forward-catalyst claim stands as of the decision"
+            ),
         )
-    # Claim asserts an already-past date: checkable against primary evidence.
-    matching = [r for r in primary if r["event_date"] == claimed]
+    # Claim asserts an already-past date: checkable against same-event evidence.
+    matching = [r for r in matched if r["event_date"] == claimed]
     if matching:
         return _reason(
             VerificationOutcome.VERIFIED,
             "past_event_confirmed_by_primary",
-            "primary evidence confirms the claimed past event date",
-        )
-    if primary:
-        return _reason(
-            VerificationOutcome.CONTRADICTED,
-            "primary_dates_past_event_differently",
-            (
-                "primary evidence dates the past event differently "
-                f"({primary[0]['event_date'].isoformat()} != {claimed.isoformat()})"
-            ),
+            "primary evidence of the SAME event confirms the claimed past event date",
         )
     return _reason(
-        VerificationOutcome.UNVERIFIED,
-        "past_event_without_primary_evidence",
-        "past-dated claim with no primary evidence; recorded, not discarded",
+        VerificationOutcome.CONTRADICTED,
+        "primary_dates_past_event_differently",
+        (
+            "primary evidence of the SAME event dates the past event differently "
+            f"({matched[0]['event_date'].isoformat()} != {claimed.isoformat()})"
+        ),
     )
 
 
@@ -625,7 +717,8 @@ def verify_fact(
                 raise ValueError(f"{kind} facts require a basis mapping")
 
     if kind == "event_date":
-        return _verify_event_date(fact, _primary_records(primary_evidence))
+        primary, classless_count = _primary_records(primary_evidence)
+        return _verify_event_date(fact, primary, classless_count)
     if kind in ("price_level", "price_target"):
         return _verify_price_basis(fact, reference_mark, config)
     if kind == "metric":
