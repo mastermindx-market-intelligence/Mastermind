@@ -445,11 +445,12 @@ def test_online_backup_is_private_verified_and_manifest_is_receipt_only(tmp_path
         assert connection.execute("SELECT COUNT(*) FROM attempts").fetchone()[0] == 1
 
 
-def test_frozen_schema_digests_match_test_only_v3_v4_and_v5_references():
+def test_frozen_schema_digests_match_test_only_v3_through_v6_references():
     assert executive_backup._NORMALIZED_SCHEMA_DIGESTS == {
         3: executive_backup._reference_normalized_schema_digest_for_tests(3),
         4: executive_backup._reference_normalized_schema_digest_for_tests(4),
         5: executive_backup._reference_normalized_schema_digest_for_tests(5),
+        6: executive_backup._reference_normalized_schema_digest_for_tests(6),
     }
     assert executive_backup._NORMALIZED_SCHEMA_DIGESTS[5] == (
         executive_runtime._NORMALIZED_V5_SCHEMA_DIGEST
@@ -1226,7 +1227,7 @@ def test_upgrade_rejects_unproven_release_and_cli_is_directly_runnable(tmp_path)
     assert sorted(item.name for item in database.parent.iterdir()) == [database.name]
 
 
-def test_default_v5_online_backup_and_drill_succeed(tmp_path):
+def test_default_v6_online_backup_and_drill_succeed(tmp_path):
     runtime, _lease_token = _runtime_with_claim(tmp_path / "runtime")
 
     receipt = create_online_backup(runtime.store, tmp_path / "backups")
@@ -1234,11 +1235,11 @@ def test_default_v5_online_backup_and_drill_succeed(tmp_path):
     drill = verify_restore_drill(receipt.database_path, receipt.manifest_path)
 
     assert verified.normalized_schema_digest == (
-        executive_backup._NORMALIZED_SCHEMA_DIGESTS[5]
+        executive_backup._NORMALIZED_SCHEMA_DIGESTS[6]
     )
-    assert [item.version for item in verified.migrations] == [1, 2, 3, 4, 5]
-    assert drill.runtime_schema_version == 5
-    assert drill.migration_versions == (1, 2, 3, 4, 5)
+    assert [item.version for item in verified.migrations] == [1, 2, 3, 4, 5, 6]
+    assert drill.runtime_schema_version == 6
+    assert drill.migration_versions == (1, 2, 3, 4, 5, 6)
 
 
 def test_exact_v4_offline_backup_drill_and_full_v4_projection_roundtrip(tmp_path):
@@ -1370,9 +1371,11 @@ def test_explicit_v4_to_v5_upgrade_preserves_populated_v4_content(
 
     from control_plane.executive_runtime import RuntimeStore
 
-    upgraded_store = RuntimeStore(
-        tmp_path, create=False, existing_writable=True, database_path=database
-    )
+    # This historical migration still stops exactly at v5. The v6 runtime
+    # may inspect it read-only, but cannot silently append its next migration.
+    with pytest.raises(executive_runtime.ExecutiveSchemaUpgradeRequired):
+        RuntimeStore(tmp_path, create=False, existing_writable=True, database_path=database)
+    upgraded_store = RuntimeStore(tmp_path, create=False, database_path=database)
     with upgraded_store.read() as connection:
         assert connection.execute(
             "SELECT MAX(version) FROM schema_migrations"
@@ -1403,9 +1406,9 @@ def test_v4_to_v5_after_v3_to_v4_preserves_prior_transition_receipts(
     verify_backup(database, expected_schema_version=5)
     from control_plane.executive_runtime import RuntimeStore
 
-    with RuntimeStore(
-        tmp_path, create=False, existing_writable=True, database_path=database
-    ).read() as connection:
+    with pytest.raises(executive_runtime.ExecutiveSchemaUpgradeRequired):
+        RuntimeStore(tmp_path, create=False, existing_writable=True, database_path=database)
+    with RuntimeStore(tmp_path, create=False, database_path=database).read() as connection:
         assert connection.execute(
             "SELECT COUNT(*) FROM events WHERE event_type='OHF_RESTORE_INVALIDATED'"
         ).fetchone()[0] == 1
@@ -1751,7 +1754,7 @@ def test_restore_drill_uses_an_isolated_copy_and_leaves_live_state_unchanged(tmp
     assert drill.database_sha256 == receipt.database_sha256
     assert drill.integrity_check == "ok"
     assert drill.foreign_key_check == "ok"
-    assert drill.migration_versions == (1, 2, 3, 4, 5)
+    assert drill.migration_versions == (1, 2, 3, 4, 5, 6)
     assert _logical_state(runtime) == before
 
 
