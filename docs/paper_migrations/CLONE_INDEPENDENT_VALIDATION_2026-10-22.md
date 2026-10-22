@@ -83,3 +83,20 @@ A further read-only **exact source `01M2WGNCX9475G79JRKJTCM08P` versus existing 
 - This covers historical-comparison and outcome-inspection design states, **dark/light EN desktop and dark/light ZH mobile**. Representative exact-source-versus-clone screenshots were also JPEG-payload identical for `6LEM-0` (182,560 encoded characters per side) and `6LXN-0` (87,100 each).
 
 **Classification: STRONG_SELECTED_PAGE_NATIVE_STYLE_PARITY_OBSERVED, NOT A MIGRATION ACCEPTANCE.** These sequential independent reads do not establish an atomic revision, asset/reference/comment/interaction completeness, native backup restoration, a successful destination split, nor future currentness if collaborators edit the original. The page is a better **first multi-state clone-retention candidate** than the drifted Commodities page, but it still requires fresh plan/pre-prune checks against the actual clone selected at execution, review of all asset/component links, exact-page UI targeting, and independent post-prune reopening. No Paper content was altered by this audit.
+
+### All-eight JPEG rendering parity
+
+Follow-up read-only `get_screenshot(fileId,nodeId,scale=1)` on every remaining `p-22-0` artboard established **8/8 byte-identical JPEG payloads** between the exact original and existing native clone. Every source and clone screenshot was independently returned as `image/jpeg` and matched **byte for byte** (base64 payload equality), not merely by viewing similar thumbnails:
+
+| Native artboard | Base64 characters per image, both files | Exact JPEG equality |
+|---|---:|---|
+| `6LEM-0` | 182,560 | Yes |
+| `6LH9-0` | 194,356 | Yes |
+| `6LK0-0` | 124,312 | Yes |
+| `6LN2-0` | 115,520 | Yes |
+| `6LUW-0` | 119,104 | Yes |
+| `6LWD-0` | 131,500 | Yes |
+| `6LXN-0` | 87,100 | Yes |
+| `6LYX-0` | 78,872 | Yes |
+
+This upgrades the historical Market Memory source/clone evidence to **all eight native JSX bodies and all eight full-size screenshot outputs matching** at read time. It still does **not** prove a safe split or the current image/component/comment/prototype graph, nor authorize deletion; those exact capability gates remain in the migration contract. No design file was modified by these reads.
