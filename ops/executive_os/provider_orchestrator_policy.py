@@ -62,6 +62,21 @@ ROLE_PACKAGE = "mastermind-fabric-orchestration"
 CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
 # Git blob digest of the separately reviewed local Skill source; not a runtime grant.
 CLAUDE_FABRIC_SKILL_BLOB_SHA = "3dc63723e0e002bdb2337aaf68dfa97b7c0ced5f"
+FABRIC_ENTRY_BEGIN = "<!-- mastermind-claude-fabric-entrypoint-v1 -->"
+FABRIC_ENTRY_END = "<!-- /mastermind-claude-fabric-entrypoint-v1 -->"
+FABRIC_ENTRY_BODY = """<!-- mastermind-claude-fabric-entrypoint-v1 -->
+## M2 Claude: delegate through existing Mastermind Subagent Fabric
+
+When you are the currently assigned, authorized orchestrator and a bounded worker
+will save effort, read `~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md`
+first. It gives the real M2 Fabric CLI/MCP request, status, result and acceptance
+path, as well as operator -> child return. Require verified original root and
+actual immediate parent, authorized tools and existing admission. No native
+Agent/Task or direct provider/SSH substitute and no inherited authorization.
+Leaf workers cannot fan out; only a separately admitted operator with the
+controller-issued child scope may request C0/C1 descendants.
+<!-- /mastermind-claude-fabric-entrypoint-v1 -->
+"""
 ROLE_SHA256 = {'SKILL.md': '2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
 
 POLICY_BODY = f"""{BEGIN}
@@ -990,19 +1005,116 @@ def apply_provider_policy(
     )
 
 
+
+def _render_claude_fabric_entry_doc(raw: bytes) -> bytes:
+    """Add one discoverable pointer without changing other Claude instructions."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise OrchestratorPolicyError("Claude instructions are not UTF-8") from exc
+    if text.count(FABRIC_ENTRY_BEGIN) != text.count(FABRIC_ENTRY_END) or text.count(FABRIC_ENTRY_BEGIN) > 1:
+        raise OrchestratorPolicyError("Claude Fabric entrypoint markers ambiguous")
+    # A successfully installed full managed policy already contains this entry.
+    if text.count(BEGIN) == text.count(END) == 1:
+        block = text[text.index(BEGIN):text.index(END) + len(END)]
+        if "mastermind-claude-fabric-delegation/SKILL.md" in block and FABRIC_ENTRY_BEGIN not in text:
+            return raw
+    if FABRIC_ENTRY_BEGIN in text:
+        start = text.index(FABRIC_ENTRY_BEGIN)
+        end = text.index(FABRIC_ENTRY_END, start) + len(FABRIC_ENTRY_END)
+        updated = text[:start] + FABRIC_ENTRY_BODY.rstrip() + text[end:]
+        return (updated.rstrip() + "\n").encode("utf-8")
+    return ((text.rstrip() + "\n\n") if text.strip() else "").encode("utf-8") + FABRIC_ENTRY_BODY.encode("utf-8")
+
+
+def verify_claude_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Verify only the delegated M2 Claude guide, not native capacity policy."""
+    paths = _paths(home)
+    expected_skill = _canonical_claude_fabric_skill()
+    issues: list[str] = []
+    try:
+        _preflight_destination(paths["claude_fabric_skill"], Path(home).expanduser().resolve())
+        actual_skill = _regular_bytes(paths["claude_fabric_skill"])
+    except OrchestratorPolicyError:
+        issues.append("claude_fabric_skill.missing_or_unsafe")
+    else:
+        if actual_skill != expected_skill:
+            issues.append("claude_fabric_skill.digest")
+    try:
+        raw_doc = _regular_bytes(paths["claude_doc"])
+        doc = raw_doc.decode("utf-8")
+        has_short = doc.count(FABRIC_ENTRY_BEGIN) == doc.count(FABRIC_ENTRY_END) == 1
+        has_full = doc.count(BEGIN) == doc.count(END) == 1
+        if has_full:
+            block = doc[doc.index(BEGIN):doc.index(END) + len(END)]
+            has_full = "mastermind-claude-fabric-delegation/SKILL.md" in block
+        if not has_short and not has_full:
+            issues.append("claude_fabric_entrypoint.missing")
+    except (OrchestratorPolicyError, UnicodeError, ValueError):
+        issues.append("claude_fabric_entrypoint.unreadable")
+    return {
+        "state": "READY" if not issues else "DRIFT",
+        "provider_scope": "claude-fabric",
+        "home": str(Path(home).expanduser().resolve()),
+        "issues": issues,
+        "claude_fabric_skill_blob_sha": CLAUDE_FABRIC_SKILL_BLOB_SHA,
+        "session_loading_proven": False,
+        "runtime_admission_proven": False,
+        "native_capacity_modified": False,
+        "provider_settings_modified": False,
+        "credentials_read": False,
+    }
+
+
+def apply_claude_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Install just the guide through the incumbent user-policy file owner.
+
+    In particular, do NOT normalize an existing native Claude concurrency of
+    twelve (or any other non-default value) to the older full-policy limit two.
+    """
+    resolved = Path(home).expanduser().resolve()
+    paths = _paths(resolved)
+    for key in ("claude_doc", "claude_fabric_skill"):
+        _preflight_destination(paths[key], resolved)
+    skill = _canonical_claude_fabric_skill()
+    original_doc = _regular_bytes(paths["claude_doc"], missing=b"")
+    new_doc = _render_claude_fabric_entry_doc(original_doc)
+    modified: list[str] = []
+    # Install skill before publishing the doc pointer; no identity/credential changes.
+    try:
+        for key, payload in (("claude_fabric_skill", skill), ("claude_doc", new_doc)):
+            if _atomic_write(paths[key], payload):
+                modified.append(str(paths[key]))
+    except OrchestratorPolicyError as exc:
+        if modified:
+            try:
+                issues = verify_claude_fabric_entrypoint(resolved)["issues"]
+            except Exception:
+                issues = ["verify_after_partial_apply_failed"]
+            raise OrchestratorPolicyApplyIncomplete(
+                "Claude Fabric entrypoint install partial; verify original home before retry",
+                modified_files=modified, verify_issues=issues,
+            ) from exc
+        raise
+    return verify_claude_fabric_entrypoint(resolved)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("verify", "apply"))
     parser.add_argument("--home", type=Path, default=Path.home())
     parser.add_argument("--guard-source", type=Path)
-    parser.add_argument("--provider", choices=("all", "codex", "claude"), default="all")
+    parser.add_argument("--provider", choices=("all", "codex", "claude", "claude-fabric"), default="all")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.provider == "all":
+        if args.provider == "claude-fabric":
+            result = (apply_claude_fabric_entrypoint(args.home) if args.mode == "apply"
+                      else verify_claude_fabric_entrypoint(args.home))
+        elif args.provider == "all":
             result = (
                 apply_policy(args.home, guard_source=args.guard_source)
                 if args.mode == "apply"
