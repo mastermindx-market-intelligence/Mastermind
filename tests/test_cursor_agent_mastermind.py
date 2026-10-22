@@ -22,11 +22,11 @@ def repo(tmp_path: Path) -> Path:
 def test_project_projection_is_explicit_reversible_and_idempotent(repo: Path) -> None:
     plan = install.project(repo)
     assert plan["state"] == "NOT_APPLIED"
-    assert len(plan["files"]) == 5
+    assert len(plan["files"]) == len(install.FILES)
     assert not (repo / ".cursor").exists()
     applied = install.project(repo, "apply")
     assert applied["state"] == "APPLIED"
-    assert len(applied["created"]) == 5
+    assert len(applied["created"]) == len(install.FILES)
     ready = install.project(repo, "verify")
     assert ready["state"] == "READY"
     assert len(install.project(repo, "apply")["created"]) == 0
@@ -87,3 +87,73 @@ def test_source_digest_drift_blocks_all_writes(repo: Path, tmp_path: Path, monke
 def test_non_git_workspace_refused(tmp_path: Path) -> None:
     with pytest.raises(install.ProjectionRefused, match="Git root"):
         install.project(tmp_path)
+
+
+
+def test_project_rules_and_skills_have_cursor_native_frontmatter(repo: Path) -> None:
+    installed = install.project(repo, "apply")
+    assert installed["state"] == "APPLIED"
+    rules = sorted((repo / ".cursor/rules").glob("*.mdc"))
+    skills = sorted((repo / ".cursor/skills").glob("*/SKILL.md"))
+    assert len(rules) == 4
+    assert len(skills) == 4
+    for i, path in enumerate(rules):
+        text = path.read_text(encoding="utf-8")
+        assert text.startswith("---\n") and "\n---\n" in text[4:]
+        frontmatter = text.split("---", 2)[1]
+        assert "alwaysApply: true" in frontmatter if i == 0 else (
+            "alwaysApply: false" in frontmatter and "description: " in frontmatter
+        )
+    for path in skills:
+        content = path.read_text(encoding="utf-8")
+        assert content.startswith("---\n")
+        frontmatter = content.split("---", 2)[1]
+        assert f"name: {path.parent.name}" in frontmatter
+        assert "description: " in frontmatter
+
+
+def test_plan_does_not_add_rules_or_skills(repo: Path) -> None:
+    result = install.project(repo, "plan")
+    assert len(result["files"]) == len(install.FILES)
+    assert not (repo / ".cursor").exists()
+
+
+def test_project_rule_symlink_is_refused_without_writes(repo: Path, tmp_path: Path) -> None:
+    root = repo / ".cursor"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "rules").symlink_to(outside)
+    with pytest.raises(install.ProjectionRefused, match="symlink"):
+        install.project(repo, "apply")
+    assert not (root / "agents" / "mmx-repo-explorer.md").exists()
+    assert not list(outside.iterdir())
+
+
+
+def test_dirfd_rejects_symlink_substitution_between_preflight_and_apply(
+    repo: Path, tmp_path: Path, monkeypatch
+) -> None:
+    """A path swapped after preflight cannot redirect the installer outside root."""
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    checked = install.checked_regular
+    seen = []
+
+    def substitute_after_preflight(path):
+        data = checked(path)
+        # The final source manifest entry was safely checked. Introduce a
+        # competing symlink *after* the preflight but before installer writes.
+        if path.parent.name == "mastermind-verify-and-close" and not seen:
+            seen.append("raced")
+            (repo / ".cursor").mkdir(exist_ok=True)
+            (repo / ".cursor/skills").symlink_to(outside)
+        return data
+
+    monkeypatch.setattr(install, "checked_regular", substitute_after_preflight)
+    with pytest.raises(install.ProjectionRefused, match="interrupted"):
+        install.project(repo, "apply")
+    assert seen == ["raced"]
+    assert not list(outside.iterdir())
+    assert (repo / ".cursor/skills").is_symlink()
+    assert not (repo / ".cursor/skills/mastermind-fabric/SKILL.md").exists()

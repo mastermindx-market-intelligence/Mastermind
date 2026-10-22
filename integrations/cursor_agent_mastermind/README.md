@@ -173,3 +173,131 @@ admission, and only then perform the original-owner guarded update with backup,
 effect reconciliation and live Cursor+Claude tests. Any changed preimage
 invalidates this candidate and requires new bounded reconciliation. It is
 not an external provider grant or new control plane.
+
+
+## Cursor native workflow parity hardening (separate from Fabric enrollment)
+
+This package now projects **12 reviewed, hash-pinned files** into one *explicitly
+authorized exact Git repository root*: four custom Cursor agents, four
+`.cursor/rules/*.mdc` project rules, and four `.cursor/skills/*/SKILL.md`
+skills. It does not edit the M2 global Cursor settings, credential store, MCP
+binding, installed Claude guard, Executive OS, Agent OS or capacity owner.
+
+Native Cursor features used here follow the [official rules][rules],
+[subagents][subagents], [skills][skills], [CLI][cli] and [worktrees][worktrees]
+contracts. Project rules are discoverable from `.cursor/rules`; a single
+short always-applied core anchors project authority, and three
+description-selected rules make planning, model economics and verification
+relevant on demand rather than polluting every session's context. Skills
+provide actionable multi-phase procedures and can be invoked with
+`/mastermind-long-horizon`, `/mastermind-model-routing`, and
+`/mastermind-verify-and-close`.
+
+| Capability from Claude/Codex workflows | Cursor-native building block | What is actually proven |
+| --- | --- | --- |
+| Role and project instructions | `AGENTS.md` plus the short `.mdc` core rule | Source package and disposable project projection; runtime core-rule answer canary |
+| Long-horizon plan | Cursor Plan mode and `mastermind-long-horizon` skill | Source/project install proven; real sustained multi-phase session **not** proven |
+| Specialized model-aware workers | Native custom subagents with role `model` frontmatter | Role/source/model catalog observed; live user Claude hook still blocks custom Task |
+| Delegation to Subagent Fabric | Existing `mastermindStudio` MCP and canonical Executive owner | 5 read-only tools exposed, 0 Fabric typed tools; no dispatch grant |
+| Source collision control | Existing `mmx-workspace` admission and operation-owned worktrees | Source workspace provenance observed; Cursor `agent -w` **not** permitted in occupied lanes |
+| CI / code review | GitHub checks, `mmx-independent-reviewer`, `mastermind-verify-and-close` | Local tests; independent *host guard* review still outstanding |
+| Project recovery | Cursor `agent resume`/ID resumption plus canonical Agent OS frontier | CLI resume advertised; cross-session Agent OS durable handoff not yet exercised |
+| Per-project reusable knowledge | `.cursor/skills` and scoped `.cursor/rules` | 12-file projection verified; no Cloud skill sync is implied |
+| Browser/desktop tool use | Native Cursor Browser agent, approved MCP/Computer Use when enrolled | **Not** granted or proven by these local role files |
+| Environment isolation | Canonical workspace manager and reviewable Git commits | Cursor's own worktree auto-cleanup not permitted to own these registered repos |
+
+### Safe project enrollment and health census
+
+Obtain or reuse the **incumbent** approved Git-linked worktree; do not use
+Cursor `agent -w` or automatic worktree creation on an already-leased
+Mastermind source lane. From a verified checkout that contains this package:
+
+```sh
+python3 integrations/cursor_agent_mastermind/install.py   --workspace /absolute/verified/git/root --mode plan
+python3 integrations/cursor_agent_mastermind/install.py   --workspace /absolute/verified/git/root --mode apply
+python3 integrations/cursor_agent_mastermind/install.py   --workspace /absolute/verified/git/root --mode verify
+python3 integrations/cursor_agent_mastermind/diagnose.py   --workspace /absolute/verified/git/root
+```
+
+`plan` never writes; `apply` never overwrites a conflicting file. It
+hashes source bytes, preflights *all* targets before writing and opens
+each parent directory via non-following directory descriptors to resist
+symlink races. Interrupted writes require readback of the exact destination
+before another attempt. Project enrollment is a governed source edit: do
+not apply to another writer's live worktree or a protected main checkout.
+
+`diagnose.py` is strictly **read-only**. It allowlists four benign CLI
+catalog probes, reports requested role IDs against advertised models,
+and shows MCP server/tool names without outputting account identity,
+secret configuration or arbitrary CLI output. It deliberately returns
+`fabric_dispatch_authorized=false`, `native_task_started=false` and
+`observed_actual_models=false` until proven elsewhere. No scheduled health
+polling, retries, worker dispatch, credentials or extra runtime state exist.
+
+### M2 scratch evidence
+
+A disposable Git-root projection installed/verified all 12 assets and the
+read-only diagnostic observed the authenticated Cursor model catalog (265
+advertised IDs at the time, **not** quota or usage) while reporting the
+5-tool existing Studio MCP as `READ_ONLY_OR_UNRELATED_MCP`. One root
+Cursor `--mode=ask` canary with Composer 2.5, no tool calls and no file
+reads answered `--force,--yolo`, consistent with consumption of the
+always-applied core rule. This is **rule-consistent answer evidence**, not
+a guaranteed project-rule injection trace or proof of a custom Task child.
+The scratch repository was discarded after the canary.
+
+### Model choice and economics
+
+Cursor `agent --list-models` is a catalog, not a model-dispatch receipt.
+Frontmatter selection can be overridden by Cursor plan/team restrictions,
+and a native child is not the equivalent of an Executive Attempt. Separate
+declared model, actual observed child model, paid pool and end-result
+verification. Prefer cheap deterministic operations without spawning,
+then qualified bounded work through already-admitted Fabric. Keep C3
+architectural judgment under the assigned principal, not automatic
+parallel clones.
+
+### Remaining hard gates
+
+- Live imported Claude hook compatibility must be reviewed and reconciled
+  with the *exact* installed M2 SHA before any original-owner release.
+- Only then prove a real project-local Cursor Task child START, result,
+  and actual selected model. A role discovered by Cursor is not START.
+- The incumbent #1217 provider owner must enroll the actual Cursor Fabric
+  principal, with seven typed tools, exact root/parent and capacity grants.
+- An admitted Fabric request must reach START, return, undergo verification
+  and be accepted/read back through the existing owners. Browser and
+  Cloud/self-hosted capabilities require their own real-path acceptance.
+
+[rules]: https://cursor.com/docs/rules
+[subagents]: https://cursor.com/docs/subagents
+[skills]: https://cursor.com/docs/skills
+[cli]: https://cursor.com/docs/cli/overview
+[worktrees]: https://cursor.com/docs/configuration/worktrees
+
+
+### Headless Plan mode and real Task trace qualification
+
+The M2 `agent --print --mode=plan` scratch canary returned process exit 0,
+emitted `createPlanToolCall` and **two `interaction_query` events**,
+and never returned a completed two-phase plan. Its fixture was unchanged.
+Therefore a *CLI success event is not plan acceptance*. Use **interactive**
+Cursor Plan mode where a plan requires an explicit decision/approval; in a
+headless path, treat interaction queries as an unresolved input gate and
+require actual emitted plan content/artifact plus review before calling it
+complete. Do not blindly retry a stateful plan interaction.
+
+An offline, bounded trace checker now makes this failure mode explicit:
+
+```sh
+python3 integrations/cursor_agent_mastermind/trace_proof.py   --trace /path/to/an/existing/cursor-stream-json-trace.jsonl
+```
+
+This parser reads one existing regular 4-MiB-max trace, exposes only
+sanitized event-type and tool-call counts, refuses symlink traces, and
+distinguishes root process success, native Task call, Task hook denial and
+interactive Plan questions. It **never** claims an actual child START,
+selected billed model, Fabric admission, accepted plan or source release
+from Cursor's incomplete CLI event stream. Those must be attested by
+separate actual parent/child/Runtime and consumer evidence. It stores
+no execution history and performs no provider API calls.
