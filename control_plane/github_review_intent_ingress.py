@@ -400,6 +400,19 @@ class ReconcilingReviewPublication:
             raise ReviewVerificationRefused("review event is outside the closed verb set")
         if len(body) > MAX_REVIEW_BODY_CHARS:
             raise ReviewVerificationRefused("review body exceeds its bound")
+        # The preceding publish may have succeeded even when its local
+        # receipt/index write failed. Always reconcile the authoritative
+        # GitHub state *before* attempting any new POST, not just on a
+        # timeout from the current call. The installed transport scopes these
+        # reads to the configured App publisher identity.
+        existing = reconcile_publication(
+            reviews=self._transport.read_reviews(
+                repository=repository, pull_number=pull_number, commit_id=head_sha
+            ),
+            commit_id=head_sha, event=event, body=body,
+        )
+        if existing is not None:
+            return existing
         try:
             return self._transport.submit_review(
                 repository=repository,

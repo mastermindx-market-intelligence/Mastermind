@@ -1,0 +1,131 @@
+# GitHub independent review — executable integration & production release
+
+**State:** BUILT_NOT_PROVEN. Source-only, draft stack #1741 → #1748 →
+#1763. No production webhook listener, GitHub App enrollment, autonomous
+worker START, or real GitHub PR review is claimed.
+
+Tracking: Mastermind #1740. Protected procedure pinned separately by the CEO
+at its verified compatible Mastermind `master` SHA. This runbook is
+implementation evidence, not admission law.
+
+## Machine job and the one canonical execution plane
+
+1. GitHub emits an explicit authorized review intent: `pull_request:labeled`
+   using `independent-review`, a configured `review_requested`, or an
+   authorized `issue_comment:created` with `/independent-review`.
+2. The **installed Executive control host** (not the dedicated-UID
+   `executive_mcp_entry.py`) mounts the exact
+   `/internal/github/review-intent/delivery` route with
+   `GitHubReviewASGIMount`. All other routes remain on the existing ASGI app.
+3. `GitHubReviewReceiver` enforces exact method/path/raw path, TLS/host,
+   bounded header/body/time, HMAC-SHA256 over raw bytes, event/action policy,
+   current GitHub author permission and current PR head.
+4. `GitHubReviewAPI` uses a configured GitHub App installation, short-lived
+   repo-scoped token and fixed GitHub REST routes only. The token issuer is
+   `GitHubAppInstallationTokens`; its private-key source is injected from
+   the **existing approved host secret custodian**, not environment strings,
+   Repo Actions secrets, GitHub comments, Slack, or model text.
+5. `ExecutiveReviewJobAdmission` writes a single canonical **read-only**
+   root Job with `events.command_id UNIQUE` (one PR+SHA, regardless of intent
+   channel), under an *explicit existing Executive admission guard*. This
+   is only QUEUED, not START. No watcher, subprocess, internal worker claim,
+   provider selection, retry or separate run registry is created here.
+6. Existing Executive/Fabric worker owner MUST perform real admission,
+   START, terminal receipt and resource accounting. The current installed
+   `ceo_submit_armed=false` posture is a release HOLD, not a bypass.
+7. `ExecutiveVerifiedReviewResults` recognizes a genuine completed,
+   read-only legacy Runtime Job with exactly one terminal Attempt, its
+   `JOB_COMPLETED` event, a verdict in the existing JobPayload vocabulary,
+   and a **separately source-verified distinct completed builder Job**. When
+   that original builder provenance is unavailable, automatic publication
+   refuses (it does not invent a builder). The native strict orchestration
+   sibling-review validator remains separately owned; this adapter does
+   not impersonate or replace it.
+8. `GitHubReviewReturn` rebinds the terminal Job to its exact original
+   `JOB_CREATED` repo, PR, actor and frozen head before calling
+   `publish_verified_review`. The PR is fetched **again** at the effect
+   boundary; changed SHA refuses. PASS publishes `COMMENT`, not APPROVE;
+   REQUEST_CHANGES publishes `REQUEST_CHANGES`. No merge path exists.
+9. `ExecutiveReviewPublicationRecord` reserves one publication via
+   the incumbent Executive **events** table/UNIQUE command id before a
+   GitHub POST; confirms the exact GitHub review ID afterward. Ambiguous
+   POSTs reconcile against authenticated GitHub review readback (exact
+   publisher, SHA, event and body). A claim without proof remains
+   EFFECT_UNKNOWN: **never** blindly retry. The event log is a receipt,
+   not a replacement for GitHub's publication authority.
+10. `SlackReviewVisibility` uses the existing Mastermind Executive Relay
+    bot, newly bound to exact channel `C0CAUK8P8S3` *without changing* its
+    A2 `#agent-dispatch` client. `ExecutiveSlackReviewThreads` records
+    parent timestamp on the existing Executive event ledger.
+    `SlackReviewResultNotifier` posts one sanitized reply in that exact
+    thread after confirmed GitHub publication. Missing/uncertain Slack
+    receipts never become PR review acceptance and are never blindly
+    reposted. The default public channel message does not reveal private
+    repo names, PR titles, patch text or findings.
+
+## Source files and hermetic proof
+
+- Admission/decision: `control_plane/github_review_intent.py`,
+  `control_plane/github_review_intent_ingress.py`,
+  `control_plane/github_review_runtime_adapter.py`.
+- HTTP/App: `control_plane/github_review_host_config.py`,
+  `integrations/github_review_ingress_asgi.py`,
+  `integrations/github_review_asgi_mount.py`,
+  `integrations/github_review_app_token.py`,
+  `integrations/github_review_api.py`,
+  `integrations/github_review_host_composition.py`.
+- Return: `control_plane/github_review_result_reader.py`,
+  `control_plane/github_review_publication_record.py`,
+  `integrations/github_review_return.py`,
+  `integrations/github_review_slack_visibility.py`,
+  `integrations/github_review_slack_thread.py`.
+- Tests `tests/test_github_review_*.py`: signed ASGI → GitHub mock
+  (including real ephemeral RSA/JWT) → **real SQLite Executive Runtime**
+  → queued Job → real terminal worker fixture → GitHub formal review
+  POST/readback → Slack thread reply; invalid signature, actor permission,
+  duplicate intent, switched PR, moved SHA, uncertain POST, unknown builder
+  and lost Slack ACK. **Hermetic tests are not a production reviewer.**
+
+## Actual release/administration gates (unmet)
+
+1. GitHub administrator must confirm whether existing organization installation
+   `152874959` is the **right App**; do not repurpose it merely because
+   installed. If not, register a separate narrowly scoped GitHub App. Needed:
+   repository `contents:read`, `pull_requests:write`, metadata read;
+   subscribed pull_request and issue_comment events. Configure exact webhook
+   receiver URL and signing secret. GitHub REST review POST requires
+   `pull_requests:write` and `commit_id`.
+2. Enroll the app ID, installation ID, repo allowlist, *approved sealed* App
+   private-key reader and webhook-secret reader on the actual Executive
+   control host. No plaintext secret in git, Slack, test fixtures, environment
+   exports or this runbook.
+3. Qualify a separate, **exact-path** public Caddy route and ASGI mount for
+   the Runtime-owning control service. Existing
+   `ops/executive_os/os_public_edge.caddy.template` only exposes the current
+   fixed Executive POST routes. The existing MCP launcher explicitly
+   `never opens Runtime`: DO NOT mount a live Runtime-owning receiver
+   into the dedicated-UID MCP process to work around this separation.
+4. Prove authorized Executive runtime admission guard, real worker broker
+   START/terminal evidence, and builder Job provenance resolution for the
+   actual PR. GitHub PRs with no canonical Executive builder mapping remain
+   refused for *automatic formal publication* until a separately accepted
+   external-source independence binding is designed. Never fabricate a
+   builder Job or self-approve.
+5. Qualify source with an independent security reviewer **who actually
+   returns readable findings**, repair blockers, protected PR/CI, and
+   installed source SHA. A Fabric run rc=0 by itself is not read or accepted
+   independent review evidence.
+6. Live acceptance needs an actual signed GitHub delivery → one admitted
+   Job → worker START → terminal verified independent result → one exact-SHA
+   formal GitHub review ID read back → one matching Slack thread reply,
+   plus negative signature, actor, duplicate, stale-SHA and lost-POST tests.
+   No green CI / source push alone qualifies that chain.
+
+## Explicitly prohibited shortcuts
+
+Never auto-approve/merge, execute untrusted PR head code with app credentials,
+reuse the A2 Slack conversation binding as a different channel, infer worker
+START from QUEUED, bypass the installed CEO/Executive arm, manufacture
+a builder worker ID, configure a GitHub App from an unrelated installation,
+or retry an uncertain GitHub/Slack write. No new queue, watcher, database,
+worker lease, token vault, or autonomous daemon is authorized by this source.

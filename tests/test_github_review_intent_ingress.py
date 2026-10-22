@@ -817,7 +817,7 @@ class TestPublicationEffectUncertainty:
         assert published.state is ing.PublishState.PUBLISHED
         assert published.review_id == "review-recovered"
         assert transport.submits == 1
-        assert transport.readbacks == 1
+        assert transport.readbacks == 2  # preflight and effect reconciliation
 
     def test_the_concrete_adapter_reraises_an_unmatched_effect(self) -> None:
         transport = FakeTransport(lands=False)

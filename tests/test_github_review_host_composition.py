@@ -13,6 +13,7 @@ from control_plane.github_review_host_config import ReviewHostSettings
 from control_plane.github_review_intent import sign_webhook_body
 from integrations.github_review_host_composition import compose_github_review_host
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
+from integrations.slack_agent_dialogue.engine import SlackMessage
 
 REPO = "example/repo"
 SHA = "a" * 40
@@ -111,6 +112,9 @@ def test_composition_proves_job_and_no_duplicate_with_real_app_jwt(tmp_path):
     sent = []
     async def fake_post(*, channel_id, text):
         sent.append(text)
+        return SlackMessage(
+            ts="1792699000.000001", author_user_id="U0BT71H4FQE", text=text,
+        )
     slack.post_parent = fake_post
 
     runtime = Runtime.at(tmp_path)

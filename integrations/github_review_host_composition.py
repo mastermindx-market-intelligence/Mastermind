@@ -19,6 +19,7 @@ from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_app_token import GitHubAppInstallationTokens
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
 from integrations.github_review_slack_visibility import SlackReviewVisibility
+from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
 
 
@@ -79,6 +80,7 @@ def compose_github_review_host(
     visibility = SlackReviewVisibility(
         client=relay_client,
         public_repository_names_authorized=public_repository_names_authorized,
+        threads=ExecutiveSlackReviewThreads(runtime=runtime),
     )
     return GitHubReviewReceiver(
         settings=settings,

@@ -105,10 +105,14 @@ def test_submit_posts_exact_commit_and_never_approves():
 
 def test_uncertain_post_must_reconcile_from_own_review_readback():
     attempts = []
+    reads = []
     def transport(req):
         if req.method == "POST":
             attempts.append(req)
             raise httpx.ReadTimeout("response lost", request=req)
+        reads.append(req)
+        if not attempts:
+            return httpx.Response(200, json=[])
         return httpx.Response(200, json=[
             {"id": 123, "commit_id": SHA, "state": "COMMENTED", "body": "review body",
              "user": {"login": "reviewer-bot[bot]"}},
@@ -154,3 +158,28 @@ def test_redirect_never_sends_token_to_third_party():
     api, _ = source(redirect)
     with pytest.raises(GitHubReviewAPIUnavailable, match="READ_REFUSED"):
         api.read_pull_request(repository=REPO, pull_number=42)
+
+
+def test_missing_local_receipt_does_not_duplicate_a_review_already_on_github():
+    posts = []
+    def transport(req):
+        if req.method == "POST":
+            posts.append(req)
+            raise AssertionError("preexisting review must not be reposted")
+        return httpx.Response(200, json=[
+            {"id": 867, "commit_id": SHA, "state": "COMMENTED", "body": "same review",
+             "user": {"login": "reviewer-bot[bot]"}},
+        ])
+    api, _ = source(transport)
+    published = ReconcilingReviewPublication(
+        transport=api, published=type(
+            "MissingLocalIndex", (),
+            {"published_command_ids": lambda self: frozenset()},
+        )(),
+    )
+    assert published.publish_review(
+        publication_command_id="gh-review-publish:" + "a" * 32,
+        repository=REPO, pull_number=42, head_sha=SHA,
+        event="COMMENT", body="same review",
+    ) == "867"
+    assert posts == []

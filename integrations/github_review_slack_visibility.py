@@ -11,6 +11,7 @@ import asyncio
 
 from control_plane.github_review_intent import ReviewIntentDecision
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
+from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
 
 REVIEW_CHANNEL_ID = "C0CAUK8P8S3"
 MAX_NOTICE_CHARS = 700
@@ -23,6 +24,7 @@ class SlackReviewVisibility:
         client: SlackWebApiDialogueClient,
         channel_id: str = REVIEW_CHANNEL_ID,
         public_repository_names_authorized: bool = False,
+        threads: ExecutiveSlackReviewThreads | None = None,
     ) -> None:
         if not isinstance(client, SlackWebApiDialogueClient):
             raise ValueError("existing Slack dialogue client must be bound")
@@ -31,6 +33,7 @@ class SlackReviewVisibility:
         self._client = client
         self._channel_id = channel_id
         self._publish_repo_names = public_repository_names_authorized
+        self._threads = threads
 
     def notify_review_admitted(
         self, *, summary: str, decision: ReviewIntentDecision, job_id: str | None
@@ -52,7 +55,11 @@ class SlackReviewVisibility:
         )[:MAX_NOTICE_CHARS]
         # Called inside the ingress' to_thread, not inside an existing event
         # loop. Reuse the real client's exact-channel, validated write receipt.
-        asyncio.run(self._client.post_parent(channel_id=self._channel_id, text=message))
+        receipt = asyncio.run(self._client.post_parent(channel_id=self._channel_id, text=message))
+        if self._threads is not None:
+            self._threads.record_parent(
+                decision=decision, job_id=job_id, message=receipt,
+            )
 
     def notify_review_refused(
         self, *, summary: str, decision: ReviewIntentDecision
