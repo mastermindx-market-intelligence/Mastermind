@@ -150,6 +150,21 @@ tests through existing interfaces; separate source readiness, human-only enrollm
 a bounded admitted canary and production release. Do not remove refusal guards or
 invent an admission receipt to make a dormant path appear live.
 
+### Responsibility continuity — no imaginary owners
+
+<!-- MMX_RESPONSIBILITY_CONTINUITY_BEGIN -->
+Within an assigned nonterminal job, the current session retains responsibility for the next step until it either executes that step, completes a concrete handoff/continuation to a proven exact receiver, records `WAITING_CAPACITY`, enters a lawful `PRESTART_REBIND`, returns `RUNTIME_BINDING_RECONCILIATION_REQUIRED` or `EFFECT_UNKNOWN`, or reaches a genuine Chairman/admin gate.
+
+- A component, service, repository, team, role, provider account, browser tab, or historical session is not a live assignee. `FACT_OWNER`/`CAPABILITY_OWNER` identifies where truth or implementation lives; it does not prove a current executor.
+- Before deferring because a capability is unavailable, inspect the actual current tool/connector/host surface once when it can materially answer the question. If the bounded action is inside current scope and this session is already authorized and capable, perform it instead of naming a conceptual owner.
+- Tool access is capability, not modification authority. Saying "I take ownership" does not create action-target or source-writer authority.
+- If another exact live action target or source writer is proven current, continue that target; do not steal the write. Perform the required delivery/continuation edge or return the exact transport/binding blocker.
+- With no receiver assignment edge before START and no effect, use existing placement / `WAITING_CAPACITY` / lawful `PRESTART_REBIND`; never invent an assignee.
+- `EFFECT_UNKNOWN` forbids takeover, retry, receiver rotation, provider failover, or replacement modification until canonical reconciliation.
+- Do not end at "the owner should do it" without an actual handoff or typed gate. A genuine Chairman/admin gate must name the exact external decision or credential boundary.
+- A dead or missing runtime/session is a reconciliation/succession problem for the existing canonical owner; it never grants this session automatic modifying authority.
+<!-- MMX_RESPONSIBILITY_CONTINUITY_END -->
+
 ### Reciprocal dialogue and watcher invariant
 
 For any watcher-enabled Sol↔worker/COO loop, `docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md` is the
