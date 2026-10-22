@@ -443,6 +443,73 @@ def test_jsonl_tail_counts_and_digest_from_single_stable_read(repo_roots):
     assert [row["id"] for row in result["sections"]["historical_memory"]["rows"]] == list(range(5, 105))
 
 
+def test_oversize_jsonl_tail_receipt_keeps_known_row_counts(repo_roots):
+    """F4 (R-1735): the fail-closed OVERSIZE JSONL-tail branch knows the row census from
+    the same stable read, so the receipt and section surface rows_total / omitted_rows
+    instead of zeros. Status, coverage, and gap are unchanged; rows_returned stays 0."""
+    repo, _ = repo_roots
+    path = repo / "data/portfolios/autonomous/decisions.jsonl"
+    _write_jsonl(path, [{"memo": "x" * c.MAX_JSONL_TAIL_BYTES}])
+
+    result = sources.capture_book_state(
+        "autonomous",
+        decision_cutoff="2026-09-15T20:00:00Z",
+        recorded_at="2026-09-15T20:01:00Z",
+    )
+    receipt = _by_id(result["sources"])["book.decisions"]
+    assert receipt["status"] == "OVERSIZE"
+    assert receipt["error_code"] == "OVERSIZE"
+    assert receipt["coverage_state"] == "BLOCKED"
+    assert receipt["rows_returned"] == 0
+    assert receipt["rows_total"] == 1
+    assert receipt["omitted_rows"] == 1
+    c.validate_source_receipt(receipt)
+
+    section = result["sections"]["historical_memory"]
+    assert section["coverage_state"] == "BLOCKED"
+    assert section["rows"] == []
+    assert section["rows_returned"] == 0
+    assert section["omitted_rows"] == 1
+    assert section["rows_total"] == 1
+
+
+def test_vendored_macro_external_specs_are_macro_vendored(repo_roots):
+    """SR-2 rights relabel: every external spec names a contract whose registry owner is
+    the macro engine and is read through the vendored-Macro containment proof, so it
+    carries MACRO_VENDORED and emits MACRO_VENDORED receipts; every internal receipt the
+    producers emit stays FIRST_PARTY_INTERNAL — internal coverage derived from the
+    module's own source registries, never a hard-coded list."""
+    repo, macro = repo_roots
+    _full_capture_fixture(repo, macro)
+    result = sources.capture_all(
+        "autonomous", decision_cutoff=_CUTOFF, recorded_at="2026-09-15T20:10:00Z",
+    )
+
+    from control_plane import contracts as contracts_module
+    external_ids = {spec.source_id for spec in sources.EXTERNAL_SOURCE_SPECS}
+    for spec in sources.EXTERNAL_SOURCE_SPECS:
+        entry = contracts_module.contract(spec.contract_key)
+        assert isinstance(entry, dict), spec.source_id
+        receipt = _by_id(result["sources"])[spec.source_id]
+        if entry.get("owner") == "macro_engine":
+            assert spec.rights_class == "MACRO_VENDORED", spec.source_id
+            assert receipt["rights_class"] == "MACRO_VENDORED", spec.source_id
+        else:
+            # A non-macro_engine contract would have to keep its original labelling.
+            assert spec.rights_class != "MACRO_VENDORED", spec.source_id
+
+    expected_internal = (
+        {s[0] for s in sources._INTERNAL_FILE_SPECS}
+        | {s[0] for s in sources._INTERNAL_JSONL_SPECS}
+        | {sources._SETTLEMENT_RECEIPTS_SOURCE_ID}
+    )
+    internal = [r for r in result["sources"] if r["source_id"] not in external_ids]
+    assert {r["source_id"] for r in internal} == expected_internal
+    assert internal
+    for receipt in internal:
+        assert receipt["rights_class"] == "FIRST_PARTY_INTERNAL", receipt["source_id"]
+
+
 def test_historical_memory_overflow_counts_all_cap_drops_exactly_once(repo_roots):
     repo, _ = repo_roots
     _write_jsonl(

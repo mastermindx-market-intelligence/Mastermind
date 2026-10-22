@@ -260,3 +260,80 @@ def test_non_available_states_keep_their_lawful_unqualified_clocks(status, known
         "coverage_state": "PARTIAL",
     }
     c.validate_source_receipt(receipt)
+
+
+# ---------------------------------------------------------------------------
+# SR-2 — one strict clock/rights vocabulary
+# ---------------------------------------------------------------------------
+
+def test_clock_bases_are_the_strict_set():
+    """Ruling SR-2: the clock vocabulary is exactly the strict set — the loose
+    caller-declared/source-declared bases are gone — and the qualified set is an
+    explicit allowlist rather than "anything not denied"."""
+    assert c.CLOCK_BASES == frozenset({
+        "FILE_MTIME_FIRST_PARTY_STATE",
+        "DECLARED_SOURCE_FIELD",
+        "UNQUALIFIED_EXTERNAL_CLOCK",
+        "UNKNOWN",
+    })
+    assert c.QUALIFIED_CLOCK_BASES == frozenset({
+        "FILE_MTIME_FIRST_PARTY_STATE",
+        "DECLARED_SOURCE_FIELD",
+    })
+    # The denylist stays defined as the exact complement, for existing readers.
+    assert c.UNQUALIFIED_CLOCK_BASES == c.CLOCK_BASES - c.QUALIFIED_CLOCK_BASES
+
+
+@pytest.mark.parametrize("clock_basis", ["SOURCE_DECLARED", "CALLER_SUPPLIED"])
+def test_caller_supplied_and_source_declared_clocks_rejected(clock_basis):
+    """SR-2: ``SOURCE_DECLARED`` and ``CALLER_SUPPLIED`` are no longer lawful values at
+    all — the validator refuses them for AVAILABLE and for every non-available status."""
+    for status, known_at in (
+        ("AVAILABLE", "2026-09-15T20:00:00Z"),
+        ("UNQUALIFIED_CLOCK", None),
+        ("ABSENT_OPTIONAL", None),
+        ("DEPENDENCY_PARTIAL", None),
+    ):
+        receipt = {
+            **_receipt(),
+            "status": status,
+            "known_at": known_at,
+            "clock_basis": clock_basis,
+            "coverage_state": "PARTIAL",
+        }
+        with pytest.raises(c.DecisionSnapshotContractError):
+            c.validate_source_receipt(receipt)
+
+
+def test_available_requires_qualified_clock_allowlist():
+    """AVAILABLE rests only on the qualified clock allowlist."""
+    assert c.QUALIFIED_CLOCK_BASES == frozenset({
+        "FILE_MTIME_FIRST_PARTY_STATE",
+        "DECLARED_SOURCE_FIELD",
+    })
+    for clock_basis in ("UNKNOWN", "UNQUALIFIED_EXTERNAL_CLOCK"):
+        with pytest.raises(c.DecisionSnapshotContractError):
+            c.validate_source_receipt({**_receipt(), "clock_basis": clock_basis})
+    for clock_basis in ("FILE_MTIME_FIRST_PARTY_STATE", "DECLARED_SOURCE_FIELD"):
+        c.validate_source_receipt({**_receipt(), "clock_basis": clock_basis})
+
+
+def test_rights_classes_and_available_requires_qualified_rights():
+    """SR-2: the rights vocabulary gains ``UNKNOWN``/``BLOCKED`` (and never
+    ``LICENSED_INTERNAL``), and AVAILABLE may rest only on a qualified rights class —
+    ``MACRO_VENDORED`` qualifies; ``UNKNOWN``/``BLOCKED`` degrade."""
+    assert c.RIGHTS_CLASSES == frozenset({
+        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
+        "UNKNOWN",
+        "BLOCKED",
+    })
+    assert c.QUALIFIED_RIGHTS_CLASSES == frozenset({
+        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
+    })
+    assert "LICENSED_INTERNAL" not in c.RIGHTS_CLASSES
+    for rights in ("UNKNOWN", "BLOCKED"):
+        with pytest.raises(c.DecisionSnapshotContractError):
+            c.validate_source_receipt({**_receipt(), "rights_class": rights})
+    c.validate_source_receipt({**_receipt(), "rights_class": "MACRO_VENDORED"})

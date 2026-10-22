@@ -93,6 +93,10 @@ class SourceSpec:
     definition_fields: tuple[str, ...] = ("definition_id",)
 
 
+# Every external spec is read through ``_resolve_external_path``, which proves the target
+# lies under the vendored Macro root ``_V``, and names a ``config/contracts.yml`` contract
+# whose registry owner is ``macro_engine`` — each is therefore a vendored-Macro artifact
+# carrying ``MACRO_VENDORED`` rights, never ``FIRST_PARTY_INTERNAL``.
 EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
     SourceSpec(
         "macro.risk_envelope",
@@ -100,7 +104,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("risk_truth",),
         True,
         "MARKET_RISK_CONTEXT",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "risk_envelope",
         known_at_fields=("known_at", "available_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -112,7 +116,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("market_structure",),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "regime",
         known_at_fields=("known_at", "available_at", "generated_at"),
         as_of_fields=("as_of", "asof", "date"),
@@ -124,7 +128,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("market_structure",),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "receipt_only_pr548",
         as_of_fields=("as_of",),
     ),
@@ -134,7 +138,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("independence",),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "covariance_spine",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of",),
@@ -146,7 +150,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("factor_risk",),
         False,
         "MEASUREMENT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "factor_betas",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -158,7 +162,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("candidate_geometry",),
         False,
         "DISPLAY_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "prophet",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -170,7 +174,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("relationships",),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "neural_web",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of",),
@@ -182,7 +186,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("fundamental_state", "positioning", "event_state", "priceability"),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "portfolio_context",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -194,7 +198,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("fundamental_state", "positioning", "event_state"),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "held_ticker_bundle",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -206,7 +210,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("positioning",),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "held_ticker_bundle",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -218,7 +222,7 @@ EXTERNAL_SOURCE_SPECS: tuple[SourceSpec, ...] = (
         ("event_state",),
         False,
         "CONTEXT_ONLY",
-        "FIRST_PARTY_INTERNAL",
+        "MACRO_VENDORED",
         "held_ticker_bundle",
         known_at_fields=("known_at", "generated_at"),
         as_of_fields=("as_of", "asof"),
@@ -1148,10 +1152,14 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             # zero retained rows. Unlike that branch these bytes *were* read stably, so the
             # known_at / clock_basis / artifact_digest set above stand, and the generation
             # is keyed on those bytes — the same stable-bytes family as the
-            # FUTURE_AT_CUTOFF and MALFORMED branches.
+            # FUTURE_AT_CUTOFF and MALFORMED branches. The stable parse also knows the row
+            # census, so rows_total / omitted_rows are surfaced even though rows_returned
+            # stays 0 — status, coverage, and gap are unchanged by that honesty.
             receipt["status"] = tail["error_code"]
             receipt["error_code"] = tail["error_code"]
             receipt["coverage_state"] = "BLOCKED"
+            receipt["rows_total"] = tail["rows_total"]
+            receipt["omitted_rows"] = tail["omitted_rows"]
             receipt["correction_generation"] = c.content_digest({
                 "generation_kind": "SOURCE_BYTES",
                 "status": receipt["status"],
@@ -1167,7 +1175,7 @@ def capture_book_state(book: str, *, decision_cutoff: str, recorded_at: str) -> 
             )
             gaps_out.append(gap)
             _merge_into_section(sections[section_id], rows=[], coverage_state="BLOCKED",
-                                 omitted_rows=0, gaps=[gap])
+                                 omitted_rows=tail["omitted_rows"], gaps=[gap])
             sources_out.append(receipt)
             continue
         # Stable bytes exist, so the generation is those bytes. A JSONL tail declares no

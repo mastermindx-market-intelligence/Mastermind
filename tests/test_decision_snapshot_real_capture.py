@@ -167,7 +167,7 @@ def test_real_autonomous_capture_seals_non_complete_at_capture_time(capture_root
     assert pending["status"] == "AVAILABLE"
     assert pending["artifact_digest"] == "sha256:" + entry["sha256"]
 
-    # The ~10 KB-per-row real decision tail is byte-bounded with counted omissions.
+    # The large-per-row real decision tail is byte-bounded with counted omissions.
     decisions = receipts["book.decisions"]
     assert decisions["status"] == "AVAILABLE"
     assert decisions["omitted_rows"] > 0
@@ -250,7 +250,7 @@ def test_real_china_capture_seals_non_complete(capture_root):
         receipt = receipts[source_id]
         assert receipt["status"] == "AVAILABLE", source_id
         assert receipt["rows_total"] == receipt["rows_returned"] + receipt["omitted_rows"], source_id
-    # The 1.3 MB decision tail is byte-bounded with counted omissions; the fill blotter is
+    # The multi-megabyte real decision tail is byte-bounded with counted omissions; the fill blotter is
     # row-count bounded; the ledger is a single raw-object row with nothing omitted.
     assert receipts["book.decisions"]["omitted_rows"] > 0
     assert receipts["book.fills"]["omitted_rows"] > 0
