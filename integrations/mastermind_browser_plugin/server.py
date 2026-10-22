@@ -14,6 +14,7 @@ from typing import Any, Callable
 
 from .catalog import SERVER_NAME, SERVER_VERSION
 from .facade import BrowserFacade
+from .screenshot import BrowserCallResult
 from .ingress import INTERNAL_PATH
 
 MAX_REQUEST_BYTES = 98_304
@@ -59,7 +60,7 @@ def create_mcp_server(facade: BrowserFacade):
         raise TypeError("owner-bound BrowserFacade is required")
 
     from mcp.server import Server
-    from mcp.types import CallToolResult, TextContent, Tool
+    from mcp.types import CallToolResult, ImageContent, TextContent, Tool
 
     server = Server(SERVER_NAME, version=SERVER_VERSION)
 
@@ -70,6 +71,14 @@ def create_mcp_server(facade: BrowserFacade):
     @server.call_tool(validate_input=False)
     async def call_tool(name: str, arguments: dict):
         result = await facade.call(name, arguments)
+        images = (
+            [
+                ImageContent(type="image", data=item.data, mimeType=item.mime_type)
+                for item in result.images
+            ]
+            if type(result) is BrowserCallResult
+            else []
+        )
         return CallToolResult(
             content=[
                 TextContent(
@@ -79,9 +88,10 @@ def create_mcp_server(facade: BrowserFacade):
                         ensure_ascii=False,
                         separators=(",", ":"),
                     ),
-                )
+                ),
+                *images,
             ],
-            structuredContent=result,
+            structuredContent=dict(result),
             isError=result["is_error"],
         )
 

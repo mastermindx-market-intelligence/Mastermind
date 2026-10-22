@@ -60,10 +60,18 @@ jobs:
         with:
           node-version: "22.14.0"
           cache: npm
-          cache-dependency-path: app/mastermind_os/package-lock.json
+          cache-dependency-path: |
+            app/mastermind_os/package-lock.json
+            integrations/mastermind_browser_link/package-lock.json
 
       - name: Install Node dependencies
         run: npm ci --prefix app/mastermind_os
+
+      - name: Verify Browser Link package
+        run: |
+          npm ci --prefix integrations/mastermind_browser_link --ignore-scripts --no-audit --no-fund
+          npm run build --prefix integrations/mastermind_browser_link
+          node --test tests/browser_link/*.test.mjs
 
       - uses: actions/setup-python@v5
         with:
@@ -73,7 +81,7 @@ jobs:
       - name: Install project
         run: |
           python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          python -m pip install -e ".[dev,browser-mcp]"
 
       - name: Verify Paper direct pinned MCP SDK
         run: |

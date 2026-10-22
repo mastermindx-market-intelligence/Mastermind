@@ -588,3 +588,112 @@ def render_census_extension_bundle(
 
 
 __all__.append("render_census_extension_bundle")
+
+
+# Browser Link is an explicit combined package, separate from CENSUS1. The
+# original renderer continues to refuse all permission/layout widening.
+_BROWSER_LINK_SOURCE_KINDS = (
+    ("browser-link-bootstrap.js", "extension_browser_bootstrap"),
+    ("browser-link/worker.bundle.js", "extension_browser_worker"),
+    ("browser-link/popup.html", "extension_browser_popup_html"),
+    ("browser-link/popup.css", "extension_browser_popup_css"),
+    ("browser-link/popup.mjs", "extension_browser_popup_controller"),
+)
+_BROWSER_LINK_SOURCE_NAMES = frozenset(name for name, _kind in _BROWSER_LINK_SOURCE_KINDS)
+
+
+def render_browser_link_extension_bundle(
+    binding: dict[str, Any],
+    release: WebSolRelease,
+    *,
+    source_files: Mapping[str, bytes],
+    expected_source_digests: Mapping[str, str],
+    browser_link_files: Mapping[str, bytes],
+    expected_browser_link_digests: Mapping[str, str],
+) -> DeploymentBundle:
+    """Compose Browser Link into the currently loaded exact Web Sol release.
+
+    This performs no install or browser/native-host enrollment. A 0.2 renderer
+    cannot compose or downgrade a 0.4 installation: the original release,
+    manifest, and source checks run first. The caller must authenticate both
+    the source commit and build receipt; matching supplied hashes is integrity
+    evidence, not release authority.
+    """
+    base = render_census_extension_bundle(
+        binding,
+        release,
+        source_files=source_files,
+        expected_source_digests=expected_source_digests,
+    )
+    if (
+        not isinstance(browser_link_files, Mapping)
+        or set(browser_link_files) != _BROWSER_LINK_SOURCE_NAMES
+        or not isinstance(expected_browser_link_digests, Mapping)
+        or set(expected_browser_link_digests) != _BROWSER_LINK_SOURCE_NAMES
+    ):
+        raise WebSolDeploymentError("browser_link_sources_invalid")
+    accepted = dict(browser_link_files)
+    expected = dict(expected_browser_link_digests)
+    if (
+        any(type(value) is not bytes or not 0 < len(value) <= _CENSUS_MAX_FILE_BYTES
+            for value in accepted.values())
+        or sum(len(value) for value in accepted.values()) > _CENSUS_MAX_TOTAL_BYTES
+        or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+               for value in expected.values())
+    ):
+        raise WebSolDeploymentError("browser_link_source_content_invalid")
+    if any(_sha256(value) != expected[name] for name, value in accepted.items()):
+        raise WebSolDeploymentError("browser_link_source_digest_mismatch")
+
+    base_extension = {row.kind: row for row in base.artifacts}
+    manifest = json.loads(base_extension["extension_manifest"].content.decode("utf-8"),
+                          object_pairs_hook=_manifest_members)
+    # Keep the issued key, transport package version, ChatGPT content scripts,
+    # host permissions, census popup route, and original worker byte-for-byte.
+    manifest["permissions"] = ["nativeMessaging", "alarms", "debugger", "tabs", "storage"]
+    manifest["minimum_chrome_version"] = "116"
+    manifest["background"] = {"service_worker": "browser-link-bootstrap.js"}
+    manifest["content_security_policy"] = {
+        "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
+    }
+    manifest_bytes = _canonical_bytes(manifest) + b"\n"
+    census = base_extension["extension_census_html"].content
+    marker = b"  </header>"
+    if census.count(marker) != 1:
+        raise WebSolDeploymentError("browser_link_census_layout_invalid")
+    link = (
+        b'\n  <nav aria-label="Browser controls"><a href="browser-link/popup.html">'
+        b'Share browser tabs with agents</a></nav>'
+    )
+    census_bytes = census.replace(marker, marker + link, 1)
+    extension_root = next(
+        row.destination.parent for row in base.artifacts
+        if row.kind == "extension_manifest"
+    )
+    revised = tuple(
+        dataclasses.replace(
+            row,
+            content=manifest_bytes if row.kind == "extension_manifest" else census_bytes,
+        ) if row.kind in {"extension_manifest", "extension_census_html"} else row
+        for row in base.artifacts
+    )
+    added = tuple(
+        DeploymentArtifact(kind, extension_root / name, accepted[name], 0o600)
+        for name, kind in _BROWSER_LINK_SOURCE_KINDS
+    )
+    artifacts = tuple(sorted(
+        (*revised, *added), key=lambda row: (str(row.destination), row.kind)
+    ))
+    return _CensusExtensionDeploymentBundle(
+        instance_id=base.instance_id,
+        native_host_name=base.native_host_name,
+        source_commit=base.source_commit,
+        wrapper_argv=base.wrapper_argv,
+        artifacts=artifacts,
+        bundle_digest=_bundle_digest(
+            release=release, instance_id=base.instance_id, artifacts=artifacts
+        ),
+    )
+
+
+__all__.append("render_browser_link_extension_bundle")

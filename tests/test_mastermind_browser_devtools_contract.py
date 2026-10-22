@@ -261,3 +261,24 @@ def test_catalog_attestation_refuses_duplicate_names_and_malformed_schema():
     next(row for row in catalog['tools'] if row['name']=='click')['inputSchema']=[]
     with pytest.raises(BackendContractError):
         attest_backend_catalog(catalog)
+
+def test_catalog_digest_matches_existing_stdio_relay_attestation():
+    from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
+
+    catalog = _complete_catalog()
+    selected = {"tools": {
+        row["name"]: row for row in catalog["tools"]
+        if row["name"] in ALLOWED_BACKEND_TOOLS
+    }}
+    assert attest_backend_catalog(catalog).schema_digest == observed_mcp_tool_schema_digest(selected)
+
+
+@pytest.mark.parametrize("field, value", [
+    ("annotations", {"readOnlyHint": True}),
+    ("outputSchema", {"type": "object", "properties": {"value": {"type": "string"}}}),
+])
+def test_backend_security_annotations_and_output_contract_are_attested(field, value):
+    baseline = _complete_catalog()
+    changed = _complete_catalog()
+    next(row for row in changed["tools"] if row["name"] == "click")[field] = value
+    assert attest_backend_catalog(baseline).schema_digest != attest_backend_catalog(changed).schema_digest

@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from jsonschema import Draft202012Validator
 
 from .catalog import CATALOG_GENERATION, SCHEMA_DIGEST, catalog
+from .screenshot import BrowserCallResult, separate_screenshot
 
 EFFECTS = frozenset({"NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN"})
 MAX_BYTES = 65_536
@@ -128,6 +129,9 @@ class BrowserFacade:
             )
 
         try:
+            images = ()
+            if name == "browser_screenshot":
+                result, images = separate_screenshot(result)
             data = _snapshot(result)
             if uncertain:
                 effect = data.get("effect")
@@ -137,15 +141,18 @@ class BrowserFacade:
                 effect = "NOT_APPLIED"
                 if data.get("effect", "NOT_APPLIED") != "NOT_APPLIED":
                     raise ValueError("read smuggled effect")
-            return _snapshot(
-                {
-                    "schema": "mastermind.browser_mcp_result.v1",
-                    "catalog_generation": CATALOG_GENERATION,
-                    "is_error": False,
-                    "effect": effect,
-                    "retry_allowed": False,
-                    "data": data,
-                }
+            return BrowserCallResult(
+                _snapshot(
+                    {
+                        "schema": "mastermind.browser_mcp_result.v1",
+                        "catalog_generation": CATALOG_GENERATION,
+                        "is_error": False,
+                        "effect": effect,
+                        "retry_allowed": False,
+                        "data": data,
+                    }
+                ),
+                images=images,
             )
         except Exception:
             return _error(

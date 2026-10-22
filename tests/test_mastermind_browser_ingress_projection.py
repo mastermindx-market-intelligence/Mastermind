@@ -60,6 +60,7 @@ def test_projection_has_no_host_account_or_credential_selector():
         'schema','public_resource_url','internal_upstream_url','public_path',
         'internal_path','web_lane','native_lane','same_browser_owner_required',
         'requires_dedicated_public_binding','is_admission',
+        'public_metadata_url','internal_metadata_upstream_url',
     }
     rendered=str(plan.to_dict()).lower()
     for forbidden in ('credential','account_label','host_ref','worker_id','attempt_id','token'):
@@ -69,3 +70,15 @@ def test_projection_has_no_host_account_or_credential_selector():
 def test_current_v1_never_claims_one_tunnel_multiplexing_is_proven():
     plan=build_browser_ingress_plan(public_resource_url=PUBLIC,internal_upstream_url=INTERNAL)
     assert plan.requires_dedicated_public_binding is True
+
+def test_browser_metadata_has_distinct_internal_route_from_workbench():
+    plan = build_browser_ingress_plan(
+        public_resource_url=PUBLIC, internal_upstream_url=INTERNAL,
+    )
+    assert plan.public_metadata_url == (
+        "https://browser-mcp.mastermind.example/.well-known/oauth-protected-resource/mcp"
+    )
+    assert plan.internal_metadata_upstream_url == (
+        "https://m2-browser.tail123.ts.net/browser-fabric-metadata"
+    )
+    assert plan.to_dict()["schema"] == "mastermind.browser_ingress_plan.v2"

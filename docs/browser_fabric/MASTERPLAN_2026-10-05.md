@@ -6,6 +6,8 @@ Protected source/procedure pin: `7eac3ec252475600147ec9a376b8ca16403ac4c5`; Skil
 
 **MISSION_COMPLETE=false. Documentation publication is separate from candidate-source publication, installation and production acceptance.**
 
+Current source status: [implementation checkpoint, 2026-10-22](IMPLEMENTATION_STATUS_2026-10-22.md). The current assignment adds Browser Link as a scoped component of the installed Web Sol extension, while retaining a separate Browser MCP service. This supersedes the older documentation-only and standalone-extension packaging status below; historical failed effects remain recorded.
+
 ## 1. Decision and intended outcome
 
 Build one governed Browser capability with two client lanes and two actuator modes. Expose it as a separate **Mastermind Browser** MCP plugin, rather than adding more generic tools to Studio Direct. Preserve the existing Web Sol provider-session extension; add the small, replaceable **Mastermind Browser Link** attachment extension only for explicitly shared existing tabs. Retain existing Playwright isolated/persistent worker browsers for managed automation.

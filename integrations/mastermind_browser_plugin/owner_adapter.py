@@ -18,6 +18,7 @@ from typing import Any, Protocol
 from urllib.parse import urlsplit
 
 from .facade import OwnerRefused
+from .resource_identity import validate_browser_resource
 from .tab_ref import (
     BROKER_ACTION_SCHEMA,
     BrokeredBrowserActionRef,
@@ -44,9 +45,9 @@ class BrowserCallerBinding:
     def __post_init__(self) -> None:
         if type(self.subject_digest) is not str or _HEX64.fullmatch(self.subject_digest) is None:
             raise ValueError("caller subject is invalid")
-        for value in (self.client_ref, self.resource):
-            if type(value) is not str or _TOKEN.fullmatch(value) is None:
-                raise ValueError("caller reference is invalid")
+        if type(self.client_ref) is not str or _TOKEN.fullmatch(self.client_ref) is None:
+            raise ValueError("caller reference is invalid")
+        validate_browser_resource(self.resource)
 
 
 @dataclass(frozen=True, slots=True)

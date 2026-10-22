@@ -41,6 +41,7 @@ from .runtime import StableWorkbenchActionLease, WorkbenchActionRuntime
 
 SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
 SERVICE_SCHEMA_V2 = "mastermind.workbench_action_service.v2"
+SERVICE_SCHEMA_V3 = "mastermind.workbench_action_service.v3"
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
 MAX_BROWSER_CATALOG_BYTES = 2 * 1024 * 1024
@@ -69,6 +70,9 @@ _CONFIG_KEYS = frozenset(
     }
 )
 _CONFIG_KEYS_V2 = _CONFIG_KEYS | {"browser"}
+_CONFIG_KEYS_V3 = _CONFIG_KEYS_V2 | {
+    "browser_fabric_policy_file", "browser_fabric_audit_directory"
+}
 _BROWSER_KEYS = frozenset(
     {
         "source_root",
@@ -162,6 +166,8 @@ class ServiceConfig:
     action_ttl_ms: int
     lease: StableWorkbenchActionLease
     browser: BrowserServiceConfig | None = None
+    browser_fabric_policy_file: str | None = None
+    browser_fabric_audit_directory: str | None = None
 
     @property
     def allowed_hosts(self) -> tuple[str, ...]:
@@ -322,6 +328,8 @@ def parse_service_config(value: object) -> ServiceConfig:
     if not isinstance(value, dict):
         _refuse()
     schema = value.get("schema")
+    browser_fabric_policy_file = None
+    browser_fabric_audit_directory = None
     if schema == SERVICE_SCHEMA:
         if set(value) != _CONFIG_KEYS:
             _refuse()
@@ -330,6 +338,18 @@ def parse_service_config(value: object) -> ServiceConfig:
         if set(value) != _CONFIG_KEYS_V2:
             _refuse()
         browser = parse_browser_service_config(value.get("browser"))
+    elif schema == SERVICE_SCHEMA_V3:
+        if set(value) != _CONFIG_KEYS_V3:
+            _refuse()
+        browser = parse_browser_service_config(value.get("browser"))
+        browser_fabric_policy_file = _absolute_path(
+            value.get("browser_fabric_policy_file")
+        )
+        browser_fabric_audit_directory = _absolute_path(
+            value.get("browser_fabric_audit_directory")
+        )
+        if browser_fabric_audit_directory == value.get("audit_directory"):
+            _refuse()
     else:
         _refuse()
     if value.get("bind_host") != "127.0.0.1":
@@ -354,6 +374,8 @@ def parse_service_config(value: object) -> ServiceConfig:
         action_ttl_ms=ttl,
         lease=_lease(value.get("lease")),
         browser=browser,
+        browser_fabric_policy_file=browser_fabric_policy_file,
+        browser_fabric_audit_directory=browser_fabric_audit_directory,
     )
 
 
@@ -819,6 +841,116 @@ def create_browser_sibling(
         raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
 
 
+class _BrowserAuthAudit:
+    """Service lifespan binding for the canonical policy-specific audit sink."""
+
+    def __init__(self, directory: str, policy_id: str) -> None:
+        self._directory = directory
+        self._policy_id = policy_id
+        self._sink = None
+        self.healthy = False
+
+    @contextmanager
+    def opened(self):
+        from integrations.business_mcp_auth.audit import DurableAuthAuditSink
+
+        if self._sink is not None:
+            _refuse()
+        descriptor = _open_safe_directory(self._directory)
+        try:
+            self._sink = DurableAuthAuditSink.open(
+                descriptor, policy_id=self._policy_id
+            )
+        finally:
+            try:
+                os.close(descriptor)
+            except BaseException as error:
+                if self._sink is not None:
+                    try:
+                        self._sink.close()
+                    finally:
+                        self._sink = None
+                raise ServiceConfigurationError(
+                    "SERVICE_STARTUP_CLEANUP_UNCERTAIN"
+                ) from error
+        self.healthy = True
+        try:
+            yield self
+        finally:
+            self.healthy = False
+            try:
+                self._sink.close()
+            finally:
+                self._sink = None
+
+    def emit(self, event) -> None:
+        if self._sink is None or not self.healthy:
+            raise RuntimeError("Browser authentication audit is unavailable")
+        try:
+            self._sink.emit(event)
+        except BaseException:
+            self.healthy = False
+            raise
+
+
+def create_browser_fabric_auth(
+    runtime: WorkbenchActionRuntime,
+    config: ServiceConfig,
+):
+    """Load an explicit Browser policy through the existing Business auth owner.
+
+    V1/V2 remain unchanged. V3 reuses this runtime's clock and the canonical
+    durable audit implementation with its own policy stream. It provisions no
+    credentials or route.
+    """
+    if config.browser_fabric_policy_file is None:
+        return None
+    if (
+        config.schema != SERVICE_SCHEMA_V3
+        or config.browser is None
+        or config.browser_fabric_audit_directory is None
+    ):
+        _refuse()
+    try:
+        from integrations.mastermind_browser_plugin.http_auth import (
+            BROWSER_CONTROL_SCOPE,
+            build_browser_http_auth,
+        )
+
+        policy = load_resource_policy(
+            _secure_json(config.browser_fabric_policy_file, maximum=MAX_POLICY_BYTES)
+        )
+        if (
+            policy.required_scopes != (BROWSER_CONTROL_SCOPE,)
+            or policy.resource == runtime.services.policy.resource
+        ):
+            _refuse()
+        resource = urlsplit(policy.resource)
+        metadata = urlsplit(policy.resource_metadata_url)
+        if (
+            metadata.netloc != resource.netloc
+            or metadata.path != "/.well-known/oauth-protected-resource" + resource.path
+        ):
+            _refuse()
+        cache = BoundedJwksCache(
+            policy=policy,
+            fetcher=HttpxJwksFetcher(policy),
+            monotonic=time.monotonic,
+        )
+        return build_browser_http_auth(
+            authenticator=JwtAuthenticator(policy=policy, jwks_cache=cache),
+            policy=policy,
+            now=runtime.services.now,
+            audit_sink=_BrowserAuthAudit(
+                config.browser_fabric_audit_directory, policy.policy_id
+            ),
+        )
+    except ServiceConfigurationError:
+        raise
+    except Exception as error:
+        raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
+
+
 def create_browser_fabric_sibling(
     runtime: WorkbenchActionRuntime,
     config: ServiceConfig,
@@ -830,9 +962,8 @@ def create_browser_fabric_sibling(
     """Compose the high-level Browser MCP over the same Workbench deployment.
 
     This creates no runtime, browser resource, lease, auth policy, credential,
-    listener, tunnel, scheduler, or effect owner. Authentication is injected by
-    the caller so the Browser-specific OAuth/Auth0 policy can remain the final
-    rollout step.
+    listener, tunnel, scheduler, or effect owner. Authentication comes from
+    the explicit V3 Browser policy or a trusted embedding composition.
     """
     if (
         not isinstance(runtime, WorkbenchActionRuntime)
@@ -882,13 +1013,21 @@ def build_service_app(
     browser_fabric_auth_challenge: str | None = None,
 ):
     from starlette.applications import Starlette
-    from starlette.responses import PlainTextResponse
+    from starlette.responses import JSONResponse, PlainTextResponse
     from starlette.routing import Mount, Route
 
     if (browser_fabric_authenticate is None) != (
         browser_fabric_auth_challenge is None
     ):
         _refuse()
+
+    configured_auth = None
+    if config.browser_fabric_policy_file is not None:
+        if browser_fabric_authenticate is not None:
+            _refuse()
+        configured_auth = create_browser_fabric_auth(runtime, config)
+        browser_fabric_authenticate = configured_auth.authenticate
+        browser_fabric_auth_challenge = configured_auth.auth_challenge
 
     inner = runtime.server.streamable_http_app()
     browser_deployment = create_browser_sibling(runtime, config)
@@ -915,7 +1054,8 @@ def build_service_app(
         return PlainTextResponse("OK\n", status_code=200)
 
     async def ready(_request):
-        if is_ready(runtime, config, state):
+        audit_ready = configured_auth is None or configured_auth.audit_sink.healthy
+        if audit_ready and is_ready(runtime, config, state):
             return PlainTextResponse("READY\n", status_code=200)
         return PlainTextResponse("NOT_READY\n", status_code=503)
 
@@ -923,6 +1063,8 @@ def build_service_app(
     async def lifespan(_app):
         try:
             async with AsyncExitStack() as stack:
+                if configured_auth is not None:
+                    stack.enter_context(configured_auth.audit_sink.opened())
                 await stack.enter_async_context(runtime.server.session_manager.run())
                 if browser_deployment is not None:
                     await stack.enter_async_context(
@@ -953,6 +1095,27 @@ def build_service_app(
         Route("/healthz", health, methods=["GET"]),
         Route("/readyz", ready, methods=["GET"]),
     ]
+    if configured_auth is not None:
+        from integrations.business_mcp_auth.metadata import protected_resource_metadata
+        from integrations.mastermind_browser_plugin.ingress import INTERNAL_METADATA_PATH
+
+        metadata_document = protected_resource_metadata(configured_auth.policy)
+
+        async def browser_metadata(request):
+            if request.headers.get("host") not in config.allowed_hosts:
+                return PlainTextResponse("Invalid host", status_code=421)
+            origin = request.headers.get("origin")
+            if origin is not None and origin not in config.allowed_origins:
+                return PlainTextResponse("Invalid origin", status_code=403)
+            return JSONResponse(metadata_document, headers={"Cache-Control": "no-store"})
+
+        routes.append(
+            Route(
+                INTERNAL_METADATA_PATH,
+                browser_metadata,
+                methods=["GET"],
+            )
+        )
     if browser_inner is not None:
         routes.append(Mount(config.browser.mount_path, app=browser_inner))
     if browser_fabric_app is not None:
@@ -1061,12 +1224,15 @@ def run_configured_service(path: str) -> int:
 
 __all__ = [
     "SERVICE_SCHEMA",
+    "SERVICE_SCHEMA_V2",
+    "SERVICE_SCHEMA_V3",
     "ServiceConfig",
     "ServiceConfigurationError",
     "ServiceState",
     "ShutdownOutcome",
     "build_service_app",
     "create_runtime",
+    "create_browser_fabric_auth",
     "is_ready",
     "load_service_config",
     "parse_service_config",

@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import PurePosixPath
-import hashlib
+from control_plane.executive_agent_capabilities import observed_mcp_tool_schema_digest
 import json
 import re
 from urllib.parse import urlsplit
@@ -191,18 +191,31 @@ def attest_backend_catalog(value: object) -> BackendCatalogAttestation:
             )
         except (TypeError, ValueError):
             raise BackendContractError("selected backend schema is invalid") from None
-        selected.append({"name": name, "inputSchema": canonical_schema})
+        selected.append({
+            "name": name,
+            "inputSchema": canonical_schema,
+            "annotations": by_name[name].get("annotations"),
+            "outputSchema": by_name[name].get("outputSchema"),
+        })
 
-    raw = json.dumps(
-        selected,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=True,
-        allow_nan=False,
-    ).encode("utf-8")
+    try:
+        canonical = json.loads(json.dumps(
+            selected,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ))
+        digest = observed_mcp_tool_schema_digest({
+            "tools": {row["name"]: row for row in canonical}
+        })
+    except (TypeError, ValueError, RecursionError):
+        raise BackendContractError("selected backend schema is invalid") from None
+    if digest is None:
+        raise BackendContractError("selected backend schema is invalid")
     return BackendCatalogAttestation(
         selected_tools=tuple(sorted(ALLOWED_BACKEND_TOOLS)),
-        schema_digest=hashlib.sha256(raw).hexdigest(),
+        schema_digest=digest,
     )
 
 

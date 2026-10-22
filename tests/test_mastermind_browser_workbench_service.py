@@ -54,7 +54,7 @@ def broker():
 class Outer:
     subject_digest: str = "e" * 64
     client_ref: str = "outer-client"
-    resource: str = "browser-resource"
+    resource: str = "https://browser.example/mcp"
     scopes: tuple[str, ...] = ("browser.control",)
     expires_at: int = 2_000_000_000
 
@@ -270,14 +270,14 @@ def test_http_fabric_uses_exact_route_and_isolates_outer_callers():
     alice = ActionCaller(
         subject_digest="e" * 64,
         client_ref="alice-client",
-        resource="browser-resource",
+        resource="https://browser.example/mcp",
         scopes=("browser.control",),
         expires_at=2_000_000_000,
     )
     bob = ActionCaller(
         subject_digest="f" * 64,
         client_ref="bob-client",
-        resource="browser-resource",
+        resource="https://browser.example/mcp",
         scopes=("browser.control",),
         expires_at=2_000_000_000,
     )

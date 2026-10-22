@@ -14,8 +14,9 @@ from urllib.parse import urlsplit
 
 PUBLIC_PATH = "/mcp"
 INTERNAL_PATH = "/browser-fabric"
+INTERNAL_METADATA_PATH = "/browser-fabric-metadata"
 TAILNET_SUFFIX = ".ts.net"
-SCHEMA = "mastermind.browser_ingress_plan.v1"
+SCHEMA = "mastermind.browser_ingress_plan.v2"
 
 
 class BrowserIngressError(ValueError):
@@ -70,6 +71,16 @@ class BrowserIngressPlan:
     requires_dedicated_public_binding: bool = True
 
     @property
+    def public_metadata_url(self) -> str:
+        endpoint = urlsplit(self.public_resource_url)
+        return f"https://{endpoint.netloc}/.well-known/oauth-protected-resource{PUBLIC_PATH}"
+
+    @property
+    def internal_metadata_upstream_url(self) -> str:
+        endpoint = urlsplit(self.internal_upstream_url)
+        return f"https://{endpoint.netloc}{INTERNAL_METADATA_PATH}"
+
+    @property
     def is_admission(self) -> bool:
         return False
 
@@ -78,6 +89,8 @@ class BrowserIngressPlan:
             "schema": SCHEMA,
             "public_resource_url": self.public_resource_url,
             "internal_upstream_url": self.internal_upstream_url,
+            "public_metadata_url": self.public_metadata_url,
+            "internal_metadata_upstream_url": self.internal_metadata_upstream_url,
             "public_path": self.public_path,
             "internal_path": self.internal_path,
             "web_lane": self.web_lane,

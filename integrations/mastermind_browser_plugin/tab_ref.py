@@ -16,6 +16,8 @@ import json
 import re
 from typing import Any
 
+from .resource_identity import validate_browser_resource
+
 BROWSER_SESSION_SCHEMA = "mastermind.browser_session_ref.v1"
 BROWSER_SESSION_REF_VERSION = "bs1"
 TAB_REF_SCHEMA = "mastermind.browser_tab_ref.v1"
@@ -55,6 +57,13 @@ def _token(value: object) -> str:
     if type(value) is not str or _TOKEN.fullmatch(value) is None:
         _refuse("REFERENCE_INVALID")
     return value
+
+
+def _resource(value: object) -> str:
+    try:
+        return validate_browser_resource(value)
+    except (TypeError, ValueError):
+        _refuse("REFERENCE_INVALID")
 
 
 def _hex64(value: object, code: str) -> str:
@@ -128,9 +137,9 @@ class BrowserSessionRef:
         ):
             _refuse("BROWSER_REF_INVALID")
         _hex64(self.subject_digest, "SUBJECT_INVALID")
+        _resource(self.resource)
         for value in (
             self.client_ref,
-            self.resource,
             self.host_ref,
             self.boot_ref,
             self.profile_ref,
@@ -197,9 +206,9 @@ class BrowserTabRef:
         ):
             _refuse("BROWSER_REF_INVALID")
         _hex64(self.subject_digest, "SUBJECT_INVALID")
+        _resource(self.resource)
         for value in (
             self.client_ref,
-            self.resource,
             self.host_ref,
             self.boot_ref,
             self.profile_ref,
@@ -252,8 +261,8 @@ class BrokeredBrowserActionRef:
         if self.schema != BROKER_ACTION_SCHEMA:
             _refuse("ACTION_REF_INVALID")
         _hex64(self.subject_digest, "SUBJECT_INVALID")
+        _resource(self.resource)
         _token(self.client_ref)
-        _token(self.resource)
         _hex64(self.tab_ref_sha256, "ACTION_TAB_BINDING_INVALID")
         if (
             type(self.owner_action_ref) is not str
