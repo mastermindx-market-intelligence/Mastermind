@@ -78,6 +78,11 @@ MAX_SECTION_RESPONSE_BYTES = 65_536
 MAX_SECTION_ROWS = 100
 MAX_SOURCE_BYTES = 8_388_608
 MAX_JSONL_TAIL_ROWS = 100
+# Ceiling on the canonical bytes a single JSONL tail source may retain into a snapshot.
+# It must stay >= the largest single lawful row (a larger row fails its source closed as
+# OVERSIZE rather than being truncated) and small enough that the worst-case pair of JSONL
+# tails (decisions + fills, at most 2x this value) cannot alone exceed MAX_SNAPSHOT_BYTES.
+MAX_JSONL_TAIL_BYTES = 65_536
 # Ceiling on the total encoded filename metadata a single directory manifest may carry.
 # Deliberately far below MAX_SOURCE_BYTES: a manifest is metadata about an unbounded
 # directory, and an unbounded name census is not bounded capture.
