@@ -133,6 +133,22 @@ that current version; historical receipts and persisted Job identities are
 unchanged. Existing host, quota, grant and root bindings must qualify the new
 policy identity through their owners before native selection.
 
+For the ordinary native COO route, the existing stopped, disarmed install-input
+builder can explicitly call
+`ops.executive_os.coo_quota_selection.prepare_current_coo_quota_selection` with
+its validated Control/Worker inputs and protected source's `ModelRouter`. This
+pure preparation changes only the three `codex-coo` selectors. Their shared
+suffix binds the routing catalogue, both complete resolved aliases and the
+observed Operator binary digest/version; a proof-source-only upgrade does not
+change it. Historical quota rows remain immutable. The helper neither publishes
+configuration nor arms or registers anything, and does not run by default in
+the installer or arm path. The existing host installer owns publication; service
+registration and Runtime retain current-binding checks and refuse additive
+registration while an Attempt is held. The helper refuses armed, attended,
+subscription-canary, custom and native-return compositions. Prepared selectors
+are not authentication, provider readiness, Capacity evidence or permission to
+submit the original request.
+
 An ordinary native-return planner still stops after its one sealed plan. A
 retained native proof requires the existing deterministic `create-interactive`
 creator and an already sealed native root profile; creation rejects stale

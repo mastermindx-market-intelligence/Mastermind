@@ -193,6 +193,15 @@ def adapt_producer_state(payload: Mapping[str, Any], *, as_of: datetime) -> Sour
         raise ContractError("source_snapshot_hash must be a canonical SHA-256 reference")
     _same(event["data_version"], "glt_data:" + digest[:16], "producer data version")
     raw, z = values["magnitude"], values["magnitude_z"]
+    if raw is not None:
+        rule = _object(state.get("label_rule"), "state label rule")
+        _same(rule.get("field"), "state.monetary_impulse", "label rule field")
+        _same(rule.get("unit"), RAW_UNIT, "label rule unit")
+        band = _number(rule.get("flat_band_abs"), "label rule flat band")
+        if band < 0:
+            raise ContractError("label rule flat band must be >= 0")
+        expected = "expanding" if raw > band else "contracting" if raw < -band else "flat"
+        _same(state.get("label"), expected, "raw-unit direction label")
     direction = _required(event, "direction")
     if raw is None or raw == 0:
         if direction is not None:

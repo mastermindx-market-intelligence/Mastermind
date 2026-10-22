@@ -1,0 +1,51 @@
+{
+  "run_id": "mm-l0-price-metadata-review-20261015-01a1333c-v1",
+  "scope": {
+    "root": "01a1333c-a475-7052-95a8-72c623fb12e1",
+    "parent": "01a1333c-a475-7052-95a8-72c623fb12e1",
+    "host": "ubuntu1",
+    "mode": "qwen",
+    "requested_model": "qwen3.8-max",
+    "packet_path": "/Volumes/Mastermind/evidence/market-memory-20261012-01a1333c/integration/L0_PRICE_METADATA_REVIEW_PACKET.txt",
+    "packet_sha256": "baf0b1e363b85a22796086029202e6b2e8330d21f4caa6b78a02d40c2916d197",
+    "support_digest": "8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c",
+    "source_pins": {
+      "log": "b1a89114c36ed8133306a4c654e0995ae2799d9bc77fcf64a24d0d7698c3b954",
+      "support": "fe7b408aef29aa851ff0710e25bc50cc51002342c369afac0d04c15395b962d2"
+    },
+    "lease_witness": {
+      "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/mm-l0-price-metadata-review-20261015-01a1333c-v1.lease.kPZhMS",
+      "sha256": "70ba6a698a49d7401611ef5ab5cf6f2f64f10355329d6593f38a76b3d3f5887b"
+    },
+    "destination": "/Volumes/Mastermind/evidence/market-memory-20261012-01a1333c/retained-returns/mm-l0-price-metadata-review-20261015-01a1333c-v1-collection-v1"
+  },
+  "native_transcript": "/Users/chriswong/.codex/sessions/2026/10/12/rollout-2026-10-12T20-09-34-01a1333c-a475-7052-95a8-72c623fb12e1.jsonl",
+  "original_session_id": "01a1333c-a475-7052-95a8-72c623fb12e1",
+  "witnesses": [
+    {
+      "line": 28092,
+      "at": "2026-10-15T20:35:22.560Z",
+      "call_id": "call_a549996176de4b79b4b637fbef45515c",
+      "kind": "custom_tool_call",
+      "line_sha256": "c8575c2b8952f5c45a285fe353aff3881df1f489fd4f1d67ce8b9272b85570bd"
+    },
+    {
+      "line": 28097,
+      "at": "2026-10-15T20:35:29.047Z",
+      "call_id": "call_d7cb5da6dc124cc293b2519cb7d9763b",
+      "kind": "custom_tool_call",
+      "line_sha256": "dc599762c6c258767283b641e72bdd591b6dc1a3dc6e38226836f84322642a52"
+    },
+    {
+      "line": 28099,
+      "at": "2026-10-15T20:35:30.298Z",
+      "call_id": "call_d7cb5da6dc124cc293b2519cb7d9763b",
+      "kind": "custom_tool_call_output",
+      "line_sha256": "66d7daec6a1482521c96f45bc94f074eddb67d37161eab66fef3d50887cfa196"
+    }
+  ],
+  "effect": "LOCAL_SOURCE_QUALIFICATION_ONLY_NO_REMOTE_READ_NO_LEASE_MUTATION",
+  "original_support_files": 31,
+  "existing_remote_refusal": false,
+  "retained_result_state": "UNKNOWN"
+}

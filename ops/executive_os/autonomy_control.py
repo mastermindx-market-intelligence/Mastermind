@@ -1647,7 +1647,6 @@ def execute_arm(
         host.write_autonomy_receipt(transaction, receipt)
         host.start_services(request.expected_sha)
         host.prove_services_ready(request.expected_sha)
-        host.complete_transaction(transaction)
     except ArmAdmissionError:
         # A marker that appeared between the read-only admission check and the
         # atomic mkdir belongs to another root transaction. Never "recover"
@@ -1679,6 +1678,14 @@ def execute_arm(
         except Exception as rollback_exc:
             raise TransactionEffectUnknown() from rollback_exc
         raise ArmTransactionError("arm_rolled_back") from exc
+    try:
+        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        # Publication/terminal cleanup has started; rollback cannot erase that
+        # boundary and publish again, even if cleanup raises an ordinary error.
+        raise TransactionEffectUnknown() from exc
     return TransactionResult(
         state="ARMED",
         status="ARMED_READY",
@@ -1714,7 +1721,10 @@ def execute_disarm(
         host.replace_control_config(transaction)
         receipt = build_transaction_receipt(transaction, state="DISARMED", now=now)
         host.write_autonomy_receipt(transaction, receipt)
-        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # A lost publication/ownership acknowledgement is not an instruction
+        # to rewrite the configs, receipt or original journal through rollback.
+        raise
     except Exception as exc:
         try:
             host.stop_services(expected_sha)
@@ -1727,6 +1737,15 @@ def execute_disarm(
         except Exception as rollback_exc:
             raise TransactionEffectUnknown() from rollback_exc
         raise ArmTransactionError("disarm_recovered") from exc
+    try:
+        # Closeout may publish the observation and then remove journal files.
+        # Any failure here (including an ordinary cleanup OSError) is ambiguous;
+        # never enter rollback, which itself calls complete_transaction again.
+        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
     return TransactionResult(
         state="DISARMED",
         status="UNARMED",
@@ -5302,4 +5321,10 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # The installed wrapper executes this file with -I -S -B. Publication
+    # imports this module by package name and requires its genuine classes;
+    # objects defined under __main__ have a different identity. Delegate the
+    # entry, not the type check, and do not alias an arbitrary module in sys.modules.
+    from ops.executive_os.autonomy_control import main as canonical_main
+
+    raise SystemExit(canonical_main())

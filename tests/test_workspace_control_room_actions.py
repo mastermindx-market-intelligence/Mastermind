@@ -3,6 +3,7 @@ import asyncio
 import copy
 import json
 import threading
+from types import SimpleNamespace
 
 import pytest
 
@@ -30,9 +31,19 @@ def owner_fixture(cfg):
         action: workspace_control_room_authorizers(policy=policy, load_bindings=load, action=action)[1]
         for action in wire.OPERATIONS
     }
-    hosted = HostedControlRoom(cfg, cache_only=True)
-    # This is a fixture-only active resolver, never running-host acceptance.
-    hosted._cache_active = True
+    # Explicitly inert fixture room: exact HostedControlRoom class identity
+    # over this fixture's config, but no protected-constructor custody, no
+    # listener, and never started — the action unit layer makes no installed
+    # lifecycle claim here. The inert server record supplies only the exact
+    # config field read by current_owner(); it is not a serving thread or
+    # custody proof. Retirement still uses the room's own stop gate.
+    hosted = HostedControlRoom.__new__(HostedControlRoom)
+    hosted.config = cfg
+    hosted.shutdown_timeout = 10.0
+    hosted._server = SimpleNamespace(config=cfg)
+    hosted._server_thread = None
+    hosted._refresh_thread = None
+    hosted._stop = threading.Event()
     clock = [100]
     service = ExistingControlRoomActions(
         hosted, authorize=authorize, authorize_actions=action_owners,
@@ -74,7 +85,7 @@ def test_an_unstarted_or_retired_owner_never_becomes_an_action_owner(tmp_path, s
     service, hosted, _, _, request = owner_fixture(cfg)
     cfg.open_binding_fn = lambda *a, **k: pytest.fail("unavailable owner reached provider")
     ready = lambda: True
-    if state == "inactive": hosted._cache_active = False
+    if state == "inactive": hosted._stop.set()  # retired room gate: no live owner
     elif state == "stopping": cfg.state_stopping = True
     elif state == "host_not_ready": ready = lambda: False
     else: ready = None
@@ -122,7 +133,7 @@ def test_actual_effect_guard_refuses_changes_during_the_binding_read(
 
     def changed(path):
         result = read(path)
-        if movement == "owner": hosted.config = config(tmp_path / "replacement")
+        if movement == "owner": hosted._server.config = config(tmp_path / "replacement")
         elif movement == "instance": cfg._workspace_read_instance = "f" * 64
         elif movement == "stopping": cfg.state_stopping = True
         elif movement == "grant": bindings["profiles"]["member-0"]["control_room_actions"]["open"] = None

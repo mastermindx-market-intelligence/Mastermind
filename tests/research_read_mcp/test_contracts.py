@@ -22,7 +22,7 @@ REQUIREMENTS = ROOT / "requirements" / "research-read-linux-x86_64-py312.in"
 LOCK = ROOT / "requirements" / "research-read-linux-x86_64-py312.lock"
 DIRECT_PINS = [
     "mcp==1.28.1",
-    "PyJWT[crypto]==2.13.0",
+    "PyJWT[crypto]==2.14.0",
     "httpx==0.28.1",
     "jsonschema==4.26.0",
     "pydantic==2.13.5",

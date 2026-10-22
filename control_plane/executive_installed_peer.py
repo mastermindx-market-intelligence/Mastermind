@@ -1322,6 +1322,24 @@ _EXPECTED_PLIST_PROFILES = {
 }
 
 
+# The optional workspace Control Room socket (install.sh adds it only when the
+# Control config carries the unix stanza). Owner, group and mode derive from
+# the existing Control topology; mode is owner read/write only.
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+_WORKSPACE_CONTROL_ROOM_SOCKET = {
+    "SockPassive": True,
+    "SockPathGroup": _ROLE_TOPOLOGIES["control"].config_gid,
+    "SockPathMode": stat.S_IRUSR | stat.S_IWUSR,
+    "SockPathName": "/var/run/mastermind-executive/workspace-control-room.sock",
+    "SockPathOwner": _ROLE_TOPOLOGIES["control"].service_uid,
+    "SockType": "stream",
+}
+_CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM = {
+    **_EXPECTED_PLIST_PROFILES["control"],
+    "Sockets": {**_CONTROL_SOCKETS, _WORKSPACE_CONTROL_ROOM_SOCKET_NAME: _WORKSPACE_CONTROL_ROOM_SOCKET},
+}
+
+
 def _lstat(path: str) -> os.stat_result:
     """Single lstat seam so link races stay testable without root."""
     return os.lstat(path)
@@ -1715,6 +1733,13 @@ _READ_ONLY_COMMANDS = (_CODESIGN_VERIFY_ARGV, _CODESIGN_METADATA_ARGV)
 
 def _profile_matches(template: object, value: object, releases: list) -> bool:
     """Closed structural match; only exact release-SHA substitution may vary."""
+    if (
+        template is _EXPECTED_PLIST_PROFILES["control"]
+        and type(value) is dict
+        and type(value.get("Sockets")) is dict
+        and _WORKSPACE_CONTROL_ROOM_SOCKET_NAME in value["Sockets"]
+    ):
+        template = _CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM
     if type(template) is str:
         if type(value) is not str or not value.isascii():
             return False

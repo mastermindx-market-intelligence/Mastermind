@@ -268,6 +268,13 @@ def create_browser_tunnel_server(
     project_ref = services.project_ref
     ports: BrowserPorts = create_browser_ports(
         resolve_binding=current_binding,
+        # For a worker-selected grant, read recovery must also verify the
+        # original durable BrowserResourcePort APPLIED start/process claim.
+        # A same-key signed BrowserRef without that claim grants no read.
+        # Attended/ungranted Workbench remains under its existing owner law.
+        resolve_recovery_binding=current_binding if mcp_grant is not None else None,
+        # Fresh mutating tools must not bypass the same durable start claim.
+        require_resource_claim_for_fresh=mcp_grant is not None,
         clock_ms=services.clock_ms,
         action_token_key=services.action_token_key,
         artifact_store=services.artifact_store,

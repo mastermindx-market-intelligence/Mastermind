@@ -71,6 +71,10 @@ class CeoIngressWorkspaceClient:
         elif isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
             validate_facts_frame(frame)
             ceiling = MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v5":
+            from common import executive_workspace_activity_contract as activity
+            activity.validate_frame(frame)
+            ceiling = activity.MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             validate_v3_frame(frame)
             ceiling = MAX_PLAN_RESPONSE_BYTES

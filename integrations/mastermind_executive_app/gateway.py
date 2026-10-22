@@ -3071,7 +3071,10 @@ class CeoIngressReadGateway:
         cls, upstream_code: str
     ) -> tuple[str, str]:
         code = "backend_unavailable"
-        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+        if upstream_code in {"output_too_large", "response_too_large"}:
+            code = "output_too_large"
+            message = "Executive reader response exceeds the installed byte limit."
+        elif upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
             message = "Executive reader is unavailable in the installed backend."
         else:
             code = "backend_refused"

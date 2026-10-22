@@ -1,0 +1,45 @@
+{
+  "schema": "mastermind.deepseek_client_source_verification.v1",
+  "scope": "SOURCE_IMPLEMENTED_NOT_INSTALLED",
+  "base_sha": "d31aade92b969e8897513d8634ecd59dba00e1e3",
+  "frontend": {
+    "command": "npm test -- --maxWorkers=4",
+    "passed": 1704,
+    "skipped": 1,
+    "failed": 0,
+    "files": 76
+  },
+  "focused": {
+    "passed": 79,
+    "failed": 0
+  },
+  "provenance": {
+    "command": "python3 -m unittest discover -s tests -p test_deepseek_client_provenance.py -v",
+    "passed": 4,
+    "failed": 0
+  },
+  "build": {
+    "command": "npm run build",
+    "passed": true
+  },
+  "browser": "browser-proof.json",
+  "git_diff_check": true,
+  "artifacts_sha256": {
+    "app/mastermind_os/src/conversations/SourceMarkdown.tsx": "8f8b62620fe990c68a93364e46ed1c98abde36b39bd08e63aa9f0801ee6b58c3",
+    "app/mastermind_os/src/conversations/source-markdown.css": "58baf057a802707bf07aa5c86d04e5dc8a3a7b790c55d68e7e2b5b5de5ae20e0",
+    "app/mastermind_os/src/conversations/ResultSourceReader.tsx": "c69e0d11303789e439bf73ddef11109bfcead38fa888aba09d9895e0fa6da319",
+    "app/mastermind_os/src/orchestration/ui/useComposerKeyboard.ts": "dcf55460b3f2545672c89ee57cd1aee1a1515c9861ab972c41d1bed85f2f8e7a",
+    "app/mastermind_os/src/orchestration/ui/SelectedSessionContinuation.tsx": "d6d7728aec24c6e43c9f4c4bbd6239fd4a5cd23c4c28beda30f03deb12f0d3c2",
+    "app/mastermind_os/src/client-reuse-proof.tsx": "87036bf65b04a0a04649e0299a7c9cb99f8019a372344846a226067f621f21cf",
+    "app/mastermind_os/tools/qualify_client_reuse.py": "da2501eb533830174ee72a22bc0e35e2492c745cd26e952432508c2821209436",
+    "app/mastermind_os/package-lock.json": "f006593504884a30b2aca1a47f07c8274462fa199f519337b001fd8ce8ebbb68",
+    "research/harness_reuse/evidence/2026-10-22-client/desktop-dark.png": "398a572051b2c238f3084fd6fa59e7b2c38e97d9cdfd27cb756092672ab93737",
+    "research/harness_reuse/evidence/2026-10-22-client/desktop-light.png": "b14a1d54cedded2eab86bedf04ffe66c801368bf95f399335448827254f0c888",
+    "research/harness_reuse/evidence/2026-10-22-client/mobile-dark.png": "1a3a116f8001e41f9192e7c638b18866a25b6fdc40003d112853ff11798a3340",
+    "research/harness_reuse/evidence/2026-10-22-client/mobile-light.png": "52da54da14d0edc9bca243ac1624dcfecb774414f1b94de17a2091fc856762a7"
+  },
+  "live_session": false,
+  "provider_call": false,
+  "installation": false,
+  "original_parent_consumption": false
+}

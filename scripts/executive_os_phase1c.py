@@ -326,6 +326,7 @@ _CONFIG_OPTIONAL = frozenset(
         "fabric_bindings_sha256",
         "fabric_bridge_armed",
         "fabric_attended_probe",
+        "native_capacity_v2",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -360,6 +361,13 @@ class FabricActivationRefused(ServiceError):
     """Shared Fabric execution has no admitted backend and isolation profile."""
 
 
+def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
+    """A source pin can be prepared only while every execution switch is off."""
+    return all(raw.get(key, False) is False for key in (
+        "coo_autonomy_armed", "coo_operator_harness_armed", "coo_foreground_only",
+        "ceo_submit_armed", "fabric_bridge_armed"))
+
+
 def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
     armed = raw.get("fabric_bridge_armed", False)
     if type(armed) is not bool:
@@ -387,6 +395,17 @@ def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
                 or str(Path(probe["worker_config_path"])) != probe["worker_config_path"]
                 or "\x00" in probe["worker_config_path"]):
             raise ServiceError("Fabric attended probe requires one fixed worker definition")
+    if "native_capacity_v2" in raw:
+        stanza = raw["native_capacity_v2"]
+        if ("fabric_attended_probe" not in raw
+                or (not _native_capacity_staging_only(raw)
+                    and raw.get("coo_foreground_only") is not True)
+                or type(stanza) is not dict or set(stanza) != {"macro_release", "producer_sha256"}
+                or type(stanza["macro_release"]) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", stanza["macro_release"]) is None
+                or type(stanza["producer_sha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", stanza["producer_sha256"]) is None):
+            raise ServiceError("native V2 capacity requires fixed source and foreground Control custody")
     return bool(present)
 
 
@@ -668,26 +687,6 @@ def _path(value: Any, name: str) -> Path:
     return Path(value).resolve(strict=False)
 
 
-def _workspace_control_room_topology(value: Any) -> tuple[bool, int, Path | None]:
-    """Parse one explicit existing topology without selecting a fallback store."""
-    if type(value) is not dict:
-        raise ServiceError("workspace Control Room topology refused")
-    if set(value) == {"port"}:
-        port = value["port"]
-        if type(port) is int and 1 <= port <= 65535:
-            return False, port, None
-    elif set(value) == {"mode", "bindings_path"} and value["mode"] == "cache_only":
-        selected = value["bindings_path"]
-        if selected is None:
-            return True, 0, None
-        if (type(selected) is str and 0 < len(selected) <= 4096
-                and "\x00" not in selected and Path(selected).is_absolute()):
-            # Retain the operator's explicit path; no HOME expansion,
-            # alias resolution, store probing or path provisioning here.
-            return True, 0, Path(selected)
-    raise ServiceError("workspace Control Room topology refused")
-
-
 def _sealed_root_executable(value: Any, name: str) -> Path:
     """Require one root-owned executable behind no symlink/writable ancestor."""
     if not isinstance(value, str) or not Path(value).is_absolute():
@@ -884,6 +883,64 @@ _CANONICAL_COMPANY_CONSULTATION_SOCKET = "/var/run/mastermind-executive/company-
 _COMPANY_CONSULTATION_SOCKET_NAME = "CompanyConsultation"
 
 
+_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET = "/var/run/mastermind-executive/workspace-control-room.sock"
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+
+
+def validate_workspace_control_room(stanza: Any, *, control_uid: int) -> dict[str, Any]:
+    """Closed unix/launchd stanza for the in-process workspace Control Room.
+
+    The legacy ``{"port": int}`` TCP shape is refused loudly so a forgotten
+    migration tool never silently degrades Control back onto a loopback socket.
+    """
+
+    if type(stanza) is dict and set(stanza) == {"port"}:
+        raise ServiceError(
+            "workspace Control Room legacy TCP port stanza refused; "
+            "migrate it with ops/executive_os/migrate_workspace_control_room.py"
+        )
+    if type(stanza) is not dict:
+        raise ServiceError("workspace Control Room topology refused")
+    expected = {"transport", "socket_path", "launchd_socket_name", "allowed_peer_uids"}
+    if set(stanza) != expected:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["transport"] != "unix":
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["socket_path"] != _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["launchd_socket_name"] != _WORKSPACE_CONTROL_ROOM_SOCKET_NAME:
+        raise ServiceError("workspace Control Room topology refused")
+    peers = stanza["allowed_peer_uids"]
+    if (type(peers) is not list or len(peers) == 0
+            or any(type(item) is not int for item in peers)
+            or any(item is True or item is False for item in peers)
+            or len(set(peers)) != len(peers)):
+        raise ServiceError("workspace Control Room topology refused")
+    if any(peer != control_uid for peer in peers):
+        raise ServiceError("workspace Control Room topology refused")
+    return {key: value for key, value in stanza.items()}
+
+
+def workspace_control_room_launchd_entry(
+    config: Mapping[str, Any], *, control_gid: int
+) -> dict[str, Any] | None:
+    """Closed optional host binding, shared by loader, installer and factory."""
+
+    if "workspace_control_room" not in config:
+        return None
+    validate_workspace_control_room(
+        config["workspace_control_room"], control_uid=int(config["control_uid"]))
+    if type(control_gid) is not int or control_gid <= 0:
+        raise ServiceError("workspace Control Room launchd entry requires a positive control gid")
+    return {
+        "SockPathName": _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+        "SockType": "stream", "SockPassive": True,
+        "SockPathOwner": int(config["control_uid"]),
+        "SockPathGroup": control_gid,
+        "SockPathMode": 0o600,
+    }
+
+
 def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, Any] | None:
     """One closed optional host binding, shared by loader, installer and factory."""
     value = config.get("company_consultation")
@@ -1070,7 +1127,8 @@ def load_control_config(
     if keys & workspace_keys:
         if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
             raise ServiceError("workspace acquisition requires its policy and installed App peer")
-        _workspace_control_room_topology(config["workspace_control_room"])
+        config["workspace_control_room"] = validate_workspace_control_room(
+            config["workspace_control_room"], control_uid=config["control_uid"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
         try:
@@ -1743,16 +1801,15 @@ def _service_from_config(
     fabric_attended_probe_source: Any | None = None,
     attended_work_placements: tuple = (),
 ) -> ExecutiveControlService:
-    workspace_cache_only, workspace_port = False, 0
-    selected_workspace_bindings_path = workspace_bindings_path
     if "workspace_acquisition" in raw:
-        workspace_cache_only, workspace_port, configured_bindings = (
-            _workspace_control_room_topology(raw.get("workspace_control_room")))
-        if workspace_cache_only:
-            if (workspace_bindings_path is not None
-                    and workspace_bindings_path != configured_bindings):
-                raise ServiceError("workspace Control Room bindings selection conflicts")
-            selected_workspace_bindings_path = configured_bindings
+        # Closed unix/launchd stanza only. validate_workspace_control_room
+        # refuses the legacy TCP port stanza and accepts no port or
+        # cache_only shape, so neither a TCP listener, a port config, nor
+        # an alternate store can re-enter service composition. The
+        # explicitly selected bindings store stays the sealed
+        # parent-provided path.
+        validate_workspace_control_room(
+            raw.get("workspace_control_room"), control_uid=int(raw["control_uid"]))
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
         dialogue_canary_profile = DialogueWakeCanaryProfile(None)
@@ -1985,6 +2042,18 @@ def _service_from_config(
             raise ServiceError("product acceptance review requires the sealed COO and complete App binding") from None
         product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
 
+    native_capacity_source = None
+    if ("native_capacity_v2" in raw and _native_capacity_staging_only(raw)
+            and attended_work_placements):
+        raise ServiceError("staged native capacity cannot carry active placements")
+    if "native_capacity_v2" in raw and not _native_capacity_staging_only(raw):
+        if (len(attended_work_placements) != 1
+                or qualification_for(attended_work_placements) is None):
+            raise ServiceError("native V2 capacity requires the single original finite placement")
+        from control_plane.native_capacity_acquisition import NativeCapacitySource
+        native_capacity_source = NativeCapacitySource.from_startup(
+            fabric_attended_probe_source, fabric_worker_binding_source)
+
     def supervisor_factory(runtime):
         def validations(spec):
             job = runtime.jobs.get_job(spec.job_id)
@@ -2102,7 +2171,11 @@ def _service_from_config(
                 product_acceptance_context_reader=(product_acceptance_basis_reader()
                     if product_acceptance_context_owner is not None else None),
             )
-        mixed = MixedExecutionOwnerSupervisor(primary, owners)
+        initial_admission = None
+        if native_capacity_source is not None:
+            from control_plane.finite_initial_admission import FiniteInitialAdmission
+            initial_admission = FiniteInitialAdmission(native_capacity_source)
+        mixed = MixedExecutionOwnerSupervisor(primary, owners, initial_admission=initial_admission)
         recovery_controller["owners"] = mixed.owners
         return mixed
 
@@ -2322,17 +2395,28 @@ def _service_from_config(
                 macro_root=Path(raw["ceo_ingress_app_macro_root"]),
                 bounded_runtime=lambda: service._namespace_custody.bound_runtime(
                     service._require_runtime()),
-                bindings_path=selected_workspace_bindings_path,
+                bindings_path=workspace_bindings_path,
             )
-            # Both READ and action owners select this one explicit store and
-            # the existing cache. The legacy port shape remains unchanged.
-            workspace_control_room = HostedControlRoom(ServerConfig(
-                repo_root=Path(raw["proof_source_repository"]),
-                macro_root=str(raw["ceo_ingress_app_macro_root"]),
-                bindings_path=selected_workspace_bindings_path,
-                token=secrets.token_urlsafe(32),
-                origin=f"http://127.0.0.1:{workspace_port}", port=workspace_port,
-                compose_inputs=compose_inputs), cache_only=workspace_cache_only)
+            # Existing source paths and existing controller permissions only.
+            # Bind the installation-selected incumbent topology before publishing.
+            # Closed AF_UNIX launchd listener; never a TCP loopback port.
+            room_listener = activate_launchd_socket(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+            activated_listeners.append(room_listener)
+            from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+            workspace_control_room = HostedControlRoom(
+                ServerConfig(
+                    repo_root=Path(raw["proof_source_repository"]),
+                    macro_root=str(raw["ceo_ingress_app_macro_root"]),
+                    bindings_path=workspace_bindings_path,
+                    token=secrets.token_urlsafe(32),
+                    origin=UNIX_CONTROL_ROOM_ORIGIN,
+                    port=0,
+                    compose_inputs=compose_inputs,
+                ),
+                listener=room_listener,
+                socket_path=str(raw["workspace_control_room"]["socket_path"]),
+                allowed_peer_uids=tuple(raw["workspace_control_room"]["allowed_peer_uids"]),
+            )
             from integrations.product_acceptance_read import read_acceptance
             from integrations.product_acceptance_selector import read_original_acceptance_observation
             from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
@@ -2668,6 +2752,10 @@ def _service_from_config(
     if qualification_for(attended_work_placements) is not None:
         from control_plane.fabric_attended_registration import register_fixed_finite
         def attended_registration(runtime):
+            if native_capacity_source is not None:
+                from control_plane.finite_initial_registration import register_initial
+                return register_initial(runtime, attended_work_placements[0],
+                    native_capacity_source, autonomy_guard)
             return register_fixed_finite(runtime, attended_work_placements[0],
                 fabric_worker_binding_source, fabric_attended_probe_source, autonomy_guard)
     service = ExecutiveControlService(
@@ -3029,6 +3117,10 @@ async def _run(args: argparse.Namespace) -> int:
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "to_dict"):
         return _jsonable(value.to_dict())
+    # asdict() skips to_dict() on nested dataclasses and leaves Enums as-is; neither
+    # applies to WakeRetryPolicy (flat, frozen, bool/int/None fields).
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(dataclasses.asdict(value))
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

@@ -260,6 +260,38 @@ class TestIdentity(unittest.TestCase):
 
 
 class TestStrictTunnelHealth(unittest.TestCase):
+    def test_successful_poll_timestamp_must_be_current(self):
+        now = 1_792_087_941
+        for value in (None, True, "1792087940", float("nan"), float("inf"),
+                      -float("inf"), 10**400, -(10**400), now + 1,
+                      now - 90.1, now - 91, 1_792_086_545):
+            with self.subTest(value=value):
+                poll = {"ok": True}
+                if value is not None:
+                    poll["value"] = value
+                payload = {"healthz": {"ok": True}, "readyz": {"ok": True},
+                           "control_plane_poll": poll, "result": "ok"}
+                with mock.patch.object(svc, "_run", return_value=FakeResult(
+                    0, json.dumps(payload), ""
+                )), mock.patch.object(svc.time, "time", return_value=now):
+                    self.assertEqual(svc._strict_tunnel_health(Path("/tc"), 45031),
+                                     (True, False, False))
+
+    def test_fresh_poll_age_boundary_and_local_readiness(self):
+        now = 1_792_087_941
+        for age in (0, 30, 30.5, 90):
+            for local_ready in (False, True):
+                with self.subTest(age=age, local_ready=local_ready):
+                    payload = {"healthz": {"ok": True},
+                               "readyz": {"ok": local_ready},
+                               "control_plane_poll": {"ok": True, "value": now-age},
+                               "result": "ok"}
+                    with mock.patch.object(svc, "_run", return_value=FakeResult(
+                        0, json.dumps(payload), ""
+                    )), mock.patch.object(svc.time, "time", return_value=now):
+                        self.assertEqual(svc._strict_tunnel_health(Path("/tc"), 45031),
+                                         (True, local_ready, True))
+
     def test_requires_successful_control_plane_poll(self):
         payload = {
             "healthz": {"ok": True},
@@ -294,12 +326,12 @@ class TestStrictTunnelHealth(unittest.TestCase):
         payload = {
             "healthz": {"ok": True},
             "readyz": {"ok": True},
-            "control_plane_poll": {"ok": True},
+            "control_plane_poll": {"ok": True, "value": 1_792_087_940},
             "result": "ok",
         }
         with mock.patch.object(
             svc, "_run", return_value=FakeResult(0, json.dumps(payload), "")
-        ):
+        ), mock.patch.object(svc.time, "time", return_value=1_792_087_941):
             self.assertEqual(
                 svc._strict_tunnel_health(Path("/tc"), 45031),
                 (True, True, True),
@@ -1063,6 +1095,64 @@ class TestStartStatusStop(unittest.TestCase):
             bootout = [c for c in rec.calls if c[:2] == ["launchctl", "bootout"]]
             self.assertTrue(bootout[0][2].endswith(label))
             self.assertNotIn("com.mastermind.studio-direct-private.chatgpt1", bootout[0][2])
+
+
+class TestC2HistoricalEightRequestTunnel(unittest.TestCase):
+    """Only the original sealed C2 tunnel may retain its historical 8 limit."""
+
+    def _manifest(self, account="chatgpt2-business", concurrency=8):
+        return {
+            "version": 1,
+            "account": account,
+            "label": svc._tunnel_label(account),
+            "gatewayLabel": svc._gateway_label(account),
+            "managedAlias": svc._managed_alias(account),
+            "transportTTL": svc.TRANSPORT_TTL,
+            "maxConcurrentRequests": concurrency,
+            "tunnelClient": svc.PINNED_TUNNEL_CLIENT,
+            "profileHash": "a"*64,
+            "plistHash": "b"*64,
+            "organizationId": None,
+            "tunnelId": "tunnel-test",
+            "gatewayPort": 45028,
+            "healthPort": 45029,
+            "profile": "/tmp/sealed-profile",
+            "runtimeKeyRef": "file:///tmp/sealed",
+        }
+
+    def test_c2_original_eight_accepted_but_other_accounts_denied(self):
+        d = self._manifest()
+        self.assertTrue(svc._valid_manifest(
+            d, d["account"], d["label"]))
+        other = self._manifest("chatgpt1")
+        self.assertFalse(svc._valid_manifest(
+            other, other["account"], other["label"]))
+        for invalid in (5, 6, 16, True, None):
+            bad = self._manifest(concurrency=invalid)
+            self.assertFalse(svc._valid_manifest(
+                bad, bad["account"], bad["label"]))
+        d["version"] = 2
+        self.assertFalse(svc._valid_manifest(
+            d, d["account"], d["label"]))
+
+    def test_historical_exception_refuses_rewritten_manifest_bytes(self):
+        with tempfile.TemporaryDirectory() as raw:
+            path = Path(raw) / "tunnel-manifest.json"
+            data = self._manifest()
+            path.write_text(json.dumps(data), encoding="utf-8")
+            with self.assertRaisesRegex(SystemExit, "corrupt tunnel manifest"):
+                svc._read_manifest(path, data["account"], data["label"])
+
+    def test_legacy_argv_verification_uses_sealed_limit_without_changing_default(self):
+        from pathlib import Path
+        client = Path(svc.PINNED_TUNNEL_CLIENT)
+        profile = Path("/tmp/sealed-profile")
+        default = svc._expected_argv(client, profile, 45029)
+        legacy = svc._expected_argv(
+            client, profile, 45029, max_concurrent_requests=8)
+        flag = "--mcp.max-concurrent-requests"
+        self.assertEqual(default[default.index(flag)+1], "4")
+        self.assertEqual(legacy[legacy.index(flag)+1], "8")
 
 
 if __name__ == "__main__":

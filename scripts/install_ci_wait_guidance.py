@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Install bounded CI guidance corrections, without changing guard decisions.
+"""Install bounded CI guidance and Codex hook-input compatibility corrections.
 
 Default is a read-only plan. Explicit --apply backs up each changed target and
 records partial progress on failure. No scheduler, credential, hook binding or

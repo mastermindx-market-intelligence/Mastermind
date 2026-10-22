@@ -159,7 +159,7 @@ def _doctrine() -> dict[str, Any]:
     return {}
 
 
-def _trading_days_since(as_of: str | None) -> int | None:
+def _trading_days_since(as_of: str | None, *, today: date | None = None) -> int | None:
     """Count NYSE trading sessions strictly between *as_of* (YYYY-MM-DD) and today.
 
     Reuses the freshness()-style arithmetic but on a trading-day basis (the cycle
@@ -169,7 +169,8 @@ def _trading_days_since(as_of: str | None) -> int | None:
 
     A same-day or future asOf returns 0.  Weekends and NYSE holidays are excluded
     via portfolio.market_calendar.is_trading_day so a Friday read is not "stale" by
-    Monday.  Falls back to a calendar-weekday count if the calendar import fails.
+    Monday. Falls back to a calendar-weekday count if the calendar import fails.
+    An explicit today lets a read projection use one clock for its entire assessment.
     """
     if not as_of:
         return None
@@ -177,7 +178,7 @@ def _trading_days_since(as_of: str | None) -> int | None:
         d0 = date.fromisoformat(str(as_of))
     except (ValueError, TypeError):
         return None
-    today = datetime.now(tz=timezone.utc).date()
+    today = today if today is not None else datetime.now(tz=timezone.utc).date()
     if d0 >= today:
         return 0
     try:
@@ -316,7 +317,10 @@ def freshness(region: str = "us") -> int | None:
 # cycles() — the sole sector_cycles.json consumer (architecture Stage 1, W2)
 # ---------------------------------------------------------------------------
 
-def cycles_with_meta() -> dict[str, Any]:
+_CYCLES_SOURCE_UNSET = object()
+
+
+def cycles_with_meta(*, raw: Any = _CYCLES_SOURCE_UNSET, today: date | None = None) -> dict[str, Any]:
     """Return the freshness-stamped sector-cycle snapshot.
 
     THIS IS THE ONLY CONSUMER of vendor/macro/site/sectordata/sector_cycles.json in the
@@ -347,16 +351,20 @@ def cycles_with_meta() -> dict[str, Any]:
         "degrade_reason": "absent_or_unreadable",
     }
     try:
-        if not _CYCLES_PATH.exists():
+        if raw is _CYCLES_SOURCE_UNSET:
+            if not _CYCLES_PATH.exists():
+                return empty
+            raw = json.loads(_CYCLES_PATH.read_text())
+        if not isinstance(raw, dict):
             return empty
-        raw = json.loads(_CYCLES_PATH.read_text())
     except Exception:  # noqa: BLE001 — any I/O or parse error → no-op
         return empty
 
     meta = raw.get("meta") or {}
     as_of = meta.get("asOf") if isinstance(meta, dict) else None
     stale_after = _cycles_stale_after_td()
-    age = _trading_days_since(as_of)
+    age = (_trading_days_since(as_of) if today is None else
+           _trading_days_since(as_of, today=today))
     # Unknown age (age is None) is treated as stale — fail-closed, never fail-open.
     if age is None or age < 0 or age > stale_after:
         return {

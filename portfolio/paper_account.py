@@ -501,8 +501,9 @@ def _pending_clear_transition(
     *,
     prices: dict[str, float] | None = None,
     price_sources: dict[str, str] | None = None,
+    _evidence: dict | None = None,
 ) -> dict[str, Any]:
-    """Capture the exact queued target that a successful settlement is allowed to remove."""
+    """Capture the exact queued target and optional selected-price context for recovery."""
     path = _pending_target_path(portfolio_id)
     pending_payload = _read_pending_target_payload(portfolio_id)
     settlement_prices = {
@@ -531,6 +532,25 @@ def _pending_clear_transition(
             ticker: str(price_sources.get(ticker) or "settlement_snapshot")
             for ticker in settlement_prices
         }
+    if _evidence is not None:
+        try:
+            from portfolio import price_evidence, registry
+            transition["settlement_price_evidence"] = price_evidence.settlement_snapshot(
+                settlement_prices, transition.get("settlement_price_sources"),
+                registry.currency(portfolio_id), _evidence,
+            )
+        except Exception:
+            # Evidence capture does not veto a numerically valid settlement. The
+            # failure itself stays in the same immutable transaction preimage.
+            transition["settlement_price_evidence"] = {
+                "schema": "mastermind.settlement_price_evidence.v1",
+                "currency": None,
+                "quotes": {},
+                "omitted_quote_count": len(settlement_prices),
+                "capture_error": "snapshot_failed",
+                "market_observed_at": None,
+                "execution_qualification": "not_checked",
+            }
     return transition
 
 
@@ -996,15 +1016,44 @@ def acknowledge_settlement_receipt(
     transaction_id: str,
     portfolio_id: str | None = None,
 ) -> bool:
-    """Acknowledge only the exact committed receipt after mark/publish finalization."""
+    """Retain the exact committed receipt before removing it from the active outbox.
+
+    The archive preserves the original transaction preimage, queue and price facts;
+    acknowledgement does not reserialize it or add a supposed fill timestamp.
+    An archive may coexist with an active receipt after an interrupted ACK.  The
+    active copy still owns recovery until its removal succeeds.
+    """
     value = str(transaction_id or "")
     if len(value) != 64 or any(ch not in "0123456789abcdef" for ch in value):
         raise ValueError("invalid settlement receipt transaction id")
-    path = _settlement_receipt_path(value, portfolio_id)
-    if not path.exists():
-        return False
-    _durable_unlink(path)
-    return True
+    with _paper_transaction_lock(portfolio_id):
+        path = _settlement_receipt_path(value, portfolio_id)
+        if not path.exists():
+            return False
+        payload = path.read_bytes()
+        archive = path.parent / "acknowledged" / path.name
+        # The existing book lock serializes cooperating receipt writers.  Never
+        # replace a retained preimage, including one left by an interrupted ACK.
+        if not archive.exists():
+            _atomic_write_bytes(archive, payload)
+        if archive.read_bytes() != payload:
+            raise PaperTransactionConflict("settlement receipt archive differs from active receipt")
+
+        # The shared atomic writer tolerates unsupported directory fsync.  Here
+        # retention must be durable before deleting the only active preimage, so
+        # archive sync errors deliberately leave the active receipt for retry.
+        # Sync both directories: the archive directory itself may be newly made.
+        # Repeat these syncs for an identical copy left by an interrupted write.
+        with archive.open("rb") as retained:
+            os.fsync(retained.fileno())
+        for directory in (archive.parent, path.parent):
+            dir_fd = os.open(directory, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        _durable_unlink(path)
+        return True
 
 
 def _pending_orders_transition(
@@ -1348,7 +1397,7 @@ def _commit_account_and_fills(
 # price loaders (engine price store)
 # ---------------------------------------------------------------------------
 
-def _fetch_price_series(ticker: str) -> "pd.Series | None":
+def _fetch_price_series(ticker: str, *, cache_only: bool = False) -> "pd.Series | None":
     """Return a date-indexed close Series from the macro engine price stores.
 
     Priority:
@@ -1357,8 +1406,19 @@ def _fetch_price_series(ticker: str) -> "pd.Series | None":
     """
     try:
         import pandas as pd
-        from lib import store  # vendored macro lib
-        df = store.read("yahoo", ticker)
+        if cache_only:
+            from lib import config  # vendored macro lib
+            # Match Macro store.read's cache format without its mkdir in _path.
+            safe = ticker.replace("^", "_").replace("=", "_").replace("/", "_").replace(" ", "_")
+            cached_path = config.data_dir() / "yahoo" / f"{safe}.parquet"
+            df = None
+            if cached_path.exists():
+                df = pd.read_parquet(cached_path)
+                df.index = pd.to_datetime(df.index)
+                df = df.sort_index()
+        else:
+            from lib import store  # vendored macro lib
+            df = store.read("yahoo", ticker)
         if df is not None and "close" in df.columns and len(df) > 0:
             s = df["close"].astype(float).dropna()
             s.index = pd.to_datetime(s.index)
@@ -1390,7 +1450,8 @@ def _fetch_price_series(ticker: str) -> "pd.Series | None":
     if (ticker or "").upper().strip() in {"000300.SS", "^HSI"}:
         try:
             from data_layer import yahoo_feed
-            s = yahoo_feed.history_local(ticker)
+            s = (yahoo_feed.history_cached(ticker) if cache_only
+                 else yahoo_feed.history_local(ticker))
             if s is not None and len(s) > 0:
                 return s
         except Exception:
@@ -1399,94 +1460,201 @@ def _fetch_price_series(ticker: str) -> "pd.Series | None":
     return None
 
 
-def _live_price(ticker: str) -> float | None:
-    """Best live mark for a ticker, in USD.
+def _live_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Best available native quote converted to USD, with optional read provenance.
 
-    Dispatches by venue suffix:
-      * ``*.SS`` / ``*.SZ`` → the LIVE Tushare A-share close (CNY) when available, else the vendored
-                              ``chinastockdata/`` snapshot → USD
-      * ``*.HK`` / ``^HSI`` → the LIVE Yahoo close (HKD) when available, else the vendored
-                              ``hkstockdata/`` snapshot → USD
-      * else                → ``stockdata/``     (USD, incl. US-listed China ADRs)
-    The China/HK legs convert their LOCAL quote to USD via ``portfolio.fx`` so the paper account's
-    single-currency NAV stays honest (it holds all three venues at once). Live marks come from
-    Tushare for A-shares (``daily``) and Yahoo for Hong Kong; both degrade to the snapshot on any
-    miss (Tushare's ``hk_daily`` is too rate-limited to mark a multi-name HK book)."""
+    Yahoo Close is tried first for US, mainland China and HK. China also tries
+    Tushare after a missing Yahoo result. The vendored per-name snapshot is the
+    final fallback. A fresh retrieval can still contain an older source bar;
+    neither the word "live" nor this observation qualifies a price for execution.
+    """
+    from portfolio import price_evidence
+
     t = (ticker or "").upper().strip()
     if t.endswith(".SS") or t.endswith(".SZ"):
-        sub, convert = "chinastockdata", True
+        sub, convert, native_currency = "chinastockdata", True, "CNY"
     elif t.endswith(".HK") or t == "^HSI":
-        sub, convert = "hkstockdata", True
+        sub, convert, native_currency = "hkstockdata", True, "HKD"
     else:
-        sub, convert = "stockdata", False
+        sub, convert, native_currency = "stockdata", False, "USD"
 
     local: float | None = None
-    # A-shares: prefer Yahoo's native-CNY Shanghai/Shenzhen quote, which remains reachable from
-    # non-China VPS hosts; retain Tushare as the second live source. Hong Kong: Yahoo HKD close
-    # (Tushare's ``hk_daily`` is throttled to ~1 call/hr — see data_layer.yahoo_feed).
-    # Both lag-correct the vendored snapshot.
+    selected_source = None
+    upstream = None
+    source_label = None
+    source_text_sha256 = None
+    fx_context = None
+    attempts = []
+
+    def read(reader, name):
+        nonlocal selected_source, upstream
+        try:
+            if _evidence is None:
+                value, context = reader(t), None
+            else:
+                value, context = price_evidence.read_with_evidence(reader, t)
+        except Exception:
+            if _evidence is not None:
+                try:
+                    attempts.append({"source": name, "outcome": "error"})
+                except Exception:
+                    pass
+            raise
+        if value is not None:
+            selected_source, upstream = name, context
+        if _evidence is not None:
+            try:
+                attempts.append({
+                    "source": name,
+                    "outcome": "missing" if value is None else (
+                        "returned" if price_evidence.positive_number(value) is not None else "invalid_value"
+                    ),
+                })
+            except Exception:
+                pass
+        return value
+
     if t.endswith((".SS", ".SZ")):
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
         if local is None:
             try:
                 from data_layer import tushare_feed
-                local = tushare_feed.price_local(t)
+                local = read(tushare_feed.price_local, "tushare_close")
             except Exception:
                 local = None
     elif t.endswith(".HK") or t == "^HSI":
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
     else:
-        # US (bare tickers + ETFs): the LIVE Yahoo quote (USD) via yfinance — reflects TODAY's tape.
-        # The vendored stockdata snapshot is CI/EOD-lagging, so on a fast day (e.g. SMH -7%) it marks a
-        # stale price and the book NAV is wrong; the live leg fixes that. Degrades to the snapshot below.
         try:
             from data_layer import yahoo_feed
-            local = yahoo_feed.price_local(t)
+            local = read(yahoo_feed.price_local, "yahoo_close")
         except Exception:
             local = None
-    # Fallback (and the only path when the live leg misses): the vendored per-name snapshot.
     if local is None:
+        snapshot_error = False
         try:
             p = _ROOT / "vendor" / "macro" / "site" / sub / f"{t}.json"
             if p.exists():
-                v = (json.loads(p.read_text()).get("tech") or {}).get("price")
+                raw_text = p.read_text()
+                payload = json.loads(raw_text)
+                v = (payload.get("tech") or {}).get("price")
                 if v is not None:
                     local = float(v)
+                    selected_source, upstream = "macro_snapshot", None
+                    if _evidence is not None:
+                        try:
+                            source_label = payload.get("asof")
+                            source_text_sha256 = hashlib.sha256(raw_text.encode("utf-8")).hexdigest()
+                        except Exception:
+                            pass
         except Exception:
+            snapshot_error = True
             local = None
+        if _evidence is not None:
+            try:
+                attempts.append({
+                    "source": "macro_snapshot",
+                    "outcome": "error" if snapshot_error else (
+                        "missing" if local is None else (
+                            "returned" if price_evidence.positive_number(local) is not None else "invalid_value"
+                        )
+                    ),
+                })
+            except Exception:
+                pass
+
+    def observed(value):
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, value, "USD", selected_source, stage="paper_live",
+                    upstream=upstream, input_price=local, input_currency=native_currency,
+                    source_bar_label=source_label, source_bar_label_kind="snapshot_asof",
+                    source_text_sha256=source_text_sha256, attempts=attempts,
+                    fx_context=fx_context, fx_operation="divide",
+                ))
+            except Exception:
+                pass
+        return value
+
     if local is None:
-        return None
+        return observed(None)
     if convert:
         from portfolio import fx
-        return fx.to_usd(local, t)
-    return local
+        if _evidence is None:
+            return observed(fx.to_usd(local, t))
+        value, fx_context = price_evidence.read_with_evidence(fx.to_usd, local, t)
+        return observed(value)
+    return observed(local)
 
 
-def _current_price(ticker: str) -> float | None:
-    """Best available current/last-close price for a ticker: the stockdata live mark first,
-    else the last point of the engine price series (covers the leadership-sleeve ETFs)."""
-    px = _live_price(ticker)
+def _current_price(ticker: str, *, _evidence: dict | None = None) -> float | None:
+    """Select the existing live/snapshot path, then the last engine-series point.
+
+    Optional context preserves the selected source and native/USD conversion facts.
+    Source index labels remain bar labels, and FX source timing is not certified.
+    """
+    from portfolio import price_evidence
+
+    t = (ticker or "").upper().strip()
+    if _evidence is None:
+        px, live_context = _live_price(ticker), None
+    else:
+        px, live_context = price_evidence.read_with_evidence(_live_price, ticker)
     if px and px > 0:
+        if _evidence is not None:
+            try:
+                price_evidence.emit(_evidence, price_evidence.make_read(
+                    t, px, "USD", "live_price", stage="paper_current", upstream=live_context,
+                ))
+            except Exception:
+                pass
         return px
     s = _fetch_price_series(ticker)
     try:
         if s is not None and len(s) > 0:
             v = float(s.iloc[-1])
-            # The series stores (yahoo / breadth cache) quote in LOCAL currency; convert a China/HK
-            # name to USD so the fallback can't leak a raw CNY/HKD mark into NAV (bare US tickers pass
-            # through unchanged). Mirrors the conversion _live_price already does for the live mark.
             from portfolio import fx
-            return fx.to_usd(v, ticker)
+            if _evidence is None:
+                value, fx_context = fx.to_usd(v, ticker), None
+            else:
+                value, fx_context = price_evidence.read_with_evidence(fx.to_usd, v, ticker)
+            if _evidence is not None:
+                try:
+                    price_evidence.emit(_evidence, price_evidence.make_read(
+                        t, value, "USD", "engine_series", stage="paper_current",
+                        input_price=v, input_currency=fx.currency_of(ticker),
+                        fx_context=fx_context, fx_operation="divide",
+                        source_bar_label=s.index[-1], source_bar_label_kind="series_index",
+                        attempts=[{
+                            "source": "live_price",
+                            "outcome": "missing" if px is None else "invalid_value",
+                        }],
+                    ))
+                except Exception:
+                    pass
+            return value
     except Exception:
         pass
+    if _evidence is not None:
+        try:
+            price_evidence.emit(_evidence, price_evidence.make_read(
+                t, None, "USD", None, stage="paper_current",
+                attempts=[
+                    {"source": "live_price", "outcome": "missing" if px is None else "invalid_value"},
+                    {"source": "engine_series", "outcome": "unavailable"},
+                ],
+            ))
+        except Exception:
+            pass
     return None
 
 
@@ -3007,6 +3175,7 @@ def clear_pending_target(portfolio_id: str | None = None) -> None:
 def settle_target(prices: dict[str, float], asof: str,
                   portfolio_id: str | None = None, *,
                   _price_sources: dict[str, str] | None = None,
+                  _evidence: dict | None = None,
                   _locked: bool = False) -> dict | None:
     """If a target was queued while the market was closed, rebalance to it now (at the open marks)
     and clear it. Returns the settled target dict, or None if nothing was queued. Paper-only.
@@ -3016,6 +3185,10 @@ def settle_target(prices: dict[str, float], asof: str,
     If any positive target or intended full exit lacks a trusted price,
     ``UnpriceableExitPrices`` is raised before an account write and the pending target is retained
     for a later retry.
+
+    Optional _evidence is observation input, not numeric authority. Its bounded
+    snapshot joins the existing transaction identity and can change future IDs;
+    absent legacy input keeps the existing preimage shape. Recovery reuses it.
     """
     try:
         canonical_asof = date.fromisoformat(asof).isoformat()
@@ -3030,6 +3203,7 @@ def settle_target(prices: dict[str, float], asof: str,
                 asof,
                 portfolio_id=portfolio_id,
                 _price_sources=_price_sources,
+                _evidence=_evidence,
                 _locked=True,
             )
     preflight = preflight_pending_target(portfolio_id)
@@ -3095,7 +3269,7 @@ def settle_target(prices: dict[str, float], asof: str,
             positive_target_tickers=missing_prices["positive_target_tickers"],
         )
     followup = _pending_clear_transition(
-        portfolio_id, prices=prices, price_sources=_price_sources
+        portfolio_id, prices=prices, price_sources=_price_sources, _evidence=_evidence
     )
     rebalance(
         target,
@@ -3257,7 +3431,7 @@ def _load_spy_history(window: int = 91, symbol: str = "SPY") -> "list[tuple[str,
     Uses the same store loader as _fetch_price_series so it works offline as
     long as the engine price cache is populated.  Returns [] if unavailable.
     """
-    s = _fetch_price_series(symbol)
+    s = _fetch_price_series(symbol, cache_only=True)
     if s is None or len(s) == 0:
         return []
     try:
@@ -3271,230 +3445,90 @@ def _load_spy_history(window: int = 91, symbol: str = "SPY") -> "list[tuple[str,
 # /api/performance payload
 # ---------------------------------------------------------------------------
 
-def performance(portfolio_id: str | None = None,
-                prices: dict[str, float] | None = None) -> dict:
-    """Assemble the /api/performance contract.
-
-    Series is HONEST:
-      - spy_nav = the configured benchmark's real history normalised to $1,000,000 at the first
-        date of the window (legacy field name retained for existing chart/API consumers).
-      - nav (our portfolio) = $1,000,000 FLAT for every date before
-        inception_date; from inception onward it uses the real marked NAV from
-        nav_history.jsonl.  No hypothetical repricing of our allocation ever.
-      - kind = "pre_inception" for the flat prefix, "realized" from inception.
-
-    `prices` (TICKER → price in the book's BASE currency, e.g. live delayed quotes for the US
-    books, snapshot/FX marks for HK/China) makes `current_nav` LIVE: the CURRENT account holdings
-    are valued now (cash + live market value — realized P&L is already booked into cash) instead of
-    freezing on the last once-daily nav_history snapshot. Without it the function degrades to the
-    last realized row (back-compat). This is what makes the dashboard NAV move intraday.
-
-    Returns a safe minimal payload on error.
-    """
-    bench = _benchmark_for(portfolio_id)
+def unavailable_performance(portfolio_id: str | None = None,
+                            *, issue: str = "performance_unavailable") -> dict:
+    """Compatible unavailable shape; no synthetic capital, return, date or raw exception."""
+    allowed_issues = {"performance_unavailable", "portfolio_unavailable", "benchmark_unavailable"}
+    safe_issue = issue if issue in allowed_issues else "performance_unavailable"
+    payload = {key: None for key in (
+        "inception_date", "starting_nav", "current_nav", "cash", "invested",
+        "total_return_pct", "vs_benchmark_pct", "vs_spy_pct", "benchmark",
+        "benchmark_name", "benchmark_name_zh", "benchmark_as_of", "day_change_pct",
+        "max_drawdown_pct", "realized_since", "portfolio_id", "currency",
+        "day_change_window", "drawdown_window",
+    )}
     try:
         from portfolio import registry
-        bench_name = registry.benchmark_name(portfolio_id)
-        bench_name_zh = registry.benchmark_name_zh(portfolio_id)
+        pid = registry.canonical_id(portfolio_id)
+        payload.update(portfolio_id=pid, currency=registry.currency(pid),
+                       benchmark=registry.benchmark(pid),
+                       benchmark_name=registry.benchmark_name(pid),
+                       benchmark_name_zh=registry.benchmark_name_zh(pid))
     except Exception:
-        bench_name = bench
-        bench_name_zh = bench
+        pass
+    payload.update(
+        schema="mastermind.bot.performance.v1", series=[], sources={},
+        observed_at=datetime.now(timezone.utc).isoformat(),
+        availability={"status": "unavailable", "account_status": "unavailable",
+                      "history_status": "unavailable", "valuation_basis": "unavailable",
+                      "as_of": None, "issues": [safe_issue]},
+        note="Performance is unavailable. No account values or returns have been substituted.",
+    )
+    return payload
 
-    _base: dict[str, Any] = {
-        "inception_date": _INCEPTION_DATE,
-        "starting_nav": _STARTING_NAV,
-        "current_nav": _STARTING_NAV,
-        "cash": _STARTING_NAV,
-        "invested": 0.0,
-        "total_return_pct": 0.0,
-        "vs_benchmark_pct": None,
-        "vs_spy_pct": None,  # backward-compatible key; value is always versus ``benchmark``
-        "benchmark": bench,
-        "benchmark_name": bench_name,
-        "benchmark_name_zh": bench_name_zh,
-        "benchmark_as_of": None,
-        "day_change_pct": 0.0,
-        "max_drawdown_pct": 0.0,
-        "realized_since": _INCEPTION_DATE,
-        "series": [],
-        "note": "No data yet — run the book build to initialise.",
-    }
+
+def performance(portfolio_id: str | None = None,
+                prices: dict[str, float] | None = None) -> dict:
+    """Project observed account/history facts without recovery or fresh-account fallbacks.
+
+    Provided prices are a provisional, undated valuation. A recorded NAV carries
+    its own date and cash. Missing dates stay chart gaps; comparison needs common
+    dates. This reader does not change the account, journal, cohort or strategy.
+    """
+    from portfolio import registry
+    from portfolio.performance_read import MAX_BENCHMARK_ROWS, read_performance_sources
+    from portfolio.performance_projection import project_performance
 
     try:
-        state = _load_account(portfolio_id)
-        realized_rows = _load_jsonl(_paths(portfolio_id)["nav"])
-
-        inception_date = state.get("inception_date", _INCEPTION_DATE)
-
+        pid = registry.canonical_id(portfolio_id)
+    except (ValueError, TypeError):
+        return unavailable_performance(portfolio_id, issue="portfolio_unavailable")
+    try:
+        source = read_performance_sources(_paths(pid), pid, currency=registry.currency(pid))
+        benchmark = registry.benchmark(pid)
+        benchmark_issue = []
         try:
-            today_iso = date.today().isoformat()
+            # Cache-only: regional histories must not trigger Yahoo on a performance GET.
+            history = _load_spy_history(MAX_BENCHMARK_ROWS, benchmark)
         except Exception:
-            today_iso = ""
-
-        # LIVE current values: when the caller passes today's marks (base ccy), value the CURRENT
-        # account holdings now (cash + live market value) instead of freezing on the last daily
-        # nav_history snapshot — this is what moves the NAV intraday. Fall back to the last realized
-        # row, then to starting NAV.
-        live_nav: float | None = None
-        if prices:
-            try:
-                live_nav = nav(prices, portfolio_id)
-            except Exception:
-                live_nav = None
-
-        if live_nav is not None:
-            current_nav = live_nav
-            cash = float(state.get("cash", _STARTING_NAV))
-            invested = current_nav - cash
-            spy_nav_latest = realized_rows[-1].get("spy_nav") if realized_rows else None
-        elif realized_rows:
-            latest = realized_rows[-1]
-            current_nav = float(latest["nav"])
-            cash = float(latest["cash"])
-            invested = float(latest.get("invested", 0.0))
-            spy_nav_latest = latest.get("spy_nav")
-        else:
-            current_nav = _STARTING_NAV
-            cash = state.get("cash", _STARTING_NAV)
-            invested = 0.0
-            spy_nav_latest = None
-
-        total_return_pct = (current_nav - _STARTING_NAV) / _STARTING_NAV * 100
-
-        # Compare like-for-like SINCE INCEPTION using the currently configured benchmark's own
-        # history. This avoids relabeling persisted FXI rows as CSI 300 / Hang Seng during the
-        # migration. The legacy spy_nav path is retained only when it is provably the same symbol.
-        benchmark_history = _load_spy_history(504, bench)
-        benchmark_since = [
-            (d, px) for d, px in benchmark_history
-            if d >= inception_date and (not today_iso or d <= today_iso) and px > 0
-        ]
-        vs_benchmark_pct: float | None = None
-        if benchmark_since:
-            benchmark_return = (
-                float(benchmark_since[-1][1]) / float(benchmark_since[0][1]) - 1.0
-            ) * 100
-            vs_benchmark_pct = round(total_return_pct - benchmark_return, 4)
-        elif spy_nav_latest:
-            latest_benchmark = realized_rows[-1].get("benchmark") if realized_rows else None
-            persisted_matches = (
-                latest_benchmark == bench or (latest_benchmark is None and bench == "SPY")
-            )
-            if persisted_matches:
-                benchmark_return = (
-                    float(spy_nav_latest) - _STARTING_NAV
-                ) / _STARTING_NAV * 100
-                vs_benchmark_pct = round(total_return_pct - benchmark_return, 4)
-
-        # day-over-day change. With a live mark, compare to the last daily close STRICTLY before
-        # today (so we don't divide by today's own frozen snapshot); otherwise the prior row.
-        day_change_pct: float = 0.0
-        if live_nav is not None:
-            prior = [r for r in realized_rows if (r.get("date") or "") < today_iso]
-            if prior:
-                prev_nav = float(prior[-1]["nav"])
-                if prev_nav > 0:
-                    day_change_pct = round((current_nav - prev_nav) / prev_nav * 100, 4)
-        elif len(realized_rows) >= 2:
-            prev_nav = float(realized_rows[-2]["nav"])
-            if prev_nav > 0:
-                day_change_pct = round((current_nav - prev_nav) / prev_nav * 100, 4)
-
-        # max drawdown over realized track only
-        import numpy as np
-        nav_arr = [float(r["nav"]) for r in realized_rows]
-        max_drawdown_pct = 0.0
-        if len(nav_arr) > 1:
-            running_max = np.maximum.accumulate(nav_arr)
-            drawdowns = (np.array(nav_arr) - running_max) / running_max * 100
-            max_drawdown_pct = round(float(drawdowns.min()), 4)
-
-        # ---- build series ----
-        # Use the tail for the chart; the full history above is reserved for since-inception alpha.
-        spy_history = benchmark_history[-91:]
-
-        series: list[dict] = []
-
-        if spy_history:
-            # Normalise the configured benchmark so spy_nav == $1M at the window's first date.
-            spy0 = spy_history[0][1]
-            spy_scale = _STARTING_NAV / spy0 if spy0 > 0 else 1.0
-
-            # Build a quick lookup from the realized rows for nav by date
-            realized_by_date: dict[str, float] = {
-                r["date"]: float(r["nav"]) for r in realized_rows
-            }
-            # keep the chart endpoint in step with the live header NAV
-            if live_nav is not None and today_iso:
-                realized_by_date[today_iso] = current_nav
-
-            for date_str, spy_close in spy_history:
-                spy_nav_val = round(spy_close * spy_scale, 2)
-
-                if date_str < inception_date:
-                    # Pre-inception: our portfolio is flat at $1M — we did not exist yet
-                    series.append({
-                        "date": date_str,
-                        "nav": _STARTING_NAV,
-                        "spy_nav": spy_nav_val,
-                        "kind": "pre_inception",
-                    })
-                else:
-                    # Realized: use real NAV from nav_history.jsonl if available,
-                    # otherwise stay flat (today's book hasn't run yet)
-                    nav_val = realized_by_date.get(date_str, _STARTING_NAV)
-                    series.append({
-                        "date": date_str,
-                        "nav": nav_val,
-                        "spy_nav": spy_nav_val,
-                        "kind": "realized",
-                    })
-        else:
-            # No current benchmark history: emit realized rows, but never relabel legacy FXI values
-            # as a native regional index. Unlabelled legacy rows are accepted only for SPY books.
-            for r in realized_rows:
-                nav_val = float(r["nav"])
-                if live_nav is not None and today_iso and r.get("date") == today_iso:
-                    nav_val = current_nav      # live-mark today's point
-                row_benchmark = r.get("benchmark")
-                benchmark_matches = (
-                    row_benchmark == bench or (row_benchmark is None and bench == "SPY")
-                )
-                series.append({
-                    "date": r["date"],
-                    "nav": nav_val,
-                    "spy_nav": (
-                        float(r["spy_nav"])
-                        if benchmark_matches and r.get("spy_nav") is not None else None
-                    ),
-                    "kind": "realized",
-                })
-
-        note = (
-            f"Portfolio starts at ${_STARTING_NAV:,.0f} on {inception_date}; "
-            "flat until the live daily track accrues. "
-            f"{bench} shown over the same window for comparison (real history)."
+            history = []
+            benchmark_issue = ["benchmark_unavailable"]
+        payload = project_performance(
+            source["state"], source["rows"], history,
+            benchmark=benchmark, today=datetime.now(timezone.utc).date().isoformat(), prices=prices,
+            account_status=source["account_status"], history_status=source["history_status"],
+            transaction_pending=source["transaction_pending"],
         )
-
-        return {
-            "inception_date": inception_date,
-            "starting_nav": _STARTING_NAV,
-            "current_nav": round(current_nav, 2),
-            "cash": round(cash, 2),
-            "invested": round(invested, 2),
-            "total_return_pct": round(total_return_pct, 4),
-            "vs_benchmark_pct": vs_benchmark_pct,
-            "vs_spy_pct": vs_benchmark_pct,
-            "benchmark": bench,
-            "benchmark_name": bench_name,
-            "benchmark_name_zh": bench_name_zh,
-            "benchmark_as_of": benchmark_history[-1][0] if benchmark_history else None,
-            "day_change_pct": day_change_pct,
-            "max_drawdown_pct": max_drawdown_pct,
-            "realized_since": inception_date,
-            "series": series,
-            "note": note,
-        }
-    except Exception as exc:
-        _base["note"] = f"Performance unavailable: {exc}"
-        return _base
+        availability = payload["availability"]
+        availability["issues"] = sorted(set(
+            availability.get("issues", []) + source["issues"] + benchmark_issue))
+        availability["consistency"] = source["consistency"]
+        availability["account_history_binding"] = "book_path_only"
+        availability["settlement_reconciliation"] = "not_checked"
+        payload.update(
+            schema="mastermind.bot.performance.v1", portfolio_id=pid,
+            currency=registry.currency(pid),
+            return_measure="nav_change_from_starting_capital", external_flow_adjustment="not_applied",
+            benchmark_return_basis="cached_close_series", benchmark_total_return_status="unverified",
+            benchmark_comparison_scope="common_dates_only",
+            benchmark_name=registry.benchmark_name(pid),
+            benchmark_name_zh=registry.benchmark_name_zh(pid),
+            sources=source["sources"], observed_at=datetime.now(timezone.utc).isoformat(),
+            note="Recorded NAV and provisional valuations retain their separate evidence basis. "
+                 "Missing observations are gaps; benchmark differences require common dates.",
+        )
+        # Keep the HTTP contract JSON-safe even if a future projection regresses.
+        json.dumps(payload, allow_nan=False)
+        return payload
+    except Exception:
+        return unavailable_performance(pid)

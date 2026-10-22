@@ -24,27 +24,36 @@ class _Capture:
         self.identity = None
         self.guard = None
         self.calls = 0
+        self.invalid = False
+
+    def invalidate(self):
+        self.invalid = True
+        self.identity = self.guard = None
+
+    def _refuse(self):
+        self.invalidate()
+        raise ContractViolation("SOURCE_UNAVAILABLE")
 
     def retain(self, result):
-        if type(result) is not GuardedOperation or not callable(result.delivery_guard):
-            raise ContractViolation("SOURCE_UNAVAILABLE")
+        if self.invalid or type(result) is not GuardedOperation or not callable(result.delivery_guard):
+            self._refuse()
         key = result.selection_identity
         if (type(key) is not tuple or len(key) != 4
                 or any(type(x) is not str or not 0 < len(x) <= 1024 for x in key[:3])
                 or re.fullmatch(r"[0-9a-f]{64}", key[2]) is None
                 or type(key[3]) is not int or key[3] < 0):
-            raise ContractViolation("SOURCE_UNAVAILABLE")
+            self._refuse()
         if self.identity is not None and self.identity != key:
-            raise ContractViolation("SOURCE_UNAVAILABLE")
+            self._refuse()
         self.calls += 1
         if self.calls > 22:
-            raise ContractViolation("SOURCE_UNAVAILABLE")
+            self._refuse()
         self.identity, self.guard = key, result.delivery_guard
         return result.value
 
     async def check(self):
-        if self.identity is None or self.guard is None:
-            raise ContractViolation("SOURCE_UNAVAILABLE")
+        if self.invalid or self.identity is None or self.guard is None:
+            self._refuse()
         guard = self.guard
         def verify():
             try:
@@ -54,6 +63,7 @@ class _Capture:
                 if observed is not None:
                     raise ValueError("invalid guard result")
             except Exception:
+                self.invalidate()
                 raise ContractViolation("SOURCE_UNAVAILABLE") from None
         # Share the adapter's actual four slots, including cancellation custody.
         await self.bounded(verify)
@@ -77,6 +87,6 @@ class SelectionScopes:
 
     def active(self):
         value = self.current.get()
-        if value is None:
+        if value is None or value.invalid:
             raise ContractViolation("SOURCE_UNAVAILABLE")
         return value

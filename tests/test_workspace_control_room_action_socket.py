@@ -155,12 +155,18 @@ def real_control(tmp_path, socket_root, monkeypatch, *, app_uid=None):
     from tests.test_control_room_binding_transactions import FIRST, binding, config, save
     from tests.test_executive_ceo_ingress import _FakeGrounding, _FakeSupervisor, _config
     from tests.test_workspace_control_room_actions import owner_fixture
-    from tests.test_workspace_control_room_lifecycle import doc
+    from tests.test_workspace_control_room_lifecycle import _doc as doc
 
     cfg = config(tmp_path)
     save(cfg, [binding(FIRST)])
-    seed, hosted, bindings, clock, request = owner_fixture(cfg)
-    hosted._cache_active = False  # The real service start owns activation in this fixture.
+    seed, _, bindings, clock, request = owner_fixture(cfg)
+    from control_plane.workspace_control_room_lifecycle import HostedControlRoom
+    from tests.executive_installed_control_fixture import spawn_workspace_room_listener
+    listener, room_path = spawn_workspace_room_listener(monkeypatch)
+    _ROOM_LISTENERS.append((listener, room_path))
+    cfg.origin, cfg.port = publisher.UNIX_CONTROL_ROOM_ORIGIN, 0
+    hosted = HostedControlRoom(cfg, listener=listener, socket_path=room_path,
+                               allowed_peer_uids=(os.geteuid(),))
     monkeypatch.setattr(publisher, "_compose_state_doc", lambda *a, **k: doc())
     monkeypatch.setattr(publisher.capability, "census", lambda **k: {})
     factory = workspace_provider_factory(
@@ -201,7 +207,7 @@ def test_actual_app_peer_dispatches_once_without_business_arming(tmp_path, short
             runtime = svc.runtime
             result = await CeoIngressWorkspaceClient(svc.ceo_ingress_socket_path).request(request)
             assert result == returned() and calls == [True] and factories == [runtime]
-            assert host.current_owner() is cfg and host._server is None
+            assert host.current_owner() is cfg and host._server.config is cfg
             assert svc._ceo_ingress_armed is False and svc._ceo_ingress_app_binding.armed is False
         finally:
             await svc.close()
@@ -342,3 +348,19 @@ def test_existing_ingress_drain_retains_admitted_owner_until_actual_completion(
             if close_task is not None: await asyncio.gather(close_task, return_exceptions=True)
             await svc.close()
     asyncio.run(scenario())
+
+
+# These are harmless test-owned listeners, never installed launchd handles.
+_ROOM_LISTENERS = []
+
+
+@pytest.fixture(autouse=True)
+def _cleanup_room_listeners():
+    import os
+    yield
+    while _ROOM_LISTENERS:
+        listener, path = _ROOM_LISTENERS.pop()
+        listener.close()
+        if os.path.exists(path):
+            os.unlink(path)
+        os.rmdir(os.path.dirname(path))

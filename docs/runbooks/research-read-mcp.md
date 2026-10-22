@@ -32,6 +32,48 @@ Installed archive releases can be checked by `verify_archive_release` in `releas
 
 `load_archive_verifier` loads a separate0600owner configuration with the closed `mastermind.research_read_archive_owner.v1` schema, binds only the two exact production deployment identities, and returns the callback required by `compose_runtime`. Each call checks bytes again; retained copied receipts supply evidence and do not cache admission. The committed example digest is a placeholder. The installer must pin the independently reviewed stage manifest SHA and install both owner configuration and manifest under actual secure ownership. Production release ownership defaults to root. The launcher must use that callback and retain its receipts; this source still performs no installation.
 
+### Explicit selected-reader owner configuration
+
+The committed v1 example remains deliberately unselected. To request the
+selected-generation path, the existing secure owner file must instead use the
+closed `mastermind.research_read_archive_owner.v2` schema. It retains exactly
+`manifest_path` and `manifest_sha256` and adds one closed `selected_read` object
+with these eight required fields:
+
+- `expected_producer_commit`: the separately qualified writer's 40-character
+  lowercase commit identity, not necessarily the reader release commit.
+- `max_age_seconds`, `max_reuse_seconds`, `corpus_byte_budget`,
+  `image_admission_bytes`, and `refresh_interval_seconds`: the existing
+  `SelectedReadOptions` limits. The current deployment ceilings are
+  `corpus_byte_budget` 256MiB and `image_admission_bytes` 1536MiB; the defaults
+  remain 32MiB and 256MiB. Byte admission is finite allocation, not RSS,
+  host-memory or client qualification: admission counts accepted bytes and
+  promises no resident-set outcome. The 1536MiB image ceiling is sized so the
+  retained 256MiB corpus admission, four new 256MiB image allocations, and the
+  catalog reserve fit within it. No dynamic pool, oversubscription or new
+  policy/control plane is introduced.
+- `writer_protocol_qualified`: strictly JSON `true`, issued only after actual
+  all-writer settlement and protocol qualification. Configuration cannot prove it.
+- `valid_until`: integer Unix seconds, strictly future and at most 24 hours from
+  binding. Milliseconds or a longer horizon refuse.
+
+Every use securely rereads the same file and requires its exact admitted bytes.
+Any observed change (including whitespace or manifest promotion), expiry,
+insecure file, or inability to read it permanently withdraws this process's
+selected writer policy. Restoring old bytes does not reset the latch. This
+conservative withdrawal is intentional: unavailable evidence is not continuing
+admission. After fixing the cause, the owner must requalify and use the existing
+service restart/release path with a fresh bounded declaration; there is no reset
+endpoint or automatic legacy fallback. A transient change that was never
+observed is not claimed to have been detected.
+
+Ship the matching Macro selected-reader import closure before issuing v2.
+`--qualify` proves source/configuration/dependency checks only; it does not build
+or prepare the selected service and is not serving readiness. Actual startup
+constructs the Store and prepares the selected reader before acquiring listeners.
+A failed selected composition or an unexpected verifier shape refuses startup.
+Current generation, coverage, freshness and final response guards still apply.
+
 The separate runtime branch now contains a direct principal reconstruction of L4 after the original Fabric run `rv-delivery-01a13301-l4adapter-r1` settled rc65 and supported artifact export refused qualification. That original result remains unaccepted; these source files are not claimed to be recovered worker bytes. `ResearchPortAdapter` keeps F12 v1.1 closed, obtains evidence quote authority from the same current secure grant owner and preserves zero-passage truth: any unknown/unavailable addressed source prevents NOT_FOUND. A bounded implicit catalog candidate search reports PARTIAL for returned evidence and UNAVAILABLE for no evidence; it never claims the entire catalog was searched. `compose_macro_service` verifies the exact release before import, refuses a foreign loaded engine/lib/scripts namespace, verifies all imported owned module paths, and invokes only the actual `read_runtime.build_read_service` factory.
 
 `scripts/mastermind_research_read_server.py --describe` is inert and reports installed distributions without starting a store, HTTP server or tunnel. `--qualify --config <secure deployment> --archive-owner <secure independent pins>` verifies archive/source/configuration and required dependencies; it does not open audit or construct the Macro store. The ordinary `--config` serving invocation uses the existing durable auth audit sink, exact issuer JWT/JWKS components, the actual Macro factory and loopback-only HTTP with access logging disabled. Readyz remains503 because the existing status ratio does not bind inventory to a canonical source generation. A real same-generation production census and current-grant qualification must be wired from the actual owning producer; an injected or unqualified>=95 ratio never makes this candidate ready. F11's independent materialization and release gates remain required.

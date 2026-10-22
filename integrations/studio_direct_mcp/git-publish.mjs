@@ -15,6 +15,8 @@ const COMMISSION_COMMIT_MESSAGE = 'chore: prepare Executive commission';
 const MAX_COMMISSION_BYTES = 512 * 1024;
 const BRANCH_RE = /^sol\/web-[A-Za-z0-9._-]+$/;
 const ALLOWED_LANE = 'web';
+const CLOSED_REPOSITORY_ALIASES = Object.freeze(['mastermind', 'macro', 'terminal']);
+const NOT_REGISTERED = 'workspace is not registered to the source repository';
 const MAX_STDIO_BYTES = 1024 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_PUSH_TIMEOUT_MS = 60_000;
@@ -165,6 +167,60 @@ export function resolveGitPublishConfig(value) {
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('config.gitPublish must be an object, false, or absent');
   }
+  if (Object.hasOwn(value, 'repositories')) {
+    assertExactKeys(value, new Set([
+      'enabled', 'workspaceCli', 'gitBinary', 'repositories',
+      'commandTimeoutMs', 'pushTimeoutMs',
+    ]), 'config.gitPublish');
+    if (value.enabled !== true || !Array.isArray(value.repositories) ||
+        value.repositories.length !== CLOSED_REPOSITORY_ALIASES.length) {
+      throw new TypeError('config.gitPublish requires the exact closed repository profile');
+    }
+    const names = new Set();
+    const sources = new Set();
+    const remotes = new Set();
+    const profiles = value.repositories.map((profile) => {
+      if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        throw new TypeError('repository profile must be an object');
+      }
+      assertExactKeys(profile, new Set(['repository', 'sourceRepository', 'allowedRemoteUrls']),
+        'config.gitPublish.repositories[]');
+      if (!CLOSED_REPOSITORY_ALIASES.includes(profile.repository) || names.has(profile.repository)) {
+        throw new TypeError('repository profile alias must be unique and closed');
+      }
+      if (profile.allowedRemoteUrls?.length !== 1 ||
+          sources.has(profile.sourceRepository) || remotes.has(profile.allowedRemoteUrls[0])) {
+        throw new TypeError('closed repository profile requires distinct source and remote bindings');
+      }
+      names.add(profile.repository);
+      sources.add(profile.sourceRepository);
+      remotes.add(profile.allowedRemoteUrls[0]);
+      return resolveGitPublishConfig({
+        enabled: true,
+        workspaceCli: value.workspaceCli,
+        gitBinary: value.gitBinary,
+        repository: profile.repository,
+        sourceRepository: profile.sourceRepository,
+        allowedRemoteUrls: profile.allowedRemoteUrls,
+        commandTimeoutMs: value.commandTimeoutMs,
+        pushTimeoutMs: value.pushTimeoutMs,
+      });
+    });
+    if (!CLOSED_REPOSITORY_ALIASES.every((alias) => names.has(alias))) {
+      throw new TypeError('repository profile missing a closed alias');
+    }
+    const resolved = Object.freeze({
+      enabled: true,
+      workspaceCli: requireAbsoluteString(value.workspaceCli, 'config.gitPublish.workspaceCli'),
+      gitBinary: requireAbsoluteString(value.gitBinary, 'config.gitPublish.gitBinary'),
+      commandTimeoutMs: clampTimeout(value.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS, 'config.gitPublish.commandTimeoutMs'),
+      pushTimeoutMs: clampTimeout(value.pushTimeoutMs, DEFAULT_PUSH_TIMEOUT_MS, 'config.gitPublish.pushTimeoutMs'),
+      repositories: Object.freeze(CLOSED_REPOSITORY_ALIASES.map((name) =>
+        profiles.find((profile) => profile.repository === name))),
+    });
+    RESOLVED_CONFIGS.add(resolved);
+    return resolved;
+  }
   assertExactKeys(
     value,
     new Set([
@@ -281,9 +337,78 @@ function publicStatus(state) {
   };
 }
 
+function createClosedRepositoryPublisher(cfg, dependencies) {
+  const execFile = dependencies.execFile ?? execFileDefault;
+  const publishers = new Map(cfg.repositories.map((profile) =>
+    [profile.repository, createGitPublisher(profile, dependencies)]));
+  async function select(operationId) {
+    const operation = validateOperationId(operationId);
+    let selected = null;
+    for (const profile of cfg.repositories) {
+      let stdout;
+      try {
+        ({stdout} = await execFile(cfg.workspaceCli,
+          ['status', '--operation-id', operation, '--lane', ALLOWED_LANE,
+            '--repository', profile.repository],
+          {
+            timeout: cfg.commandTimeoutMs, maxBuffer: MAX_STDIO_BYTES, encoding: 'utf8',
+            env: {
+              PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+              HOME: process.env.HOME ?? '',
+              USER: process.env.USER ?? '',
+              LOGNAME: process.env.LOGNAME ?? '',
+              LANG: 'C', LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0',
+              GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
+            },
+          }));
+      } catch (error) {
+        // The installed mmx-workspace CLI emits its exact NOT_REGISTERED
+        // read-only refusal as JSON on stderr and exits 2. Only this one
+        // typed absence is a non-match; every other error remains a refusal.
+        if (error?.code !== 2 || String(error.stdout ?? '').trim() ||
+            typeof error.stderr !== 'string') throw error;
+        const result = parseJson(error.stderr, 'closed mmx-workspace refusal');
+        const exactKeys = ['action', 'effect', 'error', 'repository', 'schema_version'];
+        if (result?.action === 'status' && result.effect === 'NOT_APPLIED' &&
+            result.error === NOT_REGISTERED && result.repository === profile.repository &&
+            result.schema_version === 'mastermind.workspace_cli/v2' &&
+            Object.keys(result).length === exactKeys.length &&
+            exactKeys.every((key) => Object.hasOwn(result, key))) continue;
+        throw error;
+      }
+      const result = parseJson(stdout, 'closed mmx-workspace status');
+      if (result?.action !== 'status' ||
+          result.schema_version !== 'mastermind.workspace_cli/v2' ||
+          result.effect !== 'NOT_APPLIED' || result.repository !== profile.repository) {
+        throw new Error('closed workspace registry returned an invalid repository receipt');
+      }
+      // A successful stdout response can never report absence: only the exit
+      // code 2 typed stderr refusal above is canonical non-registration. Any
+      // error field here is malformed evidence and fails closed.
+      if (result.error !== undefined || !result.receipt || typeof result.receipt !== 'object') {
+        throw new Error('closed workspace registry returned an unexpected result');
+      }
+      if (selected !== null) throw new Error('operation ID is registered in more than one repository');
+      selected = publishers.get(profile.repository);
+    }
+    if (!selected) throw new Error('operation is not registered in the closed repository profile');
+    return selected;
+  }
+  const dispatch = (method) => async (args) => {
+    const publisher = await select(args?.operation_id);
+    return publisher[method](args);
+  };
+  return Object.freeze({
+    status: dispatch('status'),
+    commit: dispatch('commit'),
+    push: dispatch('push'),
+  });
+}
+
 export function createGitPublisher(config, dependencies = {}) {
   const cfg = resolveGitPublishConfig(config);
   if (!cfg) throw new TypeError('git publish is not configured');
+  if (cfg.repositories) return createClosedRepositoryPublisher(cfg, dependencies);
   const execFile = dependencies.execFile ?? execFileDefault;
   const realpath = dependencies.realpath ?? realpathDefault;
   const remove = dependencies.rm ?? rm;
@@ -684,7 +809,7 @@ export function createGitPublisher(config, dependencies = {}) {
         try {
           const observed = await workspace(operationId, { observeRemote: false });
           if (observed.localHead === commitHead) {
-            return finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+            return await finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
           }
         } catch {
           // Preserve uncertainty from a lost ref-update response.
@@ -702,7 +827,7 @@ export function createGitPublisher(config, dependencies = {}) {
         };
       }
 
-      return finishKnownApplied('APPLIED');
+      return await finishKnownApplied('APPLIED');
     } finally {
       try {
         await remove(scratch, { recursive: true, force: true });

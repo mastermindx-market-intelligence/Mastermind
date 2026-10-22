@@ -23,6 +23,7 @@ SOURCE_REPO=""
 EXPECTED_SHA=""
 PROTECTED_MASTER_SHA=""
 ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
+STAGE_RELEASE_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
@@ -380,7 +381,7 @@ MASTERMIND_NATIVE_ACL_RUBY
 # --- END native ACL guard ---
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -390,6 +391,7 @@ while [ "$#" -gt 0 ]; do
     --expected-sha) EXPECTED_SHA="${2:-}"; shift 2 ;;
     --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
     --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
+    --stage-release-only) STAGE_RELEASE_ONLY="1"; shift ;;
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
@@ -406,6 +408,17 @@ while [ "$#" -gt 0 ]; do
   esac
 done
 
+# --- BEGIN release staging option guard ---
+validate_release_staging_options() {
+  [ "$STAGE_RELEASE_ONLY" = "1" ] || return 0
+  [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] \
+    && [ "$ARM_PRIVILEGED_BROKER" = "0" ] \
+    && [ -z "$CONTROL_CONFIG_SOURCE" ] && [ -n "$OS_WEB_ASSETS" ] || {
+      /bin/echo "stage-only requires complete OS assets and excludes frozen source, arming and config replacement" >&2
+      return 65
+    }
+}
+# --- END release staging option guard ---
 [ "$(/usr/bin/id -u)" -eq 0 ] || {
   /bin/echo "install.sh must run as root" >&2
   exit 77
@@ -414,6 +427,7 @@ done
   /bin/echo "install.sh supports macOS only" >&2
   exit 69
 }
+validate_release_staging_options || exit 65
 [ -n "$SOURCE_REPO" ] && [ -n "$EXPECTED_SHA" ] && [ -n "$OPERATOR_USER" ] || usage
 case "$OPERATOR_USER" in
   [A-Za-z_]* ) ;;
@@ -1325,6 +1339,103 @@ require_native_no_acl one "$AUTH_PATH" || {
   /bin/echo "dedicated worker auth has an unexpected filesystem ACL" >&2; exit 65
 }
 
+# --- BEGIN shared sealed release staging ---
+# Both entry paths use this exact archive/import/seal/publication implementation.
+# Stage-only reaches it before installing any service trap or mutating helpers.
+verify_release_ancestry() {
+  local ancestor metadata
+  for ancestor in /Library "/Library/Application Support" "$SYSTEM_ROOT" "$SYSTEM_ROOT/releases"; do
+    [ -d "$ancestor" ] && [ ! -L "$ancestor" ] || return 65
+    metadata="$(/usr/bin/stat -f '%u:%g:%Lp' "$ancestor")" || return 65
+    if [ "$metadata" != "0:0:755" ]; then
+      [ "$ancestor" = "/Library/Application Support" ] && [ "$metadata" = "0:80:755" ] || return 65
+    fi
+    require_native_no_acl one "$ancestor" || return 65
+  done
+}
+
+stage_sealed_release() {
+  verify_release_ancestry || return 65
+  # A previous attempt's stage is unresolved even if a canonical release exists.
+  if [ "$STAGE_RELEASE_ONLY" = "1" ] && { [ -e "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ] || [ -L "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ]; }; then
+    /bin/echo "stage-only destination already occupied; preserve it for reconciliation" >&2
+    return 65
+  fi
+  if [ ! -e "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ]; then
+    if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+      STAGING="$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA"
+      /bin/mkdir -m 0700 "$STAGING" || return 65
+    else
+      STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")" || return 65
+    fi
+    /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | (
+      archive_extract_status=0
+      /usr/bin/tar -xf - -C "$STAGING" || archive_extract_status=$?
+      # BSD tar can stop at its end marker before Git finishes trailing padding.
+      # Drain to EOF so Git can report its real status; pipefail still rejects a
+      # producer error, and the subshell preserves any extraction error.
+      /bin/cat >/dev/null
+      exit "$archive_extract_status"
+    ) || return 65
+    /usr/sbin/chown -R root:wheel "$STAGING" || return 65
+    /bin/chmod -R go-w "$STAGING" || return 65
+    # mktemp creates the staging root as 0700. Both non-root service UIDs need
+    # read/traverse access to the immutable release, while only root may mutate.
+    /bin/chmod 0755 "$STAGING" || return 65
+    if [ -n "$OS_WEB_ASSETS" ]; then
+      "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" import \
+        --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
+        --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
+        --release-root "$STAGING" >/dev/null || return 65
+    fi
+    # Seal and verify while the directory is still operation-owned staging. A
+    # settled interruption must never expose a canonical release without a seal.
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \
+      --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
+    /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json" || return 65
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" verify \
+      --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
+    # Reuse the existing exclusive namespace move: plain mv can nest staging
+    # inside a directory created by another writer after the initial check.
+    rename_codex_path_exclusive "$STAGING" "$RELEASE_ROOT" || return 65
+    STAGING=""
+  else
+    [ -d "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ] || return 65
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" verify \
+      --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
+  fi
+  [ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
+    && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+    && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
+    && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
+    && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
+    /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
+    return 65
+  }
+  if ! require_native_no_acl tree "$RELEASE_ROOT"; then
+    /bin/echo "installed release contains a filesystem ACL" >&2
+    return 65
+  fi
+
+  # A concurrent destination or changed bundle cannot be silently accepted.
+  if [ -n "$OS_WEB_ASSETS" ]; then
+    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" check \
+      --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
+      --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
+      --release-root "$RELEASE_ROOT" >/dev/null || return 65
+  fi
+}
+# --- END shared sealed release staging ---
+
+# --- BEGIN stage-only dispatch ---
+if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+  # No cleanup/service trap: an interrupted stage or publication is retained.
+  stage_sealed_release || exit 65
+  printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  exit 0
+fi
+# --- END stage-only dispatch ---
+
 # Cross the mutation boundary only after the identity, runtime, source, auth,
 # and exact-SHA preflight above. From here to process exit the trap keeps all
 # install-owned daemons, including a separately prepared C1 Relay, disabled
@@ -1388,55 +1499,7 @@ wait_for_launchd_absent "$WORKER_LABEL" worker || exit 65
 wait_for_launchd_absent "$BACKUP_LABEL" backup || exit 65
 wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
-if [ ! -d "$RELEASE_ROOT" ]; then
-  STAGING="$(/usr/bin/mktemp -d "$SYSTEM_ROOT/releases/.install.$EXPECTED_SHA.XXXXXX")"
-  /usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive --format=tar "$EXPECTED_SHA" | (
-    archive_extract_status=0
-    /usr/bin/tar -xf - -C "$STAGING" || archive_extract_status=$?
-    # BSD tar can stop at its end marker before Git finishes trailing padding.
-    # Drain to EOF so Git can report its real status; pipefail still rejects a
-    # producer error, and the subshell preserves any extraction error.
-    /bin/cat >/dev/null
-    exit "$archive_extract_status"
-  )
-  /usr/sbin/chown -R root:wheel "$STAGING"
-  /bin/chmod -R go-w "$STAGING"
-  # mktemp creates the staging root as 0700. Both non-root service UIDs need
-  # read/traverse access to the immutable release, while only root may mutate.
-  /bin/chmod 0755 "$STAGING"
-  if [ -n "$OS_WEB_ASSETS" ]; then
-    "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/os_release_assets.py" import \
-      --source-repo "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" \
-      --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
-      --release-root "$STAGING" >/dev/null || exit 65
-  fi
-  # Seal and verify while the directory is still operation-owned staging. A
-  # settled interruption must never expose a canonical release without a seal.
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" create \
-    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  /usr/sbin/chown root:wheel "$STAGING/.executive-release-manifest.json"
-  "$PYTHON_BINARY" -I -S -B "$STAGING/ops/executive_os/release_manifest.py" verify \
-    --root "$STAGING" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-  # Reuse the existing exclusive namespace move: plain mv can nest staging
-  # inside a directory created by another writer after the initial check.
-  rename_codex_path_exclusive "$STAGING" "$RELEASE_ROOT" || exit 65
-  STAGING=""
-else
-  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/release_manifest.py" verify \
-    --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA"
-fi
-[ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
-  && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
-  && [ -f "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] \
-  && [ ! -L "$RELEASE_ROOT/ops/executive_os/credential_rotation_interlock.py" ] || {
-  /bin/echo "installed autonomy control surface is unavailable or unsafe" >&2
-  exit 65
-}
-if ! require_native_no_acl tree "$RELEASE_ROOT"; then
-  /bin/echo "installed release contains a filesystem ACL" >&2
-  exit 65
-fi
+stage_sealed_release || exit 65
 
 INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
 if [ ! -f "$INSTALLED_CODEX" ]; then
@@ -2113,6 +2176,29 @@ sockets = document["Sockets"]
 sockets.pop("CompanyConsultation", None)
 if entry is not None:
     sockets["CompanyConsultation"] = entry
+with plist_path.open("wb") as stream:
+    plistlib.dump(document, stream, sort_keys=False)
+PY
+# The optional workspace Control Room socket belongs to this same service and
+# Runtime. Configs without the stanza have no Control Room socket; a legacy
+# TCP stanza is refused here, loudly, by the shared validator.
+"$PYTHON_BINARY" -I -S -B - "$RELEASE_ROOT" "$CONTROL_CONFIG" "$CONTROL_PLIST" "$CONTROL_GID" <<'PY'
+import json, pathlib, plistlib, sys
+release, config_path, plist_path = map(pathlib.Path, sys.argv[1:4])
+control_gid = int(sys.argv[4])
+sys.path.insert(0, str(release))
+from scripts.executive_os_phase1c import (
+    _WORKSPACE_CONTROL_ROOM_SOCKET_NAME,
+    workspace_control_room_launchd_entry,
+)
+config = json.loads(config_path.read_text(encoding="utf-8"))
+entry = workspace_control_room_launchd_entry(config, control_gid=control_gid)
+with plist_path.open("rb") as stream:
+    document = plistlib.load(stream)
+sockets = document["Sockets"]
+sockets.pop(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME, None)
+if entry is not None:
+    sockets[_WORKSPACE_CONTROL_ROOM_SOCKET_NAME] = entry
 with plist_path.open("wb") as stream:
     plistlib.dump(document, stream, sort_keys=False)
 PY

@@ -11,6 +11,7 @@ from unittest.mock import Mock, patch
 ROOT=Path(__file__).resolve().parents[1]
 S=types.SimpleNamespace
 P=types.ModuleType('control_plane.executive_installed_peer')
+P._GATEWAY_MCP_PROFILES=('release_control_v1','web_ceo_release_v1')
 P._SYSCTL_OSRELEASE_ARGV=('/usr/sbin/sysctl','-n','kern.osrelease')
 P._SYSCTL_BOOT_ID_ARGV=('/usr/sbin/sysctl','-n','kern.bootsessionuuid')
 P._object_identity=lambda s:(s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)

@@ -395,7 +395,8 @@ class WorkspaceReadService:
                  mission_v3_compose=None, work_acquire=None, work_compose=None,
                  product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                  product_acceptance_owner_guard=None, product_acceptance_read=None,
-                 product_acceptance_observe=None, control_room_presenter=None,
+                 product_acceptance_observe=None, activity_membership=None,
+                 control_room_presenter=None,
                  control_room_actions=None):
         self.cache = cache
         self.runtime = runtime
@@ -454,6 +455,11 @@ class WorkspaceReadService:
             raise ValueError("acceptance read composition requires callable readers")
         self._product_acceptance_read = product_acceptance_read
         self._product_acceptance_observe = product_acceptance_observe
+        # Only the installed COO source may supply principal/workstream
+        # membership. General Workspace sign-in is insufficient for OHF data.
+        if activity_membership is not None and not callable(activity_membership):
+            raise ValueError("activity membership owner must be callable")
+        self._activity_membership = activity_membership
 
     async def _handle_original_acceptance_frame(self, frame):
         from common.product_acceptance_acquisition_contract import mission_frame
@@ -768,6 +774,173 @@ class WorkspaceReadService:
             raise _WorkRefusal("projection_refused") from None
         response = {"ok": True, "result": result}
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
+        return response
+
+    def _activity_membership_marker(self, principal, selected, *, original_owner=None):
+        """Re-read the incumbent installed COO principal/workstream owner.
+
+        This is NOT a native Fabric-run grant. It covers only original
+        Executive Runtime Attempt evidence inside the COO-enrolled workstream
+        and the exact currently selected Control Room root. No caller-supplied
+        authority, machine owner, TTL or new permission registry is accepted.
+        """
+        from control_plane.coo_principal_mandate import AuthorityFact, PrincipalFact
+        from common.executive_workspace_contract import RESOURCE, SCOPE
+        owner = original_owner if original_owner is not None else self._activity_membership
+        if not callable(owner):
+            raise PermissionError("activity source not installed")
+        try:
+            value = owner(principal, selected["work_ref"])
+            if type(value) is not tuple or len(value) != 3:
+                raise ValueError("wrong COO source")
+            row, fact, authority = value
+            if (type(row) is not dict or type(fact) is not PrincipalFact
+                    or type(authority) is not AuthorityFact
+                    or row.get("enabled") is not True
+                    or row.get("work_ref") != selected["work_ref"]
+                    or authority.work_ref != selected["work_ref"]
+                    or authority.live_source_or_lease_conflict is not False
+                    or type(row.get("principal_binding_digest")) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", row["principal_binding_digest"]) is None
+                    or fact.principal_binding_digest != row["principal_binding_digest"]
+                    or type(authority.authority_generation_digest) is not str
+                    or re.fullmatch(r"[0-9a-f]{64}", authority.authority_generation_digest) is None):
+                raise ValueError("COO source unresolved")
+            expected = {
+                "issuer_digest": fact.issuer_digest,
+                "subject_digest": fact.subject_digest, "client_ref": fact.client_ref,
+                "resource": RESOURCE, "scopes": [SCOPE],
+            }
+            if (type(principal) is not dict or set(principal) != set(expected) | {"policy_id"}
+                    or type(principal["policy_id"]) is not str
+                    or not 1 <= len(principal["policy_id"]) <= 256
+                    or {k: principal[k] for k in expected} != expected):
+                raise ValueError("cross-principal source")
+            # The source owner's digest and the entire validated installed
+            # mission row are reobserved on release; no made-up grant digest.
+            return (digest(row), fact.principal_binding_digest,
+                    authority.authority_generation_digest,
+                    authority.mission_authority_ref)
+        except Exception:
+            raise PermissionError("activity source unavailable") from None
+
+    def _read_retained_activity(self, frame):
+        """One original bounded Runtime observation under the current CCR root.
+
+        The caller first establishes the original issuer/COO principal
+        membership and rechecks it after this synchronous read has closed.
+        Never returns the raw typed Job, Attempt or Event source to the App.
+        """
+        from common import executive_workspace_activity_contract as activity
+        from control_plane.executive_runtime import RuntimeRoleResultOverBudget
+        from control_plane.operator_activity_projection import (
+            project_retained_operator_activity, ActivityProjectionRefusal,
+        )
+        selected = activity.selection(frame["selection"])
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+        _join(before.document, selected)  # 404 before Runtime for foreign root
+        try:
+            if not _qualified(before, selected):
+                return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+            bounded = self._bounded_runtime(self.runtime) if self._bounded_runtime else self.runtime
+            with bounded.observe_bounded_read() as observation:
+                source = observation.read_retained_operator_activity_bounded(
+                    selected["root_job_id"], selected["job_id"], selected["attempt_id"]
+                )
+            receipt = observation.receipt  # physical close first
+            if source.root_metadata.work_ref != selected["work_ref"]:
+                return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+            after = self.cache.snapshot()
+            if (before.owner is not after.owner
+                    or before.instance != after.instance
+                    or before.publication != after.publication
+                    or digest(before.document) != digest(after.document)
+                    or digest(_plan_validity_identity(before.validity)) !=
+                       digest(_plan_validity_identity(after.validity))
+                    or digest(before.currentness) != digest(after.currentness)):
+                return activity.unavailable(selected, "SOURCE_CHANGED")
+            if not _qualified(after, selected):
+                return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+            view = project_retained_operator_activity(
+                source, receipt, **selected,
+            )
+            observation_doc = self._result_observation(before, after, selected, receipt)
+            observation_doc["schema"] = activity.OBSERVATION_SCHEMA
+            body = {
+                "schema": activity.BODY_SCHEMA, "selection": selected,
+                "availability": "AVAILABLE", "reason_codes": [],
+                "source_observation": observation_doc, "activity": view,
+            }
+            try:
+                bounded_canonical({"ok": True, "result": body},
+                                  limit=activity.MAX_RESPONSE_BYTES - 1)
+            except (TypeError, ValueError):
+                return activity.unavailable(selected, "RESPONSE_OVER_BUDGET")
+            return {"ok": True, "result": body}
+        except RuntimeRoleResultOverBudget:
+            return activity.unavailable(selected, "OVER_BUDGET")
+        except ActivityProjectionRefusal as exc:
+            if exc.code == "SOURCE_CHANGED":
+                return activity.unavailable(selected, "SOURCE_CHANGED")
+            return activity.unavailable(selected,
+                                        "OVER_BUDGET" if exc.code == "SOURCE_OVER_BUDGET"
+                                        else "SOURCE_UNAVAILABLE")
+        except LookupError:
+            raise
+        except Exception:
+            return activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+
+    async def handle_activity_from_original_coo(self, frame, installed_source):
+        """Trusted COO factory supplies its original installed reader per request.
+
+        No changes to the immutable installed launcher or a global authority.
+        Ordinary standalone Workspace frames without that source remain denied.
+        """
+        from ops.executive_os.coo_principal_host import CooInstalledSource
+        if type(installed_source) is not CooInstalledSource:
+            return error("access_denied", 403)
+        return await self._handle_activity_frame(
+            frame, original_owner=installed_source.for_workspace_read_principal,
+        )
+
+    async def _handle_activity_frame(self, frame, *, original_owner=None):
+        from common import executive_workspace_activity_contract as activity
+        try:
+            activity.validate_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        principal, selected = frame["principal"], frame["selection"]
+        try:
+            if self.authorize(principal) is not True:
+                return error("access_denied", 403)
+            stamp = permission_stamp(self.authorize, principal)
+            if stamp is None:
+                return error("access_denied", 403)
+            source_reader = original_owner if original_owner is not None else self._activity_membership
+            stored_source_reader = self._activity_membership
+            before = self._activity_membership_marker(principal, selected, original_owner=source_reader)
+        except Exception:
+            # Missing installed COO grants do not downgrade to global viewer
+            # permission or a raw Runtime read.
+            return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_retained_activity, frame))
+        try:
+            response = await await_owned(task)
+        except LookupError:
+            response = error("selection_not_found", 404)
+        except Exception:
+            response = activity.unavailable(selected, "SOURCE_UNAVAILABLE")
+        try:
+            if (self.authorize(principal) is not True
+                    or permission_stamp(self.authorize, principal) != stamp
+                    or self._activity_membership is not stored_source_reader
+                    or self._activity_membership_marker(principal, selected, original_owner=source_reader) != before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
         return response
 
     def _read_admitted_plan(self, frame):
@@ -1193,6 +1366,9 @@ class WorkspaceReadService:
             return await self._handle_v4_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             return await self._handle_v3_frame(frame)
+        from common.executive_workspace_activity_contract import FRAME_SCHEMA as ACTIVITY_FRAME_SCHEMA
+        if isinstance(frame, dict) and frame.get("schema") == ACTIVITY_FRAME_SCHEMA:
+            return await self._handle_activity_frame(frame)
         # v2 frames take the closed v2 validation path; v1 frames keep their
         # existing envelope.  The two are mutually exclusive — never both.
         if isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v2":
@@ -1369,7 +1545,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                authorize_discovery=None, authorize_actions=None, action_now=None,
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
-                               product_acceptance_observe=None):
+                               product_acceptance_observe=None, activity_membership=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1410,5 +1586,6 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                     product_acceptance_owner_target=product_acceptance_owner_target,
                                     product_acceptance_owner_guard=product_acceptance_owner_guard,
                                     product_acceptance_read=product_acceptance_read,
-                                    product_acceptance_observe=product_acceptance_observe)
+                                    product_acceptance_observe=product_acceptance_observe,
+                                    activity_membership=activity_membership)
     return provide

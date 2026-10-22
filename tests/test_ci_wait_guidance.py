@@ -83,7 +83,7 @@ class GuardTests(unittest.TestCase):
         result = self.invoke('sleep 300; gh run view 42')
         self.assertEqual(result['permissionDecision'], 'deny')
 
-    def test_guard_ast_changes_only_guidance_strings(self):
+    def test_guard_ast_changes_only_guidance_and_native_surface_classification(self):
         # Joined-string text has different segmentation; normalize entire returned
         # guidance expressions only, then require all other AST nodes unchanged.
         old = ast.parse(FIXTURE.read_text())
@@ -96,6 +96,9 @@ class GuardTests(unittest.TestCase):
             calls = [n for n in ast.walk(bash) if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == 'allow_context']
             self.assertEqual(len(calls), 1)
             calls[0].args = [ast.Constant(value='<watch request guidance>')]
+            native = next(n for n in bash.body if isinstance(n, ast.Assign)
+                          and any(isinstance(t, ast.Name) and t.id == 'codex_native' for t in n.targets))
+            native.value = ast.Constant(value='<documented native surface>')
         self.assertEqual(ast.dump(old), ast.dump(new))
 
 
