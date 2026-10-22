@@ -865,7 +865,8 @@ def test_service_sink_refuses_registered_principal_with_mismatched_actor_before_
 
 def test_service_sink_closed_enrollment_contract_is_exact():
     assert SERVICE_PRINCIPAL_BINDINGS == frozenset(
-        {("svc-site-maintenance", "svc-site-maintenance")}
+        {("svc-site-maintenance", "svc-site-maintenance"),
+         ("svc-vps-inference", "svc-vps-inference")}
     )
 
 

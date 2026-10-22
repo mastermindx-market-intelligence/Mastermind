@@ -215,6 +215,10 @@ def _parser() -> argparse.ArgumentParser:
     ):
         command = sub.add_parser(name, help=help_text)
         command.add_argument(
+            "--routing-policy", type=Path,
+            help="Host-selected existing ModelRouter policy for claim/restart eligibility."
+        )
+        command.add_argument(
             "--codex-binary", required=True, type=Path, help="Absolute native Codex binary."
         )
         command.add_argument(
@@ -261,7 +265,12 @@ def main(argv: list[str] | None = None) -> int:
             _print(decision.to_dict())
             return 0
 
-        runtime = Runtime.at(args.root)
+        # The host's selected routing policy must stay bound through preview
+        # and the broker's atomic claim. Job/worker metadata cannot supply a
+        # replacement policy path or an independent scheduling authority.
+        runtime = Runtime.at(
+            args.root, routing_policy_path=getattr(args, "routing_policy", None)
+        )
         if args.command == "register-worker":
             quota_metadata: dict[str, Any] = {}
             worker_metadata: dict[str, Any] = {}

@@ -160,7 +160,7 @@ _V2_BUSINESS_IMPACTS = frozenset({"routine", "material", "critical"})
 #: ``execution_contract.requested_authorities`` — this branch adds no authority
 #: carrier, it only pins the class and constrains the contract.
 _SERVICE_REQUIRED_KEYS = _REQUIRED_KEYS | frozenset({"principal_id", "task_kind"})
-_SERVICE_OPTIONAL_KEYS = _OPTIONAL_KEYS
+_SERVICE_OPTIONAL_KEYS = _OPTIONAL_KEYS | frozenset({"inference_request"})
 _SERVICE_TASK_KINDS = frozenset({"research"})
 _SERVICE_PRINCIPAL_RE = re.compile(r"^svc-[a-z0-9-]{3,63}$")
 _SERVICE_INTENT_ID_PREFIX = "svc-"
@@ -170,7 +170,8 @@ _SERVICE_ALLOWED_AUTHORITIES = frozenset({"READ", "RESEARCH"})
 #: Future principals require a reviewed source change here; upstream emitters
 #: must prove their registry remains identical to this closed set.
 SERVICE_PRINCIPAL_BINDINGS = frozenset(
-    {("svc-site-maintenance", "svc-site-maintenance")}
+    {("svc-site-maintenance", "svc-site-maintenance"),
+     ("svc-vps-inference", "svc-vps-inference")}
 )
 #: The READ level of the A0-A7 effect ladder is its weakest rung, ``A0`` — the
 #: same default v1 already rides (``create_job(authority_level="A0")`` and
@@ -316,6 +317,10 @@ MAX_DEPTH = 8
 #: maximal 4-byte-per-character one are wildly different sizes.  This check is
 #: what makes the published bounds honest for both.
 MAX_ENVELOPE_BYTES = 48 * 1024
+# The inference service carries one larger semantic prompt while remaining below
+# the existing 64 KiB public Executive HTTP request fence. Historical CEO and
+# service envelopes retain MAX_ENVELOPE_BYTES unchanged.
+MAX_SERVICE_INFERENCE_ENVELOPE_BYTES = 60 * 1024
 
 
 class CeoIntentError(ValueError):
@@ -713,6 +718,28 @@ def _run_principal_guard(intent, guard) -> None:
         raise CeoIntentError("trusted principal admission refused") from None
 
 
+def _run_service_guard(intent, guard) -> None:
+    """Trusted synchronous host recheck at fresh creation; never on reconciliation.
+
+    This callback grants no authentication authority. The host owns enrollment,
+    arming and revocation, and must check them synchronously without retries.
+    Historical svc-site-maintenance admission does not require this input.
+    """
+    try:
+        if not callable(guard):
+            raise ValueError()
+        verdict = guard(copy.deepcopy(intent))
+        if verdict is not None:
+            # An async function is not a synchronous guard. Close its unawaited
+            # coroutine without running it; all other non-None values also refuse.
+            import inspect
+            if inspect.iscoroutine(verdict):
+                verdict.close()
+            raise ValueError()
+    except Exception:
+        raise CeoIntentError("trusted service admission refused") from None
+
+
 def validate_intent(payload: Any) -> dict[str, Any]:
     """Return the canonical form of one closed CEO intent envelope.
 
@@ -823,6 +850,24 @@ def validate_intent(payload: Any) -> dict[str, Any]:
                 f"service intent.actor {intent['actor']!r} does not match the "
                 f"reviewed principal {principal_id!r}"
             )
+        if principal_id == "svc-vps-inference":
+            if "inference_request" not in raw:
+                raise CeoIntentError(
+                    "svc-vps-inference requires the closed inference_request"
+                )
+            from control_plane import executive_inference_io as inference_io
+            try:
+                intent["inference_request"] = inference_io.normalize_request(
+                    raw["inference_request"]
+                )
+            except inference_io.InferenceIOError as exc:
+                raise CeoIntentError(
+                    "service inference_request is invalid"
+                ) from exc
+        elif "inference_request" in raw:
+            raise CeoIntentError(
+                "inference_request is admitted only for svc-vps-inference"
+            )
         _require_service_ceiling(intent["execution_contract"])
         intent["principal_id"] = principal_id
         intent["task_kind"] = task_kind
@@ -837,9 +882,17 @@ def validate_intent(payload: Any) -> dict[str, Any]:
             raw["workstream"], "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
         )
     size = len(canonical_bytes(intent))
-    if size > MAX_ENVELOPE_BYTES:
+    ceiling = (
+        MAX_SERVICE_INFERENCE_ENVELOPE_BYTES
+        if (
+            schema == INTENT_SCHEMA_SERVICE
+            and intent.get("principal_id") == "svc-vps-inference"
+        )
+        else MAX_ENVELOPE_BYTES
+    )
+    if size > ceiling:
         raise CeoIntentError(
-            f"intent is {size} canonical bytes, over the {MAX_ENVELOPE_BYTES}-byte "
+            f"intent is {size} canonical bytes, over the {ceiling}-byte "
             "envelope ceiling"
         )
     return intent
@@ -999,6 +1052,8 @@ def _provenance(intent: Mapping[str, Any], fingerprint: str, *, principal_reques
         value["requested_authorities"] = requested
         value["effective_authorities"] = list(requested)
         value["write_authorities"] = []
+        if intent["principal_id"] == "svc-vps-inference":
+            value["inference_request"] = copy.deepcopy(intent["inference_request"])
     if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
         value.update({key: intent[key] for key in _PRINCIPAL_IDENTITY_KEYS})
         value["request_ref"] = _require_principal_request_ref(principal_request_ref, intent["intent_id"])
@@ -1239,6 +1294,9 @@ def submit_intent(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
+    service_admission_guard: Any = None,
+    service_execution_binding: Any = None,
+
     fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
@@ -1259,6 +1317,10 @@ def submit_intent(
     in Job constraints, making provider/profile selection host-owned while the
     original CEO operation identity remains the complete normalized envelope.
 
+    ``service_admission_guard`` is a trusted keyword-only synchronous host input.
+    Fresh svc-vps-inference creation requires it at the final sink boundary;
+    accepted duplicates reconcile before it, even when currently disarmed.
+
     Strict-v2 ``dialogue_source`` is trusted host admission input, never a
     public envelope field and never part of the caller-controlled fingerprint.
     The source is stored in immutable root ``JOB_CREATED`` provenance and a
@@ -1275,6 +1337,14 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if service_execution_binding is not None and (
+        intent["schema"] != INTENT_SCHEMA_SERVICE
+        or intent.get("principal_id") != "svc-vps-inference"
+    ):
+        raise CeoIntentError(
+            "service execution binding is reserved for svc-vps-inference"
+        )
+
     # Private host source seam, never a frame field or a launch capability.
     # Only the actual new-root branch calls it. Public/replay receipts remain
     # queued, and no observer may turn a duplicate into a fresh admission.
@@ -1333,8 +1403,30 @@ def submit_intent(
                 # ``coo`` is the one seat that skips the typed-executive-
                 # provenance gate, and a service intent must never be seated
                 # above it.  No role, no host binding, no dialogue source.
+                inference_binding = None
                 if intent["schema"] == INTENT_SCHEMA_SERVICE:
                     _require_service_ceiling(contract)
+                    if intent["principal_id"] == "svc-vps-inference":
+                        _run_service_guard(intent, service_admission_guard)
+                        if service_execution_binding is None or workspace_root is None:
+                            raise CeoIntentError(
+                                "svc-vps-inference requires a trusted execution binding"
+                            )
+                        from control_plane.executive_inference_execution import (
+                            InferenceExecutionBindingError,
+                            validate_execution_binding,
+                        )
+                        try:
+                            inference_binding = validate_execution_binding(
+                                service_execution_binding,
+                                intent_id=intent["intent_id"],
+                                workspace_root=workspace_root,
+                                inference_request=intent["inference_request"],
+                            )
+                        except InferenceExecutionBindingError as exc:
+                            raise CeoIntentError(
+                                "svc-vps-inference execution binding refused"
+                            ) from exc
                 else:
                     _require_principal_contract(intent)
                 def principal_commit_fence():
@@ -1345,9 +1437,21 @@ def submit_intent(
                     department=intent["department"],
                     priority=intent["priority"],
                     authority_level=contract.get("authority_level", "A0"),
-                    branch=contract.get("branch"),
-                    worktree=contract.get("worktree"),
-                    constraints=contract.get("constraints"),
+                    branch=(
+                        inference_binding["branch"]
+                        if inference_binding is not None
+                        else contract.get("branch")
+                    ),
+                    worktree=(
+                        inference_binding["worktree"]
+                        if inference_binding is not None
+                        else contract.get("worktree")
+                    ),
+                    constraints=(
+                        inference_binding["constraints"]
+                        if inference_binding is not None
+                        else contract.get("constraints")
+                    ),
                     attempt_limit=contract.get("attempt_limit", 10),
                     # The REQUEST's authorities travel unchanged; the policy
                     # inside create_job is the adjudicator.
@@ -1455,6 +1559,7 @@ __all__ = [
     "INTENT_SCHEMA_PRINCIPAL",
     "INTENT_SCHEMA_V2",
     "MAX_ENVELOPE_BYTES",
+    "MAX_SERVICE_INFERENCE_ENVELOPE_BYTES",
     "RECEIPT_SCHEMA",
     "RECEIPT_SCHEMA_SERVICE",
     "RECEIPT_SCHEMA_PRINCIPAL",

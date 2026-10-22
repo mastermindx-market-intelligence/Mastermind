@@ -1549,7 +1549,11 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     from tests.executive_identity_review import _reviewed_ast_dump
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            '5ff13f90499f44f04bbfba96bde1190085a9587cd1f7c742182a91618ddf4af3'):
+            # Exact source reviewed after composing dormant, unenrolled
+            # inference staging with protected native-capacity startup.
+            # The installed event-loop AST pin below remains unchanged;
+            # no additional asyncio.run scope is admitted by this pin.
+            'f1b86bc4af1fabccc658e4f4175383f34223d7fb9a20b8060a0228166711efce'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

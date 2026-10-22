@@ -789,6 +789,11 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "fabric_bindings_sha256",
         "fabric_attended_probe",
         "coo_foreground_only",
+        # Inference service UID is staging-only. No default template may
+        # implicitly enroll an OS peer, grant historical result access, or
+        # arm fresh service submission without the independent host owner.
+        "ceo_ingress_inference_peer_uid",
+        "ceo_ingress_inference_armed",
         "coo_principal_dialogue_armed",
         # Native V2 requires explicitly sealed source and remains absent by default.
         "native_capacity_v2",

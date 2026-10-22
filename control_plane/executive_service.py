@@ -2084,6 +2084,42 @@ class CeoIngressAppBinding:
                 and not callable(self.principal_dialogue_provider_factory)):
             raise ValueError("principal dialogue requires a host provider")
 
+@dataclasses.dataclass(frozen=True)
+class CeoIngressInferenceBinding:
+    """Dormant host capability on the existing CEO Unix socket.
+
+    A separately enrolled service App must run as a *different OS peer UID*
+    from C1 and the incumbent Web/COO App peer. No caller chooses a provider
+    or model: the trusted host factory maps the closed inference_request into
+    the existing ModelRouter/Capacity-bound execution contract. Optional
+    read-side Runtime custody is provided by the same installed host.
+    """
+
+    peer_uid: int
+    grounding_provider: ceo_ingress.GroundingProvider
+    admission_armed: bool = False
+    admission_guard: Callable[[Mapping[str, Any]], None] | None = None
+    execution_binding_provider: Callable[[str, Mapping[str, Any]], Mapping[str, Any]] | None = None
+    result_read_runtime_factory: Callable[[Runtime], Runtime] | None = None
+
+    def __post_init__(self) -> None:
+        if type(self.peer_uid) is not int or self.peer_uid <= 0:
+            raise ValueError("inference service peer UID must be a positive non-root integer")
+        if not callable(getattr(self.grounding_provider, "observe", None)):
+            raise ValueError("inference service requires host grounding")
+        if type(self.admission_armed) is not bool:
+            raise ValueError("inference service arming must be Boolean")
+        for name in ("admission_guard", "execution_binding_provider",
+                     "result_read_runtime_factory"):
+            value = getattr(self, name)
+            if value is not None and (not callable(value)
+                                      or inspect.iscoroutinefunction(value)
+                                      or inspect.iscoroutinefunction(getattr(value, "__call__", None))):
+                raise ValueError("inference service host callback must be synchronous")
+        if self.admission_armed and (self.admission_guard is None
+                                     or self.execution_binding_provider is None):
+            raise ValueError("armed inference service requires placement and admission guards")
+
 
 class CompanyConsultationHostProtocol(Protocol):
     async def handle_connection(
@@ -2208,6 +2244,7 @@ class ExecutiveControlService:
         ) = None,
         ceo_ingress_armed: bool = False,
         ceo_ingress_app_binding: CeoIngressAppBinding | None = None,
+        ceo_ingress_inference_binding: CeoIngressInferenceBinding | None = None,
         workspace_control_room: Any | None = None,
         ceo_ingress_activated_socket: socket.socket | None = None,
         terminal_return_projector: TerminalReturnProjector | None = None,
@@ -2474,6 +2511,19 @@ class ExecutiveControlService:
             if ceo_ingress_app_binding.peer_uid == ceo_ingress_peer_uid:
                 raise ValueError("App and C1 must have distinct peer uids")
         self._ceo_ingress_app_binding = ceo_ingress_app_binding
+        if ceo_ingress_inference_binding is not None:
+            if type(ceo_ingress_inference_binding) is not CeoIngressInferenceBinding:
+                raise ValueError("inference ingress requires an exact host binding")
+            if self._ceo_ingress_socket_path is None:
+                raise ValueError("inference service requires the existing CEO ingress socket")
+            privileged = {os.geteuid()} | {int(v) for v in self.config.allowed_peer_uids}
+            if ceo_ingress_inference_binding.peer_uid in privileged:
+                raise ValueError("inference service peer overlaps a privileged Operator identity")
+            if (ceo_ingress_inference_binding.peer_uid == ceo_ingress_peer_uid
+                    or (ceo_ingress_app_binding is not None and
+                        ceo_ingress_inference_binding.peer_uid == ceo_ingress_app_binding.peer_uid)):
+                raise ValueError("inference service requires a distinct kernel peer identity")
+        self._ceo_ingress_inference_binding = ceo_ingress_inference_binding
         self._ceo_ingress_peer_uid = ceo_ingress_peer_uid
         self._ceo_ingress_grounding_provider = ceo_ingress_grounding_provider
         if (
@@ -3210,60 +3260,77 @@ class ExecutiveControlService:
                 raise ServiceError("launchd control socket must not be world-accessible")
 
     def _grant_app_socket_access(self) -> None:
-        """One named-user ACL; C1 ownership, modes and groups stay intact.
+        """Grant only named enrolled App/service UIDs to the existing socket.
 
-        Reapply after launchd recreates its socket. The existing bootstrap's
-        root-owned 0755 parent already allows traversal and stays untouched.
-        A private service-owned parent receives only a traversal ACL. No root
-        subprocess, broad group, or Runtime ACL is needed.
+        No broad group/world permission, owner mode or Operator socket change.
+        Reapply idempotently only after a launchd socket is present; installed
+        owner remains responsible for an actual distinct service OS identity.
         """
-        binding = self._ceo_ingress_app_binding
-        if binding is None or binding.peer_uid == os.geteuid():
+        principals = [
+            binding.peer_uid for binding in (
+                self._ceo_ingress_app_binding,
+                self._ceo_ingress_inference_binding,
+            ) if binding is not None and binding.peer_uid != os.geteuid()
+        ]
+        if not principals:
             return
         if sys.platform != "darwin":
-            raise ServiceError("installed App socket permissions require macOS")
-        name = pwd.getpwuid(binding.peer_uid).pw_name
-        if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name) is None:
-            raise ServiceError("App service identity is invalid")
+            raise ServiceError("installed App/service socket permissions require macOS")
         path = self._ceo_ingress_socket_path
         assert path is not None
-        for node, permissions, directory in (
-            (path.parent, "search", True), (path, "read,write", False),
-        ):
-            before = node.lstat()
-            if directory and (stat.S_ISDIR(before.st_mode)
-                    and before.st_uid == 0
-                    and stat.S_IMODE(before.st_mode) == 0o755):
-                # bootstrap-host.sh owns this shared parent. All peers can
-                # traverse it already; each socket retains its own authority.
-                continue
-            if (before.st_uid != os.geteuid() or stat.S_ISLNK(before.st_mode)
-                    or before.st_mode & 0o007
-                    or not (stat.S_ISDIR(before.st_mode) if directory else stat.S_ISSOCK(before.st_mode))):
-                raise ServiceError("App socket custody is unavailable")
-            rule = f"user:{name} allow {permissions}"
-            observed = subprocess.run(
-                ["/bin/ls", "-lde", str(node)], check=True, capture_output=True, text=True,
-            ).stdout
-            if not any(line.strip().split(": ", 1)[-1] == rule for line in observed.splitlines()[1:]):
-                subprocess.run(["/bin/chmod", "+a", rule, str(node)], check=True, capture_output=True)
-            after = node.lstat()
-            if (after.st_dev, after.st_ino, after.st_mode, after.st_uid, after.st_gid) != (
-                before.st_dev, before.st_ino, before.st_mode, before.st_uid, before.st_gid,
+        for uid in principals:
+            name = pwd.getpwuid(uid).pw_name
+            if re.fullmatch(r"[A-Za-z_][A-Za-z0-9_-]*", name) is None:
+                raise ServiceError("App/service identity is invalid")
+            for node, permissions, directory in (
+                (path.parent, "search", True), (path, "read,write", False),
             ):
-                raise ServiceError("App socket identity changed while applying access")
+                before = node.lstat()
+                if directory and (stat.S_ISDIR(before.st_mode)
+                        and before.st_uid == 0
+                        and stat.S_IMODE(before.st_mode) == 0o755):
+                    # Bootstrap owns this traversable shared parent; the exact
+                    # socket still has its separately named-user ACL.
+                    continue
+                if (before.st_uid != os.geteuid() or stat.S_ISLNK(before.st_mode)
+                        or before.st_mode & 0o007
+                        or not (stat.S_ISDIR(before.st_mode) if directory
+                                else stat.S_ISSOCK(before.st_mode))):
+                    raise ServiceError("App/service socket custody is unavailable")
+                rule = f"user:{name} allow {permissions}"
+                observed = subprocess.run(
+                    ["/bin/ls", "-lde", str(node)], check=True,
+                    capture_output=True, text=True,
+                ).stdout
+                if not any(line.strip().split(": ", 1)[-1] == rule
+                           for line in observed.splitlines()[1:]):
+                    subprocess.run(
+                        ["/bin/chmod", "+a", rule, str(node)],
+                        check=True, capture_output=True,
+                    )
+                after = node.lstat()
+                if (after.st_dev, after.st_ino, after.st_mode,
+                        after.st_uid, after.st_gid) != (
+                        before.st_dev, before.st_ino, before.st_mode,
+                        before.st_uid, before.st_gid):
+                    raise ServiceError("App/service socket identity changed while granting access")
 
     async def _bind_ceo_ingress_server(self, *, start_serving: bool) -> None:
         """Construct (bind) the dedicated CeoIngress listener; see ``_bind_operator_server``."""
 
         from control_plane import executive_release_ingress as release_ingress
+        from control_plane import executive_inference_ingress as inference_ingress
+        # Read before schema discrimination must accommodate every admitted
+        # family; the later closed discriminator retains each OWN byte ceiling.
+        transport_ceiling = max(release_ingress.MAX_FRAME_BYTES,
+                                inference_ingress.MAX_FRAME_BYTES)
         assert self._ceo_ingress_socket_path is not None
         if self._ceo_ingress_activated_socket is None:
             self._prepare_ceo_ingress_socket_path()
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 path=str(self._ceo_ingress_socket_path),
-                limit=release_ingress.MAX_FRAME_BYTES + 1,
+                limit=transport_ceiling + 1,
                 start_serving=start_serving,
             )
             self._ceo_ingress_socket_path.chmod(0o600)
@@ -3278,7 +3345,7 @@ class ExecutiveControlService:
             self._ceo_ingress_server = await asyncio.start_unix_server(
                 self._handle_ceo_ingress_connection,
                 sock=activated,
-                limit=release_ingress.MAX_FRAME_BYTES + 1,
+                limit=transport_ceiling + 1,
                 start_serving=start_serving,
                 **activated_options,
             )
@@ -5045,6 +5112,7 @@ class ExecutiveControlService:
     async def _send_ceo_ingress_response(
         self, writer: asyncio.StreamWriter, payload: Mapping[str, Any],
         *, response_ceiling: int = ceo_ingress.MAX_RESPONSE_BYTES,
+        delivery_timeout: float | None = None,
     ) -> None:
         """Dedicated bounded sender (§7.4) — the 32 KiB ingress ceiling, never
         the generic ``_send()``'s ``ServiceConfig.max_response_bytes``.  A
@@ -5066,7 +5134,19 @@ class ExecutiveControlService:
             )
         try:
             writer.write(raw)
-            await writer.drain()
+            if delivery_timeout is None:
+                await writer.drain()
+            else:
+                # This deadline starts AFTER the canonical read/admission
+                # operation has returned. A stuck receiver cannot retain the
+                # Executive service shutdown task indefinitely. The client
+                # reconciles the original operation if reply delivery fails.
+                if type(delivery_timeout) not in (int, float) or not 0 < delivery_timeout <= 5:
+                    raise ValueError("service response deadline is not bounded")
+                await asyncio.wait_for(writer.drain(), timeout=delivery_timeout)
+        except asyncio.TimeoutError:
+            writer.transport.abort()
+            return
         except _CLIENT_GONE:
             return
 
@@ -5096,6 +5176,7 @@ class ExecutiveControlService:
             # real terminal point — a client disconnect does not remove it
             # while a canonical mutation is running.
             self._ceo_ingress_tasks.add(task)
+        inference_peer = False
         try:
             connection = writer.get_extra_info("socket")
             if connection is None:
@@ -5123,7 +5204,10 @@ class ExecutiveControlService:
                 return
             app_binding = self._ceo_ingress_app_binding
             app_peer = app_binding is not None and peer == app_binding.peer_uid
-            if peer != self._ceo_ingress_peer_uid and not app_peer:
+            inference_binding = self._ceo_ingress_inference_binding
+            inference_peer = (inference_binding is not None
+                              and peer == inference_binding.peer_uid)
+            if peer != self._ceo_ingress_peer_uid and not app_peer and not inference_peer:
                 await self._send_ceo_ingress_error(
                     writer, "peer_denied", "peer uid is not authorized"
                 )
@@ -5142,7 +5226,19 @@ class ExecutiveControlService:
                 )
                 return
             try:
-                raw = await reader.readuntil(b"\n")
+                # The new service peer is untrusted until a COMPLETE bounded
+                # frame arrives. Its pre-admission wait must not retain an
+                # Executive shutdown task indefinitely. Existing C1/Web-peer
+                # admission timing is unchanged by this service-only deadline.
+                raw = await asyncio.wait_for(
+                    reader.readuntil(b"\n"),
+                    timeout=(2.0 if inference_peer else None),
+                )
+            except asyncio.TimeoutError:
+                await self._send_ceo_ingress_error(
+                    writer, "ingress_unavailable", "service frame admission timed out"
+                )
+                return
             except asyncio.LimitOverrunError:
                 await self._send_ceo_ingress_error(
                     writer, "request_too_large", "request exceeds byte limit"
@@ -5164,7 +5260,9 @@ class ExecutiveControlService:
             # unreachable here and is intentionally omitted (verified by
             # grepping both except clauses above: neither falls through).
             from control_plane import executive_release_ingress as release_ingress
-            if len(raw) > release_ingress.MAX_FRAME_BYTES:
+            from control_plane import executive_inference_ingress as inference_ingress
+            if len(raw) > max(release_ingress.MAX_FRAME_BYTES,
+                              inference_ingress.MAX_FRAME_BYTES):
                 await self._send_ceo_ingress_error(
                     writer, "request_too_large", "request exceeds byte limit"
                 )
@@ -5188,14 +5286,129 @@ class ExecutiveControlService:
                 )
                 return
             is_release = isinstance(parsed, dict) and parsed.get("schema") == release_ingress.FRAME_SCHEMA
+            is_inference = isinstance(parsed, dict) and parsed.get("schema") in inference_ingress.SCHEMAS
             is_principal_dialogue = (isinstance(parsed, dict)
                 and parsed.get("schema") == principal_app_protocol.APP_REQUEST_SCHEMA)
             selected_principal_dialogue = (is_principal_dialogue and app_peer
                 and callable(app_binding.principal_dialogue_provider_factory))
             request_ceiling = (principal_app_protocol.MAX_REQUEST_BYTES
                 if selected_principal_dialogue else ceo_ingress.MAX_REQUEST_BYTES)
-            if not is_release and len(raw) > request_ceiling:
+            if ((is_release and len(raw) > release_ingress.MAX_FRAME_BYTES)
+                    or (not is_release and not is_inference and len(raw) > request_ceiling)
+                    or (is_inference and len(raw) > inference_ingress.MAX_FRAME_BYTES)):
                 await self._send_ceo_ingress_error(writer, "request_too_large", "request exceeds byte limit")
+                return
+            # A separately enrolled inference App uses the SAME Unix
+            # ingress and canonical Job sink, but its kernel UID is distinct
+            # from C1 and Web/COO. No service-specific socket, queue,
+            # credential selection or independent lifecycle is created.
+            if inference_peer and (isinstance(parsed, dict)
+                                   and parsed.get("schema") == ceo_ingress.APP_GROUNDING_SCHEMA):
+                try:
+                    if set(parsed) != {"schema"}:
+                        raise ValueError("invalid grounding frame")
+                    value = await ceo_ingress._observe_trusted_grounding(
+                        inference_binding.grounding_provider
+                    )
+                    await self._send_ceo_ingress_response(
+                        writer, {"ok": True, "result": value}
+                    )
+                except Exception:
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "service grounding unavailable"
+                    )
+                return
+            if is_inference:
+                if not inference_peer:
+                    await self._send_ceo_ingress_error(
+                        writer, "peer_denied", "service inference requires its distinct peer"
+                    )
+                    return
+                if (self._closing or not self._ceo_ingress_ready
+                        or self._service_state not in {"READY", "AWAITING_CANARY"}
+                        or self._ceo_ingress_inference_binding is not inference_binding):
+                    await self._send_ceo_ingress_error(
+                        writer, "ingress_unavailable", "service inference ingress unavailable"
+                    )
+                    return
+                is_submit = parsed["schema"] == inference_ingress.SUBMIT_SCHEMA
+
+                def require_service_current() -> None:
+                    if (self._closing or not self._ceo_ingress_ready
+                            or self._ceo_ingress_inference_binding is not inference_binding
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}
+                            or not inference_binding.admission_armed):
+                        raise ValueError("service inference admission is not currently armed")
+
+                def admitted_guard(envelope: Mapping[str, Any]) -> None:
+                    require_service_current()
+                    if inference_binding.admission_guard is None:
+                        raise ValueError("inference service admission guard unavailable")
+                    verdict = inference_binding.admission_guard(envelope)
+                    if inspect.isawaitable(verdict):
+                        close = getattr(verdict, "close", None)
+                        if callable(close):
+                            close()
+                        raise ValueError("async admission verdict cannot grant service work")
+                    if verdict is not None:
+                        raise ValueError("nonempty admission verdict cannot authorize work")
+                    require_service_current()
+                    return None
+
+                def host_execution_binding(identity: str) -> Mapping[str, Any]:
+                    require_service_current()
+                    factory = inference_binding.execution_binding_provider
+                    if factory is None:
+                        raise ValueError("service inference placement unavailable")
+                    value = factory(identity, parsed["request"]["inference_request"])
+                    require_service_current()
+                    return value
+
+                try:
+                    active_runtime = self._require_runtime()
+                    read_runtime = None
+                    if (not is_submit and
+                            inference_binding.result_read_runtime_factory is not None):
+                        read_runtime = inference_binding.result_read_runtime_factory(
+                            active_runtime
+                        )
+                    result = await inference_ingress.handle_frame(
+                        parsed, runtime=active_runtime,
+                        grounding_provider=inference_binding.grounding_provider,
+                        workspace_root=self.config.proof_workspace_root,
+                        admission_guard=admitted_guard if is_submit else None,
+                        execution_binding_provider=host_execution_binding if is_submit else None,
+                        result_read_runtime=read_runtime,
+                    )
+                    if (self._closing or not self._ceo_ingress_ready
+                            or self._service_state not in {"READY", "AWAITING_CANARY"}
+                            or self._ceo_ingress_inference_binding is not inference_binding):
+                        # An awaited status/direct read must not publish after
+                        # quarantine or service-state revocation. A completed
+                        # canonical mutation is reconciled by original ID;
+                        # reply refusal never licenses submission replay.
+                        raise ValueError("service inference binding or readiness changed before response")
+                    from control_plane.executive_inference_contract import MAX_RESULT_BYTES as SERVICE_MAX_RESULT_BYTES
+                    await self._send_ceo_ingress_response(
+                        writer, {"ok": True, "result": result},
+                        response_ceiling=(SERVICE_MAX_RESULT_BYTES if parsed["schema"] == inference_ingress.DIRECT_RESULT_SCHEMA
+                                          else ceo_ingress.MAX_RESPONSE_BYTES),
+                        delivery_timeout=2.0,
+                    )
+                except ceo_ingress.CeoIngressError as exc:
+                    await self._send_ceo_ingress_error(writer, exc.code, exc.message)
+                except Exception:
+                    # A submitted operation may already have persisted. An
+                    # opaque failure here is EFFECT_UNKNOWN to the App; the
+                    # original operation must be reconciled, never replayed.
+                    await self._send_ceo_ingress_error(
+                        writer, "backend_unavailable", "service inference outcome unavailable"
+                    )
+                return
+            if inference_peer:
+                await self._send_ceo_ingress_error(
+                    writer, "peer_denied", "inference peer may send only service frames"
+                )
                 return
             if is_principal_dialogue:
                 if not selected_principal_dialogue:
@@ -5680,10 +5893,17 @@ class ExecutiveControlService:
             # admission/readback and response cleanup (writer close/drain)
             # reaches the real terminal point, so ``close()``'s drain-set wait
             # cannot observe this handler as "done" while its writer is still
-            # being torn down.
+            # being torn down. Only the separately admitted inference peer's
+            # post-effect socket closure has a deadline; an in-flight canonical
+            # mutation is never cancelled to enforce a transport timeout.
             writer.close()
             try:
-                await writer.wait_closed()
+                if inference_peer:
+                    await asyncio.wait_for(writer.wait_closed(), timeout=2.0)
+                else:
+                    await writer.wait_closed()
+            except asyncio.TimeoutError:
+                writer.transport.abort()
             except _CLIENT_GONE:
                 pass
             if task is not None:

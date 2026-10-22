@@ -1,0 +1,28 @@
+{
+  "review_base": "608ab814f6434317a25acf01586bb90d5c32f7f8",
+  "reviewed_source_sha256": {
+    "control_plane/executive_inference_io.py": "f7dfa5707e2448934fe9c2b9ef99da08a99485c6570ed415b582e225054cd1c6",
+    "control_plane/executive_inference_execution.py": "7829960f57a784a2b7a865386ba892ab15ebf38acee5a8383f18e3cb7e79a776",
+    "control_plane/ceo_intent.py": "814a1b47d3ef1a19c2e5553922fa642c4dad245b7ea01918d8b1c70120380451",
+    "control_plane/executive_service_principal.py": "78578555f63773622515256c9d84f1de8ae3ee66a3d0f87d9ea37d893ab3f170",
+    "integrations/executive_mcp/inference.py": "7ded3d0a601f80139792617f2abb6387bd35ee0b528146341ea54f8d127b01db",
+    "tests/test_executive_service_principal.py": "89e6622a6840ea02ddba0361a7a53c9bfb8df6498da310ca781e32b30005dae7",
+    "tests/test_vps_inference_task_fit.py": "44a1f1336d477883147777868c89801c51b9eedbfd9fc1e721d1c4b5a2831c3e"
+  },
+  "native_session": "01a12dd9-1161-71d0-8d17-cd24d9342e01",
+  "native_process_exit": 0,
+  "requested_model": "gpt-6.1-sol",
+  "served_model": "not independently attested",
+  "verdict": "NO_ACTIONABLE_FINDING_WITHIN_SEVEN_FILE_SLICE",
+  "raw_final_report_sha256": "7d135cc570053498402930ac06346fa0cdbc5e15c582a1efd1d3d47e1c579a01",
+  "published_report_sha256": "c40fb897cfaff0f1fd2477ce30df740f37b8675c0829b35d1f9292e8f3b19f68",
+  "review_scope": "source and pure injected in-memory probes; not native Runtime, pytest, installed auth, capacity or provider proof",
+  "local_full_regression": {
+    "passed": 257,
+    "failed": 1,
+    "known_failure": "test_direct_emitter_cannot_bypass_sink_guard",
+    "held_fixture_unchanged": true
+  },
+  "new_task_fit_cases": 23,
+  "worker_or_provider_started": false
+}

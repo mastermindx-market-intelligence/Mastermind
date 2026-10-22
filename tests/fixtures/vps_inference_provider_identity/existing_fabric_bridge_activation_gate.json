@@ -1,0 +1,63 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "original_service_head": "f44f3830385c7d215b55dea92861a8aa67ce4624",
+  "kind": "finite existing Fabric bridge source census and actual activation refusal",
+  "source_sha256": {
+    "scripts/executive_os_phase1c.py": "744ade200790602770c258b2a1e243ba1bedf0a37ff0339093d8c27792434b47",
+    "control_plane/worker_adapter.py": "657c05c3c273ae886aa82c02f31173c0d948885577840724974bbc4c4775cf74",
+    "control_plane/executive_fabric_adapter.py": "4474bffd95ad627f2258a739297c9694439e8c611f94f47228821613dbf6d70e",
+    "control_plane/executive_fabric_bridge_broker.py": "e2bd6a8f805c6b84571e27d93af5b2dfac8e825860225095fafa6c04c6c1a7f6",
+    "control_plane/executive_fabric_composition.py": "8b137fb9326dee1dbe094eca8c3ed3cebddd0c7884b875c8eae6575065d50f3a",
+    "control_plane/fabric_remote_transport.py": "67f792e031d9488265b3c631e01c657122f7aff2ff207a671f88d7b406894088"
+  },
+  "existing_bridge_suite": {
+    "passed": 222,
+    "failed": [],
+    "errors": [],
+    "skipped": [],
+    "junit_sha256": "e73d844f62196da5d8131568248cc24b01800db1bf35a631b16090c73ffa00e0"
+  },
+  "pure_inference_activation_check": {
+    "fabric_bridge_armed_true": "REFUSED_BY_FabricActivationRefused",
+    "no_fabric_binding_source": "DISABLED_BY_DEFAULT",
+    "unpaired_host_binding_path": "REFUSED_BY_ServiceError",
+    "provider_process_started": false
+  },
+  "adapter_catalog": {
+    "codex-cli": {
+      "implemented": true
+    },
+    "attended-fabric": {
+      "implemented": false,
+      "named_class_available": true
+    },
+    "openai-compatible": {
+      "implemented": false,
+      "named_class_available": false
+    }
+  },
+  "current_installed_executive_observation": {
+    "mastermind_sha": "54e8659730141fc130ebbeb214dbb50f3edb04a7",
+    "workers_available": 1,
+    "attempts_running": 0,
+    "source": "existing read-only Executive MCP projection; separate from local build"
+  },
+  "effects": {
+    "installed_config_changed": false,
+    "production_deployed": false,
+    "fabric_lease_created": false,
+    "new_executive_job_created": false,
+    "provider_execution": false,
+    "portfolio_execution": false
+  },
+  "actual_remaining_gates": [
+    "admit one concrete backend over incumbent remote_sub Fabric controller and original Attempt fence",
+    "qualify real host identity, installed bridge UID/isolation, pinned route and provider realm",
+    "retain authenticated Control original command through existing O_EXCL START/collection/revoke owners",
+    "resolve separately refused Supervisor admitted-prompt/terminal-result writer before real direct inference return",
+    "install role-correct service App identity and DCR with existing release protections",
+    "prove actual economical model result and independently justified frontier result under current capacity/usage owner",
+    "consume exact results at originating Bot decision and verify browser/paper/future evaluation"
+  ],
+  "release": "DRAFT_HOLD_NO_REAL_PROVIDER_ADMISSION"
+}

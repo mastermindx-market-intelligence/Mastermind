@@ -2,8 +2,8 @@
 
 WHAT THIS IS
 ------------
-A closed, reviewed *identity type* for one bounded non-CEO principal
-(``svc-site-maintenance``: VPS site/source-health READ/RESEARCH audits) plus a
+A closed, reviewed *identity type* for bounded non-CEO principals
+(``svc-site-maintenance`` for site audits and ``svc-vps-inference`` for research) plus a
 derive/submit path that rides the EXISTING single mutation sink
 (``control_plane.ceo_intent.submit_intent``) and the existing Job creation path
 (``runtime.jobs.create_job(..., provenance=...)``).  The principal is typified -
@@ -39,8 +39,9 @@ WHAT THIS IS NOT
   the CEO branch of ``_has_executive_provenance`` (``executive_runtime.py:L928-L942``,
   consulted only from ``:10287-10297``) - but a RAW ``mastermind.ceo_intent.v1``
   stamp still does.  That raw-v1 residual stays OWNED by
-  ``executive_runtime.py`` (the Runtime seat lane).  Authenticated service
-  ingress (A5) remains deferred to the app/gateway lane.
+  ``executive_runtime.py`` (the Runtime seat lane). Authenticated VPS service
+  ingress (A5) is composed separately by executive_inference_ingress and the
+  Executive App inference profile.
 
 Identity law
 ------------
@@ -79,7 +80,7 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Any, Mapping
 
-from control_plane import ceo_intent, ceo_request
+from control_plane import ceo_intent, ceo_request, executive_inference_io as inference_io
 
 __all__ = [
     "ADMITTED",
@@ -319,11 +320,12 @@ class ServicePrincipal:
             )
 
 
-#: The CLOSED registry: exactly one reviewed principal.  There is no runtime,
-#: config, CLI, or environment way to add a second one - adding a principal is a
+#: The CLOSED registry: exactly the reviewed principals. There is no runtime,
+#: config, CLI, or environment way to add another one - adding a principal is a
 #: code review, not an operation.
 _SINK_BINDING = ("svc-site-maintenance", "svc-site-maintenance")
-if ceo_intent.SERVICE_PRINCIPAL_BINDINGS != frozenset({_SINK_BINDING}):
+_INFERENCE_BINDING = ("svc-vps-inference", "svc-vps-inference")
+if ceo_intent.SERVICE_PRINCIPAL_BINDINGS != frozenset({_SINK_BINDING, _INFERENCE_BINDING}):
     raise RuntimeError(
         "service principal emitter and canonical sink enrollment contract differ"
     )
@@ -337,7 +339,12 @@ REGISTRY: Mapping[str, ServicePrincipal] = MappingProxyType(
                 "VPS site/source-health READ/RESEARCH audits (no writes, no dispatch, "
                 "no provider or credential effect)"
             ),
-        )
+        ),
+        _INFERENCE_BINDING[0]: ServicePrincipal(
+            principal_id=_INFERENCE_BINDING[0],
+            actor=_INFERENCE_BINDING[1],
+            purpose="Bounded VPS inference research through Executive/Fabric; no writes or provider administration",
+        ),
     }
 )
 
@@ -544,6 +551,17 @@ def validate_grant(derived: Mapping[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def service_intent_id(principal: ServicePrincipal, operation_key: str) -> str:
+    """Public stable identity over the closed principal and validated operation key."""
+    registered = _require_registered(principal)
+    normalized = ceo_request.normalize_high_level_request({
+        "operation_key": operation_key, "objective": "Identity validation",
+        "department": "executive-infrastructure", "priority": 3,
+        "execution_profile": "research_only", "attempt_limit": 1,
+    })
+    return _intent_id(registered, normalized)
+
+
 def _intent_id(principal: ServicePrincipal, normalized: Mapping[str, Any]) -> str:
     """Stable logical-operation identity: EXACTLY (SCHEMA, principal_id, operation_key).
 
@@ -622,7 +640,20 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
     if "grounding" not in request:
         raise _refuse("request must carry the trusted 'grounding' block")
     grounding = request["grounding"]
-    payload = {key: value for key, value in request.items() if key != "grounding"}
+    inference_request = None
+    if registered.principal_id == _INFERENCE_BINDING[0]:
+        if "inference_request" not in request:
+            raise _refuse("VPS inference requests require the closed inference_request")
+        try:
+            inference_request = inference_io.normalize_request(request["inference_request"])
+        except inference_io.InferenceIOError as exc:
+            raise _refuse("VPS inference request payload is invalid") from exc
+    elif "inference_request" in request:
+        raise _refuse("inference_request is admitted only for svc-vps-inference")
+    payload = {
+        key: value for key, value in request.items()
+        if key not in {"grounding", "inference_request"}
+    }
 
     # Reuse, do not re-implement: the sink's own normalizer refuses unknown and
     # privileged keys and applies the reviewed coherence rules.
@@ -656,7 +687,7 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
             f"{sorted(registered.allowed_operations)}"
         )
 
-    intent_id = _intent_id(registered, normalized)
+    intent_id = service_intent_id(registered, normalized["operation_key"])
     provenance = _provenance(registered, authorities)
     contract: dict[str, Any] = {
         # The envelope's grant is READ OFF the typed block, so the two can never
@@ -683,6 +714,8 @@ def derive_intent(principal: ServicePrincipal, request: Mapping[str, Any], *, no
         "task_kind": TASK_KIND,
         "execution_contract": contract,
     }
+    if inference_request is not None:
+        envelope["inference_request"] = inference_request
     if normalized.get("workstream"):
         envelope["workstream"] = str(normalized["workstream"])
 
@@ -828,7 +861,7 @@ def admission_status() -> dict[str, Any]:
         "predicates": (
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L735",
+                "line": "L762",
                 "what": (
                     "validate_intent admits the third, strict service schema through "
                     "the same exact-key-set fence: _SERVICE_REQUIRED_KEYS = the v1 keys "
@@ -837,7 +870,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L598",
+                "line": "L603",
                 "what": (
                     "_require_service_ceiling refuses any requested authority outside "
                     "{READ, RESEARCH}, any allowed_write_paths, and any authority_level "
@@ -847,7 +880,7 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L997",
+                "line": "L1050",
                 "what": (
                     "_provenance() stamps the typed service evidence (principal_id, "
                     "task_kind, requested_authorities, effective_authorities, "
@@ -857,12 +890,13 @@ def admission_status() -> dict[str, Any]:
             },
             {
                 "file": "control_plane/ceo_intent.py",
-                "line": "L1361",
+                "line": "L1465",
                 "what": (
                     "the service branch of submit_intent passes EXPLICIT "
                     "owner_seat='coo' / escalation_target='coo' and no orchestration "
-                    "role, no execution_binding and no dialogue_source, so a service "
-                    "Job can never be seated above coo"
+                    "role, generic execution_binding, or dialogue_source; the VPS "
+                    "inference principal may receive only its separately validated "
+                    "trusted host execution binding, never a caller-supplied route"
                 ),
             },
         ),
@@ -874,7 +908,7 @@ def admission_status() -> dict[str, Any]:
             "conflict_predicates": (
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1299",
+                    "line": "L1369",
                     "what": (
                         "submit_intent looks the derived command id up in the durable "
                         "event log first, so a reused intent id reconciles instead of "
@@ -883,7 +917,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L1052",
+                    "line": "L1107",
                     "what": (
                         "_receipt_from_event raises CeoIntentConflict when the reused "
                         "intent id was already accepted under a DIFFERENT whole-envelope "
@@ -893,7 +927,7 @@ def admission_status() -> dict[str, Any]:
                 },
                 {
                     "file": "control_plane/ceo_intent.py",
-                    "line": "L884",
+                    "line": "L937",
                     "what": "command_id_for() derives the durable command id from the intent id",
                 },
             ),

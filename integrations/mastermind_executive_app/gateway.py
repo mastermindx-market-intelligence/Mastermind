@@ -404,6 +404,8 @@ class CeoIngressClient:
         request_ceiling = MAX_REQUEST_BYTES
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
+        # Independently closed frame families use their original owners'
+        # limits. Every legacy CEO schema retains its 8 KiB ceiling.
         principal_encoded = None
         # This closed source-only frame has its own canonical byte bounds.
         # Selecting transport limits grants no receiving-side admission.
@@ -426,9 +428,10 @@ class CeoIngressClient:
             request_ceiling = principal_request_limit
             response_ceiling = principal_response_limit
             stream_limit = response_ceiling + 4096
-        # Only the separately versioned, closed release frame can use the
-        # larger token envelope; every historical schema retains its limits.
+        # Release and service-inference envelopes below keep their separate
+        # canonical validation/size gates; dialogue never grants service UID.
         from control_plane import executive_release_ingress as release_ingress
+        from control_plane import executive_inference_ingress as inference_ingress
         if isinstance(frame, Mapping) and frame.get("schema") == release_ingress.FRAME_SCHEMA:
             try:
                 release_ingress.validate_frame(frame)
@@ -439,6 +442,12 @@ class CeoIngressClient:
             request_ceiling = release_ingress.MAX_FRAME_BYTES
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
+        elif isinstance(frame, Mapping) and frame.get("schema") in inference_ingress.SCHEMAS:
+            request_ceiling = inference_ingress.MAX_FRAME_BYTES
+            if frame.get("schema") == inference_ingress.DIRECT_RESULT_SCHEMA:
+                from control_plane.executive_inference_contract import MAX_RESULT_BYTES as INFERENCE_VIEW_MAX_BYTES
+                response_ceiling = INFERENCE_VIEW_MAX_BYTES
+                stream_limit = response_ceiling + 4096
         try:
             encoded = principal_encoded if principal_encoded is not None else json.dumps(
                 frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
@@ -2487,7 +2496,11 @@ class CeoIngressReadGateway:
                     "MISSING_PRODUCER",
                     "runtime.acquisition.provenance",
                     "executive_runtime",
-                    "durable CEO-intent workstream join unavailable for included Jobs",
+                    # Match the incumbent bounded Fabric v2 producer's exact
+                    # MISSING_PRODUCER fact. Historical roots can legitimately
+                    # have no orchestration/CEO-intent join. Do not convert
+                    # this explicit PARTIAL truth into backend_unavailable.
+                    "durable orchestration-root workstream join unavailable for included Jobs",
                 )
             )
         if truncation.get("jobs") or truncation.get("attempt_job_ids"):

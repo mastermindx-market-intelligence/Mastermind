@@ -308,6 +308,9 @@ _CONFIG_OPTIONAL = frozenset(
         "ceo_ingress_app_peer_uid",
         "ceo_ingress_app_armed",
         "ceo_ingress_app_macro_root",
+        # Dormant, read-only service peer staging; no new credential/queue.
+        "ceo_ingress_inference_peer_uid",
+        "ceo_ingress_inference_armed",
         "ceo_ingress_app_boot_python",
         "executive_mcp_profile",
         "terminal_return_armed",
@@ -339,6 +342,9 @@ _CEO_INGRESS_CONFIG_KEYS = frozenset(
 _CEO_INGRESS_APP_CONFIG_KEYS = frozenset({
     "ceo_ingress_app_peer_uid", "ceo_ingress_app_armed", "ceo_ingress_app_macro_root",
 })
+_CEO_INGRESS_INFERENCE_CONFIG_KEYS = frozenset({
+    "ceo_ingress_inference_peer_uid", "ceo_ingress_inference_armed",
+})
 _TERMINAL_RETURN_CONFIG_KEYS = frozenset(
     {
         "terminal_return_armed",
@@ -359,6 +365,38 @@ _CONFIG_DISABLED_EXTENSIONS = frozenset()
 
 class FabricActivationRefused(ServiceError):
     """Shared Fabric execution has no admitted backend and isolation profile."""
+
+
+def _staged_inference_peer_uid(raw: Mapping[str, Any]) -> int | None:
+    """Host-validated, explicitly dormant service peer on the EXISTING socket.
+
+    A configured UID is not proof of Auth0 enrollment, producer capacity or
+    admission. Fresh service submission remains impossible in this phase.
+    The installed Control/Operator and incumbent App retain their own UIDs.
+    """
+    fields = {key for key in raw if isinstance(key, str)
+              and key.startswith("ceo_ingress_inference_")}
+    if not fields:
+        return None
+    if (fields != _CEO_INGRESS_INFERENCE_CONFIG_KEYS
+            or not _CEO_INGRESS_CONFIG_KEYS <= set(raw)
+            or not _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)):
+        raise ServiceError("inference service needs a closed dormant peer pair and existing App/ingress")
+    uid = raw.get("ceo_ingress_inference_peer_uid")
+    if type(uid) is not int or uid <= 0:
+        raise ServiceError("inference service needs a positive non-root OS peer UID")
+    if raw.get("ceo_ingress_inference_armed") is not False:
+        raise FabricActivationRefused(
+            "inference admission remains disabled until its installed service and backend are proven"
+        )
+    forbidden = {
+        os.geteuid(), raw.get("control_uid"), raw.get("worker_uid"),
+        raw.get("ceo_ingress_peer_uid"), raw.get("ceo_ingress_app_peer_uid"),
+        *(raw.get("allowed_peer_uids") or ()),
+    }
+    if uid in forbidden:
+        raise ServiceError("inference service OS peer cannot share privileged or App identities")
+    return uid
 
 
 def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
@@ -1024,6 +1062,13 @@ def load_control_config(
     if ceo_ingress_present and ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS:
         raise ServiceError("CeoIngress control config fields must be supplied together")
     app_present = keys & _CEO_INGRESS_APP_CONFIG_KEYS
+    inference_present = keys & _CEO_INGRESS_INFERENCE_CONFIG_KEYS
+    if inference_present and (
+        inference_present != _CEO_INGRESS_INFERENCE_CONFIG_KEYS
+        or ceo_ingress_present != _CEO_INGRESS_CONFIG_KEYS
+        or app_present != _CEO_INGRESS_APP_CONFIG_KEYS
+    ):
+        raise ServiceError("inference service requires its own closed peer pair and existing App/ingress")
     content_sources = keys & {"content_observer", "content_observer_profile_path"}
     if len(content_sources) > 1:
         raise ServiceError("content observer sources are mutually exclusive")
@@ -1102,6 +1147,8 @@ def load_control_config(
         config["ceo_ingress_peer_uid"] = _integer(
             config["ceo_ingress_peer_uid"], "ceo_ingress_peer_uid"
         )
+    if inference_present:
+        _staged_inference_peer_uid(config)
     if app_present:
         config["ceo_ingress_app_peer_uid"] = _integer(
             config["ceo_ingress_app_peer_uid"], "ceo_ingress_app_peer_uid"
@@ -1808,6 +1855,11 @@ def _service_from_config(
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     _validate_fabric_bridge_config(raw)
+    # Validate the optional future service principal UID but DO NOT grant a
+    # socket identity from config alone. The existing installed enrollment
+    # owner must eventually supply a verified host binding; no such receipt
+    # exists in this source/release.
+    _staged_inference_peer_uid(raw)
     from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
     if (type(attended_work_placements) is not tuple
             or len(attended_work_placements) > 6
@@ -2603,6 +2655,10 @@ def _service_from_config(
         ceo_ingress_kwargs["ceo_ingress_dialogue_source_provider"] = (
             commission_source_provider
         )
+    # No inference binding is installed from a merely configured UID. This
+    # is not a credential/enrollment proof and cannot authorize even result
+    # status reads. The separately authorized installed service owner must
+    # provide its own exact, role-correct host binding in a later release.
     dialogue_observation_kwargs: dict[str, Any] = {}
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)

@@ -1,0 +1,178 @@
+{
+  "base_service_head": "09719bb76d19cfd8bccb28a8759540acbafb0c81",
+  "scope": "direct-answer pure contracts/client plus authenticated ASGI service profile with synthetic JWT and injected status/result reader; not installed OAuth, Supervisor, Runtime result production or provider execution",
+  "executed_suite": {
+    "tests.test_vps_inference_direct_profile": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_vps_inference_direct_answer": {
+      "passed": 41,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_vps_inference_supervisor_io": {
+      "passed": 2,
+      "failed": 8,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_vps_inference_task_fit": {
+      "passed": 23,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_executive_inference_io": {
+      "passed": 13,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_fabric_inference_client": {
+      "passed": 48,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_vps_inference_service": {
+      "passed": 55,
+      "failed": 1,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_vps_inference_transport": {
+      "passed": 1,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_executive_service_principal": {
+      "passed": 19,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_ceo_intent": {
+      "passed": 69,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    },
+    "tests.test_executive_model_router": {
+      "passed": 29,
+      "failed": 0,
+      "skipped": 0,
+      "errors": 0
+    }
+  },
+  "totals": {
+    "passed": 319,
+    "failed": 9,
+    "skipped": 0,
+    "errors": 0
+  },
+  "failures": [
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_admitted_input_reaches_worker_prompt_without_objective_truncation",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_dedicated_worker_schema_carries_answer_and_original_attempt_identity",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_bad_service_provenance_refuses_before_schema_materialization[missing_request]",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_bad_service_provenance_refuses_before_schema_materialization[foreign_actor]",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_bad_service_provenance_refuses_before_schema_materialization[foreign_principal]",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_bad_service_provenance_refuses_before_schema_materialization[write_authority]",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_bad_service_provenance_refuses_before_schema_materialization[wrong_schema]",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_supervisor_io",
+      "test": "test_wrong_attempt_cannot_receive_the_service_payload",
+      "status": "failed"
+    },
+    {
+      "suite": "tests.test_vps_inference_service",
+      "test": "test_direct_emitter_cannot_bypass_sink_guard",
+      "status": "failed"
+    }
+  ],
+  "junit_sha256": "01dfe690ee11dd902f27f1b4af543d359d204491077b2fcf381dde1d87119cae",
+  "reports": {
+    "architecture_review.md": {
+      "original_final_sha256": "6ce04fa76d4faef59a64f755f58e99f95b66f983efc4bfa6df1af9f2b14975cf",
+      "published_sha256": "97b6defdd5c84c111c8824390abb331bc2f972c49b62be108435e9e223eae884",
+      "format_normalization": "trailing Markdown whitespace and excess blank EOF lines only"
+    },
+    "initial_review.md": {
+      "original_final_sha256": "41ee95aad3ebea57a751130c14de83c48d20446239b2cdaa8991628589880d39",
+      "published_sha256": "70332aabc846f13f9cc1e377fda106155c7ffb6094bb27b99d7b8086dfb7edbb",
+      "format_normalization": "trailing Markdown whitespace and excess blank EOF lines only"
+    },
+    "final_review.md": {
+      "original_final_sha256": "62756dbadcac9bb465adb998ce384cf267fd5ceaff90a0cb580d5f49b2475408",
+      "published_sha256": "06b16b3787ca46eba75ad79eb7afecc099bae8a9eb2db947843bab358363f6b3",
+      "format_normalization": "trailing Markdown whitespace and excess blank EOF lines only"
+    }
+  },
+  "reviewed_final_source": {
+    "base": "09719bb76d19cfd8bccb28a8759540acbafb0c81",
+    "files": {
+      "control_plane/executive_inference_io.py": "28b111480234b444a3d7ef821c57a2c5ba1b7f50dd15c26dd878bccd9b2268fe",
+      "control_plane/executive_inference_contract.py": "dd965b18919788d58686f044538be6fa988777ec0db8b113a5149c25113be765",
+      "brain/fabric_inference_client.py": "10db652e37a93a696318aad7d123424ccf5cbb5b830130eda59d8a2b60846f13",
+      "integrations/executive_mcp/inference.py": "b047674f82a0a1669e05cb1d78aeb02d2a0795ddb52909a291a7f61a7bb8673e",
+      "integrations/mastermind_executive_app/inference.py": "10d954f6ef05f5707913e6870c1df9109170dd529c04ac5f6c873841fad2e8ef",
+      "tests/test_vps_inference_direct_answer.py": "494bdd0b4052a63a2646b869b2d692bc02c71c853c1452c18568db7ad8c6c958",
+      "tests/test_vps_inference_direct_profile.py": "a1c5fcfdcf896c77015a87a45e4882446efc0f3f242517c0a8d887c40b5e01c6"
+    }
+  },
+  "final_review_state": "NO_ACTIONABLE_FINDING_WITHIN_SEVEN_FILE_SLICE; prior receipt-alias P1 resolved",
+  "platform_refused_request_reader": "NOT_APPLIED",
+  "production_changed": false,
+  "providers_started": false,
+  "review_session": "01a12e45-8685-78a1-90bf-0e1263776291",
+  "review_processes": {
+    "initial": {
+      "pid": 79386,
+      "exit_code": 0
+    },
+    "followup": {
+      "pid": 52206,
+      "exit_code": 0
+    }
+  },
+  "review_scope": "exact source and pure injected probes; independent reviewer did not rerun pytest or verify installed auth/provider/Runtime",
+  "new_direct_answer_cases": 41,
+  "new_authenticated_profile_cases": 19,
+  "raw_source_repairs_held": [
+    "Supervisor admitted-request reader",
+    "earlier service direct-emitter fixture",
+    "separate Bot snapshot and zero-evidence repairs"
+  ]
+}

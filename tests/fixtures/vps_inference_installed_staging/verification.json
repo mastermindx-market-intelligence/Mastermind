@@ -1,0 +1,148 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "base": "770683f9db0261fd967a660004470cce29b8fafd",
+  "protected_merge_parent": "78388ac29f7e54c9dfe7799a8e4769fb46d4aed6",
+  "source_sha256": {
+    "scripts/executive_os_phase1c.py": "accf4a5039b4edce733055ba4cc83a1c4e3f2181b0e12c6fe36a9ccaa568c9e1",
+    "control_plane/executive_service.py": "16029e950a5c4b584f55a0f876111d2da48551d9716fd77c5921bd79381fa94c",
+    "tests/test_vps_inference_installed_dormant.py": "589cc32bab33d58413189f644c1ae84accd274e22d4090ca10effd0e21700c6a",
+    "tests/test_vps_inference_installed_socket.py": "a3a38ff20f34dff344018b4e94ea8335d732ac3aec1750b38630dff5e1d261e0",
+    "integrations/mastermind_executive_app/gateway.py": "5630bb8d2159ef02f3eb4a8d7c7dce8fc650c814d78d00e8d0cd71e153df449f"
+  },
+  "new_capability": "Source-only optional dormant numeric service UID configuration validation; NO binding/ACL/status/direct read/fresh admission established solely by config. Existing host binding remains an uninstalled separate authority.",
+  "red_before": {
+    "preimplementation": {
+      "failed": 15,
+      "passed": 1
+    },
+    "reviewed_security_findings": {
+      "High": "config-only distinct UID disclosed old results",
+      "Medium": "QUARANTINED in-flight read could publish"
+    },
+    "causal_regressions": "two unenrolled UID/status-read refusals and one paused read/quarantine test were RED before repairs"
+  },
+  "focused": {
+    "passed": 48,
+    "failures": [],
+    "skipped": [],
+    "junit_sha256": "ae6008ef8598127382ba37c6e9b2099542ed47d66d2bbbf10cd10cf48967aef6",
+    "scope": "24 dormant source tests plus 24 historical socket tests, post-High/Medium repair"
+  },
+  "broad": {
+    "passed": 395,
+    "failed": [
+      "tests.test_vps_inference_service::test_direct_emitter_cannot_bypass_sink_guard"
+    ],
+    "errors": [],
+    "skipped": [],
+    "junit_sha256": "0af34782d6a24b0b9de238232b60b2370ddd6ee085173eb5a4333be58483dca6",
+    "known_refusal": "platform-denied prior direct-emitter fixture change NOT_APPLIED; 1 failure retained"
+  },
+  "protected_dialogue": {
+    "passed": 80,
+    "failed": 0,
+    "log_sha256": "86ce45994f7a5a6a9217d20737d8972620ad3eb9367686fa9b6ccd9ceed31f32"
+  },
+  "merged_bridge": {
+    "passed": 324,
+    "failed": 0,
+    "log_sha256": "2dfc4ed70d524d90974228f21b6c0753d18c2ad2c3d01866e5c997a39e2c2382"
+  },
+  "finite_owner_expansion": {
+    "passed": 280,
+    "failed": 3,
+    "failure_identities": [
+      "test_real_factory_v2_helper_and_coupled_validator_compose",
+      "test_supervisor_retains_final_probe_in_start_pin_and_recovery[False]",
+      "test_supervisor_retains_final_probe_in_start_pin_and_recovery[True]"
+    ],
+    "protected_owner_files_unchanged_sha256": {
+      "control_plane/executive_supervisor.py": "e8114e8a4942ca5e1bad9447026a5688a82b15dd8520f3e9aaaaadf61ce7f5be",
+      "control_plane/executive_fabric_adapter.py": "c85182380887239474ebaec128a33ca287fd867726294c8e6e394fcba6b9ee71",
+      "control_plane/fabric_attended_assignment.py": "7eabff78bf4e3c3b5945a41264674d8f03f986102798fc56e2dd8cf1a890a265",
+      "control_plane/executive_canary.py": "62acb7a8f4b3349380989e51d01a6cf53198e4adc6840abcf43f98da17802349",
+      "tests/test_fabric_attended_probe_join.py": "8d2601af22a93f0e788093f47a8841b26be789133286bde1fa6f4a6af377a70c",
+      "scripts/executive_os_phase1c_worker.py": "cc6a2577a5c040ce9381b0684ac19cb5c64093538a584f12dd5561deb6947f3e"
+    },
+    "tests_from_current_protected_commit_unchanged": true
+  },
+  "independent_security_review": "SCOPED_CLEAR_FIVE_FROZEN_FILES_HIGH_AND_MEDIUM_REPAIRED; does not attest installed OAuth/UID/ACL, provider, or deployment",
+  "installed_oauth_dcr_qualified": false,
+  "actual_os_uid_acl_verified": false,
+  "real_provider_started": false,
+  "production_write": false,
+  "admission_armed": false,
+  "service_status_read_test": "CONFIG_ONLY UID CAN NEVER READ: actual temporary AF_UNIX test asserts status/direct/fresh submit return peer_denied even with a valid existing canonical Job; no enrollment or ACL commands executed in this negative test",
+  "critical_gates": [
+    "independent enrolled UID + original service App OAuth/DCR + root-installed ACL/namespace custody",
+    "real provider backend, admitted quota and approved sealed model profile under existing Fabric/Executive owners",
+    "previously refused Supervisor prompt/result writer and Bot snapshot correctness",
+    "browser, natural paper session and OOS forward evaluation"
+  ],
+  "release_state": "DRAFT_HOLD_SOURCE_ONLY",
+  "independent_reviews": {
+    "initial_security_review.md": {
+      "original_sha256": "df4692bc5a662fdcd80d2eb56a2c3d2c497ec32adcc8d972c9cc371b54fe1678",
+      "published_sha256": "14a1ff13c5faaf0a19b1cfb09c8bb9f3d8cc983563874da6eca137b16ebd1418",
+      "transforms": "local absolute paths normalized to relative source/test labels; Markdown trailing whitespace removed"
+    },
+    "final_security_review.md": {
+      "original_sha256": "2f54d0c41ce35cf6cc38cd32c321319e24714b301bf051d0719a8c322ec3d052",
+      "published_sha256": "8a6054cdabca06d93c72d86fd933f15b33f358c2da2420ac47f78f79e1f0488f",
+      "transforms": "local absolute paths normalized to relative source/test labels; Markdown trailing whitespace removed"
+    }
+  },
+  "source_review_sha256": {
+    "scripts/executive_os_phase1c.py": "accf4a5039b4edce733055ba4cc83a1c4e3f2181b0e12c6fe36a9ccaa568c9e1",
+    "control_plane/executive_service.py": "16029e950a5c4b584f55a0f876111d2da48551d9716fd77c5921bd79381fa94c",
+    "tests/test_vps_inference_installed_dormant.py": "589cc32bab33d58413189f644c1ae84accd274e22d4090ca10effd0e21700c6a",
+    "tests/test_vps_inference_installed_socket.py": "d778ecc947f321bb784b5e64afe573b561cae21d63993742da54e6c9c0f3123b",
+    "integrations/mastermind_executive_app/gateway.py": "5630bb8d2159ef02f3eb4a8d7c7dce8fc650c814d78d00e8d0cd71e153df449f"
+  },
+  "additional_ci_maintenance": {
+    "cause": "two originally published PR CI failures caused by reviewed dormant inference staging: strict static Control template expected the two optional unconfigured fields, and source-citation D7 pin retained protected-master SHA rather than exact independently reviewed source SHA",
+    "frozen_installed_source_sha256": "accf4a5039b4edce733055ba4cc83a1c4e3f2181b0e12c6fe36a9ccaa568c9e1",
+    "independent_review_source_sha_matches": true,
+    "canonical_installed_event_loop_ast_sha256": "060525ac61b01452e7a84397f0e68ab4be9c0a05f6dac560113bce8180adc819",
+    "wrapper_ast_digest_is_unchanged": true,
+    "strict_optional_template_source_key_assertion": "two inference UID/armed keys are deliberately absent from default template, not silently granted",
+    "full_D4_D6_D7_D8_source_tests": {
+      "passed": 167,
+      "failed": 0,
+      "errors": 0,
+      "skipped": 0,
+      "deselected": 5,
+      "junit_sha256": "c1984e28c32a526871430f70f88c6e39a68500b013109816ad92c9d627bdcf3e"
+    },
+    "previous_subset": {
+      "passed": 25,
+      "log_sha256": "318dad004aa338a08b34bb6104ee141b898ce18b5c3a5504776cb3a25af4015b"
+    },
+    "previous_held_ci_failures_remaining_without_replay": {
+      "supervisor_schema_prompt": 8,
+      "root_origin_stale_expectations": 2,
+      "direct_emitter_fixture": 1
+    },
+    "production_effect": "NONE",
+    "source_write_boundary": "source tests and evidence only, no launcher/installed config/identity/credential/provider/trading writes"
+  },
+  "postreview_direct_result_regression": {
+    "historical_readonly_reviewer_test_sha256": "d778ecc947f321bb784b5e64afe573b561cae21d63993742da54e6c9c0f3123b",
+    "new_test_sha256": "a3a38ff20f34dff344018b4e94ea8335d732ac3aec1750b38630dff5e1d261e0",
+    "production_reviewed_code_files_unchanged": true,
+    "reason": "Prior reviewer correctly flagged synthetic status-only quarantine test. Added two real source-qualified terminal-result variants after that scoped review without modifying any production code or previously reviewed policy.",
+    "source_only_fixture": "Already admitted canonical Job, future-writer-simulated completed Attempt, exact qualified bounded Runtime, actual service ingress, real AF_UNIX socket. Not a live provider, service identity, or market operation.",
+    "cases": [
+      "test_canonical_completed_inference_read_quarantine_refuses_result_publication[status]",
+      "test_canonical_completed_inference_read_quarantine_refuses_result_publication[direct]"
+    ],
+    "verified_result": {
+      "passed": 46,
+      "failed": 0,
+      "skipped": 0,
+      "junit_sha256": "5039d0d9dfb902758fa73bb5a14f90ab1bd1173b7af662a5a198c67ded225204"
+    },
+    "protected_outcome": "Both STATUS and DIRECT_RESULT produce a completed content-bound answer internally, then a QUARANTINED transition before publication refuses the socket reply with no output content disclosure.",
+    "test_only_edit_no_increased_service_authority": true
+  }
+}

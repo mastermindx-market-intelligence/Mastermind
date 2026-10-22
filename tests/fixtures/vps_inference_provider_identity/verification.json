@@ -1,0 +1,103 @@
+{
+  "operation": "vps-fabric-llm-convergence-20261001-sol-001",
+  "original_commit": "b9a70ff85ea122f330675ad7fd3f80a2391c133b",
+  "current_protected_master_to_reconcile": "1ffe6b566b9addb58d13893bfb78e8505dce1752",
+  "kind": "source-only host-owned ModelRouter plus Capacity broker alias identity hardening",
+  "source_sha256": {
+    "control_plane/executive_runtime.py": "d869236d0d415cb8f3b48cbf1528d77392c9005dc8c073c0075febd614cef9c4",
+    "scripts/executive_os_phase1b.py": "0fc35924cd6fb08ec1ec13fdc8f0766cb5134de68e56177cdc0f0fbb44107a8d",
+    "tests/test_service_capacity_provider_identity.py": "df993fa779081caa433ea052c4357e60bc911fda5e19b5302058fcfbbaf062db",
+    "tests/test_attended_capacity_physical_identity.py": "73aeb70faaba1d051bcaeb04be10d2b3a707ce93d36c52d680e6fa5d694745e9",
+    "tests/test_fabric_attended_routing.py": "ad1ef7a9995c50d34793ebdddf824953fe5ee3a3bfa05815f72b36a6c6d09376",
+    "tests/test_vps_inference_provider_selection.py": "f11ea8081a27b766b1dc24dedc3c30b8eaba17983b5301bd5c4347311302e120"
+  },
+  "first_red": {
+    "passed": 2,
+    "failed": 6,
+    "causes": [
+      "GLM/Qwen/xAI registered provider mismatched copied Codex alias",
+      "wrong model",
+      "wrong effort",
+      "wrong cost class"
+    ]
+  },
+  "independent_v1_review": "REQUEST_CHANGES four compatibility findings reproduced and repaired",
+  "independent_v2_review": "REQUEST_CHANGES three physical attended / CLI / outer metadata findings reproduced and repaired",
+  "third_red": {
+    "passed": 1,
+    "failed": 4,
+    "cause": "SQLite Row membership skipped attended physical check"
+  },
+  "targeted_selections": [
+    {
+      "passed": 84,
+      "failed": 0,
+      "log_sha256": "33576db851eb4d57fb95e8f75447bc78068422773b2c287228a96c49d7bd6d8a"
+    },
+    {
+      "passed": 6,
+      "failed": 0,
+      "deselected": 11,
+      "log_sha256": "ca77115df2e19964981fb575a0880224be93da0ac6921377343e610b391c44ad"
+    }
+  ],
+  "canonical_service_canary": {
+    "passed": 3,
+    "scope": "extraction/comparison service-created Jobs and wrong physical adapter fixture no provider launch"
+  },
+  "broad_selection": {
+    "passed": 325,
+    "failed": [
+      "tests.test_vps_inference_service::test_direct_emitter_cannot_bypass_sink_guard"
+    ],
+    "skipped": [],
+    "errors": [],
+    "junit_sha256": "4d12ee2b595c280bdaea170e321aaabbd988ea400d1585c7aaf28c7f48d28f64"
+  },
+  "security_reviewer_v3": "SCOPED_CLEAR_NO_REMAINING_ACTIONABLE_DEFECT_IN_FROZEN_ROUTER_AND_CLI_FILES",
+  "production": "HOLD; no actual model, real Provider/Quota certificate, installed release, or portfolio execution",
+  "frozen_do_not_replay": [
+    "Supervisor admitted-prompt and direct-emitter fixture edit refused",
+    "Bot snapshot/zero qualified guard and two stale adversarial fixture edits denied",
+    "Bot local 8b230a75 newer evidence remote push refused"
+  ],
+  "effective_execution_binding": "NOT_ESTABLISHED_FOR_EXTERNAL_FABRIC_POOLS",
+  "independent_reviews": {
+    "initial_review.md": {
+      "original_sha256": "e941b27f2a2a4ffc30b7f8666a2812f4ebd8e6b01e0b7235fa3ef6b0520c4634",
+      "published_sha256": "ef74eb28f407fcc7f6502f93998a63621551e2bc6be87ab459db767660290ad9",
+      "transform": "local absolute working paths replaced with relative source/proof labels and whitespace normalized"
+    },
+    "intermediate_review.md": {
+      "original_sha256": "2273ba1365c08f5d79ab0898f89cb4f8a862ac988013a942f5e696f4cc87c426",
+      "published_sha256": "0dc236f12d91da50d36df2c7c926a33f5e4ced62536aad7ec2bc039e32298691",
+      "transform": "local absolute working paths replaced with relative source/proof labels and whitespace normalized"
+    },
+    "final_review.md": {
+      "original_sha256": "6746368ceae2cdaa7ce2da04ec44aad8dc0b2504f0bc5d940bce63b1fd731716",
+      "published_sha256": "fdbb062f862a54d2bbe6f6beb62789a04a81c83ebd3b303ef1b6668b65ac9a24",
+      "transform": "local absolute working paths replaced with relative source/proof labels and whitespace normalized"
+    }
+  },
+  "reviewer_claim_limit": "read-only source and pure memory probes; did not run pytest independently or prove installed providers, release or native Fabric return",
+  "verified_green_observations": [
+    "84 passing attended/external/Codex unit tests + 6 passing CLI tests, separate scopes",
+    "325 passing in broader selected suite and one explicitly named inherited fixture failure",
+    "3 passing source-only genuine service Job -> registered external provider rejected -> exact Codex identity claimed canaries"
+  ],
+  "final_source_sha256": {
+    "control_plane/executive_runtime.py": "d869236d0d415cb8f3b48cbf1528d77392c9005dc8c073c0075febd614cef9c4",
+    "scripts/executive_os_phase1b.py": "0fc35924cd6fb08ec1ec13fdc8f0766cb5134de68e56177cdc0f0fbb44107a8d",
+    "tests/test_service_capacity_provider_identity.py": "df993fa779081caa433ea052c4357e60bc911fda5e19b5302058fcfbbaf062db",
+    "tests/test_attended_capacity_physical_identity.py": "73aeb70faaba1d051bcaeb04be10d2b3a707ce93d36c52d680e6fa5d694745e9",
+    "tests/test_fabric_attended_routing.py": "ad1ef7a9995c50d34793ebdddf824953fe5ee3a3bfa05815f72b36a6c6d09376",
+    "tests/test_vps_inference_provider_selection.py": "f11ea8081a27b766b1dc24dedc3c30b8eaba17983b5301bd5c4347311302e120"
+  },
+  "source_review_v3_frozen_sha256": {
+    "control_plane/executive_runtime.py": "d869236d0d415cb8f3b48cbf1528d77392c9005dc8c073c0075febd614cef9c4",
+    "scripts/executive_os_phase1b.py": "0fc35924cd6fb08ec1ec13fdc8f0766cb5134de68e56177cdc0f0fbb44107a8d",
+    "tests/test_service_capacity_provider_identity.py": "df993fa779081caa433ea052c4357e60bc911fda5e19b5302058fcfbbaf062db",
+    "tests/test_attended_capacity_physical_identity.py": "73aeb70faaba1d051bcaeb04be10d2b3a707ce93d36c52d680e6fa5d694745e9",
+    "tests/test_fabric_attended_routing.py": "ad1ef7a9995c50d34793ebdddf824953fe5ee3a3bfa05815f72b36a6c6d09376"
+  }
+}

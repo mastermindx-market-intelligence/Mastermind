@@ -186,6 +186,97 @@ def _classify_legacy(event: Any, provenance: Mapping[str, Any], command_id: Any)
     }
 
 
+_SERVICE_SCHEMA = "mastermind.executive_service_intent.v1"
+_SERVICE_BASE_KEYS = frozenset({
+    "schema", "intent_id", "actor", "fingerprint", "grounding",
+    "principal_id", "task_kind", "requested_authorities",
+    "effective_authorities", "write_authorities",
+})
+_SERVICE_OPTIONAL_KEYS = frozenset({"workstream", "inference_request"})
+def _classify_registered_service(
+    job: Any, provenance: Mapping[str, Any], command_id: Any
+) -> dict[str, Any]:
+    """Accept only an exact enrolled READ/RESEARCH service root as NON_CEO.
+
+    Reuse the incumbent source registry, typed grant and inference request
+    validators; this is origin attribution only, never service admission or
+    model execution authority. Malformed/unregistered roots still refuse the
+    WHOLE bounded root mapping rather than being silently omitted.
+    """
+    keys = frozenset(provenance)
+    if not _SERVICE_BASE_KEYS <= keys or not keys <= (
+        _SERVICE_BASE_KEYS | _SERVICE_OPTIONAL_KEYS
+    ):
+        _fail("service origin provenance is not the closed registered envelope")
+    intent_id = provenance["intent_id"]
+    if not isinstance(intent_id, str) or _INTENT_ID_RE.fullmatch(intent_id) is None:
+        _fail("service intent identity is invalid")
+    if command_id != f"{_COMMAND_PREFIX}{intent_id}":
+        _fail("service creation command does not bind the original intent")
+    digest = provenance["fingerprint"]
+    if not isinstance(digest, str) or _LOWER_HEX64_RE.fullmatch(digest) is None:
+        _fail("service creation fingerprint is malformed")
+    # This pure classifier must agree with the EXISTING canonical mutation
+    # sink, not infer different laws from two convenience-client fixtures.
+    # The sink permits optional boot_packet_schema on both enrolled services.
+    from control_plane import ceo_intent as sink_owner
+    from control_plane import executive_service_principal as principal_owner
+    if not intent_id.startswith(sink_owner._SERVICE_INTENT_ID_PREFIX):
+        _fail("service intent does not belong to the registered ID domain")
+    grounding = provenance["grounding"]
+    try:
+        if sink_owner._grounding(grounding) != grounding:
+            _fail("service grounding differs from canonical sink normalization")
+    except (sink_owner.CeoIntentError, TypeError, KeyError) as exc:
+        _fail("service creation grounding is not admitted by the sink")
+    principal_id = provenance["principal_id"]
+    if "workstream" in provenance:
+        value = provenance["workstream"]
+        if not isinstance(value, str) or _WORKSTREAM_RE.fullmatch(value) is None:
+            _fail("service creation workstream is malformed")
+
+    try:
+        registered = principal_owner.service_principal(principal_id)
+        # The convenience emitter demands the FULL registered grant; the
+        # canonical sink independently admits NONEMPTY NARROWER subsets.
+        # Validate those subsets via the sink's own parser and allowed ceiling.
+        requested = sink_owner._authorities(provenance["requested_authorities"])
+    except (ValueError, TypeError, KeyError) as exc:
+        _fail("service origin principal or requested grant is invalid")
+    if (provenance["actor"] != registered.actor
+            or provenance["task_kind"] != principal_owner.TASK_KIND
+            or not requested
+            or requested != provenance["requested_authorities"]
+            or not set(requested) <= sink_owner._SERVICE_ALLOWED_AUTHORITIES
+            or provenance["effective_authorities"] != requested
+            or provenance["write_authorities"] != []):
+        _fail("service origin actor, authority or task differs from canonical sink")
+    request_present = "inference_request" in provenance
+    is_inference = principal_id == "svc-vps-inference"
+    if request_present != is_inference:
+        _fail("service origin inference request membership is invalid")
+    if is_inference:
+        from control_plane.executive_inference_io import (
+            normalize_request, InferenceIOError,
+        )
+        try:
+            if normalize_request(provenance["inference_request"]) != provenance["inference_request"]:
+                _fail("service origin inference request is not canonical")
+        except (InferenceIOError, TypeError, ValueError) as exc:
+            _fail("service origin inference request is malformed")
+
+    # The durable Job is not itself authentication of provenance.  Both the
+    # canonical Job authority ceiling and the exact typed Event must agree.
+    if (_required_attr(job, "requested_authorities") != requested
+            or _required_attr(job, "authority_level") != "A0"
+            or _required_attr(job, "owner_seat") != "coo"
+            or _required_attr(job, "escalation_target") != "coo"
+            or _required_attr(job, "allowed_write_paths") != []
+            or _required_attr(job, "validation_commands") != []):
+        _fail("service root Job authority or seat differs from reviewed source")
+    return {"kind": "NON_CEO", "provenance": None}
+
+
 def classify_legacy_root_creation(job: Any, event: Any) -> dict[str, Any]:
     """Classify one canonical ROOT creation as NON_CEO or LEGACY_CEO.
 
@@ -208,4 +299,6 @@ def classify_legacy_root_creation(job: Any, event: Any) -> dict[str, Any]:
         return _classify_generic(command_id)
     if not isinstance(provenance, Mapping):
         _fail(f"payload provenance is {type(provenance).__name__}, not a mapping")
+    if provenance.get("schema") == _SERVICE_SCHEMA:
+        return _classify_registered_service(job, provenance, command_id)
     return _classify_legacy(event, provenance, command_id)
