@@ -7,7 +7,7 @@ program: Mastermind#1693 — Portfolio Bot Rebuild, Wave 9
 root: "Mastermind#1693 (Portfolio Bot Rebuild)"
 orchestrator: pbr-product-ed665c78
 lane: pbr-p2-spec
-base_commit: "origin/master @ dce821e0 (sections 0-2 drafted at 230e9a301; panel line numbers in §2 shift +4 after #1707, see §3 preamble; no cited UI file changed through 0f9c5584)"
+base_commit: "origin/master @ db5a001b (PR #1711). Every cited app/portfolio file is byte-identical at dce821e0; §2 and §6 were drafted at census base 230e9a301 and every citation was re-verified against db5a001b after independent review r1 (see §3 preamble)"
 sources:   # _pbr_inputs/ is the lane input bundle. Repo copies: PRODUCT_CENSUS.md and PRODUCT_CONTRACT_REQUESTS.md -> research/commission_pbr_fable_masterplan/2026-10-22/lanes/PRODUCT/{PRODUCT_CENSUS.md,CONTRACT_REQUESTS.md} (ids minted here, R6 and S6-S9, are defined in section 7); ECON_CONTRACTS_PR1699.md -> lanes/ECON/CONTRACTS.md; DS_* and MASTER_PRODUCT_DESIGN_SYSTEM_V1.md -> the Mastermind Product Design System references
   - _pbr_inputs/PRODUCT_CENSUS.md          # factual baseline; its §"Orchestrator verification (pbr-product)" overrides the lane text on conflict
   - _pbr_inputs/MASTERPLAN_EXCERPTS.md      # §10.2 five questions / seven views / truth rules; §4 defect register
@@ -53,7 +53,7 @@ token names. It proposes no route, IA or seat change as settled — each is mark
 **1 · The account is the answer.** Every view opens with the settled factual state — what is
 held, the cash, the value, and the as-of that value was computed at — before any narrative, and
 narrative is rendered as subordinate annotation that can never contradict the ledger. Visual
-consequence: V1's first content element is a `.mx-vh`-shaped answer block (holdings count, cash,
+consequence: V1's first content element is a VerdictHero-shaped answer block (DS anatomy, bound in §3 Tokens to the `.panel` surface + `.mm-perf-stat-value` figure; no `.mx-vh` class ships) (holdings count, cash,
 NAV + status, one as-of stamp) occupying the canvas tier; the decision memo, posture and brain
 log sit below it in panel tier and are visually quieter than the account, and where a memo
 sentence and `account.json` disagree, the account's value is the one that is drawn.
@@ -96,11 +96,11 @@ the page never scrolls horizontally at any width.
 | View | Lives today | Route / panel ids | Proposed V1 home | Change class |
 |---|---|---|---|---|
 | **V1 Portfolio overview** | `/` SPA dashboard, existing panels | `index.html` `#performance` (NAV/cash/as-of), `#alloc`, `#positions`, `#safety`, `#live-marks-status` | Composed as one V1 route: an answer block + `#positions` + `#alloc`; `#safety` demoted to V1's own support-2 | **SEAT DECISION** — merges four shipped panels into one view |
-| **V2 Manager decision** | `/` SPA, existing panels | `#decision-availability` (`index.html:2719`), `#auto-banner-sec` (`:2727`), `#decisions-sec` (`:2858`), posture chip | V2 route: `#decision-availability` promoted to the answer, `#auto-banner` as support-1, `#decisions-sec` as support-2 | **SEAT DECISION** — promotes an evidence panel to the page answer |
-| **V3 Pending activity** | `/` SPA, existing panel | `#trades` pending block (`index.html:4940-4981`, `_pendingTruthNoticeHtml` `:4927`), `accepted_target.pending` inside `#decision-availability` | V3 route: the pending block promoted out of Trade History, which keeps only fills | **SEAT DECISION** — splits one shipped panel |
-| **V4 Performance** | `/` SPA, existing panel | `#performance` (`index.html:2751`), `#equity-curve` (`:2790`), `#perf-evidence` (`:2753`) | V4 route: `#performance` becomes its own view; its as-of/strip moves with it | **SEAT DECISION** — separates a shipped panel into its own view |
-| **V5 Opportunities** | `/` SPA, **hidden for product books** | `#rejected` is in `PF_GATED_ONLY` (`index.html:6380`) so it is hidden whenever a Brain book is active (`index.html:6454-6457`); `#nav-research` / `#view-research` render only when `_portfolio === 'flagship'` (`index.html:6462-6463`) | V5 route reachable for every active book | **SEAT DECISION** — exposes a view that is unreachable today |
-| **V6 Position review** | `/` SPA, existing panel | expand-row under `#positions` (`toggleExpand`, `index.html:4899-4916`), `#trades` blotter, `#sizing-sec` | V6 route per holding: the existing expand-row becomes a first-class route (`/position?ticker=` or `#position/<ticker>`) so it is linkable, keyboard-navigable and shareable | **SEAT DECISION** — promotes an in-page disclosure to a route |
+| **V2 Manager decision** | `/` SPA, existing panels | `#decision-availability` (`index.html:2723`), `#auto-banner-sec` (`:2730`), `#decisions-sec` (`:2861`), posture chip | V2 route: `#decision-availability` promoted to the answer, `#auto-banner` as support-1, `#decisions-sec` as support-2 | **SEAT DECISION** — promotes an evidence panel to the page answer |
+| **V3 Pending activity** | `/` SPA, existing panel | `#trades` pending block (`index.html:5031-5068`, `_pendingTruthNoticeHtml` `:5015`), `accepted_target.pending` inside `#decision-availability` | V3 route: the pending block promoted out of Trade History, which keeps only fills | **SEAT DECISION** — splits one shipped panel |
+| **V4 Performance** | `/` SPA, existing panel | `#performance` (`index.html:2755`), `#equity-curve` (`:2794`), `#perf-evidence` (`:2757`) | V4 route: `#performance` becomes its own view; its as-of/strip moves with it | **SEAT DECISION** — separates a shipped panel into its own view |
+| **V5 Opportunities** | `/` SPA, **hidden for product books** | `#rejected` is in `PF_GATED_ONLY` (`index.html:6468`) so it is hidden whenever a Brain book is active (`index.html:6542-6545`); `#nav-research` / `#view-research` render only when `_portfolio === 'flagship'` (`index.html:6550-6551`) | V5 route reachable for every active book | **SEAT DECISION** — exposes a view that is unreachable today |
+| **V6 Position review** | `/` SPA, existing panel | expand-row under `#positions` (`toggleExpand`, `index.html:4988-5003`), `#trades` blotter, `#sizing-sec` | V6 route per holding: the existing expand-row becomes a first-class route (`/position?ticker=` or `#position/<ticker>`) so it is linkable, keyboard-navigable and shareable | **SEAT DECISION** — promotes an in-page disclosure to a route |
 | **V7 Operations** | `/` SPA (`#runs`, `#view-desk`) + standalone `/market_view`, `/agenda` | `#runs` (`:2893`), `#forward-evaluation` (`:2746`), `/api/scheduler`, `/api/desk/*` (Flagship-only in UI) | V7 route: one operations surface per book; operator technical detail opens separately | **SEAT DECISION** — new operator-facing view |
 
 All seven mappings are proposals. The IA owner decides; this lane only states what each view
@@ -110,15 +110,15 @@ needs and what would have to be redesigned if it moved.
 
 - The book switcher is the **primary** navigation axis and stays in chrome (it is not a view).
   It currently lives in `#mm-nav` as `#pf-switch`, ordered by `_PF_ORDER`
-  (`index.html:3838`): `autonomous, china, hk, self_directed, flagship, heavyweight, etf`.
+  (`index.html:3847`): `autonomous, china, hk, self_directed, flagship, heavyweight, etf`.
   Each tab shows book label, archived chip, and a NAV + return sub-line
-  (`renderPortfolioSwitch`, `index.html:6390`).
+  (`renderPortfolioSwitch`, `index.html:6477`).
 - The **view** axis is a second, secondary axis: Overview · Decision · Pending · Performance ·
   Opportunities · Position review · Operations. At ≥ 768 px it is a horizontal tabset; at 375 px
   it is a horizontally-scrolled strip that recentres the active item, reusing the existing
-  `revealActivePortfolioTab` behaviour (`index.html:6417-6427`) rather than minting a new idiom.
+  `revealActivePortfolioTab` behaviour (`index.html:6504-6513`) rather than minting a new idiom.
 - Selection writes the URL so every view is linkable and browser-back works. Today the SPA
-  keeps `showView(name)` in memory and `applyPortfolioScope()` (`index.html:6444`) hides panels
+  keeps `showView(name)` in memory and `applyPortfolioScope()` (`index.html:6529`) hides panels
   by id; the move to real routes is a `SEAT DECISION` under the IA owner.
 - Cross-view entry points that must exist: a held ticker in V1 opens **V6**; a queued row in V3
   and a pending verdict chip in V1 both open **V6** on the same holding; a decision id in V2 opens
@@ -129,7 +129,7 @@ needs and what would have to be redesigned if it moved.
 
 | Book id | Display label EN / ZH | Currency | Benchmark | Lifecycle | Currency symbol source |
 |---|---|---|---|---|---|
-| `autonomous` | US Brain / 美股大脑 | USD | SPY | active | `_ccySymOf(undefined)` → `$` (`index.html:3818`) |
+| `autonomous` | US Brain / 美股大脑 | USD | SPY | active | `_ccySymOf(undefined)` → `$` (`index.html:3827`) |
 | `china` | CN Brain / A股大脑 | CNY | `000300.SS` "CSI 300" / 沪深300 | active | `¥` |
 | `hk` | HK Brain / 港股大脑 | HKD | `^HSI` "Hang Seng" / 恒生指数 | active | `HK$` |
 | `self_directed` | Self-Directed / 自选组合 | USD | SPY | active | `$` |
@@ -140,7 +140,7 @@ needs and what would have to be redesigned if it moved.
 Source: `portfolio/registry.py` `PORTFOLIOS` (`registry.py:32-146`); tab order `index.html:3828-3848`.
 
 - **Archived books** render a persistent `ARCHIVED` / `已归档` chip plus the
-  `archived_reason` and `superseded_by` line (`index.html:6405`, `registry.py:39-43`). Archived
+  `archived_reason` and `superseded_by` line (`index.html:6493`, `registry.py:44-45`). Archived
   books are read-only; no pending, no ordering, no "next action" module.
 - **The switcher resets every view-scoped panel** on book change. Today `applyPortfolioScope()`
   hides/reveals by id and `_safeRender` re-renders from already-cached payloads; the spec
@@ -170,13 +170,15 @@ restricted. Therefore:
 ## 3. Shared rules
 
 These rules bind V1–V7. They are printed once here so each view subsection states only what is
-specific to it. Line citations are against **this checkout, `origin/master @ dce821e0`**. `§2`'s
-route table was written against `230e9a301`; Mastermind PR #1707 is now merged on master and
-shifted the panels above the positions table down by 4 lines, so panel ids here are cited 4 lines
-later than in §2 — `#decision-availability` `index.html:2723` (was `:2719`), `#performance` `:2755`
-(was `:2751`), `#alloc` `:2819`, `#positions` `:2837`, `#trades` `:2845`, `#safety` `:2853`. The
-ids and section semantics are unchanged; only the line numbers moved. Every citation in this part
-was re-verified against `dce821e0` by direct read, not carried over from the census.
+specific to it. Line citations throughout this spec are against **`origin/master @ db5a001b`**
+(PR #1711); every cited app/portfolio file is byte-identical at `dce821e0`. `§2` and `§6` were
+drafted against census base `230e9a301`; Mastermind PR #1707 then inserted `index.html` lines
+(+4 after old line 349, +9 after old 3444, +73 after old 4707, +88 after old 4762), so every
+`index.html` citation in those sections was re-cited. After independent review r1 (VERDICT: FAIL,
+retained at `lanes/PRODUCT/reviews/pbr-p2-spec-review-r1.md`) every flagged citation, and the V6
+Fields rows the review did not reach, was re-verified by direct read against `db5a001b`. Panel
+anchors: `#decision-availability` `index.html:2723`, `#performance` `:2755`, `#alloc` `:2819`,
+`#positions` `:2837`, `#trades` `:2845`, `#safety` `:2853`.
 
 ### Tokens
 
@@ -207,6 +209,9 @@ a variable that exists today in `app/static/theme.css` or to a class that exists
 | Empty / loading block | `.mm-empty` (+ existing empty glyph spans) | rendered at `index.html:2839`, `:4787`, `:4036` |
 | Archived book chip | `.mm-archive-chip` | rendered `index.html:6492` |
 | Pending-fill chip on a not-yet-filled row | `.mm-pend-chip` | rendered `index.html:4843` |
+| One-answer verdict block (DS VerdictHero anatomy) | `.panel` surface on `--panel` + `.mm-perf-stat-value` figure + `.mm-perf-stat-sub` evidence line | `.panel` `theme.css:129`, `index.html:72`; `#performance` `index.html:2755-2757`; figure `:922-932` |
+| Bounded data table (L1 rows) | `.mm-table-wrap` > `table` | `index.html:565`; rendered `:4963`, `:5059` |
+| Tier-2/3 disclosure | `<details class="mm-da-foot">` (or `mm-da-detail`) whose `<summary>` names what is inside | style `index.html:2492-2493`; rendered `:7006`, `:7087`, `:7258`, `:7412` |
 
 - **Lock ink is violet only** and only on a tier gate. No view in this product draws one today
   (see §2 "Pro gating today"), so the binding is reserved, not rendered:
@@ -279,7 +284,7 @@ The app has real, consistent helpers today; the spec binds to them rather than t
   `PORTFOLIOS` (`registry.py:106` `CNY` for `china`, `registry.py:124` `HKD` for `hk`) and
   defaulting to `USD` (`registry.py:307`). It reaches the view as
   `/api/live_marks.currency` (`app/web.py:1197`) and `/api/portfolio.currency`
-  (`app/web.py:249`). The renderer's `_ccySym()`/`_ccySymOf()` (`index.html:3818`) maps the code
+  (`app/web.py:249`). The renderer's `_ccySym()`/`_ccySymOf()` (`index.html:3827`) maps the code
   to `$` / `¥` / `HK$`. A currency symbol is **never** written into prose copy; it prefixes the
   numeral only. Note the one live gap: `/api/portfolio`'s `account_preview` sub-object
   (`app/web.py:1343-1354`) does **not** carry `currency`, so a V1 that reads only that object has
@@ -292,7 +297,7 @@ The app has real, consistent helpers today; the spec binds to them rather than t
 - **Signed money** always carries an explicit `+`/`−` **outside** the symbol, and the percent sits
   in a parenthesised, 1dp, 70%-opacity span (`pnlCell`, `index.html:3612-3617`). Absolutes only:
   `+`/`-` + `Math.abs()`, so the sign column never jitters.
-- **Percentages**: 1dp for weights and cell percentages (`pct()`, `index.html:3683`);
+- **Percentages**: 1dp for weights and cell percentages (`pct()`, `index.html:3682`);
   2dp with an explicit sign for changes (`fmtPctSign`, `index.html:3869-3873`; `fmtPct1`,
   `:3866-3868`). A percent is always suffixed `%`; a fraction is never shown raw.
 - **Basis points**: drawn as `bps` only for spreads, correlations and attribution deltas
@@ -303,7 +308,7 @@ The app has real, consistent helpers today; the spec binds to them rather than t
   (`DS_foundations.md` "Information density") — one holdings count, one pending count. Never
   `0` for an unknown count; see the coercion rule below.
 - **Null never becomes a number.** `pct(null)` and `fmtPctSign(null)` return an em-dash today
-  (`index.html:3683`, `:3870`), and `pnlCell(null)` returns a dash with **no colour class**
+  (`index.html:3682`, `:3870`), and `pnlCell(null)` returns a dash with **no colour class**
   (`:3613`). That is correct for a per-cell mark. It is **not** correct for a *state*: an
   unavailable, withheld or benchmark-less slot renders the word `unavailable`, never `—`.
   `DESIGN-SYSTEM-GAP G3: unavailable value slot — DS_components.md "Metric" says null gets an
@@ -402,7 +407,7 @@ Per `DS_states-accessibility.md` and `MASTER_PRODUCT_DESIGN_SYSTEM_V1.md`:
 - A number that is derivable from another visible number does not earn Tier 1.
   `DESIGN-SYSTEM-GAP G4: counted overflow affordance — DS_components.md and the density law require
   a counted "See all N" depth affordance, but `app/static/index.html` has no such component and
-  `PF_GATED_ONLY` panel gating (`index.html:6380`) hides whole panels instead of counting rows;
+  `PF_GATED_ONLY` panel gating (`index.html:6468`) hides whole panels instead of counting rows;
   V1 and V2 both need the counted version.*
 
 ### Canonical state vocabulary
@@ -425,6 +430,13 @@ non-colour cue**, so the state survives greyscale, colour-blindness and a screen
 | unverified (pre-A02 row) | Unverified | 未核实 | label only; never upgraded to qualified |
 | queued (pending while held) | Queued | 已排队 | the held row keeps its shares and shows the #1707 chip + timing line |
 | unavailable | Unavailable | 不可用 | the word in the value slot, muted, never a number |
+
+**Shipped strings that predate this table.** Four shipped empty strings open with a bespoke phrase
+instead of the `Empty` / `暂无` label: `pos.empty` (`index.html:3250`), `pend.none` (`:3297`),
+`ec.no_data` (`:3235`) and `rej.empty` (`:3395`). Each view cites the shipped string only as the
+current state and specifies its replacement as a **copy request** (i18n strings are PRODUCT's write
+scope); the replacement lands in that view's build PR with an EN/ZH agreement test. No view treats
+a shipped bespoke string as accepted copy.
 
 What each state still does — the honest reading of the table:
 
@@ -524,15 +536,15 @@ marked `CONTRACT REQUEST` with type, nullability and units.
 | `unattested[]` | names with no attested price source | ECON | `paper_account.valuation()` — A02 `ECON_CONTRACTS_PR1699.md:88` | `string[]` of tickers | no — empty array | empty → nothing drawn. `CONTRACT REQUEST → E4` |
 | **current-valuation projection** | one API object carrying status + as-of + nav + nav_qualified + carried + unattested + unpriced for the *current* book | ECON (read helper) / PRODUCT (`app/web.py` wiring) | not yet exposed — the legacy `paper_account.nav()` call at `app/web.py:1339` migrates to `valuation()` in the same change | object; `status:"unavailable"` when no valuation exists | object is non-null; its members are null | whole header renders `Unavailable`. `CONTRACT REQUEST → E6` |
 | `positions[].ticker` | held lot | ECON | `/api/portfolio.positions[].ticker` — `app/web.py:1355-1400`; render `index.html:4843` | string | no | row absent → no row; the account may still hold lots the strategy snapshot omits (`app/web.py:1388-1420`) |
-| `positions[].name` / `name_zh` | security name sub-line | PRODUCT | `app/web.py:1421` `_attach_security_names`; `securityName()` `index.html:3596-3603` | string | yes | subtitle not drawn (correct); a ticker-as-name duplicate is suppressed in code |
+| `positions[].name` / `name_zh` | security name sub-line | PRODUCT | `app/web.py:1420` `_attach_security_names`; `securityName()` `index.html:3596-3603` | string | yes | subtitle not drawn (correct); a ticker-as-name duplicate is suppressed in code |
 | `positions[].shares` | lot size | ECON | `/api/live_marks.positions[].shares`; `app/web.py:1389` | number | yes | `Unavailable` |
 | `positions[].sleeve` | `brain` / `conviction` / `leadership` / `account` | RESEARCH | `app/web.py:1385`, `:1390` (`"account"` for account-only rows) | enum | yes | defaults to leadership styling today (`index.html:4799`) — must render `Unavailable`, not a guessed sleeve |
 | `positions[].stage` | DOCTRINE stage 0–4 | RESEARCH | book file `latest.json` | int 0–4 | yes | `—` (existing cell behaviour, correct: a stage is a per-cell value) |
 | `positions[].verdict` | book verdict | RESEARCH | `vKey` map `index.html:4823`, incl. `pos.v_exit_pending` | enum | yes | `(p.verdict \|\| 'hold')` at `:4804` renders HOLD — **must become `Unavailable`**, never a default verdict |
 | `positions[].cost_basis` / `avg_cost` | entry price | ECON | `app/web.py:1364`, `:1155`; render `index.html:4818-4819` | number, book ccy | yes | `—`; a `pending` (unfilled) row shows `est_price` instead |
-| `positions[].current_price` | mark | ECON | `app/web.py:1361`; render `index.html:4820` | number, book ccy | yes | `—` (correct per-cell behaviour) |
+| `positions[].current_price` | mark | ECON | `app/web.py:1361`; render `index.html:4849` | number, book ccy | yes | `—` (correct per-cell behaviour) |
 | `positions[].market_value` | shares × mark; the weight denominator | ECON | `app/web.py:1363`; weight computed `:1156`, `:1380` | number, book ccy | yes | `—` |
-| `positions[].weight` | weight of NAV | ECON | `app/web.py:1380`, gated on valuation basis `app/web.py:1186-1193`; render `pct()` `index.html:4846` | fraction 0–1 | yes | `—` today via `pct(null)` (`index.html:3683`); correct per-cell, but the **sleeve bar** must not inherit it (see below) |
+| `positions[].weight` | weight of NAV | ECON | `app/web.py:1380`, gated on valuation basis `app/web.py:1186-1193`; render `pct()` `index.html:4846` | fraction 0–1 | yes | `—` today via `pct(null)` (`index.html:3682`); correct per-cell, but the **sleeve bar** must not inherit it (see below) |
 | `positions[].unrealized_pnl` / `unrealized_pct` | open P&L | ECON | `app/web.py:1365-1366`; `pnlCell()` `index.html:3612-3617` | number ccy / fraction | yes | `—` with **no colour class** (correct) |
 | `positions[].quote_source` / `quote_as_of` / `quote_is_live` / `quote_stale_days` | per-name mark provenance | RUNTIME | `app/web.py:1149-1157`, `:1367-1371`; strip render `index.html:8697-8768` | string / date / bool / days | yes | strip falls back to `generated_at`; the "live feed asleep" branch is `stale` |
 | `pending_target.rows[]` action on a **held** row | queued change against a lot still held | ECON | `/api/trades.pending_target.rows[].action` — projected `app/web.py:2001-2222`; helper `_heldPendingChange` `index.html:4717-4780` | enum `exit\|trim\|add\|comparison_unavailable\|unpriceable` → `unclassified` | yes | `pt.status !== 'queued'` → no chip (`:4733`); `hold/blocked/buy/filtered/unknown` → no chip (`:4755`); never infer a direction |
@@ -573,12 +585,12 @@ Above the fold: 1–4 only. `#safety` never appears above the fold.
 **768 — tablet.** Same order, two-column where a module has independent content: the answer block
 keeps full width; Positions takes 8 of 12 columns with Allocation stacked beside it; Safety goes
 full width below. The `mm-hide-sm` columns (sleeve, stage, entry, current price —
-`index.html:4844`, `:4847-4848`) stay hidden; weight, unrealized and verdict remain.
+`index.html:4844-4845`, `:4847-4848`) stay hidden; weight, unrealized and verdict remain.
 
 **375 — mobile recomposition.** Answer + current evidence + next action survive; mechanics do not.
 
 1. Chrome: book switcher (scrollable), view strip (horizontally scrolled, recentred on the
-   active item, reusing `revealActivePortfolioTab`, `revealActivePortfolioTab` `index.html:6504`).
+   active item, reusing `revealActivePortfolioTab`, `index.html:6504`).
 2. Answer block — stacked: count, then NAV (18px numeral, `index.html:2419`), then cash, then the
    page stamp. The qualification badge sits **next to the numeral**, never below it.
 3. Session strip — one line, truncated with the full string in the disclosure.
@@ -611,13 +623,13 @@ book's render if one is already painted.
 
 **empty.** Trigger: `positions[]` is `[]` **and** `pricing.total_positions === 0` — a genuinely
 new or fully cleared book, not a failed read. EN `Empty — this book holds no positions yet; the
-next daily run will rebuild it.` · ZH `暂无 — 本组合尚无持仓，下次每日运行后重建。` The shipped copy
-already exists (`pos.empty`, `index.html:3250`) and is the model. Treatment: full-weight sentence,
+next daily run will rebuild it.` · ZH `暂无 — 本组合尚无持仓，下次每日运行后重建。` This is a **copy
+request** replacing the shipped `pos.empty` string (`index.html:3250`), which predates the §3 vocabulary. Treatment: full-weight sentence,
 `--text` at body weight, no glyph, no dashed placeholder box. Still works: cash, NAV, the page
 stamp, the session strip, allocation (which correctly shows 100% cash).
 
 **stale.** Trigger: any of `positions[].quote_stale_days > 0`, `generated_at` older than
-`poll_after_seconds × 2`, or `archive_as_of` set. EN `Behind` + the last settled stamp —
+`poll_after_seconds × 2`, or `frozen_as_of` set. EN `Behind` + the last settled stamp —
 `Behind — showing the last settled observation of 2026-10-21 16:00 ET` ·
 ZH `滞后 — 显示最近一次结算观察：2026-10-21 16:00 ET`. Treatment: `--muted` label, `--muted` chip
 fill, the as-of in the same line so the age is never separated from the word. Still works:
@@ -750,7 +762,7 @@ drift from the strings already in the file.
 | vs benchmark | vs SPY (per book) | 相对标普500 (per book) | `perf.vs_spy` `:3224`; label composed per book at `index.html:3961-3963` from `benchmark_name` / `benchmark_name_zh` |
 | Benchmark unavailable | Benchmark unavailable | 基准不可用 | new state word |
 | Positions | Positions | 持仓 | static `index.html:2838` |
-| No positions yet | No positions yet — the book builds on the next daily run. | 暂无持仓 — 下次每日运行后将更新。 | `pos.empty` `:3250` |
+| Empty (no positions) | Empty — this book holds no positions yet; the next daily run will rebuild it. | 暂无 — 本组合尚无持仓，下次每日运行后重建。 | copy request: replaces shipped `pos.empty` `:3250` ("No positions yet — …" / "暂无持仓 — …") |
 | Allocation | Allocation | 仓位分配 | static `index.html:2820` |
 | Portfolio Safety | Portfolio Safety | 组合安全度 | static `index.html:2854` |
 | Holding (verdict) | HOLDING | 持有中 | `pos.v_hold` `:3447` |
@@ -852,7 +864,7 @@ Seat-accepted truth requirements that apply here, stated as requirements:
 - **Missing never coerces to zero.** `app/web.py:1341` (`float(account.get("cash") or 0.0)`) must
   render `Unavailable`, as must `(sl.leadership || 0) * 100` (`index.html:4516-4518`),
   `(m.n_names || 0)` (`:4606`), `(d.cash_weight || 0) * 100` (`:4610`),
-  `Number(pricing.total_positions || 0)` (`:8718`) and `Number(seconds) || 120` (`:8747`).
+  `Number(pricing.total_positions || 0)` (`:8806`) and `Number(seconds) || 120` (`:8835`).
   `CONTRACT REQUEST → E7`.
 - **The self-directed error path never shows a funded $1,000,000 book** (`app/web.py:2423-2432`;
   Mastermind PR #1719 renders `status:"unavailable"` with every money field `null` and the header
@@ -973,7 +985,7 @@ invalidation, and unchanged-book explanation.
 | `observed_at` | the read's own stamp | RUNTIME | `app/decision_availability.py:530` | ISO-8601 UTC | yes | `Unavailable` / `不可用` (`_daTime`, `index.html:6623-6625`) |
 | `status` | `available` / `partial` | RUNTIME | `app/decision_availability.py:531` | enum | no | `partial` → the panel is Partial and `issues[]` names what is excluded |
 | `last_valid_decision.ts` / `.asof` | when the last valid decision was taken | RESEARCH | `app/decision_availability.py:535`; `_decision()` `:138-157` | ISO-8601 | yes | `Unavailable` / `不可用` (`index.html:7295`) — **never today's date** |
-| `last_valid_decision.summary` / `.summary_zh` | the original accepted memo (rationale) | RESEARCH | `app/decision_availability.py:145-157`; banner `#auto-sum` `index.html:2741`, `:7549-7551` | string (≤14-word clause at Tier 1) | yes | `Valid decision memo unavailable. See decision and account status above.` — never an empty memo block |
+| `last_valid_decision.summary` / `.summary_zh` | the original accepted memo (rationale) | RESEARCH | `app/decision_availability.py:145-157`; banner `#auto-sum` `index.html:2741` | string (≤14-word clause at Tier 1) | yes | `Valid decision memo unavailable. See decision and account status above.` — never an empty memo block |
 | `last_valid_decision.submitted_holding_count` | holdings in the submitted target | ECON | `app/decision_availability.py:145-157`; render `index.html:7296` | int | yes | `Unavailable` (today a bare `—`) |
 | `last_valid_decision.summary_truncated` | the memo preview was cut | RESEARCH | render `index.html:7298-7300` | bool | no | note omitted when false |
 | **`horizon`** | when this decision stops being the live thesis | RESEARCH | **absent from every payload today** — only `time_stop_by` exists per position in `/api/trades open[]` (`portfolio/position_log.py:331`) | per-holding `{horizon_end, next_review_at, review_condition, decision_id}`; date / ISO-8601 UTC | yes — absent ⇒ `Unavailable`, **never derived from holding age** | `CONTRACT REQUEST → S5` |
@@ -1300,7 +1312,7 @@ V2; it answers "what has the manager already accepted that has not yet touched t
 #### Archetype
 
 **G (Monitor)** as the product shell (§2 Art direction, item 2), composed with the
-canonical **Lifecycle rail** `.mx-rail` as the identity device for the one queued target's
+canonical **Lifecycle rail** (DS `.mx-rail`; no app class ships — `DESIGN-SYSTEM-GAP G6: lifecycle rail`, §8) as the identity device for the one queued target's
 chronology — drawn "by weight/surface, not colorful goodness", with historical stages
 non-actionable. Not A: there is no multi-event change ledger to triage, a queue is one target's
 life. Not C: there is no thesis/evidence/task tabset to browse.
@@ -1340,7 +1352,7 @@ life. Not C: there is no thesis/evidence/task tabset to browse.
 
 | Breakpoint | Modules, in order |
 |---|---|
-| **1280** | 1. Verdict block (`.mx-vh` anatomy, bound to `--panel`/`--text`): `Queued` / `Empty`, the actionable-row count, next eligible session, one freshness stamp. 2. Support-1: queued order rows, `.mx-tbl`, L1 ≤ 8 rows then counted `See all N`. 3. Support-2: the lifecycle rail `.mx-rail` for the target's life. 4. Tier-3 band: target identity strip; audit table `pending_target.rows[]` in a `<details class="mx-disc">` whose summary names what is inside and why one would open it. |
+| **1280** | 1. Verdict block (VerdictHero anatomy, bound per §3 Tokens to the `.panel` surface + `.mm-perf-stat-value` figure): `Queued` / `Empty`, the actionable-row count, next eligible session, one freshness stamp. 2. Support-1: queued order rows, `.mm-table-wrap` table, L1 ≤ 8 rows then counted `See all N`. 3. Support-2: the lifecycle rail (G6) for the target's life. 4. Tier-3 band: target identity strip; audit table `pending_target.rows[]` in a `<details class="mm-da-foot">` whose summary names what is inside and why one would open it. |
 | **768** | Same four modules; the rail moves above the audit disclosure; the order table keeps 4 columns (name · action · est. price · settlement) with `mm-hide-sm` columns demoted to the row's audit landing. No column is deleted — §3 Shared rules, Density. |
 | **375** | 1. Verdict block. 2. One queued row as a card (name · action chip · settlement line), each opening V6 for that holding. 3. The rail. 4. **Named landing**: `See all N queued changes` → the audit table as its own route. The identity strip, `suppressed_by` detail and the `no trade band / dust` mechanics are inside that landing, never removed. The page must not scroll horizontally; the table scrolls inside its own container. |
 
@@ -1352,7 +1364,7 @@ below), the treatment and what still works.
 | State | Trigger (field-level) | Copy + treatment | What still works |
 |---|---|---|---|
 | **Loading** | `/api/trades` in flight | Skeleton at final geometry — verdict block, one row, rail stub. No prose. `t('rej.loading')`-style "Loading…" prose is **not** allowed in V3's own blocks. | Navigation, book switch, the last settled panel behind the skeleton. |
-| **Empty** | `pending_target.status:"none"` and `pending[]` empty | `No orders queued.` / `暂无挂单。` (`index.html:3297`), rendered at full weight with the mandatory reason: "Nothing is accepted and waiting to settle." Queued-orders block is replaced, not zero-height. | V1, V2, V4, V6, V7. |
+| **Empty** | `pending_target.status:"none"` and `pending[]` empty | `Empty` / `暂无` + the mandatory reason: `Empty — nothing is accepted and waiting to settle.` / `暂无 — 没有已接受、待结算的订单。` Copy request: replaces the shipped `pend.none` string `No orders queued.` / `暂无挂单。` (`index.html:3297`). Rendered at full weight. Queued-orders block is replaced, not zero-height. | V1, V2, V4, V6, V7. |
 | **Stale** | the panel's as-of is behind the session clock | `Behind` + the last settled as-of stamp (§3 vocabulary). The stamp is the panel's own; it never borrows V1's. | Everything, with the staleness labelled. |
 | **Partial** | `status:"queued"` with `rows:[]`; `comparison_status:"prices_unavailable"` or `"account_unavailable"`; `snapshot_status:"transaction_pending"` | The exact per-state sentences already shipped at `index.html:3301-3302` — "Target is queued, but the account snapshot is unavailable, so no buy or sell direction is inferred." / "Account settlement is in progress. Trade history is withheld until one coherent snapshot is available." Treatment: quiet `.mm-pend-alert` fill + even neutral border, labelled status ink; never a coloured container edge (`DS_states-accessibility.md`). | The queue identity, `queued_at`, and the held-row chips for names whose direction is already classified. |
 | **Error** | `pending_target.status:"unavailable"` or the endpoint's `error` | `Couldn't load` + what failed + what still works + a lawful retry. Copy: "Queued-target status is temporarily unavailable. No execution is being claimed." (`index.html:3300`). **No queue is claimed, and no row is drawn.** | V1/V4/V6 for the same book; the retry re-reads `/api/trades` only. |
@@ -1414,7 +1426,7 @@ not a transliteration of the EN string.
 | Estimate columns | `Est. Price` / `Est. Value` (`pend.est_px` / `pend.est_val`) | `预估价格` / `预估金额` |
 | Estimates footnote | `Any estimates use the previous close. Actual prices appear only after a recorded fill.` (`index.html:3298`) | `预估值采用上一收盘价；只有记录成交后才会显示实际价格。` |
 | Queued-on-held chips | `EXIT QUEUED` / `TRIM QUEUED` / `ADD QUEUED` / `CHANGE QUEUED` (`index.html:3450-3453`) | `已排队卖出` / `已排队减仓` / `已排队加仓` / `已排队调整` |
-| Empty | `No orders queued.` (`index.html:3297`) | `暂无挂单。` |
+| Empty | `Empty — nothing is accepted and waiting to settle.` (copy request; replaces shipped `pend.none` `No orders queued.`, `index.html:3297`) | `暂无 — 没有已接受、待结算的订单。` |
 | Degraded | the six `pend.*` sentences at `index.html:3299-3304` | shipped pairs at the same lines |
 | NEW — expiry / supersession | `Expires` · `Superseded by <target id>` | `有效期至` · `被 <目标编号> 取代` |
 | NEW — disposition / none yet | `Filled` / `Partly filled` / `Expired` / `Superseded` / `Rejected` · `No disposition recorded` | `已成交` / `部分成交` / `已过期` / `已被取代` / `已拒绝` · `暂无处置记录` |
@@ -1429,7 +1441,7 @@ not a transliteration of the EN string.
   `.mm-q-when` is `--muted` on `--panel` (`theme.css:17`, `:47`), clear of 4.5:1 in both themes and
   languages — `--muted` is the only permitted muted role here.
 - Focus order: verdict block → queued rows (each a link to V6) → non-actionable rail stages → the
-  audit `<details class="mx-disc">` summary → `See all N`. Every Tier-2/3 disclosure opens by
+  audit `<details class="mm-da-foot">` summary → `See all N`. Every Tier-2/3 disclosure opens by
   **keyboard and touch**, never hover only (`DS_states-accessibility.md`).
 - `:focus-visible` is `--focus-ring` (`theme.css:29`) at 2 px and `.mm-pend-alert` must not clip it
   (`DS_components.md` §Callout). Targets are at least 44 px; the chip and its `.mm-q-when` line are
@@ -1532,7 +1544,7 @@ would invert the answer.
 | `total_return_pct` | change from `starting_nav` | ECON | `performance_projection.py:283`; render `index.html:3945-3950` | percent, 2 dp, signed | yes (the empty result returns `None`) | `Unavailable`; never `+0.00%` from a missing baseline (`app/web.py:190-196`) |
 | `inception_date` / `starting_nav` | the measurement anchor | ECON | `performance_projection.py:278-279`; validated finite > 0 at `index.html:4042` | date / number | yes | `since inception` (`index.html:3222`); a null `starting_nav` renders pre-inception points as **gaps**, never zeros |
 | `series[].date` / `.nav` / `.spy_nav` / `.kind` | the two curves | ECON | `performance_projection.py:233-275`; render `index.html:4011-4045` | date / number / number / enum `realized\|pre_inception` | `spy_nav` null per point | the pen lifts on a null point (`_equityAreaPath`, `index.html:3903-3921`); today the line does lift, the **area** is what must not be re-closed across the gap |
-| `benchmark` / `benchmark_name` / `benchmark_name_zh` / `benchmark_as_of` | the book's own benchmark | ECON | `portfolio/registry.py` `benchmark*`; render `index.html:3925-3927`, `:4018-4020` | string / string / string / ISO | `benchmark` falls back to the literal `Benchmark` (`index.html:3925`) | the literal fallback may name the axis, never claim a series exists |
+| `benchmark` / `benchmark_name` / `benchmark_name_zh` / `benchmark_as_of` | the book's own benchmark | ECON | `portfolio/registry.py` `benchmark*`; render `index.html:3925-3927`, `:4028-4029` | string / string / string / ISO | `benchmark` falls back to the literal `Benchmark` (`index.html:3925`) | the literal fallback may name the axis, never claim a series exists |
 | `vs_benchmark_pct` | the same-window delta | ECON | `performance_projection.py:284`; render `index.html:3967` | percent, signed | yes | **Benchmark unavailable** (§3) |
 | `vs_spy_pct` | the alias of the same value | ECON | `app/web.py:211` publishes `"vs_spy_pct": vs_benchmark_pct` | percent | yes | **must not be read as a fallback** (`index.html:3967`) — CN/HK would read "vs 沪深300" over an SPY-named field. V4 requires the alias dropped from the consumer and the field renamed at source (candidate bounded PR). |
 | benchmark comparison `{status: supported\|unsupported, reason, start, end, book_return, bench_return, delta}` | the A12 same-window comparison | ECON | **CONTRACT REQUEST → E8** (against the #1434 helper `brain/benchmark_comparison.compare_curves`) | object; returns as fractions | `status:"unsupported"` → **every** number null | every number null **and** the word `Benchmark unavailable` / `基准不可用` in the value slot, with `reason` in the evidence sentence. Never 0, never a dash alone, never a bar at zero height. |
@@ -1549,7 +1561,7 @@ would invert the answer.
 
 | Breakpoint | Modules, in order |
 |---|---|
-| **1280** | 1. VerdictHero: NAV value + `perf-nav-label` qualification word + the evidence sentence + one freshness stamp, in the existing `#performance` panel (`index.html:2753-2790`). 2. Support-1: metric row — total return, benchmark delta, day change, drawdown, cash (`#perf-ret`, `#perf-spy`, `#perf-day`, `#perf-dd`, `#perf-cash-lbl`). 3. Support-2: `#equity-curve` ChartFrame with legend + range label (`index.html:2792-2812`). 4. Tier-3 band in `<details class="mx-disc">`: attribution (E11), window ledger, withheld-dates ledger, win-rate scorecard. |
+| **1280** | 1. VerdictHero: NAV value + `perf-nav-label` qualification word + the evidence sentence + one freshness stamp, in the existing `#performance` panel (`index.html:2757-2794`). 2. Support-1: metric row — total return, benchmark delta, day change, drawdown, cash (`#perf-ret`, `#perf-spy`, `#perf-day`, `#perf-dd`, `#perf-cash-lbl`). 3. Support-2: `#equity-curve` ChartFrame with legend + range label (`index.html:2794-2813`). 4. Tier-3 band in `<details class="mm-da-foot">`: attribution (E11), window ledger, withheld-dates ledger, win-rate scorecard. |
 | **768** | Same order; metric row becomes a 2×3 grid; the chart keeps its legend and range label beneath it (chart context below the graph, per the shipped comment at `index.html:2800`). Attribution moves into the Tier-3 disclosure. |
 | **375** | 1. NAV + qualification + evidence sentence. 2. The chart (min 180 px tall, legend below). 3. Total return and benchmark delta only. 4. **Named landing**: `See return, drawdown, cash and attribution` → the remaining metrics + the Tier-3 ledger as their own route. Nothing is deleted; the landing is named. |
 
@@ -1558,7 +1570,7 @@ would invert the answer.
 | State | Trigger | Copy + treatment | What still works |
 |---|---|---|---|
 | **Loading** | `/api/performance` in flight | Skeleton at the real geometry: one hero numeral, five metric stubs, a chart frame with axes. No prose. | Book switch; V1's own as-of. |
-| **Empty** | `series:[]` and `availability.history_status:"unavailable"` | `No recorded performance observations available.` / `暂无可用的业绩记录` (`ec.no_data`, `index.html:3235`) — full weight, with the reason: the account has no recorded NAV history yet. The chart frame stays, empty, at its real geometry. | NAV, cash, benchmark name (as a name only), the book switch. |
+| **Empty** | `series:[]` and `availability.history_status:"unavailable"` | `Empty` / `暂无` + the reason: `Empty — this account has no recorded NAV history yet.` / `暂无 — 本账户尚无净值记录。` Copy request: replaces the shipped `ec.no_data` string `No recorded performance observations available` / `暂无可用的业绩记录` (`index.html:3235`). Full weight. The chart frame stays, empty, at its real geometry. | NAV, cash, benchmark name (as a name only), the book switch. |
 | **Stale** | the panel as-of is behind the session clock, or the last observation predates the open | `Behind` + last settled as-of stamp. A pre-open row is stale **and** the day change is unavailable — see the day-change rule below. | Every settled figure, labelled. |
 | **Partial** | `availability.status:"provisional"` with `carried[]`/`unattested[]`; `history_status != "available"`; `benchmark_comparison_scope` narrower than the curve window | `Partial` + the word that names what is excluded. The shipped sentence already composes these clauses (`index.html:3891-3899`); V4 requires all of them to be present, not just the first. | Qualified figures render at full weight; the excluded part is named. |
 | **Error** | `availability.status:"unavailable"` / the `unavailable_performance()` shape | The shipped sentence — `Performance evidence unavailable; no balance or zero return has been substituted.` (`index.html:3880`) — under the `Couldn't load` label, naming what still works (the book's holdings, from V1) plus retry. | V1, V3, V6 for the same book. |
@@ -1641,7 +1653,7 @@ the alternative.
 | Return | `Change from Start` · `since <date>` · `since inception` (`index.html:3221-3223`) | `相对初始净值变化` · `自 <日期>` · `自成立以来` |
 | Benchmark | `vs <benchmark name>` / `相对<基准名>` (`index.html:3962-3963`); `Benchmark unavailable` | `基准不可用` |
 | Day change | `Last observed change` · `between recorded observations` (`index.html:3226-3227`) | `最近记录变动` · `记录之间的变化` |
-| Drawdown | `Recorded Drawdown` · `over recorded observations` (`index.html:3228-3229`) | `记录最大回撤` · `已记录观察区间` |
+| Drawdown | `Recorded Drawdown` · `over recorded observations` (`index.html:3228`; range phrase `:3999`) | `记录最大回撤` · `已记录观察区间` |
 | Cash | `cash:` (`perf.cash_lbl`, `index.html:3229`) | `现金:` |
 | Legend | `Portfolio (recorded since <date>)` · `<benchmark> (reference series)` (`index.html:3232-3233`) | `组合（记录始于 <日期>）` · `<基准>（参考序列）` |
 | New — carried / withheld reason | `priced from the <date> close, <n> day(s) old` · `Not valued on <date>: <tickers> could not be priced` | `采用 <日期> 收盘价，已过时 <n> 天` · `<日期> 未估值：<标的> 无法取得价格` |
@@ -1725,7 +1737,7 @@ for the product book; this spec is the proposal that makes it answer Q5.
 #### Archetype
 
 **B (Discovery Board)** composed inside the **G (Monitor)** shell (§2 Art direction,
-item 2), exactly as V6 composes C. B's identity device is the **count ladder** `.mx-ladder`:
+item 2), exactly as V6 composes C. B's identity device is the **count ladder** (DS `.mx-ladder`; no app class ships — `DESIGN-SYSTEM-GAP G10: count ladder`, §8):
 exhaustive, disjoint stage cells, the active stage marked by weight and surface and **never
 violet**. The two populations are **finalists** (researched, not held) and **rejected** (evaluated,
 not held) — disjoint by construction, so the ladder must never merge them into one total.
@@ -1761,13 +1773,13 @@ Flagship Desk to fill a product-book gap.
 | `reliability_curve[].bucket` / `.mean_predicted` / `.hit_rate` / `.n` | calibration buckets | RESEARCH | render `index.html:5429-5430` | fractions / int | `hit_rate` missing is coerced to `0` | V5 requires a bucket with `n === 0` to render as an **absent** bucket with its n, not a 0-width bar at "0%" (census violation 8) |
 | `lens_edge[]` / `.lens_weights{}` / `records[]` | per-lens edge | RESEARCH | `app/web.py:1971-1999` | array / object | yes | Tier-3 only; not a Tier-1 or Tier-2 number |
 | finalist source coverage `{sources[]: {source, status, asof}, coverage_complete}` | how much of each finalist rests on each source | RESEARCH | **CONTRACT REQUEST → S8** | array of objects / boolean | per-source nullable | the ladder's coverage word renders `Unavailable`; a finalist row shows `Coverage unavailable` / `来源覆盖不可用` |
-| entry readiness `{status: enterable\|blocked\|unknown, blockers[], price_asof, next_session_at}` | can this finalist be entered now | RESEARCH + market calendar | **CONTRACT REQUEST → S9** — entry readiness is modelled nowhere today | enum / array / ISO | null → the readiness slot renders `Unavailable`; it is **never** inferred from score, confluence or a veto list |
+| entry readiness `{status: enterable\|blocked\|unknown, blockers[], price_asof, next_session_at}` | can this finalist be entered now | RESEARCH + market calendar | **CONTRACT REQUEST → S9** — entry readiness is modelled nowhere today | enum / array / ISO | yes — the whole object until S9 ships | null → the readiness slot renders `Unavailable`; it is **never** inferred from score, confluence or a veto list |
 
 #### Layout
 
 | Breakpoint | Modules, in order |
 |---|---|
-| **1280** | 1. The count ladder `.mx-ladder`: `RESEARCHED n` \| `FINALIST n` \| `REJECTED n`, one exhaustive disjoint accounting, active cell by weight/surface. 2. Support-1: finalist rows (`.mx-tbl`, L1 ≤ 8 then `See all N`). 3. Support-2: rejected cards in the existing `.mm-rej-grid` rhythm (`index.html:4470`). 4. Tier-3 band in `<details class="mx-disc">`: per-name paper + key risks, calibration block, source-coverage ledger, entry-readiness blockers. |
+| **1280** | 1. The count ladder (G10): `RESEARCHED n` \| `FINALIST n` \| `REJECTED n`, one exhaustive disjoint accounting, active cell by weight/surface. 2. Support-1: finalist rows (`.mm-table-wrap` table, L1 ≤ 8 then `See all N`). 3. Support-2: rejected cards in the existing `.mm-rej-grid` rhythm (`index.html:4470`). 4. Tier-3 band in `<details class="mm-da-foot">`: per-name paper + key risks, calibration block, source-coverage ledger, entry-readiness blockers. |
 | **768** | Same four modules; the ladder spans full width; finalist table keeps name, combined, viability, readiness, as-of and demotes `engine_score`/`research_score` to the row's evidence landing. |
 | **375** | 1. The ladder. 2. Top 3 finalists as row cards (name · combined · readiness word), each opening its V6-style thesis card (§2 Navigation, cross-view entry points). 3. Top 3 rejected cards. 4. **Named landing**: `See all N researched names` → the full ladder breakdown. Scores, papers and calibration move into that landing. Nothing is deleted. |
 
@@ -1776,7 +1788,7 @@ Flagship Desk to fill a product-book gap.
 | State | Trigger | Copy + treatment | What still works |
 |---|---|---|---|
 | **Loading** | `/api/portfolio` or `/api/research_papers` in flight | Skeleton at final geometry: the ladder as three labelled cells with no counts, then card shells. No prose. | Navigation, book switch. |
-| **Empty** | `rejected[]` empty and no finalist rows | `No rejected names — either the book hasn't run yet or all evaluated names passed.` (`rej.empty`, `index.html:3395`) at full weight. The block is not rendered as a zero-height shell. | V1, V2, V3, V4, V6, V7. |
+| **Empty** | `rejected[]` empty and no finalist rows | `Empty` / `暂无` + the reason: `Empty — no rejected names: this book has not run yet, or every evaluated name passed.` / `暂无 — 无剔除标的：本组合尚未运行，或所有标的均通过评估。` Copy request: replaces the shipped `rej.empty` string (`index.html:3395`). Full weight. The block is not rendered as a zero-height shell. | V1, V2, V3, V4, V6, V7. |
 | **Stale** | the ladder's as-of is behind the session clock | `Behind` + the ladder's last settled as-of stamp, separate from V1's page stamp (§3: one freshness stamp per panel + one page stamp). | Everything, labelled. |
 | **Partial** | `rejected[]` present but the finalist join unbound (today's state for every product book) | `Partial` + the word that names what is excluded: "No finalist list is bound to this book. Rejected names below are complete." The ladder shows the `REJECTED` cell filled and `FINALIST` as `Unavailable` — **never 0**, because 0 finalists and unknown finalists are different facts. | Rejection reasons, vetoes and bear bullets in full. |
 | **Error** | `/api/research_papers` returns its `{papers: [], error}` shape (`app/web.py:1905-1907`) or the request fails | `Couldn't load` + what failed + what still works (the rejected list, from a different endpoint) + retry. | Rejected cards render; the finalist ladder cell renders `Unavailable`. |
@@ -1817,7 +1829,7 @@ renders the `Partial` state with the exact exclusion sentence above.
 | Ladder subtitle | `one accounting · both sets are disjoint` | `同一口径 · 两类互不重叠` |
 | Veto chips | the veto string itself (`parabolic extension`, `distress`, `cycle-blocked`) | the veto's ZH string; a veto with no ZH pair renders the EN string, never a transliteration |
 | Confluence | `Confluence:` (`rej.confluence`, `index.html:3397`) | `汇聚分:` |
-| Empty | `No rejected names — either the book hasn't run yet or all evaluated names passed.` (`index.html:3395`) | `暂无剔除标的 — 账本未运行或所有标的均通过评估。` |
+| Empty | `Empty — no rejected names: this book has not run yet, or every evaluated name passed.` (copy request; replaces shipped `rej.empty`, `index.html:3395`) | `暂无 — 无剔除标的：本组合尚未运行，或所有标的均通过评估。` |
 | No reason | `No reason recorded` | `未记录原因` |
 | Coverage / readiness | `Source coverage unavailable` · `Entry readiness unavailable` | `来源覆盖不可用` · `入场就绪度不可用` |
 
@@ -1864,7 +1876,7 @@ arrive with its interpretation). L1 caps: 8 finalist rows, 6 rejected cards, the
    is book-scoped, assert instead that the rendered table has **no** `Action` column at all.
 3. **Ladder arithmetic, states and no unknown→0.** Ladder cells sum to the union of the two
    disjoint populations for a fixture and each count appears exactly once on the page; Empty renders
-   `rej.empty` at full weight; Partial names the excluded half and renders `Unavailable` (never
+   the §3 `Empty` sentence that replaces `rej.empty` at full weight; Partial names the excluded half and renders `Unavailable` (never
    `0`); Error names what failed, keeps the rejected list and offers retry; a `confluence: null` and
    a `hit_rate`-absent bucket render `Unavailable` and an absent bucket with its `n` — regression
    tests for `index.html:4473-4475` and `index.html:5429-5430`.
@@ -1904,9 +1916,9 @@ panel and the route must render the same tree.
 
 | Tier | Contents |
 |---|---|
-| **1 · answer** | Ticker + security name · **two separate status slots** (local thesis, provider plan — TR-P1) · shares held · weight · entry basis vs current mark with `quote_source`/`quote_as_of` · unrealized P&L and % · the #1707 queued-change chip + `.mm-q-when` timing line when a change is classified · the freshness stamp |
-| **2 · support** | Original thesis (summary + why-now) · Stage 0–4 + time stop · the actual-fills blotter for this ticker · entry-risk levels (`published_stop`, `buy_zone`) · contribution over a stated window (E11) · realized P&L from closed sells |
-| **3 · depth** | Case for / case against · vetoes · divergences · falsifier box · sizing rationale · `confluence` / `prob_correct` · Research Desk gate block and paper link · `open[]`/`closed[]` position-log rows · the decision-snapshot inspector (CR-R6 → #1357, operator-gated only) · accountability/Sizing Scorecard cards |
+| **1 · answer** | Ticker + security name · **two separate status slots** (local thesis, provider plan — TR-P1) · shares held · weight · entry basis vs current mark with `quote_source`/`quote_as_of` · unrealized P&L and % · the #1707 queued-change chip + `.mm-q-when` timing line when a change is classified · the freshness stamp + valuation-basis provenance (E12) |
+| **2 · support** | Original thesis (summary + why-now) · Stage 0–4 + time stop + thesis amendments since entry (S7 — the subsequent factual changes) · the actual-fills blotter for this ticker · entry-risk levels (`published_stop`, `buy_zone`) · contribution over a stated window (E11) · realized P&L from closed sells |
+| **3 · depth** | Case for / case against · vetoes · divergences · falsifier box · sizing rationale · `confluence` / `prob_correct` · Research Desk gate block and paper link · `open[]`/`closed[]` position-log rows · the decision-snapshot inspector (CR-R6 → #1357, operator-gated only) · the 6-dim confirmation scorecard (S2) · evidence items (S4) · accountability/Sizing Scorecard cards |
 
 #### Fields
 
@@ -1917,36 +1929,40 @@ below names a narrower correct behaviour.
 | Field | Meaning | Owner | Source today (API + JSON path) | Type / units | Nullable? | Display when null / unknown |
 |---|---|---|---|---|---|---|
 | `ticker` | holding symbol | PRODUCT | `/api/portfolio` `positions[].ticker`; `/api/live_marks` `positions[].ticker` (`app/web.py:1152-1153`) | string | no | n/a — a position row without a ticker is a contract error, not a row |
-| `security_name` | display name | PRODUCT | `_attach_security_names`, `app/web.py:2370`; rendered `index.html:4844` | string | yes | omit the sub-line; the ticker is the answer |
+| `security_name` | display name | PRODUCT | `_attach_security_names`, `app/web.py:2370`; rendered `index.html:4843` | string | yes | omit the sub-line; the ticker is the answer |
 | `shares` | shares held now | ECON | `/api/live_marks` `positions[].shares` — `paper_account.positions_pnl`, `portfolio/paper_account.py:1711-1736` | number, shares | no (`0` is real) | `0` renders as `0` — a closed lot is a lot with zero shares, not "unavailable" |
-| `avg_cost` / `cost_basis` | true entry basis | ECON | `positions_pnl.avg_cost` (`paper_account.py:1725`); `app/web.py:1157-1158` republishes it as `cost_basis`; rendered `index.html:4817` | number, book ccy | yes | entry cell `Unavailable`; never `$0.00` |
+| `avg_cost` / `cost_basis` | true entry basis | ECON | `positions_pnl.avg_cost` (`paper_account.py:1725`); `app/web.py:1157-1158` republishes it as `cost_basis`; rendered `index.html:4818` | number, book ccy | yes | entry cell `Unavailable`; never `$0.00` |
 | `current_price` | latest mark | ECON | `positions_pnl.current_price` (`paper_account.py:1726`) | number, book ccy | yes | mark cell `Unavailable`; weight, unrealized and P&L all become `Unavailable` in the same row — one missing mark quarantines the derived cells, never zeroes them |
-| `market_value` | shares × mark | ECON | `positions_pnl.market_value` (`paper_account.py:1729,1732`) | number, book ccy | yes | `Unavailable` |
-| `unrealized_pnl` / `unrealized_pct` | open contribution | ECON | `positions_pnl.unrealized_pnl/.unrealized_pct` (`paper_account.py:1728-1729,1733-1734`); rendered `index.html:4820` via `pnlCell` | number, book ccy / % | yes | `Unavailable`, no colour, no sign |
+| `market_value` | shares × mark | ECON | `positions_pnl.market_value` (`paper_account.py:1727,1732`) | number, book ccy | yes | `Unavailable` |
+| `unrealized_pnl` / `unrealized_pct` | open contribution | ECON | `positions_pnl.unrealized_pnl/.unrealized_pct` (`paper_account.py:1728-1729,1733-1734`); rendered `index.html:4849` via `pnlCell` | number, book ccy / % | yes | `Unavailable`, no colour, no sign |
 | `quote_source` / `quote_as_of` / `quote_time_kind` / `quote_stale_days` | mark provenance | ECON | `app/web.py:1161-1166` | string / ISO date / enum / integer days | yes | `quote_source` absent renders the `Behind` state with the last settled stamp (§3) |
-| `weight` | share of book | PRODUCT | `positions[].weight`; rendered `index.html:4848` | fraction 0–1 | yes | `Unavailable`; the allocation bar does **not** redistribute the remainder |
-| `sleeve` | Leadership / Conviction / Cash | PRODUCT | `positions[].sleeve`; `.mm-sleeve-chip` `index.html:4846` | enum | yes | chip omitted |
-| `stage` | DOCTRINE Stage 0–4 | RESEARCH | `positions[].stage`; rendered `index.html:4847` (`DOCTRINE.md:62-72`) | integer 0–4 | yes | `Unavailable` — never coerced to 0, which would read "latent" |
-| `opened_at` / `held_days` | holding age | ECON | `/api/trades` `open[].opened_at`, `open[].held_days` — `portfolio/position_log.py:323-325`; rendered `index.html:4810-4812` | ISO date / integer days | `opened_at` yes, `held_days` yes | age sub-line omitted; `time_stop_by` still renders if present |
-| `entry_weight` / `current_weight` | weight at entry vs now | ECON | `position_log.py:326-327`; rendered today only as a pending target row cell (`index.html:4832`) | fraction | yes | `Unavailable` |
+| `weight` | share of book | PRODUCT | `positions[].weight`; rendered `index.html:4846` | fraction 0–1 | yes | `Unavailable`; the allocation bar does **not** redistribute the remainder |
+| `sleeve` | Leadership / Conviction / Cash | PRODUCT | `positions[].sleeve`; `.mm-sleeve-chip` `index.html:4844` | enum | yes | chip omitted |
+| `stage` | DOCTRINE Stage 0–4 | RESEARCH | `positions[].stage`; rendered `index.html:4845` (`DOCTRINE.md:62-72`) | integer 0–4 | yes | `Unavailable` — never coerced to 0, which would read "latent" |
+| `opened_at` / `held_days` | holding age | ECON | `/api/trades` `open[].opened_at`, `open[].held_days` — `portfolio/position_log.py:326-327`; rendered `index.html:4809-4811` | ISO date / integer days | `opened_at` yes, `held_days` yes | age sub-line omitted; `time_stop_by` still renders if present |
+| `entry_weight` / `current_weight` | weight at entry vs now | ECON | `position_log.py:328-329`; not rendered today — `_heldPendingChange` reads the pending-target row's own `current_weight` (`index.html:4775`) and does not draw it | fraction | yes | `Unavailable` |
 | `time_stop_by` | **the existing next-review date** | RESEARCH | `/api/trades` `open[].time_stop_by` — `portfolio/position_log.py:331` (ledger stamped at `:179`) | ISO date | yes | this is the one review trigger PRODUCT can render **today**; when null the review-condition slot falls back to `Unavailable` and is never derived from `held_days` |
-| `published_stop` / `buy_zone` | published entry-risk levels | ECON | `position_log.py:332-334` (echoed from `_levels` at `:157-161`) | number / [number, number] | yes (absent on legacy rows) | `Unavailable`; the stop line names which of the three stops is bound (DOCTRINE.md:115-124) |
-| `thesis_id` | thesis episode id | RESEARCH | `position_log.py:330` | string | yes | see `local_thesis_status` below |
-| `verdict` | manager stance on the lot | PRODUCT | `positions[].verdict`; `index.html:4731` reads it with a `'hold'` default | enum `hold\|add\|trim\|reduce\|avoid\|watch\|exit_pending` | yes | **must** render `Unavailable`, not `HOLDING` (census TV-18) |
+| `published_stop` / `buy_zone` | published entry-risk levels | ECON | `position_log.py:334-335` (echoed from `_levels` at `:157-161`) | number / [number, number] | yes (absent on legacy rows) | `Unavailable`; the stop line names which of the three stops is bound (DOCTRINE.md:115-124) |
+| `thesis_id` | thesis episode id | RESEARCH | `position_log.py:332` | string | yes | see `local_thesis_status` below |
+| `verdict` | manager stance on the lot | PRODUCT | `positions[].verdict`; `index.html:4804` reads it with a `'hold'` default | enum `hold\|add\|trim\|reduce\|avoid\|watch\|exit_pending` | yes | **must** render `Unavailable`, not `HOLDING` (census TV-18) |
 | queued change `kind` | accepted, classified change to a held lot | RESEARCH → target, PRODUCT render | `_heldPendingChange()` between `PBR-HELD-PENDING-CHANGE:BEGIN/END` (`index.html:4717-4780`); consumed at `:4828-4841`; `data-queued-change` on the row | enum `exit\|trim\|add\|unclassified` | yes | no chip; the row is the book verdict alone |
-| queued `fill_after` / `queued_at` | when the queued change can fill | RESEARCH → target, calendar-derived | `index.html:4769-4774` reads `row.fill_after` then `pending_target.fill_after`; rendered as `.mm-q-when` `index.html:4836-4838` | ISO-8601 with offset / UTC | yes | `.mm-q-when` renders the existing `pend.awaiting_lbl` = "awaiting settlement" / "等待结算" (`index.html:3294`) — never an invented date |
-| `thesis_full.summary` / `.why_now` / `.sizing_rationale` (+ `_zh`) | the original thesis text | RESEARCH | `/api/portfolio` `positions[].thesis_full.*`; zh cache assembled `app/web.py:1441-1446`; rendered `index.html:4796-4806` | string | yes | the thesis block is omitted and the status slot carries the reason; no empty panel shell |
-| `thesis_full.bull[]` / `.bear[]` (+ `_zh`) | the two-sided case | RESEARCH | `app/web.py:1448-1455`; rendered `index.html:4808-4823` | string[] | yes (empty array is a real answer) | today's explicit "no bull points" `li` (`index.html:4811`) stays; it is an answer, not a gap |
-| `thesis_full.vetoes[]` / `.divergences[]` | standing objections | RESEARCH | rendered `index.html:4825-4839` | string[] | yes | section omitted; the omission is not an error |
-| `thesis_full.what_would_prove_wrong` (+ `_zh`) | free-text falsifier | RESEARCH | `app/web.py:1445`; rendered `index.html:4841-4844` | string | yes | box omitted |
-| `thesis_full.confluence` / `.prob_correct` | sizing numbers | RESEARCH | rendered `index.html:4852-4862` under a `!= null` guard | number | yes | block skipped entirely |
-| `research.{engine_score,research_score,combined,viability,summary,summary_zh,mode,paper_id}` | the gate block that sized this buy | RESEARCH | `app/web.py:1433-1438`; rendered `index.html:4859-4877` | number / enum / string | yes | block omitted; `paper_id` never renders a dead "view full paper" link |
-| `history[]` (this ticker) | **actual fills** | ECON | `/api/trades` `history[].{date,ticker,action,shares,price,exit_price,realized_pnl,realized_pct}` — `portfolio/trade_history.py:31-180`; rendered `index.html:5020-5045` | number / ISO date | per-cell | per-cell `Unavailable` |
+| queued `fill_after` / `queued_at` | when the queued change can fill | RESEARCH → target, calendar-derived | `index.html:4766-4767` reads `row.fill_after` then `pending_target.fill_after`; rendered as `.mm-q-when` `index.html:4836-4838` | ISO-8601 with offset / UTC | yes | `.mm-q-when` renders the existing `pend.awaiting_lbl` = "awaiting settlement" / "等待结算" (`index.html:3294`) — never an invented date |
+| `thesis_full.summary` / `.why_now` / `.sizing_rationale` (+ `_zh`) | the original thesis text | RESEARCH | `/api/portfolio` `positions[].thesis_full.*`; zh cache assembled `app/web.py:1441-1446`; rendered `index.html:4884-4893` | string | yes | the thesis block is omitted and the status slot carries the reason; no empty panel shell |
+| `thesis_full.bull[]` / `.bear[]` (+ `_zh`) | the two-sided case | RESEARCH | `app/web.py:1448-1455`; rendered `index.html:4895-4910` | string[] | yes (empty array is a real answer) | today's explicit "no bull points" `li` (`index.html:4903`) stays; it is an answer, not a gap |
+| `thesis_full.vetoes[]` / `.divergences[]` | standing objections | RESEARCH | rendered `index.html:4913-4923` | string[] | yes | section omitted; the omission is not an error |
+| `thesis_full.what_would_prove_wrong` (+ `_zh`) | free-text falsifier | RESEARCH | `app/web.py:1445`; rendered `index.html:4927-4930` | string | yes | box omitted |
+| `thesis_full.confluence` / `.prob_correct` | sizing numbers | RESEARCH | rendered `index.html:4934-4948` under a `!= null` guard | number | yes | block skipped entirely |
+| `research.{engine_score,research_score,combined,viability,summary,summary_zh,mode,paper_id}` | the gate block that sized this buy | RESEARCH | `app/web.py:1433-1438`; rendered `index.html:4860-4878` | number / enum / string | yes | block omitted; `paper_id` never renders a dead "view full paper" link |
+| `history[]` (this ticker) | **actual fills** | ECON | `/api/trades` `history[].{date,ticker,action,shares,price,exit_price,realized_pnl,realized_pct}` — `portfolio/trade_history.py:31-180`; rendered `index.html:5115-5134` | number / ISO date | per-cell | per-cell `Unavailable` |
 | `realized_pnl`, `realized_pct` (per sell) | realized contribution | ECON | `history[].realized_pnl` — FIFO reader; requested with basis at `CONTRACT REQUEST → E10` | number, book ccy / % | buys | buy rows show `—` (a buy has no realized P&L; that is an answer, not a gap) |
 | contribution over a window | **loss/gain contribution** | ECON | `CONTRACT REQUEST → E11` `{ticker, window_start, window_end, contribution, contribution_basis: realized\|unrealized\|both, priced_through}` | array; fraction of book NAV at window start | holding with an unqualified mark → `contribution: null` + reason | `Unavailable` with the named reason; the window selector defaults to inception-to-date and is **stated**, never implied |
 | `local_thesis_status` | whether a local thesis exists | RESEARCH | `CONTRACT REQUEST → S1` (slot 2 of 2) | enum `present\|absent\|amended` | yes | slot renders `Unavailable` independently |
 | `provider_plan_status` | whether an optional provider (Prophet) plan exists | RESEARCH | `CONTRACT REQUEST → S1` (slot 1 of 2) | enum `held_with_active_plan\|held_without_active_plan\|absent` | yes | slot renders `Unavailable` independently |
 | `horizon_end` / `review_condition` / `next_review_at` | **next review condition** | RESEARCH | `CONTRACT REQUEST → S5`, extending the renderable `time_stop_by` above | ISO date / string | yes | `Unavailable`; never derived from holding age |
+| `amendments[]` | **subsequent factual changes** — every amendment to this position's thesis after entry | RESEARCH | `CONTRACT REQUEST → S7` `{amendment_id, ticker, decision_id, effective_at, old_conditions, new_conditions, reason, evidence_refs[]}` | array; `effective_at` ISO-8601 UTC | no — empty array is a real answer (never amended) | delivered + empty → `Empty — no amendments since entry.` / `暂无 — 建仓后未修订。`; not yet delivered → `Unavailable`; never inferred by diffing `thesis_full` |
+| `scorecard[]` | the 6-dim confirmation scorecard (DOCTRINE; catalyst gates full size) | RESEARCH | `CONTRACT REQUEST → S2` `{dim, score, evidence_ref}`×6 | array of 6; RESEARCH-named scale | per dim | Tier 3; a missing dim is listed by name as `Unavailable`, never zero-filled; the catalyst dim is never implied from position size |
+| `evidence[]` | the evidence items behind the thesis | RESEARCH | `CONTRACT REQUEST → S4` `[{claim, source, asof, observed\|inferred}]` | array | empty | Tier 3; `Unavailable` until delivered; `inferred` items keep the `(unverified)` / `（未核实）` tag in both languages |
+| `valued_at_cost[]` / `nav_basis` | valuation-basis provenance for the header | ECON | `CONTRACT REQUEST → E12` (`portfolio/self_directed.py` `book()` / `mark()`) | array / enum `marked\|includes_cost_fallback` | empty array, never absent | ticker in `valued_at_cost[]` → the header provenance line reads `Valued at cost — no market mark` / `按成本计价 — 无市价` and unrealized P&L renders `Unavailable` (a cost fallback is not a mark); not yet delivered → provenance line `Unavailable` and the header makes no qualified claim |
 | `open[]` / `closed[]` (position log) | thesis history per position | RESEARCH / ECON | `/api/trades` `open[]`, `closed[]` (`app/web.py:2352-2353, 2375-2376`) — **payload only, rendered nowhere today** | array of objects | array | Tier 3 lifecycle rail stays `Unavailable` until consumed; the payload already exists, so this is a render task, not a contract |
 | decision snapshot | the decision that set this lot | RESEARCH | `CONTRACT REQUEST → S1.decision_id`; inspector is #1357's surface per CR-R6 (`PRODUCT_CONTRACT_REQUESTS.md` §Requests answered) | object | yes | **never rendered for an anonymous viewer** — the row itself does not draw, and no lock affordance appears (see §2 Pro gating: no `TierLock` today) |
 
@@ -1956,11 +1972,11 @@ The three breakpoints from §3, recomposed rather than squeezed.
 
 | Breakpoint | Module order | Demoted → named landing |
 |---|---|---|
-| **1280** | 1 V6 decision header (two status slots · shares · weight · entry → mark · unrealized · queued chip · freshness stamp) → 2 Original thesis (summary, why-now, sizing rationale) → 3 **Actual fills** blotter, L1 capped at 8 rows → 4 Contribution over the stated window → 5 lifecycle rail (`open[]`/`closed[]`, Stage 0–4, time stop) | case for/against, vetoes, divergences, falsifier, confluence, Research Desk block, accountability cards → the same disclosure stack below, opened by keyboard and touch |
+| **1280** | 1 V6 decision header (two status slots · shares · weight · entry → mark · unrealized · queued chip · freshness stamp · valuation basis (E12)) → 2 Original thesis (summary, why-now, sizing rationale) → 3 **Actual fills** blotter, L1 capped at 8 rows → 4 Contribution over the stated window → 5 lifecycle rail (`open[]`/`closed[]`, Stage 0–4, time stop, and S7 amendments as dated rail events — the subsequent factual changes) | case for/against, vetoes, divergences, falsifier, confluence, 6-dim scorecard (S2), evidence items (S4), Research Desk block, accountability cards → the same disclosure stack below, opened by keyboard and touch |
 | **768** | 1 header (unchanged) → 2 Original thesis (summary + why-now; sizing rationale collapses into it) → 3 Actual fills blotter, L1 capped at 6 rows → 4 Contribution → 5 Review condition | the lifecycle rail becomes a single line: `Stage 3 · time stop 2026-11-05` linking to the full rail; everything in the 1280 demotion list moves under **Details** |
-| **375** | 1 header, reflowed to: ticker + name → status slots → mark + P&L → shares/weight → queued chip + timing line → freshness stamp → 2 Original thesis, `summary` only, `why_now` in the disclosure → 3 next review condition (`time_stop_by` or `Unavailable`) → 4 fills, L1 capped at 4 rows → **See all N fills** | contribution, lifecycle rail, case for/against, Research Desk, accountability → each gets a named row under **Details**; the blotter scrolls inside its container, the page never scrolls horizontally |
+| **375** | 1 header, reflowed to: ticker + name → status slots → mark + P&L → shares/weight → queued chip + timing line → freshness stamp + valuation basis (E12) → 2 Original thesis, `summary` only, `why_now` in the disclosure → 3 next review condition (`time_stop_by` or `Unavailable`) → 4 fills, L1 capped at 4 rows → **See all N fills** | contribution, lifecycle rail (with S7 amendments), case for/against, scorecard (S2), evidence (S4), Research Desk, accountability → each gets a named row under **Details**; the blotter scrolls inside its container, the page never scrolls horizontally |
 
-Row-cell composition at 375 is a recomposition, not a squeeze: `mm-hide-sm` cells (sleeve, stage, entry, mark, rs, confluence, held-since — `index.html:4845-4854`) demote into the header's stacked key/value lines with their labels, so a demoted number is never silently dropped.
+Row-cell composition at 375 is a recomposition, not a squeeze: `mm-hide-sm` cells (sleeve, stage, entry, mark, rs, confluence, held-since — `index.html:4844-4853`) demote into the header's stacked key/value lines with their labels, so a demoted number is never silently dropped.
 
 #### States
 
@@ -1978,8 +1994,8 @@ Every state below names a **field-level trigger**, the exact EN + ZH copy from t
 | **provisional valuation** | the mark used for this position is carried: A02 `carried[]` carries `{ticker, price, price_asof, age_days, ...}` (ECON A02, `_pbr_inputs/ECON_CONTRACTS_PR1699.md` §a) | `Provisional` / `暂定` + the carried name and its age: "MU priced from the 2026-10-21 close, 1 day old" — the exact sentence E3 was written for | the unrealized figure, **labelled** provisional; it is never presented as a qualified mark, and it is never zeroed |
 | **withheld valuation** | A02 `WITHHELD`: ≥1 UNPRICED held line (ECON A02 §a table) | `Withheld` / `暂不估值` + the reason from `nav_withheld.jsonl` `{date, mark_source, unpriced[], carried[], reason}` (E5). For V6 specifically: **mark, market value, unrealized P&L and unrealized % are all withheld together** | shares, weight, entry basis, fills, thesis, time stop, contribution basis as realized-only |
 | **unverified (pre-A02 row)** | a `nav_history` row written before A02 landed has no `nav_status` | `Unverified` / `未核实` — label only, never upgraded to qualified | the row renders with the label and no inference |
-| **queued (pending while held)** | `pending_target.status == 'queued'` and a row names this ticker with a classified action (PR #1707, merged) | chip: `EXIT QUEUED` / `已排队卖出` (`pos.q_exit`, `index.html:3450`), class `exit_pending` (`index.html:348`); trim/add/unclassified use `pos.q_trim` `TRIM QUEUED` / `已排队减仓`, `pos.q_add` `ADD QUEUED` / `已排队加仓`, `pos.q_unclassified` `CHANGE QUEUED` / `已排队调整` (`index.html:3451-3453`). Timing line `.mm-q-when` (`index.html:353`) = "at open <date>" (`pend.fills_at_lbl` "at open" / "开盘", `:3293`) or "awaiting settlement" / "等待结算" (`:3294`). Row carries `data-queued-change` (`index.html:4841`) | **shares, mark, P&L, weight, sleeve, held-since and the thesis row are unchanged** — nothing is filled until the next open (`index.html:4826-4827`). After the fill the row loses the chip and V3 gains the `filled` disposition; see V3 Truth rules |
-| **unavailable** | any CONTRACT REQUEST field not yet delivered | the word, muted, in the value slot (§3): `Unavailable` / `不可用`. Applied to: the local-thesis slot, the provider-plan slot, contribution, review condition, `published_stop` — **each independently**, never inferred from a sibling | everything already delivered; two `Unavailable` slots side by side never collapse into one "no thesis" |
+| **queued (pending while held)** | `pending_target.status == 'queued'` and a row names this ticker with a classified action (PR #1707, merged) | chip: `EXIT QUEUED` / `已排队卖出` (`pos.q_exit`, `index.html:3450`), class `exit_pending` (`index.html:348`); trim/add/unclassified use `pos.q_trim` `TRIM QUEUED` / `已排队减仓`, `pos.q_add` `ADD QUEUED` / `已排队加仓`, `pos.q_unclassified` `CHANGE QUEUED` / `已排队调整` (`index.html:3451-3453`). Timing line `.mm-q-when` (`index.html:353`) = "at open <date>" (`pend.fills_at_lbl` "at open" / "开盘", `:3293`) or "awaiting settlement" / "等待结算" (`:3294`). Row carries `data-queued-change` (`index.html:4839`) | **shares, mark, P&L, weight, sleeve, held-since and the thesis row are unchanged** — nothing is filled until the next open (`index.html:4826-4827`). After the fill the row loses the chip and V3 gains the `filled` disposition; see V3 Truth rules |
+| **unavailable** | any CONTRACT REQUEST field not yet delivered | the word, muted, in the value slot (§3): `Unavailable` / `不可用`. Applied to: the local-thesis slot, the provider-plan slot, contribution, review condition, `published_stop`, amendments (S7), scorecard (S2), evidence (S4), valuation basis (E12) — **each independently**, never inferred from a sibling | everything already delivered; two `Unavailable` slots side by side never collapse into one "no thesis" |
 
 #### EN / ZH
 
@@ -2002,7 +2018,12 @@ spec's own copy, with the ZH shaped natively rather than as a literal of the Eng
 | Contribution | Contribution | 贡献 | E11 |
 | Window label | <start> → <end> | <start> → <end> | dates stay numeric in both |
 | Falsifier box | What would prove this wrong | 证伪条件 | `what_would_prove_wrong` |
-| Case for / against | Case for · Case against | 看多理由 · 看空理由 | existing two-column block, `index.html:4808-4823` |
+| Amendments | Amendments since entry | 建仓后修订 | S7; dated events on the lifecycle rail |
+| No amendments | Empty — no amendments since entry. | 暂无 — 建仓后未修订。 | S7 delivered and empty |
+| Scorecard | Confirmation scorecard | 确认评分卡 | S2; six dims, a missing dim is named |
+| Evidence | Evidence | 证据 | S4; inferred items tagged `(unverified)` / `（未核实）` |
+| Valued at cost | Valued at cost — no market mark | 按成本计价 — 无市价 | E12 header provenance line |
+| Case for / against | Case for · Case against | 看多理由 · 看空理由 | existing two-column block, `index.html:4895-4910` |
 | Queued chip labels | *shipped* `EXIT QUEUED` / `TRIM QUEUED` / `ADD QUEUED` / `CHANGE QUEUED` | *shipped* `已排队卖出` / `已排队减仓` / `已排队加仓` / `已排队调整` | `index.html:3450-3453` |
 | Timing line | *shipped* `at open <date>` / `awaiting settlement` | *shipped* `开盘 <date>` / `等待结算` | `index.html:3293-3294` |
 
@@ -2084,7 +2105,7 @@ the manager's behaviour, including the machinery's own honest failures.
 A — Command Center, inside the G shell: verdict → change rows → action → deep links.
 Today those four items exist but are scattered — `#runs` is a collapsed panel at the foot of the SPA
 (`index.html:2895-2903`), the scheduler and Desk lanes are **Flagship-only in the UI**
-(`index.html:6462-6463`) and flagship is archived (`portfolio/registry.py:33-45`), so an operator on
+(`index.html:6550-6551`) and flagship is archived (`portfolio/registry.py:33-45`), so an operator on
 the product book cannot reach job-level delay at all (census gap map, V7). The view's identity device
 is therefore *the disposition line*: one word per cycle, in #1711's vocabulary, with the change that
 caused it beneath.
@@ -2106,14 +2127,14 @@ entitlement gate at all). An anonymous reader sees Tier 1 + Tier 2 with the deta
 | Field | Meaning | Owner | Source today (API + JSON path) | Type / units | Nullable? | Display when null / unknown |
 |---|---|---|---|---|---|---|
 | lifecycle projection | the disposition, per cycle | RUNTIME | `CONTRACT REQUEST → R1` `{run_status, last_decision_at, last_attempt_at, next_scheduled_at, failure_reason_code, halted_by}` | object; ISO-8601 UTC | `run_status: "unavailable"` when no projection exists | the whole Tier-1 disposition strip renders `Unavailable` / `不可用` + "Lifecycle projection is not wired for this book." Until R1 ships, **V7 shows `unavailable` — never `ok`** |
-| per-cycle `disposition` | RUNTIME #1711's per-cycle disposition word | RUNTIME | `CONTRACT REQUEST → R1` (adds `cycles[].{cycle_at, disposition}`), enumerated below | enum of 8 (§EN/ZH table) | never | `unavailable` when no projection is wired; there is no `unknown` member of this enum |
+| per-cycle `disposition` | RUNTIME #1711's per-cycle disposition word | RUNTIME | `CONTRACT REQUEST → R6` `cycles[].{cycle_at, disposition}`, enumerated below | enum of 8 (§EN/ZH table) | never | `unavailable` when no projection is wired; there is no `unknown` member of this enum |
 | `failure_reason_code` | why a cycle failed | RUNTIME | `CONTRACT REQUEST → R1` | enum/string | yes | `Unavailable`; the change row still renders with its disposition word |
 | feed health | provider/feed liveness | RUNTIME | `CONTRACT REQUEST → R3` `[{feed, status: live\|stale\|down, asof, stale_after_s}]` | array; seconds | empty array → `unavailable` | `Unavailable` — an empty array is not "all feeds healthy" |
 | settlement receipt | a retained receipt that blocks marks | RUNTIME | `CONTRACT REQUEST → R4` `{receipt_id, status: retained\|finalised, retained_reason}` per book | object | null when none | line omitted; its absence is never read as "no blocker" without the receipts row also being present |
 | `jobs[].{id,last_status,last_severity,last_started,last_finished,last_skipped,last_reason,last_target_status,next_run_time}` | per-job scheduler health | RUNTIME | `/api/scheduler` `jobs[]` — `app/web.py:3539-3552`, `app/scheduler.py` `scheduler_health()`; rendered `index.html:5565-5600` | enum / ISO-8601 | yes (both clocks render `—` today) | `Unavailable`; today the empty list already renders "Scheduler not available…" — that is the correct §3 `unavailable` copy |
 | `[].{run_id,ts,kind,title,title_zh,n_steps,cost_usd,summary,summary_zh}` | run list | RUNTIME | `/api/runs` — `app/web.py:3071-3093`; rendered `index.html:4304-4345` | string / number (USD) | `title` falls back to `run_id`, then `—`; `cost_usd` omitted when absent | title fallback chain is an existing, honest answer and stays |
 | `steps[].{ts,type,title,detail}` | full step trace per run | RUNTIME | `/api/runlog?run_id=` — `app/web.py:3096-3103`; lazy fetch `index.html:4380` | array | 500 → `{run_id, steps: [], error}` | `Couldn't load` + "the step trace failed" + retry that refetches the same `run_id` only; other runs stay readable |
-| `expected_opportunity.status` | was today's run scheduled at all | RUNTIME | `/api/portfolio?view=decision_availability` `expected_opportunity.status` — `app/decision_availability.py:556`; text `index.html:7410` | enum; permanently `unknown` with `reason: "scheduler_evidence_not_bound"` | not nullable | renders the existing footer sentence, which already says **unverified**. The spec keeps that sentence and adds no optimism |
+| `expected_opportunity.status` | was today's run scheduled at all | RUNTIME | `/api/portfolio?view=decision_availability` `expected_opportunity.status` — `app/decision_availability.py:538`; text `index.html:7410` | enum; permanently `unknown` with `reason: "scheduler_evidence_not_bound"` | not nullable | renders the existing footer sentence, which already says **unverified**. The spec keeps that sentence and adds no optimism |
 | evaluation record status | is the forward-evaluation record qualified | ECON | `/api/forward-evaluation` `status`, `latest_asof`, `snapshot.{asof,book,schema,cohort.evaluation_start,nav_date_basis}`, `observation_qualification.*` — `app/web.py:1652-1679`, `portfolio/forward_evaluation.py:1840-2020`; rendered `index.html:7501-7611` | enum | yes | every unverified dimension renders `Unverified` / `未核实` — label only, never upgraded |
 | raw evidence record | the JSON behind that record | ECON | the "Inspect evidence record" link, `index.html:7604` | object | yes | operator-only channel (Tier 3) |
 | decision snapshot | the decision internals | RESEARCH | #1357's router per CR-R6 (`app/decision_snapshot.py` mounted in `app/main.py`, gated on `app.auth.is_operator_authorized`, denied by `app/response_cache.py`) | object | yes | **never drawn for an anonymous viewer**; #673's inline handler must not ship whichever PR lands first |
@@ -2144,13 +2165,17 @@ Every Tier-3 module has a named landing: **Operator detail → Run traces · Sch
 | **benchmark-unavailable** | n/a — V7 renders no benchmark comparison | — | — |
 | **provisional valuation** | n/a — V7 renders no valuation | — | — |
 | **withheld valuation** | n/a — V7 renders no valuation. A withheld mark surfaces here only as a **feed-health** fact under R3, carrying its reason rather than a number | — | — |
-| **unverified (pre-A02 row)** | an evaluation-record dimension outside the shipped schema | `Unverified` / `未核实`, label only — this is the state the existing footer sentence already reports for `expected_opportunity` (`app/decision_availability.py:556`, shipped text `index.html:7410`) | the rest of the record |
+| **unverified (pre-A02 row)** | an evaluation-record dimension outside the shipped schema | `Unverified` / `未核实`, label only — this is the state the existing footer sentence already reports for `expected_opportunity` (`app/decision_availability.py:538`, shipped text `index.html:7410`) | the rest of the record |
 | **queued (pending while held)** | n/a in V7 — the queued chip belongs to the held row (V1/V3/V6, PR #1707). V7 **links** to it and never re-renders it, so the chip can never disagree between views | — | — |
 | **unavailable** | no lifecycle projection is wired (R1), or `R3` is an empty array, or R4 is null | the word, muted (§3): `Unavailable` / `不可用` + "Lifecycle projection is not wired for this book." / "本组合尚未接入运行周期投影。" L-P4 renders exactly this against a documented stub. **It never renders `ok`** | the page stamp, the run list and every already-delivered field |
 
 **#1711 disposition vocabulary.** Exactly these eight members plus the §3 `unavailable`. No member
-is invented by this view and no member is renamed; the EN word is the identifier, the ZH word is
-display copy, and the non-colour cue is what carries the meaning if colour is unavailable.
+is invented and no identifier is renamed: the `disposition` value is the contract and the test key
+and is never printed raw. The EN and ZH labels are PRODUCT display copy mapped 1:1 from it. Four EN
+labels differ in wording from their identifier (`started` → `Running`, `accepted_no_change` →
+`Accepted · no change`, `accepted_change` → `Accepted · change applied`, `incomplete_uncertain` →
+`Incomplete · uncertain`); that mapping is §9 seat decision 11. The non-colour cue is what carries
+the meaning if colour is unavailable.
 
 | `disposition` | EN label | ZH label | non-colour cue | one-line meaning in this view |
 |---|---|---|---|---|
@@ -2293,20 +2318,20 @@ The rest, with the exact display rule that fixes each. Every row ships with a DO
 | # | Violation (census row) | Exact display rule that fixes it |
 |---|---|---|
 | 1 | Client-side repeat of the $1,000,000 invention — `index.html:6068` falls back to `1000000` when `nav` is absent | With #1719 landed, `#sd-nav` renders the §3 `Unavailable` word in `--muted` and the heartbeat dot takes the static muted class. Until then: delete the fallback so the seed `$1,000,000` static value (`index.html:3113`) is replaced by the word, never by a fabricated number. (Companion to E13.) |
-| 2 | Missing sleeve weights render a definite 0% split — `index.html:4507-4509` (`(sl.leadership \|\| 0)`) | Render a segment only for a non-null weight; an absent weight contributes **no segment** and its legend entry reads `Unavailable`. The bar never sums to 100% on a partial payload and no zero-width segment is drawn. (Sibling `gross` already hides its label when null, `index.html:4526`.) |
-| 3 | Safety tiles coerce missing metrics to 0 — `index.html:4597`, `:4601` | `Effective names` and `Cash buffer` use the existing `num()`/`pc()` null path, which already returns `'—'`; remove the `|| 0` so they join it. Display rule: `Unavailable` + "risk snapshot unavailable", never `0 actual` / `0.0%`. |
-| 4 | **Win rate with no sample gate — `index.html:5001-5010` and `:6157-6159`** (V6/V3) | Always render `n` beside the rate: `57% · n = 42 closed` / `57% · 已平仓 n = 42`. Below the minimum closed-sample size (SEAT DECISION: **n ≥ 30**) render the label instead of the rate: `Sample too small (n = <n> closed)` / `样本不足（已平仓 n = <n>）`. Never a bare percentage. |
-| 5 | Mislabelled comparison — `index.html:3958`, `:7586` read a SPY-named field under a CSI-300/Hang-Seng label | Drop the alias fallback; when the two keys differ, render the value under the benchmark the server actually used, or `Benchmark unavailable`. The number is currently un-wrong because the server publishes both keys from one value (`performance_projection.py:599-600`), so this is a defect in the alias, fixed by removing it. |
-| 6 | Missing `availability` leaves no qualification line — `index.html:3869-3870`; `_archived_performance` returns no `availability` key at all (`app/web.py:205-225`) | When `availability` is absent, the NAV label renders with the §3 `Unverified` label rather than plain "NAV", so a frozen archived mark is never presented as a current qualified NAV. |
-| 7 | `_archived_performance` fabricates `+0.00%` — `app/web.py:190-196` (`day_change_pct = 0.0`, `total_return_pct` default) | Return `None` for both, as the active-book path already does (`performance_projection.py:284-285`). Display rule: the day change and total return render `Unavailable`. **This is the seat-accepted flat-day rule** and is the code half of TR-D(a). |
-| 8 | Pre-inception synthetic points drawn as a solid `--up` line — `index.html:4033-4038`, `:4164-4166` | Draw synthetic points as a dashed, `--muted` segment excluded from `allVals` (`index.html:4068`), so a long flat `$1M` tail cannot compress the realised range. The existing inception baseline, `START` marker and "recorded since …" legend stay. |
+| 2 | Missing sleeve weights render a definite 0% split — `index.html:4516-4518` (`(sl.leadership \|\| 0)`) | Render a segment only for a non-null weight; an absent weight contributes **no segment** and its legend entry reads `Unavailable`. The bar never sums to 100% on a partial payload and no zero-width segment is drawn. (Sibling `gross` already hides its label when null, `index.html:4532`.) |
+| 3 | Safety tiles coerce missing metrics to 0 — `index.html:4606`, `:4610` | `Effective names` and `Cash buffer` use the existing `num()`/`pc()` null path, which already returns `'—'`; remove the `|| 0` so they join it. Display rule: `Unavailable` + "risk snapshot unavailable", never `0 actual` / `0.0%`. |
+| 4 | **Win rate with no sample gate — `index.html:5087-5093` and `:6242`** (V6/V3) | Always render `n` beside the rate: `57% · n = 42 closed` / `57% · 已平仓 n = 42`. Below the minimum closed-sample size (SEAT DECISION: **n ≥ 30**) render the label instead of the rate: `Sample too small (n = <n> closed)` / `样本不足（已平仓 n = <n>）`. Never a bare percentage. |
+| 5 | Mislabelled comparison — `index.html:3967`, `:7674` read a SPY-named field under a CSI-300/Hang-Seng label | Drop the alias fallback; when the two keys differ, render the value under the benchmark the server actually used, or `Benchmark unavailable`. The number is currently un-wrong because the server publishes both keys from one value (`performance_projection.py:599-600`), so this is a defect in the alias, fixed by removing it. |
+| 6 | Missing `availability` leaves no qualification line — `index.html:3877`; `_archived_performance` returns no `availability` key at all (`app/web.py:205-225`) | When `availability` is absent, the NAV label renders with the §3 `Unverified` label rather than plain "NAV", so a frozen archived mark is never presented as a current qualified NAV. |
+| 7 | `_archived_performance` fabricates `+0.00%` — `app/web.py:190-196` (`day_change_pct = 0.0`, `total_return_pct` default) | Return `None` for both, as the active-book path already does (`performance_projection.py:283` and `:288`). Display rule: the day change and total return render `Unavailable`. **This is the seat-accepted flat-day rule** and is the code half of TR-D(a). |
+| 8 | Pre-inception synthetic points drawn as a solid `--up` line — `index.html:4040-4046`, `:4173-4175` | Draw synthetic points as a dashed, `--muted` segment excluded from `allVals` (`index.html:4077`), so a long flat `$1M` tail cannot compress the realised range. The existing inception baseline, `START` marker and "recorded since …" legend stay. |
 | 9 | `/api/pfolio/positions` publishes `day_pnl: 0.0` when holdings exist but quotes do not — `app/pfolio.py:357-359`, `:382-383`; rendered `portfolio.html:676-686` | Publish `null` instead; the Desk renders `Unavailable` for day and total P&L. Sibling fix for the same rule: `portfolio.html:681,686` styles `parseFloat(null)` → `NaN` as negative (red); the null path must take the neutral `.neu` class, never `.neg` (census TV-13). |
-| 10 | Calibration reliability buckets with no observations draw a 0-width bar — `index.html:5341-5342` | An empty bucket renders an absent/`—` bucket, not a bar pinned at 0%. |
+| 10 | Calibration reliability buckets with no observations draw a 0-width bar — `index.html:5429-5430` | An empty bucket renders an absent/`—` bucket, not a bar pinned at 0%. |
 | 11 | Market-view assembly counts print `0 fresh, 0 stale, 0 missing` — `market_view.html:414`, `:427` | Render `Unavailable` for a missing count; `0 fresh, 0 stale, 0 missing` must not be reachable from an absent `assembly` object. |
-| 12 | A missing `pricing` block asserts holdings completeness — `index.html:8718` (`0 === 0`) | `holdingsComplete` requires the `pricing` block to be **present**; absent → the SPA keeps its cached positions and renders `Partial` naming the exclusion. |
-| 13 | **Verdict default fabricates a manager stance — `index.html:4731` (`(p.verdict \|\| 'hold')`)** (V6) | An absent `verdict` renders the §3 `Unavailable` word in the verdict cell, never `HOLDING`. The account-only rows that carry an explicit `"verdict": "hold"` (`app/web.py:1391`) are unaffected — that is why the defect is currently invisible. |
+| 12 | A missing `pricing` block asserts holdings completeness — `index.html:8806` (`0 === 0`) | `holdingsComplete` requires the `pricing` block to be **present**; absent → the SPA keeps its cached positions and renders `Partial` naming the exclusion. |
+| 13 | **Verdict default fabricates a manager stance — `index.html:4804` (`(p.verdict \|\| 'hold')`)** (V6) | An absent `verdict` renders the §3 `Unavailable` word in the verdict cell, never `HOLDING`. The account-only rows that carry an explicit `"verdict": "hold"` (`app/web.py:1388`) are unaffected — that is why the defect is currently invisible. |
 | 14 | Unknown session state renders `closed` — `index.html:8730-8736` (V7-adjacent; the market clock feeds every view) | An unmapped `session.state` renders `Unavailable`, never `closed` / `休市`; a clock failure must not hide behind an ordinary closed market. |
-| 15 | Curve legend always names the benchmark as a reference series — `index.html:4020` (TR-C) | The legend names a reference series only when at least one `series[].spy_nav` point is finite; otherwise the legend says `Benchmark unavailable` / `基准不可用`. |
+| 15 | Curve legend always names the benchmark as a reference series — `index.html:4029` (TR-C) | The legend names a reference series only when at least one `series[].spy_nav` point is finite; otherwise the legend says `Benchmark unavailable` / `基准不可用`. |
 
 ---
 
@@ -2361,7 +2386,7 @@ requests against the shape ECON already published in #1699.
 
 ## 8. DESIGN-SYSTEM-GAPs
 
-Numbered G1–G9 at assembly; the index below the table maps every name used in §1–§4. Each is a real need this spec raises that the
+Numbered G1–G10 (G10 added in the r1 repair); the index below the table maps every name used in §1–§4. Each is a real need this spec raises that the
 canonical inventory (`DS_components.md`) does not cover **and** that the Mastermind app does not ship
 — the app carries no `.mx-*` namespace, so a gap is also a place where the binding must land in
 `app/static/theme.css` / `app/static/index.html` instead.
@@ -2369,18 +2394,19 @@ canonical inventory (`DS_components.md`) does not cover **and** that the Masterm
 | Gap | Why it is needed |
 |---|---|
 | `DESIGN-SYSTEM-GAP G1: tier gate lock primitive` (`.mx-tier-gate`) | Referenced in §2: the canonical lock primitive has **no app equivalent**, and `TierLock` is listed in `DS_components.md` for completeness only. No view draws it today because this process has no entitlement gate (`app/auth.py:132-141`, `:436-438`); the gap exists so that if an edge paywall is ever proven, lock is a labelled channel separate from data truth rather than a page-local colour. |
-| `DESIGN-SYSTEM-GAP G5: skeleton loader at true final geometry` | The app ships `.mm-empty` and prose loaders (`index.html:2899`, `:4310`) but no skeleton primitive. §3 and `DS_states-accessibility.md` both require `loading` to be a skeleton at final geometry with **no placeholder prose**; without it, `Loading run history…` and a seed `$1,000,000` are the same class of fabrication. |
+| `DESIGN-SYSTEM-GAP G2: type scale tokens` | Raised in §1 / §4 V1: the canonical `--fs-*` / `--fs-num-*` scale has no counterpart in `app/static/theme.css`, which defines only the three font families; every size is a literal per rule. |
 | `DESIGN-SYSTEM-GAP G3: metric tile with a null explanation` | `DS_components.md` `.mtile` requires "null gets explanation, never bare em-dash". The app's `.mm-perf-stat` (`index.html:3120`) renders a bare `—`, and truth-violation rows 3 and 9 above are exactly this gap. Needed in V6 (entry, mark, P&L), V7 (feeds, receipts) and V1. |
-| `DESIGN-SYSTEM-GAP G6: lifecycle rail` | `DS_components.md` `.mx-rail` is a chronology by weight/surface. V6 needs one for Stage 0–4 + entry + time stop + amendments (the doctrine's stage lifecycle, `DOCTRINE.md:62-72`), and V7 needs one for cycle dispositions. The app has `#runs` (a collapsible list) and nothing that reads as a chronology; the S7 amendment list has no primitive at all. |
+| `DESIGN-SYSTEM-GAP G4: counted overflow affordance` | Raised in §4 V1/V2: the density law requires a counted `See all N`; the app has no such component and `PF_GATED_ONLY` hides whole panels instead of counting rows. |
+| `DESIGN-SYSTEM-GAP G5: skeleton loader at true final geometry` | The app ships `.mm-empty` and prose loaders (`index.html:2899`, `:4310`) but no skeleton primitive. §3 and `DS_states-accessibility.md` both require `loading` to be a skeleton at final geometry with **no placeholder prose**; without it, `Loading run history…` and a seed `$1,000,000` are the same class of fabrication. |
+| `DESIGN-SYSTEM-GAP G6: lifecycle rail` | `DS_components.md` `.mx-rail` is a chronology by weight/surface. V6 needs one for Stage 0–4 + entry + time stop + amendments (the doctrine's stage lifecycle, `DOCTRINE.md:62-72`), V3 needs one for the single queued target's chronology (accepted → queued → fill window → settled, historical stages non-actionable), and V7 needs one for cycle dispositions. The app has `#runs` (a collapsible list) and nothing that reads as a chronology; the S7 amendment list has no primitive at all. |
 | `DESIGN-SYSTEM-GAP G7: operational disposition chip family` | `.mm-verdict-chip` (`index.html:338-348`) is bound to *position verdicts* and `.mm-side-chip` to *order sides*. V7's eight #1711 dispositions are a third, different enum with a different semantic axis (did the machine work, not what should we hold). Reusing the verdict chip would make `accepted_change` look like an investment opinion. Needs its own primitive bound to `--warn`/`--act`/`--muted` with glyph cues. |
 | `DESIGN-SYSTEM-GAP G8: evidence lens (hover + focus + tap)` | `DS_components.md` LENS `data-tip-en/zh` has no app equivalent; the app's evidence affordance is a raw-JSON link (`index.html:7604`) and inline title text. V6 needs a falsifier/evidence layer that opens by hover, keyboard **and** touch — `DS_states-accessibility.md` calls hover-only evidence noncompliant, and V7's failure rows need the same. |
-| `DESIGN-SYSTEM-GAP G2: type scale tokens` | Raised in §1 / §4 V1: the canonical `--fs-*` / `--fs-num-*` scale has no counterpart in `app/static/theme.css`, which defines only the three font families; every size is a literal per rule. |
-| `DESIGN-SYSTEM-GAP G4: counted overflow affordance` | Raised in §4 V1/V2: the density law requires a counted `See all N`; the app has no such component and `PF_GATED_ONLY` hides whole panels instead of counting rows. |
 | `DESIGN-SYSTEM-GAP G9: epistemic-qualification badge` | Raised in §4 V4: the A02 words QUALIFIED / PROVISIONAL / WITHHELD / UNVERIFIED must be a labelled word beside a value, not a freshness chip (`.dtp*` is scoped to freshness/session language); V1/V2/V4/V6 would otherwise each invent one. |
+| `DESIGN-SYSTEM-GAP G10: count ladder` | `DS_components.md` `.mx-ladder` is V5's identity device: one exhaustive, disjoint accounting of `RESEARCHED n` · `FINALIST n` · `REJECTED n`, the active stage marked by weight and surface. The app ships `.mm-rej-grid` cards (`index.html:1239`) and no counted stage strip; without the primitive V5 would show three unrelated counters that need not sum. |
 
 ---
 
-**Gap index (assembled).** G1 tier-lock primitive; G2 type scale tokens; G3 unavailable value slot (metric tile with a null explanation); G4 counted overflow affordance; G5 skeleton loader at true final geometry; G6 lifecycle rail; G7 operational disposition chip family; G8 evidence lens (hover + focus + tap); G9 epistemic-qualification badge. G1 and G3 merge the names parts of this spec used for the same need.
+**Gap index (assembled).** G1 tier-lock primitive; G2 type scale tokens; G3 unavailable value slot (metric tile with a null explanation); G4 counted overflow affordance; G5 skeleton loader at true final geometry; G6 lifecycle rail; G7 operational disposition chip family; G8 evidence lens (hover + focus + tap); G9 epistemic-qualification badge; G10 count ladder. G1 and G3 merge the names parts of this spec used for the same need.
 
 ## 9. Seat decisions required
 
@@ -2397,6 +2423,7 @@ One line each: the question, this lane's recommendation, and the alternative.
 
 9. **`#positions` row cap (SEAT DECISION, §4 V1 Density)** — cap the shipped positions panel at 8 rows with a counted `See all N` landing on V6? **Recommend cap**; it is a behaviour change to a shipped panel, so it needs the seat. *Alternative:* keep the full table with in-panel scroll.
 10. **`account_preview.starting_nav` default (SEAT DECISION, §4 V1 Fields)** — the `or 1_000_000.0` default at `app/web.py:1342` must stop being silent. **Recommend** render `Unavailable` / `不可用` when the book has no recorded starting NAV, the same rule PR #1719 applies to the self-directed book. *Alternative:* keep the default but label it `Assumed starting capital` / `假定初始资金` everywhere it feeds a return.
+11. **V7 disposition display labels (SEAT DECISION, §4 V7)** — print #1711's dispositions through PRODUCT display labels (`started` → `Running`, `accepted_no_change` → `Accepted · no change`, `accepted_change` → `Accepted · change applied`, `incomplete_uncertain` → `Incomplete · uncertain`) or verbatim? **Recommend display labels**: the identifier stays the contract and the test key, and `Running` reads as a state where `Started` reads as an event. *Alternative:* title-case the identifiers (`Started`, `Accepted no change`, …), zero mapping but machine-sounding.
 
 ---
 
