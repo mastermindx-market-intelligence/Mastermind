@@ -198,7 +198,7 @@ gating only Chain A would just move fallback fills to these paths:
 
 - `execute_fill` scalar/`_current_price` selection — `paper_account.py:2196` (caller:
   `bot/derisk.py:610`).
-- `fill_pending._px_for` — `paper_account.py:2471-2475` (callers: `bot/phase2.py:2707`,
+- `fill_pending._px_for` — `paper_account.py:2471-2475` (callers: `bot/phase2.py:2702`,
   `scripts/fill_pending_now.py:108`, including its `est_price` fallback `:101-102`).
 - Flagship open cycle — `bot/phase2.py:2696-2709`.
 - Heavyweight build→rebalance — `bot/heavyweight.py:509-525`.
