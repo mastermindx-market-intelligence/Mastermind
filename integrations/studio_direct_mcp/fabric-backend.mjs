@@ -48,6 +48,7 @@ export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_capabilities', 'Read adapter availability and the fixed tool boundary. This does not dispatch, prove provider admission, or identify a ChatGPT user.', {}, [], true),
   tool('fabric_request', 'Submit a new bounded commission to the existing M2 Fabric adapter. The installed owner may use up to three immutable attempts after proven pre-task capacity rejection. Checks the exact origin run ID first. A returned controller PID does not prove worker START. Never replay an interrupted request or move an existing Executive operation here.', {
     ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
+    max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
     work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
@@ -216,9 +217,9 @@ export function createFabricFacade(engine, options={}) {
     if(!decoded || decoded.captureError || decoded.decodeError) fail('CAPTURE_INVALID');
     return {exit_code:decoded.exit_code,stdout:decoded.stdout};
   }
-  async function continuityAvailable() {
+  async function continuityAvailable(requestHelp=null) {
     if(!cfg.quotaFallback) return false;
-    const requestHelp=await runCapturedShort(['request','--help']);
+    requestHelp ??= await runCapturedShort(['request','--help']);
     const statusHelp=await runCapturedShort(['status','--help']);
     return requestHelp.exit_code===0 && statusHelp.exit_code===0 &&
       requestHelp.stdout.includes('--quota-fallback') && statusHelp.stdout.includes('--follow');
@@ -262,11 +263,17 @@ export function createFabricFacade(engine, options={}) {
         const requestKey=args.run_id;
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
         if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
-        if(cfg.quotaFallback && !await continuityAvailable()) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
+        let requestHelp=null;
+        if(args.max_turns!==undefined) {
+          requestHelp=await runCapturedShort(['request','--help']);
+          if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--max-turns')) fail('ADAPTER_TURN_LIMIT_UNAVAILABLE');
+        }
+        if(cfg.quotaFallback && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
         if(s.state!=='NOT_FOUND') fail(s.state==='EFFECT_UNKNOWN'?'EFFECT_UNKNOWN':'RUN_EXISTS');
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
         if(cfg.quotaFallback) argv.push('--quota-fallback');
+        if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
         if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
@@ -279,6 +286,7 @@ export function createFabricFacade(engine, options={}) {
         const settled=completedOutput(text);
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
+          ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }

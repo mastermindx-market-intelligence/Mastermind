@@ -368,3 +368,109 @@ admission and supervised deadline expiry. No test starts a provider worker or
 alters a live host/configuration owner. Passing these tests is source
 qualification, not live installation, worker START, result acceptance, or
 permission to replay any held operation.
+
+## Composed native-closure qualification
+
+After changing any file in the explicit native closure, rebuild the manifest and
+source inventory, compare the complete closure against the selected generation,
+and update the current `NATIVE_MANIFEST_SHA` binding in
+`tests/test_fabric_native_security_composition_20261018.py` to the reviewed
+manifest. Do not repin its historical executor, donor, quota, deadline or physical
+root transformations merely to clear a test. The current manifest pin is distinct
+from those preserved security preimages and transformations.
+
+Run the composed regression before publishing a PR, not only the isolated
+`ops/native_fabric` tests:
+
+```sh
+python3 -m pytest -q tests/test_fabric_native_security_composition_20261018.py
+```
+
+That test builds the exact closure, selects it through the existing publisher,
+and exercises the remote-support/executor/outcome-binding seam using an inert
+fixture. It does not contact a provider, acquire a host lease, or authorize a
+production selection. The OPT-007 outcome correction changes only
+`ext/provider_outcome.py` within the 85-file closure; its composed-manifest check
+must move with that reviewed change.
+
+## Explicit per-request turn ceilings
+
+The native `fabric_task.py request --max-turns N` constrains one new commission
+without changing global defaults. N must be an integer in 1..400. Validation
+precedes request retention and routing, including the foreground continuation
+entry. The transient request constraint is cleared at request ingress, retained
+with the commission, and carried by the existing environment relay. The incumbent
+`sub.sh` profile resolves its normal limit first, then applies the smaller request
+ceiling. An invalid incumbent limit is never sanitized by a valid request.
+
+Only the existing GLM and MiniMax Claude modes are qualified for this option.
+Model suitability, economic, host and lease guards still run; unsupported routes
+cannot silently execute without the ceiling. Quota successors preserve the
+ceiling and original deadline. Mid-task exhaustion never gains replay authority.
+This is a CLI-turn fuse, not a tool-call or token counter and not guaranteed cost.
+
+Repository test `tests/test_fabric_request_turn_budget.py` runs native and Web
+contracts in fresh processes, including actual shell/CLI fixture transport and
+negative tests. No provider calls or installed state are used. Release needs the
+full regenerated native manifest and its composition-test fingerprint, protected
+checks, then existing publisher/CAS selection. The Web facade is a separate
+same-account release and refuses an older native adapter for this opt-in.
+
+This change does not replace the OPT-007 outcome-classification repair in #1720.
+Compose any newer protected native closure before installation; never select this
+branch's earlier dependency snapshot over a later installed generation.
+
+### Request-ceiling qualification, 2026-10-22
+
+Operation `fabric-request-turn-budget-20261022-c3` keeps #1720's incumbent source
+and CI untouched. Direct scoped implementation was retained for lower total
+framing/review overhead; no new provider worker or native helper was commissioned.
+The new regressions first failed on the preimage. Local checks then passed 12
+native ceiling/continuation/profile cases, 43 Web facade cases (including actual
+isolated shell/CLI transport), and the two corresponding repository wrapper cases.
+Separate incumbent suites passed: adapter 4, foreground continuation 7, owned
+wrappers 3, capacity preflight 6, physical transport owner 20, support publication 3.
+Counts overlap in exercised behavior and are not independent product capabilities.
+
+The existing 19-case commission-deadline suite returned two failures on M2, with
+retained evidence of an expired original deadline during routing-env processing.
+No timeout was relaxed and causation is not established. A subsequent isolated
+Ubuntu qualification transport was refused by the platform before dispatch; it
+was not replayed through another connector. The repository CI wrapper includes the existing deadline suite so a protected
+release cannot silently omit it; the follow-up fixture changes below preserve
+all original short-expiry assertions.
+Local regression artifacts remain at
+`/Volumes/Mastermind/evidence/fabric-request-turn-budget-20261022-c3/native-regression`.
+Full current-head hosted CI, native selection and live Web/native consumption
+remain unproven. This candidate is source-only until those release gates clear.
+
+### Follow-up: private fixtures and actual worker-wrapper ceiling
+
+The two positive transport-identity cases now allow finite 30-second startup
+headroom (40-second outer test timeout); they do not test host speed. Every short
+negative expiry case and the frozen original 31.5-second end-to-end assertion
+remain unchanged. The normal CI wrapper supplies the existing test-root seam
+with a canonical private directory beneath the test user's home. Shared `/tmp`
+was correctly rejected by the no-follow/ancestor-mode checks; no permissions or
+production guard was changed to admit it.
+
+All five targeted positive/tamper/expiry cases passed in that private directory.
+The complete CI-facing wrapper then returned two passed and one failed: within
+its 19-case deadline suite, the frozen original case measured 31.660543 seconds
+against 31.5. This remains a failed check, not a waived threshold or a proven
+cause. No further unchanged timing retry was made. Hosted exact-head qualification
+remains required and this source candidate remains DRAFT/HOLD.
+
+An additional real executor -> provider wrapper -> inert CLI regression now
+verifies both GLM and MiniMax receive max-turns25, and that an existing limit8
+remains8. It checks actual process/output binding and cleanup through existing
+owners, with only loopback provider and fake credential fixtures. The native
+ceiling suite now passes13 tests; the Web facade suite passes43. A disposable
+source-only composition of #1720's corrected private metadata projection with
+this ceiling implementation passed the nine metadata and twelve then-existing
+ceiling cases. These are compatibility tests, not deployment or live acceptance.
+
+The existing deadline assertion is not removed, weakened or marked expected to
+fail. Runtime source and the 85-file native manifest are unchanged by these
+fixture improvements. Evidence remains in this operation's native-regression
+directory; production selection and both owning release processes remain pending.
