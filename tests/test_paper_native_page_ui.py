@@ -74,17 +74,20 @@ class FakePeekaboo:
         self.wrong_title = False
         self.right_clicks = 0
         self.drift_second_menu_to_keep = False
+        self.drift_final_menu_to_keep = False
         self.move_final_menu = False
         self.source_native_drift_after_delete = False
 
-    def menu(self, window_id, private_dir):
-        self.calls.append(("menu", window_id))
+    def menu(self, window_id, private_dir, *, row_x, row_y):
+        self.calls.append(("menu", window_id, row_x, row_y))
         assert private_dir.exists()
         elements = [
             {"id": "ocr_3", "label": "Copy link", "confidence": 0.5,
              "bounds": {"x": 620, "y": 210, "width": 60, "height": 12}},
             {"id": "ocr_4", "label": "Delete page", "confidence": 0.5,
-             "bounds": {"x": 620, "y": 265, "width": 75, "height": 12}},
+             "bounds": {"x": 620, "y": 306, "width": 75, "height": 12}},
+            {"id": "ocr_5", "label": "Add divider", "confidence": 0.5,
+             "bounds": {"x": 620, "y": 245, "width": 75, "height": 12}},
         ]
         if self.missing_menu:
             elements = elements[:1]
@@ -97,6 +100,8 @@ class FakePeekaboo:
             "coordinate_context": {"logical_bounds": [[508, 55], [2165, 1223]],
                                     "window": {"window_id": window_id}},
             "ui_elements": elements,
+            "_row_visual_sha256": (
+                "a" * 64 if self.link_page == "p-3-0" else "b" * 64),
         }
 
     def click(self, window_id, x, y, *, right=False):
@@ -105,16 +110,20 @@ class FakePeekaboo:
             self.right_clicks += 1
             if self.drift_second_menu_to_keep and self.right_clicks == 2:
                 self.link_page = "p-1-0"
+            if self.drift_final_menu_to_keep and self.right_clicks == 3:
+                self.link_page = "p-1-0"
             return {"success": True}
         if y == 161:  # Copy link OCR: 210+6-55
             if not self.no_clipboard_change and not (
                     self.no_second_copy_change and self.right_clicks == 2):
                 self.clipboard["value"] = (
                     "https://app.paper.design/file/" + self.link_file + "/" + self.link_page)
-        elif y == 216:  # Delete page OCR: 265+6-55
+        elif y == 257:  # Delete page OCR: 306+6-55
             if self.fail_delete:
                 raise ui_module.bridge.Refusal("CLICK_RESULT_LOST")
-            self.client.files[CLONE]["pages"] = [copy.deepcopy(PAGE1)]
+            self.client.files[CLONE]["pages"] = (
+                [copy.deepcopy(PAGE2)] if self.link_page == "p-1-0"
+                else [copy.deepcopy(PAGE1)])
             if self.source_native_drift_after_delete:
                 self.client.source_native_drift = True
             if self.change_file_after_delete:
@@ -159,7 +168,7 @@ def perform(plan=None, *, client=None, clipboard=None, ui=None, page_id="p-3-0")
         client, clipboard, ui = scenario()
     result = ui_module.prune_one(
         plan or fixture_plan(), page_id, "paper-scratch-ui-20261022",
-        313, 87, 194, client=client, ui=ui,
+        313, 100, 165, client=client, ui=ui,
         clipboard=lambda: clipboard["value"],
         clipboard_set=lambda value: clipboard.__setitem__("value", value))
     return result, client, clipboard, ui
@@ -169,7 +178,8 @@ class NativePageUITests(unittest.TestCase):
     def test_copy_link_anchor_only_with_two_verified_first_party_menu_rows(self):
         from copy import deepcopy
         client, clipboard, ui = scenario()
-        snapshot = ui.menu(313, __import__("pathlib").Path("/tmp"))
+        snapshot = ui.menu(313, __import__("pathlib").Path("/tmp"),
+                           row_x=100, row_y=165)
         # Real M1 OCR omitted Copy link while recognizing Add divider and
         # Delete page. First row may be clicked non-destructively but its
         # clipboard result must still independently match exact IDs.
@@ -246,7 +256,7 @@ class NativePageUITests(unittest.TestCase):
         self.assertFalse(result["retry_allowed"])
         self.assertEqual([p["id"] for p in client.files[SRC]["pages"]], ["p-1-0", "p-3-0"])
         self.assertEqual([p["id"] for p in client.files[CLONE]["pages"]], ["p-1-0"])
-        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click" and x[3] == 216), 1)
+        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click" and x[3] == 257), 1)
 
     def test_second_copy_link_must_refresh_unique_clipboard_marker(self):
         client, clipboard, ui = scenario()
@@ -255,19 +265,77 @@ class NativePageUITests(unittest.TestCase):
         self.assertEqual(result["state"], "STALE_CLIPBOARD")
         self.assertEqual(ui.right_clicks, 2)
         self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
-                             and x[3] == 216), 0)
+                             and x[3] == 257), 0)
         self.assertEqual(len(client.files[CLONE]["pages"]), 2)
 
     def test_second_menu_page_drift_refuses_before_destructive_dispatch(self):
         client, clipboard, ui = scenario()
         ui.drift_second_menu_to_keep = True
         result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
-        self.assertEqual(result["state"], "UI_PAGE_ID_MISMATCH")
+        self.assertEqual(result["state"], "UI_PAGE_ROW_CHANGED")
         self.assertEqual(ui.right_clicks, 2)
         self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
-                             and x[3] == 216), 0)
+                             and x[3] == 257), 0)
         self.assertEqual([p["id"] for p in client.files[CLONE]["pages"]],
                          ["p-1-0", "p-3-0"])
+
+    def test_identical_geometry_third_menu_wrong_page_refuses_before_delete(self):
+        # Adversarial repro of the actual independent-review P1: the last
+        # context menu belongs to a different retained page even though its
+        # Copy link / Delete page geometry is unchanged.
+        client, clipboard, ui = scenario()
+        ui.drift_final_menu_to_keep = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "UI_PAGE_ROW_CHANGED")
+        self.assertEqual(ui.right_clicks, 3)
+        self.assertEqual(
+            sum(1 for x in ui.calls if x[0] == "click" and x[3] == 257), 0)
+        self.assertEqual([p["id"] for p in client.files[CLONE]["pages"]],
+                         ["p-1-0", "p-3-0"])
+
+    def test_third_menu_wrong_page_mutation_kills_visual_guard(self):
+        from unittest.mock import patch
+        client, clipboard, ui = scenario()
+        ui.drift_final_menu_to_keep = True
+        # Simulates accidentally removing the new visual identity fence.
+        with patch.object(ui_module, "_assert_same_row_visual", return_value=None):
+            result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+        self.assertEqual(
+            [p["id"] for p in client.files[CLONE]["pages"]], ["p-3-0"])
+        self.assertEqual(
+            sum(1 for x in ui.calls if x[0] == "click" and x[3] == 257), 1)
+
+    def test_missing_or_changed_sidebar_visual_refuses(self):
+        fake = {"_row_visual_sha256": "a" * 64}
+        other = {"_row_visual_sha256": "b" * 64}
+        ui_module._assert_same_row_visual(fake, dict(fake))
+        for invalid in (other, {}, {"_row_visual_sha256": "not-a-sha"}):
+            with self.subTest(invalid=invalid), self.assertRaises(
+                    ui_module.bridge.Refusal):
+                ui_module._assert_same_row_visual(fake, invalid)
+
+    def test_lone_forged_near_row_delete_ocr_refuses(self):
+        client, clip, ui = scenario()
+        snapshot = ui.menu(313, __import__("pathlib").Path("/tmp"),
+                           row_x=100, row_y=165)
+        del snapshot["ui_elements"][2]  # No corroborating Add divider
+        with self.assertRaisesRegex(ui_module.bridge.Refusal,
+                                    "UI_MENU_STRUCTURE_UNVERIFIED"):
+            ui_module._menu_target(
+                snapshot, "Young harmony (copy)", "Delete page", 313,
+                row_x=100, row_y=165)
+
+    def test_persistent_near_row_misaligned_menu_stack_refuses(self):
+        client, clip, ui = scenario()
+        snapshot = ui.menu(313, __import__("pathlib").Path("/tmp"),
+                           row_x=100, row_y=165)
+        snapshot["ui_elements"][2]["bounds"]["x"] += 40
+        with self.assertRaisesRegex(ui_module.bridge.Refusal,
+                                    "UI_MENU_STRUCTURE_UNVERIFIED"):
+            ui_module._menu_target(
+                snapshot, "Young harmony (copy)", "Delete page", 313,
+                row_x=100, row_y=165)
 
     def test_final_menu_relocation_refuses_before_destructive_dispatch(self):
         client, clipboard, ui = scenario()
@@ -276,7 +344,7 @@ class NativePageUITests(unittest.TestCase):
         self.assertEqual(result["state"], "UI_MENU_RELOCATED")
         self.assertEqual(ui.right_clicks, 3)
         self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
-                             and x[3] == 216), 0)
+                             and x[3] == 257), 0)
         self.assertEqual(len(client.files[CLONE]["pages"]), 2)
 
     def test_content_only_source_drift_after_dispatch_cannot_be_verified(self):
@@ -291,7 +359,7 @@ class NativePageUITests(unittest.TestCase):
         self.assertEqual(len(client.files[SRC]["pages"]), 2)
         self.assertEqual(len(client.files[CLONE]["pages"]), 1)
         self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
-                             and x[3] == 216), 1)
+                             and x[3] == 257), 1)
 
     def test_wrong_file_link_refuses_before_delete(self):
         client, clipboard, ui = scenario()
@@ -299,7 +367,7 @@ class NativePageUITests(unittest.TestCase):
         result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
         self.assertEqual(result["state"], "UI_PAGE_ID_MISMATCH")
         self.assertEqual(len(client.files[CLONE]["pages"]), 2)
-        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click" and x[3] == 216), 0)
+        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click" and x[3] == 257), 0)
 
     def test_wrong_page_link_refuses_before_delete(self):
         client, clipboard, ui = scenario()

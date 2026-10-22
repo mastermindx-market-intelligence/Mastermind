@@ -8,6 +8,7 @@ and installed before enabling worker-facing destructive tools.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import math
 from pathlib import Path
@@ -223,15 +224,75 @@ class NativePeekaboo:
             args.append("--right")
         return self._json(args)
 
-    def menu(self, window_id: int, private_dir: Path) -> dict:
-        # Screenshot is ephemeral inside a 0700 dir, never sent to a new server.
+    def menu(self, window_id: int, private_dir: Path, *,
+             row_x: int, row_y: int) -> dict:
+        # Native first-party screenshot is ephemeral inside a 0700 dir.
+        shot = private_dir / "paper-menu.png"
         args = ["see", "--window-id", str(window_id), "--ocr",
-                "--path", str(private_dir / "paper-menu.png")]
+                "--path", str(shot)]
         obj = self._json(args, timeout=18)
         data = obj.get("data")
         if not isinstance(data, dict):
             raise bridge.Refusal("UI_OBSERVATION_UNAVAILABLE")
+        data["_row_visual_sha256"] = _row_visual_fingerprint(
+            shot, data.get("coordinate_context"), row_x, row_y,
+            private_dir / "sidebar-row.png")
         return data
+
+def _row_visual_fingerprint(image_path: Path, context: dict,
+                            row_x: int, row_y: int, crop_path: Path) -> str:
+    """Fingerprint the left sidebar row AND nearby visible page list.
+
+    Live Paper v0.5.15 proved identical SHA across independently opened
+    menus and a different digest when the crop shifts to another row on M1.
+    Including neighboring labels detects scroll/reorder even if two page
+    titles share the same visible prefix. Menu geometry alone is insufficient.
+    A matching screenshot is not an atomic Paper page-ID binding; all work
+    remains on verified disposable clones until a stronger API exists.
+    """
+    if (type(row_x) is not int or type(row_y) is not int
+            or not 85 <= row_x <= 190 or row_y < 24):
+        raise bridge.Refusal("UI_ROW_VISUAL_UNVERIFIED")
+    context = context if isinstance(context, dict) else {}
+    bounds = context.get("logical_bounds")
+    frame = context.get("delivered_image_size")
+    scale = context.get("output_scale")
+    if (not isinstance(bounds, list) or len(bounds) != 2
+            or not isinstance(bounds[1], list) or len(bounds[1]) != 2
+            or not isinstance(frame, list) or len(frame) != 2
+            or scale != 1
+            or any(type(x) is not int or x <= 0 for x in frame)
+            or any(not _finite_number(x) or x <= 0 for x in bounds[1])
+            or any(abs(frame[i] - bounds[1][i]) > 2 for i in (0, 1))):
+        raise bridge.Refusal("UI_ROW_VISUAL_UNVERIFIED")
+    x, y, width = 15, max(0, row_y - 60), row_x - 25
+    height = min(140, frame[1] - y)
+    if (width < 60 or x + width > frame[0] or height < 60
+            or not (y <= row_y - 10 and y + height >= row_y + 10)
+            or not image_path.is_file()):
+        raise bridge.Refusal("UI_ROW_VISUAL_UNVERIFIED")
+    try:
+        p = subprocess.run(["/usr/bin/sips", "-s", "format", "png",
+                            "-c", str(height), str(width), "--cropOffset",
+                            str(y), str(x), str(image_path),
+                            "--out", str(crop_path)],
+                           capture_output=True, timeout=6, check=False)
+        raw = crop_path.read_bytes() if p.returncode == 0 else b""
+    except (OSError, subprocess.TimeoutExpired):
+        raise bridge.Refusal("UI_ROW_VISUAL_UNAVAILABLE") from None
+    if len(raw) < 100 or not raw.startswith(b"\x89PNG\r\n\x1a\n"):
+        raise bridge.Refusal("UI_ROW_VISUAL_UNAVAILABLE")
+    return hashlib.sha256(raw).hexdigest()
+
+
+def _assert_same_row_visual(*snapshots: dict) -> None:
+    digests = [s.get("_row_visual_sha256") for s in snapshots]
+    if (len(digests) < 2
+            or any(not isinstance(v, str)
+                   or not re.fullmatch(r"[0-9a-f]{64}", v) for v in digests)):
+        raise bridge.Refusal("UI_ROW_VISUAL_UNVERIFIED")
+    if len(set(digests)) != 1:
+        raise bridge.Refusal("UI_PAGE_ROW_CHANGED")
 
 
 def _finite_number(value) -> bool:
@@ -309,6 +370,29 @@ def _menu_target(snapshot: dict, expected_file_name: str, label: str,
         raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
     if not all(_finite_number(rect.get(k)) for k in ("x", "y", "width", "height")):
         raise bridge.Refusal("UI_MENU_BOUNDS_UNVERIFIED")
+    if label.casefold() == "delete page":
+        # A lone OCR string on a design canvas is not a first-party menu.
+        # The live context menu places Add divider 42-80px above Delete
+        # page, sharing its column; both anchors must be unique and coherent.
+        anchors = [
+            z for z in snapshot.get("ui_elements", []) or []
+            if isinstance(z, dict) and str(z.get("id", "")).startswith("ocr_")
+            and str(z.get("label", "")).strip().casefold() == "add divider"
+            and _finite_number(z.get("confidence"))
+            and OCR_MIN_CONFIDENCE <= z["confidence"] <= 1
+        ]
+        if len(anchors) != 1:
+            raise bridge.Refusal("UI_MENU_STRUCTURE_UNVERIFIED")
+        add = anchors[0].get("bounds") or {}
+        if (not all(_finite_number(add.get(k))
+                    for k in ("x", "y", "width", "height"))
+                or not 6 <= add["height"] <= 20
+                or not 6 <= rect["height"] <= 20
+                or abs((add["x"] + add["width"] / 2)
+                       - (rect["x"] + rect["width"] / 2)) > 16
+                or not 42 <= (rect["y"] + rect["height"] / 2
+                              - add["y"] - add["height"] / 2) <= 80):
+            raise bridge.Refusal("UI_MENU_STRUCTURE_UNVERIFIED")
     x = round(rect["x"] + rect["width"] / 2 - origin_x)
     y = round(rect["y"] + rect["height"] / 2 - origin_y)
     if not (0 <= x < width and 0 <= y < height):
@@ -363,7 +447,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
         with tempfile.TemporaryDirectory(prefix="paper-clone-ui-", dir=str(bridge.state_root())) as tmp:
             private_dir = Path(tmp)
             ui.click(window_id, row_x, row_y, right=True)
-            opened = ui.menu(window_id, private_dir)
+            opened = ui.menu(window_id, private_dir, row_x=row_x, row_y=row_y)
             copy_xy = _menu_target(opened, plan["clone_file_name"], "Copy link", window_id,
                                    row_x=row_x, row_y=row_y)
             _menu_target(opened, plan["clone_file_name"], "Delete page", window_id,
@@ -380,7 +464,8 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             # changes can make the next right-click target a different page.
             # Copy the link from the *second* menu before re-arming delete.
             ui.click(window_id, row_x, row_y, right=True)
-            reopened = ui.menu(window_id, private_dir)
+            reopened = ui.menu(window_id, private_dir, row_x=row_x, row_y=row_y)
+            _assert_same_row_visual(opened, reopened)
             second_copy_xy = _menu_target(reopened, plan["clone_file_name"], "Copy link", window_id,
                                           row_x=row_x, row_y=row_y)
             second_delete_xy = _menu_target(reopened, plan["clone_file_name"], "Delete page", window_id,
@@ -398,11 +483,13 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
                 raise bridge.Refusal("UI_PAGE_ID_MISMATCH")
             _validate_plan_and_current(plan, client, page_id)
 
-            # Copy link closes the menu. Reopen once for Delete, rejecting
-            # menu movement since the freshly ID-verified second menu. This
-            # is a guarded visual actuation, not an atomic Paper page API.
+            # Finish all Paper RPCs BEFORE opening the destructive menu.
+            # The final screenshot is compared against two independently
+            # observed sidebar-row pixels; same menu geometry alone would
+            # miss a different target page after a reorder/scroll.
             ui.click(window_id, row_x, row_y, right=True)
-            final_menu = ui.menu(window_id, private_dir)
+            final_menu = ui.menu(window_id, private_dir, row_x=row_x, row_y=row_y)
+            _assert_same_row_visual(opened, reopened, final_menu)
             _menu_target(final_menu, plan["clone_file_name"], "Copy link", window_id,
                          row_x=row_x, row_y=row_y)
             delete_xy = _menu_target(final_menu, plan["clone_file_name"], "Delete page", window_id,
@@ -410,7 +497,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             if (abs(delete_xy[0] - second_delete_xy[0]) > 12
                     or abs(delete_xy[1] - second_delete_xy[1]) > 12):
                 raise bridge.Refusal("UI_MENU_RELOCATED")
-            _validate_plan_and_current(plan, client, page_id)
+            # No Paper RPC between exact-row visual proof and Delete.
             delete_dispatched = True
             try:
                 ui.click(window_id, *delete_xy)
