@@ -133,7 +133,7 @@ def test_skill_drift_detected_without_mutation(tmp_path: Path) -> None:
 
 
 def test_bounded_operator_source_keeps_plain_leaf_denied() -> None:
-    from ops.native_fabric.quota_continuity.source import fabric_operator_client as client
+    from ops.native_fabric.quota_continuity.candidate import fabric_operator_client as client
     assert "fabric_operator_scope" in client.OPERATOR_INSTRUCTIONS
     assert "fabric_child_request" in client.OPERATOR_INSTRUCTIONS
     assert "fabric_child_acknowledge" in client.OPERATOR_INSTRUCTIONS
