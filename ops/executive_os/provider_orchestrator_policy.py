@@ -569,6 +569,8 @@ def _paths(home: Path) -> dict[str, Path]:
         "claude_settings": home / ".claude" / "settings.json",
         "codex_guard": home / ".codex" / "hooks" / "mastermind_fabric_routing_guard.py",
         "claude_guard": home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py",
+        "codex_cursor_task_policy": home / ".codex" / "hooks" / "cursor_native_child_policy.py",
+        "claude_cursor_task_policy": home / ".claude" / "hooks" / "cursor_native_child_policy.py",
     }
 
     for provider, directory in (("codex", ".agents"), ("claude", ".claude")):
@@ -580,6 +582,11 @@ def _paths(home: Path) -> dict[str, Path]:
 def _canonical_guard(source: Path | None = None) -> bytes:
     path = source or Path(__file__).with_name("provider_orchestrator_guard.py")
     return _regular_bytes(path)
+
+
+def _canonical_cursor_task_policy() -> bytes:
+    """Read the companion role verifier; no separate hook registration."""
+    return _regular_bytes(Path(__file__).with_name("cursor_native_child_policy.py"))
 
 
 def _canonical_role_files() -> dict[str, bytes]:
@@ -626,6 +633,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
     resolved_home = Path(home).expanduser().resolve()
     paths = _paths(resolved_home)
     guard = _canonical_guard(guard_source)
+    cursor_policy = _canonical_cursor_task_policy()
     roles = _canonical_role_files()
     _preflight_destination(paths["claude_settings"], resolved_home)
     _refuse_existing_claude_native_limit_reset(
@@ -656,6 +664,8 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
     }
 
     operations = [
+        ("codex_cursor_task_policy", cursor_policy),
+        ("claude_cursor_task_policy", cursor_policy),
         ("codex_guard", guard),
         ("claude_guard", guard),
         ("codex_doc", rendered["codex_doc"]),
@@ -671,7 +681,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
         for provider in ("codex", "claude")
         for index, relative in enumerate(ROLE_SHA256)
     ]
-    operations = operations[:2] + role_operations + operations[2:]
+    operations = operations[:4] + role_operations + operations[4:]
     modified: list[str] = []
     try:
         for key, payload in operations:
@@ -759,6 +769,7 @@ def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str
     selected = ("codex", "claude") if provider == "all" else (provider,)
     paths = _paths(home)
     canonical = _canonical_guard(guard_source)
+    cursor_policy = _canonical_cursor_task_policy()
     issues: list[str] = []
     roles = _canonical_role_files()
     for enrolled_provider in selected:
@@ -773,6 +784,13 @@ def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str
             if installed != roles[relative]:
                 issues.append(f"{key}.digest")
 
+
+    for name in (f"{p}_cursor_task_policy" for p in selected):
+        try:
+            if _regular_bytes(paths[name]) != cursor_policy:
+                issues.append(f"{name}.digest")
+        except OrchestratorPolicyError:
+            issues.append(f"{name}.missing")
 
     for name in (f"{p}_guard" for p in selected):
         try:
@@ -889,6 +907,7 @@ def apply_provider_policy(
     paths = _paths(resolved_home)
     selected = {k: path for k, path in paths.items() if k.startswith(provider + "_")}
     guard = _canonical_guard(guard_source)
+    cursor_policy = _canonical_cursor_task_policy()
     roles = _canonical_role_files()
 
     # All destination and exact-config preconditions before a single write.
@@ -899,6 +918,7 @@ def apply_provider_policy(
         _refuse_existing_claude_native_limit_reset(original_settings)
         original_doc = _regular_bytes(paths["claude_doc"], missing=b"").decode("utf-8")
         operations = [
+            ("claude_cursor_task_policy", cursor_policy),
             ("claude_guard", guard),
             ("claude_doc", _managed_text(original_doc).encode("utf-8")),
             (
@@ -911,6 +931,7 @@ def apply_provider_policy(
         original_hooks = _regular_bytes(paths["codex_hooks"], missing=b"{}\n")
         original_config = _regular_bytes(paths["codex_config"], missing=b"")
         operations = [
+            ("codex_cursor_task_policy", cursor_policy),
             ("codex_guard", guard),
             ("codex_doc", _managed_text(original_doc).encode("utf-8")),
             ("codex_hooks", _render_codex_hooks(original_hooks, paths["codex_guard"])),

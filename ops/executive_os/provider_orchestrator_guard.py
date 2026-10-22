@@ -438,6 +438,40 @@ def main() -> None:
         guard_bash(payload, tool_input)
         return
 
+    # A Cursor Task has the runtime-owned top-level cursor_version field.
+    # CURSOR_VERSION in the environment alone is NOT enough: a Claude CLI
+    # running inside Cursor can inherit that variable and must remain subject
+    # to its original native-child guard.
+    if tool == "Task" and "cursor_version" in payload:
+        project_root = os.environ.get("CURSOR_PROJECT_DIR", "")
+        # Cursor hook events may omit cwd. Check the actual Cursor project root
+        # for company policy scope; the classifier separately binds it to the
+        # observed workspace_roots and the hook's executing cwd.
+        in_company_scope = is_project_scope(payload) or (
+            bool(project_root)
+            and os.path.isabs(project_root)
+            and is_project_scope({"cwd": project_root})
+        )
+        if not in_company_scope:
+            return
+        try:
+            if __package__:
+                from .cursor_native_child_policy import evaluate_cursor_task
+            else:
+                from cursor_native_child_policy import evaluate_cursor_task
+        except ImportError:
+            deny("Mastermind Cursor role policy unavailable; native Task refused")
+        observed = evaluate_cursor_task(payload, os.environ)
+        if not observed.admitted:
+            deny("Mastermind Cursor Task refused: " + observed.code)
+        allow_context(
+            "Approved read-only Cursor role declaration: "
+            + str(observed.declared_model)
+            + ". Actual selected model and any fallback remain UNVERIFIED; "
+            "no Fabric dispatch, identity, child budget or acceptance granted."
+        )
+        return
+
     if tool in ("Agent", "Task") and is_project_scope(payload):
         guard_native_child(tool_input)
 

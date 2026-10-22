@@ -1,0 +1,12 @@
+---
+description: Cursor task model selection, subagent delegation, parallel agents, paid Subagent Fabric, routing economics and context budget
+alwaysApply: false
+---
+# Cost-aware model and tool selection
+
+- First ask whether the task needs another agent at all. Keep a deterministic formatter, lookup or one-tool read with the principal or skill. Use a narrow subagent for independent context-heavy investigation or an admissible scoped review; parallelism is not a success metric.
+- Categorize a packet as C0 mechanical, C1 routine, C2 complex-bounded or C3 genuine frontier judgment. Separate actual available Cursor models from configured frontmatter and observed successful executions. A catalog is not plan quota or selected model proof.
+- Prefer the existing Executive/Capacity paid Fabric route for meaningful C0-C2 labor when the current Cursor principal and typed MCP tools are admitted. Do not directly launch `fabric_task.py`, `pool`, `sub.sh`, SSH or another provider from Cursor to work around missing admission.
+- Native `mmx-repo-explorer` and `mmx-independent-reviewer` are read-only helpers **only if** the effective incumbent hook allows them. Other role files may be discovered but are not automatically authorized native children. Actual child START, model and cost must be measured from tool/session evidence.
+- For tasks with overlapping source files, keep one modifying author and independently verify before integration. The original root and parent stay stable; a lost modifying result is EFFECT_UNKNOWN and cannot be silently retried or moved.
+- Delegate compact input, exact source refs, one bounded deliverable, tests, and return evidence; never delegate a transcript or unlimited branch ownership.

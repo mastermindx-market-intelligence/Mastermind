@@ -1,0 +1,13 @@
+---
+description: Mastermind substantial engineering missions, multi-phase implementation, Cursor planning, project continuity, handoffs, and autonomous orchestrator recovery
+alwaysApply: false
+---
+# Sustained project execution in Cursor
+
+0. Plan-mode CLI can request interactive decisions. In headless `--print --mode=plan`, an `interaction_query` or exit 0 without a completed plan artifact is **not** plan acceptance. Prefer interactive Plan for decisions, or read-only Ask for a noninteractive proposal; verify final content before moving to implementation.
+1. Use Cursor Plan mode (`/plan`, `--mode=plan`) to decompose the assigned outcome only when it materially reduces ambiguity. The plan is working context, not a new durable Job or parallel state machine.
+2. Activate the `mastermind-long-horizon` project skill. Recover the current operation and the smallest current canonical frontier, then define DONE_WHEN, one critical dependency, scoped verticals, non-goals and evidence.
+3. Before changes, confirm the actual Git-linked workspace, base/head SHA, current modifying writer, affected files and unresolved effects. Use the canonical `mmx-workspace` admission route for a new Mastermind source worktree; avoid Cursor `-w` or auto-created worktrees competing with registered source leases.
+4. Spend principal context on decisions, integration and review. Send only bounded eligible worker labor through an actually authorized Fabric session. Native Cursor subagents may help where the installed hook explicitly permits; do not invent a Fabric carrier when tools are absent.
+5. On every useful verified vertical, persist source/result evidence with GitHub and organizational continuity in the existing Agent OS owner. Continue the next independent unblocked phase while CI/review waits; never busy-loop status or equate a checkpoint with completion.
+6. On session recovery use the exact branch/commit, original root, active writer/effects and next executable action; do not replay completed steps or invent background execution.
