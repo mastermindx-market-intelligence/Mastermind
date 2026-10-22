@@ -287,8 +287,9 @@ def _mu_catalyst_components(fix):
                     value=value,
                     source_ref=f"records@75.{path}",
                     # SR-1 rule (3) declared identity: the claimed catalyst is
-                    # the fiscal Q4 2026 results release; the fixture digests
-                    # carry no period_labels.
+                    # the fiscal Q4 2026 results release. The why_now/exit_plan
+                    # digests carry no period label and the falsifier digest
+                    # records another form, so one canonical label is declared.
                     period="FY2026-Q4",
                 ),
             )
