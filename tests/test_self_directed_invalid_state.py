@@ -906,3 +906,27 @@ def test_publish_never_creates_its_directory(
 
     assert sd.publish(prices={"AAA": 12.0}) is None
     assert not published.exists()
+
+
+# ── B8. the low-level writer never creates directories ────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_low_level_writer_never_creates_directories(
+        strict_sd: Path, run_events_recorder: list[dict]) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    away = base.with_name(base.name + ".away")
+    base.rename(away)
+
+    with pytest.raises(OSError):
+        sd._atomic_write_bytes(base / "x.json", b"{}")
+    with pytest.raises(sd.SelfDirectedAccountInvalid):
+        sd._append_fill({"a": 1})
+    assert not base.exists()
+    assert list(away.iterdir()) == []
+
+    base.mkdir()
+    sd._atomic_write_bytes(base / "x.json", b"{}")
+    assert sorted(p.name for p in base.iterdir()) == ["x.json"]
+    assert (base / "x.json").read_bytes() == b"{}"
