@@ -178,3 +178,17 @@ Parent preparation and reads at this boundary:
 ## Public-history exposure (seat or GitHub decision; RESEARCH cannot purge)
 
 Pre-SR-1 verbatim production rows remain in public git history: #1703 commit `a71544d9` (fixtures before the amendment); this ledger branch's earlier L-S3 packet commits and the first `R-1701.REVIEW.md` copy; #1701 head `cdc79d10`. Later heads carry digests only. Purging (history rewrite or GitHub support) is a seat decision.
+
+## Seat ruling on wave 2 (received ~15:45Z)
+
+- Wave 2 ACCEPTED: #1750 at `8e68a202` and #1754 at `f23a9c7d` verified on origin/master by the seat. Flag A2 noted, no ruling.
+- **#1746 (W2-R3) MERGED into the #673 carrier** by the seat: squash at exact head `a2d3a6c1`. Carrier head is now `67aa483a3a5ac445b01a3dc2849889afa19ce057` (was `2a830e60`). Fetched and confirmed at 15:47Z.
+- **GO for W2-R4 step 2 (supersedes build).** Fabric build; one C2 review (glm-5.3) at the exact head; PR titled "[RESERVED: seat merge]"; lands in W2 after the W1 lift. Constraints:
+  1. append-only `supersedes=<prior row id>`, no in-place overwrite anywhere, the 11 writers on one writer API;
+  2. one effective-row accessor, readers changed only where a raw read must call it, no PRODUCT logic change;
+  3. `bot/settle.py` :902/:986 still raise on a genuine double settlement but read the effective row, with discriminating tests both ways;
+  4. ECON's `portfolio/heavyweight_outcomes.py` and `portfolio/etf_outcomes.py` touched only through the accessor, and ECON reads that slice through the seat before RETURN;
+  5. replay of the RUNTIME `run_events` capture (sha256 `6a423ef9…`): the effective view equals master's view for every asof, payload byte-equal except the new fields;
+  6. evidence off-repo under `/Volumes/Mastermind/evidence/pbr/`.
+- **W2-R5 APPROVED**: one C1 leaf lane for the three open MINORs above. Runs after W2-R4's head is fixed, gets its own exact-head review, opens RESERVED, lands W2.
+- Merge hold: nothing of RESEARCH's enqueues on master before "s3 launched" or "window lost"; no `gh pr merge` on a pending-check PR after 02:00Z. Both W2 PRs are seat-merged.
