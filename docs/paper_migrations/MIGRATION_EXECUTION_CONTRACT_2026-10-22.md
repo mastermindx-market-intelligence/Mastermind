@@ -255,3 +255,20 @@ The [read-only name-and-journey partition candidates](HEAVY_PAGE_SEMANTIC_PARTIT
 Max group size is 22 **artboards**, but that is NOT a safe vendor storage measurement. One complex artboard can still exceed the provisional per-file target. The artifact explicitly leaves per-board subtree-node counts, actual asset bytes, shared component dependencies, new destination file IDs and native copy verification unknown.
 
 Before moving: obtain real per-artboard subtree weights, inspect references/components that cross proposed groups, move paired dark/light/EN/ZH/device states together when feasible, and revise any grouping that would break reuse, history lineage or useful end-user experience. The first source copy should remain small and non-destructive, with readback and native editability. Neither this partition proposal nor the preceding offline 51-page plan authorizes file creation or source cleanup.
+
+
+## 14. Vendor storage, restoration and call-budget constraints (official-source research)
+
+Official Paper public references reviewed October 22, 2026:
+
+- https://paper.design/build-log — the **August 2026** changelog says the file-size limit was raised for Pro-plan files and dashboard duplication was added. The **September 2026** changelog reports large-file memory and navigation improvements. This does not disclose exact per-file document byte/node limits, prove the source warning is false or qualify a specific duplication/restoration method.
+- https://paper.design/pricing — as inspected, Free lists 100/week MCP tool calls and Pro lists 1M/week MCP tool calls. These are public plan descriptions, not proof of the active seat's plan or available quota. The stated 25 MB Free / 100 MB Pro figure is a **max image size**, not a Paper document size. Never substitute it for a file/node capacity limit.
+- https://paper.design/docs/support — copy/export shortcuts are documented, but an image/React/Tailwind export is not a restorable, natively editable Paper source.
+- https://paper.design/docs/tokens — copying a theme between files is supported, but those token copies are **not synchronized** with future source token changes.
+- https://paper.design/docs/paste/figma — importing from Figma may detach instances/variables and may omit unavailable images; this **does not prove** that Paper-to-Paper native copy does the same, but shows why imported/cross-file component and asset fidelity must be tested independently.
+
+**Unverified recovery capability:** The consulted public docs did not establish a version-history restore API or a restorable native single-file archive. Do **not** assume that a dashboard duplicate, image export, JSX or a Paper comment is a disaster-recovery backup. Before deleting original pages, the actual operator must prove a **vendor-supported recovery path** for the exact file on a disposable target, or hold destructive cleanup. Whole-file duplication of an already oversized file may itself be risky and is not an automatic prerequisite.
+
+**Call economics:** A naive one-artboard-at-a-time full pre-read/copy/post-read across 310 oversized artboards already implies hundreds of MCP calls, potentially exceeding the public Free allocation. Confirm the actual seat's capabilities and quota rather than assuming it is Free or Pro. Prefer the fewest bounded, exact-ID **read-only** inspections needed to produce sufficient proof; batch disjoint work only when the released adapter explicitly supports that action, with known per-operation effects. Never bypass denial, buy/upgrade a plan, invent quota, or turn batching into a no-replay loophole.
+
+These are release planning constraints and official-source observations, not any new tool grant, catalog permission or evidence of restored Paper content.
