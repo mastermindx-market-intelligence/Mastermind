@@ -335,6 +335,7 @@ def test_catalog_base_urls_use_canonical_dns_authorities():
         "https://api.z.ai/api/anthropic",
         "https://token-plan.ap-southeast-1.maas.aliyuncs.com/apps/anthropic",
         "https://api.minimax.io/anthropic",
+        "https://ark.ap-southeast.bytepluses.com/api/coding",
     }
 
 
