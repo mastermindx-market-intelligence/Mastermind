@@ -6,7 +6,7 @@ Protected source/procedure pin: `7eac3ec252475600147ec9a376b8ca16403ac4c5`; Skil
 
 **MISSION_COMPLETE=false. Documentation publication is separate from candidate-source publication, installation and production acceptance.**
 
-Current source status: [implementation checkpoint, 2026-10-22](IMPLEMENTATION_STATUS_2026-10-22.md). The current assignment adds Browser Link as a scoped component of the installed Web Sol extension, while retaining a separate Browser MCP service. This supersedes the older documentation-only and standalone-extension packaging status below; historical failed effects remain recorded.
+Current source status: [implementation checkpoint, 2026-10-22](IMPLEMENTATION_STATUS_2026-10-22.md). The current assignment adds Browser Link as a scoped component of the installed Web Sol extension, while retaining a separate Browser MCP service. The branch now includes native activation/recovery, tab/window creation, transactional native/extension installation, and authenticated multi-host service v4 with bounded fleet pagination. This supersedes the older documentation-only, standalone-extension and injected-route-only status below; historical failed effects remain recorded. Installed Chrome, public ingress and live client enrollment are still outstanding.
 
 ## 1. Decision and intended outcome
 

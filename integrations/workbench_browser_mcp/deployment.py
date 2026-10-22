@@ -68,6 +68,9 @@ class BrowserDeployment:
     reconcile_action: Callable[..., Any]
     cleanup_resource: Callable[..., Any]
     observe_active_resources: Callable[..., Any]
+    observe_active_resources_with_status: Callable[..., Any]
+    observe_active_resource: Callable[..., Any]
+    observe_resources: Callable[..., Any]
     observe_tab_group: Callable[..., Any]
     observe_connection: Callable[..., Any]
     activate_configured_profiles: Callable[..., Any]
@@ -335,36 +338,56 @@ def create_browser_deployment(
             return activation_observation
 
 
-    async def observe_active_resources(
-        caller: ActionCaller,
-    ) -> tuple[ActiveBrowserProjection, ...]:
+    async def observe_active_resources_with_status(caller: ActionCaller):
         key = caller_key(caller)
-
-        def project() -> tuple[ActiveBrowserProjection, ...]:
+        def project():
             with projection_gate:
                 snapshot = tuple(active_projection.items())
-            result: list[ActiveBrowserProjection] = []
-            stale: list[str] = []
-            for browser_ref, (owner_key, _cached) in snapshot:
+            result, expired, partial = [], [], False
+            for browser_ref, (owner_key, cached) in snapshot:
                 if owner_key != key:
+                    continue
+                if cached.expires_at_ms <= services.clock_ms():
+                    expired.append(browser_ref)
                     continue
                 try:
                     live = action_port.observe_resource(caller, browser_ref)
                 except BrowserPortRefused:
-                    stale.append(browser_ref)
+                    # Observation refusal is not positive evidence of retirement.
+                    # Keep the candidate for the next independent observation.
+                    partial = True
                     continue
-                result.append(
-                    ActiveBrowserProjection(browser_ref=browser_ref, resource=live)
-                )
-            if stale:
+                result.append(ActiveBrowserProjection(browser_ref=browser_ref, resource=live))
+            if expired:
                 with projection_gate:
-                    for browser_ref in stale:
+                    for browser_ref in expired:
                         current = active_projection.get(browser_ref)
-                        if current is not None and current[0] == key:
+                        if current is not None and current[0] == key and current[1].expires_at_ms <= services.clock_ms():
                             active_projection.pop(browser_ref, None)
-            return tuple(result)
-
+            return tuple(result), partial
         return await _run_existing(services, project)
+
+    async def observe_active_resources(caller: ActionCaller):
+        rows, _partial = await observe_active_resources_with_status(caller)
+        return rows
+
+    async def observe_active_resource(caller: ActionCaller, browser_ref: str):
+        key = caller_key(caller)
+        def project():
+            # The exact signed resource is the authority; no fleet scan or
+            # other browser status call is necessary for selected use.
+            live = action_port.observe_resource(caller, browser_ref)
+            if (live.subject_digest, live.client_ref, live.resource) != key:
+                return None
+            return ActiveBrowserProjection(browser_ref=browser_ref, resource=live)
+        return await _run_existing(services, project)
+
+    async def observe_resources(caller, request):
+        from .resource_observation import observe_resource_projection
+        return await observe_resource_projection(
+            deployment=deployment, caller=caller, request=request,
+            backend_digest=selected_host.expected_tool_schema_digest,
+            clock_ms=services.clock_ms, host_binding=services.host_binding)
 
     async def observe_connection(caller: ActionCaller, browser_ref: str):
         return await _run_existing(
@@ -448,9 +471,10 @@ def create_browser_deployment(
         call_receipt_sink=services.call_receipt_sink,
         allowed_origins=services.allowed_origins,
         expected_tool_schema_digest=selected_host.expected_tool_schema_digest,
+        observe_resources=observe_resources,
     )
 
-    return BrowserDeployment(
+    deployment = BrowserDeployment(
         services=services,
         server=server,
         resource_port=resource_port,
@@ -464,10 +488,14 @@ def create_browser_deployment(
         reconcile_action=reconcile_action,
         cleanup_resource=cleanup_resource,
         observe_active_resources=observe_active_resources,
+        observe_active_resources_with_status=observe_active_resources_with_status,
+        observe_active_resource=observe_active_resource,
+        observe_resources=observe_resources,
         observe_tab_group=observe_tab_group,
         observe_connection=observe_connection,
         activate_configured_profiles=activate_configured_profiles,
     )
+    return deployment
 
 
 __all__ = [

@@ -95,10 +95,7 @@ class LinkWorkbenchInventoryProjection(WorkbenchDeploymentInventoryProjection):
             raise WorkbenchInventoryProjectionError("Link backend changed")
         if resource.expires_at_ms <= self._now():
             return None
-        try:
-            data = await _maybe(self._deployment.observe_connection(self._broker_caller, item.browser_ref))
-        except Exception:
-            return None
+        data = await _maybe(self._deployment.observe_connection(self._broker_caller, item.browser_ref))
         try:
             record(data, {"schema", "instance_id", "connected"}, {"connection_generation"})
             if (data["schema"] != OWNER_CONNECTION_SCHEMA or type(data["connected"]) is not bool
@@ -126,23 +123,43 @@ class LinkWorkbenchInventoryProjection(WorkbenchDeploymentInventoryProjection):
             backend_schema_digest=LINK_TOOL_SCHEMA_DIGEST, expires_at_ms=resource.expires_at_ms,
         )
 
-    async def resource_reader(self, _outer_caller, limit):
+    async def resource_reader(self, _outer_caller, limit, *, after=None):
         if type(limit) is not int or not 1 <= limit <= 50:
             raise WorkbenchInventoryProjectionError("limit is invalid")
-        projected = []
-        for item in await self._active():
-            row = await self._project(item)
-            if row is not None:
-                projected.append(row)
-        projected.sort(key=lambda row: (row.host_ref, row.profile_ref, row.browser_instance_ref))
+        from integrations.workbench_browser_mcp.resource_observation import bounded_resource_projection, ResourceObservation
+        from .inventory_owner import BrowserResourcePage, BrowserHostObservation
+        observe = getattr(self._deployment, "observe_resources", None)
+        if callable(observe):
+            request = {"limit": limit}
+            if after is not None:
+                request["after"] = {name: getattr(after, name) for name in
+                                    ("profile_ref", "browser_instance_ref", "browser_ref")}
+            result = ResourceObservation.from_document(await _maybe(observe(self._broker_caller, request)))
+            return BrowserResourcePage(
+                result.resources, (BrowserHostObservation(
+                    result.host_ref, "partial" if result.observation_status == "partial" else "available",
+                    result.boot_ref, result.observed_at_ms),), result.truncated)
+        projected, _partial = await bounded_resource_projection(await self._active(), self._project)
+        projected.sort(key=lambda row: (row.host_ref, row.profile_ref, row.browser_instance_ref, row.browser_ref))
+        if after is not None:
+            projected = [row for row in projected if (row.host_ref, row.profile_ref, row.browser_instance_ref, row.browser_ref)
+                         > (after.host_ref, after.profile_ref, after.browser_instance_ref, after.browser_ref)]
+        # Compatibility projections retain the legacy tuple when complete.
+        if len(projected) > limit:
+            hosts = {(row.host_ref, row.boot_ref) for row in projected}
+            return BrowserResourcePage(tuple(projected[:limit]), tuple(BrowserHostObservation(
+                host, "partial" if _partial else "available", boot, self._now()) for host, boot in sorted(hosts)), True)
         return tuple(projected[:limit])
 
-    async def resource_lookup(self, _outer_caller, browser_ref):
+    async def resource_lookup(self, _outer_caller, selected):
+        browser_ref = selected if type(selected) is str else selected.browser_ref
+        lookup = getattr(self._deployment, "observe_active_resource", None)
+        if callable(lookup):
+            item = await _maybe(lookup(self._broker_caller, browser_ref))
+            return None if item is None else await self._project(item)
+        # Compatibility for inert test/legacy projections without the new seam.
         matches = [item for item in await self._active() if item.browser_ref == browser_ref]
-        if len(matches) != 1:
-            return None
-        # Never ask unrelated native profiles to respond during selected use.
-        return await self._project(matches[0])
+        return None if len(matches) != 1 else await self._project(matches[0])
 
     async def tab_reader(self, _outer_caller, resource):
         if type(resource) is not ActiveBrowserResource:

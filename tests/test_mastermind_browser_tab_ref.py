@@ -523,3 +523,33 @@ def test_browser_session_ref_expiry_and_consent_backend_rules():
         client_ref="client-a",
         resource="browser-resource",
     ).consent_ref == "consent-a"
+
+
+def test_all_noncanonical_signature_spellings_refuse_for_each_reference_kind():
+    from dataclasses import asdict
+    from integrations.mastermind_browser_plugin.tab_ref import (
+        BROWSER_SESSION_SCHEMA, BROKER_ACTION_SCHEMA, BrowserSessionRef, BrokeredBrowserActionRef)
+    tab = binding()
+    tab_token = codec().encode(tab)
+    session_data = {key: value for key, value in asdict(tab).items()
+                    if key not in {"tab_locator", "document_revision"}}
+    session = BrowserSessionRef(**{**session_data, "schema": BROWSER_SESSION_SCHEMA})
+    action = BrokeredBrowserActionRef(
+        schema=BROKER_ACTION_SCHEMA, subject_digest=tab.subject_digest, client_ref=tab.client_ref,
+        resource=tab.resource, tab_ref_sha256=hashlib.sha256(tab_token.encode()).hexdigest(),
+        owner_action_ref="owner-action-ref", issued_at_ms=NOW, expires_at_ms=NOW + 60_000)
+    caller = dict(subject_digest=tab.subject_digest, client_ref=tab.client_ref, resource=tab.resource)
+    cases = [
+        (tab_token, lambda token: codec().decode(token, now_ms=NOW)),
+        (codec().encode_session(session), lambda token: codec().decode_session(token, now_ms=NOW, **caller)),
+        (codec().encode_brokered_action(action), lambda token: codec().decode_brokered_action(
+            token, now_ms=NOW, tab_ref=tab_token, **caller)),
+    ]
+    for token, decode in cases:
+        assert decode(token)
+        for final in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_":
+            if final != token[-1]:
+                with pytest.raises(BrowserTabRefError):
+                    decode(token[:-1] + final)
+        with pytest.raises(BrowserTabRefError):
+            decode(token + "=")

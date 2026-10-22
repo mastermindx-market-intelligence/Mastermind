@@ -262,11 +262,16 @@ class HostRoutedBrowserOwnerRouter(BrowserOwnerRouter):
         try:
             owner = self._owner_resolver(caller, tab)
             owner = await _maybe(owner)
-        except OwnerRefused:
+        except OwnerRefused as exc:
+            if exc.code == "BACKEND_ROUTE_UNAVAILABLE":
+                raise RuntimeError("BACKEND_ROUTE_UNAVAILABLE") from exc
             raise
         except Exception as exc:
-            raise OwnerRefused("BACKEND_ROUTE_UNAVAILABLE") from exc
-        return self._validate_backend_owner(owner)
+            raise RuntimeError("BACKEND_ROUTE_UNAVAILABLE") from exc
+        try:
+            return self._validate_backend_owner(owner)
+        except OwnerRefused as exc:
+            raise RuntimeError("BACKEND_ROUTE_UNAVAILABLE") from exc
 
 
 __all__ = [

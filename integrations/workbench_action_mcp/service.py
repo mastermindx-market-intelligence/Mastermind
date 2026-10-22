@@ -43,6 +43,7 @@ from .runtime import StableWorkbenchActionLease, WorkbenchActionRuntime
 SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
 SERVICE_SCHEMA_V2 = "mastermind.workbench_action_service.v2"
 SERVICE_SCHEMA_V3 = "mastermind.workbench_action_service.v3"
+SERVICE_SCHEMA_V4 = "mastermind.workbench_action_service.v4"
 BROWSER_ACTIVATION_INTERVAL_SECONDS = 10.0
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
@@ -75,6 +76,7 @@ _CONFIG_KEYS_V2 = _CONFIG_KEYS | {"browser"}
 _CONFIG_KEYS_V3 = _CONFIG_KEYS_V2 | {
     "browser_fabric_policy_file", "browser_fabric_audit_directory"
 }
+_CONFIG_KEYS_V4 = _CONFIG_KEYS_V3 | {"browser_fabric_routes_file"}
 _BROWSER_KEYS = frozenset(
     {
         "source_root",
@@ -187,6 +189,7 @@ class ServiceConfig:
     browser: BrowserServiceConfig | BrowserLinkServiceConfig | None = None
     browser_fabric_policy_file: str | None = None
     browser_fabric_audit_directory: str | None = None
+    browser_fabric_routes_file: str | None = None
 
     @property
     def allowed_hosts(self) -> tuple[str, ...]:
@@ -369,6 +372,7 @@ def parse_service_config(value: object) -> ServiceConfig:
     schema = value.get("schema")
     browser_fabric_policy_file = None
     browser_fabric_audit_directory = None
+    browser_fabric_routes_file = None
     if schema == SERVICE_SCHEMA:
         if set(value) != _CONFIG_KEYS:
             _refuse()
@@ -377,8 +381,8 @@ def parse_service_config(value: object) -> ServiceConfig:
         if set(value) != _CONFIG_KEYS_V2:
             _refuse()
         browser = parse_browser_service_config(value.get("browser"))
-    elif schema == SERVICE_SCHEMA_V3:
-        if set(value) != _CONFIG_KEYS_V3:
+    elif schema in {SERVICE_SCHEMA_V3, SERVICE_SCHEMA_V4}:
+        if set(value) != (_CONFIG_KEYS_V4 if schema == SERVICE_SCHEMA_V4 else _CONFIG_KEYS_V3):
             _refuse()
         selected = value.get("browser")
         browser = (parse_link_browser_service_config(selected)
@@ -392,6 +396,10 @@ def parse_service_config(value: object) -> ServiceConfig:
         )
         if browser_fabric_audit_directory == value.get("audit_directory"):
             _refuse()
+        if schema == SERVICE_SCHEMA_V4:
+            if type(browser) is not BrowserLinkServiceConfig:
+                _refuse()
+            browser_fabric_routes_file = _absolute_path(value.get("browser_fabric_routes_file"))
     else:
         _refuse()
     if value.get("bind_host") != "127.0.0.1":
@@ -421,10 +429,11 @@ def parse_service_config(value: object) -> ServiceConfig:
         browser=browser,
         browser_fabric_policy_file=browser_fabric_policy_file,
         browser_fabric_audit_directory=browser_fabric_audit_directory,
+        browser_fabric_routes_file=browser_fabric_routes_file,
     )
 
 
-def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
+def _secure_json(path: str, *, maximum: int, owner_only: bool = False) -> dict[str, object]:
     selected = Path(_absolute_path(path))
     try:
         before = selected.lstat()
@@ -436,6 +445,7 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
         or before.st_nlink != 1
         or before.st_uid != os.geteuid()
         or stat.S_IMODE(before.st_mode) & 0o022
+        or (owner_only and stat.S_IMODE(before.st_mode) != 0o600)
     ):
         _refuse()
     nofollow = getattr(os, "O_NOFOLLOW", 0)
@@ -457,6 +467,7 @@ def _secure_json(path: str, *, maximum: int) -> dict[str, object]:
             or opened.st_nlink != 1
             or opened.st_uid != os.geteuid()
             or stat.S_IMODE(opened.st_mode) & 0o022
+            or (owner_only and stat.S_IMODE(opened.st_mode) != 0o600)
             or os.get_inheritable(fd)
         ):
             _refuse()
@@ -971,7 +982,7 @@ def create_browser_fabric_auth(
     if config.browser_fabric_policy_file is None:
         return None
     if (
-        config.schema != SERVICE_SCHEMA_V3
+        config.schema not in {SERVICE_SCHEMA_V3, SERVICE_SCHEMA_V4}
         or config.browser is None
         or config.browser_fabric_audit_directory is None
     ):
@@ -1051,6 +1062,19 @@ def create_browser_fabric_sibling(
             create_workbench_browser_fabric_http_app,
         )
 
+        if config.schema == SERVICE_SCHEMA_V4:
+            from integrations.mastermind_browser_plugin.workbench_service import create_workbench_browser_estate_http_app
+            from integrations.mastermind_browser_plugin.workbench_transport import parse_host_routes
+            if type(config.browser) is not BrowserLinkServiceConfig or config.browser_fabric_routes_file is None:
+                _refuse()
+            routes = parse_host_routes(_secure_json(config.browser_fabric_routes_file, maximum=256 * 1024))
+            return create_workbench_browser_estate_http_app(
+                deployment=browser_deployment, local_host_ref=runtime.services.host_binding.host_id,
+                routes=routes, action_token_key=runtime.services.action_token_key,
+                clock_ms=runtime.services.clock_ms, caller_binding=browser_caller_binding_from_action_caller,
+                broker_caller=browser_broker_caller_from_lease(config.lease),
+                authenticate=authenticate, auth_challenge=auth_challenge,
+                allowed_hosts=list(runtime.services.allowed_hosts), allowed_origins=runtime.services.allowed_origins)
         return create_workbench_browser_fabric_http_app(
             deployment=browser_deployment,
             action_token_key=runtime.services.action_token_key,
@@ -1136,6 +1160,8 @@ def build_service_app(
                         browser_deployment.server.session_manager.run()
                     )
                 if browser_fabric_app is not None:
+                    if config.schema == SERVICE_SCHEMA_V4:
+                        await stack.enter_async_context(browser_fabric.composition.opened())
                     await stack.enter_async_context(
                         browser_fabric_app.router.lifespan_context(
                             browser_fabric_app

@@ -27,6 +27,10 @@ BROKER_ACTION_REF_VERSION = "ba1"
 MAX_TAB_REF_BYTES = 16 * 1024
 MAX_BROWSER_SESSION_REF_BYTES = 16 * 1024
 MAX_BROKER_ACTION_REF_BYTES = 32 * 1024
+# Canonical unpadded base64 payload plus version, separators and SHA256 signature.
+MAX_TAB_REF_WIRE_BYTES = (4 * MAX_TAB_REF_BYTES + 2) // 3 + len(TAB_REF_VERSION) + 2 + 43
+MAX_BROWSER_SESSION_REF_WIRE_BYTES = (4 * MAX_BROWSER_SESSION_REF_BYTES + 2) // 3 + len(BROWSER_SESSION_REF_VERSION) + 2 + 43
+MAX_BROKER_ACTION_REF_WIRE_BYTES = (4 * MAX_BROKER_ACTION_REF_BYTES + 2) // 3 + len(BROKER_ACTION_REF_VERSION) + 2 + 43
 MAX_TAB_REF_LIFETIME_MS = 5 * 60 * 1000
 HIGH_LEVEL_ACTIONS = frozenset(
     {"snapshot", "screenshot", "click", "type", "scroll", "navigate", "create_tab", "create_window"}
@@ -87,11 +91,16 @@ def _b64decode(value: object) -> bytes:
         _refuse("TAB_REF_INVALID")
     try:
         padding = "=" * (-len(value) % 4)
-        return base64.b64decode(
+        decoded = base64.b64decode(
             value + padding,
             altchars=b"-_",
             validate=True,
         )
+        # Reject alternate padding/alphabet and nonzero unused bits. Otherwise
+        # different signed wire references can decode to the same signature.
+        if _b64encode(decoded) != value:
+            _refuse("TAB_REF_INVALID")
+        return decoded
     except (ValueError, UnicodeError):
         _refuse("TAB_REF_INVALID")
 

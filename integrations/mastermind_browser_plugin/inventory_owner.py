@@ -7,7 +7,8 @@ resource/tab facts and mints short-lived caller-bound session/tab references.
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
+import json
 import inspect
 import re
 from typing import Any
@@ -151,6 +152,57 @@ class ActiveBrowserResource:
 
 
 @dataclass(frozen=True, slots=True)
+class BrowserHostObservation:
+    host_ref: str
+    status: str
+    boot_ref: str | None
+    observed_at_ms: int | None
+
+    def __post_init__(self):
+        _token(self.host_ref, "host_ref")
+        if type(self.status) is not str or self.status not in {"available", "partial", "unavailable"}:
+            raise ValueError("host observation invalid")
+        if self.status == "unavailable":
+            if self.boot_ref is not None or self.observed_at_ms is not None:
+                raise ValueError("unavailable host cannot advertise current identity")
+        else:
+            _token(self.boot_ref, "boot_ref")
+            _integer(self.observed_at_ms, "observed_at_ms")
+
+
+@dataclass(frozen=True, slots=True)
+class BrowserResourcePage(Sequence):
+    resources: tuple[ActiveBrowserResource, ...]
+    hosts: tuple[BrowserHostObservation, ...]
+    truncated: bool = False
+
+    def __post_init__(self):
+        if (type(self.resources) is not tuple or len(self.resources) > 50
+                or any(type(row) is not ActiveBrowserResource for row in self.resources)
+                or type(self.hosts) is not tuple or len(self.hosts) > 17
+                or any(type(row) is not BrowserHostObservation for row in self.hosts)
+                or type(self.truncated) is not bool):
+            raise ValueError("resource page invalid")
+        by_host = {}
+        for row in self.hosts:
+            row.__post_init__()
+            if row.host_ref in by_host:
+                raise ValueError("host observation duplicated")
+            by_host[row.host_ref] = row
+        for row in self.resources:
+            row.__post_init__()
+            host = by_host.get(row.host_ref)
+            if host is None or host.status == "unavailable" or host.boot_ref != row.boot_ref:
+                raise ValueError("resource page host mismatch")
+
+    def __len__(self):
+        return len(self.resources)
+
+    def __getitem__(self, index):
+        return self.resources[index]
+
+
+@dataclass(frozen=True, slots=True)
 class BrowserTabObservation:
     """One current exact tab/document observation from the resource owner."""
 
@@ -197,7 +249,7 @@ class BrowserInventoryOwner:
         resource_reader: Callable[[Any, int], Any],
         tab_reader: Callable[[Any, ActiveBrowserResource], Any],
         expected_catalog_schema_digest: str = SCHEMA_DIGEST,
-        resource_lookup: Callable[[Any, str], Any] | None = None,
+        resource_lookup: Callable[[Any, BrowserSessionRef | BrowserTabRef], Any] | None = None,
     ) -> None:
         if type(codec) is not BrowserTabRefCodec:
             raise TypeError("signed Browser ref codec is required")
@@ -244,9 +296,11 @@ class BrowserInventoryOwner:
         *,
         limit: int,
         now_ms: int,
+        after: BrowserSessionRef | None = None,
     ) -> tuple[ActiveBrowserResource, ...]:
         try:
-            raw = await _maybe(self._resource_reader(caller, limit))
+            raw = await _maybe(self._resource_reader(caller, limit) if after is None
+                               else self._resource_reader(caller, limit, after=after))
         except OwnerRefused:
             raise
         except Exception as exc:
@@ -258,8 +312,13 @@ class BrowserInventoryOwner:
         ):
             raise OwnerRefused("INVENTORY_INVALID")
         now_ms = self._now()
+        if type(raw) is BrowserResourcePage:
+            try:
+                raw.__post_init__()
+            except ValueError as exc:
+                raise OwnerRefused("INVENTORY_INVALID") from exc
         rows: list[ActiveBrowserResource] = []
-        seen: set[str] = set()
+        seen: set[tuple[str, str]] = set()
         for item in raw:
             if type(item) is not ActiveBrowserResource:
                 raise OwnerRefused("INVENTORY_INVALID")
@@ -267,14 +326,17 @@ class BrowserInventoryOwner:
                 item.__post_init__()
             except ValueError as exc:
                 raise OwnerRefused("INVENTORY_INVALID") from exc
-            if item.browser_ref in seen:
+            identity = (item.host_ref, item.browser_ref)
+            if identity in seen:
                 raise OwnerRefused("INVENTORY_DUPLICATE")
-            seen.add(item.browser_ref)
+            seen.add(identity)
             if item.expires_at_ms <= now_ms:
                 continue
             if item.catalog_schema_digest != self._catalog_digest:
                 continue
             rows.append(item)
+        if type(raw) is BrowserResourcePage:
+            return BrowserResourcePage(tuple(rows), raw.hosts, raw.truncated)
         return tuple(rows)
 
     @staticmethod
@@ -317,7 +379,7 @@ class BrowserInventoryOwner:
             matches = [row for row in rows if row.browser_ref == session.browser_ref]
         else:
             try:
-                selected = await _maybe(self._resource_lookup(caller, session.browser_ref))
+                selected = await _maybe(self._resource_lookup(caller, session))
                 if selected is not None:
                     if type(selected) is not ActiveBrowserResource:
                         raise ValueError("invalid exact resource")
@@ -396,16 +458,28 @@ class BrowserInventoryOwner:
         return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
 
     async def browser_fleet(self, caller: Any, args: dict) -> dict:
-        if type(args) is not dict or any(key != "limit" for key in args):
+        if type(args) is not dict or set(args) - {"limit", "after_browser_ref"}:
             raise OwnerRefused("INVALID_ARGUMENTS")
         limit = args.get("limit", 10)
         if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 50:
             raise OwnerRefused("INVALID_ARGUMENTS")
         binding = await self._caller(caller)
         now = self._now()
-        rows = await self._resources(caller, limit=limit, now_ms=now)
+        after = None
+        if "after_browser_ref" in args:
+            try:
+                after = self._codec.decode_session(
+                    args["after_browser_ref"], now_ms=now, require_fresh=False,
+                    subject_digest=binding.subject_digest, client_ref=binding.client_ref, resource=binding.resource)
+            except BrowserTabRefError as exc:
+                raise OwnerRefused(str(exc)) from exc
+        rows = await self._resources(caller, limit=limit, now_ms=now, after=after)
         now = self._now()
         browsers = []
+        metadata = ({"hosts": [asdict(host) for host in rows.hosts],
+                     "observation_status": "partial" if any(host.status != "available" for host in rows.hosts) else "complete",
+                     "restart_required": any(host.status != "available" for host in rows.hosts),
+                     "truncated": rows.truncated} if type(rows) is BrowserResourcePage else {})
         for resource in rows:
             expires = min(
                 resource.expires_at_ms,
@@ -432,20 +506,28 @@ class BrowserInventoryOwner:
                 issued_at_ms=now,
                 expires_at_ms=expires,
             )
-            browsers.append(
-                {
-                    "browser_ref": self._codec.encode_session(session),
-                    "backend": resource.backend,
-                    "host_ref": resource.host_ref,
-                    "profile_ref": resource.profile_ref,
-                    "allowed_actions": list(resource.allowed_actions),
-                    "expires_at_ms": expires,
-                }
-            )
-        return {"browsers": browsers}
+            browser = {
+                "browser_ref": self._codec.encode_session(session),
+                "backend": resource.backend, "host_ref": resource.host_ref,
+                "profile_ref": resource.profile_ref, "allowed_actions": list(resource.allowed_actions),
+                "expires_at_ms": expires,
+            }
+            # Leave room for the facade envelope and explicit truncation.
+            if len(json.dumps({"browsers": [*browsers, browser], **metadata,
+                               "next_after_browser_ref": browser["browser_ref"]},
+                              ensure_ascii=False, separators=(",", ":")).encode("utf-8")) > 60 * 1024:
+                metadata["truncated"] = True
+                break
+            browsers.append(browser)
+        if metadata.get("truncated") and browsers:
+            metadata["next_after_browser_ref"] = browsers[-1]["browser_ref"]
+        return {"browsers": browsers, **metadata}
 
     async def browser_tabs(self, caller: Any, args: dict) -> dict:
-        if type(args) is not dict or set(args) != {"browser_ref"}:
+        if type(args) is not dict or "browser_ref" not in args or set(args) - {"browser_ref", "after_tab_id"}:
+            raise OwnerRefused("INVALID_ARGUMENTS")
+        after_tab_id = args.get("after_tab_id")
+        if "after_tab_id" in args and (type(after_tab_id) is not int or not 0 <= after_tab_id <= 2**53 - 1):
             raise OwnerRefused("INVALID_ARGUMENTS")
         binding = await self._caller(caller)
         now = self._now()
@@ -463,7 +545,11 @@ class BrowserInventoryOwner:
         observations = await self._current_tabs(caller, resource, now_ms=now)
         now = self._now()
         tabs = []
-        for observed in observations:
+        next_after_tab_id = None
+        last_tab_id = None
+        for observed in sorted(observations, key=lambda row: row.tab_locator):
+            if after_tab_id is not None and observed.tab_locator <= after_tab_id:
+                continue
             expires = min(resource.expires_at_ms, session.expires_at_ms,
                           observed.expires_at_ms, now + MAX_TAB_REF_LIFETIME_MS)
             if expires <= now:
@@ -481,9 +567,18 @@ class BrowserInventoryOwner:
                 backend_schema_digest=resource.backend_schema_digest,
                 issued_at_ms=now, expires_at_ms=expires,
             )
-            tabs.append({"tab_ref": self._codec.encode(signed), "title": observed.title,
-                         "url": self._display_url(observed.url)})
-        return {"tabs": tabs}
+            row = {"tab_ref": self._codec.encode(signed), "title": observed.title,
+                   "url": self._display_url(observed.url)}
+            if len(json.dumps({"tabs": [*tabs, row]}, ensure_ascii=False,
+                              separators=(",", ":")).encode("utf-8")) > 60 * 1024:
+                if last_tab_id is None:
+                    raise OwnerRefused("TAB_OBSERVATION_TOO_LARGE")
+                next_after_tab_id = last_tab_id
+                break
+            tabs.append(row)
+            last_tab_id = observed.tab_locator
+        return {"tabs": tabs, **({"truncated": True, "next_after_tab_id": next_after_tab_id}
+                                if next_after_tab_id is not None else {})}
 
     async def revalidate_tab(self, caller: Any, tab: BrowserTabRef) -> bool:
         if type(tab) is not BrowserTabRef:

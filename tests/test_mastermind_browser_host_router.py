@@ -156,7 +156,7 @@ def test_route_resolver_receives_bound_tab_only_after_caller_validation():
 
 def test_resolver_refusal_does_not_fall_back_to_another_host():
     router, a, b, calls = make_router()
-    with pytest.raises(OwnerRefused, match="BACKEND_ROUTE_UNAVAILABLE"):
+    with pytest.raises(RuntimeError, match="BACKEND_ROUTE_UNAVAILABLE"):
         asyncio.run(
             router.browser_snapshot(
                 Caller(),

@@ -14,6 +14,8 @@ from .screenshot import BrowserCallResult, separate_screenshot
 
 EFFECTS = frozenset({"NOT_APPLIED", "APPLIED", "EFFECT_UNKNOWN"})
 MAX_BYTES = 65_536
+# Covers the largest canonical tab+broker-action pair, below HTTP's 96 KiB body cap.
+MAX_ARGUMENT_BYTES = 80 * 1024
 _CODE = re.compile(r"[A-Z][A-Z0-9_]{0,79}\Z")
 
 
@@ -37,7 +39,7 @@ class BrowserOwnerPort(Protocol):
     async def reconcile_browser_action(self, caller: Any, args: dict) -> dict: ...
 
 
-def _snapshot(value: Any) -> dict:
+def _snapshot(value: Any, *, maximum: int = MAX_BYTES) -> dict:
     try:
         raw = json.dumps(
             value,
@@ -47,7 +49,7 @@ def _snapshot(value: Any) -> dict:
         ).encode("utf-8", errors="strict")
     except (TypeError, ValueError, UnicodeError, RecursionError) as exc:
         raise ValueError("invalid JSON value") from exc
-    if len(raw) > MAX_BYTES:
+    if len(raw) > maximum:
         raise ValueError("oversize")
     decoded = json.loads(raw)
     if type(decoded) is not dict:
@@ -86,7 +88,7 @@ class BrowserFacade:
         if type(name) is not str or name not in self._validators:
             return _error("UNKNOWN_TOOL")
         try:
-            args = _snapshot(arguments)
+            args = _snapshot(arguments, maximum=MAX_ARGUMENT_BYTES)
             self._validators[name].validate(args)
             if name == "prepare_browser_action":
                 if args["action"] in {"navigate", "create_tab", "create_window"}:

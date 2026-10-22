@@ -624,3 +624,39 @@ def test_applied_receipt_is_not_masked_by_a_second_runtime_admission(tmp_path: P
         assert observations == [(caller, receipt["browser_ref"])]
     finally:
         os.close(fd)
+
+
+
+def test_uncertain_resource_observation_remains_a_candidate_and_reports_partial(tmp_path):
+    import asyncio
+    from integrations.workbench_browser_mcp.browser_port import BrowserPortRefused
+
+    fd, services, host_config, catalog, caller, _ = _fixture(tmp_path)
+    try:
+        deployment = create_browser_deployment(
+            services=services, host_config=host_config, tool_catalog=catalog,
+            profile_resolver=lambda _ref: None)
+        resource = _synthetic_live_resource(caller, services)
+        browser_ref = deployment.resource_port.codec.encode_resource(resource)
+        deployment.resource_port.start_resource = lambda *_: {
+            "status": "OK", "effect_state": "APPLIED", "browser_ref": browser_ref, "reconciled": False}
+        deployment.action_port.observe_resource = lambda *_: resource
+        asyncio.run(deployment.start_resource(caller, "fixture-original-start"))
+
+        def unavailable(*_):
+            raise BrowserPortRefused("PROCESS_IDENTITY_CHANGED")
+        deployment.action_port.observe_resource = unavailable
+        first = asyncio.run(deployment.observe_resources(caller, {"limit": 10}))
+        assert first["resources"] == [] and first["observation_status"] == "partial"
+        with pytest.raises(BrowserPortRefused):
+            asyncio.run(deployment.observe_active_resource(caller, browser_ref))
+        deployment.action_port.observe_resource = lambda *_: resource
+        rows, partial = asyncio.run(deployment.observe_active_resources_with_status(caller))
+        assert len(rows) == 1 and rows[0].browser_ref == browser_ref and partial is False
+        # Positive cached expiry can retire a candidate; a failed observation cannot.
+        changed_services = services.clock_ms
+        object.__setattr__(services, "clock_ms", lambda: resource.expires_at_ms)
+        assert asyncio.run(deployment.observe_active_resources_with_status(caller)) == ((), False)
+        object.__setattr__(services, "clock_ms", changed_services)
+    finally:
+        os.close(fd)

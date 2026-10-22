@@ -4,10 +4,11 @@ from __future__ import annotations
 import copy
 import hashlib
 import json
+from .tab_ref import MAX_TAB_REF_WIRE_BYTES, MAX_BROWSER_SESSION_REF_WIRE_BYTES, MAX_BROKER_ACTION_REF_WIRE_BYTES
 
 SERVER_NAME = "mastermind-browser"
-SERVER_VERSION = "0.2.0"
-CATALOG_GENERATION = "mastermind.browser.mcp.v2"
+SERVER_VERSION = "0.3.0"
+CATALOG_GENERATION = "mastermind.browser.mcp.v3"
 
 
 def _object(properties, required=None):
@@ -44,7 +45,7 @@ _ACTIONS = [
 _PREPARE = {
     "type": "object",
     "properties": {
-        "tab_ref": _text(),
+        "tab_ref": _text(MAX_TAB_REF_WIRE_BYTES),
         "action": {"enum": ["click", "type", "scroll", "navigate", "create_tab", "create_window"]},
         "args": {"type": "object"},
     },
@@ -54,7 +55,7 @@ _PREPARE = {
 }
 for branch in _ACTIONS:
     selected = copy.deepcopy(branch)
-    selected["properties"].update({"tab_ref": _text()})
+    selected["properties"].update({"tab_ref": _text(MAX_TAB_REF_WIRE_BYTES)})
     selected["required"] += ["tab_ref"]
     _PREPARE["oneOf"].append(selected)
 
@@ -76,26 +77,27 @@ def _tool(name, description, schema, *, read_only):
 _TOOLS = [
     _tool(
         "browser_fleet",
-        "Read browser capacity already permitted by the existing owner; never allocates a host.",
-        _object({"limit": {"type": "integer", "minimum": 1, "maximum": 50}}, []),
+        "Read a live bounded page of permitted browsers. If truncated, pass next_after_browser_ref as after_browser_ref. observation_status describes this call only. Any restart_required page makes the entire walk incomplete: continue to reach healthy browsers, then restart from the first page to establish completeness. No atomic snapshot or host allocation.",
+        _object({"limit": {"type": "integer", "minimum": 1, "maximum": 50},
+                 "after_browser_ref": _text(MAX_BROWSER_SESSION_REF_WIRE_BYTES)}, []),
         read_only=True,
     ),
     _tool(
         "browser_tabs",
-        "Read only tabs authorized by the existing owner for an opaque browser reference.",
-        _object({"browser_ref": _text()}),
+        "Read a bounded page of authorized tabs. If truncated, pass next_after_tab_id as after_tab_id with the same browser_ref.",
+        _object({"browser_ref": _text(MAX_BROWSER_SESSION_REF_WIRE_BYTES), "after_tab_id": {"type": "integer", "minimum": 0, "maximum": 9007199254740991}}, ["browser_ref"]),
         read_only=True,
     ),
     _tool(
         "browser_snapshot",
         "Read a bounded accessibility observation for an exact authorized tab.",
-        _object({"tab_ref": _text()}),
+        _object({"tab_ref": _text(MAX_TAB_REF_WIRE_BYTES)}),
         read_only=True,
     ),
     _tool(
         "browser_screenshot",
         "Read a bounded viewport image for an exact authorized tab.",
-        _object({"tab_ref": _text()}),
+        _object({"tab_ref": _text(MAX_TAB_REF_WIRE_BYTES)}),
         read_only=True,
     ),
     _tool(
@@ -107,13 +109,13 @@ _TOOLS = [
     _tool(
         "run_browser_action",
         "Commit one prepared action through its original owner. Unknown effects are never retried.",
-        _object({"tab_ref": _text(), "action_ref": _text()}),
+        _object({"tab_ref": _text(MAX_TAB_REF_WIRE_BYTES), "action_ref": _text(MAX_BROKER_ACTION_REF_WIRE_BYTES)}),
         read_only=False,
     ),
     _tool(
         "reconcile_browser_action",
         "Read the original action outcome from its owner; never re-dispatches it.",
-        _object({"tab_ref": _text(), "action_ref": _text()}),
+        _object({"tab_ref": _text(MAX_TAB_REF_WIRE_BYTES), "action_ref": _text(MAX_BROKER_ACTION_REF_WIRE_BYTES)}),
         read_only=True,
     ),
 ]

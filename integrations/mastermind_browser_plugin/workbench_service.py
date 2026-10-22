@@ -206,3 +206,31 @@ __all__ = [
     "create_workbench_browser_fabric_http_app",
     "derive_browser_signing_key",
 ]
+
+
+
+@dataclass(frozen=True)
+class WorkbenchBrowserEstateHttpApp:
+    composition: Any
+    app: Any
+
+    @property
+    def owner(self):
+        return self.composition.owner
+
+
+def create_workbench_browser_estate_http_app(
+    *, deployment, local_host_ref, routes, action_token_key, clock_ms,
+    caller_binding, broker_caller, authenticate, auth_challenge,
+    allowed_hosts, allowed_origins=(), transport_factory=None,
+):
+    from .workbench_estate import compose_browser_estate_from_workbench
+    kwargs = {} if transport_factory is None else {"transport_factory": transport_factory}
+    composition = compose_browser_estate_from_workbench(
+        deployment=deployment, local_host_ref=local_host_ref, routes=routes,
+        signing_key=derive_browser_signing_key(action_token_key), clock_ms=clock_ms,
+        caller_binding=caller_binding, broker_caller=broker_caller, **kwargs)
+    app = create_http_app(
+        owner=composition.owner, authenticate=authenticate, auth_challenge=auth_challenge,
+        allowed_hosts=list(allowed_hosts), allowed_origins=allowed_origins)
+    return WorkbenchBrowserEstateHttpApp(composition, app)

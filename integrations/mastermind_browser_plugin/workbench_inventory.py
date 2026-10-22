@@ -227,10 +227,22 @@ class WorkbenchDeploymentInventoryProjection:
         return _clock(self._clock_ms())
 
     async def resource_reader(
-        self, _outer_caller: Any, limit: int
+        self, _outer_caller: Any, limit: int, *, after=None
     ) -> tuple[ActiveBrowserResource, ...]:
         if type(limit) is not int or isinstance(limit, bool) or not 1 <= limit <= 50:
             raise WorkbenchInventoryProjectionError("limit is invalid")
+        observe = getattr(self._deployment, "observe_resources", None)
+        if callable(observe):
+            from integrations.workbench_browser_mcp.resource_observation import ResourceObservation
+            from .inventory_owner import BrowserResourcePage, BrowserHostObservation
+            request = {"limit": limit}
+            if after is not None:
+                request["after"] = {name: getattr(after, name) for name in
+                                    ("profile_ref", "browser_instance_ref", "browser_ref")}
+            observed = ResourceObservation.from_document(await _maybe(observe(self._broker_caller, request)))
+            return BrowserResourcePage(observed.resources, (BrowserHostObservation(
+                observed.host_ref, "partial" if observed.observation_status == "partial" else "available",
+                observed.boot_ref, observed.observed_at_ms),), observed.truncated)
         raw = await _maybe(
             self._deployment.observe_active_resources(self._broker_caller)
         )
@@ -248,8 +260,17 @@ class WorkbenchDeploymentInventoryProjection:
                 row.host_ref,
                 row.profile_ref,
                 row.browser_instance_ref,
+                row.browser_ref,
             )
         )
+        if after is not None:
+            projected = [row for row in projected if (row.host_ref, row.profile_ref, row.browser_instance_ref, row.browser_ref)
+                         > (after.host_ref, after.profile_ref, after.browser_instance_ref, after.browser_ref)]
+        if len(projected) > limit:
+            from .inventory_owner import BrowserResourcePage, BrowserHostObservation
+            hosts = {(row.host_ref, row.boot_ref) for row in projected}
+            return BrowserResourcePage(tuple(projected[:limit]), tuple(BrowserHostObservation(
+                host, "available", boot, now) for host, boot in sorted(hosts)), True)
         return tuple(projected[:limit])
 
     async def tab_reader(
