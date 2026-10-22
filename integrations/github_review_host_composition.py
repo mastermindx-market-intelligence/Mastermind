@@ -15,6 +15,7 @@ import httpx
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_host_config import DeliverySecretSource, ReviewHostSettings
 from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
+from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_app_token import GitHubAppInstallationTokens
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
@@ -33,8 +34,9 @@ def compose_github_review_host(
     app_id: int,
     private_key_source: Callable[[], bytes],
     webhook_secret_source: DeliverySecretSource,
-    runtime: Runtime,
-    admission_guard: Callable[[], None],
+    runtime: Runtime | None = None,
+    admission_guard: Callable[[], None] | None = None,
+    socket_client: ExecutiveReviewSocketClient | None = None,
     relay_client: SlackWebApiDialogueClient,
     publisher_login: str,
     worker_constraints: Mapping[str, Any] | None = None,
@@ -51,10 +53,16 @@ def compose_github_review_host(
 
     if not isinstance(settings, ReviewHostSettings):
         raise GitHubReviewHostCompositionUnavailable("REVIEW_SETTINGS_UNBOUND")
-    if not callable(admission_guard):
-        raise GitHubReviewHostCompositionUnavailable("EXECUTIVE_ADMISSION_GUARD_UNBOUND")
-    if not isinstance(runtime, Runtime):
-        raise GitHubReviewHostCompositionUnavailable("EXECUTIVE_RUNTIME_UNBOUND")
+    # A dedicated public webhook host never receives Runtime or its database.
+    # It sends bounded frames only to the existing authenticated Executive
+    # socket. The in-process port remains solely for existing kernel tests.
+    in_process = isinstance(runtime, Runtime) and callable(admission_guard)
+    over_socket = (runtime is None and admission_guard is None
+                   and isinstance(socket_client, ExecutiveReviewSocketClient))
+    if in_process == over_socket:
+        raise GitHubReviewHostCompositionUnavailable("EXECUTIVE_PORT_BINDING_INVALID")
+    if socket_client is not None and not over_socket:
+        raise GitHubReviewHostCompositionUnavailable("MIXED_EXECUTIVE_PORTS_REFUSED")
     if not isinstance(relay_client, SlackWebApiDialogueClient):
         raise GitHubReviewHostCompositionUnavailable("EXISTING_SLACK_CLIENT_UNBOUND")
 
@@ -72,15 +80,15 @@ def compose_github_review_host(
         publisher_login=publisher_login,
         client=github_http_client,
     )
-    admission = ExecutiveReviewJobAdmission(
-        runtime=runtime,
-        admission_guard=admission_guard,
+    admission = (ExecutiveReviewJobAdmission(
+        runtime=runtime, admission_guard=admission_guard,
         constraints=worker_constraints,
-    )
+    ) if in_process else socket_client)
     visibility = SlackReviewVisibility(
         client=relay_client,
         public_repository_names_authorized=public_repository_names_authorized,
-        threads=ExecutiveSlackReviewThreads(runtime=runtime),
+        threads=(ExecutiveSlackReviewThreads(runtime=runtime)
+                 if in_process else None),
     )
     return GitHubReviewReceiver(
         settings=settings,

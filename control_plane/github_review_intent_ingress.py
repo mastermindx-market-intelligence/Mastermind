@@ -76,6 +76,8 @@ from control_plane.github_review_intent import (
     extract_intent_signal,
     intent_channel_for,
     parse_webhook_envelope,
+    review_intent_id,
+    review_command_id,
     verify_frozen_head,
     verify_webhook_signature,
 )
@@ -432,14 +434,17 @@ class ReconcilingReviewPublication:
             # reviews at the exact commit and body this call submitted before
             # anything is retried; an unmatched effect is re-raised, so no
             # caller can turn an unknown into a duplicate formal review.
-            recovered = reconcile_publication(
-                reviews=self._transport.read_reviews(
-                    repository=repository, pull_number=pull_number, commit_id=head_sha
-                ),
-                commit_id=head_sha,
-                event=event,
-                body=body,
-            )
+            try:
+                recovered = reconcile_publication(
+                    reviews=self._transport.read_reviews(
+                        repository=repository, pull_number=pull_number, commit_id=head_sha
+                    ),
+                    commit_id=head_sha, event=event, body=body,
+                )
+            except Exception:
+                # The POST may have landed; an unavailable second read can
+                # never turn that effect into a definite publication refusal.
+                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
             if recovered is not None:
                 return recovered
             raise
@@ -738,12 +743,29 @@ def admit_review_intent(
     if not isinstance(pull_request, PullRequestFacts):
         raise ReviewIngressError("PullRequestReadPort returned a non-exact fact shape")
 
+    # A remote Executive socket should read one exact command_id through its
+    # existing indexed events table rather than list every review ever admitted.
+    # The optional scalar lookup is an optimization only: the canonical UNIQUE
+    # index inside create_job still arbitrates all concurrent admissions.
+    has_command = getattr(fabric_port, "has_admitted_command", None)
+    if callable(has_command):
+        candidate_command = review_command_id(review_intent_id(
+            repository=envelope.repository,
+            pull_number=envelope.pull_number,
+            head_sha=pull_request.head_sha,
+        ))
+        command_exists = has_command(candidate_command)
+        if type(command_exists) is not bool:
+            raise ReviewIngressUnavailable("Executive review status is not exact")
+        admitted_commands = frozenset({candidate_command}) if command_exists else frozenset()
+    else:
+        admitted_commands = fabric_port.admitted_command_ids()
     decision = decide_review_intent(
         envelope=envelope,
         policy=policy,
         pull_request=pull_request,
         signal=signal,
-        admitted_command_ids=fabric_port.admitted_command_ids(),
+        admitted_command_ids=admitted_commands,
         current_permission=current_permission,
     )
 
@@ -961,16 +983,19 @@ def publish_verified_review(
                 publication_command_id=command,
                 refusal="PUBLICATION_EFFECT_UNKNOWN",
             )
-        recovered = reconcile_publication(
-            reviews=readback.read_reviews(
-                repository=decision.repository,
-                pull_number=decision.pull_number,
-                commit_id=decision.frozen_head_sha,
-            ),
-            commit_id=decision.frozen_head_sha,
-            event=event,
-            body=body,
-        )
+        try:
+            recovered = reconcile_publication(
+                reviews=readback.read_reviews(
+                    repository=decision.repository,
+                    pull_number=decision.pull_number,
+                    commit_id=decision.frozen_head_sha,
+                ),
+                commit_id=decision.frozen_head_sha, event=event, body=body,
+            )
+        except Exception:
+            # A failed authoritative read after a potential POST cannot
+            # establish failure or authorize a new review submission.
+            recovered = None
         if recovered is None:
             return ReviewPublishOutcome(
                 state=PublishState.REFUSED,

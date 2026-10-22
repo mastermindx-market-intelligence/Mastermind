@@ -20,6 +20,7 @@ from control_plane.github_review_intent_ingress import (
     FabricJobAdmissionPort,
     PullRequestReadPort,
     ReviewIngressError,
+    ReviewIngressUnavailable,
     VisibilityPort,
     admit_review_intent,
 )
@@ -203,6 +204,9 @@ class GitHubReviewReceiver:
             # never assert that no effect occurred. The canonical command_id
             # UNIQUE key must reconcile a redelivery.
             await self._reply(send, 503, "ADMISSION_EFFECT_UNKNOWN")
+            return
+        except ReviewIngressUnavailable:
+            await self._reply(send, 503, "ADMISSION_UNAVAILABLE_OR_UNKNOWN")
             return
         except (ReviewIngressError, ValueError, TypeError):
             await self._reply(send, 422, "ADMISSION_REFUSED")

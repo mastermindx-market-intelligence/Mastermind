@@ -147,3 +147,33 @@ def test_guard_retracts_during_claim_transaction(tmp_path):
         call(app)
     assert gh.submits == 0
     assert runtime.store.get_event_by_command_id(COMMAND) is None
+
+
+def test_second_gitHub_readback_outage_is_typed_unknown_and_never_reposts(tmp_path):
+    class LostReadAfterPost(Transport):
+        def read_reviews(self, *, repository, pull_number, commit_id):
+            self.reads += 1
+            if self.reads >= 2:
+                raise RuntimeError("GitHub GET unavailable after ambiguous POST")
+            return ()
+    gh = LostReadAfterPost(unknown=True, lands=True)
+    app, runtime, gh = publisher(tmp_path, gh)
+    with pytest.raises(PublicationEffectUnknown, match="EFFECT_UNKNOWN"):
+        call(app)
+    assert gh.submits == 1
+    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    with pytest.raises(PublicationEffectUnknown, match="EFFECT_UNKNOWN"):
+        call(app)
+    assert gh.submits == 1
+
+
+def test_preexisting_reservation_unavailable_readback_stays_unknown(tmp_path):
+    app, runtime, gh = publisher(tmp_path, Transport(unknown=True, lands=False))
+    with pytest.raises(PublicationEffectUnknown):
+        call(app)
+    def broken_read(*, repository, pull_number, commit_id):
+        raise RuntimeError("GitHub readback unavailable")
+    gh.read_reviews = broken_read
+    with pytest.raises(PublicationEffectUnknown, match="EFFECT_UNKNOWN"):
+        call(app)
+    assert gh.submits == 1

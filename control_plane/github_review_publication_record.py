@@ -192,13 +192,16 @@ class ExecutiveReviewPublicationRecord:
             # A previous publisher may be currently posting, may have crashed
             # before POST, or may have posted but lost its reply. Only a
             # *positive* GitHub readback can settle this; never retry POST.
-            found = reconcile_publication(
-                reviews=self._transport.read_reviews(
-                    repository=repository, pull_number=pull_number,
-                    commit_id=head_sha,
-                ),
-                commit_id=head_sha, event=event, body=body,
-            )
+            try:
+                found = reconcile_publication(
+                    reviews=self._transport.read_reviews(
+                        repository=repository, pull_number=pull_number,
+                        commit_id=head_sha,
+                    ),
+                    commit_id=head_sha, event=event, body=body,
+                )
+            except Exception:
+                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
             if found is None:
                 raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
             self._confirm(publication_command_id, identity, found)

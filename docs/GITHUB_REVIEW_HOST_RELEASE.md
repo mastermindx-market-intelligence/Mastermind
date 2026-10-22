@@ -129,3 +129,46 @@ START from QUEUED, bypass the installed CEO/Executive arm, manufacture
 a builder worker ID, configure a GitHub App from an unrelated installation,
 or retry an uncertain GitHub/Slack write. No new queue, watcher, database,
 worker lease, token vault, or autonomous daemon is authorized by this source.
+
+## Unix-socket bridge source slice — staged, never autonomously armed
+
+PR #1763 adds `control_plane/github_review_socket_contract.py`,
+`control_plane/github_review_socket_owner.py` and
+`integrations/github_review_socket_client.py`.
+`compose_github_review_host(..., socket_client=ExecutiveReviewSocketClient(...))`
+is the **public-process composition**: it accepts the existing Executive CEO
+Unix-socket path as a host-injected capability and refuses simultaneous direct
+Runtime/database access. The legacy in-process Runtime admission mode remains
+for the Executive owner and hermetic tests. The receiver and publication gates
+default disabled; assembling an object is not starting a listener.
+
+The socket client supports only exact review-command status lookup and one
+bounded review-admission submit frame. It does not enumerate Executive jobs,
+run a worker, retry a lost POST, hold a credential, or select a model. The
+`ExecutiveGitHubReviewSocketOwner` can validate and admit these frames against
+the incumbent JobRegistry and EventStore **when an authorized control host
+actually invokes it**. Its source_guard remains an explicitly injected trusted
+source-authorization dependency, not a satisfied production proof.
+
+**Critical missing production binding:** The existing
+`ExecutiveControlService` authenticated CEO socket handler has NOT gained
+an authorized `mastermind.github_review_socket_admission.v1` dispatch
+branch. An attempted source-handler edit was explicitly blocked by platform
+safety checks and was not replayed through another carrier. Dormant binding
+fields in the original Ubuntu 0 workspace do not activate this capability.
+No public Caddy route, GitHub App installation binding, Executive admission
+arm, genuine Fabric START or GitHub review publication has been demonstrated.
+The tests prove only a hermetic Unix socket server exercising the same protocol,
+the real Executive ledger and source-owner adapter.
+
+Before rollout, the authorized incumbent control-service maintainer must bind
+this typed frame on the existing peer-authenticated Unix listener, without
+altering existing C1/CEO/Session Bridge semantics. Both the peer UID and
+separate disabled-by-default review arm must be checked before parsing or
+committing. The host source_guard must reverify current PR identity/head and
+actor authority **at the mutation boundary**. If disconnected after submit,
+the caller performs read-only exact command reconciliation and never blindly
+re-submits an uncertain effect. Qualify with the real existing Executive socket
+service test fixture, not a substitute server; only then compose and enroll the
+production App listener, secret custodian, Caddy route and runtime worker
+consumer under normal protected release custody.
