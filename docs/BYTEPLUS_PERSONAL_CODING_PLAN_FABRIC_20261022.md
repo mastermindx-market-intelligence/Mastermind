@@ -282,6 +282,44 @@ a provider may have lower headline Credits but fail coding quality,
 lack vision/tool support, or be disallowed for the intended harness.
 No global forced peak blacklisting of GLM is recommended.
 
+### Observed adapter exits by workload, not accepted-task quality
+
+Actual Ubuntu1 Fabric launch ledger, trailing 7-day read on October 22
+(same account/fleet source; names anonymized), with Qwen/Bailian grouped
+as ONE Alibaba family. `rc==0` means only that the model-run adapter
+exited successfully. Failed/mismatched outputs, reviewer independence,
+task acceptance, generation/host changes and varying case difficulty
+are **not** controlled. These data may inform a falsifiable canary
+hypothesis, **not** establish vendor model supremacy or auto route
+weights on their own.
+
+| Workload | Z.AI/GLM adapter exits rc0/rows | Alibaba/Qwen | MiniMax |
+| --- | --- | --- | --- |
+| Review | 29 / 30 | 76 / 98 | 18 / 18 |
+| Fix/build | 51 / 53 | 74 / 78 | 10 / 10 |
+| Build | 52 / 53 | 10 / 12 | 9 / 11 |
+| Census | 20 / 22 | Insufficient isolated sample | 16 / 16 |
+
+Interpretation: the reviewed *routing* for independent review should
+not consume a consistently throttled Qwen key merely because a monthly
+plan is under-utilized or its model has a low headline cost. The
+existence of successful MiniMax review exits does not prove review
+independence if MiniMax authored the work. Actual acceptance by a
+different model/harness and original user remains a separate measure.
+Review failure/cooldown must be classified at the actual provider and
+account by an incumbent pre-work gate (see PR #1731), without automatic
+replay of anything that may have started tools.
+
+A separate per-account ledger investigation saw more account-like labels
+than three configured subscription keys. About half of the mapped
+Alibaba/Qwen rows could not be tied to one of those three current
+configured account aliases. Historical ledger keys are therefore
+**not trustworthy provider-identity custody or per-account quota
+attribution**. Do not infer fairness, remaining Credits, three
+independent useful seats or entitlement burn from raw alias counts.
+Use the broker's exact provider/account principal and vendor-observed
+quota/reset before enabling ranking by account residual capacity.
+
 ### Proposed decision matrix (not autonomous activation)
 
 | Original job | Preferred eligible candidate | Scarcity and qualification rule |
