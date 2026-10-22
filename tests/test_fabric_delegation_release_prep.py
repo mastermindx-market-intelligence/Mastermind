@@ -349,6 +349,32 @@ def test_canary_refuses_falsey_noninteger_worker_exit_code(invalid_rc):
     assert "codex.terminal_result" in result["issues"]
 
 
+def test_canary_rejects_conflated_computed_and_transport_child_hashes():
+    report = _valid_receipts()
+    computed = canary.EXPECTED_COMPUTATIONS["operator.child"]
+    child = report["cases"]["operator"]["child_run"]
+    child["result"]["response_sha256"] = computed
+    child["parent_return"]["result_sha256"] = computed
+    child["acceptance"]["reviewed_response_sha256"] = computed
+    report["cases"]["operator"]["child_acknowledgment"]["sha256"] = computed
+    report["cases"]["operator"]["operator_run"]["result"]["adapter_response"] = (
+        "Reviewed child transport digest: " + computed
+    )
+    result = canary.evaluate(report)
+    assert result["state"] == "REFUSED"
+    assert "operator.distinct_child_transport_digest" in result["issues"]
+    assert result["live_proven"] is False
+
+
+def test_canary_does_not_accept_failed_child_even_if_return_was_acknowledged():
+    report = _valid_receipts()
+    report["cases"]["operator"]["child_run"]["status"]["status"]["rc"] = 1
+    result = canary.evaluate(report)
+    assert result["state"] == "REFUSED"
+    assert "operator.child.terminal_result" in result["issues"]
+    assert result["live_proven"] is False
+
+
 def test_canary_duplicate_json_keys_refused():
     with pytest.raises(ValueError, match="duplicate receipt JSON key"):
         json.loads('{"schema":"one","schema":"two"}',

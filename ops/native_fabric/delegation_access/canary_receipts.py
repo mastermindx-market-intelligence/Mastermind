@@ -216,6 +216,12 @@ def evaluate(report: object) -> dict[str, object]:
              and re.search(r"(?<![0-9a-f])" + re.escape(child_digest) + r"(?![0-9a-f])",
                            operator_response) is not None,
              issues, "operator.child_digest_returned_to_principal")
+    # The digest of the framed Fabric response and the digest computed by a
+    # worker over the fixed literal represent different evidence domains.
+    # A fabricated receipt cannot equate them and still pass.
+    _require(_good_sha(child_digest)
+             and child_digest != EXPECTED_COMPUTATIONS["operator.child"],
+             issues, "operator.distinct_child_transport_digest")
     if child:
         all_runs.append(child)
     ack = nested.get("child_acknowledgment")
