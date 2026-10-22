@@ -77,6 +77,22 @@ def canonical(value):
     return (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode()
 
 
+def slot_identity(st: os.stat_result) -> tuple:
+    """Everything that proves an occupant was not adopted, replaced or rewritten.
+
+    ``os.stat_result.__eq__`` also compares ``st_atime``; a refusal path that
+    only *reads* the occupant can advance its atime (Linux ``relatime`` updates
+    atime on the first read after a write), which flaked the full-stat
+    comparison on CI.  Access time is not a mutation, so it is excluded; every
+    field a replacement or rewrite would change is kept, with nanosecond
+    mtime/ctime so a same-second rewrite is still caught.
+    """
+    return (
+        st.st_dev, st.st_ino, st.st_mode, st.st_nlink, st.st_uid, st.st_gid,
+        st.st_size, st.st_mtime_ns, st.st_ctime_ns,
+    )
+
+
 def digest_bytes(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
@@ -453,10 +469,10 @@ def test_malformed_forward_slots_are_never_absence(forward_env, slot, kind):
         path.symlink_to(path.parent / "missing-forward-target")
     else:
         os.mkfifo(path)
-    before = path.lstat()
+    before = slot_identity(path.lstat())
     with pytest.raises((ForwardRecoveryError, PrivilegedBrokerError)):
         run_forward(s)
-    assert path.lstat() == before
+    assert slot_identity(path.lstat()) == before
     # Nothing else is created and the occupant is never adopted or replaced.
     assert not rec.RECOVERY_INCIDENT_GRANT_PATH.exists()
     assert not rec.RECOVERY_INCIDENT_COMMITMENT_PATH.exists()
@@ -607,16 +623,51 @@ def test_live_incident_predicates_stay_required(forward_env, evidence_change):
     assert_no_forward_effects(s)
 
 
+def test_slot_identity_ignores_access_time_but_not_any_mutation(tmp_path):
+    occupant = tmp_path / "occupant"
+    occupant.write_bytes(b"incumbent")
+    st0 = occupant.lstat()
+    before = slot_identity(st0)
+    # A kernel read-side atime advance (relatime) changes st_atime only; it
+    # does not touch ctime.  os.utime cannot simulate that (it bumps ctime), so
+    # model it field-wise.  The old full-stat equality is sensitive to it ...
+    visible = list(st0)
+    visible[stat.ST_ATIME] += 7
+    assert os.stat_result(visible) != st0
+    # ... and the occupant identity is not.
+    fields = ("st_dev", "st_ino", "st_mode", "st_nlink", "st_uid", "st_gid",
+              "st_size", "st_mtime_ns", "st_ctime_ns")
+    read_only = types.SimpleNamespace(
+        **{f: getattr(st0, f) for f in fields},
+        st_atime=st0.st_atime + 7, st_atime_ns=st0.st_atime_ns + 7_000_000_000,
+    )
+    assert slot_identity(read_only) == before
+    # Real mutations are all caught: a same-size in-place rewrite (mtime/ctime
+    # move by as little as 1 ns) ...
+    os.utime(occupant, ns=(st0.st_atime_ns, st0.st_mtime_ns + 1))
+    assert slot_identity(occupant.lstat()) != before
+    # ... replacement by a new inode with identical bytes ...
+    st1 = occupant.lstat()
+    replacement = tmp_path / "replacement"
+    replacement.write_bytes(b"incumbent")
+    os.replace(replacement, occupant)
+    assert slot_identity(occupant.lstat()) != slot_identity(st1)
+    # ... and a mode change.
+    st2 = occupant.lstat()
+    os.chmod(occupant, 0o400)
+    assert slot_identity(occupant.lstat()) != slot_identity(st2)
+
+
 def test_occupied_incident_custody_slot_refuses(forward_env):
     s = forward_env
     occupant = rec.RECOVERY_STATE_ROOT / "allocation.json"
     occupant.write_bytes(b"incumbent")
     os.chmod(occupant, 0o400)
-    before = occupant.lstat()
+    before = slot_identity(occupant.lstat())
     with pytest.raises(ForwardRecoveryError, match="slot_occupied"):
         run_forward(s)
     # The incumbent occupant is never adopted, replaced or removed.
-    assert occupant.lstat() == before
+    assert slot_identity(occupant.lstat()) == before
     assert not rec.RECOVERY_INCIDENT_GRANT_PATH.exists()
     assert not rec.RECOVERY_INCIDENT_COMMITMENT_PATH.exists()
 

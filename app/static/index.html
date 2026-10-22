@@ -347,6 +347,10 @@ body.page-mm td.l { text-align: left; }
 .mm-verdict-chip.reduce, .mm-verdict-chip.trim { background: color-mix(in srgb, var(--warn) 15%, var(--panel2)); color: var(--warn); border: 1px solid color-mix(in srgb, var(--warn) 30%, transparent); }
 .mm-verdict-chip.exit_pending { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
 .mm-verdict-chip.avoid { background: color-mix(in srgb, var(--down) 15%, var(--panel2)); color: var(--down); border: 1px solid color-mix(in srgb, var(--down) 30%, transparent); }
+/* queued-change timing line under a verdict chip (fills at the next open, or awaiting settlement).
+   It may wrap: at phone width a no-wrap line widened the Verdict column and pushed the chip
+   itself out of the scroll viewport, hiding the very change this line qualifies. */
+.mm-q-when { display:block; margin-top:2px; font-size:11px; line-height:1.25; color:var(--muted); font-weight:500; white-space:normal; }
 
 #positions tbody tr.pos-row {
   cursor: pointer;
@@ -3442,6 +3446,11 @@ var I18N = {
   'pos.unrealized':       { en: 'Unrealized P&L', zh: '未实现盈亏' },
   'pos.v_hold':           { en: 'HOLDING', zh: '持有中' },
   'pos.v_exit_pending':   { en: 'EXIT QUEUED', zh: '已排队卖出' },
+  // queued full-target change for a lot we still hold — distinct from the (pending, unfilled) row
+  'pos.q_exit':           { en: 'EXIT QUEUED', zh: '已排队卖出' },
+  'pos.q_trim':           { en: 'TRIM QUEUED', zh: '已排队减仓' },
+  'pos.q_add':            { en: 'ADD QUEUED', zh: '已排队加仓' },
+  'pos.q_unclassified':   { en: 'CHANGE QUEUED', zh: '已排队调整' },
   'pos.v_add':            { en: 'ADDING', zh: '加仓中' },
   'pos.v_trim':           { en: 'TRIMMING', zh: '减仓中' },
   'pos.v_reduce':         { en: 'REDUCING', zh: '减仓中' },
@@ -4705,6 +4714,70 @@ function renderSafety() {
 }
 
 // ── POSITIONS ─────────────────────────────────────────────────────────────────
+// PBR-HELD-PENDING-CHANGE:BEGIN
+// A queued full-target decision naming a lot we STILL hold must be visible on that lot's row.
+// /api/trades already projects it truthfully (app/web.py::_pending_target_projection); the
+// Positions verdict cell used to keep rendering the stale book verdict ("HOLDING"), so the
+// primary holdings view contradicted the accepted decision the queue already carried.
+// Pure + ES5 (var/function only, no page globals): it reads only its two arguments and never
+// mutates them, so the same object can be re-rendered or diffed without side effects.
+function _heldPendingChange(ticker, trades) {
+  if (!ticker) return null;
+  var want = String(ticker).toUpperCase();
+  if (!want) return null;
+  if (!trades || typeof trades !== 'object') return null;
+  var pt = trades.pending_target;
+  if (!pt || typeof pt !== 'object') return null;
+  // Only an accepted, queued target is intent. invalid/unavailable/none are fail-closed reads
+  // with no executable rows behind them and must never be presented as a queued change.
+  if (String(pt.status).toLowerCase() !== 'queued') return null;
+  var rows = pt.rows;
+  if (!rows || typeof rows.length !== 'number') return null;
+  var row = null;
+  for (var i = 0; i < rows.length; i++) {
+    var candidate = rows[i];
+    if (candidate && typeof candidate === 'object' &&
+        String(candidate.ticker).toUpperCase() === want) { row = candidate; break; }
+  }
+  if (!row) return null;
+
+  // Classified directions only. A target queued for a held name whose direction is not
+  // classified stays 'unclassified' — the queue is shown, but no direction is guessed.
+  // hold/blocked/buy/filtered/unknown are carries or filters, not changes to this held lot.
+  var kind;
+  var action = String(row.action);
+  switch (action.toLowerCase()) {
+    case 'exit': kind = 'exit'; break;
+    case 'trim': kind = 'trim'; break;
+    case 'add': kind = 'add'; break;
+    case 'comparison_unavailable':
+    case 'unpriceable': kind = 'unclassified'; break;
+    default: return null;
+  }
+
+  var finiteOrNull = function(v) {
+    return (typeof v === 'number' && isFinite(v)) ? v : null;
+  };
+  var strOrNull = function(v) {
+    if (typeof v !== 'string') return null;
+    var s = v.replace(/^\s+|\s+$/g, '');
+    return s ? s : null;
+  };
+  var fillAfter = strOrNull(row.fill_after);
+  if (fillAfter === null) fillAfter = strOrNull(pt.fill_after);
+  var queuedAt = strOrNull(row.queued_at);
+  if (queuedAt === null) queuedAt = strOrNull(pt.queued_at);
+
+  return {
+    kind: kind,
+    action: action,
+    targetWeight: finiteOrNull(row.target_weight),
+    currentWeight: finiteOrNull(row.current_weight),
+    fillAfter: fillAfter,
+    queuedAt: queuedAt
+  };
+}
+// PBR-HELD-PENDING-CHANGE:END
 function renderPositions() {
   var b = _book || {};
   var positions = b.positions || [];
@@ -4751,7 +4824,22 @@ function renderPositions() {
     var vLabel = vKey ? t(vKey) : verdict.toUpperCase();
     var posName = securityName(p);
 
-    rows += '<tr class="pos-row" data-idx="' + i + '" onclick="toggleExpand(' + i + ')">' +
+    // A lot we still hold can already carry an accepted queued change (see _heldPendingChange).
+    // Only the verdict cell changes: shares, marks, P&L, weight, sleeve, held date and the thesis
+    // row stay exactly as they are, because nothing is filled until the next open.
+    var qc = p.pending ? null : _heldPendingChange(p.ticker, _trades);
+    var qAttr = '';
+    var verdictCell = '<td><span class="mm-verdict-chip ' + verdict + '">' + vLabel + '</span></td>';
+    if (qc) {
+      var qCls = { exit: 'exit_pending', trim: 'trim', add: 'add', unclassified: 'hold' }[qc.kind] || 'hold';
+      var qKey = { exit: 'pos.q_exit', trim: 'pos.q_trim', add: 'pos.q_add', unclassified: 'pos.q_unclassified' }[qc.kind] || 'pos.q_unclassified';
+      var qWhen = qc.fillAfter ? (t('pend.fills_at_lbl') + ' ' + fmtDate(qc.fillAfter)) : t('pend.awaiting_lbl');
+      verdictCell = '<td><span class="mm-verdict-chip ' + qCls + '">' + t(qKey) + '</span>' +
+        '<span class="mm-q-when">' + esc(qWhen) + '</span></td>';
+      qAttr = ' data-queued-change="' + qc.kind + '"';
+    }
+
+    rows += '<tr class="pos-row" data-idx="' + i + '"' + qAttr + ' onclick="toggleExpand(' + i + ')">' +
       '<td><span class="pos-ticker">' + esc(p.ticker) + '</span>' + (p.pending ? ' <span class="mm-pend-chip">' + t('pend.status') + '</span>' : '') + (posName ? '<span class="pos-name" style="display:block;font-size:11px;color:var(--muted);font-weight:500;line-height:1.2">' + esc(posName) + '</span>' : '') + '</td>' +
       '<td class="l mm-hide-sm"><span class="mm-sleeve-chip ' + sleeveClass + '">' + sleeveName + '</span></td>' +
       '<td class="mm-hide-sm">' + (p.stage != null ? p.stage : '—') + '</td>' +
@@ -4759,7 +4847,7 @@ function renderPositions() {
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + entryStr + '</td>' +
       '<td class="mm-hide-sm" style="font-variant-numeric:tabular-nums">' + curStr + '</td>' +
       '<td class="' + u.cls + '">' + u.txt + '</td>' +
-      '<td><span class="mm-verdict-chip ' + verdict + '">' + vLabel + '</span></td>' +
+      verdictCell +
       '<td class="mm-hide-sm">' + rsStr + '</td>' +
       '<td class="mm-hide-sm">' + conflStr + '</td>' +
       '<td class="l mm-hide-sm" style="font-size:11.5px;color:var(--muted)">' + heldStr + '</td>' +
