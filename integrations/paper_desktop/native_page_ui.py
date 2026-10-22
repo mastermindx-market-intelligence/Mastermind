@@ -38,14 +38,28 @@ def native_page_identity(link: str) -> tuple[str, str]:
     return matched.group(1), matched.group(2)
 
 
+def _reviewed_read(client, tool: str, arguments: dict) -> dict:
+    """Use the canonical bridge read allowlist inside main's existing mutex.
+
+    bridge.execute acquires the same host-global desktop lock, so calling it
+    recursively inside a locked UI transaction would deadlock. The outer
+    main has already admitted the exact reviewed catalog and server before
+    this function can perform its first read. This is not a second tool gate.
+    """
+    if tool not in bridge.READ_TOOLS:
+        raise bridge.Refusal("TOOL_NOT_ALLOWED")
+    response = client.call(tool, arguments)
+    if not isinstance(response, dict) or response.get("isError"):
+        raise bridge.Refusal("TOOL_ERROR")
+    return response
+
+
 def _basic(client, file_id: str | None = None,
            page_id: str | None = None) -> dict:
     args = {"fileId": file_id} if file_id else {}
     if page_id:
         args["pageId"] = page_id
-    raw = client.call("get_basic_info", args)
-    if raw.get("isError"):
-        raise bridge.Refusal("DOCUMENT_UNAVAILABLE")
+    raw = _reviewed_read(client, "get_basic_info", args)
     info = bridge.basic_object(raw)
     if not isinstance(info, dict) or not isinstance(info.get("fileId"), str):
         raise bridge.Refusal("FILE_ID_REQUIRED")
@@ -57,9 +71,7 @@ def _basic(client, file_id: str | None = None,
 def _clone_resource_proof(client, source_id: str, clone_id: str) -> None:
     # Require Paper's own inventory to establish an actual newer duplicate.
     # A caller-supplied plan is not authority to label an original file a clone.
-    raw = client.call("list_resources", {"limit": 200})
-    if raw.get("isError"):
-        raise bridge.Refusal("FILE_INVENTORY_UNAVAILABLE")
+    raw = _reviewed_read(client, "list_resources", {"limit": 200})
     candidates = bridge._basic_candidates(raw)
     inventories = [x["resources"] for x in candidates
                    if isinstance(x.get("resources"), list)]
@@ -114,12 +126,10 @@ def _retained_native_proof(plan: dict, client, originals: list[dict]) -> None:
         native_id = row["node_id"]
         body = []
         for file_id in (plan["source_file_id"], plan["clone_file_id"]):
-            response = client.call("get_jsx", {
+            response = _reviewed_read(client, "get_jsx", {
                 "fileId": file_id, "nodeId": native_id,
                 "format": "inline-styles", "includeNodeIds": True,
             })
-            if response.get("isError"):
-                raise bridge.Refusal("JSX_READ_UNAVAILABLE")
             text_values = [x.get("text") for x in response.get("content", [])
                            if isinstance(x, dict) and x.get("type") == "text"]
             if len(text_values) != 2 or not isinstance(text_values[1], str):

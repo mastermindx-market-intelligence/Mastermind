@@ -147,6 +147,16 @@ def perform(plan=None, *, client=None, clipboard=None, ui=None, page_id="p-3-0")
 
 
 class NativePageUITests(unittest.TestCase):
+    def test_every_paper_rpc_is_checked_by_canonical_read_allowlist(self):
+        client = FakeClient()
+        self.assertIn("list_resources", ui_module.bridge.READ_TOOLS)
+        from unittest.mock import patch
+        with patch.object(ui_module.bridge, "READ_TOOLS", frozenset({"get_basic_info"})):
+            with self.assertRaisesRegex(ui_module.bridge.Refusal, "TOOL_NOT_ALLOWED"):
+                ui_module._reviewed_read(client, "list_resources", {"limit": 200})
+        self.assertEqual(client.calls, [])
+
+
     def test_page_link_exact_match(self):
         url = "https://app.paper.design/file/" + CLONE + "/p-3-0"
         self.assertEqual(ui_module.native_page_identity(url), (CLONE, "p-3-0"))
