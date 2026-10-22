@@ -9452,7 +9452,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": True,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9462,7 +9462,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_loaded = service_cli.load_control_config(terminal_return_path)
         assert terminal_loaded["terminal_return_armed"] is True
         assert terminal_loaded["terminal_return_socket_path"] == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
         terminal_unarmed_path.write_text(
@@ -9471,7 +9471,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": False,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9617,7 +9617,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert isinstance(unarmed_composed_config, ServiceConfig)
         assert unarmed_composed_config.terminal_return_armed is False
         assert unarmed_composed_config.terminal_return_socket_path == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         assert isinstance(unarmed_composed_kwargs, dict)
         assert "terminal_return_projector_factory" not in unarmed_composed_kwargs

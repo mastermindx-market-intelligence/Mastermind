@@ -56,6 +56,40 @@ class GrokUpgrade(unittest.TestCase):
             self.assertEqual(captured[-1]['requested_model'],requested)
         self.assertEqual(len(captured),2)
 
+    def test_exhausted_grok_explicit_pin_refuses_cross_provider_substitution(self):
+        picker=load('pick')
+        for requested in ('grok-4.6','grok-4.7'):
+            for target in (None,'grok'):
+                seen=[]
+                def fake(_class,**options):
+                    seen.append((options.get('pool'),options.get('requested_model')))
+                    if options.get('pool')=='grok':
+                        return 'NONE reason=grok exhausted (GROK_EXHAUSTED marker)'
+                    return 'POOL=cursor KEY=- MODEL=cursor-grok-4.6-high REASON=fixture'
+                with self.subTest(requested=requested,pool=target), \
+                     patch.object(picker,'_format_pick_host',side_effect=fake), \
+                     patch.object(picker,'_grok_exhausted',return_value=True):
+                    result=picker.format_pick('review',pool=target,requested_model=requested)
+                self.assertEqual(result,'NONE reason=grok exhausted (GROK_EXHAUSTED marker)')
+                self.assertEqual(seen,[('grok',requested)])
+
+    def test_exhausted_unpinned_grok_affinity_still_uses_legacy_cursor(self):
+        picker=load('pick')
+        seen=[]
+        def fake(_class,**options):
+            seen.append((options.get('pool'),options.get('requested_model')))
+            if options.get('pool')=='grok':
+                return 'NONE reason=grok exhausted (GROK_EXHAUSTED marker)'
+            if options.get('pool')=='cursor':
+                return 'POOL=cursor KEY=- MODEL=cursor-grok-4.6-high REASON=fixture'
+            return 'POOL=glm KEY=- MODEL=glm-5.3 REASON=fixture'
+        with patch.object(picker,'_format_pick_host',side_effect=fake), \
+             patch.object(picker,'_grok_exhausted',return_value=True):
+            result=picker.format_pick('review',pool='grok')
+        self.assertIn('MODEL=cursor-grok-4.6-high',result)
+        self.assertIn('QUOTA_FAILOVER=grok-weekly-to-cursor-monthly MODEL_CHANGED=true',result)
+        self.assertEqual(seen,[('grok',None),('cursor','cursor-grok-4.6-high')])
+
     def test_forced_grok_pin_reaches_model_aware_launch_guard(self):
         picker=load('pick')
         doc={'pools':{'grok':{'default_model':'grok-4.6'}}}
