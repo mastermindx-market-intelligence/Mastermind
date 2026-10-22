@@ -50,10 +50,14 @@ bounded 1/2/4/8-worker experiment with real quota and 429 observations.
 ## Published supported model names
 
 - `dola-seed-2.0-pro`, `dola-seed-2.0-lite`, `dola-seed-2.0-code`
-- `bytedance-seed-code`
-- `glm-5.3-flash`, `glm-5.2`, `glm-5.1`
-- `kimi-k2.5`, `gpt-oss-120b`
+- `glm-5.3-flash`, `glm-5.2`
 - `deepseek-v4.1-flash`, `deepseek-v4-flash`, `deepseek-v4-pro`
+
+**Deprecated September 23, 2026:** `bytedance-seed-code`, `glm-5.1`,
+`kimi-k2.5`, and `gpt-oss-120b` must not be durable routing defaults.
+Some broad vendor setup pages still display them. Prefer the more specific
+vendor deprecation notice:
+https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-model-deprecation
 - `ark-code-latest` (console-selected model or automatic routing)
 
 Use the regional console's allowed models as the actual final authority.

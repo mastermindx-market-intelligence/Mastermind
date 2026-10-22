@@ -451,12 +451,8 @@ def test_byteplus_published_model_upper_bound_is_reviewed():
         "dola-seed-2.0-pro",
         "dola-seed-2.0-lite",
         "dola-seed-2.0-code",
-        "bytedance-seed-code",
         "glm-5.3-flash",
         "glm-5.2",
-        "glm-5.1",
-        "kimi-k2.5",
-        "gpt-oss-120b",
         "deepseek-v4.1-flash",
         "deepseek-v4-flash",
         "deepseek-v4-pro",
@@ -464,4 +460,16 @@ def test_byteplus_published_model_upper_bound_is_reviewed():
     for model in allowed:
         changed = _catalog()
         changed["profiles"]["byteplus-coding-plan-personal"]["models"]["hard"] = model
+        validate_profiles(changed)
+
+
+
+@pytest.mark.parametrize(
+    "deprecated",
+    ["bytedance-seed-code", "glm-5.1", "kimi-k2.5", "gpt-oss-120b"],
+)
+def test_byteplus_deprecated_models_are_unselectable(deprecated):
+    changed = _catalog()
+    changed["profiles"]["byteplus-coding-plan-personal"]["models"]["hard"] = deprecated
+    with pytest.raises(ProviderProfileError, match="unsupported BytePlus Coding Plan model"):
         validate_profiles(changed)

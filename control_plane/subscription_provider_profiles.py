@@ -25,20 +25,19 @@ SCHEMA = "mastermind.subscription_provider_profiles/v1"
 DEFAULT_PROFILES_PATH = Path(__file__).resolve().parents[1] / "config" / "subscription_provider_profiles.v1.json"
 _ALLOWED_MODEL_CLASSES = frozenset({"routine", "hard", "fast", "subagent"})
 
-# Published BytePlus Personal Coding Plan coding-tool models. This is an upper
-# bound, not a claim that every regional/account model is enabled. Do not
-# interpret this list as generic ModelArk PAYG inference entitlement.
+# Current non-deprecated BytePlus Personal Coding Plan coding-tool models.
+# The dedicated vendor deprecation notice removes bytedance-seed-code,
+# glm-5.1, kimi-k2.5 and gpt-oss-120b (September 23, 2026), even though
+# some general setup pages still display those stale model IDs.
+# This is only an upper bound, not account/region/model availability proof.
+# Do not interpret this list as generic ModelArk PAYG inference entitlement.
 _BYTEPLUS_CODING_TOOL_MODELS = frozenset({
     "ark-code-latest",  # Vendor-managed auto selection, not a fixed quality tier.
     "dola-seed-2.0-pro",
     "dola-seed-2.0-lite",
     "dola-seed-2.0-code",
-    "bytedance-seed-code",
     "glm-5.3-flash",
     "glm-5.2",
-    "glm-5.1",
-    "kimi-k2.5",
-    "gpt-oss-120b",
     "deepseek-v4.1-flash",
     "deepseek-v4-flash",
     "deepseek-v4-pro",
