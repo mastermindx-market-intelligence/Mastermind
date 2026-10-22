@@ -717,3 +717,83 @@ def test_incident_replay_module_importable():
         assert fns, "incident replay module has no test_ functions"
     except ImportError:
         pytest.skip("incident replay module not importable (expected in isolated worktree)")
+
+
+# ---------------------------------------------------------------------------
+# G. Portfolio V3 Decision Snapshot source contracts (S0 Task 1)
+# ---------------------------------------------------------------------------
+
+def test_portfolio_v3_snapshot_sources_are_registered_context_only():
+    from control_plane import contracts
+    expected = {
+        "portfolio-v3-risk-envelope-settled": (
+            "site/riskdata/risk_envelope.json", "SHRINK"
+        ),
+        "portfolio-v3-sector-central": (
+            "site/sectordata/sector_central.json", "ADVISORY"
+        ),
+        "portfolio-v3-covariance-spine": (
+            "data/neuralweb/covariance_spine.json", "ADVISORY"
+        ),
+        "portfolio-v3-factor-betas": (
+            "site/factor_betas.json", "ADVISORY"
+        ),
+        "portfolio-v3-prophet-index": (
+            "site/prophet/index.json", "ADVISORY"
+        ),
+        "portfolio-v3-portfolio-context": (
+            "site/data/portfolio_ctx.json", "ADVISORY"
+        ),
+    }
+    for key, (path, degradation) in expected.items():
+        row = contracts.contract(key)
+        assert row is not None
+        assert row["path"] == path
+        assert row["allowed_effect"] in {"context-only", "display-only"}
+        assert row["degradation_class"] == degradation
+        assert row["consumer_modules"] == [
+            "portfolio/decision_snapshot_sources.py"
+        ]
+
+
+def test_contracts_yaml_has_no_duplicate_keys_and_preserves_prior_rows():
+    """The V3 snapshot registration must not corrupt config/contracts.yml structurally.
+
+    PyYAML's default loader silently accepts duplicate mapping keys (last one wins),
+    so a plain `contract(...)` lookup cannot discriminate a pasted-in-the-middle
+    insertion that strips a neighboring row's fields or duplicates a key within the
+    new rows. This test parses the raw file with a loader that raises on any
+    duplicate key anywhere in the document, then pins the exact prior-row shape
+    that a mis-inserted block would otherwise silently damage.
+    """
+    import yaml
+
+    class _UniqueKeyLoader(yaml.SafeLoader):
+        pass
+
+    def _construct_mapping(loader, node, deep=False):
+        seen = set()
+        for key_node, _value_node in node.value:
+            key = loader.construct_object(key_node, deep=deep)
+            if key in seen:
+                raise ValueError(
+                    f"duplicate key {key!r} found in config/contracts.yml mapping"
+                )
+            seen.add(key)
+        return yaml.SafeLoader.construct_mapping(loader, node, deep)
+
+    _UniqueKeyLoader.add_constructor(
+        yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_mapping
+    )
+
+    contracts_path = Path(__file__).resolve().parent.parent / "config" / "contracts.yml"
+    text = contracts_path.read_text(encoding="utf-8")
+    doc = yaml.load(text, Loader=_UniqueKeyLoader)
+    arts = doc["artifacts"]
+
+    # Pre-existing row immediately preceding the new V3 block must be unmodified.
+    assert arts["site-intelligence-briefing"]["consumer_modules"] == ["brain/intake.py"]
+    assert arts["site-intelligence-briefing"]["declared_by"] == "census"
+
+    # New row must carry exactly one declared_by, not a duplicate.
+    assert arts["portfolio-v3-portfolio-context"]["declared_by"] == "census"

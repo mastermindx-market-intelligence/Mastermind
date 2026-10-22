@@ -587,3 +587,75 @@ artifacts:
     consumer_modules:
       - brain/intake.py
     declared_by: census
+
+  portfolio-v3-risk-envelope-settled:
+    path: site/riskdata/risk_envelope.json
+    owner: macro_engine
+    schema_hint: json
+    freshness_budget_sessions: 1
+    tier: display
+    allowed_effect: context-only
+    degradation_class: SHRINK
+    consumer_modules:
+      - portfolio/decision_snapshot_sources.py
+    declared_by: census
+
+  portfolio-v3-sector-central:
+    path: site/sectordata/sector_central.json
+    owner: macro_engine
+    schema_hint: json
+    freshness_budget_sessions: 1
+    tier: display
+    allowed_effect: context-only
+    degradation_class: ADVISORY
+    consumer_modules:
+      - portfolio/decision_snapshot_sources.py
+    declared_by: census
+
+  portfolio-v3-covariance-spine:
+    path: data/neuralweb/covariance_spine.json
+    owner: macro_engine
+    schema_hint: json
+    freshness_budget_sessions: 1
+    tier: infrastructure
+    allowed_effect: context-only
+    degradation_class: ADVISORY
+    consumer_modules:
+      - portfolio/decision_snapshot_sources.py
+    declared_by: census
+
+  portfolio-v3-factor-betas:
+    path: site/factor_betas.json
+    owner: macro_engine
+    schema_hint: json
+    freshness_budget_sessions: 1
+    tier: display
+    allowed_effect: context-only
+    degradation_class: ADVISORY
+    consumer_modules:
+      - portfolio/decision_snapshot_sources.py
+    declared_by: census
+
+  portfolio-v3-prophet-index:
+    path: site/prophet/index.json
+    owner: macro_engine
+    schema_hint: json
+    freshness_budget_sessions: 1
+    tier: display
+    allowed_effect: display-only
+    degradation_class: ADVISORY
+    consumer_modules:
+      - portfolio/decision_snapshot_sources.py
+    declared_by: census
+
+  portfolio-v3-portfolio-context:
+    path: site/data/portfolio_ctx.json
+    owner: macro_engine
+    schema_hint: json
+    freshness_budget_sessions: 1
+    tier: display
+    allowed_effect: context-only
+    degradation_class: ADVISORY
+    consumer_modules:
+      - portfolio/decision_snapshot_sources.py
+    declared_by: census
