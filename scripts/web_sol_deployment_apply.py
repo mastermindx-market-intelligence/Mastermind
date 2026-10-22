@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from integrations.chairman_surfaces import web_sol_deployment as deployment
+from integrations.chairman_surfaces import web_sol_browser_link_overlay as browser_overlay
 from integrations.chairman_surfaces import web_sol_deployment_apply as applier
 from integrations.chairman_surfaces import web_sol_instance as instance
 from integrations.chairman_surfaces import web_sol_protocol as protocol
@@ -180,7 +181,46 @@ class _ReleaseIdentity:
         self.source_commit = source_commit
 
 
+def _decode_overlay_bundle(raw: object) -> browser_overlay.BrowserLinkOverlayBundle:
+    row = _exact_dict(raw, frozenset({
+        "schema", "instance_id", "native_host_name", "source_commit", "wrapper_argv",
+        "bundle_digest", "artifacts", "base_package_version", "base_source_commit",
+        "base_capability_digest", "extension_root", "required_preimage_digests",
+    }))
+    if row["schema"] != browser_overlay.OVERLAY_SCHEMA or _exact_list(row["wrapper_argv"]) != []:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    raw_artifacts = _exact_list(row["artifacts"])
+    raw_preimages = _exact_list(row["required_preimage_digests"])
+    if (not 1 <= len(raw_artifacts) <= MAX_ARTIFACTS
+            or len(raw_preimages) != len(raw_artifacts)):
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    artifacts = tuple(_decode_artifact(item) for item in raw_artifacts)
+    if sum(len(item.content) for item in artifacts) > MAX_TOTAL_ARTIFACT_BYTES:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    preimages = []
+    for value in raw_preimages:
+        item = _exact_dict(value, frozenset({"name", "sha256"}))
+        preimages.append((_string(item["name"], maximum=128),
+                          None if item["sha256"] is None else _digest(item["sha256"])))
+    try:
+        return browser_overlay.BrowserLinkOverlayBundle(
+            instance_id=_digest(row["instance_id"]),
+            native_host_name=_string(row["native_host_name"], maximum=255),
+            source_commit=_digest(row["source_commit"], width=40),
+            wrapper_argv=(), artifacts=artifacts, bundle_digest=_digest(row["bundle_digest"]),
+            base_package_version=_string(row["base_package_version"], maximum=32),
+            base_source_commit=_digest(row["base_source_commit"], width=40),
+            base_capability_digest=_digest(row["base_capability_digest"]),
+            extension_root=_absolute_path(row["extension_root"]),
+            required_preimage_digests=tuple(preimages),
+        )
+    except deployment.WebSolDeploymentError as error:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from error
+
+
 def _decode_bundle(raw: object) -> deployment.DeploymentBundle:
+    if type(raw) is dict and raw.get("schema") == browser_overlay.OVERLAY_SCHEMA:
+        return _decode_overlay_bundle(raw)
     row = _exact_dict(
         raw,
         frozenset(
@@ -339,6 +379,9 @@ def _decode_request(
         "expected_uid": _integer(row["expected_uid"]),
         "expected_gid": _integer(row["expected_gid"]),
     }
+    if (isinstance(bundle, browser_overlay.BrowserLinkOverlayBundle)
+            and metadata["install_root"] != bundle.extension_root):
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
     return bundle, plan, metadata
 
 

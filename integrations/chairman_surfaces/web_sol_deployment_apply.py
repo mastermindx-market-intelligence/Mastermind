@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from . import web_sol_deployment as deployment
+from . import web_sol_browser_link_overlay as browser_overlay
 
 PREPARED_RECEIPT_SCHEMA = "mastermind.web_sol_deployment_prepared_receipt.v1"
 MAX_PREIMAGE_BYTES = 1_048_576
@@ -172,6 +173,11 @@ def _plan_rows(
         raise WebSolDeploymentApplyError("TARGET_DUPLICATE")
     if set(rows) != set(artifact_paths):
         raise WebSolDeploymentApplyError("PLAN_MISMATCH")
+    if isinstance(bundle, browser_overlay.BrowserLinkOverlayBundle):
+        try:
+            browser_overlay.validate_overlay_plan(bundle, plan)
+        except deployment.WebSolDeploymentError as error:
+            raise WebSolDeploymentApplyError("OVERLAY_PLAN_INVALID") from error
     return rows
 
 
@@ -385,6 +391,9 @@ def prepare_deployment(
     except OSError as exc:
         raise WebSolDeploymentApplyError("CLEANUP_NONCE_UNAVAILABLE") from exc
     root = _install_root(install_root, uid=expected_uid, gid=expected_gid)
+    if (isinstance(bundle, browser_overlay.BrowserLinkOverlayBundle)
+            and root != bundle.extension_root):
+        raise WebSolDeploymentApplyError("OVERLAY_ROOT_MISMATCH")
     rows = _plan_rows(bundle, plan)
     artifacts = sorted(bundle.artifacts, key=lambda row: str(row.destination))
 
@@ -792,6 +801,9 @@ def _current_matches_artifact(
 def _validate_prepared_digest(prepared: PreparedDeployment) -> None:
     if not isinstance(prepared, PreparedDeployment):
         raise WebSolDeploymentApplyError("PREPARED_INVALID")
+    if (isinstance(prepared.bundle, browser_overlay.BrowserLinkOverlayBundle)
+            and prepared.install_root != prepared.bundle.extension_root):
+        raise WebSolDeploymentApplyError("OVERLAY_ROOT_MISMATCH")
     try:
         current_digest = _prepared_digest_from_state(
             operation_key=prepared.operation_key,
@@ -1692,6 +1704,7 @@ def verify_applied_deployment(applied: AppliedDeployment) -> dict[str, object]:
 
     if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
         raise WebSolDeploymentApplyError("APPLIED_INVALID")
+    _validate_prepared_digest(applied.prepared)
     if not _postimage_complete(applied.prepared):
         raise WebSolDeploymentApplyError("READBACK_MISMATCH")
     return {
@@ -2077,6 +2090,10 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
     if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
         raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
     prepared = applied.prepared
+    if isinstance(prepared.bundle, browser_overlay.BrowserLinkOverlayBundle):
+        # A changed overlay identity/root is a definite pre-effect refusal.
+        # Do not relabel the already-applied transaction as an uncertain rollback.
+        _validate_prepared_digest(prepared)
     try:
         verify_applied_deployment(applied)
         artifacts = {

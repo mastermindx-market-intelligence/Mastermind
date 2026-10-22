@@ -602,6 +602,54 @@ _BROWSER_LINK_SOURCE_KINDS = (
 _BROWSER_LINK_SOURCE_NAMES = frozenset(name for name, _kind in _BROWSER_LINK_SOURCE_KINDS)
 
 
+def _validated_browser_link_sources(browser_link_files, expected_browser_link_digests):
+    if (
+        not isinstance(browser_link_files, Mapping)
+        or set(browser_link_files) != _BROWSER_LINK_SOURCE_NAMES
+        or not isinstance(expected_browser_link_digests, Mapping)
+        or set(expected_browser_link_digests) != _BROWSER_LINK_SOURCE_NAMES
+    ):
+        raise WebSolDeploymentError("browser_link_sources_invalid")
+    accepted = dict(browser_link_files)
+    expected = dict(expected_browser_link_digests)
+    if (
+        any(type(value) is not bytes or not 0 < len(value) <= _CENSUS_MAX_FILE_BYTES
+            for value in accepted.values())
+        or sum(len(value) for value in accepted.values()) > _CENSUS_MAX_TOTAL_BYTES
+        or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
+               for value in expected.values())
+    ):
+        raise WebSolDeploymentError("browser_link_source_content_invalid")
+    if any(_sha256(value) != expected[name] for name, value in accepted.items()):
+        raise WebSolDeploymentError("browser_link_source_digest_mismatch")
+
+    return accepted
+
+
+def _browser_link_base_changes(manifest_content: bytes, census_content: bytes):
+    manifest = json.loads(manifest_content.decode("utf-8"),
+                          object_pairs_hook=_manifest_members)
+    # Keep the issued key, transport package version, ChatGPT content scripts,
+    # host permissions, census popup route, and original worker byte-for-byte.
+    manifest["permissions"] = ["nativeMessaging", "alarms", "debugger", "tabs", "storage"]
+    manifest["minimum_chrome_version"] = "116"
+    manifest["background"] = {"service_worker": "browser-link-bootstrap.js"}
+    manifest["content_security_policy"] = {
+        "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
+    }
+    manifest_bytes = _canonical_bytes(manifest) + b"\n"
+    census = census_content
+    marker = b"  </header>"
+    if census.count(marker) != 1:
+        raise WebSolDeploymentError("browser_link_census_layout_invalid")
+    link = (
+        b'\n  <nav aria-label="Browser controls"><a href="browser-link/popup.html">'
+        b'Share browser tabs with agents</a></nav>'
+    )
+    census_bytes = census.replace(marker, marker + link, 1)
+    return manifest_bytes, census_bytes
+
+
 def render_browser_link_extension_bundle(
     binding: dict[str, Any],
     release: WebSolRelease,
@@ -625,47 +673,14 @@ def render_browser_link_extension_bundle(
         source_files=source_files,
         expected_source_digests=expected_source_digests,
     )
-    if (
-        not isinstance(browser_link_files, Mapping)
-        or set(browser_link_files) != _BROWSER_LINK_SOURCE_NAMES
-        or not isinstance(expected_browser_link_digests, Mapping)
-        or set(expected_browser_link_digests) != _BROWSER_LINK_SOURCE_NAMES
-    ):
-        raise WebSolDeploymentError("browser_link_sources_invalid")
-    accepted = dict(browser_link_files)
-    expected = dict(expected_browser_link_digests)
-    if (
-        any(type(value) is not bytes or not 0 < len(value) <= _CENSUS_MAX_FILE_BYTES
-            for value in accepted.values())
-        or sum(len(value) for value in accepted.values()) > _CENSUS_MAX_TOTAL_BYTES
-        or any(type(value) is not str or re.fullmatch(r"[0-9a-f]{64}", value) is None
-               for value in expected.values())
-    ):
-        raise WebSolDeploymentError("browser_link_source_content_invalid")
-    if any(_sha256(value) != expected[name] for name, value in accepted.items()):
-        raise WebSolDeploymentError("browser_link_source_digest_mismatch")
-
-    base_extension = {row.kind: row for row in base.artifacts}
-    manifest = json.loads(base_extension["extension_manifest"].content.decode("utf-8"),
-                          object_pairs_hook=_manifest_members)
-    # Keep the issued key, transport package version, ChatGPT content scripts,
-    # host permissions, census popup route, and original worker byte-for-byte.
-    manifest["permissions"] = ["nativeMessaging", "alarms", "debugger", "tabs", "storage"]
-    manifest["minimum_chrome_version"] = "116"
-    manifest["background"] = {"service_worker": "browser-link-bootstrap.js"}
-    manifest["content_security_policy"] = {
-        "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'"
-    }
-    manifest_bytes = _canonical_bytes(manifest) + b"\n"
-    census = base_extension["extension_census_html"].content
-    marker = b"  </header>"
-    if census.count(marker) != 1:
-        raise WebSolDeploymentError("browser_link_census_layout_invalid")
-    link = (
-        b'\n  <nav aria-label="Browser controls"><a href="browser-link/popup.html">'
-        b'Share browser tabs with agents</a></nav>'
+    accepted = _validated_browser_link_sources(
+        browser_link_files, expected_browser_link_digests
     )
-    census_bytes = census.replace(marker, marker + link, 1)
+    base_extension = {row.kind: row for row in base.artifacts}
+    manifest_bytes, census_bytes = _browser_link_base_changes(
+        base_extension["extension_manifest"].content,
+        base_extension["extension_census_html"].content,
+    )
     extension_root = next(
         row.destination.parent for row in base.artifacts
         if row.kind == "extension_manifest"
