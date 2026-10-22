@@ -27,7 +27,9 @@ export function missionInteriors(mission: FabricMission | null) {
   const usable = !!root && mission?.mission.runtime_root_state === "RESOLVED" &&
     !mission.mission.root_job_ambiguous && mission.read_state.state !== "UNAVAILABLE" &&
     mission.children.state !== "UNAVAILABLE";
-  const visibleIds = new Set(slice.map(child => child.job_id));
+  // The decoder bounds the complete source to 500 children. The display cap
+  // limits rendered rows and counts, not which supplied ancestors can prove
+  // lineage. Missing, duplicate and cyclic parents still fail below.
   const rows: FabricRow[] = slice.map((child, index) => {
     const lineage: string[] = [];
     const seen = new Set<string>();
@@ -39,7 +41,6 @@ export function missionInteriors(mission: FabricMission | null) {
       seen.add(cursor.job_id);
       lineage.unshift(cursor.job_id);
       if (cursor.parent_job_id === root) { lineage.unshift(root!); break; }
-      if (!visibleIds.has(cursor.parent_job_id)) { problem = "PARENT_NOT_OBSERVED"; break; }
       cursor = byId.get(cursor.parent_job_id);
       if (!cursor) problem = "PARENT_NOT_OBSERVED";
     }
