@@ -28,13 +28,30 @@ class Copy:
                         pages=copy.deepcopy(PAGES), contentHash={"tokens": "c1"}, nodeCount=1),
         }
         self.calls = []
+        self.page_calls = []
+        source_pages = {
+            "p-1-0": dict(fileId=SRC, pageId="p-1-0", pageName="Page 1",
+                          nodeCount=5, artboardCount=1, fontFamilies=["Inter"],
+                          artboards=[dict(id="1-1", name="Migration fidelity specimen",
+                                          childCount=3)]),
+            "p-3-0": dict(fileId=SRC, pageId="p-3-0", pageName="Page 2",
+                          nodeCount=1, artboardCount=0, fontFamilies=[], artboards=[]),
+        }
+        self.page_infos = {SRC: source_pages, CLONE: copy.deepcopy(source_pages)}
+        for page in self.page_infos[CLONE].values():
+            page["fileId"] = CLONE
 
     def read(self, file_id):
         self.calls.append(file_id)
         return copy.deepcopy(self.infos[file_id])
 
+    def read_page(self, file_id, page_id):
+        self.page_calls.append((file_id, page_id))
+        return copy.deepcopy(self.page_infos[file_id][page_id])
+
     def plan(self, keep=("p-1-0",)):
-        return g.make_plan(SRC, CLONE, list(keep), "scratch-copy-prune-20261022", reader=self.read)
+        return g.make_plan(SRC, CLONE, list(keep), "scratch-copy-prune-20261022",
+                           reader=self.read, page_reader=self.read_page)
 
     def delete_clone_page_2(self):
         self.infos[CLONE]["pages"] = [copy.deepcopy(PAGES[0])]
@@ -71,10 +88,10 @@ class ClonePruneGuardTests(unittest.TestCase):
         self.assertEqual(plan["remove_pages"][0]["id"], "p-3-0")
         self.assertEqual(fixture.calls, [SRC, CLONE])
         fixture.delete_clone_page_2()
-        verified = g.verify_plan(plan, reader=fixture.read)
+        verified = g.verify_plan(plan, reader=fixture.read, page_reader=fixture.read_page)
         self.assertEqual(verified["state"], "CLONE_PRUNE_METADATA_VERIFIED")
         self.assertEqual(verified["clone_removed_page_ids"], ["p-3-0"])
-        self.assertEqual(verified["source_unchanged_page_ids"], ["p-1-0", "p-3-0"])
+        self.assertEqual(verified["source_page_list_unchanged_ids"], ["p-1-0", "p-3-0"])
         self.assertFalse(verified["original_deletion_authorized"])
         self.assertFalse(verified["production_migration_accepted"])
         self.assertFalse(verified["image_component_comment_fidelity_verified"])
@@ -83,11 +100,11 @@ class ClonePruneGuardTests(unittest.TestCase):
     def test_source_and_clone_identity_guards(self):
         fixture = Copy()
         with self.assertRaisesRegex(g.bridge.Refusal, "SOURCE_EQUALS_CLONE"):
-            g.make_plan(SRC, SRC, ["p-1-0"], "op", reader=fixture.read)
+            g.make_plan(SRC, SRC, ["p-1-0"], "op", reader=fixture.read, page_reader=fixture.read_page)
         self.assertEqual(fixture.calls, [])
         for file_id in ("", "other", "../../fake", SRC.lower()):
             with self.subTest(file_id=file_id), self.assertRaisesRegex(g.bridge.Refusal, "FILE_ID_REQUIRED"):
-                g.make_plan(file_id, CLONE, ["p-1-0"], "op", reader=fixture.read)
+                g.make_plan(file_id, CLONE, ["p-1-0"], "op", reader=fixture.read, page_reader=fixture.read_page)
         fixture.infos[CLONE]["fileId"] = SRC
         with self.assertRaisesRegex(g.bridge.Refusal, "FILE_ID_MISMATCH"):
             fixture.plan()
@@ -137,7 +154,7 @@ class ClonePruneGuardTests(unittest.TestCase):
         f = Copy()
         plan = f.plan()
         with self.assertRaisesRegex(g.bridge.Refusal, "CLONE_PRUNE_UNVERIFIED"):
-            g.verify_plan(plan, reader=f.read)
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
         self.assertEqual(len(f.infos[CLONE]["pages"]), 2)
 
     def test_extra_clone_page_blocks_verification(self):
@@ -147,7 +164,7 @@ class ClonePruneGuardTests(unittest.TestCase):
             "type": "page", "id": "p-extra", "name": "Unplanned", "icon": None,
         }]
         with self.assertRaisesRegex(g.bridge.Refusal, "CLONE_PRUNE_UNVERIFIED"):
-            g.verify_plan(plan, reader=f.read)
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
     def test_source_changed_blocks_verification(self):
         f = Copy()
@@ -155,7 +172,7 @@ class ClonePruneGuardTests(unittest.TestCase):
         f.delete_clone_page_2()
         f.infos[SRC]["pages"][1]["name"] = "Changed"
         with self.assertRaisesRegex(g.bridge.Refusal, "SOURCE_CHANGED"):
-            g.verify_plan(plan, reader=f.read)
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
     def test_source_token_drift_blocks_verification(self):
         f = Copy()
@@ -163,7 +180,7 @@ class ClonePruneGuardTests(unittest.TestCase):
         f.delete_clone_page_2()
         f.infos[SRC]["contentHash"]["tokens"] = "drift"
         with self.assertRaisesRegex(g.bridge.Refusal, "SOURCE_TOKENS_CHANGED"):
-            g.verify_plan(plan, reader=f.read)
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
     def test_clone_token_drift_blocks_verification(self):
         f = Copy()
@@ -171,7 +188,7 @@ class ClonePruneGuardTests(unittest.TestCase):
         f.delete_clone_page_2()
         f.infos[CLONE]["contentHash"]["tokens"] = "drift"
         with self.assertRaisesRegex(g.bridge.Refusal, "CLONE_TOKENS_CHANGED"):
-            g.verify_plan(plan, reader=f.read)
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
     def test_tampered_plan_blocks_verification(self):
         for mutate, expected in [
@@ -187,7 +204,7 @@ class ClonePruneGuardTests(unittest.TestCase):
                 mutate(plan)
                 f.delete_clone_page_2()
                 with self.assertRaisesRegex(g.bridge.Refusal, expected):
-                    g.verify_plan(plan, reader=f.read)
+                    g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
     def test_selected_native_jsx_exact_parity_passes(self):
         f = Copy()
@@ -197,7 +214,7 @@ class ClonePruneGuardTests(unittest.TestCase):
         def jsx(file_id, node_id):
             jsx_reads.append((file_id, node_id))
             return '(\n  <div id="1-1" style={{ color: "#ffffff" }}>content</div>\n)'
-        result = g.verify_plan(plan, reader=f.read,
+        result = g.verify_plan(plan, reader=f.read, page_reader=f.read_page,
                                evidence_node_ids=["1-1"], jsx_reader=jsx)
         self.assertEqual(result["exact_jsx_node_ids_verified"], ["1-1"])
         self.assertFalse(result["full_page_visual_fidelity_verified"])
@@ -208,7 +225,7 @@ class ClonePruneGuardTests(unittest.TestCase):
         plan = f.plan()
         f.delete_clone_page_2()
         with self.assertRaisesRegex(g.bridge.Refusal, "CLONE_JSX_MISMATCH"):
-            g.verify_plan(plan, reader=f.read, evidence_node_ids=["1-1"],
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page, evidence_node_ids=["1-1"],
                           jsx_reader=lambda file_id, node_id: (
                               "(<div>same</div>)" if file_id == SRC else "(<div>wrong</div>)"))
 
@@ -219,10 +236,41 @@ class ClonePruneGuardTests(unittest.TestCase):
         for node_ids in ([""], ["1-1", "1-1"], ["x" * 121], list(map(str, range(25)))):
             with self.subTest(node_ids=node_ids), self.assertRaisesRegex(
                     g.bridge.Refusal, "INVALID_JSX_EVIDENCE_TARGETS"):
-                g.verify_plan(plan, reader=f.read, evidence_node_ids=node_ids)
+                g.verify_plan(plan, reader=f.read, page_reader=f.read_page, evidence_node_ids=node_ids)
         with self.assertRaisesRegex(g.bridge.Refusal, "JSX_SCHEMA_UNVERIFIED"):
-            g.verify_plan(plan, reader=f.read, evidence_node_ids=["1-1"],
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page, evidence_node_ids=["1-1"],
                           jsx_reader=lambda *_: "unexpected tool error")
+
+    def test_nested_node_count_mismatch_refuses_retained_page_plan(self):
+        f = Copy()
+        f.page_infos[CLONE]["p-1-0"]["nodeCount"] += 8
+        with self.assertRaisesRegex(g.bridge.Refusal, "RETAINED_PAGE_NATIVE_STRUCTURE_MISMATCH"):
+            f.plan()
+        self.assertEqual(f.infos[SRC]["pages"], PAGES)
+        self.assertEqual(f.infos[CLONE]["pages"], PAGES)
+
+    def test_post_plan_native_source_and_clone_drift_refused(self):
+        for file_id, expected in ((SRC, "SOURCE_NATIVE_PAGE_DRIFT"),
+                                  (CLONE, "CLONE_NATIVE_PAGE_DRIFT")):
+            f = Copy()
+            plan = f.plan()
+            f.delete_clone_page_2()
+            f.page_infos[file_id]["p-1-0"]["nodeCount"] += 8
+            with self.subTest(file_id=file_id), self.assertRaisesRegex(
+                    g.bridge.Refusal, expected):
+                g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
+
+    def test_incomplete_retained_artboard_census_is_never_accepted(self):
+        f = Copy()
+        f.page_infos[CLONE]["p-1-0"]["artboardCount"] = 2
+        with self.assertRaisesRegex(g.bridge.Refusal, "NATIVE_PAGE_CENSUS_INCOMPLETE"):
+            f.plan()
+        f = Copy()
+        plan = f.plan()
+        f.delete_clone_page_2()
+        plan["retained_native_census"][0]["native_metadata_sha256"] = "0" * 64
+        with self.assertRaisesRegex(g.bridge.Refusal, "NATIVE_PAGE_CENSUS_PLAN_INVALID"):
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
     def test_plan_no_modifying_dispatch(self):
         f = Copy()
