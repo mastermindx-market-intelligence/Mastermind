@@ -49,8 +49,12 @@ The new pure function is
 It performs no writes. For every held line with `shares != 0`, in order:
 
 1. **FRESH.** `prices[t]` is finite and > 0, **and** `price_evidence[t]` attests a
-   same-date observation: `stale_days in (None, 0)`, `source` is not a carry label, and
-   `observed_asof == asof` whenever it is present.
+   same-date observation: `stale_days in (None, 0)`, `source` is not a carry label,
+   `observed_asof == asof` whenever it is present, and `close_qualified` is not `False`
+   whenever it is present. Evidence with `close_qualified is False` (an intraday print, a
+   seed, a legacy injected float, an adjusted historical close) is treated as
+   **UNATTESTED**: the value is used, but the line cannot qualify. Evidence without the
+   key keeps the rule above, so today's `mark_symbols()["sources"]` shape stays accepted.
 2. **CARRIED.** One of two cases. Either `prices[t]` is finite and > 0 but its evidence
    says carry or `stale_days > 0`. Or `prices[t]` is absent and the persisted
    `current_price` satisfies `current_price_asof <= asof` (direction-aware; a newer
@@ -203,8 +207,12 @@ What #726/#727/#728 already contribute (kept as is):
 What L-E4 adds:
 
 4. **Observed date on every source row.** `mark_symbols()["sources"][S]` gains
-   `observed_asof`, `retrieved_at` and `basis`, and `stale_days` is computed from
-   `asof − observed_asof` for **every** source, not only carry:
+   `observed_asof`, `retrieved_at`, `basis`, `time_kind`
+   (`session_close|intraday|carry|seed`) and `close_qualified` (true only for an
+   official-session-close-grade observation for `observed_asof`, on a basis valid for
+   unadjusted share counts on that date). `stale_days` is computed from
+   `asof − observed_asof` for **every** source, not only carry. "Today" is the US/Eastern
+   session date of an injectable run clock, not the machine's local date:
    - Polygon aggregates use the bar date.
    - The yahoo parquet uses the index date of the last row ≤ asof.
    - Today `_yahoo_parquet` returns `s.iloc[-1]` with no age check, so a parquet row
@@ -251,7 +259,12 @@ What L-E4 adds:
      unmeasured. It is a W3 census item against Polygon raw daily aggregates.
 
 **Acceptance (L-E4).**
-- The #726/#727/#728 tests pass unchanged.
+- The #726/#727/#728 tests pass. Three of their expectations are deliberately narrowed
+  by items 4, 5 and 7, so they are amended in place, each keeping its intent:
+  - the exact-dict carry-row assertion becomes a subset check plus the new keys (item 4);
+  - the historical-aggregate call also records `adjusted=False`, with a pinned clock (item 7);
+  - the current-day snapshot fallback is pinned to a pre-close clock and reads the raw
+    snapshot fields (item 5: after the close the aggregate is used, never `lastTrade`).
 - New tests:
   - directional stale (negative d is ineligible);
   - yahoo stale age reported and bounded;
@@ -271,16 +284,16 @@ What L-E4 adds:
 
 | carrier | disposition | why | lane | interface it hands on |
 |---|---|---|---|---|
-| #726 | **CONTINUE** (rebase + items 4–8) | applies cleanly, tests green on 230e9a30, design correct | L-E4 | `mark_symbols(symbols, asof)["sources"][S] = {source, price, stale_days, observed_asof, retrieved_at, basis}` — the `price_evidence` input to A02 |
+| #726 | **CONTINUE** (rebase + items 4–8) | applies cleanly, tests green on 230e9a30, design correct | L-E4 | `mark_symbols(symbols, asof)["sources"][S] = {source, price, stale_days, observed_asof, retrieved_at, basis, time_kind, close_qualified}` — the `price_evidence` input to A02 |
 | #727 | **CONTINUE** (folded into the L-E4 carrier) | asof propagation into `desk_ab._gather_prices` is correct | L-E4 | replay consumers call `mark_symbols(..., asof)` with the decision asof |
 | #728 | **CONTINUE** (folded into the L-E4 carrier) | one `mark_asof`; live-quote fill only when `mark_asof == today` | L-E4 | shadow books value through the same source rows. Its own note that `_mark_to()` still substitutes avg_cost is **routed to L-E3's follow-up** and is not fixed silently |
 | #824 | **CONTINUE as its own carrier** (not ECON's file) | `decision_submission` raises `DecisionBoundaryFreeze` instead of the avg_cost fallback; keeps the builder fences; composes with A02 (§a) | seat / owner of `brain/decision_submission.py` | the decision boundary consumes the same "unpriced held line" fact that A02 records as WITHHELD |
 
 Build lanes and the interfaces they consume:
 
-- **L-E3 (A02).** Consumes `price_evidence: Mapping[str, {source, stale_days, observed_asof?}]`.
-  It must accept today's `mark_symbols()["sources"]` shape, with `observed_asof` optional
-  until L-E4 lands.
+- **L-E3 (A02).** Consumes `price_evidence: Mapping[str, {source, stale_days, observed_asof?, close_qualified?}]`.
+  It must accept today's `mark_symbols()["sources"]` shape, with `observed_asof` and
+  `close_qualified` optional until L-E4 lands. `close_qualified is False` means UNATTESTED (§a).
 - **L-E4 (A03).** Produces that shape. Neither lane edits the other's file.
   `paper_account.py` (L-E3) and `marks.py` (L-E4) are disjoint, so they can build in
   parallel.
