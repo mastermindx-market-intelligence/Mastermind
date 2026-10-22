@@ -77,9 +77,7 @@ python3 -m integrations.paper_desktop.clone_prune_guard verify \
   --plan scratch-plan.json
 ```
 
-`CLONE_PRUNE_METADATA_VERIFIED` means exact source pages/names/icons
-were preserved, clone retained precisely the designated pages and removed
-the expected others, and available token content hashes remained stable.
+`CLONE_PRUNE_METADATA_VERIFIED` means exact source page-list identities were preserved, the clone retained precisely the designated pages, available token hashes remained stable, and the retained-page native node/artboard/font metadata has been rechecked on both source and clone.
 It explicitly returns `production_migration_accepted: false` and
 `original_deletion_authorized: false`. With no `--verify-node-id` it cannot
 attest to retained native node styling. With specific node IDs, matching
@@ -122,6 +120,18 @@ refuse completion without any write.
 **Production original remains untouched:** MASTERMIND PAGES
 `01M2WGNCX9475G79JRKJTCM08P` still reported 57 pages on a separate
 exact-file read after this contentful scratch test.
+
+## Retained-page native metadata guard (added October 22)
+
+The previous helper checked page lists and token hashes only. An independent real-path source-versus-copy read found a consequential counterexample: **Commodities page `p-L-0` contains 6,078 native nodes in the active source and 6,070 in the old copy**, despite equal page lists, 41 artboards, top-level child counts and token catalogs. The source and clone are therefore no longer content-equivalent.
+
+The helper's new `plan` step now reads **each page that is intended to survive pruning**, using exact source and clone `fileId` + `pageId`. It compares node totals, complete returned artboard IDs/names/direct child counts and available font families, stores a structural metadata digest in the plan, and refuses incomplete/truncated artboard enumeration. A retained page that differs across source and clone is refused as `RETAINED_PAGE_NATIVE_STRUCTURE_MISMATCH`.
+
+The separate `verify` step re-reads that retained page from **both files** and compares each with the pre-prune digest. Source drift is `SOURCE_NATIVE_PAGE_DRIFT`; clone drift is `CLONE_NATIVE_PAGE_DRIFT`. Neither can be marked complete on the strength of stable page names or a stable global token hash. The reported `source_page_list_unchanged_ids` refers only to list identities—not unchanged native content. This is deliberately target-scoped: removed pages need not be frozen against legitimate ongoing edits in the original.
+
+**This does not prove full fidelity.** Nested node edits that keep counts and direct-child summaries unchanged can escape this metadata census; JSX style equivalence, images, live components, fonts not enumerated by the API, comments, color-space precision and representative visual output still require independent checks. A page with 101 artboards but a capped 100-record read fails closed until the adapter offers a verified complete enumeration. The helper continues to return `production_migration_accepted:false` and `original_deletion_authorized:false`.
+
+The live production clone must **not** be pruned based on a historical creation receipt: its active retained pages have to pass this fresh check. The existing clone of MASTERMIND PAGES is preserved intact.
 
 ## Release and permission fence
 
