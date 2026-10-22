@@ -61,6 +61,23 @@ another root or ID. Unrelated reserved read-only branches may progress.
 Aggregation waits for all transitive descendants and unresolved dispatch-return
 markers before producing its immutable handoff.
 
+## Project tracking
+
+The existing bounded Fabric view joins each descendant through its immediate
+coordinator while retaining the original Event-backed workstream root. Planner
+identity is unique within each coordinator, so planners in separate delegated
+branches remain visible together. Work, review, and repair relationships stay
+within that coordinator's plan; identical local step names do not join across
+branches.
+
+The view validates the retained ancestry and inherited grants, including all
+completed descendants. It does not reopen admission or require a coordinator to
+remain queued. A missing parent, invalid grant, or over-budget subtree remains
+explicitly unjoined; truncation remains partial. The original 17-Job acquisition
+budget, Attempt limits, observation receipt, authorization, and canonical result
+reader remain unchanged. A tracking card does not itself accept a result or
+prove live provider readiness.
+
 ## Schema and rollout
 
 New stores use schema v7. The migration history remains ordered: v6 adds
