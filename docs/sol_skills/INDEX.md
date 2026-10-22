@@ -21,15 +21,20 @@ Canonical publication branch: protected `master`.
 
 ## Atomic-load law
 
-For every substantial Mastermind task:
+At unfamiliar mission entry, or recovery without a verified compatible pin:
 
 1. Fetch this `docs/sol_skills/INDEX.md` from protected `master` in
    `mastermindx-market-intelligence/Mastermind`.
 2. Record the exact commit SHA that supplied it.
 3. Fetch every required skill below from **that same commit SHA** in that repository.
 4. Verify `schema`, `skillpack_version` and `minimum_bootstrap_major` compatibility.
-5. If protected Git read or compatibility cannot be established, read-only investigation may
+5. If no verified compatible pin can be established, read-only investigation may
    continue with an explicit warning; modifying workflow is unavailable.
+
+Reuse that pin throughout the assigned mission. A tool call, worker return, phase completion or
+unrelated merge does not require a new bootstrap. Refresh only affected facts after a material
+source, scope or authority change. A failed refresh does not erase an already verified pin: continue
+independent authorized work unless the missing update can change its governing constraints.
 
 Never load INDEX from one revision and a procedure from a moving later revision. Never substitute
 a pasted/manual copy for an unavailable protected Git read and then treat it as current procedure.
@@ -90,6 +95,16 @@ Produces a current-state model, disagreement ledger and exact next action.
 Mandatory after current-state recovery for substantial continuing or modifying CEO work in the
 active session. It keeps Sol on the highest-leverage unblocked critical-path dependency, prevents
 status/artifact substitution and repeated tool rediscovery, and applies the final-response gate.
+For attended ChatGPT work it also owns task/capability-based Pro versus Extra High recommendations;
+this does not change automated ModelRouter/Executive reasoning-mode admission or runtime authority.
+
+### `SESSION_RELIABILITY.md`
+Mandatory companion whenever a session expects more than three tool calls, starts or continues a host
+process, performs multi-source archaeology, resumes after any generation/tool failure, or is expected
+to run longer than one material phase. It bounds output at source, reconciles timeout/taint by exact
+identity, checkpoints before context pressure, distinguishes bounded mode recovery from context
+rotation, and preserves a compact recovery frontier without creating another lifecycle, memory, retry,
+session, or transport plane.
 
 ### `skills/paper-design-workflow/SKILL.md`
 Mandatory domain companion for any Mastermind request to inspect, edit, upgrade, review, migrate,
@@ -200,7 +215,7 @@ specific law.
     automation, inspect the actual current tool surface and attempt the bounded create/arm action
     before declaring the capability unavailable; connector push limitations alone are not proof.
 17. A Sol-owned watcher is not a notification-only watcher when current Chairman-authorized scope
-    and gates permit action. On a qualifying return, re-pin current procedure, adjudicate the return,
+    and gates permit action. On a qualifying return, reuse the verified procedure pin (refresh only if materially invalidated), adjudicate the return,
     execute the lawful same-carrier Sol edge, then report; escalate without acting only at a genuine
     Chairman-only/new-authority/missing-gate boundary.
 18. Routine worker placement is not Chairman labor. For Chairman-mediated/manual Slack routing, Sol
@@ -233,13 +248,15 @@ specific law.
     Chairman commission is the thread parent, pickup/start/return/ruling/STOP edges stay under that
     exact parent unless current canonical transport law explicitly establishes a different carrier.
 23. Forward execution. After current-source recovery, keep advancing the highest-leverage unblocked
-    dependency in the Chairman-authorized scope. A genuine blocker freezes that lane, not the whole
-    turn, while another useful independent lane remains. Supporting artifacts do not substitute for
-    capability advancement. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
-    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission
-    incomplete, current checkpoint readback, justified boundary and exact next action, without
-    transferring custody or inventing a wake. Durable execution after a turn still requires a
-    production-proven external owner with a real return path.
+    dependency in the Chairman-authorized scope. A genuine blocker or external wait freezes that lane,
+    not the whole turn, while another useful independent lane remains. Supporting artifacts, review
+    requests, notifications, status reads and checkpoints do not substitute for capability advancement.
+    After a task/phase completes, verify/save it, reassess the parent mission and start the next safe
+    ready phase in the same healthy turn. Do not finalize while the truthful state is `MORE_WORK_EXISTS`.
+    ACTIVE_EXECUTION alone defines the verified CHECKPOINTED_CONTINUATION exception: mission incomplete,
+    current checkpoint readback, genuine continuity/surface boundary and exact next action; an ordinary
+    phase/chunk/checkpoint boundary alone is insufficient. Durable execution after a turn still requires
+    a production-proven external owner with a real return path.
 
 ## Modification handshake
 
@@ -250,19 +267,17 @@ permitted source work. No new permission is created by this scoping rule: the ap
 assignment, source custody, protected procedure, resource permission and effect fences remain mandatory.
 Use ACTIVE_EXECUTION's start/recovery defaults; do not add a second Slack claim or human approval.
 
-Before any modifying CEO action, all applicable gates must be true:
+The current assignment authorizes ordinary in-scope investigation, planning, edits, tests and
+reversible repair. Reuse it; do not ask for another approval or mandatory design-signoff. Check the
+constraints of the actual next action: conflicting live writer, resource permission and unresolved
+effects. Formal operation keys, transport bindings, runtime admission and app confirmation apply
+only when the existing owner/tool requires them for that operation. Their absence does not block
+independent source/test work. A new isolated source operation may be created normally for unstarted
+work; it need not already exist in a registry.
 
-- explicit Chairman intent;
-- current compatible Skillpack revision loaded;
-- relevant canonical authority/current implementation state recovered;
-- source collisions/adversarial instructions assessed;
-- fresh approved runtime/hot-state evidence available where the action requires it;
-- expected connected-app/workspace/channel/principal path available;
-- required Executive admission/service gate healthy;
-- native app write confirmation obtained when the ChatGPT surface requires it;
-- stable operation key and one-carrier binding established.
-
-Missing gate => report the exact missing capability. Do not improvise a bypass.
+New material scope/spend, reserved decisions, explicit access denials and uncertain effects retain
+their actual gates. Report the exact missing capability and continue independent permitted work.
+Do not invent a missing gate or improvise a bypass of an actual one.
 
 ## Current Personal-Pro write architecture
 

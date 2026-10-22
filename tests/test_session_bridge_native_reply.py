@@ -71,7 +71,9 @@ class Service:
         self.on_read = None
         self.send_result = None
         self.send_exception = None
-    async def __call__(self, path, payload):
+    async def __call__(self, path, payload, *, before_write=None):
+        if payload["operation"] == "send_message" and before_write is not None:
+            await before_write()
         self.calls.append(copy.deepcopy(payload))
         if payload["operation"] == "read_thread":
             if self.on_read:
@@ -104,7 +106,7 @@ def test_native_reply_returns_to_original_parent_without_claiming_consumption():
     assert sent["message"]["message_type"] == "PROGRESS"
     assert sent["message"]["body"]["stage"] == "message_reply"
     assert sent["message"]["reply_to_message_key"] == REQUEST
-    assert resolver.calls == 2
+    assert resolver.calls == 3
 
 
 @pytest.mark.parametrize("field", ["target_ref", "thread_ts", "actor_ref", "native_session_id", "permission", "status"])
@@ -192,7 +194,7 @@ def test_ambiguous_send_receipt_is_effect_unknown_without_retry(response):
     with pytest.raises(BridgeError) as raised:
         asyncio.run(writer(r, s)(arguments()))
     assert raised.value.code == "carrier_effect_unknown"
-    assert len(s.calls) == 2
+    assert len(s.calls) == 3
 
 
 def test_lost_send_response_is_effect_unknown_and_one_call_only():
@@ -202,7 +204,7 @@ def test_lost_send_response_is_effect_unknown_and_one_call_only():
         asyncio.run(writer(r, s)(arguments()))
     assert raised.value.code == "carrier_effect_unknown"
     assert "private" not in str(raised.value)
-    assert len(s.calls) == 2
+    assert len(s.calls) == 3
 
 
 def test_cancellation_after_send_begins_is_not_reclassified_as_no_effect():
@@ -210,7 +212,7 @@ def test_cancellation_after_send_begins_is_not_reclassified_as_no_effect():
     s.send_exception = asyncio.CancelledError()
     with pytest.raises(asyncio.CancelledError):
         asyncio.run(writer(r, s)(arguments()))
-    assert len(s.calls) == 2
+    assert len(s.calls) == 3
 
 
 def test_revoked_binding_during_duplicate_read_does_not_return_stale_receipt():
@@ -233,7 +235,7 @@ def test_async_host_resolver_is_awaited_before_both_boundaries():
             return r.binding
     async_resolver = AsyncResolver()
     receipt = asyncio.run(writer(async_resolver, s)(arguments()))
-    assert receipt["reply_committed"] is True and async_resolver.calls == 2
+    assert receipt["reply_committed"] is True and async_resolver.calls == 3
 
 
 @pytest.mark.parametrize("seat,surface", [("ceo", "codex"), ("coo", "claude")])

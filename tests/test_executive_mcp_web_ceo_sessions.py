@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -178,6 +179,47 @@ def test_submit_scope_can_send_only_to_trusted_projection(settings, rsa_key):
         assert len(owners.summon_calls) == 1
         assert owners.summon_calls[0][1]["operation_key"] == "bridge-auth-5"
         assert owners.summon_calls[0][0] == owners.reply_calls[0][0]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("alternate_resource", [False, True])
+@pytest.mark.parametrize("auth", ["read", "combined", "extra", "submit-only"])
+def test_direct_read_accepts_exact_read_or_combined_policy(
+    settings, rsa_key, monkeypatch, alternate_resource, auth
+):
+    from integrations.mastermind_executive_app import gateway
+
+    resource = fixture.RESOURCE
+    if alternate_resource:
+        resource = "https://executive-secondary.example.test/mcp"
+        alternate = fixture.AppPolicies(
+            read=fixture._read_policy(resource=resource),
+            submit=fixture._submit_policy(resource=resource),
+        )
+        settings = dataclasses.replace(settings, additional_policies=(alternate,))
+        monkeypatch.setattr(gateway, "_default_jwks_cache", lambda _policy: fixture._FakeJwksCache(rsa_key))
+    scope = {
+        "read": fixture.READ_SCOPE,
+        "combined": f"{fixture.READ_SCOPE} {fixture.SUBMIT_SCOPE}",
+        "extra": f"{fixture.READ_SCOPE} {fixture.SUBMIT_SCOPE} unexpected",
+        "submit-only": fixture.SUBMIT_SCOPE,
+    }[auth]
+
+    async def run():
+        owners, projector = Owners(), Projector()
+        app = await app_client(settings, owners, projector)
+        token = fixture._token(rsa_key, scope=scope, aud=resource)
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                response, payload = await call(client, token, "session_targets", {"kind": "codex"})
+                if auth in {"read", "combined"}:
+                    assert response.status_code == 200 and payload["ok"] is True, payload
+                    assert payload["data"][0]["target_ref"] == "codex:BIND-1"
+                else:
+                    assert response.status_code in {401, 403}
+        assert len(projector.calls) == (1 if auth in {"read", "combined"} else 0)
+        assert not owners.reply_calls and not owners.summon_calls
+
     asyncio.run(run())
 
 
@@ -376,4 +418,82 @@ def test_typed_pre_effect_binding_refusal_is_preserved(settings, rsa_key):
         assert len(calls) == 1
         assert payload["ok"] is False
         assert payload["error"]["code"] == "binding_unavailable"
+    asyncio.run(run())
+
+
+def test_v3_profile_exposes_session_bridge_through_same_authenticated_handlers(settings, rsa_key):
+    from integrations.executive_mcp import web_ceo_v3 as v3
+
+    class Mdm:
+        async def list_macos_devices(self):
+            return {
+                "schema": "mastermind.mosyle_fleet_snapshot.v1",
+                "source": "mosyle_business",
+                "generated_at": "2026-10-03T00:00:00Z",
+                "coverage": "macos",
+                "complete": True, "device_count": 0, "page_count": 0, "devices": [],
+            }
+        async def device(self, **_kwargs):
+            raise AssertionError("MDM device read is not part of this delegation test")
+
+    async def run():
+        import dataclasses
+
+        owners, projector = Owners(), Projector()
+        installed_settings = dataclasses.replace(settings, read_from_ceo_ingress=True)
+        app = transport.build_web_ceo_v3_mcp_app(
+            installed_settings, audit_sink=Sink(), mdm_reader=Mdm(),
+            session_target_projector=projector,
+            session_reply_handler=owners.reply,
+            session_summon_handler=owners.summon,
+        )
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                listed = await rpc(client, fixture._read_token(rsa_key), "tools/list")
+                assert tuple(tool["name"] for tool in listed.json()["result"]["tools"]) == (
+                    v3.web_ceo_v3_tool_names()
+                )
+                _response, targets = await call(
+                    client, fixture._read_token(rsa_key), "session_targets", {"kind": "codex"}
+                )
+                assert targets["ok"] is True
+                assert targets["data"][0]["target_ref"] == "codex:BIND-1"
+                denied_response, _denied = await call(
+                    client, fixture._read_token(rsa_key), "session_send", {
+                        "target_ref": "codex:BIND-1",
+                        "instruction": "continue",
+                        "stop_condition": "return result",
+                        "operation_key": "v3-bridge-read-denied-1",
+                    },
+                )
+                assert denied_response.json()["result"]["isError"] is True
+                assert owners.reply_calls == []
+                _response, continued = await call(
+                    client, fixture._submit_token(rsa_key), "session_send", {
+                        "target_ref": "codex:BIND-1",
+                        "instruction": "continue",
+                        "stop_condition": "return result",
+                        "operation_key": "v3-bridge-continue-1",
+                    },
+                )
+                assert continued["ok"] is True
+                _response, summoned = await call(
+                    client, fixture._submit_token(rsa_key), "session_summon", {
+                        "objective": "bounded task",
+                        "execution_profile": "research_only",
+                        "operation_key": "v3-bridge-summon-1",
+                        "department": "executive-infrastructure",
+                        "priority": 0,
+                        "workstream": "WS:SESSION-BRIDGE",
+                    },
+                )
+                assert summoned["ok"] is True
+        assert len(owners.reply_calls) == 1
+        assert owners.reply_calls[0][1]["operation_key"] == "v3-bridge-continue-1"
+        assert len(owners.summon_calls) == 1
+        assert owners.summon_calls[0][1]["operation_key"] == "v3-bridge-summon-1"
+        assert [kind for _principal, kind in projector.calls] == ["codex", "codex"]
+
     asyncio.run(run())

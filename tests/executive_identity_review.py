@@ -14,9 +14,98 @@ from __future__ import annotations
 import ast
 import hashlib
 import inspect
+from tests.executive_fabric_release_identity_review import REVIEWED_FILES
+from tests.executive_incident_identity_review import REVIEWED_FILES as INCIDENT_REVIEWED_FILES
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
 REVIEWED_LITERAL_COUNT = 33
+
+# Source-only, fixed-mode review. These are directory chmod/inspection modes,
+# not user/group IDs or process identities. Original installed bytes remain
+# immutable; any changed source digest or site exposes every literal to D8.
+REVIEWED_PRIVATE_MODE_SOURCES = {'integrations/session_bridge/artifact_manifest_framing/artifact_production.base.py': {'anchors': ('            '
+                                                                                                   'os.mkdir(self.name, '
+                                                                                                   '0o700, '
+                                                                                                   'dir_fd=self.tmp)',
+                                                                                                   '                    '
+                                                                                                   'or s.st_uid != '
+                                                                                                   'os.getuid() or '
+                                                                                                   'stat.S_IMODE(s.st_mode) '
+                                                                                                   '!= 0o700):',
+                                                                                                   '                or '
+                                                                                                   'current.st_uid != '
+                                                                                                   'os.getuid() or '
+                                                                                                   'stat.S_IMODE(current.st_mode) '
+                                                                                                   '!= 0o700):'),
+                                                                                       'sha256': 'c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e'},
+ 'integrations/session_bridge/artifact_manifest_framing/artifact_production.py': {'anchors': ('            '
+                                                                                              'os.mkdir(self.name, '
+                                                                                              '0o700, dir_fd=self.tmp)',
+                                                                                              '                    or '
+                                                                                              's.st_uid != os.getuid() '
+                                                                                              'or '
+                                                                                              'stat.S_IMODE(s.st_mode) '
+                                                                                              '!= 0o700):',
+                                                                                              '                or '
+                                                                                              'current.st_uid != '
+                                                                                              'os.getuid() or '
+                                                                                              'stat.S_IMODE(current.st_mode) '
+                                                                                              '!= 0o700):'),
+                                                                                  'sha256': 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'},
+ 'integrations/session_bridge/artifact_tool_framing/artifact_production.base.py': {'anchors': ('            '
+                                                                                               'os.mkdir(self.name, '
+                                                                                               '0o700, '
+                                                                                               'dir_fd=self.tmp)',
+                                                                                               '                    or '
+                                                                                               's.st_uid != '
+                                                                                               'os.getuid() or '
+                                                                                               'stat.S_IMODE(s.st_mode) '
+                                                                                               '!= 0o700):',
+                                                                                               '                or '
+                                                                                               'current.st_uid != '
+                                                                                               'os.getuid() or '
+                                                                                               'stat.S_IMODE(current.st_mode) '
+                                                                                               '!= 0o700):'),
+                                                                                   'sha256': 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'},
+ 'integrations/session_bridge/artifact_tool_framing/artifact_production.py': {'anchors': ('            '
+                                                                                          'os.mkdir(self.name, 0o700, '
+                                                                                          'dir_fd=self.tmp)',
+                                                                                          '                    or '
+                                                                                          's.st_uid != os.getuid() or '
+                                                                                          'stat.S_IMODE(s.st_mode) != '
+                                                                                          '0o700):',
+                                                                                          '                or '
+                                                                                          'current.st_uid != '
+                                                                                          'os.getuid() or '
+                                                                                          'stat.S_IMODE(current.st_mode) '
+                                                                                          '!= 0o700):'),
+                                                                              'sha256': '0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409'},
+ 'integrations/session_bridge/bound_launch_capture/lane_runtime.py.patch': {'anchors': ('+_OWNED_CAPTURE_DIR_MODE = '
+                                                                                        '0o700',),
+                                                                            'sha256': '664002d7309779e69cd5f1b3e6a260215f1247526c813824e7e8f5897c8457be'},
+ 'integrations/session_bridge/prospective_completion/candidate/original_delivery_collector.py': {'anchors': ('        '
+                                                                                                             'if (not '
+                                                                                                             'stat.S_ISDIR(b.st_mode) '
+                                                                                                             'or '
+                                                                                                             'a.st_uid '
+                                                                                                             '!= '
+                                                                                                             'os.getuid() '
+                                                                                                             'or '
+                                                                                                             'stat.S_IMODE(a.st_mode) '
+                                                                                                             '!= 0o700',
+                                                                                                             '    '
+                                                                                                             'path=completion_path(run);os.mkdir(path,0o700)'),
+                                                                                                 'sha256': '30cce4abf8b50473906506452dd70f84cf001f5f4a030dd0c6751df108c2df15'},
+ 'integrations/session_bridge/prospective_completion/prospective-completion.patch': {'anchors': ('+        if (not '
+                                                                                                 'stat.S_ISDIR(b.st_mode) '
+                                                                                                 'or a.st_uid != '
+                                                                                                 'os.getuid() or '
+                                                                                                 'stat.S_IMODE(a.st_mode) '
+                                                                                                 '!= 0o700',
+                                                                                                 '+    '
+                                                                                                 'path=completion_path(run);os.mkdir(path,0o700)'),
+                                                                                     'sha256': 'cc2b765a8b3907474a321ffc93986050a2018dfbe1542d2abffdad05f85d1918'}}
+
 REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
                     'ast_sha256': 'caa7c22754197370bf93733aec4cbcb1bc12ee23ef8cc30898be5327cfe8e49c',
                     'sites': ((('value', 'values', 0, 'keywords', 3, 'value'),
@@ -171,8 +260,59 @@ def reviewed_literal_spans(path: str, source: str):
     """
     if type(source) is not str:
         return ()
+    file_review = REVIEWED_FILES.get(path) or INCIDENT_REVIEWED_FILES.get(path)
+    if file_review is not None:
+        if hashlib.sha256(source.encode()).hexdigest() != file_review['sha256']:
+            return ()
+        lines = source.splitlines()
+        spans = []
+        for line, start, end, kind, spelling in file_review['sites']:
+            if (not 1 <= line <= len(lines) or not lines[line-1].isascii()
+                    or lines[line-1][start:end] != spelling):
+                return ()
+            spans.append((line, start, end, kind))
+        return tuple(sorted(spans))
+    modes = REVIEWED_PRIVATE_MODE_SOURCES.get(path)
+    if modes is not None:
+        if hashlib.sha256(source.encode()).hexdigest() != modes["sha256"]:
+            return ()
+        lines = source.splitlines()
+        spans = []
+        for anchor in modes["anchors"]:
+            sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+            if len(sites) != 1 or anchor.count("0o700") != 1:
+                return ()
+            start = anchor.index("0o700")
+            spans.append((sites[0], start, start + len("0o700"), "int"))
+        return tuple(sorted(spans))
+    # Independent scoped review of the fixed ten-minute telemetry age, not a UID.
+    # The complete production patch is pinned; a changed or duplicated site is
+    # fully visible to D8 again. Never derive this digest from current source.
+    if path == "integrations/session_bridge/glm_host_account_pairing/glm-host-account-pairing.patch":
+        expected = "55fdbca61880b8834dd33cd22a9263927c8dc36735dfde4d069461ab78dd9b66"
+        anchor = "+DEFAULT_MAX_AGE = 600"
+        if hashlib.sha256(source.encode()).hexdigest() != expected:
+            return ()
+        lines = source.splitlines()
+        sites = [i for i, line in enumerate(lines, 1) if line == anchor]
+        if len(sites) != 1:
+            return ()
+        start = anchor.index("600")
+        return ((sites[0], start, start + 3, "int"),)
+    reviewed_container = None
     if path == REVIEWED_PATH:
         reviewed_anchors = REVIEWED_ANCHORS
+    elif path == "integrations/research_read_mcp/release_identity.py":
+        from tests.research_read_archive_identity_review import (
+            REVIEWED_ANCHORS as archive_path_anchors,
+        )
+        reviewed_anchors = archive_path_anchors
+    elif path == "control_plane/executive_service.py":
+        from tests.executive_company_identity_review import (
+            REVIEWED_ANCHORS as company_anchors, REVIEWED_CONTAINER,
+        )
+        reviewed_anchors = company_anchors
+        reviewed_container = REVIEWED_CONTAINER
     elif path == "control_plane/executive_release_factory.py":
         from tests.executive_release_identity_review import REVIEWED_ANCHORS as release_anchors
         reviewed_anchors = release_anchors
@@ -189,6 +329,12 @@ def reviewed_literal_spans(path: str, source: str):
     elif path == "ops/executive_os/a2_agent_relay_enrollment.py":
         from tests.executive_a2_identity_review import REVIEWED_ANCHORS as a2_anchors
         reviewed_anchors = a2_anchors
+    elif path == "control_plane/finite_initial_registration.py":
+        from tests.test_finite_initial_identity_review import REVIEWED_ANCHORS_BY_PATH
+        reviewed_anchors = REVIEWED_ANCHORS_BY_PATH[path]
+    elif path in {"ops/executive_os/attended_control_staging.py", "control_plane/fabric_attended_registration.py"}:
+        from tests.executive_finite_identity_review import REVIEWED_ANCHORS_BY_PATH
+        reviewed_anchors = REVIEWED_ANCHORS_BY_PATH[path]
     else:
         return ()
     # str.splitlines recognizes these separators, while Python source/AST
@@ -200,8 +346,14 @@ def reviewed_literal_spans(path: str, source: str):
     except (SyntaxError, ValueError, RecursionError):
         return ()
     lines = source.splitlines(keepends=True)
+    nodes = tree.body
+    if reviewed_container is not None:
+        containers = [node for node in nodes if _anchor_name(node) == reviewed_container]
+        if len(containers) != 1 or not isinstance(containers[0], ast.ClassDef):
+            return ()
+        nodes = containers[0].body
     anchors = {}
-    for node in tree.body:
+    for node in nodes:
         name = _anchor_name(node)
         if name is not None:
             anchors.setdefault(name, []).append(node)

@@ -238,7 +238,12 @@ if(process.argv.includes('--native-pipe')) {
  });
  test('outer expiry forbids Chrome acquisitions after a delayed initial query',async()=>{
   let now=0, release;const calls=[];
-  const h=harness({clock:{now:()=>now}});const p=await h.ready();
+  const h=harness({clock:{now:()=>now},cryptoApi:delayedCrypto(100)});const p=await h.ready();
+  // Observe the real collector's completion: event-loop ticks do not wait for
+  // WebCrypto, and can falsely pass the guard-removal mutation before it reads.
+  let collection;const collector=h.context.MMXWebSolCensus;
+  h.context.MMXWebSolCensus=Object.freeze({...collector,collect(...args){
+   collection=collector.collect(...args);return collection;}});
   const row={id:1,windowId:1,url:'https://chatgpt.com/c/deadline',status:'complete'};
   h.tabs.query=()=>{calls.push(['query',now]);return calls.length===1
    ?new Promise(r=>{release=r;}):Promise.resolve([row]);};
@@ -247,7 +252,7 @@ if(process.argv.includes('--native-pipe')) {
   const wall=Date.now();p.onMessage.fire(request({issued_at:new Date(wall).toISOString(),
    expires_at:new Date(wall+100).toISOString()}));
   await waitFor(()=>Boolean(release),'initial query actually acquired');
-  now=150;release([row]);for(let i=0;i<20;i++)await tick();
+  now=150;release([row]);await collection;await tick();
   assert.deepEqual(calls.filter(([,at])=>at>=100),[], 'no actual Chrome acquisition after outer expiry');
   assert.equal(p.messages.length,2,'expired attempt cannot post a browser receipt');
  });

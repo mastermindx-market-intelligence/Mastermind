@@ -24,7 +24,7 @@ def test_watcher_action_loop_is_canonical_and_action_oriented() -> None:
 
     required = (
         "A Sol watcher is an action re-entry hook, not a notification service.",
-        "DETECT -> RE-PIN -> ADJUDICATE -> ACT -> REPORT",
+        "DETECT -> VERIFY PIN -> ADJUDICATE -> ACT -> REPORT",
         "Do not stop at `Sol action required`",
         "post the actual Sol edge in the same lawful carrier",
         "Chairman-only boundary",
@@ -35,7 +35,7 @@ def test_watcher_action_loop_is_canonical_and_action_oriented() -> None:
         assert phrase in normalized, f"missing watcher action-loop law: {phrase}"
 
     assert "notification-only watcher" in index
-    assert "detect -> re-pin -> adjudicate -> act -> report" in kernel.lower()
+    assert "detect -> verify mission pin -> adjudicate -> act -> report" in kernel.lower()
 
 
 def test_watcher_lifetime_survives_nonterminal_events_until_stop() -> None:
@@ -58,7 +58,7 @@ def test_read_capable_write_incapable_schedule_bridges_to_exact_interactive_sol(
         "If the scheduled surface can read but cannot write the lawful carrier",
         "return `WRITE_UNAVAILABLE` to its own task or automation surface",
         "wake or notify the exact interactive Sol surface as a transport bridge",
-        "On that first interactive turn, Sol must re-pin, adjudicate, and act before reporting",
+        "On that first interactive turn, Sol must verify its mission pin, adjudicate, and act before reporting",
         "Do not turn a write-capability limitation into permanent Chairman relay work",
     )
     for phrase in required:

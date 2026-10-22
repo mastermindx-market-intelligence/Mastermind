@@ -72,18 +72,28 @@ def _canonical(value: Any) -> str:
 
 class NativeReplyReader:
     def __init__(self, resolver: NativeReplyReadResolver, *, socket_path: Path,
-                 service_call=call_service, clock=time.time):
+                 service_call=call_service, clock=time.time, projected_principal=False):
         if (not callable(getattr(resolver, "resolve_read", None))
                 or not callable(service_call) or not callable(clock)):
             raise TypeError("canonical reader dependencies are required")
         path = Path(socket_path)
         if not path.is_absolute():
             raise ValueError("canonical service socket must be absolute")
+        if type(projected_principal) is not bool:
+            raise TypeError("projected principal mode must be explicit")
+        # Only the installed authenticated private-peer composition selects this.
+        # Public tool calls retain the exact VerifiedPrincipal boundary.
+        self._projected_principal = projected_principal
         self._resolver, self._socket_path = resolver, path
         self._service_call, self._clock = service_call, clock
 
     def _current_principal(self, principal):
-        projection = principal_projection(principal)
+        if self._projected_principal:
+            if type(principal) is not NeutralPrincipalProjection:
+                raise ValueError
+            projection = principal
+        else:
+            projection = principal_projection(principal)
         now = self._clock()
         if (type(now) not in (int, float) or not math.isfinite(now)
                 or type(projection.issued_at) is not int
@@ -123,12 +133,20 @@ class NativeReplyReader:
 
     async def __call__(self, principal, arguments: Mapping[str, Any]) -> dict[str, Any]:
         try:
-            if (not isinstance(arguments, Mapping) or set(arguments) != {"read_ref"}
-                    or not isinstance(arguments["read_ref"], str)
-                    or _ID.fullmatch(arguments["read_ref"]) is None):
+            if not isinstance(arguments, Mapping) or set(arguments) not in (
+                    {"read_ref"}, {"operation_key"}):
+                raise ValueError
+            field = next(iter(arguments))
+            if not isinstance(arguments[field], str) or _ID.fullmatch(arguments[field]) is None:
                 raise ValueError
             current = self._current_principal(principal)
-            binding, context, snapshot = await self._resolve(current, arguments["read_ref"])
+            read_ref = arguments.get("read_ref")
+            if field == "operation_key":
+                # Runtime owns this join. Do not derive a public reference, bind
+                # a request, revive a target or invoke any continuation owner.
+                read_ref = await _await(self._resolver.resolve_operation_read_ref(
+                    principal=current, operation_key=arguments[field]))
+            binding, context, snapshot = await self._resolve(current, read_ref)
             response = await self._service_call(self._socket_path, {
                 "version": CONTROL_VERSION_V2, "operation": "read_thread",
                 "args": {"context": context, "thread_ts": binding.thread_ts}})
@@ -161,7 +179,12 @@ class NativeReplyReader:
                         ("actor_ref", "applies_to", "work_ref", "commission_ref", "session_ref"))):
                 raise ValueError
             refreshed = self._current_principal(principal)
-            _, _, after = await self._resolve(refreshed, arguments["read_ref"])
+            _, _, after = await self._resolve(refreshed, read_ref)
+            if field == "operation_key":
+                recovered = await _await(self._resolver.resolve_operation_read_ref(
+                    principal=refreshed, operation_key=arguments[field]))
+                if recovered != read_ref:
+                    raise ValueError
             self._current_principal(principal)
             if after != snapshot:
                 raise ValueError
@@ -170,6 +193,8 @@ class NativeReplyReader:
                 "message_key": message["message_key"], "fingerprint": message["fingerprint"],
                 "text": message["body"]["completed"], "next_step": message["body"]["next"],
                 "primary_ts": primary_ts, "reply_committed": True, "parent_consumed": False}
+            if field == "operation_key":
+                result["operation_key"] = arguments[field]
             if len(_canonical(result).encode("ascii")) > 16384:
                 raise ValueError
             return result

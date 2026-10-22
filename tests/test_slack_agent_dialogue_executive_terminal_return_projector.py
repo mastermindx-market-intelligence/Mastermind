@@ -2424,6 +2424,10 @@ class _ServicePlannerSealedWorkerAdapter(_PlannerSealedWorkerAdapter):
         self._runtime = runtime
 
     async def start(self, spec):
+        # _supervisor assigns its provider home after adapter construction.
+        # macOS temp paths may inherit wheel, so align the final fixture home
+        # with the sealed worker identity before launch attestation.
+        os.chown(self.provider_home, -1, os.getegid())
         ref = await super().start(spec)
         # FakeAdapter's generic fixture uses b*40.  This vertical instead
         # binds launch evidence to CeoIngress's exact reviewed Git base.
@@ -2552,8 +2556,10 @@ def test_terminal_candidate_posts_one_result_and_one_persisted_wake_across_repla
             "commission_ref": {
                 "repository": REPO,
                 "commit": config.proof_base_sha,
-                "path": "docs/commissions/executive-terminal-return.md",
-                "content_sha256": "d" * 64,
+                "path": "README.md",
+                "content_sha256": hashlib.sha256(
+                    b"# Exact proof base\n"
+                ).hexdigest(),
             },
             "watch_mode": "turn_watch_v1",
         }

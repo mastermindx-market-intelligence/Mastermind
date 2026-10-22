@@ -12,6 +12,7 @@ explicit non-default ``CODEX_HOME`` before a process may start.
 
 from __future__ import annotations
 
+from control_plane.native_company_receipt import project_company_read
 import hashlib
 import json
 import os
@@ -19,12 +20,20 @@ import pwd
 import re
 import stat
 import subprocess
+import sys
 import time
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Mapping, Sequence
 
+from control_plane.executive_process_identity import (
+    _ProcessInstanceObservation,
+    _observe_process_instance,
+)
 from control_plane.executive_agent_capabilities import (
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
+    COMPANY_CONSULTATION_SERVER_VERSION,
+    COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST,
     ExecutionCapabilityProfile,
     NativeHelperGrant,
     app_server_security_config_digest,
@@ -42,6 +51,7 @@ from control_plane.operator_harness_contract import (
     OPERATOR_HARNESS_INTERFACE_VERSION,
     AdapterFailureClass,
     AttentionTurnObservation,
+    AttentionCompanyReadProjection,
     AuthIdentityConfidence,
     AuthRealmFact,
     CandidateResult,
@@ -297,6 +307,13 @@ def _observed_network_state(config: Mapping[str, Any]) -> str | None:
     ).strip()
     if sandbox == "read-only" and approval == "never":
         return "disabled"
+    if sandbox == "workspace-write" and approval == "never":
+        write_config = config.get("sandbox_workspace_write")
+        # A writable sandbox is not network-disabled by inference. Require
+        # the actual effective App Server config/read response to report
+        # explicit false; absent, invalid or true remains UNKNOWN and refuses.
+        if isinstance(write_config, Mapping) and write_config.get("network_access") is False:
+            return "disabled"
     return None
 
 
@@ -314,6 +331,12 @@ def _default_base_sha(workspace: Path) -> str:
             AdapterFailureClass.WORKSPACE_MISMATCH,
             "workspace base SHA is not observable",
         ) from exc
+
+
+def _default_process_instance(pid: int) -> _ProcessInstanceObservation | None:
+    # Non-Darwin harnesses keep their historical evidence shape. CONSULT's
+    # Darwin host qualifier requires the execution pair and refuses its absence.
+    return _observe_process_instance(pid) if sys.platform == "darwin" else None
 
 
 def _default_process_identity(pid: int) -> ProcessIdentityObservation:
@@ -420,6 +443,7 @@ class _GenerationState:
     provider_session_tree_id: str
     process: ProcessIdentityObservation
     attestation: ObservedHarnessAttestation
+    process_instance: tuple[int, int] | None = None
     resource: Any | None = None
     writer_state: ProviderWriterState = ProviderWriterState.HELD
     events: list[NormalizedEvent] = field(default_factory=list)
@@ -599,6 +623,7 @@ class CodexOperatorAdapter:
     """Real stdio Codex App Server path, importable but unregistered and off."""
 
     interface_version = OPERATOR_HARNESS_INTERFACE_VERSION
+    supports_progress_metadata = True
 
     def __init__(
         self,
@@ -616,6 +641,7 @@ class CodexOperatorAdapter:
         turn_input_loader: TurnInputLoader | None = None,
         base_sha_resolver: BaseShaResolver = _default_base_sha,
         process_identity_observer: ProcessIdentityObserver = _default_process_identity,
+        process_instance_observer: Callable[[int], _ProcessInstanceObservation | None] = _default_process_instance,
         client_factory: ClientFactory = _default_client_factory,
         extra_env: Mapping[str, str] | None = None,
         skill_canary_binding: CodexSkillCanaryBinding | None = None,
@@ -676,6 +702,7 @@ class CodexOperatorAdapter:
         self.turn_input_loader = turn_input_loader
         self.base_sha_resolver = base_sha_resolver
         self.process_identity_observer = process_identity_observer
+        self.process_instance_observer = process_instance_observer
         self.client_factory = client_factory
         self.extra_env = dict(extra_env or {})
         self.skill_canary_binding = skill_canary_binding
@@ -1173,13 +1200,45 @@ class CodexOperatorAdapter:
             reasons.append("harness_version_mismatch")
         if requested.workspace != self.configured_workspace:
             reasons.append("workspace_identity_mismatch")
-        if requested.sandbox_policy != "read-only":
+        # This adapter defaults to its original read-only boundary. An exact,
+        # source-verified V4 Skill binding may additionally admit an explicitly
+        # reviewed workspace-write App Server profile. The binding is already
+        # constructor-attested; the requested OHF manifest and config must also
+        # match it exactly. No credential, helper, host path, browser resource or
+        # ambient capability can be inferred from the write bit alone.
+        bound_profile = (
+            self.skill_canary_binding.profile
+            if self.skill_canary_binding is not None else None
+        )
+        rich_workspace_write = bool(
+            requested.write_capable
+            and bound_profile is not None
+            and bound_profile.write_capable
+            and bound_profile.execution_surface == "codex-app-server"
+            and bound_profile.sandbox_policy == "workspace-write"
+            and bound_profile.native_helper_policy is NativeHelperPolicy.DISABLED
+            and self.native_helper_grant is None
+            and requested.sandbox_policy == bound_profile.sandbox_policy
+            and requested.approval_policy == bound_profile.approval_policy
+            and requested.network_policy == bound_profile.network_policy
+            and requested.expected_config_digest == bound_profile.expected_config_digest
+            and self.expected_config_digest == bound_profile.expected_config_digest
+            and requested.capabilities == bound_profile.capability_manifest(
+                harness_binary_digest=self.binary_digest
+            )
+            # A workspace-write sandbox covers the ENTIRE workspace root.
+            # Require an explicit full-root grant; empty or narrower Job path
+            # grants cannot silently become workspace-wide write authority.
+            # More granular writable Jobs need a separately qualified executor.
+            and requested.allowed_write_paths == (str(self.workspace_root),)
+        )
+        if requested.sandbox_policy != "read-only" and not rich_workspace_write:
             reasons.append("sandbox_not_read_only")
         if requested.approval_policy != "never":
             reasons.append("approval_not_never")
         if requested.network_policy != self.network_policy:
             reasons.append("network_policy_mismatch")
-        if requested.write_capable or requested.allowed_write_paths:
+        if (requested.write_capable or requested.allowed_write_paths) and not rich_workspace_write:
             reasons.append("write_capable_ohf_not_armed")
         expected_helper_policy = (
             NativeHelperPolicy.PARENT_READ_ONLY_CEILING
@@ -1216,6 +1275,63 @@ class CodexOperatorAdapter:
     def _thread_id(result: Mapping[str, Any]) -> str:
         thread = result.get("thread")
         return str(thread.get("id") or "") if isinstance(thread, Mapping) else ""
+
+    def _process_instance(self, pid: int) -> tuple[int, int] | None:
+        try:
+            value = self.process_instance_observer(pid)
+            if value is None and sys.platform != "darwin":
+                return None
+            if (
+                not isinstance(value, _ProcessInstanceObservation)
+                or type(value.unique_id) is not int or value.unique_id <= 0
+                or type(value.pidversion) is not int or value.pidversion <= 0
+            ):
+                raise ValueError("execution identity unavailable")
+            return value.unique_id, value.pidversion
+        except Exception as exc:
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity is not observable",
+                effect_unknown=True,
+            ) from exc
+
+    @staticmethod
+    def _require_same_initialized_incarnation(
+        launched: tuple[int, int] | None,
+        initialized: tuple[int, int] | None,
+    ) -> None:
+        """Permit startup exec, not PID reuse or an unobservable identity.
+
+        On macOS, libproc's pidversion can change during a legitimate exec
+        (including the fake App Server's shebang interpreter transition).
+        The kernel uniqueid is the process incarnation and must remain equal.
+        After a successful initialize response, the full pair is sealed and
+        every further check requires its exact equality.
+        """
+        if launched is None and initialized is None:
+            return  # Historical non-Darwin environment has no libproc pair.
+        if (launched is None or initialized is None
+                or launched[0] != initialized[0]):
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity changed before admission (incarnation during initialize)",
+                effect_unknown=True,
+            )
+
+    def _require_process_continuity(
+        self, process: ProcessIdentityObservation,
+        instance: tuple[int, int] | None,
+    ) -> None:
+        pid = int(process.pid or 0)
+        if (
+            self.process_identity_observer(pid) != process
+            or self._process_instance(pid) != instance
+        ):
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity changed before admission",
+                effect_unknown=True,
+            )
 
     def _initialize_and_attest(
         self,
@@ -1411,9 +1527,19 @@ class CodexOperatorAdapter:
                     "Codex App Server lacks its attested private process group",
                     effect_unknown=True,
                 )
+            launched_instance = self._process_instance(client.pid)
             attestation = self._initialize_and_attest(
                 client, requested, launch_binary_digest, resource_binding
             )
+            # First pin the complete OS exec identity after the App Server has
+            # answered initialize. A shebang or reviewed launcher may exec
+            # between Popen and initialize; it cannot replace the kernel
+            # process incarnation. From here onward, pidversion drift refuses.
+            process_instance = self._process_instance(client.pid)
+            self._require_same_initialized_incarnation(
+                launched_instance, process_instance
+            )
+            self._require_process_continuity(process, process_instance)
             if _sha256_file(self.binary_path) != launch_binary_digest:
                 raise CodexAdapterError(
                     AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -1508,6 +1634,7 @@ class CodexOperatorAdapter:
                     "thread/started did not confirm the provider session",
                     effect_unknown=True,
                 )
+            self._require_process_continuity(process, process_instance)
             # Drain (never bare-clear) so a skills/changed notification that
             # arrived during thread/start itself -- the other half of the
             # M7 fence -- is scanned rather than dropped as startup noise.
@@ -1535,6 +1662,7 @@ class CodexOperatorAdapter:
             provider_session_tree_id=provider_session_tree_id,
             process=process,
             attestation=attestation,
+            process_instance=process_instance,
             resource=(
                 resource_binding.resource if resource_binding is not None else None
             ),
@@ -1664,6 +1792,24 @@ class CodexOperatorAdapter:
         wave-3 review finding B2).
         """
 
+        # Codex App Server 0.159.3 reports externally loaded Skills as
+        # `<verified-package-directory>:<runtime-name>` even though their
+        # immutable path still contains the unqualified runtime directory.
+        # Project that exact provider spelling onto the reviewed identity;
+        # never strip an arbitrary namespace or accept an unknown Skill.
+        granted_names = frozenset(
+            grant.runtime_name for grant in binding.profile.skill_grants
+        )
+        package_namespace = Path(binding.generation.package_root).name
+        qualified_prefix = f"{package_namespace}:"
+
+        def runtime_name(provider_name: str) -> str:
+            if provider_name.startswith(qualified_prefix):
+                candidate = provider_name[len(qualified_prefix):]
+                if candidate in granted_names:
+                    return candidate
+            return provider_name
+
         path_flags = {("path" in row) for row in rows}
         if len(path_flags) > 1:
             raise CodexAdapterError(
@@ -1675,7 +1821,7 @@ class CodexOperatorAdapter:
         schema_support_mode = "path_precise" if mode_a else "pathless"
         if mode_a:
             for row in rows:
-                name = str(row.get("name") or "")
+                name = runtime_name(str(row.get("name") or ""))
                 path = str(row.get("path") or "")
                 expected_md = f"{skills_root}/{name}/SKILL.md"
                 expected_dir = f"{skills_root}/{name}"
@@ -1685,14 +1831,21 @@ class CodexOperatorAdapter:
                         "skill_path_mismatch",
                         effect_unknown=True,
                     )
-        elif not binding.protocol_receipt.supports_skill_input_path:
+        elif (
+            not binding.protocol_receipt.supports_skill_input_path
+            or binding.profile.write_capable
+        ):
+            # Pathless catalog compatibility stays available to legacy
+            # read-only Skill observers only. A write-capable profile cannot
+            # prove which physical Skill supplied an observed name, even if
+            # the protocol advertises a structured Skill input path.
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                 "skill_path_attestation_unavailable",
                 effect_unknown=True,
             )
         enabled_rows = [row for row in rows if row.get("enabled") is True]
-        names = [str(row.get("name") or "") for row in enabled_rows]
+        names = [runtime_name(str(row.get("name") or "")) for row in enabled_rows]
         if len(names) != len(set(names)):
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -2022,13 +2175,8 @@ class CodexOperatorAdapter:
         """Observe the exact launched PID's effective host identity."""
 
         state = self._state(generation)
-        process = self.process_identity_observer(int(state.process.pid or 0))
-        if process != state.process:
-            raise CodexAdapterError(
-                AdapterFailureClass.PROCESS_CRASH,
-                "launched process identity changed before admission",
-                effect_unknown=True,
-            )
+        process = state.process
+        self._require_process_continuity(process, state.process_instance)
         try:
             completed = subprocess.run(
                 ["ps", "-o", "uid=", "-p", str(process.pid)],
@@ -2046,13 +2194,17 @@ class CodexOperatorAdapter:
                 "launched process credentials are not observable",
                 effect_unknown=True,
             ) from exc
+        self._require_process_continuity(process, state.process_instance)
+        identity = {
+            "pid": process.pid,
+            "pgid": process.pgid,
+            "process_start_identity": process.process_start_identity,
+            "boot_id": process.boot_id,
+        }
+        if state.process_instance is not None:
+            identity.update(unique_id=state.process_instance[0], pidversion=state.process_instance[1])
         return OSProcessCredentialObservation(
-            process_identity={
-                "pid": process.pid,
-                "pgid": process.pgid,
-                "process_start_identity": process.process_start_identity,
-                "boot_id": process.boot_id,
-            },
+            process_identity=identity,
             os_principal_name=principal_name,
             os_principal_uid=uid,
         )
@@ -2119,7 +2271,11 @@ class CodexOperatorAdapter:
             self.visible_turn_projection = projection
         return projection
 
-    def mint_observer_grant(self, turn: TurnRef, *, binding=None):
+    def mint_observer_grant(self, turn: TurnRef, *, binding=None, progress_metadata=False):
+        if progress_metadata and self.expected_harness_version != "codex-cli 0.159.2":
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT, "progress metadata schema is unqualified"
+            )
         state = self._generations.get(turn.process_generation_id)
         if state is None:
             raise CodexAdapterError(
@@ -2142,7 +2298,7 @@ class CodexOperatorAdapter:
         )
         projection = self._visible_projection()
         if binding is not None:
-            return projection.enroll_observer(key, **binding)
+            return projection.enroll_observer(key, progress_thread_id=state.provider_session_id if progress_metadata else None, **binding)
         return projection.mint_grant(key)
 
     @staticmethod
@@ -2160,6 +2316,27 @@ class CodexOperatorAdapter:
             ):
                 return index + 1
         return None
+
+    @staticmethod
+    def _company_read_server(state: _GenerationState) -> str | None:
+        """Select only the exact requested and observed Company MCP identity."""
+        required = [value for value in state.requested.capabilities.required
+                    if value.kind == "mcp_server"
+                    and value.mcp_server_identity == COMPANY_CONSULTATION_SERVER_IDENTITY]
+        if len(required) != 1:
+            return None
+        expected = required[0]
+        if (not expected.name or expected.mcp_server_version != COMPANY_CONSULTATION_SERVER_VERSION
+                or expected.tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST
+                or expected.mcp_auth_status != "unsupported"
+                or state.attestation.effective_mcp.count(expected.name) != 1):
+            return None
+        observed = [value for value in state.attestation.capabilities
+                    if value.kind == "mcp_server" and value.name == expected.name]
+        fields = ("mcp_server_identity", "mcp_server_version", "tool_schema_digest", "mcp_auth_status")
+        if len(observed) != 1 or any(getattr(observed[0], key) != getattr(expected, key) for key in fields):
+            return None
+        return expected.name
 
     def _ingest_turn_notifications(
         self,
@@ -2389,6 +2566,16 @@ class CodexOperatorAdapter:
                 and notification_thread != state.provider_session_id
             ):
                 native_subordinate_id = register_subordinate(notification_thread)
+
+            if method == "item/completed" and not completed and native_subordinate_id is None:
+                server = self._company_read_server(state)
+                if server is not None:
+                    receipt = project_company_read(
+                        params, server_name=server, thread_id=state.provider_session_id,
+                        turn_id=state.turns.get(turn.turn_id, ""),
+                    )
+                    if receipt is not None:
+                        safe_payload["company_read_receipt"] = receipt
 
             state.events.append(
                 NormalizedEvent(
@@ -2813,10 +3000,8 @@ class CodexOperatorAdapter:
             )
         state.attention_native_turn_id = native_turn_id
         try:
-            completion = state.client.wait_notification(
-                _ATTENTION_COMPLETION_METHOD,
-                timeout=float(timeout),
-            )
+            notifications = self._attention_notifications(state, timeout=float(timeout))
+            completion = notifications[-1]
         except JsonRpcError as exc:
             if str(exc).startswith(_ATTENTION_COMPLETION_TIMEOUT_PREFIX):
                 return AttentionTurnObservation(
@@ -2860,7 +3045,23 @@ class CodexOperatorAdapter:
             completion=completion,
             terminal_status=terminal_status,
             native_turn_id=native_turn_id,
+            preceding_notifications=notifications[:-1],
         )
+
+    def _attention_notifications(
+        self, state: _GenerationState, *, timeout: float,
+    ) -> list[dict[str, Any]]:
+        # Use the existing queue owner's atomic prefix operation. A drain after
+        # completion would mix late frames with the completed attention turn.
+        if self._company_read_server(state) is not None:
+            return state.client.wait_notifications_through(
+                _ATTENTION_COMPLETION_METHOD, timeout=timeout,
+                predicate=lambda value: self._matches_attention_completion(
+                    value, provider_session_id=state.provider_session_id,
+                    native_turn_id=state.attention_native_turn_id,
+                ),
+            )
+        return [state.client.wait_notification(_ATTENTION_COMPLETION_METHOD, timeout=timeout)]
 
     @staticmethod
     def _matches_attention_completion(
@@ -2875,21 +3076,32 @@ class CodexOperatorAdapter:
         if not isinstance(params_value, Mapping):
             return False
         completed_turn = params_value.get("turn")
-        return bool(
-            completion.get("method") == _ATTENTION_COMPLETION_METHOD
-            and str(params_value.get("threadId") or "").strip()
-            == provider_session_id
-            and isinstance(completed_turn, Mapping)
-            and str(completed_turn.get("id") or "").strip() == native_turn_id
-        )
+        if (
+            completion.get("method") != _ATTENTION_COMPLETION_METHOD
+            or str(params_value.get("threadId") or "").strip()
+            != provider_session_id
+            or not isinstance(completed_turn, Mapping)
+            or str(completed_turn.get("id") or "").strip() != native_turn_id
+        ):
+            return False
+        if "threadId" in completed_turn:
+            inner_thread_id = completed_turn.get("threadId")
+            if (
+                not isinstance(inner_thread_id, str)
+                or not inner_thread_id.strip()
+                or inner_thread_id.strip() != provider_session_id
+            ):
+                return False
+        return True
 
-    @staticmethod
     def _terminal_attention_observation(
+        self,
         state: _GenerationState,
         *,
         completion: object,
         terminal_status: str,
         native_turn_id: str,
+        preceding_notifications: Sequence[Mapping[str, Any]] = (),
     ) -> AttentionTurnObservation:
         pending = state.attention_request
         if pending is None:
@@ -2926,6 +3138,35 @@ class CodexOperatorAdapter:
                 terminal_ack_trailer=True,
             )
         )
+        company = None
+        server = self._company_read_server(state)
+        receipts = []
+        if server is not None and len(preceding_notifications) <= 4096:
+            for notification in preceding_notifications:
+                if notification.get("method") == "item/completed":
+                    receipt = project_company_read(
+                        notification.get("params"), server_name=server,
+                        thread_id=state.provider_session_id, turn_id=native_turn_id,
+                    )
+                    if receipt is not None:
+                        receipts.append(receipt)
+            # A single exact read is bounded evidence. Ambiguous repeated reads
+            # never select a result by position or invent consumption credit.
+            if len(receipts) == 1:
+                receipt = receipts[0]
+                company = AttentionCompanyReadProjection(
+                    target_attempt_id=pending.attempt_id,
+                    process_generation_id=state.generation.process_generation_id,
+                    binding_id=pending.binding_id,
+                    binding_generation=pending.binding_generation,
+                    provider_session_id=state.provider_session_id,
+                    provider_native_turn_id=native_turn_id,
+                    nudge_id=pending.nudge_id,
+                    consultation_ref=receipt["consultation_ref"],
+                    result_sha256=receipt["result_sha256"],
+                    native_item_sha256=receipt["native_item_sha256"],
+                    answer_attestation_sha256=receipt["answer_attestation_sha256"],
+                )
         return AttentionTurnObservation(
             process_generation_id=state.generation.process_generation_id,
             provider_session_id=state.provider_session_id,
@@ -2934,6 +3175,7 @@ class CodexOperatorAdapter:
             accepted=True,
             delivered=True,
             wake_ack_projection=wake_ack_projection,
+            company_read_projection=company,
         )
 
     def _reconcile_late_attention_completion(
@@ -2947,10 +3189,8 @@ class CodexOperatorAdapter:
             return None
         while True:
             try:
-                completion = state.client.wait_notification(
-                    _ATTENTION_COMPLETION_METHOD,
-                    timeout=0.0,
-                )
+                notifications = self._attention_notifications(state, timeout=0.0)
+                completion = notifications[-1]
             except Exception:
                 # Absence, transport loss, and malformed reader behavior are all
                 # fail-closed: none is evidence that the provider completed.
@@ -2967,6 +3207,7 @@ class CodexOperatorAdapter:
                         completion=completion,
                         terminal_status=terminal_status,
                         native_turn_id=native_turn_id,
+                        preceding_notifications=notifications[:-1],
                     )
 
     def read_events(

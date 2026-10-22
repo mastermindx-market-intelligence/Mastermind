@@ -1,10 +1,12 @@
 # Mastermind Executive Claude plugin
 
-Status: **P1 SOURCE PACKAGE / PRODUCTION INERT / EXECUTIVE MUTATION UNAVAILABLE**
+Status: **P2 SOURCE CANDIDATE / PRODUCTION INERT / ROLE-CORRECT COO WORKFLOW PACKAGED**
 
-This directory is the first private Claude plugin package for the Mastermind Executive OS / Fable COO integration.
-
-It packages provider-side workflow and UX around the **existing** Executive client/runtime owners. It does not create another Executive backend, OAuth client, MCP server, Runtime, queue, scheduler, session registry, retry plane, identity store, token store, or source-release controller.
+This directory is the private Claude plugin package for Mastermind Executive OS / COO integration.
+It packages provider-side workflow and UX around the **existing** Executive, Mission Workspace,
+CeoIngress, Runtime, Fabric and capability owners. It does not create another Executive backend,
+OAuth client, MCP server, Runtime, queue, scheduler, session registry, retry plane, identity store,
+token store, capability authority or source-release controller.
 
 ## Current composition
 
@@ -13,94 +15,171 @@ Claude Code / Claude Desktop Code
         |
         v
 Mastermind Executive plugin
-  - COO orchestration Skill
-  - /executive-context command
+  - role-correct COO orchestration Skill
+  - /executive-context recovery command
         |
         v
-existing user-scope MCP registration: mastermind-executive
+separately enrolled user-scope MCP registration: mastermind-executive
         |
         v
-#955 loopback OAuth/resource adapter
+#955 Claude local adapter candidate
         |
         v
-existing installed Executive MCP / CeoIngress / Runtime / Workspace / Fabric
+existing installed Executive /mcp/coo route
+        |
+        v
+existing COO admission / CeoIngress / Runtime / Workspace / Fabric
 ```
 
-The plugin deliberately ships **without** a plugin-owned `.mcp.json` and without hooks in P1.
+The plugin still ships **without** a plugin-owned `.mcp.json` and without hooks. The source package
+therefore cannot install, authenticate or select the Executive connector by itself.
 
-### Why the MCP connector is not bundled yet
+## Backend contract consumed by this package
 
-The incumbent #955 path already qualifies a distinct user-scope Claude MCP registration at the local Executive edge and owns its OAuth/PKCE enrollment.
+The current protected Executive COO contract is server version `1.0.0` with exactly these six
+role-correct tools:
 
-Bundling another HTTP MCP declaration here would create a second client carrier before the COO scope/admission contract is accepted. It would also depend on provider behavior that must be requalified for the exact installed Claude versions: plugin-bundled OAuth MCPs have had version-specific authentication/client-ID defects even when the equivalent manually registered server works.
+- `executive_mandate`;
+- `executive_state`;
+- `executive_inbox`;
+- `executive_fabric`;
+- `submit_principal_intent`;
+- `principal_intent_status`.
 
-Until the role-correct COO profile exists, keep connector ownership with #955.
+The first four recover current mission/runtime context. `submit_principal_intent` submits one
+bounded **in-mission COO request** through the existing principal admission path. Acceptance is not
+Worker START or completion. `principal_intent_status` reconciles the original request reference
+without creating or retrying work.
 
-The future package may gain an exact `.mcp.json` only after all of these are true:
+This package never uses `submit_ceo_intent`. CEO and COO remain different principals/policies.
+A future orchestration-root operation for governed fan-out is a separate H4 contract and is not
+invented here.
 
-1. the static COO Executive MCP profile exists inside the existing installed Executive process;
-2. its OAuth policy uses the accepted COO action scope rather than the CEO submit scope;
-3. a public/native OAuth client is enrolled through the authorized IdP ceremony;
-4. bundled-plugin OAuth works on the exact deployed Claude Code CLI and macOS Desktop Code surfaces;
-5. tool-schema attestation proves that no CEO or ambient modifying surface leaked into the plugin.
+## Connector and authentication boundary
+
+#955 owns the distinct local Claude Executive client/transport candidate. Its current source is
+**DRAFT/HOLD** and enrollment is not performed. This plugin does not treat that PR, a source file,
+or a successful unrelated connector as proof that the current Claude process is authenticated.
+
+Use the workflow below only when the exact current Claude surface actually exposes the reviewed COO
+tool catalog through the separately enrolled `mastermind-executive` user-scope registration.
+
+If the connector is absent, unauthenticated, exposes a CEO-only surface, has the wrong tool schema,
+or differs from the reviewed capability generation:
+
+- refuse modifying COO work;
+- report the exact connector/profile mismatch;
+- do not request tokens or copy credentials;
+- do not add another server, tunnel or public endpoint;
+- do not fall back from `/mcp/coo` to a CEO route;
+- do not reinterpret a legacy CEO tool as COO authority.
+
+## Bounded COO action workflow
+
+A fresh principal first recovers current context through `/executive-context` or the same read
+sequence directly.
+
+Before `submit_principal_intent`:
+
+1. read `executive_mandate` for the exact assigned `work_ref`;
+2. require the mandate's current new-effect gate to permit the action and the COO to own the turn;
+3. verify there is no unresolved effect, reconciliation requirement or live source/lease conflict;
+4. keep the request inside the selected Mission Workspace and the mandate's allowed execution
+   profiles / write paths;
+5. use a stable operation key for the logical operation;
+6. do not select provider, account, host, Worker, session or retry carrier in the request.
+
+The public COO request remains bounded to the existing worker profiles. It is not source release,
+merge, deploy, service control, credential access or a general Fabric mutation.
+
+After submission:
+
+- an explicit accepted receipt proves admission of the request, not execution;
+- record the returned `request_ref`;
+- if the response is uncertain or transport is ambiguous, do **not** submit again;
+- reconcile only with `principal_intent_status` using that original `request_ref` and exact
+  `work_ref`;
+- consume current Executive/Fabric state before deciding the next mission action.
+
+A different semantic payload under the same logical operation must reconcile/conflict through the
+existing request identity law rather than minting a second operation.
+
+## Recovery workflow
+
+`/executive-context` is intentionally read-only. It should recover the smallest sufficient
+frontier from the exact currently authenticated COO surface:
+
+1. `executive_mandate` for the assigned mission;
+2. `executive_state` for readiness and grounding;
+3. `executive_inbox` only when relevant attention matters;
+4. `executive_fabric` for the selected root/children/results;
+5. `principal_intent_status` only for an already-existing COO request reference.
+
+Preserve admission, delivery, ACK, START, CI, result and acceptance as distinct facts.
+
+## Surface parity boundary
+
+The plugin targets Claude Code first and may also be loaded by Claude Desktop's Code/plugin surface,
+but one surface's success is not inherited by another.
+
+The current #955 adapter candidate concerns the Claude Code user-scope registration path. Therefore:
+
+- source packaging does not prove Claude Code installation or authentication;
+- Claude Desktop plugin loading remains a separate exact-version proof;
+- Claude Desktop Executive connector availability remains **UNPROVEN** until the real application
+  exposes the reviewed COO tool schema;
+- do not add an ad-hoc second connector if Desktop does not consume the accepted registration;
+- any bundled-MCP/Desktop-extension route requires its own reviewed OAuth/client and schema proof.
 
 ## Development loading
 
-Claude Code's current plugin structure expects:
+Claude Code's plugin structure expects:
 
 ```text
 .claude-plugin/plugin.json
 commands/
 skills/
-hooks/        # optional; absent in P1
-.mcp.json     # optional; absent in P1
+hooks/        # optional; absent
+.mcp.json     # optional; absent
 ```
 
-For source development, load this directory with Claude Code's supported local plugin mechanism (for example `--plugin-dir`) and use it only with the separately enrolled `mastermind-executive` user-scope MCP connector.
+For source development, load this directory using Claude's supported local plugin mechanism and pair
+it only with the separately enrolled Executive connector. The manifest contains no credential,
+endpoint secret, client ID, OAuth token, provider account, host identity or mission authority.
 
-The plugin manifest contains no credential, endpoint secret, client ID, OAuth token, provider account, host identity, or mission authority.
+## Current capability state
 
-## Surface parity boundary
+P2 source adds:
 
-The plugin package is intended for both Claude Code CLI and Claude Desktop's Code/plugin surface, but the current connector proof is narrower.
+- explicit synchronization to the current six-tool COO backend contract;
+- current role-correct bounded-action instructions;
+- exact original-request reconciliation instructions;
+- a read-only mission/context recovery command that includes `executive_mandate`;
+- source tests that reject CEO-tool leakage and stale tool/version documentation.
 
-#955 has qualified the `mastermind-executive` **Claude Code user-scope registration path**. P1 does not assume that this local registration automatically appears inside Claude Desktop.
+P2 source does **not** prove:
 
-Therefore:
-
-- Claude Code plugin/package loading is a source-level target in P1;
-- Claude Desktop plugin loading remains a separate exact-version proof;
-- Claude Desktop Executive connector availability remains **UNPROVEN** until the real macOS app exposes the expected connector and exact read tool schema;
-- if Desktop does not consume the incumbent user-scope registration, do not add an ad-hoc second connector. Qualify the accepted bundled-MCP/Desktop-extension route after the COO OAuth profile exists.
-
-The eventual parity test must prove the same principal policy, tool schema, and authority ceiling on both surfaces; one surface's success is not inherited by the other.
-
-## Current capability
-
-P1 adds:
-- a reusable Fable/COO orchestration Skill;
-- a read-only `/executive-context` workflow;
-- explicit broad-mission / narrow-reserved-boundary behavior;
-- explicit distinction between organizational authority and technical tool capability;
-- a packaging location that can later receive the reviewed static COO MCP profile and optional session-binding hooks.
-
-P1 does **not** add:
-- Executive mutation;
-- a COO OAuth scope;
-- Auth0 enrollment;
-- exact Claude session binding;
-- a provider/session attestor;
-- source release;
-- service installation;
-- production acceptance.
+- plugin installation on any Claude surface;
+- OAuth/client enrollment;
+- the #955 adapter's independent review acceptance;
+- exact native principal/profile admission;
+- exact Claude-conversation/session isolation;
+- successful `submit_principal_intent` on a real mission;
+- Worker START or completion;
+- H4 governed fan-out;
+- Agent OS write authority;
+- Company Dialogue CONTINUE/STOP authority;
+- browser resource admission;
+- source release, merge or deployment.
 
 ## Relationship to current carriers
 
-- #957: COO Principal Mandate source contract.
-- #960: pure Mission Workspace v3 mandate projection.
-- #961: pure high-level COO request/identity law.
-- #955: existing authenticated Claude transport / localhost adapter.
-- #676: accepted SPEC_ONLY rich-principal vs sealed-worker and portable COO architecture.
-- #804: incumbent unresolved non-CEO canonical sink experiment; must be reconciled before P2-C edits `ceo_intent.py`.
+- #962: merged P1 plugin source predecessor.
+- #955: current Claude local Executive adapter candidate; separate transport/auth owner, DRAFT/HOLD.
+- #676: existing SPEC_ONLY rich-principal / sealed-worker parity architecture.
+- #600: existing orchestration-parity design carrier; no duplicate orchestration layer here.
+- #919/#992/#660: merged native/adaptor/transport foundations consumed where applicable.
+- Mastermind #1236 / PR #1240: current Claude Capability Hardening integration/evidence carrier.
 
-Do not use this package to bypass any of those owners.
+Historical issue/PR text is evidence, not current runtime authority. Current protected procedure,
+mission mandate, source custody, capability admission and effect state remain controlling.

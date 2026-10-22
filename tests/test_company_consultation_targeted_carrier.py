@@ -567,7 +567,7 @@ def test_production_composition_cannot_grant_an_arbitrary_resolver():
 
     from integrations.company_consultation_dispatch import PRODUCTION_PACKET_CARRIAGE
 
-    assert PRODUCTION_PACKET_CARRIAGE == "UNAVAILABLE"
+    assert PRODUCTION_PACKET_CARRIAGE == "BUILT_NOT_INSTALLED"
 
     root = Path(__file__).resolve().parents[1]
     carrier_name = "TargetedAgentDialogueConsultationPacketCarrier"
@@ -588,6 +588,7 @@ def test_production_composition_cannot_grant_an_arbitrary_resolver():
             name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
             if name != carrier_name:
                 continue
+            assert relative.as_posix() == "integrations/company_consultation_host.py"
             compositions += 1
             targets = [kw.value for kw in node.keywords if kw.arg == "targets"]
             assert len(targets) == 1, (str(relative), node.lineno)
@@ -599,8 +600,6 @@ def test_production_composition_cannot_grant_an_arbitrary_resolver():
                 else getattr(supplied_func, "id", None)
             )
             assert supplied_name == canonical, (str(relative), node.lineno, supplied_name)
-    # Truthful today: the seam is pinned before it exists, not asserted to exist.
-    assert compositions == 0, (
-        "a production composition appeared; the carriage marker must be "
-        "re-adjudicated before arming"
-    )
+    # Request and stored-read paths share one private composition seam.
+    # Construction is not proof of installation or acceptance.
+    assert compositions == 1

@@ -2082,6 +2082,55 @@ def test_build_synthetic_workspace_unexpected_error_rolls_back_workspace(
 # ---------------------------------------------------------------------------
 
 
+def test_rich_write_skill_profile_runs_full_fake_app_server_journey(tmp_path) -> None:
+    """Source-qualified V4 write+Skills must survive real adapter launch and turn.
+
+    The disposable fake App Server executes all four typed Skill turns and the
+    real projection lifecycle.  This is NOT live provider or runtime admission.
+    """
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+
+    scratch = tmp_path / "rich-write-cap-s1"
+    scratch.mkdir()
+    evidence = run_canary(
+        backend="fake",
+        binary_path=None, codex_home=None, repo_root=REPO_ROOT,
+        scratch_root=scratch, operation_id="cap-s1-rich-write-fake",
+        protected_join="c" * 40,
+        client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+        run_command=_fake_schema_run_command(_SCHEMA_WITH_SKILL_PATH),
+        rich_write_candidate=True,
+    )
+    profile = ExecutionCapabilityRegistry.load(
+        REPO_ROOT / "scripts/ohf/fixtures/"
+        "executive_agent_capabilities_v4_rich_write_operator.json",
+        source_root=REPO_ROOT,
+    ).resolve("operator.appserver.write.mastermind-operator.v1")
+    assert profile.write_capable is True
+    assert evidence.launch_decision == "ALLOW"
+    assert evidence.app_server_config_digest == profile.expected_config_digest
+    assert all(ok for _skill, ok in evidence.turn_marker_results)
+    assert len(evidence.skill_closure_digests) == 4
+    assert evidence.after_clear_enabled_names == ()
+    cleanup = _cleanup_map(evidence.cleanup)
+    assert all(cleanup[name] == (True, True) for name in
+               ("schema", "workspace", "origin", "projection", "attempt", "thread"))
+
+
+def test_rich_write_fake_canary_refuses_live_provider_before_effect(tmp_path) -> None:
+    scratch = tmp_path / "rich-write-live-refusal"
+    with pytest.raises(CanaryStop) as exc:
+        run_canary(
+            backend="live", binary_path=None, codex_home=None,
+            repo_root=REPO_ROOT, scratch_root=scratch,
+            operation_id="cap-s1-rich-write-no-live", protected_join="c" * 40,
+            client_factory=_canary_client_factory(replies=list(_HAPPY_REPLIES)),
+            rich_write_candidate=True,
+        )
+    assert exc.value.code == "PROVIDER_REALM_UNAVAILABLE"
+    assert not scratch.exists()
+
+
 def test_run_canary_fake_backend_happy_path_four_turn_journey(tmp_path) -> None:
     scratch = tmp_path / "scratch-happy"
     scratch.mkdir()
@@ -5820,7 +5869,7 @@ def test_cap_s1_source_archive_omits_tracked_symlink_from_regular_blob_copy(
 def _cap_s1_copy_bootstrap_source(destination: Path) -> tuple[_CapS1SourceCopyEntry, ...]:
     import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
 
-    for top_level in ("scripts", "control_plane"):
+    for top_level in ("scripts", "control_plane", "common"):
         shutil.copytree(
             REPO_ROOT / top_level,
             destination / top_level,
@@ -5927,6 +5976,41 @@ def test_cap_s1_actual_pytest_bootstrap_refuses_digest_drift_with_non_test_exit(
         timeout=120,
     )
     assert restored.returncode == 0, restored.stderr
+
+
+@pytest.mark.parametrize("relative", [
+    "common/agent_dialogue_contract.py",
+    "control_plane/executive_process_identity.py",
+    "scripts/ohf/redaction.py",
+])
+def test_cap_s1_pytest_bootstrap_refuses_mutated_transitive_import(
+    tmp_path, relative
+) -> None:
+    """A dependency loaded during canary import cannot escape source sealing."""
+    import scripts.ohf.cap_s1_mastermind_operator_canary as canary_module
+
+    source = tmp_path / "owned-source"
+    source.mkdir()
+    manifest = _cap_s1_copy_bootstrap_source(source)
+    interpreter = _capture_cap_s1_interpreter_identity()
+    binding = canary_module._build_cap_s1_pytest_binding(
+        source_root=source, source_manifest=manifest, interpreter=interpreter,
+    )
+    assert any(row[1] == relative for row in binding.source_rows)
+    changed = source / relative
+    changed.write_bytes(changed.read_bytes() + b"\n# unreviewed dependency drift\n")
+    probe = tmp_path / "test_bootstrap_probe.py"
+    probe.write_text("def test_bootstrap_probe():\n    assert True\n", encoding="utf-8")
+    junit = tmp_path / "bootstrap.xml"
+    completed = _run_cap_s1_python_observer_process(
+        interpreter,
+        canary_module._cap_s1_pytest_argv(
+            binding, ("-q", "--junitxml", str(junit), str(probe)),
+        ),
+        cwd=source, timeout=120,
+    )
+    assert completed.returncode == canary_module._CAP_S1_PYTEST_PROVENANCE_EXIT
+    assert not junit.exists()
 
 
 def _build_cap_s1_historical_git_repository(
@@ -6954,7 +7038,15 @@ def _cap_s1_copy_selected_fake_child_fixture(
         mode = stat.S_IMODE(before.st_mode)
         assert stat.S_ISREG(before.st_mode)
         assert not origin.is_symlink()
-        assert mode in {0o644, 0o755}
+        # The installed managed-workspace launcher can check out source under
+        # an intentionally restrictive umask (0600/0700). Determine the
+        # canonical execute bit from Git's read-only index, not local umask;
+        # no wider/foreign mode is accepted or copied into the fixture.
+        indexed = _cap_s1_test_git(REPO_ROOT, "ls-files", "--stage", "--", relative)
+        tracked_mode = indexed.split()[0] if indexed else ""
+        assert tracked_mode in {"100644", "100755"}
+        canonical_mode = 0o755 if tracked_mode == "100755" else 0o644
+        assert mode in {canonical_mode, canonical_mode & ~0o077}
         assert 0 < before.st_size <= 1024 * 1024
         payload = origin.read_bytes()
         after = origin.lstat()
@@ -6977,14 +7069,14 @@ def _cap_s1_copy_selected_fake_child_fixture(
         destination = source_root / relative
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         destination.write_bytes(payload)
-        destination.chmod(mode)
+        destination.chmod(canonical_mode)
         git_blob = hashlib.sha1()
         git_blob.update(f"blob {len(payload)}\0".encode("ascii"))
         git_blob.update(payload)
         rows.append(
             _CapS1SourceCopyEntry(
                 path=relative,
-                mode="100755" if mode == 0o755 else "100644",
+                mode=tracked_mode,
                 blob=git_blob.hexdigest(),
                 size=len(payload),
                 sha256=hashlib.sha256(payload).hexdigest(),

@@ -45,7 +45,8 @@ def family(monkeypatch):
 def check(family, **changes):
     captured, inspector, *_ = family
     fields = dict(writer_pid=100, writer_pgid=100,
-                  writer_start_identity="parent-start", writer_boot_id="boot")
+                  writer_start_identity="parent-start", writer_boot_id="boot",
+                  writer_unique_id=1000, writer_pidversion=10)
     fields.update(changes)
     return lineage.require_current_writer_parent(captured, inspector=inspector, **fields)
 
@@ -59,6 +60,8 @@ def test_direct_child_matches_current_writer(family):
 @pytest.mark.parametrize("field,value", [
     ("writer_pid", True), ("writer_pid", 0), ("writer_pgid", None),
     ("writer_start_identity", ""), ("writer_boot_id", ""),
+    ("writer_unique_id", None), ("writer_unique_id", True),
+    ("writer_pidversion", 0), ("writer_pidversion", False),
 ])
 def test_incomplete_writer_facts_refuse(family, field, value):
     with pytest.raises(peer.PeerIdentityError, match="CONSULT_WRITER_IDENTITY_REQUIRED"):
@@ -159,6 +162,7 @@ def test_real_connected_child_has_current_parent_identity(tmp_path):
         listener.bind(path)
         listener.listen(1)
         listener.settimeout(10)
+        admitted = lineage._observe_process_instance(os.getpid())
         child = subprocess.Popen([
             sys.executable, "-I", "-S", "-B", "-c",
             "import socket,sys; s=socket.socket(socket.AF_UNIX); "
@@ -176,6 +180,7 @@ def test_real_connected_child_has_current_parent_identity(tmp_path):
                     captured, writer_pid=os.getpid(), writer_pgid=writer.pgid,
                     writer_start_identity=writer.start_identity,
                     writer_boot_id=inspector.boot_session_id(), inspector=inspector,
+                    writer_unique_id=admitted.unique_id, writer_pidversion=admitted.pidversion,
                 )
                 connection.sendall(b"1")
             assert child.wait(timeout=10) == 0
@@ -212,3 +217,48 @@ def test_boot_rotation_during_check_refuses(monkeypatch, family):
     monkeypatch.setattr(family[1], "boot_session_id", lambda: next(boots))
     with pytest.raises(peer.PeerIdentityError, match="CONSULT_PARENT_WRITER_CHANGED"):
         check(family)
+
+
+def test_exec_before_child_creation_cannot_reuse_admitted_writer(family):
+    # Current lineage agrees completely; only the earlier admitted image differs.
+    family[3][100] = replace(family[3][100], pidversion=11)
+    family[3][200] = replace(family[3][200], parent_pidversion=11)
+    with pytest.raises(peer.PeerIdentityError, match="CONSULT_PARENT_WRITER_MISMATCH"):
+        check(family)
+
+
+def test_reused_unique_instance_cannot_qualify_even_if_new_child_agrees(family):
+    family[3][100] = replace(family[3][100], unique_id=1001)
+    family[3][200] = replace(family[3][200], parent_unique_id=1001)
+    with pytest.raises(peer.PeerIdentityError, match="CONSULT_PARENT_WRITER_MISMATCH"):
+        check(family)
+
+
+@pytest.mark.skipif(sys.platform != "darwin", reason="native Darwin exec identity")
+def test_real_exec_changes_pidversion_while_preserving_process_unique_id():
+    import select
+    after_exec = "import sys; print('after',flush=True); sys.stdin.readline()"
+    before_exec = (
+        "import os,sys; print('before',flush=True); sys.stdin.readline(); "
+        "os.execv(sys.executable,[sys.executable,'-I','-S','-B','-c',sys.argv[1]])"
+    )
+    child = subprocess.Popen(
+        [sys.executable, "-I", "-S", "-B", "-c", before_exec, after_exec],
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+    )
+    try:
+        assert select.select([child.stdout], [], [], 10)[0]
+        assert child.stdout.readline().strip() == "before"
+        admitted = lineage._observe_process_instance(child.pid)
+        child.stdin.write("exec\n"); child.stdin.flush()
+        assert select.select([child.stdout], [], [], 10)[0]
+        assert child.stdout.readline().strip() == "after"
+        current = lineage._observe_process_instance(child.pid)
+        assert current.unique_id == admitted.unique_id
+        assert current.pidversion != admitted.pidversion
+        child.stdin.write("finish\n"); child.stdin.flush()
+        assert child.wait(timeout=10) == 0
+    finally:
+        if child.poll() is None:
+            child.kill(); child.wait(timeout=10)
+        child.stdin.close(); child.stdout.close(); child.stderr.close()

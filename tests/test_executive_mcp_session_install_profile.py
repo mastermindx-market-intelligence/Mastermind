@@ -7,7 +7,7 @@ import pytest
 
 from integrations.executive_mcp.web_ceo import validate_installed_mcp_profile
 from integrations.executive_mcp.web_ceo_sessions import WEB_CEO_SESSIONS_PROFILE
-from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
+from integrations.executive_mcp.web_ceo_v3 import (WEB_CEO_V3_PROFILE, validate_installed_mcp_profile_current)
 from ops.executive_os import executive_mcp_entry as entry
 
 
@@ -101,3 +101,15 @@ def test_control_daemon_sessions_profile_uses_v2_read_peer_not_legacy(tmp_path, 
     assert type(binding.read_provider) is WebCeoV2InstalledExecutiveReaders
     assert binding.read_schema == CEO_WEB_CEO_V2_READ_SCHEMA
     assert captured["ceo_ingress_armed"] is False
+
+
+def test_control_daemon_v3_profile_mounts_existing_session_bridge_provider(tmp_path, monkeypatch):
+    from tests.test_c1_ceo_ingress_composition import _app_raw, _capture_service, _module
+
+    module = _module()
+    raw = _app_raw(tmp_path)
+    raw["executive_mcp_profile"] = WEB_CEO_V3_PROFILE
+    captured = _capture_service(module, monkeypatch)
+    module._service_from_config(raw)
+    binding = captured["ceo_ingress_app_binding"]
+    assert callable(binding.session_bridge_provider_factory)

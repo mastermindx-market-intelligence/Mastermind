@@ -1,0 +1,11 @@
+{
+  "patch_sha256": "a8ff4a60a57759eeab7674a22453aea0c84559fd81f3e3fa2692f2572ae0826b",
+  "provider_turn": false,
+  "runtime_modified": false,
+  "schema": "mastermind.codex_native_message_isolation_source/v1",
+  "source_postimage_sha256": "58085812220d23485e0e23d5c5cf099dda12bbcde3029ed930f6c4c0ae6cac19",
+  "source_preimage_sha256": "a111878452f2d7ba6ad97af53055d77ed9de13d783653029e5f20311902ff051",
+  "status": "candidate_not_installed",
+  "tests_sha256": "a5afd691ef8a3ec3c13f932add293d7a900f4b249908e095ed58b12599ad730c",
+  "worker_launched": false
+}

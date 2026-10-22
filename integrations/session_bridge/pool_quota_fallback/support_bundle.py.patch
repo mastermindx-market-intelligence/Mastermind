@@ -1,0 +1,22 @@
+--- a/support_bundle.py
++++ b/support_bundle.py
+@@ -206,7 +206,18 @@
+         _verify_source_file(source_dir / name, wanted)
+     if "pools.yaml" in manifest:
+         from fabric_policy_snapshot import validate_publication
+-        validate_publication(source_dir / "pools.yaml", stable_ext)
++        try:
++            validate_publication(source_dir / "pools.yaml", stable_ext)
++        except ValueError as exc:
++            # Only a verified critical-policy difference can need refresh.
++            # Compatible advisory snapshots keep working beside active lanes;
++            # malformed policy, permission/lock and other refusals propagate.
++            if str(exc) != "ROUTING_CRITICAL_POLICY_MISMATCH":
++                raise
++            outcome = ensure_policy(source_dir / "pools.yaml", stable_ext,
++                                    manifest["pools.yaml"])
++            validate_publication(source_dir / "pools.yaml", stable_ext)
++            print(f"{outcome} sha256={manifest['pools.yaml']}", file=sys.stderr)
+     digest = _hex64(_canon_manifest(manifest))
+     final = releases_dir / digest
+     expected = _release_metadata(manifest, digest, stable_ext)

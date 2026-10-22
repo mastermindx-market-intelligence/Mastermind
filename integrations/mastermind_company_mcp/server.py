@@ -1,7 +1,8 @@
 """The only company-dialogue module that imports the MCP SDK.
 
-WP-2 advertises tools only. It has no launcher, listener, resource, prompt,
-sampling, roots, elicitation, dynamic registration, or production binding.
+The Company facets advertise tools only. The consultation stdio runner uses
+a host-supplied fixed Unix binding; it owns no listener, Runtime identity,
+resource, prompt, sampling, roots, elicitation, or dynamic registration.
 """
 from __future__ import annotations
 
@@ -10,10 +11,20 @@ from typing import Any
 import mcp.types as mcp_types
 from mcp.server.lowlevel import NotificationOptions, Server
 from mcp.server.models import InitializationOptions
+from mcp.server.stdio import stdio_server
 
 from integrations.mastermind_company_mcp.adapter import CompanyDialogueGateway
+from integrations.mastermind_company_mcp.principal_adapter import (
+    PrincipalCompanyDialogueGateway,
+)
+from integrations.mastermind_company_mcp.principal_schemas import (
+    PRINCIPAL_SERVER_NAME,
+    PRINCIPAL_SERVER_VERSION,
+    PRINCIPAL_TOOL_SPECS,
+    canonical_principal_json,
+)
 from integrations.mastermind_company_mcp.consultation import (
-    COMPANY_CONSULTATION_SERVER_NAME,
+    COMPANY_CONSULTATION_SERVER_IDENTITY,
     COMPANY_CONSULTATION_SERVER_VERSION,
     COMPANY_CONSULTATION_TOOL_SPECS,
     canonical_company_consultation_json,
@@ -22,11 +33,13 @@ from integrations.mastermind_company_mcp.schemas import (
     SERVER_NAME,
     SERVER_VERSION,
     TOOL_SPECS,
+    PRODUCT_ACCEPTANCE_TOOL_SPECS,
+    PRODUCT_ACCEPTANCE_SERVER_VERSION,
     canonical_json,
 )
 
 
-def build_tools() -> list[mcp_types.Tool]:
+def build_tools(*, product_acceptance: bool = False) -> list[mcp_types.Tool]:
     """Build the static six-tool advertisement from the reviewed table."""
 
     return [
@@ -36,15 +49,21 @@ def build_tools() -> list[mcp_types.Tool]:
             inputSchema=spec.input_schema,
             annotations=mcp_types.ToolAnnotations(**spec.annotations),
         )
-        for spec in TOOL_SPECS
+        for spec in (PRODUCT_ACCEPTANCE_TOOL_SPECS if product_acceptance else TOOL_SPECS)
     ]
 
 
 def build_mcp_server(gateway: CompanyDialogueGateway) -> Server:
     """Register only list/call handlers over one injected bounded gateway."""
 
-    server: Server = Server(SERVER_NAME, version=SERVER_VERSION)
-    tools = build_tools()
+    # Older bounded gateways implement only call(); absence keeps their frozen
+    # catalogue. Only explicit trusted host composition enables generation 1.1.
+    product_acceptance = getattr(gateway, "product_acceptance_enabled", False) is True
+    server: Server = Server(
+        SERVER_NAME,
+        version=PRODUCT_ACCEPTANCE_SERVER_VERSION if product_acceptance else SERVER_VERSION,
+    )
+    tools = build_tools(product_acceptance=product_acceptance)
 
     @server.list_tools()
     async def list_tools() -> list[mcp_types.Tool]:
@@ -57,6 +76,48 @@ def build_mcp_server(gateway: CompanyDialogueGateway) -> Server:
             mcp_types.TextContent(
                 type="text",
                 text=canonical_json(envelope).decode("utf-8"),
+            )
+        ]
+
+    return server
+
+
+def build_principal_tools() -> list[mcp_types.Tool]:
+    """Build the static four-tool COO-principal dialogue generation."""
+
+    return [
+        mcp_types.Tool(
+            name=spec.name,
+            description=spec.description,
+            inputSchema=spec.input_schema,
+            annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        )
+        for spec in PRINCIPAL_TOOL_SPECS
+    ]
+
+
+def build_principal_mcp_server(gateway: PrincipalCompanyDialogueGateway) -> Server:
+    """Register only the distinct principal list/call facet."""
+
+    server: Server = Server(
+        PRINCIPAL_SERVER_NAME,
+        version=PRINCIPAL_SERVER_VERSION,
+    )
+    tools = build_principal_tools()
+
+    @server.list_tools()
+    async def list_principal_tools() -> list[mcp_types.Tool]:
+        return list(tools)
+
+    @server.call_tool()
+    async def call_principal_tool(
+        name: str, arguments: dict[str, Any] | None
+    ) -> list[Any]:
+        envelope = await gateway.call(name, arguments or {})
+        return [
+            mcp_types.TextContent(
+                type="text",
+                text=canonical_principal_json(envelope).decode("utf-8"),
             )
         ]
 
@@ -81,7 +142,7 @@ def build_company_consultation_mcp_server(gateway: Any) -> Server:
     """Register only list/call handlers for the distinct consultation facet."""
 
     server: Server = Server(
-        COMPANY_CONSULTATION_SERVER_NAME,
+        COMPANY_CONSULTATION_SERVER_IDENTITY,
         version=COMPANY_CONSULTATION_SERVER_VERSION,
     )
     tools = build_company_consultation_tools()
@@ -105,6 +166,24 @@ def build_company_consultation_mcp_server(gateway: Any) -> Server:
     return server
 
 
+
+async def run_principal_stdio(
+    gateway: PrincipalCompanyDialogueGateway,
+) -> None:
+    """Run the principal facet only after its host composed a durable fence."""
+
+    server = build_principal_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))
+
+
+async def run_company_consultation_stdio(gateway: Any) -> None:
+    """Run the four-tool SDK frontend using its externally composed gateway."""
+    server = build_company_consultation_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))
+
+
 def initialization_options(server: Server) -> InitializationOptions:
     """Build tools-only MCP initialization options."""
 
@@ -118,6 +197,66 @@ __all__ = [
     "build_company_consultation_mcp_server",
     "build_company_consultation_tools",
     "build_mcp_server",
+    "build_principal_mcp_server",
+    "build_principal_tools",
     "build_tools",
     "initialization_options",
+    "run_company_consultation_stdio",
+    "run_principal_stdio",
+    "build_native_return_mcp_server",
+    "run_native_return_stdio",
+    "build_product_acceptance_mcp_server",
+    "run_product_acceptance_stdio",
 ]
+
+
+def build_native_return_mcp_server(gateway: Any) -> Server:
+    """One static, separately versioned native tool; registration grants nothing."""
+    import copy
+    from integrations.mastermind_company_mcp import native_return as contract
+    server = Server(contract.SERVER_IDENTITY, version=contract.SERVER_VERSION)
+
+    @server.list_tools()
+    async def list_native_tools():
+        return [mcp_types.Tool(name=contract.TOOL_NAME, description=contract.TOOL_DESCRIPTION,
+            inputSchema=copy.deepcopy(contract.INPUT_SCHEMA),
+            annotations=mcp_types.ToolAnnotations(**contract.ANNOTATIONS))]
+
+    @server.call_tool()
+    async def call_native_tool(name, arguments):
+        result = await gateway.call(name, arguments or {})
+        return [mcp_types.TextContent(type="text", text=canonical_company_consultation_json(result).decode("utf-8"))]
+
+    return server
+
+
+async def run_native_return_stdio(gateway: Any) -> None:
+    server = build_native_return_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))
+
+
+def build_product_acceptance_mcp_server(gateway: Any) -> Server:
+    """One closed selector; SDK registration supplies no Runtime grant."""
+    import copy
+    from integrations.mastermind_company_mcp import product_acceptance as contract
+    server = Server(contract.SERVER_IDENTITY, version=contract.SERVER_VERSION)
+
+    @server.list_tools()
+    async def list_acceptance_tools():
+        return [mcp_types.Tool(name=contract.TOOL_NAME, description=contract.TOOL_DESCRIPTION,
+            inputSchema=copy.deepcopy(contract.INPUT_SCHEMA),
+            annotations=mcp_types.ToolAnnotations(**contract.ANNOTATIONS))]
+
+    @server.call_tool()
+    async def call_acceptance_tool(name, arguments):
+        result = await gateway.call(name, arguments or {})
+        return [mcp_types.TextContent(type="text", text=canonical_json(result).decode("utf-8"))]
+
+    return server
+
+
+async def run_product_acceptance_stdio(gateway: Any) -> None:
+    server = build_product_acceptance_mcp_server(gateway)
+    async with stdio_server() as (reader, writer):
+        await server.run(reader, writer, initialization_options(server))

@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -28,21 +28,30 @@ PRIVATE_DIR_MODE = 0o700
 DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
 SUPPORTED_SERVER = ("paper-desktop", None)
-SUPPORTED_CATALOG_SHA256 = "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9"
+SUPPORTED_CATALOG_SHA256 = "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db"
+# Independently reviewed Paper Desktop 0.5.15 catalog: same 37 tools,
+# only get_jsx's format-default description and enum ordering changed.
+# Keep exact full-catalog fingerprint admission, not schema-subset matching.
+REVIEWED_CATALOG_SHA256_ALTERNATES = frozenset({
+    "f3483e001d4f07f5a49144ca52a4f9e14ba046e35546dda05d6cd37c9d2b4728",
+})
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
     "get_tree_summary", "get_screenshot", "get_jsx", "get_computed_styles",
     "get_fill_image", "get_font_family_info", "get_guide",
     "find_nodes", "get_tokens", "list_comment_threads", "get_comment_thread",
-    "list_comment_thread_authors",
+    "list_comment_thread_authors", "list_resources",
 })
 EDIT_TOOLS = frozenset({
     "create_artboard", "write_html", "set_text_content", "rename_nodes",
     "duplicate_nodes", "move_nodes", "update_styles", "finish_working_on_nodes",
     "create_page", "create_tokens", "set_tokens", "set_comment_thread_status",
+    "arrange_pages", "update_pages",
 })
-# Native export can write arbitrary host paths; delete can destroy a whole document.
-# Neither is exposed. Screenshots/JSX use explicit private artifact saving instead.
+FILE_MANAGE_TOOLS = frozenset({"create_file", "rename_resource"})
+PAPER_FILE_ID_RE = re.compile(r"[0-9A-HJKMNP-TV-Z]{26}")
+# Native export, node deletion and undocumented page deletion remain unavailable.
+# File management is a separate explicitly guarded write action, not a hidden read.
 
 
 class Refusal(RuntimeError):
@@ -413,14 +422,18 @@ def schema_receipt(client, catalog, *, server_pin=SUPPORTED_SERVER,
     # Paper's release version is diagnostic metadata, not a write-compatibility
     # boundary. Exact reviewed tool schemas remain the fail-closed write gate.
     server_version_ok = expected_version is None or actual["server_version"] == expected_version
-    catalog_ok = catalog_pin is None or actual["catalog_sha256"] == catalog_pin
+    catalog_ok = (catalog_pin is None or actual["catalog_sha256"] == catalog_pin
+                  or (catalog_pin == SUPPORTED_CATALOG_SHA256
+                      and actual["catalog_sha256"] in REVIEWED_CATALOG_SHA256_ALTERNATES))
     return {**actual, "accepted_for_write": bool(server_name_ok and server_version_ok and catalog_ok),
             "expected_server": [expected_name, expected_version] if server_pin else None,
             "server_name_compatible": server_name_ok,
             "server_version_compatible": server_version_ok,
             "server_version_policy": "EXACT" if expected_version is not None else "OBSERVED_NOT_PINNED",
             "catalog_compatible": catalog_ok,
-            "expected_catalog_sha256": catalog_pin}
+            "expected_catalog_sha256": catalog_pin,
+            "additional_reviewed_catalog_sha256": sorted(REVIEWED_CATALOG_SHA256_ALTERNATES)
+            if catalog_pin == SUPPORTED_CATALOG_SHA256 else []}
 
 
 def execute(action: str, *, tool: str | None = None, arguments: dict | None = None,
@@ -433,17 +446,21 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
     No persistent duplicate/retry ledger is introduced. Caller owns effect reconciliation.
     """
     execution_binding = validate_execution_binding(execution_binding)
-    if action not in {"status", "catalog", "read", "edit"}:
+    if action not in {"status", "catalog", "read", "edit", "file_manage"}:
         raise Refusal("UNKNOWN_ACTION")
     if arguments is None:
         arguments = {}
     if not isinstance(arguments, dict) or len(encode(arguments)) > MAX_REQUEST - 1024:
         raise Refusal("INVALID_ARGUMENTS")
-    editing = action == "edit"
+    # Keep the already-published paper_edit surface usable for new, strictly
+    # guarded file operations; an additional native MCP tool is optional.
+    if action == "edit" and tool in FILE_MANAGE_TOOLS:
+        action = "file_manage"
+    editing = action in {"edit", "file_manage"}
     if editing:
         if not allow_write:
             raise Refusal("WRITE_DISABLED")
-        if tool not in EDIT_TOOLS:
+        if tool not in (FILE_MANAGE_TOOLS if action == "file_manage" else EDIT_TOOLS):
             raise Refusal("TOOL_NOT_ALLOWED")
         if not isinstance(operation_id, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]{1,120}", operation_id):
             raise Refusal("OPERATION_ID_REQUIRED")
@@ -462,14 +479,30 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
         if action == "catalog":
             return {"server": client.server, "tools": [dict(catalog[n], bridge_access=("read" if n in READ_TOOLS else "edit"))
-                    for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS],
-                    "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS),
+                    for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
+                    "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS - FILE_MANAGE_TOOLS),
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
         if editing and not schema["accepted_for_write"]:
             raise Refusal("UPSTREAM_SCHEMA_UNREVIEWED", "Paper server identity or catalog schema changed; inspect read-only and review compatibility before editing.")
         if tool not in catalog:
             raise Refusal("TOOL_NOT_AVAILABLE")
-        supplied_file = arguments.get("fileId")
+        if action == "file_manage":
+            if tool == "create_file":
+                supplied_file = arguments.get("cloneFileId") or arguments.get("sourceFileId")
+                if set(arguments) - {"cloneFileId", "sourceFileId", "name"}:
+                    raise Refusal("INVALID_ARGUMENTS")
+                if arguments.get("cloneFileId") and arguments.get("sourceFileId"):
+                    raise Refusal("INVALID_ARGUMENTS")
+                if not supplied_file:
+                    raise Refusal("INVALID_ARGUMENTS")
+            else:
+                supplied_file = arguments.get("resourceId")
+                if set(arguments) != {"resourceId", "name"}:
+                    raise Refusal("INVALID_ARGUMENTS")
+            if not isinstance(supplied_file, str) or not PAPER_FILE_ID_RE.fullmatch(supplied_file):
+                raise Refusal("FILE_ID_REQUIRED", "An exact existing source file ID is required.")
+        else:
+            supplied_file = arguments.get("fileId")
         if editing and (not isinstance(supplied_file, str) or not supplied_file):
             raise Refusal("FILE_ID_REQUIRED", "Pass the exact inspected Paper file ID for every edit.")
         # A guarded background-file read must inspect that same explicit target,
@@ -482,13 +515,19 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             raise Refusal(before["binding_error"] or "DOCUMENT_BINDING_REQUIRED")
         if editing and supplied_file != before["identity"]["id"]:
             raise Refusal("FILE_ID_MISMATCH", "Edit target does not match the inspected Paper file.")
+        if action == "file_manage" and (not isinstance(arguments.get("name"), str)
+                                       or not 1 <= len(arguments["name"].strip()) <= 500):
+            raise Refusal("FILE_NAME_REQUIRED")
         if editing and tool == "set_tokens":
             updates = arguments.get("tokens")
             if isinstance(updates, list) and any(isinstance(item, dict) and item.get("delete") is True for item in updates):
                 raise Refusal("TOKEN_DELETE_NOT_ALLOWED", "Delete tokens only through an explicitly reviewed destructive workflow.")
         # Paper validates its current input schema. A dispatched tool error may be partial.
         try:
-            result = client.call(tool, arguments)
+            upstream_arguments = dict(arguments)
+            if action == "file_manage":
+                upstream_arguments.pop("sourceFileId", None)
+            result = client.call(tool, upstream_arguments)
         except Exception as exc:
             if editing:
                 return {"state": "EFFECT_UNKNOWN", "operation_id": operation_id, "tool": tool,
@@ -513,9 +552,12 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         try:
             after = snapshot(client, supplied_file, execution_binding=execution_binding)
             matched = same_document(before["identity"], after["basic_info"])
+            if action == "file_manage" and tool == "rename_resource":
+                matched = matched and after["basic_info"].get("fileName") == arguments["name"].strip()
         except Exception:
             after, matched = None, False
-        return {"state": "APPLIED_RESPONSE_OBSERVED" if matched else "EFFECT_UNKNOWN",
+        return {"state": ("RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION" if tool == "create_file" and action == "file_manage" and matched
+                          else "APPLIED_RESPONSE_OBSERVED" if matched else "EFFECT_UNKNOWN"),
                 "operation_id": operation_id, "tool": tool, "result": result,
                 "before": before, "after": after, "retry_allowed": False,
                 "production_acceptance": False}
@@ -556,7 +598,7 @@ def save_artifacts(value: dict, directory: Path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("action", choices=["status", "catalog", "read", "edit"])
+    parser.add_argument("action", choices=["status", "catalog", "read", "edit", "file_manage"])
     parser.add_argument("--tool")
     parser.add_argument("--arguments", default="{}", help="JSON object; @file reads a bounded local JSON file")
     parser.add_argument("--expected-snapshot")

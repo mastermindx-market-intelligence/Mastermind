@@ -18,6 +18,7 @@ from enum import Enum
 from typing import Mapping, Protocol, Sequence, runtime_checkable
 
 from common.redaction import sanitize_external_text
+from control_plane.operator_harness_contract import AttentionCompanyReadProjection
 from control_plane.session_targets import RuntimeBinding, SessionTargetRegistry, WakeRoute
 from control_plane.wake_ack_ingress import (
     TrustedWorkerWakeAckProjection,
@@ -34,6 +35,7 @@ from control_plane.wake_events import (
 from control_plane.wake_ledger import (
     DeliveryAttempt,
     LedgerPhase,
+    NativeCompanyReadEvidence,
     ObligationStatus,
     UNARMED_RETRY_POLICY,
     WakeLedgerRecord,
@@ -319,6 +321,11 @@ class WakeTransportCompletion:
         repr=False,
     )
 
+    company_read_projection: AttentionCompanyReadProjection | None = dataclasses.field(
+        default=None,
+        repr=False,
+    )
+
     def __post_init__(self) -> None:
         if not isinstance(self.receipt, TransportReceipt):
             raise WakeDispatchError("Wake transport completion requires a receipt")
@@ -332,6 +339,12 @@ class WakeTransportCompletion:
                 raise WakeDispatchError(
                     "Wake transport completion ACK projection requires DELIVERED"
                 )
+        company = self.company_read_projection
+        if company is not None:
+            if not isinstance(company, AttentionCompanyReadProjection):
+                raise WakeDispatchError("Wake Company read projection must be typed")
+            if self.receipt.outcome is not TransportOutcome.DELIVERED:
+                raise WakeDispatchError("Wake Company read projection requires DELIVERED")
 
 
 def normalize_transport_completion(
@@ -352,6 +365,9 @@ class PersistedNudgeResult:
     nudge_attempt: NudgeAttempt
     transport_receipt: TransportReceipt | None = None
     receipts: tuple[WakeReceipt, ...] = ()
+    native_company_read: NativeCompanyReadEvidence | None = dataclasses.field(
+        default=None, repr=False,
+    )
 
     @property
     def nudge_id(self) -> str:
@@ -840,6 +856,64 @@ def _reconciliation_required(
     )
 
 
+def _native_company_evidence(
+    completion: TransportReceipt | WakeTransportCompletion,
+    wake: WakeNudge,
+    pairs: Sequence[tuple[WakeObligation, WakeRoute]],
+) -> NativeCompanyReadEvidence | None:
+    """Withhold optional evidence on mismatch; never downgrade known delivery."""
+    if (not isinstance(completion, WakeTransportCompletion)
+            or completion.receipt.outcome is not TransportOutcome.DELIVERED
+            or len(pairs) != 1):
+        return None
+    projection = completion.company_read_projection
+    if projection is None:
+        return None
+    obligation, route = pairs[0]
+    if (wake.wake_transport != "codex-app-server"
+            or wake.reasoning_surface != "codex"
+            or projection.target_attempt_id != obligation.attempt_id
+            or projection.binding_id != wake.binding_id
+            or projection.binding_generation != wake.binding_generation
+            or projection.binding_id != route.binding_id
+            or projection.binding_generation != route.binding_generation
+            or projection.nudge_id != wake.nudge_id
+            or projection.provider_session_id != wake.native_handle):
+        return None
+    try:
+        return NativeCompanyReadEvidence(
+            target_attempt_id=projection.target_attempt_id,
+            process_generation_id=projection.process_generation_id,
+            binding_id=projection.binding_id,
+            binding_generation=projection.binding_generation,
+            nudge_id=projection.nudge_id,
+            consultation_ref=projection.consultation_ref,
+            provider_session_sha256=hashlib.sha256(
+                projection.provider_session_id.encode("utf-8")).hexdigest(),
+            provider_native_turn_sha256=hashlib.sha256(
+                projection.provider_native_turn_id.encode("utf-8")).hexdigest(),
+            result_sha256=projection.result_sha256,
+            native_item_sha256=projection.native_item_sha256,
+            answer_attestation_sha256=projection.answer_attestation_sha256,
+        )
+    except (ValueError, TypeError):
+        return None
+
+
+def _stored_native_company_evidence(
+    repo: WakeLedgerRepository, nudge_attempt: NudgeAttempt,
+) -> NativeCompanyReadEvidence | None:
+    if len(nudge_attempt.attempts) != 1:
+        return None
+    attempt = nudge_attempt.attempts[0]
+    stored = repo.get_by_command_id(ledger_command_id(
+        attempt.obligation_id, LedgerPhase.DELIVERED, attempt_n=attempt.attempt_n,
+    ))
+    if stored is None or not stored.record.matches_attempt(attempt):
+        return None
+    return stored.record.native_company_read
+
+
 def _persist_transport_result(
     repo: WakeLedgerRepository,
     pairs: Sequence[tuple[WakeObligation, WakeRoute]],
@@ -849,12 +923,13 @@ def _persist_transport_result(
     transport: TransportReceipt,
     target_ack_projection: TrustedWorkerWakeAckProjection | None,
     target_registry: SessionTargetRegistry | None,
+    native_company_read: NativeCompanyReadEvidence | None = None,
 ) -> PersistedNudgeResult:
     attempts = nudge_attempt.attempts
     phase = LedgerPhase(transport.outcome.value)
     terminal_persisted = repo.append_records_atomic(
         tuple(
-            (attempt_record(attempt, phase), obligation)
+            (attempt_record(attempt, phase, native_company_read=native_company_read), obligation)
             for attempt, (obligation, _route) in zip(attempts, pairs, strict=True)
         )
     )
@@ -902,6 +977,7 @@ def _persist_transport_result(
         nudge_attempt=nudge_attempt,
         transport_receipt=transport,
         receipts=tuple(receipts),
+        native_company_read=_stored_native_company_evidence(repo, nudge_attempt),
     )
 
 
@@ -983,6 +1059,10 @@ async def dispatch_persisted_nudge(
             return PersistedNudgeResult(
                 state=_state_for_phase(terminal_phase),
                 nudge_attempt=nudge_attempt,
+                native_company_read=(
+                    _stored_native_company_evidence(repo, nudge_attempt)
+                    if terminal_phase is LedgerPhase.DELIVERED else None
+                ),
             )
         if first_route.human_required or not first_route.delivery_allowed:
             return _reconciliation_required(nudge_attempt)
@@ -1035,6 +1115,7 @@ async def dispatch_persisted_nudge(
             transport=transport,
             target_ack_projection=target_ack_projection,
             target_registry=target_registry,
+            native_company_read=_native_company_evidence(raw_completion, wake, pairs),
         )
 
     if first_route.human_required or not first_route.delivery_allowed:
@@ -1071,6 +1152,7 @@ async def dispatch_persisted_nudge(
 
     wake = _nudge_from(attempts, binding=binding, first_route=first_route)
     target_ack_projection: TrustedWorkerWakeAckProjection | None = None
+    native_company_read: NativeCompanyReadEvidence | None = None
     try:
         raw_completion = await dispatcher.nudge(wake)
         raw_transport, target_ack_projection = normalize_transport_completion(
@@ -1079,6 +1161,7 @@ async def dispatch_persisted_nudge(
         transport = authenticate_transport_receipt(
             raw_transport, expected_nudge_id=wake.nudge_id
         )
+        native_company_read = _native_company_evidence(raw_completion, wake, pairs)
     except WakePreSubmitError as exc:
         transport = TransportReceipt(
             outcome=exc.outcome,
@@ -1100,6 +1183,7 @@ async def dispatch_persisted_nudge(
         transport=transport,
         target_ack_projection=target_ack_projection,
         target_registry=target_registry,
+        native_company_read=native_company_read,
     )
 
 

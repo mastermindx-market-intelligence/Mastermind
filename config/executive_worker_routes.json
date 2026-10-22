@@ -1,9 +1,14 @@
 {
   "schema_version": "mastermind.executive_worker_routes/v2",
-  "policy_version": "2026-08-24.stage4",
+  "policy_version": "2026-10-14.attended-qualification",
   "lifecycle_authority": "executive_os",
   "production_armed": false,
   "providers": {
+    "minimax": {
+      "adapter_id": "attended-fabric",
+      "enabled": false,
+      "autonomous_allowed": false
+    },
     "codex": {
       "adapter_id": "codex-cli",
       "enabled": true,
@@ -31,6 +36,17 @@
     }
   },
   "model_aliases": {
+    "minimax.attended": {
+      "provider_alias": "minimax",
+      "execution_profile_id": "fabric.attended.claude.bounded.v1",
+      "model": "MiniMax-M3",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": [
+        "research"
+      ],
+      "worker_eligible": false
+    },
     "coo.sealed": {
       "provider_alias": "codex",
       "execution_profile_id": "sealed.worker.write.no-extensions.v1",
@@ -52,6 +68,15 @@
     "coo.operator.readonly": {
       "provider_alias": "codex",
       "execution_profile_id": "operator.appserver.readonly.docs-mcp.native-helper.v1",
+      "model": "gpt-5.6-sol",
+      "effort": "xhigh",
+      "cost_class": "small",
+      "capabilities": ["planning", "judgment", "escalation"],
+      "worker_eligible": true
+    },
+    "coo.operator.native-return": {
+      "provider_alias": "codex",
+      "execution_profile_id": "operator.appserver.interactive.native-return.v1",
       "model": "gpt-5.6-sol",
       "effort": "xhigh",
       "cost_class": "small",

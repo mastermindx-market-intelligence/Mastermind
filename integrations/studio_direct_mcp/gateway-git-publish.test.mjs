@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile as execFileCallback } from 'node:child_process';
-import { chmod, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -245,4 +245,82 @@ test('backend tool-name collision fails closed rather than shadowing either tool
   } finally {
     await closeAll([f.root, gw, c]);
   }
+});
+
+
+test('enabled multi-repository gateway composes real owner acquisition and local commit', async () => {
+  // macOS temporary directories can be /var aliases of /private/var. The
+  // installed owner binds canonical paths; this fixture must do the same.
+  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'studio-repository-owner-')));
+  const workspaceCli = path.join(root, 'mmx-workspace');
+  const sourceRoot = path.resolve(HERE, '..', '..');
+  const { stdout: pythonOut } = await run('python3', ['-c', 'import sys; print(sys.executable)']);
+  const repos = {};
+  const bindings = {};
+  const names = { mastermind: 'Mastermind', macro: 'macro', terminal: 'mastermind-terminal' };
+  for (const [alias, name] of Object.entries(names)) {
+    const source = path.join(root, alias);
+    await run('/bin/mkdir', ['-p', source]);
+    await git(source, 'init', '-b', alias === 'macro' ? 'main' : 'master');
+    await git(source, 'config', 'user.name', 'Workspace MCP Test');
+    await git(source, 'config', 'user.email', 'workspace-mcp@example.invalid');
+    await git(source, 'remote', 'add', 'origin', `https://github.com/mastermindx-market-intelligence/${name}.git`);
+    await writeFile(path.join(source, 'proof.txt'), alias + '\n');
+    await git(source, 'add', '.');
+    await git(source, 'commit', '-m', 'test fixture');
+    repos[alias] = { source, head: (await git(source, 'rev-parse', 'HEAD')).stdout.trim() };
+    bindings[alias] = { source_repository: source, common_git_dir: path.join(source, '.git') };
+  }
+  const literal = (value) => "'" + value.replaceAll("'", "'\\''") + "'";
+  // A test-only host wrapper around the actual owner payload, using isolated
+  // real Git repositories. No live installer, production root or network push.
+  await writeFile(workspaceCli, '#!/bin/sh\n' +
+    `export MASTERMIND_SOURCE_REPO=${literal(repos.mastermind.source)}\n` +
+    `export MASTERMIND_AGENT_WORKSPACE_ROOT=${literal(path.join(root, 'workspaces'))}\n` +
+    "export MASTERMIND_WORKSPACE_STORAGE_POLICY=''\n" +
+    `export MASTERMIND_WORKSPACE_REPOSITORIES=${literal(JSON.stringify({ schema: 'mastermind.workspace_repositories/v1', repositories: bindings }))}\n` +
+    `exec ${literal(pythonOut.trim())} ${literal(path.join(sourceRoot, 'scripts/mastermind_workspace.py'))} "$@"\n`);
+  await chmod(workspaceCli, 0o700);
+  const { root: gatewayRoot, gw } = await boot({
+    gitPublish: { enabled: true, workspaceCli, gitBinary: GIT, sourceRepository: repos.mastermind.source,
+      allowedRemoteUrls: ['https://github.com/mastermindx-market-intelligence/Mastermind.git'] },
+    repositoryWorkspaces: { enabled: true, allowedRepositories: Object.keys(names) },
+  });
+  const c = await connect(gw);
+  try {
+    const listed = await c.client.listTools();
+    const tools = new Map(listed.tools.map((tool) => [tool.name, tool]));
+    assert.ok(tools.has('studio_workspace_repositories'));
+    assert.ok(tools.has('studio_workspace_acquire'));
+    assert.equal(tools.get('studio_workspace_acquire').annotations.readOnlyHint, false);
+    assert.deepEqual(tools.get('studio_git_commit_current_changes').inputSchema.properties.repository.enum, Object.keys(names));
+    const before = gw.stats().requests.backendOps;
+    const available = await c.client.callTool({ name: 'studio_workspace_repositories', arguments: {} });
+    assert.equal(available.isError, undefined);
+    assert.equal(available.structuredContent.repositories.length, 3);
+    assert.ok(available.structuredContent.repositories.every((row) => row.state === 'READY'),
+      JSON.stringify(available.structuredContent) + '\n' + (await run(workspaceCli, ['repositories'])).stdout);
+    for (const alias of ['macro', 'terminal']) {
+      const operation = 'real-mcp-owner';
+      const result = await c.client.callTool({ name: 'studio_workspace_acquire', arguments: {
+        repository: alias, operation_id: operation, base_sha: repos[alias].head,
+      } });
+      assert.equal(result.isError, undefined, JSON.stringify(result));
+      assert.equal(result.structuredContent.effect_state, 'APPLIED');
+      const workspace = result.structuredContent.receipt.workspace_path;
+      assert.equal(workspace, path.join(root, 'workspaces', alias, 'web', operation));
+      assert.equal((await git(workspace, 'rev-parse', 'HEAD')).stdout.trim(), repos[alias].head);
+      await writeFile(path.join(workspace, 'proof.txt'), alias + ' edited through assigned workspace\n');
+      const committed = await c.client.callTool({ name: 'studio_git_commit_current_changes', arguments: {
+        repository: alias, operation_id: operation, expected_head_sha: repos[alias].head,
+        message: 'test: real owner MCP composition',
+      } });
+      assert.equal(committed.isError, undefined, JSON.stringify(committed));
+      assert.equal(committed.structuredContent.effect_state, 'APPLIED');
+      assert.equal(committed.structuredContent.repository, alias);
+      assert.equal((await git(workspace, 'rev-parse', 'HEAD')).stdout.trim(), committed.structuredContent.commit_head_sha);
+      assert.equal((await git(workspace, 'status', '--porcelain=v1')).stdout, '');
+    }
+    assert.equal(gw.stats().requests.backendOps, before, 'workspace tools do not escape to generic Desktop Commander');
+  } finally { await closeAll([root, gatewayRoot, gw, c]); }
 });

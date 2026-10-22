@@ -1,6 +1,14 @@
+import { decodeOriginalAcceptanceBody, guardAcceptanceRead, missionV4Selection, type MissionV4Selection, type ProductAcceptanceOwner } from "./product-acceptance/owner-observation";
+import { attendedSelection, decodeAttendedStatus, type AttendedSelection, type AttendedStatus } from "./fabric/attended-status";
+import { decodeAdmittedPlan, validPlanSelection, type PlanRead, type PlanSelection } from "./planning/admitted-plan";
+import { decodeRetainedActivity, validActivitySelection, type ActivitySelection, type ActivityRead } from "./planning/retained-activity";
+import { createNativeExecutiveTransport } from "./native-executive-transport";
+import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
+import type { OsExecutiveTransport } from "./orchestration/os-executive-host";
 import {
   decodeMission,
   decodeMissionv3,
+  decodeMissionv4,
   normalizeSelection,
   normalizeWorkspaceSelection,
   type MissionDocument,
@@ -19,6 +27,14 @@ import {
   type ResultEnvelopeDigestShape,
   type ResultSelection,
 } from "./result";
+import { decodeWorkDocument, type WorkDocument } from "./work";
+import { decodeProgramsObservation, type ProgramsObservation } from "./programs-observation";
+import {
+  completeOrchestratorCommandBinding,
+  type OrchestratorCommandBinding,
+} from "./orchestration/host-command-bindings";
+
+export type { OrchestratorCommandBinding };
 
 export interface AuthState {
   status: "unconfigured" | "signed_out" | "signing_in" | "signed_in" | "error";
@@ -26,14 +42,31 @@ export interface AuthState {
   acquisition: boolean;
   content: boolean;
 }
+import type { ResearchEvidenceTransport } from "./research/evidence-contract";
+
 export interface RawClient {
+  /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
+  readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
+  /** Optional private owner publication; never reconstructed from browser input. */
+  readonly productAcceptanceOwner?: ProductAcceptanceOwner;
+  readMissionV4?(request: MissionV4Selection & { signal: AbortSignal }): Promise<unknown>;
+  /** Optional fixed Research capability; private Auth0 token stays with its owner. */
+  readonly research?: ResearchEvidenceTransport;
+  readonly executive?: OsExecutiveTransport;
+  /** Optional fixed selected-session continuation transport; same private bearer custody. */
+  readonly executiveSession?: ExecutiveSessionTransport;
   getState(): AuthState;
   /** Existing source epoch, when exposed by the fixed client; never a principal or grant. */
   invalidationGeneration?(): number;
   subscribe(listener: (state: AuthState) => void): () => void;
   signIn(): Promise<unknown>;
   signOut(): Promise<unknown>;
+  /** Optional owner-authorized status-only Fabric port. No default browser/machine credential bridge. */
+  readAdmittedPlan?(request: PlanSelection & { signal: AbortSignal }): Promise<unknown>;
+  readRetainedActivity?(request: ActivitySelection & { signal: AbortSignal }): Promise<unknown>;
+  readAttendedFabric?(request: AttendedSelection & { signal: AbortSignal }): Promise<unknown>;
   readPrograms(request: { signal: AbortSignal }): Promise<unknown>;
+  readWork(request: { signal: AbortSignal }): Promise<unknown>;
   readMission(request: {
     work_ref: string;
     root_job_id: string;
@@ -56,24 +89,33 @@ export interface RawClient {
 }
 /**
  * One internally consistent typed read API: every fixed read returns its
- * fully decoded frozen DTO, or throws. The typed allowed 503 body is not a
- * separate wrapper kind — it is the validated
- * `mastermind.workspace_role_result.v1` envelope with availability
- * "UNAVAILABLE", preserved whole (reason_codes included) for the consumer
- * render path. The exact five selector fields stay separate from the
- * AbortSignal, which is an option, never part of the selector.
+ * fully decoded frozen DTO, or throws. Work and Result each preserve their
+ * schema-specific typed allowed 503 document with availability "UNAVAILABLE";
+ * neither becomes a generic error wrapper or empty success. The exact Result
+ * five-selector tuple stays separate from AbortSignal, which is an option,
+ * never part of the selector.
  */
 export interface MissionResultRead {
   (request: ResultSelection & { signal: AbortSignal }): Promise<unknown>;
 }
 export interface MissionHost {
+  /** Existing authenticated original-owner acquisition; no caller-supplied request key. */
+  readOriginalMissionV4?(request: MissionSelection & { signal: AbortSignal }): Promise<unknown>;
+  readonly productAcceptanceOwner?: ProductAcceptanceOwner;
+  readMissionV4?(request: MissionV4Selection & { signal: AbortSignal }): Promise<unknown>;
   readMission?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
   readMissionV3?: (
     request: MissionSelection & { signal: AbortSignal },
   ) => Promise<unknown>;
+  readAdmittedPlan?: (request: PlanSelection & { signal: AbortSignal }) => Promise<PlanRead>;
+  readRetainedActivity?: (request: ActivitySelection & { signal: AbortSignal }) => Promise<ActivityRead>;
+  readAttendedFabric?: (request: AttendedSelection & { signal: AbortSignal }) => Promise<AttendedStatus>;
   readPrograms?: ProgramRead;
+  /** Same fixed Programs acquisition, retaining its collection owner receipt. */
+  readProgramsObservation?: (request: { signal: AbortSignal }) => Promise<ProgramsObservation>;
+  readWork?: (request: { signal: AbortSignal }) => Promise<WorkDocument>;
   readResult?: MissionResultRead;
   readCurrentWindow?: (request: {
     signal: AbortSignal;
@@ -81,8 +123,26 @@ export interface MissionHost {
   invalidationGeneration?: () => number;
   selection?: unknown;
   auth?: Pick<RawClient, "getState" | "subscribe" | "signIn" | "signOut">;
+  commandBinding?: OrchestratorCommandBinding;
+  /** Separately mounted session binding; never the launch route. */
+  sessionCommandBinding?: unknown;
+  /** Pushes the exact selection on every transition and registers the explicit condition provider. */
+  session?: {
+    refresh(selection: unknown): Promise<void>;
+    setStopCondition(provider: () => unknown): void;
+  };
 }
-export function bindMissionHost(client: RawClient): MissionHost {
+export interface SessionHostAttachment {
+  readonly binding: unknown;
+  refresh(selection: unknown): Promise<void>;
+  setStopCondition(provider: () => unknown): void;
+}
+
+export function bindMissionHost(
+  client: RawClient,
+  commandBinding?: unknown,
+  session?: SessionHostAttachment,
+): MissionHost {
   let epoch = 0;
   let previous = JSON.stringify(client.getState());
   let previousClientGeneration = client.invalidationGeneration?.();
@@ -100,6 +160,7 @@ export function bindMissionHost(client: RawClient): MissionHost {
   const check = (signal: AbortSignal, started: number) => {
     if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
   };
+  const command = completeOrchestratorCommandBinding(commandBinding);
   return {
     invalidationGeneration: () => epoch,
     auth: {
@@ -114,12 +175,124 @@ export function bindMissionHost(client: RawClient): MissionHost {
         return client.signOut();
       },
     },
+    ...(client.readAdmittedPlan && client.invalidationGeneration ? {
+      async readAdmittedPlan(request: PlanSelection & { signal: AbortSignal }) {
+        if (!validPlanSelection({ work_ref: request.work_ref, root_job_id: request.root_job_id })) throw new Error("PLAN_SELECTION_INVALID");
+        const selected = { work_ref: request.work_ref, root_job_id: request.root_job_id };
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !request.signal.aborted && started === epoch && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("PLAN_READ_UNAUTHORIZED");
+        const raw = await client.readAdmittedPlan!({ ...selected, signal: request.signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeAdmittedPlan(raw, selected);
+      },
+    } : {}),
+    ...(client.readRetainedActivity && client.invalidationGeneration ? {
+      async readRetainedActivity(request: ActivitySelection & { signal: AbortSignal }) {
+        const { signal, ...selected } = request;
+        if (!validActivitySelection(selected)) throw new Error("ACTIVITY_SELECTION_INVALID");
+        const started = epoch, source = client.invalidationGeneration!();
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && epoch === started && source === client.invalidationGeneration?.() &&
+            state.status === "signed_in" && state.acquisition;
+        };
+        if (!authorized()) throw new Error("ACTIVITY_READ_UNAUTHORIZED");
+        const raw = await client.readRetainedActivity!({ ...selected, signal });
+        if (!authorized()) throw new Error("READ_CANCELLED");
+        return decodeRetainedActivity(raw, selected);
+      },
+    } : {}),
+    ...(client.readAttendedFabric && client.invalidationGeneration ? {
+      async readAttendedFabric(request: AttendedSelection & { signal: AbortSignal }) {
+        const selected = attendedSelection(request);
+        if (!selected) throw new Error("FABRIC_SELECTION_INVALID");
+        const started = epoch;
+        check(request.signal, started);
+        const state = client.getState();
+        if (state.status !== "signed_in" || !state.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        const raw = await client.readAttendedFabric!({ ...selected, signal: request.signal });
+        check(request.signal, started);
+        const current = client.getState();
+        if (current.status !== "signed_in" || !current.acquisition) throw new Error("FABRIC_READ_UNAUTHORIZED");
+        return decodeAttendedStatus(raw, selected);
+      },
+    } : {}),
+    ...(client.readOriginalMissionV4 ? {
+      async readOriginalMissionV4(request: MissionSelection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = normalizeWorkspaceSelection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch, sourceGeneration = client.invalidationGeneration?.();
+        const read = client.readOriginalMissionV4;
+        let invalidated = false;
+        const verify = () => {
+          const state = client.getState();
+          if (invalidated || signal.aborted || started !== epoch || sourceGeneration !== client.invalidationGeneration?.()
+            || read !== client.readOriginalMissionV4 || state.status !== "signed_in" || !state.acquisition)
+            throw new Error("READ_CANCELLED");
+        };
+        verify();
+        const release = client.subscribe(() => { invalidated = true; });
+        try {
+          verify();
+          const raw = await read!.call(client, { ...selected, signal });
+          verify();
+          const decoded = decodeOriginalAcceptanceBody(raw, selected);
+          if (!decoded) throw new Error("MISSION_V4_RESPONSE_INVALID");
+          return decoded;
+        } finally { release(); }
+      },
+    } : {}),
+    ...(client.productAcceptanceOwner && client.readMissionV4 ? {
+      productAcceptanceOwner: client.productAcceptanceOwner,
+      async readMissionV4(request: MissionV4Selection & { signal: AbortSignal }) {
+        const { signal, ...input } = request;
+        const selected = missionV4Selection(input);
+        if (!selected) throw new Error("SELECTION_INVALID");
+        const started = epoch, sourceGeneration = client.invalidationGeneration?.(), owner = client.productAcceptanceOwner;
+        const authorized = () => {
+          const state = client.getState();
+          return !signal.aborted && started === epoch && sourceGeneration === client.invalidationGeneration?.()
+            && owner === client.productAcceptanceOwner && state.status === "signed_in" && state.acquisition;
+        };
+        const guard = guardAcceptanceRead(owner, selected, authorized);
+        try {
+          guard.check();
+          const raw = await client.readMissionV4!({ ...selected, signal });
+          guard.check();
+          const decoded = decodeMissionv4(raw, { workRef: selected.workRef, rootJobId: selected.rootJobId }, selected.requestMessageKey);
+          if (!decoded) throw new Error("MISSION_V4_RESPONSE_INVALID");
+          return decoded;
+        } finally { guard.dispose(); }
+      },
+    } : {}),
     async readPrograms({ signal }) {
       const started = epoch;
       check(signal, started);
       const raw = await client.readPrograms({ signal });
       check(signal, started);
       return decodeProgramsEnvelope(raw);
+    },
+    async readProgramsObservation({ signal }) {
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readPrograms({ signal });
+      check(signal, started);
+      return decodeProgramsObservation(raw);
+    },
+    async readWork({ signal }) {
+      const started = epoch;
+      check(signal, started);
+      const raw = await client.readWork({ signal });
+      check(signal, started);
+      const result = decodeWorkDocument(raw);
+      if (!result) throw new Error("WORK_RESPONSE_INVALID");
+      return result;
     },
     async readMission({ workRef, rootJobId, signal }) {
       const selection = normalizeSelection({ workRef, rootJobId });
@@ -203,6 +376,16 @@ export function bindMissionHost(client: RawClient): MissionHost {
       if (!result) throw new Error("WINDOW_RESPONSE_INVALID");
       return result;
     },
+    ...(command ? { commandBinding: command } : {}),
+    ...(session
+      ? {
+          sessionCommandBinding: session.binding,
+          session: {
+            refresh: (selection: unknown) => session.refresh(selection),
+            setStopCondition: (provider: () => unknown) => session.setStopCondition(provider),
+          },
+        }
+      : {}),
   };
 }
 
@@ -243,6 +426,7 @@ export async function createNativeClient(
   invoke: Invoke,
   listen: Listen,
 ): Promise<RawClient> {
+  const executive = await createNativeExecutiveTransport(invoke, listen);
   let current: AuthState = {
     status: "unconfigured",
     reason: "NATIVE_HOST_UNAVAILABLE",
@@ -251,10 +435,17 @@ export async function createNativeClient(
   };
   const listeners = new Set<(state: AuthState) => void>();
   let epoch = 0;
+  let readGeneration = new AbortController();
+  const invalidateReads = () => {
+    epoch++;
+    const previous = readGeneration;
+    readGeneration = new AbortController();
+    previous.abort();
+  };
   let control = 0;
   const update = (raw: unknown) => {
     current = authState(raw);
-    epoch++;
+    invalidateReads();
     for (const listener of listeners) listener({ ...current });
   };
   await listen("mastermind-auth-state", (event) => {
@@ -270,20 +461,55 @@ export async function createNativeClient(
   async function read(
     command:
       | "read_programs"
+      | "read_work"
       | "read_mission"
       | "read_mission_v3"
+      | "read_admitted_plan"
+      | "read_retained_activity"
       | "read_result"
       | "read_current_window",
     signal: AbortSignal,
     args?: Record<string, unknown>,
   ) {
     const started = epoch;
-    if (signal.aborted) throw new Error("READ_CANCELLED");
-    const raw = await invoke(command, args);
-    if (signal.aborted || started !== epoch) throw new Error("READ_CANCELLED");
-    return raw;
+    const generation = readGeneration.signal;
+    if (signal.aborted || generation.aborted) throw new Error("READ_CANCELLED");
+    // Tauri invoke has no AbortSignal parameter. Settle this read locally on
+    // cancellation without claiming the native request stopped or issuing any
+    // second native command. Both late outcomes remain observed below.
+    return new Promise<unknown>((resolve, reject) => {
+      let settled = false;
+      const finish = (failed: boolean, value: unknown) => {
+        if (settled) return;
+        settled = true;
+        signal.removeEventListener("abort", onAbort);
+        generation.removeEventListener("abort", onAbort);
+        if (failed) reject(value);
+        else resolve(value);
+      };
+      const onAbort = () => finish(true, new Error("READ_CANCELLED"));
+      const onFailure = (error: unknown) => {
+        if (signal.aborted || started !== epoch) onAbort();
+        else finish(true, error);
+      };
+      signal.addEventListener("abort", onAbort, { once: true });
+      generation.addEventListener("abort", onAbort, { once: true });
+      if (signal.aborted || generation.aborted) {
+        onAbort();
+        return;
+      }
+      try {
+        Promise.resolve(invoke(command, args)).then((raw) => {
+          if (signal.aborted || started !== epoch) onAbort();
+          else finish(false, raw);
+        }, onFailure);
+      } catch (error) {
+        onFailure(error);
+      }
+    });
   }
   return {
+    executive: executive.transport,
     getState: () => ({ ...current }),
     invalidationGeneration: () => epoch,
     subscribe(listener) {
@@ -293,12 +519,15 @@ export async function createNativeClient(
       };
     },
     async signIn() {
-      epoch++;
+      executive.invalidate();
+      invalidateReads();
       const ticket = ++control;
+      const started = epoch;
       const result = await invoke("sign_in");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     async signOut() {
+      executive.invalidate();
       const ticket = ++control;
       update({
         status: "signed_out",
@@ -306,16 +535,29 @@ export async function createNativeClient(
         acquisition: false,
         content: false,
       });
+      const started = epoch;
       const result = await invoke("sign_out");
-      if (ticket === control) update(result);
+      if (ticket === control && started === epoch) update(result);
     },
     readPrograms: ({ signal }) => read("read_programs", signal),
+    readWork: ({ signal }) => read("read_work", signal),
     readMission: ({ work_ref, root_job_id, signal }) => {
       if (!normalizeSelection({ workRef: work_ref, rootJobId: root_job_id }))
         return Promise.reject(new Error("SELECTION_INVALID"));
       return read("read_mission", signal, {
         selection: { work_ref, root_job_id },
       });
+    },
+    readAdmittedPlan: ({ work_ref, root_job_id, signal }) => {
+      if (!validPlanSelection({ work_ref, root_job_id }))
+        return Promise.reject(new Error("PLAN_SELECTION_INVALID"));
+      return read("read_admitted_plan", signal, { selection: { work_ref, root_job_id } });
+    },
+    readRetainedActivity: ({ work_ref, root_job_id, job_id, attempt_id, signal }) => {
+      const selection = { work_ref, root_job_id, job_id, attempt_id };
+      if (!validActivitySelection(selection))
+        return Promise.reject(new Error("ACTIVITY_SELECTION_INVALID"));
+      return read("read_retained_activity", signal, { selection });
     },
     readMissionV3: ({ workRef, rootJobId, signal }) => {
       if (!normalizeWorkspaceSelection({ workRef, rootJobId }))

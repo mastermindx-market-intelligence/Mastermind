@@ -137,7 +137,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-10-03.acp-providerfree-read-p0"
+    assert registry.policy_version == "2026-10-14.attended-qualification"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -300,11 +300,16 @@ def test_company_dialogue_fixture_compiles_through_existing_capability_authority
     assert widened.expected_config_digest != expected_digest
 
 
-def test_production_policy_has_no_company_dialogue_placeholder_endpoint_or_profile():
+def test_production_policy_has_no_legacy_company_dialogue_placeholder():
     raw = _raw_policy()
     rendered = json.dumps(raw, sort_keys=True)
-    assert "mastermind-company-dialogue" not in rendered
-    assert "mastermindCompanyDialogue" not in rendered
+    # The old test-only HTTPS placeholder remains forbidden. H1-RG1 now has a
+    # distinct reviewed principal Company Dialogue grant, covered separately.
+    assert "mastermind-company-dialogue-v1" not in raw["mcp_servers"]
+    assert (
+        "operator.appserver.readonly.company-dialogue.fixture.v1"
+        not in raw["profiles"]
+    )
     assert "company-dialogue.test.invalid" not in rendered
 
 
@@ -683,32 +688,64 @@ def test_browser_grants_refuse_transport_identity_or_profile_widening(tmp_path, 
         ExecutionCapabilityRegistry.load(_write(tmp_path, raw))
 
 
-def test_v3_ratified_generation_and_schema_constants_remain_exact():
-    """Freeze the explicitly ratified V3 Browser B1 runtime generation.
-
-    CAP-S1 remains opt-in for V4 and the default schema remains V3.  The
-    Browser B1 runtime receipt is target-generation-bound, so its deliberate
-    ratification rotates the V3 policy identity instead of silently reusing
-    the prior generation.
-    """
-
+def test_v3_ratified_generation_and_schema_constants_remain_exact(tmp_path):
+    """Preserve protected native-return and explicit RG1 predecessor identities."""
     assert CAPABILITY_POLICY_SCHEMA == CAPABILITY_POLICY_SCHEMA_V3
     assert CAPABILITY_POLICY_SCHEMA_V3 == "mastermind.executive_agent_capabilities/v3"
     assert CAPABILITY_POLICY_SCHEMA_V4 == "mastermind.executive_agent_capabilities/v4"
 
-    registry = ExecutionCapabilityRegistry.load()
-    assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
-    assert registry.capability_packages == {}
-    assert registry.policy_digest == (
-        "08089a81ad3650094ca33b67a4f2fb4fe3378f7d03b4ad7ba2eda233b97e796d"
+    default = ExecutionCapabilityRegistry.load()
+    assert default.schema_version == CAPABILITY_POLICY_SCHEMA_V3
+    assert default.capability_packages == {}
+    root = Path(__file__).resolve().parents[1]
+    candidate_raw = json.loads(
+        (root / "config" / "candidates" / "claude_principal_rg1.json").read_text()
     )
-    assert registry.resolve(
+    candidate = ExecutionCapabilityRegistry.load(
+        root / "config" / "candidates" / "claude_principal_rg1.json",
+        source_root=root,
+    )
+    del candidate_raw["profiles"]["principal.claude.coo.rich.v1"]
+    del candidate_raw["mcp_servers"]["executive-coo-mcp-v1"]
+    del candidate_raw["mcp_servers"]["company-dialogue-principal-mcp-v1"]
+    candidate_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    previous = ExecutionCapabilityRegistry.load(_write(tmp_path, candidate_raw))
+    assert candidate.policy_digest != previous.policy_digest
+    assert previous.policy_digest == (
+        "506c1e2aa4bb730bf0325383bfdbbcf73adba7f248378af4dfc7d89ff23c6dd5"
+    )
+
+    # The accepted native-return generation remains in the default policy;
+    # removing only its own additions recovers the same frozen predecessor.
+    protected_raw = _raw_policy()
+    del protected_raw["profiles"]["operator.appserver.interactive.product-acceptance.v1"]
+    del protected_raw["mcp_servers"]["product-acceptance-mcp-v1"]
+    del protected_raw["profiles"]["fabric.attended.claude.bounded.v1"]
+    del protected_raw["profiles"]["operator.appserver.interactive.native-return.v1"]
+    del protected_raw["mcp_servers"]["native-return-mcp-v1"]
+    # The new ACP read-only generation is independent of the frozen
+    # predecessor too; remove it only for this historical digest assertion.
+    # Default policy still tests both the protected attended and ACP profiles.
+    del protected_raw["profiles"]["worker.acp.providerfree.readonly.v1"]
+    del protected_raw["mcp_servers"]["mastermind-acp-workspace-read-v1"]
+    protected_raw["policy_version"] = "2026-10-03.company-consultation-edge-p0"
+    protected_previous = ExecutionCapabilityRegistry.load(_write(tmp_path, protected_raw))
+    assert default.policy_digest != protected_previous.policy_digest
+    assert protected_previous.policy_digest == previous.policy_digest
+
+    older_raw = json.loads(json.dumps(candidate_raw))
+    del older_raw["profiles"]["operator.browser.isolated.v1"]
+    del older_raw["resources"]["worker-browser-isolated"]
+    older = ExecutionCapabilityRegistry.load(_write(tmp_path, older_raw))
+    assert older.policy_digest == (
+        "0568a41fe7b16b20f3945e79ce87d736fa75bc90c1e747a2b7f1c0c8ffc495d5"
+    )
+    assert older.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     ).profile_digest == (
         "028fce73ff8c4cb8f8ada7b514e89b74fba64b92f29db3780004a360e0995d39"
     )
-
-    for profile in registry.profiles.values():
+    for profile in older.profiles.values():
         assert profile.skill_grants == ()
         assert profile.app_server_config_projection()["skills"] == {"config": None}
 

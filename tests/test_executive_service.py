@@ -1336,75 +1336,19 @@ def test_closed_canary_bridge_replays_one_persisted_attempt_without_second_turn(
     assert phases.count(LedgerPhase.DELIVERY_ATTEMPT) == 1
 
 
-def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
-    tmp_path: Path,
-    short_socket_root: Path,
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    """The future composition crosses the socket without replacing either resolver."""
-
-    from contextlib import contextmanager
-    from control_plane.dialogue_wake_canary_activation import (
-        DialogueWakeCanaryActivationGrant,
-        DialogueWakeCanaryProfile,
-        SCHEMA as CANARY_SCHEMA,
-        effective_dialogue_wake_canary_route,
-    )
+def _strict_dialogue_runtime(tmp_path, monkeypatch, *, provider_session_id="PROVIDER-SESSION-1"):
+    """Admit the real CEO root, current OHF writer and immutable dialogue source."""
     from control_plane.ceo_intent import submit_intent
     from control_plane.operator_harness_contract import (
-        AttentionTurnObservation,
-        CapabilityIdentity,
-        CapabilityManifest,
-        ObservedCapabilityIdentity,
-        OperationId,
-        ProcessIdentityObservation,
-        ProcessLiveness,
-        ProviderWriterState,
-        ReconcileObservation,
-        TurnStartObservation,
-        WorkerLocalWakeAckProjection,
+        CapabilityIdentity, CapabilityManifest, ObservedCapabilityIdentity,
+        OperationId, ProcessIdentityObservation,
     )
-    from control_plane.executive_orchestration_principal import (
-        OperatorPrincipalObservation,
-    )
+    from control_plane.executive_orchestration_principal import OperatorPrincipalObservation
     from control_plane.runtime_binding_projection import project_runtime_binding
     from control_plane.session_targets import (
-        SCHEMA as TARGET_SCHEMA,
-        SessionTarget,
-        SessionTargetRegistry,
-        route_digest,
-        route_obligation,
+        SCHEMA as TARGET_SCHEMA, SessionTarget, SessionTargetRegistry,
     )
-    from control_plane.wake_ledger import (
-        AckMode,
-        LedgerPhase,
-        SourceReadHealth,
-        SourceResolution,
-        SourceResolutionCode,
-        TrustedAckContext,
-        WakeLedgerError,
-        WakeRetryPolicy,
-        acknowledge,
-        ack_record,
-        attempt_record,
-        make_delivery_attempt,
-        requested_record,
-        resolved_record,
-    )
-    from control_plane.wake_persist import WakeLedgerRepository
-    from control_plane.wake_events import mint_obligation_id
-    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
-    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
-    from integrations.executive_wake.registry import WakeDispatcherRegistry
-    from integrations.slack_agent_dialogue.contract_v2 import (
-        PARENT_SCHEMA_V2,
-        build_message_v2,
-        build_parent_v2,
-    )
-    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
-        HistoricalWakeContext,
-        PersistedWakeCarrier,
-    )
+    from integrations.slack_agent_dialogue.contract_v2 import PARENT_SCHEMA_V2, build_parent_v2
     from tests import test_wake_ack_ingress as ack_fixtures
 
     source = _terminal_dialogue_source()
@@ -1508,14 +1452,14 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         operation_id=start_operation,
         fence_generation=sealed.fence_generation,
         lease_token=dispatch.lease_token,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process=process,
     )
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id="worker-a",
         process_generation_id=generation.process_generation_id,
-        provider_session_id="PROVIDER-SESSION-1",
+        provider_session_id=provider_session_id,
         process_identity={
             "pid": process.pid,
             "pgid": process.pgid,
@@ -1630,6 +1574,122 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         worker_id=material["worker_id"],
         evidence_digest=material["evidence_digest"],
     )
+    return SimpleNamespace(
+        attestation=attestation,
+        execution_binding=execution_binding,
+        facts_reader=facts_reader,
+        mcp_capability=mcp_capability,
+        principal=principal,
+        profile=profile,
+        source=source,
+        runtime=runtime,
+        root=root,
+        dispatch=dispatch,
+        sealed=sealed,
+        epoch=epoch,
+        generation=generation,
+        process=process,
+        parent=parent,
+        target=target,
+        ceo_target=ceo_target,
+        registry=registry,
+        binding=binding,
+        candidate=candidate,
+    )
+
+
+def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults(
+    tmp_path: Path,
+    short_socket_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The production carrier crosses the socket without replacing either resolver."""
+
+    from contextlib import contextmanager
+    from control_plane.dialogue_wake_canary_activation import (
+        DialogueWakeCanaryActivationGrant,
+        DialogueWakeCanaryProfile,
+        SCHEMA as CANARY_SCHEMA,
+        effective_dialogue_wake_canary_route,
+    )
+    from control_plane.ceo_intent import submit_intent
+    from control_plane.operator_harness_contract import (
+        AttentionTurnObservation,
+        CapabilityIdentity,
+        CapabilityManifest,
+        ObservedCapabilityIdentity,
+        OperationId,
+        ProcessIdentityObservation,
+        ProcessLiveness,
+        ProviderWriterState,
+        ReconcileObservation,
+        TurnStartObservation,
+        WorkerLocalWakeAckProjection,
+    )
+    from control_plane.executive_orchestration_principal import (
+        OperatorPrincipalObservation,
+    )
+    from control_plane.runtime_binding_projection import project_runtime_binding
+    from control_plane.session_targets import (
+        SCHEMA as TARGET_SCHEMA,
+        SessionTarget,
+        SessionTargetRegistry,
+        route_digest,
+        route_obligation,
+    )
+    from control_plane.wake_ledger import (
+        AckMode,
+        LedgerPhase,
+        SourceReadHealth,
+        SourceResolution,
+        SourceResolutionCode,
+        TrustedAckContext,
+        WakeLedgerError,
+        WakeRetryPolicy,
+        acknowledge,
+        ack_record,
+        attempt_record,
+        make_delivery_attempt,
+        requested_record,
+        resolved_record,
+    )
+    from control_plane.wake_persist import WakeLedgerRepository
+    from control_plane.wake_events import mint_obligation_id
+    from integrations.executive_wake.codex_app_server import CodexAppServerWakeDispatcher
+    from integrations.executive_wake.codex_app_server_rpc import CodexCurrentWriterWakeClient
+    from integrations.executive_wake.registry import WakeDispatcherRegistry
+    from integrations.slack_agent_dialogue.contract_v2 import (
+        PARENT_SCHEMA_V2,
+        build_message_v2,
+        build_parent_v2,
+    )
+    from integrations.slack_agent_dialogue.persisted_wake_carrier import (
+        HistoricalWakeContext,
+        PersistedWakeCarrier,
+    )
+    from tests import test_wake_ack_ingress as ack_fixtures
+
+    fixture = _strict_dialogue_runtime(tmp_path, monkeypatch)
+    attestation = fixture.attestation
+    execution_binding = fixture.execution_binding
+    facts_reader = fixture.facts_reader
+    mcp_capability = fixture.mcp_capability
+    principal = fixture.principal
+    profile = fixture.profile
+    source = fixture.source
+    runtime = fixture.runtime
+    root = fixture.root
+    dispatch = fixture.dispatch
+    sealed = fixture.sealed
+    epoch = fixture.epoch
+    generation = fixture.generation
+    process = fixture.process
+    parent = fixture.parent
+    target = fixture.target
+    ceo_target = fixture.ceo_target
+    registry = fixture.registry
+    binding = fixture.binding
+    candidate = fixture.candidate
     obligation = mint_obligation(
         wake_kind="dialogue_turn_pending",
         source_kind="agent_dialogue_attention",
@@ -1765,53 +1825,9 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
 
     operator = Operator()
 
-    def carrier_factory(**kwargs):
-        repository = WakeLedgerRepository(kwargs["runtime"])
-        if kwargs["historical_only"]:
-            def historical_context(attempt):
-                historical = kwargs["historical_context_for"](attempt)
-                client = CodexCurrentWriterWakeClient(
-                    operator_adapter=historical.operator_adapter,
-                    generation=historical.generation,
-                    attempt_id=historical.target_attempt_id,
-                    runtime_binding=historical.runtime_binding,
-                )
-                return HistoricalWakeContext(
-                    dispatchers=WakeDispatcherRegistry(
-                        {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-                    ),
-                    runtime_binding=historical.runtime_binding,
-                    target_registry=registry,
-                )
-
-            return PersistedWakeCarrier(
-                repository=repository,
-                dispatchers=WakeDispatcherRegistry(),
-                current_binding_for=lambda _route: None,
-                retry_policy=kwargs["retry_policy"],
-                canary_profile=kwargs["canary_profile"],
-                historical_context_for=historical_context,
-                physical_source=kwargs.get("physical_source"),
-            )
-        client = CodexCurrentWriterWakeClient(
-            operator_adapter=kwargs["resolved"].operator_adapter,
-            generation=kwargs["generation"],
-            attempt_id=kwargs["resolved"].target_attempt_id,
-            runtime_binding=kwargs["current_binding"],
-            pre_submit_guard=kwargs["pre_submit_guard"],
-        )
-        return PersistedWakeCarrier(
-            repository=repository,
-            dispatchers=WakeDispatcherRegistry(
-                {"codex-app-server": CodexAppServerWakeDispatcher(client)}
-            ),
-            current_binding_for=lambda _route: kwargs["current_binding"],
-            retry_policy=kwargs["retry_policy"],
-            target_registry=kwargs["resolved"].registry,
-            canary_profile=kwargs["canary_profile"],
-            historical_context_for=kwargs["historical_context_for"],
-            physical_source=kwargs.get("physical_source"),
-        )
+    # Exercise the installed composer, including historical conversion and the
+    # final native pre-submit guard. An injected copy hid missing production wiring.
+    carrier_factory = service_cli._build_executive_dialogue_wake_carrier
 
     clock = 1_700_000_100
 
@@ -1827,7 +1843,6 @@ def test_closed_canary_socket_uses_runtime_owned_current_and_historical_defaults
         canary_profile=DialogueWakeCanaryProfile(grant),
         canary_now_epoch_seconds=now_epoch_seconds,
         installed_release_sha=grant.installed_release_sha,
-        operation_key=grant.operation_key,
     )
     actual_current_facts = bridge._current_canary_facts
 
@@ -7674,7 +7689,7 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
             root_id = submitted["result"]["job_id"]
             root = service.runtime.jobs.get_job(root_id)
             assert root is not None
-            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
+            assert root.constraints["routing_policy_version"] == "2026-10-14.attended-qualification"
             assert root.constraints["execution_profile_id"] == (
                 "sealed.worker.write.no-extensions.v1"
             )
@@ -9370,6 +9385,41 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         ).resolve(strict=False)
         assert observation_loaded["dialogue_observation_peer_uid"] == 457
         assert observation_loaded["dialogue_bridge_armed"] is False
+        assert observation_loaded["dialogue_wake_canary_activation"] is None
+
+        from tests.test_dialogue_wake_canary_activation import valid_wire
+        from control_plane.dialogue_wake_canary_activation import (
+            DialogueWakeCanaryActivationGrant, DialogueWakeCanaryProfile,
+        )
+        grant_wire = valid_wire(installed_release_sha=raw["proof_base_sha"])
+        for suffix, grant_value in (("null", None), ("exact", grant_wire)):
+            canary_path = tmp_path / f"control-dialogue-canary-{suffix}.json"
+            canary_path.write_text(json.dumps({
+                **raw, **observation_fields,
+                "dialogue_wake_canary_activation": grant_value}))
+            canary_path.chmod(0o400)
+            parsed_config = service_cli.load_control_config(canary_path)
+            parsed_grant = parsed_config["dialogue_wake_canary_activation"]
+            if grant_value is None:
+                assert parsed_grant is None
+            else:
+                assert type(parsed_grant) is DialogueWakeCanaryActivationGrant
+                assert parsed_grant.to_dict() == grant_value
+        for index, bad_grant in enumerate((
+            {}, {**grant_wire, "production_armed": True},
+            {**grant_wire, "expires_at_epoch_seconds": grant_wire["valid_from_epoch_seconds"] + 901},
+        )):
+            bad_path = tmp_path / f"control-dialogue-canary-invalid-{index}.json"
+            bad_path.write_text(json.dumps({
+                **raw, **observation_fields, "dialogue_wake_canary_activation": bad_grant}))
+            bad_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="canary activation is invalid"):
+                service_cli.load_control_config(bad_path)
+        orphan_path = tmp_path / "control-dialogue-canary-orphan.json"
+        orphan_path.write_text(json.dumps({**raw, "dialogue_wake_canary_activation": None}))
+        orphan_path.chmod(0o400)
+        with pytest.raises(ServiceError, match="requires the observation configuration"):
+            service_cli.load_control_config(orphan_path)
 
         armed_observation_path = tmp_path / "control-observation-armed.json"
         armed_observation_path.write_text(
@@ -9402,7 +9452,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": True,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9412,7 +9462,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         terminal_loaded = service_cli.load_control_config(terminal_return_path)
         assert terminal_loaded["terminal_return_armed"] is True
         assert terminal_loaded["terminal_return_socket_path"] == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         terminal_unarmed_path = tmp_path / "control-terminal-return-unarmed.json"
         terminal_unarmed_path.write_text(
@@ -9421,7 +9471,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
                     **raw,
                     "terminal_return_armed": False,
                     "terminal_return_socket_path": (
-                        "/var/run/mastermind-agent-relay/agent-relay.sock"
+                        "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
                     ),
                 }
             ),
@@ -9529,6 +9579,26 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             observation_kwargs["dialogue_wake_handler"],
             ExecutiveDialogueWakeBridge,
         )
+        handler = observation_kwargs["dialogue_wake_handler"]
+        assert type(handler.canary_profile) is DialogueWakeCanaryProfile
+        assert handler.canary_profile.grant is None
+        assert handler._operation_key is None
+        assert handler._installed_release_sha == raw["proof_base_sha"]
+
+        # The factory must consume only the trusted profile produced by the
+        # publication/verification owner. A raw config grant alone is not
+        # sufficient authority to arm the canary lane.
+        trusted_grant = DialogueWakeCanaryActivationGrant.from_dict(grant_wire)
+        with monkeypatch.context() as composition_patch:
+            composition_patch.setattr(service_cli, "activate_launchd_socket", lambda _name: listener)
+            composition_patch.setattr(service_cli, "ExecutiveControlService", capture_service)
+            service_cli._service_from_config(
+                {**armed_observation_loaded, "dialogue_wake_canary_activation": trusted_grant},
+                dialogue_canary_profile=DialogueWakeCanaryProfile(trusted_grant),
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")))
+        handler = captured["kwargs"]["dialogue_wake_handler"]
+        assert handler.canary_profile.grant.to_dict() == grant_wire
+        assert handler._operation_key is None
 
         captured.clear()
         with monkeypatch.context() as composition_patch:
@@ -9547,7 +9617,7 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert isinstance(unarmed_composed_config, ServiceConfig)
         assert unarmed_composed_config.terminal_return_armed is False
         assert unarmed_composed_config.terminal_return_socket_path == Path(
-            "/var/run/mastermind-agent-relay/agent-relay.sock"
+            "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
         ).resolve(strict=False)
         assert isinstance(unarmed_composed_kwargs, dict)
         assert "terminal_return_projector_factory" not in unarmed_composed_kwargs
@@ -10485,3 +10555,357 @@ def test_proof_recovery_observer_requires_positive_fixed_uid(tmp_path, uid):
     with pytest.raises(ValueError, match="fixed observer and worker UID"):
         ExecutiveControlService(_config(tmp_path), proof_capacity_recovery_observer=lambda a: {},
                                 proof_capacity_recovery_worker_uid=uid)
+
+
+@pytest.mark.parametrize("schema", ["v1", "v2"])
+@pytest.mark.parametrize("fault", [None, "root", "history", "extra_event", "quota", "fence"])
+def test_maintenance_preserves_baseline_across_real_proof_lineage(tmp_path, short_socket_root, fault, schema):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer = _proof_absence
+        service._proof_capacity_recovery_worker_uid = 451
+        await service.start()
+        try:
+            if schema == "v1":
+                old_id, old_lost = await _requeued_missing_proof(service)
+            else:
+                assert (await _request(service, "register-worker"))["ok"]
+                old = await _request(service, "create-proof-job")
+                assert old["ok"], old
+                old_id = old["result"]["job_id"]
+                assert (await _request(service, "dispatch", {"job_id": old_id}))["ok"]
+                await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+                assert service.runtime.jobs.get_job(old_id).status.value == "COMPLETED"
+            runtime = service.runtime
+            root_receipt = service._submit_service_intent(_coo_intent(service.config,"maintenance"))
+            root_id = root_receipt["job_id"]
+            database = service.config.runtime_root/"data/control_plane/executive.sqlite3"
+            before = maintenance.snapshot(database)
+            descriptor = dict(schema_version=maintenance.SCHEMA if schema == "v1" else maintenance.SCHEMA_V2,
+                              worker_id=service.config.worker_id, quota_class=service.config.quota_class,
+                              successor_sha=service.config.proof_base_sha)
+            if schema == "v1":
+                descriptor.update(recovery_job_id=old_id, recovery_attempt_id=old_lost.attempt_id)
+                await service._recover_proof_capacity(old_id,old_lost.attempt_id)
+            else:
+                descriptor["template_proof_job_id"] = old_id
+            first = await _request(service,"create-proof-job")
+            first_id = first["result"]["job_id"]
+            assert (await _request(service,"dispatch",{"job_id":first_id}))["ok"]
+            await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+            second_id, second_lost = await _requeued_missing_proof(service)
+            await service._recover_proof_capacity(second_id,second_lost.attempt_id)
+            assert (await _request(service,"dispatch",{"job_id":second_id}))["ok"]
+            await asyncio.gather(*tuple(service._dispatch_tasks.values()))
+            after = maintenance.snapshot(database)
+            if fault=="root":
+                next(r for r in after["tables"]["jobs"] if r["job_id"]==root_id)["version"] += 1
+            elif fault=="history":
+                next(e for e in after["tables"]["events"] if e["job_id"] == root_id and e["event_type"] == "JOB_CREATED")["actor"]="foreign"
+            elif fault=="extra_event":
+                event=dict(after["tables"]["events"][-1],event_id=9999,job_id=root_id)
+                after["tables"]["events"].append(event)
+            elif fault=="quota":
+                after["tables"]["worker_quota_classes"][0]["metadata_json"]='{"foreign":true}'
+            elif fault=="fence":
+                after["tables"]["worker_quota_classes"][0]["fence_counter"] += 1
+            if fault:
+                with pytest.raises(maintenance.MaintenanceError):
+                    maintenance.verify_preserved(before,after,descriptor,[first_id,second_id])
+            else:
+                maintenance.verify_preserved(before,after,descriptor,[first_id,second_id])
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_recovery_never_authorizes_predecessor_dispatch(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service, _ = _service(tmp_path,socket_root=short_socket_root)
+        service._proof_capacity_recovery_observer=_proof_absence
+        service._proof_capacity_recovery_worker_uid=451
+        await service.start()
+        try:
+            job_id,lost=await _requeued_missing_proof(service)
+            previous=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40)
+            job=service.runtime.jobs.get_job(job_id)
+            assert job.constraints["base_sha"]==previous
+            assert not service._is_fixed_proof_job(job)
+            monkeypatch.setattr(maintenance,"recovery_permitted",
+                lambda candidate,attempt_id,*args: candidate.job_id==job_id and attempt_id==lost.attempt_id)
+            assert service._is_maintenance_recovery_job(job,lost.attempt_id)
+            receipt=await service._recover_proof_capacity(job_id,lost.attempt_id)
+            assert receipt["status"]=="AVAILABLE"
+            assert not service._is_fixed_proof_job(job)
+            response=await _request(service,"dispatch",{"job_id":job_id})
+            assert response["ok"] is False
+            service.config=dataclasses.replace(service.config,ceo_submit_armed=True)
+            assert not service._is_maintenance_recovery_job(job,lost.attempt_id)
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("fault",[None,"profile","event","summary","missing","other_root"])
+def test_maintenance_root_binding_keeps_frozen_base_and_harness(tmp_path, short_socket_root, monkeypatch,fault):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt=service._submit_service_intent(_coo_intent(service.config,"frozen"))
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            predecessor=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40,
+                coo_autonomy_armed=True,coo_operator_harness_armed=True)
+            # Explicitly refresh the current binding fixture after host config transition.
+            service._coo_execution_binding=service._load_coo_execution_binding()
+            with service.runtime.store.read() as conn:
+                event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
+            descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+                predecessor_sha=predecessor,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
+            summary_raw=b"reviewed acceptance"
+            carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
+                descriptor_sha256=maintenance.digest(descriptor),
+                acceptance_summary_sha256=hashlib.sha256(summary_raw).hexdigest())
+            if fault=="profile":
+                root=dataclasses.replace(root,constraints=dict(root.constraints,execution_profile_digest="c"*64))
+            elif fault=="event":
+                descriptor["root_event_sha256"]="c"*64
+                carry["descriptor_sha256"]=maintenance.digest(descriptor)
+            elif fault=="summary":
+                carry["acceptance_summary_sha256"]="c"*64
+            elif fault=="other_root":
+                descriptor["root_job_id"]="JOB-other"
+            monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+            monkeypatch.setattr(maintenance,"summary_document",lambda sha:({},summary_raw))
+            def read(path):
+                if fault=="missing": raise FileNotFoundError(path)
+                return carry
+            monkeypatch.setattr(maintenance,"sealed_json",read)
+            if fault=="other_root":
+                assert not service._is_bound_coo_root(root)
+            elif fault:
+                with pytest.raises(StateConflict):
+                    service._is_bound_coo_root(root)
+            else:
+                assert service._is_bound_coo_root(root)
+                effective=service._coo_binding_for_root(root)
+                assert effective["base_sha"]==predecessor
+                assert effective["operator_harness_armed"] is False
+                assert service._require_initial_coo_workspace(root)["head"]==predecessor
+                service.config=dataclasses.replace(service.config,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+                with pytest.raises(StateConflict,match="not armed"):
+                    await service._run_coo_cycle_once(root.job_id)
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_preparation_publishes_complete_baseline_and_refuses_drift(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        host=tmp_path/"host"
+        config=_config(tmp_path,runtime_root=host/"control/db",socket_root=short_socket_root)
+        service,_=_service(tmp_path,config=config)
+        await service.start()
+        try:
+            old_id,lost=await _requeued_missing_proof(service)
+            receipt=service._submit_service_intent(_coo_intent(config,"prepare"))
+        finally:
+            await service.close()
+        system=tmp_path/"system"
+        (system/"config").mkdir(parents=True)
+        values=dict(runtime_root=str(config.runtime_root),proof_workspace_root=str(config.proof_workspace_root),
+            worker_id=config.worker_id,quota_class=config.quota_class,proof_base_sha=config.proof_base_sha,
+            ceo_submit_armed=False,coo_autonomy_armed=False,coo_operator_harness_armed=False)
+        for key in ("worker_runs_root","receipts_root","backup_root"):
+            path=host/key
+            path.mkdir()
+            values[key]=str(path)
+        fixtures=host/"canary-fixtures"
+        fixtures.mkdir()
+        (fixtures/"sentinel").write_text("preserved fixture")
+        prior_canary=host/"prior-canary.json"
+        prior_canary.write_text('{"passed":true}')
+        values["secret_canary_receipt_path"]=str(prior_canary)
+        (system/"config/control.json").write_text(json.dumps(values))
+        (system/"config/worker-codex.json").write_text('{"operator_harness_armed":false}')
+        actual_uid=os.getuid()
+        monkeypatch.setattr(maintenance,"SYSTEM_ROOT",system)
+        monkeypatch.setattr(maintenance,"_TRUSTED_UID",actual_uid)
+        monkeypatch.setattr(maintenance,"_sealed_ancestors",lambda path:[])
+        monkeypatch.setattr(maintenance,"require_stopped",lambda:None)
+        monkeypatch.setattr(maintenance.os,"geteuid",lambda:0)
+        monkeypatch.setattr(maintenance,"sys",SimpleNamespace(platform="darwin"))
+        args=SimpleNamespace(predecessor_sha=config.proof_base_sha,successor_sha="b"*40,
+            root_job_id=receipt["job_id"],recovery_job_id=old_id,recovery_attempt_id=lost.attempt_id)
+        bundle=maintenance.prepare(args)
+        descriptor=maintenance.descriptor_for(args.successor_sha)
+        assert descriptor["root_job_id"]==receipt["job_id"]
+        assert (bundle/"prestate.sqlite3").is_file()
+        assert (bundle/"baseline.json").stat().st_mode & 0o777 == 0o400
+        assert (bundle/"descriptor.json").stat().st_mode & 0o777 == 0o444
+        assert not list(bundle.parent.glob(".preparing-*"))
+        with pytest.raises(maintenance.MaintenanceError,match="already exists"):
+            maintenance.prepare(args)
+        altered=dict(values,proof_base_sha=args.successor_sha)
+        prior_canary.write_text('{"passed":false}')
+        with pytest.raises(maintenance.MaintenanceError,match="prestate drifted"):
+            maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+        assert not (bundle/"run-started.json").exists()
+        prior_canary.write_text('{"passed":true}')
+        maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+        assert (bundle/"run-started.json").is_file()
+        with pytest.raises(FileExistsError):
+            maintenance.Maintenance(args.successor_sha,maintenance.digest(descriptor),altered)
+    asyncio.run(scenario())
+
+
+@pytest.mark.parametrize("frozen", [False, True])
+def test_cycle_supervisor_selection_uses_root_binding_not_global_arm(tmp_path, short_socket_root, monkeypatch,frozen):
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt=service._submit_service_intent(_coo_intent(service.config,"selector"))
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            plan=dataclasses.replace(root,job_id="JOB-plan",parent_job_id=root.job_id,
+                                     depth=1,orchestration_role="plan")
+            service.config=dataclasses.replace(service.config,coo_autonomy_armed=True,coo_operator_harness_armed=True)
+            monkeypatch.setattr(service.runtime.jobs,"get_job",lambda job_id:plan)
+            monkeypatch.setattr(service,"_require_bound_coo_job",lambda job:root)
+            monkeypatch.setattr(service,"_require_coo_workspace",lambda job:{})
+            monkeypatch.setattr(service,"_coo_binding_for_root",lambda job:dict(operator_harness_armed=frozen))
+            calls=[]
+            class Selected(Exception): pass
+            class Supervisor:
+                def __init__(self,name): self.name=name
+                async def start_cycle_job(self,*args,**kw):
+                    calls.append(self.name)
+                    raise Selected()
+            monkeypatch.setattr(service,"_require_supervisor",lambda:Supervisor("sealed"))
+            monkeypatch.setattr(service,"_require_operator_supervisor",lambda:Supervisor("operator"))
+            with pytest.raises(Selected):
+                await service._dispatch_cycle_job_exact(plan.job_id,"selection-proof")
+            assert calls == ["operator" if frozen else "sealed"]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+
+def test_maintenance_workspace_materializes_exact_frozen_root_once(tmp_path, short_socket_root, monkeypatch):
+    from ops.executive_os import acceptance_maintenance as maintenance
+    async def scenario():
+        service,_=_service(tmp_path,socket_root=short_socket_root)
+        await service.start()
+        try:
+            intent=_coo_intent(service.config,"materialize")
+            name="auto-"+"a"*32
+            worktree=service.config.proof_workspace_root/name
+            intent["execution_contract"].update(worktree=str(worktree),branch="codex/"+name)
+            receipt=service._submit_service_intent(intent)
+            root=service.runtime.jobs.get_job(receipt["job_id"])
+            old_base=service.config.proof_base_sha
+            service.config=dataclasses.replace(service.config,proof_base_sha="b"*40)
+            service._coo_execution_binding=service._load_coo_execution_binding()
+            with service.runtime.store.read() as conn:
+                event=dict(conn.execute("SELECT * FROM events WHERE job_id=? AND event_type='JOB_CREATED'",(root.job_id,)).fetchone())
+            descriptor=dict(schema_version=maintenance.SCHEMA,root_job_id=root.job_id,root_identity_sha256=maintenance.root_identity(root),
+                predecessor_sha=old_base,root_event_id=event["event_id"],root_event_sha256=maintenance.digest(event))
+            raw=b"complete acceptance"
+            carry=dict(schema_version=maintenance.SCHEMA,passed=True,baseline_preserved=True,
+                descriptor_sha256=maintenance.digest(descriptor),acceptance_summary_sha256=hashlib.sha256(raw).hexdigest())
+            monkeypatch.setattr(maintenance,"descriptor_for",lambda sha:descriptor)
+            monkeypatch.setattr(maintenance,"summary_document",lambda sha:({},raw))
+            monkeypatch.setattr(maintenance,"sealed_json",lambda path:carry)
+            calls=[]
+            original=es_mod.prepare_credentialless_clone
+            def prepare(*args,**kwargs):
+                calls.append(kwargs)
+                return original(*args,**kwargs)
+            monkeypatch.setattr(es_mod,"prepare_credentialless_clone",prepare)
+            assert service._maintenance_workspace_pending(root)
+            assert service._next_bound_coo_root()==root.job_id
+            await service._prepare_maintenance_root_workspace(root)
+            assert not service._maintenance_workspace_pending(root)
+            assert service._require_initial_coo_workspace(root)["head"]==old_base
+            await service._prepare_maintenance_root_workspace(root)
+            assert len(calls)==1
+            assert calls[0]["base_sha"]==old_base
+            assert calls[0]["branch"]==root.branch
+            assert "commission_dependency" not in calls[0]
+        finally:
+            await service.close()
+    asyncio.run(scenario())
+
+@pytest.mark.parametrize("fault", [
+    None, "parent", "root", "depth", "role", "provenance", "worktree", "branch",
+    "profile", "base", "quota", "binary", "native_to_closed",
+])
+def test_ceo_only_root_keeps_sealed_binding_after_same_release_arm(
+    tmp_path, short_socket_root, monkeypatch, fault
+):
+    from ops.executive_os import acceptance_maintenance as maintenance
+
+    async def scenario():
+        service, _ = _service(tmp_path, socket_root=short_socket_root)
+        await service.start()
+        try:
+            receipt = service._submit_service_intent(_coo_intent(service.config, "same-base"))
+            root = service.runtime.jobs.get_job(receipt["job_id"])
+            admitted = root.to_dict()
+            service.config = dataclasses.replace(
+                service.config, coo_autonomy_armed=True, coo_operator_harness_armed=True
+            )
+            service._coo_execution_binding = service._load_coo_execution_binding()
+            # Same-release roots cannot borrow the maintenance carry exception.
+            def no_maintenance(sha):
+                raise AssertionError("same-base root consulted maintenance evidence")
+            monkeypatch.setattr(maintenance, "descriptor_for", no_maintenance)
+            changes = {
+                "parent": {"parent_job_id": "JOB-other"},
+                "root": {"root_job_id": "JOB-other"},
+                "depth": {"depth": 1},
+                "role": {"orchestration_role": "plan"},
+                "provenance": {"orchestration_provenance": {
+                    **root.orchestration_provenance, "creator": "other"
+                }},
+                "worktree": {"worktree": None},
+                "branch": {"branch": None},
+                "profile": {"constraints": dict(root.constraints, execution_profile_digest="c"*64)},
+                "quota": {"constraints": dict(root.constraints, operator_eligible_quota_classes=["other"])},
+                "binary": {"constraints": dict(root.constraints, operator_harness_binary_digest="c"*64)},
+            }
+            if fault == "base":
+                # A base mismatch must still take the existing maintenance path.
+                monkeypatch.setattr(maintenance, "descriptor_for", lambda sha: None)
+                root = dataclasses.replace(root, constraints=dict(root.constraints, base_sha="c"*40))
+            elif fault == "native_to_closed":
+                root = dataclasses.replace(root, constraints=dict(root.constraints, operator_harness_armed=True))
+                service.config = dataclasses.replace(
+                    service.config, coo_autonomy_armed=False, coo_operator_harness_armed=False
+                )
+                service._coo_execution_binding = service._load_coo_execution_binding()
+            elif fault:
+                root = dataclasses.replace(root, **changes[fault])
+            if fault:
+                assert not service._is_bound_coo_root(root)
+                return
+            assert service._is_bound_coo_root(root)
+            assert service._coo_binding_for_root(root)["operator_harness_armed"] is False
+            planner = service.runtime.jobs.create_cycle_planner(
+                root.job_id, command_id=f"coo-cycle:{root.job_id}:create-planner:0"
+            )
+            assert planner.constraints["execution_profile_id"] == root.constraints["execution_profile_id"]
+            assert planner.constraints["eligible_quota_classes"] == root.constraints["eligible_quota_classes"]
+            assert "harness_binary_digest" not in planner.constraints
+            assert "harness_version" not in planner.constraints
+            assert service._require_bound_coo_job(planner).job_id == root.job_id
+            assert service.runtime.jobs.get_job(root.job_id).to_dict() == admitted
+        finally:
+            await service.close()
+    asyncio.run(scenario())

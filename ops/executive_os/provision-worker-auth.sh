@@ -31,7 +31,12 @@ EXPECTED_CREDENTIAL_KIND=""
 WORKSPACE_BINDING_CLASS=""
 CREDENTIAL_EXPIRES_AT=""
 REQUALIFY_TERMINAL_ADVERSE_SHA256=""
+REQUALIFY_SAME_GENERATION_TERMINAL_SHA256=""
 RENEW_DEVICE_REVALIDATION_SHA256=""
+REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256=""
+REQUALIFY_NATIVE_PROBE_DRIFT_SHA256=""
+RECOVER_CURRENT_PIN_GRANT_SHA256=""
+RECOVERY_REQUEST_ID=""
 READINESS_RECEIPT="/Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json"
 READINESS_TRANSACTION_LOCK="$SYSTEM_CONFIG/provider-readiness.transaction.lock"
 READINESS_LOCK_HELD="false"
@@ -43,6 +48,7 @@ PINNED_CODEX_BINARY=""
 IDENTITY_RESULT=""
 POST_IDENTITY_RESULT=""
 CANARY_RESULT=""
+RECOVERY_OBSERVATION_RESULT=""
 SLOT_ID="codex-01"
 SLOT_SELECTED="false"
 LOW_LEVEL_SLOT_OVERRIDE="false"
@@ -56,6 +62,7 @@ cleanup() {
   [ -z "$IDENTITY_RESULT" ] || /bin/rm -f -- "$IDENTITY_RESULT"
   [ -z "$POST_IDENTITY_RESULT" ] || /bin/rm -f -- "$POST_IDENTITY_RESULT"
   [ -z "$CANARY_RESULT" ] || /bin/rm -f -- "$CANARY_RESULT"
+  [ -z "$RECOVERY_OBSERVATION_RESULT" ] || /bin/rm -f -- "$RECOVERY_OBSERVATION_RESULT"
   if [ "$READINESS_LOCK_HELD" = "true" ] \
     && [ "$READINESS_LOCK_RELEASE_ON_EXIT" = "true" ]; then
     lock_owner="$READINESS_TRANSACTION_LOCK/owner-pid"
@@ -89,7 +96,7 @@ trap 'preserve_readiness_lock_on_signal 131' QUIT
 trap 'preserve_readiness_lock_on_signal 143' TERM
 
 usage() {
-  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256] [options]" >&2
+  /bin/echo "usage: sudo /bin/bash $0 MODE [--slot-id codex-pro-01|codex-pro-02|codex-pro-03] [--replace-existing] [--expected-credential-kind KIND] [--workspace-binding-class CLASS] [--credential-expires-at UTC] [--requalify-terminal-adverse-sha256 SHA256 | --requalify-same-generation-terminal-sha256 SHA256 | --renew-device-revalidation-sha256 SHA256 | --requalify-company-device-drift-sha256 SHA256 | --requalify-native-probe-drift-sha256 SHA256 | --recover-current-pin-grant-sha256 SHA256 --successor-request-id ID] [options]" >&2
   /bin/echo "modes: --verify-only | --verify-ready | --enroll-service-account | --enroll-personal-access-token | --reauthorize-device | --recover-readiness-transaction" >&2
   exit 64
 }
@@ -108,7 +115,12 @@ while [ "$#" -gt 0 ]; do
     --workspace-binding-class) WORKSPACE_BINDING_CLASS="${2:-}"; POLICY_OVERRIDE="true"; shift 2 ;;
     --credential-expires-at) CREDENTIAL_EXPIRES_AT="${2:-}"; shift 2 ;;
     --requalify-terminal-adverse-sha256) REQUALIFY_TERMINAL_ADVERSE_SHA256="${2:-}"; shift 2 ;;
+    --requalify-same-generation-terminal-sha256) REQUALIFY_SAME_GENERATION_TERMINAL_SHA256="${2:-}"; shift 2 ;;
     --renew-device-revalidation-sha256) RENEW_DEVICE_REVALIDATION_SHA256="${2:-}"; shift 2 ;;
+    --requalify-company-device-drift-sha256) REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256="${2:-}"; shift 2 ;;
+    --requalify-native-probe-drift-sha256) REQUALIFY_NATIVE_PROBE_DRIFT_SHA256="${2:-}"; shift 2 ;;
+    --recover-current-pin-grant-sha256) RECOVER_CURRENT_PIN_GRANT_SHA256="${2:-}"; shift 2 ;;
+    --successor-request-id) RECOVERY_REQUEST_ID="${2:-}"; shift 2 ;;
     --codex-binary) CODEX_BINARY="${2:-}"; shift 2 ;;
     --codex-version) CODEX_VERSION="${2:-}"; shift 2 ;;
     --worker-uid) WORKER_UID="${2:-}"; WORKER_GID="${2:-}"; LOW_LEVEL_SLOT_OVERRIDE="true"; shift 2 ;;
@@ -154,10 +166,20 @@ resolve_selected_slot() {
 
 resolve_selected_slot
 
-if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] && [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
-  usage
+explicit_count=0
+[ -z "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$RENEW_DEVICE_REVALIDATION_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$REQUALIFY_NATIVE_PROBE_DRIFT_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ -z "$RECOVER_CURRENT_PIN_GRANT_SHA256" ] || explicit_count=$((explicit_count + 1))
+[ "$explicit_count" -le 1 ] || usage
+# The designated successor request id belongs only to the bounded current-pin
+# recovery transition; no other route may carry it.
+if [ -n "$RECOVERY_REQUEST_ID" ]; then
+  [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ] || usage
 fi
-EXPLICIT_PREDECESSOR_SHA256="${REQUALIFY_TERMINAL_ADVERSE_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}"
+EXPLICIT_PREDECESSOR_SHA256="${RECOVER_CURRENT_PIN_GRANT_SHA256:-${REQUALIFY_NATIVE_PROBE_DRIFT_SHA256:-${REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256:-${REQUALIFY_TERMINAL_ADVERSE_SHA256:-${REQUALIFY_SAME_GENERATION_TERMINAL_SHA256:-$RENEW_DEVICE_REVALIDATION_SHA256}}}}}"
 if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
   [ "$VERIFY_READY" = "true" ] && [ "$SLOT_SELECTED" = "false" ] \
     && [ "$LOW_LEVEL_SLOT_OVERRIDE" = "false" ] \
@@ -165,6 +187,23 @@ if [ -n "$EXPLICIT_PREDECESSOR_SHA256" ]; then
     && [ "$WORKSPACE_BINDING_CLASS" = "company-workspace-admin-attested" ] \
     && [ "${#EXPLICIT_PREDECESSOR_SHA256}" -eq 64 ] || usage
   case "$EXPLICIT_PREDECESSOR_SHA256" in *[!0-9a-f]*) usage ;; esac
+fi
+if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+  case "$RECOVERY_REQUEST_ID" in
+    *[!A-Za-z0-9._-]*) usage ;;
+  esac
+  case "$RECOVERY_REQUEST_ID" in
+    [A-Za-z0-9]*) ;;
+    *) usage ;;
+  esac
+  [ "${#RECOVERY_REQUEST_ID}" -ge 3 ] && [ "${#RECOVERY_REQUEST_ID}" -le 64 ] || usage
+fi
+if [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+  [ "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" = "654abd66f6baef1b610a6c03fafe85f76fd81ed646266d3ff90db3c6e85e2a7d" ] || usage
+fi
+
+if [ -n "$REQUALIFY_NATIVE_PROBE_DRIFT_SHA256" ]; then
+  [ "$REQUALIFY_NATIVE_PROBE_DRIFT_SHA256" = "2bca56bcf84b1c5332879eaa22f23f521b37cea30c01dfe5936c3923c3f651cf" ] || usage
 fi
 
 if [ "$SLOT_SELECTED" = "true" ]; then
@@ -709,7 +748,16 @@ if [ "$VERIFY_READY" = "true" ]; then
   verify_complete_auth
   verify_installed_binary_available
   requalification_args=()
-  if [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    requalification_args=(--recover-current-pin-grant-sha256 "$RECOVER_CURRENT_PIN_GRANT_SHA256"
+                          --successor-request-id "$RECOVERY_REQUEST_ID")
+  elif [ -n "$REQUALIFY_NATIVE_PROBE_DRIFT_SHA256" ]; then
+    requalification_args=(--requalify-native-probe-drift-sha256 "$REQUALIFY_NATIVE_PROBE_DRIFT_SHA256")
+  elif [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+    requalification_args=(--requalify-company-device-drift-sha256 "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256")
+  elif [ -n "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ]; then
+    requalification_args=(--requalify-same-generation-terminal-sha256 "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256")
+  elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
     requalification_args=(--requalify-terminal-adverse-sha256 "$REQUALIFY_TERMINAL_ADVERSE_SHA256")
   elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
     requalification_args=(--renew-device-revalidation-sha256 "$RENEW_DEVICE_REVALIDATION_SHA256")
@@ -727,9 +775,35 @@ if [ "$VERIFY_READY" = "true" ]; then
   else
     reuse_status=$?
   fi
-  if [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    # Status 8 requires qualified ordinary-cause evidence plus full grant
+    # custody. The pinned production exec producer cannot qualify any cause,
+    # so this gate stays closed on the current pin and no provider call below
+    # is ever reached.
+    [ "$reuse_status" -eq 8 ] || {
+      /bin/echo "bounded current-pin recovery is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_NATIVE_PROBE_DRIFT_SHA256" ]; then
+    [ "$reuse_status" -eq 10 ] || {
+      /bin/echo "explicit native-probe drift qualification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_COMPANY_DEVICE_DRIFT_SHA256" ]; then
+    [ "$reuse_status" -eq 7 ] || {
+      /bin/echo "explicit company-device drift requalification is not eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$RENEW_DEVICE_REVALIDATION_SHA256" ]; then
     [ "$reuse_status" -eq 6 ] || {
       /bin/echo "explicit device-auth revalidation is not due or eligible; no canary spent" >&2
+      exit 65
+    }
+  elif [ -n "$REQUALIFY_SAME_GENERATION_TERMINAL_SHA256" ]; then
+    # Status 9 admits only a >=24h-old closed terminal failure recorded on the
+    # exact current pin with the exact unchanged credential lstat.
+    [ "$reuse_status" -eq 9 ] || {
+      /bin/echo "explicit same-generation terminal requalification is not eligible; no canary spent" >&2
       exit 65
     }
   elif [ -n "$REQUALIFY_TERMINAL_ADVERSE_SHA256" ]; then
@@ -745,6 +819,20 @@ if [ "$VERIFY_READY" = "true" ]; then
   fi
 
   IDENTITY_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-identity.XXXXXX)"
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    # Reached only after status 8.  This observation is transaction-bound to the
+    # designated successor request, the live source, the live credential and one
+    # observation time; it is a reservation prerequisite, never a receipt.
+    RECOVERY_OBSERVATION_RESULT="$(/usr/bin/mktemp /private/tmp/mastermind-provider-recovery-observation.XXXXXX)"
+    if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
+        --recovery-observation --slot-id "$SLOT_ID" \
+        --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
+        --successor-request-id "$RECOVERY_REQUEST_ID" \
+        >"$RECOVERY_OBSERVATION_RESULT" 2>/dev/null; then
+      /bin/echo "recovery observation refused before reservation; no canary spent" >&2
+      exit 65
+    fi
+  else
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
       --binary "$INSTALLED_CODEX_BINARY" --provider-home "$PROVIDER_HOME" \
       --worker-user "$WORKER_USER" --worker-group "$WORKER_GROUP" \
@@ -752,17 +840,27 @@ if [ "$VERIFY_READY" = "true" ]; then
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
       >"$IDENTITY_RESULT" 2>/dev/null; then
-    /bin/echo "provider identity policy refused before inference; no canary spent" >&2
+    refusal_code="$("$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_identity_probe.py" \
+      --refusal-code-stdin 2>/dev/null <"$IDENTITY_RESULT")" || refusal_code=identity_probe_failed
+    /bin/echo "provider identity policy refused before inference: $refusal_code; no canary spent" >&2
     exit 65
+  fi
   fi
 
   refresh_args=()
   if [ "$reuse_status" -eq 4 ]; then
     refresh_args=(--refresh-expired)
   fi
+  recovery_reserve_args=()
+  if [ -n "$RECOVER_CURRENT_PIN_GRANT_SHA256" ]; then
+    recovery_reserve_args=(--recovery-observation-json "$RECOVERY_OBSERVATION_RESULT")
+  else
+    recovery_reserve_args=(--identity-json "$IDENTITY_RESULT")
+  fi
   if ! "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/provider_readiness.py" reserve \
       --receipt "$READINESS_RECEIPT" --auth "$AUTH_PATH" \
-      --binary "$INSTALLED_CODEX_BINARY" --identity-json "$IDENTITY_RESULT" \
+      --binary "$INSTALLED_CODEX_BINARY" \
+      "${recovery_reserve_args[@]}" \
       --worker-uid "$WORKER_UID" --worker-gid "$WORKER_GID" \
       --expected-kind "$EXPECTED_CREDENTIAL_KIND" \
       --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \

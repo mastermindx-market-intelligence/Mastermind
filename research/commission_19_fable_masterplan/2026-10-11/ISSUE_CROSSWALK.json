@@ -1,0 +1,126 @@
+{
+  "project": "P-MAS-66",
+  "project_uuid": "71316423-9f86-4ce2-b1ef-730324675168",
+  "observed_2026_10_11": [
+    {
+      "id": "MAS-263",
+      "purpose": "Program continuity and orchestration",
+      "projection_status": "In Progress",
+      "url": "https://linear.app/mastermindx/issue/MAS-263"
+    },
+    {
+      "id": "MAS-264",
+      "purpose": "Core-truth research dossiers",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-264"
+    },
+    {
+      "id": "MAS-265",
+      "purpose": "Company/event/capital research dossiers",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-265"
+    },
+    {
+      "id": "MAS-266",
+      "purpose": "Positioning/telemetry research dossiers",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-266"
+    },
+    {
+      "id": "MAS-267",
+      "purpose": "Executable integration freeze",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-267"
+    },
+    {
+      "id": "MAS-268",
+      "purpose": "Native bitemporal positive and correction proof",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-268"
+    },
+    {
+      "id": "MAS-269",
+      "purpose": "Dataset-use / evaluation synthetic qualification",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-269"
+    },
+    {
+      "id": "MAS-270",
+      "purpose": "Consumer health and coverage evidence",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-270"
+    },
+    {
+      "id": "MAS-271",
+      "purpose": "Native company expectations and guidance",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-271"
+    },
+    {
+      "id": "MAS-272",
+      "purpose": "Financial, debt and share inputs",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-272"
+    },
+    {
+      "id": "MAS-273",
+      "purpose": "Typed macro release / expectations bundle",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-273"
+    },
+    {
+      "id": "MAS-274",
+      "purpose": "Golden integrated company answer",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-274"
+    },
+    {
+      "id": "MAS-275",
+      "purpose": "Native institutional ownership consumer",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-275"
+    },
+    {
+      "id": "MAS-276",
+      "purpose": "Short / borrow immutable capture",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-276"
+    },
+    {
+      "id": "MAS-277",
+      "purpose": "Physical / operational KPI consumer",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-277"
+    },
+    {
+      "id": "MAS-278",
+      "purpose": "Capital-action / credit qualification",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-278"
+    },
+    {
+      "id": "MAS-279",
+      "purpose": "Microstructure source-grain qualification",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-279"
+    },
+    {
+      "id": "MAS-280",
+      "purpose": "Regional / historical-consensus measured gap",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-280"
+    },
+    {
+      "id": "MAS-281",
+      "purpose": "Evidence value, procurement and production admission",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-281"
+    },
+    {
+      "id": "MAS-282",
+      "purpose": "Original full-package recovery",
+      "projection_status": "Backlog",
+      "url": "https://linear.app/mastermindx/issue/MAS-282"
+    }
+  ]
+}

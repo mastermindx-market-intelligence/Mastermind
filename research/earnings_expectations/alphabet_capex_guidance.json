@@ -1,0 +1,48 @@
+{
+  "schema": "earnings.capex_guidance_sequence.research.v1",
+  "issuer_ref": "CIK:1652044",
+  "metric": "FULL_YEAR_CAPITAL_EXPENDITURE_GUIDANCE",
+  "fiscal_target": "FY2026",
+  "unit": "USD_BILLION",
+  "source_type": "COMPANY_MANAGEMENT_GUIDANCE_NOT_SELL_SIDE_CONSENSUS",
+  "knowledge_contract": "Company forecast ranges learned during/after earnings announcements; conference-call disclosures cannot be moved before their actual call times in historical decisions. No intraday first-public seconds are independently qualified.",
+  "share_class_exclusion": "GOOG and GOOGL are a single economic issuer event; sampled stock reaction uses GOOGL class A only.",
+  "authority": "RESEARCH_DISPLAY_ONLY_NO_TRADING",
+  "updates": [
+    {
+      "event_ref": "earnings:CIK:1652044:2025Q4",
+      "statement_date": "2026-02-04",
+      "observed_fiscal_target": "FY2026",
+      "low": 175,
+      "high": 185,
+      "source_type": "COMPANY_EARNINGS_RELEASE",
+      "source_ref": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000012/googexhibit991q42025.htm",
+      "reason_from_company": "Demand for AI infrastructure/capacity",
+      "same_day_publication_clock_status": "NOT_VERIFIED_EXACT_SECOND"
+    },
+    {
+      "event_ref": "earnings:CIK:1652044:2026Q1",
+      "statement_date": "2026-04-29",
+      "observed_fiscal_target": "FY2026",
+      "low": 180,
+      "high": 190,
+      "source_type": "COMPANY_EARNINGS_CALL_REPORTED",
+      "source_ref": "https://www.fool.com/earnings/call-transcripts/2026/04/29/alphabet-googl-q1-2026-earnings-call-transcript/",
+      "source_primary_corroboration": "https://www.sec.gov/Archives/edgar/data/1652044/000119312526251733/d160205dfwp.htm",
+      "reason_from_company": "Includes Intersect acquisition closed in March",
+      "same_day_publication_clock_status": "CALL_DISCLOSURE_NOT_PRE_RELEASE"
+    },
+    {
+      "event_ref": "earnings:CIK:1652044:2026Q2",
+      "statement_date": "2026-07-22",
+      "observed_fiscal_target": "FY2026",
+      "low": 195,
+      "high": 205,
+      "source_type": "COMPANY_EARNINGS_CALL_REPORTED",
+      "source_ref": "https://stockanalysis.com/stocks/googl/transcripts/657320-q2-2026/",
+      "source_primary_corroboration": "https://www.youtube.com/watch?v=LzExSq9DU9w",
+      "reason_from_company": "Accelerated delivery of infrastructure capacity to meet demand",
+      "same_day_publication_clock_status": "CALL_DISCLOSURE_NOT_PRE_RELEASE"
+    }
+  ]
+}

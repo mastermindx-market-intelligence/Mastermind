@@ -13,16 +13,27 @@ from pathlib import PurePosixPath
 
 from common.executive_workspace_contract import canonical, _check_work_ref
 from control_plane import ceo_intent, ceo_request
-from control_plane.coo_principal_envelope import PrincipalAdmissionContext
+from control_plane.coo_principal_envelope import (
+    PrincipalAdmissionContext,
+    validate_principal_orchestration_bundle,
+)
 from control_plane.coo_principal_mandate import (
-    AuthorityFact, PrincipalFact, ReleaseClass, project_coo_principal_mandate,
+    DEFAULT_PRINCIPAL_ACTIONS,
+    PRINCIPAL_ACTIONS,
+    AuthorityFact,
+    PrincipalFact,
+    ReleaseClass,
+    project_coo_principal_mandate,
 )
 
 FACT_SCHEMA = "mastermind.ceo_ingress.principal_facts.v1"
-MISSION_KEYS = frozenset({"enabled", "work_ref", "principal_binding_digest",
+MISSION_AUTHORITY_VERSION = 2
+MISSION_KEYS_V1 = frozenset({"enabled", "work_ref", "principal_binding_digest",
     "mission_authority_ref", "outcome_ref", "proof_contract_ref",
     "capability_profile_id", "capability_profile_digest",
     "execution_profiles", "allowed_write_paths"})
+MISSION_KEYS_V2 = MISSION_KEYS_V1 | frozenset({"authority_version", "principal_actions"})
+MISSION_KEYS = MISSION_KEYS_V1
 
 
 def _refuse():
@@ -34,13 +45,31 @@ def generation(row):
     return hashlib.sha256(canonical(immutable)).hexdigest()
 
 
+def _mission_actions(row):
+    keys = set(row)
+    if keys == MISSION_KEYS_V1:
+        return DEFAULT_PRINCIPAL_ACTIONS
+    if keys != MISSION_KEYS_V2 or type(row.get("authority_version")) is not int:
+        _refuse()
+    if row["authority_version"] != MISSION_AUTHORITY_VERSION:
+        _refuse()
+    actions = row.get("principal_actions")
+    if (type(actions) is not list or not actions
+            or actions != sorted(set(actions))
+            or any(type(action) is not str or action not in PRINCIPAL_ACTIONS
+                   for action in actions)):
+        _refuse()
+    return tuple(actions)
+
+
 def _authority(row):
     return AuthorityFact(work_ref=row["work_ref"],
         mission_authority_ref=row["mission_authority_ref"],
         authority_generation_digest=generation(row), outcome_ref=row["outcome_ref"],
         proof_contract_ref=row["proof_contract_ref"], release_class=ReleaseClass.RESERVED_RELEASE,
         capability_profile_digest=row["capability_profile_digest"],
-        source_grant_digest=None, economic_envelope_digest=None)
+        source_grant_digest=None, economic_envelope_digest=None,
+        principal_actions=_mission_actions(row))
 
 
 def validate_missions(value):
@@ -48,8 +77,9 @@ def validate_missions(value):
         _refuse()
     seen = []
     for row in value:
-        if type(row) is not dict or set(row) != MISSION_KEYS or type(row["enabled"]) is not bool:
+        if type(row) is not dict or type(row.get("enabled")) is not bool:
             _refuse()
+        _mission_actions(row)
         _authority(row)
         PrincipalAdmissionContext(row["work_ref"], row["principal_binding_digest"],
             row["mission_authority_ref"], generation(row))
@@ -86,6 +116,16 @@ class CooHostProvider:
             _refuse()
         self.source, self.workspace = source, workspace
 
+    async def read_workspace_retained_activity(self, frame):
+        """Delegate one *read-only* original Executive OHF observation.
+
+        The installed COO provider already owns this source and its existing
+        Workspace reader. No new grant registry, new host or action token.
+        """
+        from common.executive_workspace_activity_contract import validate_frame
+        validate_frame(frame)
+        return await self.workspace.handle_activity_from_original_coo(frame, self.source)
+
     def facts(self, frame):
         validate_facts_frame(frame)
         before = self.source.for_principal(frame["principal"], frame["work_ref"])
@@ -109,6 +149,8 @@ class CooHostProvider:
         if row["enabled"] is not True or any(envelope.get(k) != v for k, v in
                 dataclasses.asdict(context).items() if k != "work_ref"):
             _refuse()
+        if "bounded_intent" not in authority.principal_actions:
+            _refuse()
         contract = envelope.get("execution_contract", {})
         allowed = [ceo_request.derive_authorities(p) for p in row["execution_profiles"]]
         if contract.get("requested_authorities") not in allowed:
@@ -124,8 +166,96 @@ class CooHostProvider:
             _refuse()
         return None
 
+    def guard_orchestration(self, bundle):
+        """Re-prove current COO authority before a governed root effect."""
 
-__all__ = ["FACT_SCHEMA", "CooHostProvider", "validate_missions", "validate_facts_frame"]
+        try:
+            normalized = validate_principal_orchestration_bundle(bundle)
+        except (TypeError, ValueError):
+            _refuse()
+        envelope = normalized["envelope"]
+        before = self.source.snapshot(envelope["workstream"])
+        row, principal, authority = before
+        context = PrincipalAdmissionContext(
+            row["work_ref"],
+            principal.principal_binding_digest,
+            authority.mission_authority_ref,
+            authority.authority_generation_digest,
+        )
+        if (
+            row["enabled"] is not True
+            or envelope["workstream"] != context.work_ref
+            or any(
+                envelope.get(key) != value
+                for key, value in dataclasses.asdict(context).items()
+                if key != "work_ref"
+            )
+            or "governed_orchestration" not in authority.principal_actions
+        ):
+            _refuse()
+        mission = self.workspace.read_mission_for_work_ref(row["work_ref"])
+        mandate = project_coo_principal_mandate(
+            principal=principal,
+            authority=authority,
+            mission_workspace=mission,
+        )
+        if (
+            mandate["new_effect_gate"] != "OPEN"
+            or self.source.snapshot(row["work_ref"]) != before
+        ):
+            _refuse()
+        return None
+
+    def guard_dialogue(self, *, context, root_job_id, capability_profile_digest):
+        """Revalidate a trusted App caller at the existing Control effect seam.
+
+        This method authenticates no transport and grants no action. Only an
+        already-authorized host may supply these facts; an App peer still needs
+        its separate kernel-peer gate. Child/Relay identity and single COMMIT
+        remain with their existing owners. No source selection or fallback.
+        """
+        try:
+            if type(context) is not PrincipalAdmissionContext:
+                _refuse()
+            before = self.source.snapshot(context.work_ref)
+            row, principal, authority = before
+            current = PrincipalAdmissionContext(
+                row["work_ref"], principal.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest,
+            )
+            if (row["enabled"] is not True or context != current
+                    or authority.capability_profile_digest != capability_profile_digest
+                    or "governed_orchestration" not in authority.principal_actions):
+                _refuse()
+            def read_mandate():
+                return project_coo_principal_mandate(principal=principal,
+                    authority=authority,
+                    mission_workspace=self.workspace.read_mission_for_work_ref(context.work_ref))
+            mandate = read_mandate()
+            mission = mandate["mission"]
+            if (mandate["new_effect_gate"] != "OPEN"
+                    or mandate["decision_posture"] != "DECIDE_CONTINUE"
+                    or mission["work_ref"] != context.work_ref
+                    or mission["root_job_id"] != root_job_id
+                    or mission["accountable_seat"] != "coo"
+                    or mission["owed_turn"]["seat"] != "coo"
+                    or read_mandate() != mandate
+                    or self.source.snapshot(context.work_ref) != before):
+                _refuse()
+        except Exception:
+            raise ValueError("installed COO authority unavailable") from None
+        return None
+
+
+__all__ = [
+    "FACT_SCHEMA",
+    "MISSION_AUTHORITY_VERSION",
+    "MISSION_KEYS_V1",
+    "MISSION_KEYS_V2",
+    "CooHostProvider",
+    "validate_missions",
+    "validate_facts_frame",
+]
 
 
 FACT_PRINCIPAL_KEYS = frozenset({"policy_id", "issuer_digest", "subject_digest", "client_ref", "resource", "scopes"})

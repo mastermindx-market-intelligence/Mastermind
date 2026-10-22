@@ -759,6 +759,32 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
   --arm-privileged-broker
 ```
 
+#### Workspace Control Room migration (install inputs)
+
+The live `control.json` is never hand-edited. The seat generates the
+successor control input as today, then runs the reviewed stdlib migration
+tool against the exact clean release clone it passes to `install.sh` as
+`--source-repo`, verified at the merge SHA:
+
+```bash
+sudo /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/migrate_workspace_control_room.py" \
+  --input "$CONTROL_INPUT" --output "$CONTROL_INPUT_UNIX"
+```
+
+and passes `"$CONTROL_INPUT_UNIX"` as `--control-config` to `install.sh`.
+
+The tool removes `workspace_control_room.port` and adds the closed
+`{"transport": "unix", "socket_path": <canonical>, "launchd_socket_name":
+"WorkspaceControlRoom", "allowed_peer_uids": [control_uid]}` stanza in the
+same key position; every other top-level key is unchanged and
+`workspace_acquisition` is preserved.
+
+Exit codes: `0` migrated, `2` refused (no output written), `3` not needed
+(no output written), `64` usage error. A legacy `{"port": int}` stanza that
+reaches `install.sh` or `load_control_config` is refused loudly by the
+shared `validate_workspace_control_room` validator.
+
 Installation still leaves the ordinary Executive control/worker/backup daemons
 disabled and stopped. With the explicit arm flag, only the root privileged
 broker is socket-activated. From this point onward, reviewed host effects use
@@ -803,6 +829,59 @@ unresolved marker evidence remains (`EFFECT_UNKNOWN`), and `4` means neither
 terminal nor in-flight/reconciled evidence exists (`NOT_FOUND`, which is not
 license to resubmit). Malformed or mismatched reconciliation evidence is
 refused rather than downgraded to a clean state.
+
+### Privileged broker maintenance stop
+
+For the assigned root maintenance owner, the installed
+`service-control.sh stop-incident-broker` command disables and unloads only the
+fixed privileged broker. First stop Control, worker and Relay through the existing
+`stop-readside` and `stop` commands. The new command takes no arguments and is
+not exposed as a broker action: a broker must not stop itself while returning a
+privileged-action result.
+
+The command requires the current sealed release, closed intake arms, stopped
+consumers, an idle or already-unloaded broker and no other pinned root interpreter.
+It checks the fixed retained socket slot before any modifying broker verb, then
+uses one disable and one bootout at most. If launchd leaves the canonical socket
+node behind, the same maintenance owner may preserve that exact qualified inode
+at `.privileged-retired.sock` in the existing pinned socket directory. This uses
+the native descriptor-relative no-replace rename, bracketed by complete source,
+closed-arm, disabled/unloaded, strict old-owner, boot and namespace observations.
+It verifies the retained inode, metadata and native ACL absence and requires the
+canonical socket path to be absent. The original absolute budget remains in force.
+
+It never unlinks a socket, repairs permissions, overwrites or adopts a retained
+node, edits configuration or touches incident evidence. An occupied retained slot
+blocks another maintenance operation before disable/bootout, including when the
+canonical path is already absent. The slot is intentionally retained after
+success too; this command provides no cleanup or reuse authority. An active broker,
+ambiguous command result, changed socket generation or cleanup failure refuses.
+`socket_retirement_attempted` remains true after any attempted move, so a failure
+returns exit75 even if the broker was already unloaded and no launchctl verb ran.
+Preserve the original operation and both paths for owner reconciliation; do not
+unlink, roll back the move, or retry it. A sampled lsof absence is not old-owner
+exclusion. Held namespace descriptors are not a global lock against trusted root.
+
+Success reports a sampled stopped state only. It neither grants recovery authority
+nor supplies an origin context; the separately authorized forward entry must
+acquire its own current context. A dormant forward policy stays dormant. This
+maintenance stop does not invoke the original issuer or its qualification.
+
+The incident path uses a private v2 observation purpose. Control, worker,
+gateway and broker must match the current sealed source. The frozen C1 Relay
+must remain exactly unloaded on release
+`326c8469a21d7f50fc9ecb1848196bf1c6e66685`, with its own fully verified manifest
+and wrapper provenance. A loaded Relay, another historical release, unreadable
+closure or content drift refuses. This neither rebinds nor restarts C1.
+
+The parent, fixed client and broker use closed v2 witness frames and compare the
+same cohort-content digest at acquisition and every stage. Version 1 is not a
+fallback for this purpose. The original budget, complete root-process census,
+socket and peer generation checks, one-use reservation, UNKNOWN handling and
+source-owned dormant policy remain unchanged. Generic release observation and
+release-factory convergence still require all five roles on one release; they
+do not accept the incident observation type. Source tests and installation do
+not qualify a physical recovery or authorize another maintenance attempt.
 
 ### Three isolated Personal Pro readiness slots
 
@@ -950,6 +1029,36 @@ Retain one request ID and use the existing same-ID status/reconciliation path
 after transport loss. The predecessor digest is a concurrency fence, not a
 source of renewal authority.
 
+For the separately reviewed company-device metadata-drift qualification, the
+same `executive.worker_auth.verify_ready` action accepts
+`--requalify-company-device-drift-sha256 SHA256`. The sole admitted predecessor
+is the expired passing receipt whose exact bytes hash is
+`654abd66f6baef1b610a6c03fafe85f76fd81ed646266d3ff90db3c6e85e2a7d`.
+This is a fresh qualification of the current fixed `codex-01` company credential,
+not a claim of historical credential continuity or an explanation of its drift.
+The original identity failure and any original uncertain request/marker remain
+retained and unreplayed. A successful `verify_only` proves login status only;
+it does not supply company-plan proof or READY.
+
+Use the fixed company device-auth kind/binding with a newly authorized UTC
+deadline more than 30 and no more than 60 minutes ahead, one explicit request ID,
+and this option only after protected review, release and installation. Slot,
+path and policy overrides, other receipt preimages, nonpassing/reserved receipts,
+unexpired predecessors, changed binary/device/inode/principal/mode/link count
+refuse. Only size/mtime/ctime may differ on the same credential inode. Ordinary
+refresh, renewal and terminal-adverse qualification keep their existing rules.
+
+Before reservation, the existing fresh identity probe must pass the same safe
+company policy and bind the exact current credential and reviewed binary. The
+existing transaction lock, immutable superseded-receipt archive, preimage CAS,
+sticky one-canary reservation and exact post-canary identity/finalization remain
+controlling. A new guard checks current credential/binary identity around archive
+and reservation replacement; these are locked checks, not an atomic snapshot of
+multiple files. After lost transport, inspect the same request ID. The existing
+NOT_APPLIED owner may reconcile only that exact new request with unchanged old
+receipt bytes, no lock/process and valid current input. It preserves the marker,
+does not clear the old operation and never authorizes replay.
+
 For the reviewed Codex **0.147.0 to 0.159.2** upgrade only, the existing
 `executive.worker_auth.verify_ready` broker action also accepts the explicit
 `--requalify-terminal-adverse-sha256 SHA256` option. This is a new bounded
@@ -974,9 +1083,10 @@ receipt, identity and canary must bind the exact reviewed predecessor binary,
 whose retained root-owned install attestation must still validate. The current
 binary must be the reviewed successor; the new identity probe must pass.
 Passing receipts, reservations, missing/ambiguous results, timeouts, signal
-exits, other failures, changed credentials and same-generation attempts refuse
-before a canary. Without this explicit option, existing refusal behavior stays
-unchanged.
+exits, other failures and changed credentials refuse before a canary.
+Same-generation attempts refuse under this option; they are admitted only by
+the dedicated option in the next subsection. Without this explicit option,
+existing refusal behavior stays unchanged.
 
 A specialized `paired_filesystem_device_renumbering` comparison is confined to
 this explicit new qualification and its NOT_APPLIED reconciliation. Historical
@@ -1004,6 +1114,162 @@ old final bytes predate the request, the prior/current binary transition and
 credential identity still validate, and no readiness lock/process remains.
 Any changed receipt or reservation keeps the effect unknown. Reconciliation
 preserves the original marker and never replays the request.
+
+### Same-generation terminal requalification on the current pin (reviewed 2026-10-18)
+
+A closed terminal failure recorded on the **current** reviewed pin with the
+**same** credential has one direct root-operator path only:
+`provision-worker-auth.sh --verify-ready … --requalify-same-generation-terminal-sha256 SHA256`,
+with the company device-auth kind and binding attested as above and no slot
+selector. The `executive.worker_auth.verify_ready` broker action and `mmx-admin` do not
+accept this option; they refuse the unknown key by design. The digest is the
+full SHA256 of the exact root-owned live readiness receipt bytes, a concurrency
+fence, not authority. The deadline must be Chairman-approved and more than 30
+and at most 60 minutes ahead.
+
+Admission requires a finalized v2 `provider_turn_failed` receipt observed at
+least 24 hours earlier whose `codex_binary` equals the live pinned binary lstat
+exactly and whose `credential_lstat` equals the live credential lstat exactly;
+there is no device-renumbering tolerance. Identity policy must be unchanged.
+The canary must have the exact closed terminal shape: exit 1, no timeout,
+matching terminal event/refusal and a non-null sanitized canary. Passing
+receipts, reservations, timeouts, signal exits, changed credentials, changed
+binaries and failures younger than 24 hours refuse before a canary.
+
+The fresh identity probe must pass within the clock-skew bound and carry the
+same identity stability tuple as the live credential. One reservation then
+saves the old bytes as the digest-named `.superseded-<sha16>.json` sibling and
+atomically replaces the live receipt. Exactly one canary runs, followed by the
+existing finalization. A failing canary writes a new adverse receipt that this
+option cannot requalify for 24 hours; a second failure is a provider fact for
+the Chairman, not a reason for a second canary. This option does not touch
+current-pin recovery, its producer table or its grant.
+
+### Bounded current-pin recovery is implemented but closed on the current pin
+
+The same `executive.worker_auth.verify_ready` action also accepts the explicit,
+mutually exclusive `--recover-current-pin-grant-sha256 SHA256
+--successor-request-id ID` pair. This is a separately governed recovery of one
+retained terminal failure on the **currently pinned** binary. It is not an
+automatic retry, not a deadline extension and not a second canary budget.
+
+**The current production admission is closed and this runbook cannot open it.**
+Ordinary cause must come from a producer whose exact installed source was
+reviewed and found to emit complete, bounded, structured failure evidence. The
+pinned `codex` 0.159.2 release cannot: its `exec_events.rs` reduces every
+stream failure to `ThreadErrorEvent { message: String }`, and
+`event_processor_with_jsonl_output.rs` discards the structured error before
+emitting, so the JSONL cannot distinguish an ordinary provider failure from a
+denial, a cancellation or any other terminal state. The reviewed producer table
+shipped in `ops/executive_os/provider_recovery.py` is therefore **empty**. A
+structurally valid current-producer submission — current-exec output, legacy `provider_turn_failed` or
+`rate_limited` wording, capacity or model vocabulary, or a caller-declared
+ordinary class — refuses with `recovery_failure_cause_unproven` before any
+claim, archive, reservation or provider call. No flag, config key, environment
+value, receipt field or raw JSON attribute can extend that table, and this
+release ships **no ordinary grant creator**, so qualified ordinary evidence
+cannot be minted on the host. The separate exact-incident policy below does not
+extend ordinary admission.
+
+The grant is a separate root-owned document at the fixed internal path
+`/var/db/mastermind-executive/provider-recovery/current-pin/grant.json`,
+requiring a separately qualified authority/producer installation procedure;
+this release provides no such issuer or installation authorization. It must
+carry the immutable authority reference, the exact sealed Executive release
+and manifest digest separately from the pinned Codex binary, the fixed
+company worker identity, the pinned credential metadata, the production model,
+the full sanitized cause evidence, the **designated successor request ID**, an
+exact budget of one, and a 30-to-60-minute window that has actually begun.
+The digest is a custody fence, never authority. Mode is root-only `0400` with
+one link, no ACL, and duplicate JSON keys are refused.
+
+The target Executive identity is derived from the loaded installed path and
+the existing whole-release manifest verifier, never from a caller's release
+selector. Reservation, its observation and its durable allocation bind that
+same identity. The original failed broker request must be read from its fixed
+root-owned terminal store with the exact request, release and byte digest,
+without contradictory inflight or reconciliation records. Its wrapper exit
+code is distinct from the canary's exit code: the closed cause fields
+`original_broker_exit_code` and `original_canary_exit_code` each join their own
+canonical record. The outer CLI exit status is neither of those records.
+A terminal record plus nearby
+timestamps still does not establish causation: the separately reviewed producer
+must verify the exact terminal-request/readiness/canary linkage. No production
+link verifier ships; a vocabulary or an asserted ordinary flag cannot replace it.
+
+If — and only if — cause, grant custody, unchanged predecessor preimage, fresh
+identity policy and the transaction-bound observation all pass, the readiness
+transaction durably consumes one allocation at
+`.../current-pin/allocation.json` keyed by the **original predecessor receipt
+digest and scope**, then archives the old bytes under the digest-named
+`.superseded-*.json` sibling and atomically installs one fresh reservation.
+There is no refund path: a crash, a lost response, a failed canary and a
+passing canary all leave the budget consumed. A concurrent claim, a different
+predecessor key or a regrant refuse. The new adverse receipt can never chain
+into another allocation, and the original request and its bytes are preserved.
+Only then does the existing fixed inert canary and unchanged finalization run;
+a real provider result plus exact post-call identity is still required for
+`READY`, and unknown effects stay unknown.
+
+Historical request reconstruction and `NOT_APPLIED` reconciliation retain the
+immutable grant's custody, digest, strict fields and finite window structure
+after its window expires. Those read paths do not admit a new qualification or
+refund its allocation. Live reuse and reservation still require the grant to
+be within its actual current window; there is no caller-selectable expiry bypass.
+
+**Because the producer table is empty, no current Due10 or same-generation
+failure is recoverable through this section today; a same-generation terminal
+failure is admitted only by the explicit option in the dedicated subsection
+above.** This section documents a capability whose
+admission is closed, not an available procedure. Enabling it requires a new
+source review that adds a qualified producer to the table plus an
+authority-installed grant; both are out of scope for this runbook. The explicit
+same-generation terminal requalification above is a distinct admission; it uses
+neither the producer table nor a grant.
+
+### Source-authorized exact incident exception is distinct from ordinary recovery
+
+The internal broker action `executive.worker_auth.issue_due10_incident_grant`
+accepts only a designated successor ID and an explicit original issuer request
+ID. It has no shell executor or policy override. `PRODUCTION_INCIDENT_POLICY`
+now binds the actual separate human authorization for exactly the designated
+Due10 terminal/readiness pair despite both historical unknowns. It carries the
+reviewed question, answer and retained provenance digests; hashes reference
+those private retained records and are not cryptographic proof of a chat decision.
+
+This source binding creates no grant, commitment, successor, time window or
+allocation. Protected landing, installation of this exact policy and all fresh
+host gates remain necessary before invoking the existing authenticated issuer.
+Ordinary-only authorization remains insufficient for other unknown incidents;
+there is no caller flag, environment, JSON policy or general retry permission.
+The one non-refundable attempt has no retry after failure or uncertainty. The
+separately refused C1 Mission remains frozen.
+
+This schema preserves the designated incident's cause as `UNKNOWN` and its
+request-to-readiness attribution as `NOT_ESTABLISHED`. It records that raw
+provider messages were not retained, without asserting absence of a denial.
+Known relevant denial evidence excludes use; the separately refused C1 Mission
+remains frozen. No incident record enters the ordinary producer/cause table.
+
+After this exact reviewed policy is protected and installed, the authenticated
+existing broker derives current source and identity, verifies the exact
+designated historical
+terminal/readiness evidence, current markers, lock and process guards, then
+creates an immutable grant and commitment. The commitment binds grant, policy,
+issuer and successor; the successful broker terminal's stdout digest binds the
+actual commitment bytes. Consumption requires that join, absent issuer inflight
+markers, the same installed policy and current revalidation of the designated
+evidence, plus the existing live window, permission, source, identity and CAS
+predicates. A handwritten grant alone is insufficient.
+
+Both recovery classes share the fixed exclusive allocation and one nonrefundable
+budget. Partial issuance preserves the original operation and evidence as
+uncertain; it has no replacement, refund or issuer `NOT_APPLIED` route. Historical
+successor status and reconciliation can read the immutable issued records after
+expiry or policy deactivation, without opening a new readiness effect. The issuer
+derives its finite window at actual issuance, not source activation.
+The test-only positive fixture exercises issuance through finalization; it is
+not a production grant, permission, allocation or recovered readiness result.
 
 This install-before-readiness order is deliberate, not circular: `install.sh`
 requires strong structural auth metadata (exact worker UID/GID, mode `0600`,
@@ -1093,27 +1359,49 @@ Attempt IDs, UIDs, exit statuses, and exact SHA.
 ## Receipt-gated autonomy arm, proof, and credential interlock
 
 Formal acceptance still leaves both installed arm bits false. Do not edit either
-JSON config. From the exact installed release, first prove the closed unarmed
-state, then run the one root transaction that binds the reviewed Gate B receipt,
-formal acceptance, current provider readiness, both configs, exact release and
-Runtime quiescence:
+JSON config. Acceptance may also leave macOS per-user agents owned by the fixed
+Control service UID after the LaunchDaemons stop. The arm gate deliberately
+never signals a process, so converge that one fixed principal through the
+existing autonomy owner before the receipt-gated arm. This pre-arm action accepts
+only the expected release SHA: it cannot select a UID, PID, label, signal or
+timeout; it requires the accepted release, unarmed configs, a quiescent Runtime,
+stopped Control/worker services and no autonomy transaction; it never targets
+the worker UID, Runtime, configs, credentials or Gate B receipt. Success is
+current process-table evidence only, and the following arm independently
+rechecks service-UID quiescence.
+
+From the exact installed release, first prove the closed unarmed state, then
+quiesce the fixed Control UID and run the one root transaction that binds the
+reviewed Gate B receipt, formal acceptance, current provider readiness, both
+configs, exact release and Runtime quiescence:
 
 ```bash
 AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
-EXPECTED_CREDENTIAL_KIND='service-account'
-WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
-# Reuse the exact finite UTC value already used for --verify-ready.
-CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
+# Copy the exact values recorded in the device-auth readiness receipt at
+# /Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json
+# (JSON keys "expected_credential_kind", "credential_expires_at", and
+# "workspace_binding_class", emitted by ops/executive_os/provider_readiness.py);
+# do not invent or recompute them locally.
+EXPECTED_CREDENTIAL_KIND='<expected_credential_kind from provider-readiness-v2.json>'
+CREDENTIAL_EXPIRES_AT='<credential_expires_at from provider-readiness-v2.json>'
+WORKSPACE_BINDING_CLASS='<workspace_binding_class from provider-readiness-v2.json>'
 
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
+  --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --expected-sha "$MERGE_SHA" \
   --gate-b-receipt "$GATE_B_RECEIPT" \
   --expected-credential-kind "$EXPECTED_CREDENTIAL_KIND" \
   --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+  --foreground-only
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
+
+The sample always passes `--foreground-only` and never `--native-return`: `--native-return` selects the bounded native-return profile, which the `arm` parser in ops/executive_os/autonomy_control.py documents as requiring full v5 acceptance and the installed Company listener.
+
+The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 
 The first status must be exactly `UNARMED`; the post-transaction status must be
 exactly `ARMED_READY`. Arm stops both services before committing either config,

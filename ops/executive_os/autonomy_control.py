@@ -27,6 +27,7 @@ import pwd
 import re
 import secrets
 import selectors
+import signal
 import stat
 import subprocess
 import sys
@@ -58,10 +59,13 @@ from control_plane.executive_autonomy import (
     StatusEvidence,
     classify_status,
     validate_receipt_document,
+    load_receipt_file,
+    validate_runtime_guard_document,
 )
 from ops.executive_os import release_manifest
 from ops.executive_os import git_handoff_preflight
 from ops.executive_os import provider_readiness
+from ops.executive_os import provider_worker_slots
 from scripts import executive_os_phase1c_control_wrapper as control_wrapper
 
 
@@ -77,6 +81,25 @@ AUTONOMY_TRANSACTION = CONFIG_ROOT / "autonomy-transaction.lock"
 CEO_SUBMIT_RECEIPT = CONFIG_ROOT / "ceo-submit-state-v1.json"
 CEO_SUBMIT_RECEIPT_SCHEMA = "mastermind.executive_ceo_submit_receipt/v1"
 CEO_SUBMIT_OPERATIONS = frozenset({"CEO_SUBMIT_ARM", "CEO_SUBMIT_DISARM"})
+DIALOGUE_CANARY_OPERATIONS = frozenset({"DIALOGUE_WAKE_CANARY_PUBLISH"})
+CONTROL_ONLY_TRANSACTION_OPERATIONS = CEO_SUBMIT_OPERATIONS | DIALOGUE_CANARY_OPERATIONS
+_CANARY_RECEIPT_ARCHIVE = "prior-dialogue-canary-receipt.json"
+_CANARY_MANIFEST_FIELDS = frozenset({
+    "prior_canary_receipt_sha256", "target_canary_receipt_sha256",
+    "prior_canary_receipt_present",
+})
+_COEXISTENCE_ARCHIVES = ("prior-autonomy-receipt.json", "prior-ceo-submit-receipt.json")
+_COEXISTENCE_MANIFEST_FIELDS = frozenset({
+    "prior_autonomy_receipt_sha256", "target_autonomy_receipt_sha256",
+    "prior_ceo_receipt_present", "prior_ceo_receipt_sha256",
+    "target_ceo_receipt_sha256",
+})
+_FINITE_RECEIPT_ARCHIVE = "prior-finite-disarmed-receipt.json"
+_FINITE_RECEIPT_FIELDS = frozenset({
+    "finite_prior_receipt_present", "finite_prior_receipt_sha256",
+    "finite_target_receipt_sha256",
+})
+
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
     r'^"(?P<label>[^"]+)"\s*=>\s*(?P<state>enabled|disabled|true|false)$'
@@ -166,11 +189,15 @@ _ARM_ADMISSION_CODES = frozenset(
         "transaction_incomplete",
         "uids_gate_failed",
         "workspace_binding_invalid",
+        "native_selection_invalid",
+        "native_listener_unavailable",
+        "native_relay_unavailable",
     }
 )
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM"}) | CEO_SUBMIT_OPERATIONS
+A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -377,6 +404,8 @@ class ArmRequest:
     expected_credential_kind: str
     workspace_binding_class: str
     credential_expires_at: str
+    native_return: bool = False
+    foreground_only: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -503,9 +532,13 @@ class ArmAdmissionHost(Protocol):
 
     def load_unarmed_configs(self, expected_sha: str) -> ConfigEvidence: ...
 
+    def require_native_listener(self, config: ConfigEvidence) -> None: ...
+
     def require_runtime_quiescent(self, config: ConfigEvidence) -> None: ...
 
     def require_services_stopped(self) -> None: ...
+
+    def require_services_already_stopped(self) -> None: ...
 
     def require_service_uids_quiescent(self) -> None: ...
 
@@ -573,6 +606,8 @@ class CeoSubmitTransactionHost(Protocol):
     ) -> CeoSubmitSeparation: ...
 
     def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool: ...
+
+    def rebind_full_autonomy_receipt(self, transaction: TransactionContext) -> None: ...
 
     def incomplete_transaction_operation(self) -> str | None: ...
 
@@ -662,6 +697,18 @@ def _parser() -> argparse.ArgumentParser:
     )
     arm.add_argument("--workspace-binding-class", action=_StoreOnce, required=True)
     arm.add_argument("--credential-expires-at", action=_StoreOnce, required=True)
+    arm.add_argument("--native-return", action="store_true",
+                     help="Select the bounded native-return profile after full v5 acceptance; requires the installed Company listener.")
+    arm.add_argument("--foreground-only", action="store_true",
+                     help="Allow only fresh authenticated same-call cycles; keep background selection disabled across restart.")
+
+    arm_quiesce = sub.add_parser(
+        "arm-quiesce-control-uid",
+        help="Quiesce only the fixed Control service UID before a receipt-gated arm.",
+    )
+    arm_quiesce.add_argument(
+        "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
+    )
 
     disarm = sub.add_parser("disarm", help="Converge both arm bits to false.")
     disarm.add_argument(
@@ -700,6 +747,26 @@ def _parser() -> argparse.ArgumentParser:
     ceo_reconcile.add_argument(
         "--expected-sha", type=_exact_sha, action=_StoreOnce, required=True
     )
+    canary_publish = sub.add_parser(
+        "dialogue-canary-publish", help="Publish one bounded, source-derived continuation grant."
+    )
+    canary_publish.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    canary_publish.add_argument("--read-ref", action=_StoreOnce, required=True)
+    canary_publish.add_argument("--validity-seconds", type=int, action=_StoreOnce, required=True)
+    canary_publish.add_argument("--native-return", action="store_true",
+        help="Publish the exact native grant on the existing receipt without restarting Control.")
+    canary_reconcile = sub.add_parser(
+        "dialogue-canary-reconcile", help="Restore one interrupted grant publication's exact preimages."
+    )
+    canary_reconcile.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    for command in sorted(A2_DISABLE_COMMANDS):
+        a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
+        a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    finite_stage = sub.add_parser('finite-control-stage', help='Stage the fixed finite definition while stopped and disarmed.')
+    finite_stage.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+    finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
+    finite_reconcile = sub.add_parser('finite-control-stage-reconcile', help='Prove an already-published finite stage without replay.')
+    finite_reconcile.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
     return parser
 
 
@@ -736,8 +803,43 @@ def encode_config(value: Mapping[str, Any]) -> bytes:
         raise ArmTransactionError("arm_rolled_back") from exc
 
 
+_NATIVE_QUOTA_SUFFIX = ".native-return"
+
+
+def _require_native_preselection(control: Mapping[str, Any]) -> None:
+    """Only the accepted readonly composition can enter native arm."""
+    company = control.get("company_consultation")
+    quota = control.get("coo_operator_quota_class")
+    if (control.get("coo_operator_model_alias") != "coo.operator.readonly"
+            or control.get("dialogue_wake_canary_activation") is not None
+            or type(company) is not dict or company.get("armed") is not True
+            or company.get("native_return_armed", False) is not False
+            or not isinstance(quota, str)
+            or re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,48}", quota) is None
+            or quota.endswith(_NATIVE_QUOTA_SUFFIX)):
+        raise ArmAdmissionError("native_selection_invalid")
+
+
+def _native_selection_matches(control: Mapping[str, Any], native_return: bool) -> bool:
+    company = control.get("company_consultation", {})
+    if type(company) is not dict:
+        return False
+    selected = control.get("coo_operator_model_alias") == "coo.operator.native-return"
+    flag = company.get("native_return_armed", False)
+    if type(flag) is not bool or selected != flag or selected != native_return:
+        return False
+    if selected:
+        quota = control.get("coo_operator_quota_class")
+        return (isinstance(quota, str) and quota.endswith(_NATIVE_QUOTA_SUFFIX)
+                and re.fullmatch(r"[a-z0-9][a-z0-9._-]{0,48}",
+                                 quota[:-len(_NATIVE_QUOTA_SUFFIX)]) is not None
+                and company.get("armed") is True)
+    return True
+
+
 def derive_candidate_configs(
-    configs: ConfigEvidence, *, armed: bool
+    configs: ConfigEvidence, *, armed: bool, native_return: bool = False,
+    foreground_only: bool = False,
 ) -> CandidateConfigs:
     control_value = copy.deepcopy(dict(configs.control))
     worker_value = copy.deepcopy(dict(configs.worker))
@@ -747,8 +849,30 @@ def derive_candidate_configs(
         or not isinstance(worker_value.get("operator_harness_armed"), bool)
     ):
         raise ArmTransactionError("arm_rolled_back")
+    if type(native_return) is not bool or (native_return and not armed):
+        raise ArmAdmissionError("native_selection_invalid")
+    if (type(foreground_only) is not bool or (foreground_only and not armed)
+            or (foreground_only and native_return)):
+        raise ArmAdmissionError("native_selection_invalid")
+    if native_return:
+        _require_native_preselection(control_value)
+        control_value["coo_operator_model_alias"] = "coo.operator.native-return"
+        # The incumbent registry refuses mutating an existing quota policy.
+        # A reversible, distinct selector preserves the accepted readonly class.
+        control_value["coo_operator_quota_class"] += _NATIVE_QUOTA_SUFFIX
+        control_value["company_consultation"]["native_return_armed"] = True
+    elif control_value.get("coo_operator_model_alias") == "coo.operator.native-return":
+        if not _native_selection_matches(control_value, True):
+            raise ArmAdmissionError("native_selection_invalid")
+        control_value["coo_operator_model_alias"] = "coo.operator.readonly"
+        control_value["coo_operator_quota_class"] = control_value["coo_operator_quota_class"][:-len(_NATIVE_QUOTA_SUFFIX)]
+        control_value["company_consultation"]["native_return_armed"] = False
+    elif not _native_selection_matches(control_value, False):
+        raise ArmAdmissionError("native_selection_invalid")
     control_value["coo_autonomy_armed"] = armed
     control_value["coo_operator_harness_armed"] = armed
+    if foreground_only or "coo_foreground_only" in control_value:
+        control_value["coo_foreground_only"] = foreground_only
     worker_value["operator_harness_armed"] = armed
     control_bytes = encode_config(control_value)
     worker_bytes = encode_config(worker_value)
@@ -801,6 +925,19 @@ def derive_ceo_submit_candidate(
         worker_bytes=configs.worker_bytes,
         control_bytes=control_bytes,
         control_sha256=sha256_bytes(control_bytes),
+        worker_sha256=configs.worker_sha256,
+    )
+
+
+
+def _ceo_submit_preimage(configs: ConfigEvidence) -> CandidateConfigs:
+    """Rollback restores archived bytes; it is not a fresh arm transition."""
+    return CandidateConfigs(
+        control=copy.deepcopy(dict(configs.control)),
+        worker=copy.deepcopy(dict(configs.worker)),
+        control_bytes=configs.control_bytes or encode_config(configs.control),
+        worker_bytes=configs.worker_bytes or encode_config(configs.worker),
+        control_sha256=configs.control_sha256,
         worker_sha256=configs.worker_sha256,
     )
 
@@ -884,7 +1021,7 @@ def _ceo_submit_binding_matches_control(
 
 
 def _ceo_submit_arm_state_refusal(
-    control: Mapping[str, Any], binding: ExecutiveAppBinding
+    control: Mapping[str, Any], binding: ExecutiveAppBinding, *, coexistence: bool = False
 ) -> str | None:
     """Return the first current-evidence ARM authority refusal, in fixed order.
 
@@ -915,19 +1052,58 @@ def _ceo_submit_arm_state_refusal(
         return "ceo_ingress_separation_invalid"
     if not _ceo_submit_binding_matches_control(control, binding):
         return "app_binding_invalid"
-    if control.get("coo_autonomy_armed") is not False:
+    if control.get("coo_autonomy_armed") is not coexistence:
         return "coo_autonomy_armed"
-    if control.get("coo_operator_harness_armed") is not False:
+    if control.get("coo_operator_harness_armed") is not coexistence:
         return "coo_operator_harness_armed"
     return None
 
 
 def _ceo_submit_arm_state_authorized(
-    control: Mapping[str, Any], binding: ExecutiveAppBinding
+    control: Mapping[str, Any], binding: ExecutiveAppBinding, *, coexistence: bool = False
 ) -> bool:
     """Whether current canonical evidence authorizes CEO-submit ARM/readback."""
 
-    return _ceo_submit_arm_state_refusal(control, binding) is None
+    return _ceo_submit_arm_state_refusal(control, binding, coexistence=coexistence) is None
+
+
+def _full_autonomy_flags(configs: ConfigEvidence) -> bool:
+    return (
+        configs.control.get("coo_autonomy_armed") is True
+        and configs.control.get("coo_operator_harness_armed") is True
+        and configs.worker.get("operator_harness_armed") is True
+    )
+
+
+def coexistence_receipt_eligible(
+    configs: ConfigEvidence, receipt: Mapping[str, Any] | None,
+    metadata: ReceiptMetadata, *, expected_sha: str, now: datetime | None = None,
+) -> bool:
+    """Prove both current config bytes against existing full-arm authority."""
+    if not _full_autonomy_flags(configs) or not isinstance(receipt, Mapping):
+        return False
+    try:
+        binding = validate_runtime_guard_document(
+            receipt, metadata=metadata, role="control",
+            own_config_sha256=configs.control_sha256, release_sha=expected_sha, now=now,
+        )
+        return binding.worker_config_sha256 == configs.worker_sha256
+    except (AutonomyRefusal, TypeError, ValueError):
+        return False
+
+
+def rebind_coexistence_receipt(
+    transaction: TransactionContext, receipt: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Change config correlation only; never refresh readiness or authority."""
+    require_ceo_submit_preservation(transaction.prior_configs, transaction.candidates)
+    value = copy.deepcopy(dict(receipt))
+    value.update(
+        control_config_sha256=transaction.candidates.control_sha256,
+        prior_control_config_sha256=transaction.prior_configs.control_sha256,
+        transaction_id=transaction.transaction_id,
+    )
+    return value
 
 
 def ceo_submit_projection(
@@ -1152,13 +1328,12 @@ def ceo_submit_sink_eligible(
     binding: ExecutiveAppBinding,
     expected_sha: str,
     installed_sha: str,
+    control_config_sha256: str | None = None,
+    autonomy_receipt: Mapping[str, Any] | None = None,
+    autonomy_metadata: ReceiptMetadata | None = None,
+    now: datetime | None = None,
 ) -> bool:
-    """SOURCE-side eligibility gate for the existing ``submit-ceo-intent`` sink.
-
-    HONEST LIMIT: this predicate is the SOURCE-side gate; the runtime sink in
-    ``control_plane/executive_service.py`` does not yet consult it -- that
-    integration is a later wave -- so this function proves eligibility in source
-    only and claims no runtime effect.
+    """Shared eligibility predicate for root status and runtime host admission.
 
     Eligible ONLY when the present control and worker documents, exact installed
     release, live host-observed App binding, and sealed ARM receipt independently
@@ -1173,7 +1348,15 @@ def ceo_submit_sink_eligible(
     if not isinstance(worker_config, Mapping):
         return False
     worker_armed = worker_config.get("operator_harness_armed")
-    if worker_armed is not False:
+    coexistence = False
+    if worker_armed is True and autonomy_metadata is not None:
+        coexistence = coexistence_receipt_eligible(
+            ConfigEvidence(control=control_config, worker=worker_config,
+                           control_sha256=control_config_sha256 or "",
+                           worker_sha256=worker_config_sha256),
+            autonomy_receipt, autonomy_metadata, expected_sha=expected_sha, now=now,
+        )
+    if worker_armed is not False and not coexistence:
         return False
     if (
         not isinstance(expected_sha, str)
@@ -1196,7 +1379,7 @@ def ceo_submit_sink_eligible(
     projection_digest = receipt["projection_digest"]
     if not isinstance(binding, ExecutiveAppBinding) or not binding.present:
         return False
-    if not _ceo_submit_arm_state_authorized(control_config, binding):
+    if not _ceo_submit_arm_state_authorized(control_config, binding, coexistence=coexistence):
         return False
     recomputed = {field: control_config[field] for field in _CEO_SUBMIT_CONTROL_FIELDS}
     if set(recomputed) != _CEO_SUBMIT_CONTROL_FIELDS:
@@ -1222,7 +1405,7 @@ def ceo_submit_sink_eligible(
         return False
     if (
         projection["worker_operator_harness_armed"] is not worker_armed
-        or projection["worker_operator_harness_armed"] is not False
+        or projection["worker_operator_harness_armed"] is not coexistence
     ):
         return False
     if worker_config_sha256 != projection["worker_config_sha256"]:
@@ -1230,6 +1413,56 @@ def ceo_submit_sink_eligible(
     if projection_digest != digest:
         return False
     return True
+
+
+def require_ceo_submit_runtime_admission(
+    control_config: Mapping[str, Any], *, own_config_sha256: str,
+    now: datetime | None = None,
+) -> None:
+    """Control-side guard: read only the two public root-sealed receipts.
+
+    The service composition separately revalidates its current config/attestation
+    and dedicated App peer. The worker config stays private to its own principal.
+    """
+    try:
+        try:
+            AUTONOMY_TRANSACTION.lstat()
+        except FileNotFoundError:
+            pass
+        else:
+            raise ValueError("transaction occupied")
+        receipt, metadata = load_receipt_file(CEO_SUBMIT_RECEIPT)
+        if metadata != ReceiptMetadata(uid=0, gid=0, mode=0o444, nlink=1,
+                                       is_regular=True, is_symlink=False, has_acl=False):
+            raise ValueError("unsealed receipt")
+        if not validate_ceo_submit_receipt_document(receipt, armed=True):
+            raise ValueError("invalid receipt")
+        projection = receipt["projection"]
+        binding = ExecutiveAppBinding(
+            present=True, app_peer_user=projection["app_peer_user"],
+            app_peer_uid=projection["ceo_ingress_app_peer_uid"],
+            app_armed=projection["ceo_ingress_app_armed"],
+            app_macro_root=projection["ceo_ingress_app_macro_root"],
+            ingress_peer_uid=projection["ceo_ingress_peer_uid"],
+            ingress_socket_path=projection["ceo_ingress_socket_path"],
+            launchd_socket_name=projection["ceo_ingress_launchd_socket_name"],
+            binding_valid=projection["app_binding_valid"],
+            acl_valid=projection["app_acl_valid"], topology_valid=projection["app_topology_valid"],
+        )
+        full_receipt, full_metadata = (None, None)
+        if projection["worker_operator_harness_armed"] is True:
+            full_receipt, full_metadata = load_receipt_file(AUTONOMY_RECEIPT)
+        if not ceo_submit_sink_eligible(
+            control_config=control_config,
+            worker_config={"operator_harness_armed": projection["worker_operator_harness_armed"]},
+            worker_config_sha256=projection["worker_config_sha256"], receipt=receipt,
+            binding=binding, expected_sha=str(control_config["proof_base_sha"]),
+            installed_sha=projection["installed_sha"], control_config_sha256=own_config_sha256,
+            autonomy_receipt=full_receipt, autonomy_metadata=full_metadata, now=now,
+        ):
+            raise ValueError("receipt not eligible")
+    except Exception as exc:
+        raise CeoSubmitAdmissionError("ceo_submit_transaction_incomplete") from exc
 
 
 _ACCEPTANCE_FIELDS = frozenset(
@@ -1348,6 +1581,9 @@ def evaluate_arm_admission(
 ) -> ArmAdmission:
     """Evaluate all arm gates in fixed order without mutating host state."""
 
+    if (type(request.native_return) is not bool or type(request.foreground_only) is not bool
+            or (request.foreground_only and request.native_return)):
+        raise ArmAdmissionError("native_selection_invalid")
     _request_expiry(request, now=now)
     host.require_exact_install(request.expected_sha)
     acceptance_digest = host.validate_acceptance(request.expected_sha)
@@ -1360,6 +1596,9 @@ def evaluate_arm_admission(
     host.require_services_stopped()
     host.require_service_uids_quiescent()
     host.require_transaction_absent()
+    if request.native_return:
+        _require_native_preselection(configs.control)
+        host.require_native_listener(configs)
     return ArmAdmission(
         expected_sha=request.expected_sha,
         acceptance_receipt_sha256=acceptance_digest,
@@ -1382,6 +1621,9 @@ def evaluate_arm_admission(
 def execute_arm(
     host: TransactionHost, request: ArmRequest, *, now: datetime
 ) -> TransactionResult:
+    if (type(request.native_return) is not bool or type(request.foreground_only) is not bool
+            or (request.foreground_only and request.native_return)):
+        raise ArmAdmissionError("native_selection_invalid")
     existing = host.existing_arm(request, now=now)
     if existing is not None:
         return existing
@@ -1390,7 +1632,9 @@ def execute_arm(
         transaction_id=host.new_transaction_id(),
         expected_sha=request.expected_sha,
         prior_configs=admission.configs,
-        candidates=derive_candidate_configs(admission.configs, armed=True),
+        candidates=derive_candidate_configs(admission.configs, armed=True,
+                                            native_return=request.native_return,
+                                            foreground_only=request.foreground_only),
         admission=admission,
     )
     try:
@@ -1403,7 +1647,6 @@ def execute_arm(
         host.write_autonomy_receipt(transaction, receipt)
         host.start_services(request.expected_sha)
         host.prove_services_ready(request.expected_sha)
-        host.complete_transaction(transaction)
     except ArmAdmissionError:
         # A marker that appeared between the read-only admission check and the
         # atomic mkdir belongs to another root transaction. Never "recover"
@@ -1435,6 +1678,14 @@ def execute_arm(
         except Exception as rollback_exc:
             raise TransactionEffectUnknown() from rollback_exc
         raise ArmTransactionError("arm_rolled_back") from exc
+    try:
+        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        # Publication/terminal cleanup has started; rollback cannot erase that
+        # boundary and publish again, even if cleanup raises an ordinary error.
+        raise TransactionEffectUnknown() from exc
     return TransactionResult(
         state="ARMED",
         status="ARMED_READY",
@@ -1451,9 +1702,9 @@ def execute_disarm(
         return existing
     host.require_exact_install(expected_sha)
     transaction_id = host.new_transaction_id()
-    host.stop_services(expected_sha)
     try:
         prior_configs = host.begin_disarm(expected_sha, transaction_id)
+        host.stop_services(expected_sha)
     except Exception as exc:
         raise TransactionEffectUnknown() from exc
     transaction = TransactionContext(
@@ -1470,7 +1721,10 @@ def execute_disarm(
         host.replace_control_config(transaction)
         receipt = build_transaction_receipt(transaction, state="DISARMED", now=now)
         host.write_autonomy_receipt(transaction, receipt)
-        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # A lost publication/ownership acknowledgement is not an instruction
+        # to rewrite the configs, receipt or original journal through rollback.
+        raise
     except Exception as exc:
         try:
             host.stop_services(expected_sha)
@@ -1483,6 +1737,15 @@ def execute_disarm(
         except Exception as rollback_exc:
             raise TransactionEffectUnknown() from rollback_exc
         raise ArmTransactionError("disarm_recovered") from exc
+    try:
+        # Closeout may publish the observation and then remove journal files.
+        # Any failure here (including an ordinary cleanup OSError) is ambiguous;
+        # never enter rollback, which itself calls complete_transaction again.
+        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
     return TransactionResult(
         state="DISARMED",
         status="UNARMED",
@@ -1561,14 +1824,15 @@ def evaluate_ceo_submit_arm_admission(
     # ARM and sink/status readback. The earlier gates preserve the existing
     # typed refusal order before config loading; this assertion catches any
     # disagreement between canonical control evidence and the live binding.
-    authority_refusal = _ceo_submit_arm_state_refusal(configs.control, binding)
+    coexistence = _full_autonomy_flags(configs) and host.proves_safe_coexistence(configs)
+    authority_refusal = _ceo_submit_arm_state_refusal(configs.control, binding, coexistence=coexistence)
     if authority_refusal is not None:
         raise CeoSubmitAdmissionError(authority_refusal)
-    if separation.coo_autonomy_armed:
+    if separation.coo_autonomy_armed and not coexistence:
         raise CeoSubmitAdmissionError("coo_autonomy_armed")
-    if separation.coo_operator_harness_armed:
+    if separation.coo_operator_harness_armed and not coexistence:
         raise CeoSubmitAdmissionError("coo_operator_harness_armed")
-    if separation.worker_operator_harness_armed:
+    if separation.worker_operator_harness_armed and not coexistence:
         raise CeoSubmitAdmissionError("worker_operator_harness_armed")
     try:
         host.require_transaction_absent()
@@ -1617,6 +1881,8 @@ def execute_ceo_submit_arm(
     try:
         host.write_candidates(transaction)
         host.validate_candidates(transaction)
+        if _full_autonomy_flags(configs):
+            host.rebind_full_autonomy_receipt(transaction)
         host.replace_control_config(transaction)
         receipt = build_ceo_submit_receipt(transaction, admission, armed=True, now=now)
         host.write_ceo_submit_receipt(transaction, receipt)
@@ -1633,9 +1899,7 @@ def execute_ceo_submit_arm(
         try:
             rollback = dataclasses.replace(
                 transaction,
-                candidates=derive_ceo_submit_candidate(
-                    transaction.prior_configs, armed=False
-                ),
+                candidates=_ceo_submit_preimage(transaction.prior_configs),
             )
             host.rollback_ceo_submit(
                 rollback,
@@ -1701,7 +1965,8 @@ def evaluate_ceo_submit_disarm_admission(
             ),
         )
     separation = host.ceo_submit_separation(configs)
-    if separation.coo_autonomy_armed and not host.proves_safe_coexistence(configs):
+    if any((separation.coo_autonomy_armed, separation.coo_operator_harness_armed,
+            separation.worker_operator_harness_armed)) and not host.proves_safe_coexistence(configs):
         # Later full autonomy is armed: refuse unless the SOURCE proves that
         # coexistence is safe.  The default is refuse.
         raise CeoSubmitAdmissionError("full_autonomy_armed_unsafe_coexistence")
@@ -1778,6 +2043,8 @@ def execute_ceo_submit_disarm(
     try:
         host.write_candidates(transaction)
         host.validate_candidates(transaction)
+        if _full_autonomy_flags(configs):
+            host.rebind_full_autonomy_receipt(transaction)
         host.replace_control_config(transaction)
         receipt = build_ceo_submit_receipt(transaction, admission, armed=False, now=now)
         host.write_ceo_submit_receipt(transaction, receipt)
@@ -1794,9 +2061,7 @@ def execute_ceo_submit_disarm(
         try:
             rollback = dataclasses.replace(
                 transaction,
-                candidates=derive_ceo_submit_candidate(
-                    transaction.prior_configs, armed=True
-                ),
+                candidates=_ceo_submit_preimage(transaction.prior_configs),
             )
             host.rollback_ceo_submit(
                 rollback,
@@ -1851,6 +2116,12 @@ def evaluate_ceo_submit_status(
             transaction_id=transaction_id,
             replayed=False,
         )
+    full_receipt, full_metadata = None, None
+    if _full_autonomy_flags(configs):
+        try:
+            full_receipt, full_metadata = load_receipt_file(AUTONOMY_RECEIPT)
+        except AutonomyRefusal:
+            pass
     eligible = ceo_submit_sink_eligible(
         control_config=configs.control,
         worker_config=configs.worker,
@@ -1859,6 +2130,8 @@ def evaluate_ceo_submit_status(
         binding=host.executive_app_binding(),
         expected_sha=request.expected_sha,
         installed_sha=installed_sha,
+        control_config_sha256=configs.control_sha256,
+        autonomy_receipt=full_receipt, autonomy_metadata=full_metadata,
     )
     state = "CEO_SUBMIT_ARMED" if eligible else "CEO_SUBMIT_ARMED_UNBOUND"
     return TransactionResult(
@@ -2117,6 +2390,29 @@ class ProductionStatusHost:
         return completed.returncode == 0
 
     @staticmethod
+    def _loaded_observe_only(label: str) -> bool:
+        """Return loaded/absent only when launchd proves either state.
+
+        This helper is intentionally narrower than the historical ``_loaded``
+        predicate.  The quiesce-only command must not treat a permission, IPC,
+        or transient launchctl read failure as service absence before signaling
+        the fixed Control UID.
+        """
+        completed = subprocess.run(
+            ["/bin/launchctl", "print", f"system/{label}"],
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            check=False,
+            timeout=5,
+        )
+        if completed.returncode == 0:
+            return True
+        if completed.returncode == 113:
+            return False
+        raise ArmAdmissionError("services_gate_failed")
+
+    @staticmethod
     def _control_ready(expected_sha: str) -> bool:
         release = SYSTEM_ROOT / "releases" / expected_sha
         control_home = RUNTIME_ROOT / "control" / "home"
@@ -2274,6 +2570,9 @@ class ProductionArmHost(ProductionStatusHost):
     def __init__(self) -> None:
         self._admission_sha: str | None = None
 
+    def effective_uid(self) -> int:
+        return os.geteuid()
+
     def require_exact_install(self, expected_sha: str) -> str:
         try:
             self._require_host()
@@ -2307,7 +2606,15 @@ class ProductionArmHost(ProductionStatusHost):
                 gid=control_group.gr_gid,
             )
             validate_acceptance_document(summary, expected_sha=expected_sha)
-            return hashlib.sha256(raw).hexdigest()
+            from ops.executive_os.acceptance_maintenance import (
+                MaintenanceError, validate_carry_receipt,
+            )
+            summary_digest = hashlib.sha256(raw).hexdigest()
+            try:
+                validate_carry_receipt(expected_sha, summary_digest)
+            except (MaintenanceError, OSError, ValueError) as exc:
+                raise ArmAdmissionError("acceptance_receipt_invalid") from exc
+            return summary_digest
         except ArmAdmissionError:
             raise
         except (HostControlError, KeyError, OSError) as exc:
@@ -2402,6 +2709,27 @@ class ProductionArmHost(ProductionStatusHost):
             worker_bytes=worker_raw,
         )
 
+    def require_native_listener(self, config: ConfigEvidence) -> None:
+        # Installation owns the listener. Arm only observes its fixed root-owned
+        # launchd binding, after exact install and the full acceptance gates.
+        from scripts.executive_os_phase1c import company_consultation_launchd_entry, ServiceError
+        try:
+            expected = company_consultation_launchd_entry(config.control)
+            public_plist_mode = stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH
+            raw, _info = _read_root_file(
+                CONTROL_PLIST, modes=frozenset({public_plist_mode}), gid=0
+            )
+            value = plistlib.loads(raw)
+            sockets = value.get("Sockets", {})
+            if (expected is None or type(sockets) is not dict
+                    or sockets.get("CompanyConsultation") != expected):
+                raise ArmAdmissionError("native_listener_unavailable")
+        except (HostControlError, OSError, ValueError, plistlib.InvalidFileException, ServiceError) as exc:
+            raise ArmAdmissionError("native_listener_unavailable") from exc
+        from ops.executive_os.a2_agent_relay_enrollment import w3c_plist_configured
+        if not w3c_plist_configured(release_sha=config.control.get("proof_base_sha")):
+            raise ArmAdmissionError("native_relay_unavailable")
+
     def require_runtime_quiescent(self, config: ConfigEvidence) -> None:
         try:
             from control_plane.executive_runtime import Runtime
@@ -2469,30 +2797,140 @@ class ProductionArmHost(ProductionStatusHost):
         if any(loaded):
             raise ArmAdmissionError("services_not_stopped")
 
-    def require_service_uids_quiescent(self) -> None:
+    def require_services_already_stopped(self) -> None:
+        """Observe the fixed Control/worker labels without changing lifecycle state."""
         try:
-            identities = (
-                pwd.getpwnam(CONTROL_USER).pw_uid,
-                pwd.getpwnam("_mastermind_worker").pw_uid,
+            loaded = (
+                self._loaded_observe_only(CONTROL_LABEL),
+                self._loaded_observe_only(WORKER_LABEL),
             )
+        except ArmAdmissionError:
+            raise
+        except (OSError, subprocess.SubprocessError) as exc:
+            raise ArmAdmissionError("services_gate_failed") from exc
+        if any(loaded):
+            raise ArmAdmissionError("services_not_stopped")
+
+    def quiesce_control_uid_for_arm(self) -> tuple[int, ...]:
+        """Converge only the fixed Control service UID to zero live processes.
+
+        This is a pre-arm cleanup action, not part of the arm admission gate.
+        It never targets the worker UID (whose one attested distnoted may be
+        permitted by require_service_uids_quiescent), and it accepts no
+        caller-selected UID, PID, signal or timeout. The process table is the
+        reconciliation source: every signal target must still be observed under
+        the canonical Control UID, and success requires two consecutive empty
+        observations after the final signal.
+        """
+
+        from control_plane.executive_worker_broker import _ps_pids_for_uid
+
+        try:
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
         except KeyError as exc:
             raise ArmAdmissionError("service_uid_process_unknown") from exc
-        for uid in identities:
+        if control_uid <= 0:
+            raise ArmAdmissionError("service_uid_process_unknown")
+
+        try:
+            before = _ps_pids_for_uid(control_uid)
+        except Exception as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if not before:
+            time.sleep(0.1)
             try:
-                completed = subprocess.run(
-                    ["/usr/bin/pgrep", "-U", str(uid)],
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                    timeout=5,
-                )
-            except (OSError, subprocess.SubprocessError) as exc:
+                if not _ps_pids_for_uid(control_uid):
+                    return ()
+            except Exception as exc:
                 raise ArmAdmissionError("service_uid_process_unknown") from exc
-            if completed.returncode == 0 and completed.stdout.strip():
-                raise ArmAdmissionError("service_uid_process_live")
-            if completed.returncode not in {0, 1}:
+
+        signalled: set[int] = set()
+        for signum in (signal.SIGTERM, signal.SIGKILL):
+            phase_signalled: set[int] = set()
+            for _ in range(50):
+                try:
+                    live = _ps_pids_for_uid(control_uid)
+                except Exception as exc:
+                    raise ArmAdmissionError("service_uid_process_unknown") from exc
+                if not live:
+                    time.sleep(0.1)
+                    try:
+                        live = _ps_pids_for_uid(control_uid)
+                    except Exception as exc:
+                        raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    if not live:
+                        return tuple(sorted(signalled))
+                for pid in live:
+                    if pid <= 1:
+                        raise ArmAdmissionError("service_uid_process_unknown")
+                    if pid in phase_signalled:
+                        continue
+                    try:
+                        os.kill(pid, signum)
+                    except ProcessLookupError:
+                        continue
+                    except OSError as exc:
+                        raise ArmAdmissionError("service_uid_process_unknown") from exc
+                    phase_signalled.add(pid)
+                    signalled.add(pid)
+                time.sleep(0.1)
+
+        try:
+            remaining = _ps_pids_for_uid(control_uid)
+        except Exception as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        if remaining:
+            raise ArmAdmissionError("service_uid_process_live")
+        return tuple(sorted(signalled))
+
+    def require_service_uids_quiescent(self) -> None:
+        # Reuse the worker owner's saved/real/effective UID projection and exact
+        # Apple launchd attribution. Process names and argv never grant an
+        # exception. This gate observes only; it never sweeps or signals.
+        from control_plane.executive_ambient_process import (
+            AmbientClassification, AmbientProcessIdentity, DarwinDistnotedClassifier,
+        )
+        from control_plane.executive_worker_broker import _ps_pids_for_uid
+
+        try:
+            control_uid = pwd.getpwnam(CONTROL_USER).pw_uid
+            worker = provider_worker_slots.get_slot("codex-01")
+            worker_uid = pwd.getpwnam(worker.worker_user).pw_uid
+            if worker_uid != worker.worker_uid:
                 raise ArmAdmissionError("service_uid_process_unknown")
+        except (KeyError, provider_worker_slots.SlotCatalogError) as exc:
+            raise ArmAdmissionError("service_uid_process_unknown") from exc
+        for uid in (control_uid, worker_uid):
+            try:
+                before = _ps_pids_for_uid(uid)
+                if not before:
+                    continue
+                # The reviewed ambient exception belongs only to the dedicated
+                # worker principal. Control must remain entirely absent.
+                if uid != worker_uid:
+                    raise ArmAdmissionError("service_uid_process_live")
+                classifier = DarwinDistnotedClassifier()
+                ambient = classifier.classify(worker_uid=uid)
+                if type(ambient) is not AmbientClassification or ambient.status == "failed_closed":
+                    raise ArmAdmissionError("service_uid_process_unknown")
+                if ambient.status != "attested" or len(ambient.identities) != 1:
+                    raise ArmAdmissionError("service_uid_process_live")
+                identity = ambient.identities[0]
+                if type(identity) is not AmbientProcessIdentity or identity.codesign_verified is not True:
+                    raise ArmAdmissionError("service_uid_process_unknown")
+                if (identity.uid != uid or identity.pid <= 1
+                        or identity.launchd_reported_pid != identity.pid
+                        or before != (identity.pid,)):
+                    raise ArmAdmissionError("service_uid_process_live")
+                # Process creation, exit, PID replacement or attribution drift
+                # during the read cannot inherit the earlier observation.
+                if (_ps_pids_for_uid(uid) != before
+                        or classifier.classify(worker_uid=uid) != ambient):
+                    raise ArmAdmissionError("service_uid_process_unknown")
+            except ArmAdmissionError:
+                raise
+            except Exception as exc:
+                raise ArmAdmissionError("service_uid_process_unknown") from exc
 
     def require_transaction_absent(self) -> None:
         if AUTONOMY_TRANSACTION.exists() or AUTONOMY_TRANSACTION.is_symlink():
@@ -2593,6 +3031,10 @@ class ProductionTransactionHost(ProductionArmHost):
         if descriptor is None:
             raise TransactionEffectUnknown()
         self._transaction_owner_fd = None
+        self._control_observation_origin = None
+        self._control_observation_fresh_transaction = None
+        self._control_observation_recovery_owner = None
+        self._control_observation_rollback_proven = None
         os.close(descriptor)
 
     def _manifest(self) -> dict[str, Any]:
@@ -2616,6 +3058,28 @@ class ProductionTransactionHost(ProductionArmHost):
             "target_control_sha256",
             "target_worker_sha256",
         }
+        if set(value) & _COEXISTENCE_MANIFEST_FIELDS:
+            if (value.get("operation") not in CEO_SUBMIT_OPERATIONS
+                    or type(value.get("prior_ceo_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _COEXISTENCE_MANIFEST_FIELDS - {"prior_ceo_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _COEXISTENCE_MANIFEST_FIELDS
+        if set(value) & _FINITE_RECEIPT_FIELDS:
+            if (value.get("operation") != "FINITE_CONTROL_STAGE"
+                    or type(value.get("finite_prior_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _FINITE_RECEIPT_FIELDS - {"finite_prior_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _FINITE_RECEIPT_FIELDS
+        if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
+            required |= _CANARY_MANIFEST_FIELDS
+            if (
+                type(value.get("prior_canary_receipt_present")) is not bool
+                or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                       for field in ("prior_canary_receipt_sha256", "target_canary_receipt_sha256"))
+            ):
+                raise TransactionEffectUnknown()
         keys = set(value)
         allowed_with_control_preimage = required | {_CONTROL_LAUNCHD_PREIMAGE_FIELD}
         if (
@@ -2644,7 +3108,7 @@ class ProductionTransactionHost(ProductionArmHost):
             or (
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD in value
                 and (
-                    value.get("operation") not in CEO_SUBMIT_OPERATIONS
+                    value.get("operation") not in CONTROL_ONLY_TRANSACTION_OPERATIONS
                     or type(value.get(_CONTROL_LAUNCHD_PREIMAGE_FIELD)) is not bool
                 )
             )
@@ -2680,6 +3144,12 @@ class ProductionTransactionHost(ProductionArmHost):
             value[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = current[
                 _CONTROL_LAUNCHD_PREIMAGE_FIELD
             ]
+        if current is not None and operation in DIALOGUE_CANARY_OPERATIONS:
+            value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
+        if current is not None and set(current) & _COEXISTENCE_MANIFEST_FIELDS:
+            value.update({key: current[key] for key in _COEXISTENCE_MANIFEST_FIELDS})
+        if current is not None and set(current) & _FINITE_RECEIPT_FIELDS:
+            value.update({key: current[key] for key in _FINITE_RECEIPT_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -2950,6 +3420,12 @@ class ProductionTransactionHost(ProductionArmHost):
                     fcntl.flock(lock, fcntl.LOCK_UN)
                 finally:
                     os.close(lock)
+            # Actual creator provenance remains process-local and bound to the
+            # held marker inode. Reclaiming an old marker never creates it.
+            self._control_observation_origin = (
+                os.getpid(), descriptor, transaction.transaction_id,
+                transaction.expected_sha,
+            )
         except Exception as exc:
             if descriptor >= 0 and self._transaction_owner_fd == descriptor:
                 # Successful or uncertain publication retains the original
@@ -2992,6 +3468,17 @@ class ProductionTransactionHost(ProductionArmHost):
             != request.credential_expires_at
         ):
             raise ArmAdmissionError("changed_arm_evidence")
+        try:
+            control, _worker, control_digest, worker_digest, _cr, _wr = self._configs()
+        except (HostControlError, OSError) as exc:
+            raise ArmAdmissionError("changed_arm_evidence") from exc
+        if (control_digest != snapshot.control_config_sha256
+                or worker_digest != snapshot.worker_config_sha256
+                or control.get("coo_foreground_only", False) is not request.foreground_only
+                or not _native_selection_matches(control, request.native_return)):
+            raise ArmAdmissionError("changed_arm_evidence")
+        if request.native_return:
+            self.require_native_listener(ConfigEvidence(control_digest, worker_digest, control, _worker, _cr, _wr))
         return TransactionResult(
             state="ARMED",
             status="ARMED_READY",
@@ -3188,6 +3675,9 @@ class ProductionTransactionHost(ProductionArmHost):
             gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
         )
         self._persist_phase(transaction, "CONTROL_REPLACED")
+        # Process-local publication provenance. Reconstructed recovery contexts
+        # can verify the derivative observation, never issue another write.
+        self._control_observation_fresh_transaction = transaction
 
     def write_autonomy_receipt(
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
@@ -3306,15 +3796,27 @@ class ProductionTransactionHost(ProductionArmHost):
             or manifest.get("expected_sha") != transaction.expected_sha
         ):
             raise TransactionEffectUnknown()
+        from ops.executive_os.control_observation import publish_for_transaction
+        publish_for_transaction(self, transaction)
         control_candidate, worker_candidate = self._candidate_paths(
             transaction.transaction_id
         )
         self._remove_candidate(control_candidate)
         self._remove_candidate(worker_candidate)
         expected = {"transaction.json", "prior-control.json", "prior-worker.json"}
+        archives = list(self._archive_paths())
+        if set(manifest) & _COEXISTENCE_MANIFEST_FIELDS:
+            expected.update(_COEXISTENCE_ARCHIVES)
+            archives.extend(AUTONOMY_TRANSACTION / name for name in _COEXISTENCE_ARCHIVES)
+        if set(manifest) & _FINITE_RECEIPT_FIELDS:
+            expected.add(_FINITE_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _FINITE_RECEIPT_ARCHIVE)
+        if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
+            expected.add(_CANARY_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
         if set(os.listdir(AUTONOMY_TRANSACTION)) != expected:
             raise TransactionEffectUnknown()
-        for path in (*self._archive_paths(), self._manifest_path()):
+        for path in (*archives, self._manifest_path()):
             info = path.lstat()
             if (
                 stat.S_ISLNK(info.st_mode)
@@ -3362,7 +3864,8 @@ class ProductionTransactionHost(ProductionArmHost):
                 self._claim_transaction_owner()
             manifest = self._manifest()
             if (
-                manifest.get("transaction_id") != transaction_id
+                manifest.get("operation") not in {"ARM", "DISARM"}
+                or manifest.get("transaction_id") != transaction_id
                 or manifest.get("expected_sha") != expected_sha
             ):
                 raise TransactionEffectUnknown()
@@ -3447,6 +3950,94 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         uid = os.geteuid()
         require_root_privilege(uid)
         return uid
+
+    def _seal_generation(self, generation, transaction, *, operation):
+        super()._seal_generation(generation, transaction, operation=operation)
+        if not _full_autonomy_flags(transaction.prior_configs):
+            return
+        payload, metadata = load_receipt_file(AUTONOMY_RECEIPT)
+        if not coexistence_receipt_eligible(
+            transaction.prior_configs, payload, metadata,
+            expected_sha=transaction.expected_sha,
+        ):
+            raise TransactionEffectUnknown()
+        raw, _ = _read_root_file(AUTONOMY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0)
+        if json.loads(raw) != payload:
+            raise TransactionEffectUnknown()
+        ceo_present = CEO_SUBMIT_RECEIPT.exists() or CEO_SUBMIT_RECEIPT.is_symlink()
+        ceo_raw = b""
+        if ceo_present:
+            ceo_raw, _ = _read_root_file(CEO_SUBMIT_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0)
+        for name, contents in zip(_COEXISTENCE_ARCHIVES, (raw, ceo_raw)):
+            _atomic_file(generation / name, contents, mode=0o400, uid=0, gid=0, replace=False)
+        manifest = self._manifest_document(transaction, "LOCKED", operation=operation)
+        # Seal recovery's launchd preimage before the FIRST paired receipt
+        # effect, including a crash before service reconciliation is reached.
+        disabled = self._read_control_launchd_disabled_override()
+        if type(disabled) is not bool:
+            raise TransactionEffectUnknown()
+        manifest[_CONTROL_LAUNCHD_PREIMAGE_FIELD] = disabled
+        manifest.update(
+            prior_autonomy_receipt_sha256=sha256_bytes(raw),
+            target_autonomy_receipt_sha256=sha256_bytes(_encoded_json(rebind_coexistence_receipt(transaction, payload))),
+            prior_ceo_receipt_present=ceo_present,
+            prior_ceo_receipt_sha256=sha256_bytes(ceo_raw),
+            target_ceo_receipt_sha256=sha256_bytes(ceo_raw),
+        )
+        _atomic_file(generation / _TRANSACTION_MANIFEST_NAME, _encoded_json(manifest),
+                     mode=0o400, uid=0, gid=0, replace=True)
+        _fsync_directory(generation)
+
+    def _coexistence_archives(self, transaction):
+        if (self._transaction_owner_fd is None or self._active_transaction is None
+                or self._active_transaction.transaction_id != transaction.transaction_id):
+            raise TransactionEffectUnknown()
+        self._verify_published_inode(self._transaction_owner_fd)
+        manifest = self._manifest()
+        if (manifest.get("transaction_id") != transaction.transaction_id
+                or manifest.get("expected_sha") != transaction.expected_sha
+                or not _COEXISTENCE_MANIFEST_FIELDS <= set(manifest)):
+            raise TransactionEffectUnknown()
+        contents = []
+        for name, key in zip(_COEXISTENCE_ARCHIVES,
+                             ("prior_autonomy_receipt_sha256", "prior_ceo_receipt_sha256")):
+            raw, _ = _read_root_file(AUTONOMY_TRANSACTION / name, modes=frozenset({0o400}), uid=0, gid=0)
+            if sha256_bytes(raw) != manifest[key]:
+                raise TransactionEffectUnknown()
+            contents.append(raw)
+        if not manifest["prior_ceo_receipt_present"] and contents[1] != b"":
+            raise TransactionEffectUnknown()
+        return manifest, contents
+
+    def rebind_full_autonomy_receipt(self, transaction):
+        manifest, (raw, _) = self._coexistence_archives(transaction)
+        current, _ = _read_root_file(AUTONOMY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0)
+        configs = self.load_ceo_submit_configs(transaction.expected_sha)
+        if (current != raw or configs.control_sha256 != transaction.prior_configs.control_sha256
+                or configs.worker_sha256 != transaction.prior_configs.worker_sha256
+                or not self.proves_safe_coexistence(configs)):
+            raise TransactionEffectUnknown()
+        rebound = _encoded_json(rebind_coexistence_receipt(transaction, json.loads(raw)))
+        if sha256_bytes(rebound) != manifest["target_autonomy_receipt_sha256"]:
+            raise TransactionEffectUnknown()
+        _atomic_file(AUTONOMY_RECEIPT, rebound, mode=0o444, uid=0, gid=0, replace=True)
+        self._persist_phase(transaction, "AUTONOMY_RECEIPT_REBOUND")
+
+    def _check_coexistence_rollback(self, transaction):
+        manifest, archived = self._coexistence_archives(transaction)
+        configs = self.load_ceo_submit_configs(transaction.expected_sha)
+        if (configs.control_sha256 not in {transaction.prior_configs.control_sha256, manifest["target_control_sha256"]}
+                or configs.worker_sha256 != transaction.prior_configs.worker_sha256):
+            raise TransactionEffectUnknown()
+        for path, prefix in ((AUTONOMY_RECEIPT, "autonomy"), (CEO_SUBMIT_RECEIPT, "ceo")):
+            if prefix == "ceo" and not path.exists() and not path.is_symlink():
+                current = b""
+            else:
+                current, _ = _read_root_file(path, modes=frozenset({0o444}), uid=0, gid=0)
+            if sha256_bytes(current) not in {manifest[f"prior_{prefix}_receipt_sha256"],
+                                             manifest[f"target_{prefix}_receipt_sha256"]}:
+                raise TransactionEffectUnknown()
+        return manifest, archived
 
     def require_exact_install(self, expected_sha: str) -> str:
         try:
@@ -3632,7 +4223,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
         self._persist_phase(transaction, "CANDIDATES_WRITTEN")
 
-    def validate_candidates(self, transaction: TransactionContext) -> None:
+    def _read_validated_control_candidate(self, transaction: TransactionContext):
         release = SYSTEM_ROOT / "releases" / transaction.expected_sha
         control_candidate, _worker_candidate = self._candidate_paths(
             transaction.transaction_id
@@ -3640,7 +4231,6 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         control_home = RUNTIME_ROOT / "control" / "home"
         control_gid = grp.getgrnam(CONTROL_GROUP).gr_gid
         worker_gid = grp.getgrnam(WORKER_GROUP).gr_gid
-        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
         self._run_fixed(
             [
                 "/usr/bin/sudo",
@@ -3674,6 +4264,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         worker_raw, _worker_info = _read_root_file(
             WORKER_CONFIG, modes=frozenset({0o440}), gid=worker_gid
         )
+        return candidate_control, candidate_raw, worker_raw
+
+    def validate_candidates(self, transaction: TransactionContext) -> None:
+        candidate_control, candidate_raw, worker_raw = self._read_validated_control_candidate(transaction)
+        expected_armed = self._manifest().get("operation") == "CEO_SUBMIT_ARM"
         if (
             sha256_bytes(candidate_raw) != transaction.candidates.control_sha256
             or candidate_control.get("ceo_submit_armed") is not expected_armed
@@ -3722,6 +4317,12 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             has_acl=False,
         ):
             raise TransactionEffectUnknown()
+        manifest = self._manifest()
+        if set(manifest) & _COEXISTENCE_MANIFEST_FIELDS:
+            self._coexistence_archives(transaction)
+            manifest["target_ceo_receipt_sha256"] = sha256_bytes(_encoded_json(dict(receipt)))
+            _atomic_file(self._manifest_path(), _encoded_json(manifest),
+                         mode=0o400, uid=0, gid=0, replace=True)
         _atomic_file(
             CEO_SUBMIT_RECEIPT,
             _encoded_json(dict(receipt)),
@@ -3856,6 +4457,10 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
 
     @staticmethod
     def _read_control_launchd_disabled_override() -> bool:
+        return ProductionCeoSubmitHost._read_launchd_disabled_override(CONTROL_LABEL)
+
+    @staticmethod
+    def _read_launchd_disabled_override(target_label: str, *, allow_absent: bool = False):
         """Read one exact persistent launchd override with a closed parser.
 
         ``print-disabled`` is a global table. Before a CEO-submit transaction may
@@ -3872,7 +4477,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         except UnicodeDecodeError as exc:
             raise TransactionEffectUnknown() from exc
         lines = [line.strip() for line in text.splitlines() if line.strip()]
-        if len(lines) < 3 or lines[0] != "disabled services = {" or lines[-1] != "}":
+        if len(lines) < 2 or lines[0] != "disabled services = {" or lines[-1] != "}":
             raise TransactionEffectUnknown()
         observed: dict[str, bool] = {}
         for line in lines[1:-1]:
@@ -3884,9 +4489,11 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             if label in observed or state not in _CONTROL_LAUNCHD_DISABLED_SPELLINGS:
                 raise TransactionEffectUnknown()
             observed[label] = _CONTROL_LAUNCHD_DISABLED_SPELLINGS[state]
-        if CONTROL_LABEL not in observed:
+        if target_label not in observed:
+            if allow_absent:
+                return None
             raise TransactionEffectUnknown()
-        return observed[CONTROL_LABEL]
+        return observed[target_label]
 
     def _persist_control_launchd_preimage(
         self, transaction: TransactionContext, disabled: bool
@@ -3897,7 +4504,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             raise TransactionEffectUnknown()
         current = self._manifest()
         if (
-            current.get("operation") not in CEO_SUBMIT_OPERATIONS
+            current.get("operation") not in CONTROL_ONLY_TRANSACTION_OPERATIONS
             or current.get("transaction_id") != transaction.transaction_id
             or current.get("expected_sha") != transaction.expected_sha
         ):
@@ -4036,6 +4643,17 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
     def _ceo_admission_probe(
         self, expected_sha: str, expected_control_sha256: str
     ) -> bool:
+        full_armed = (self._active_transaction is not None
+                      and _full_autonomy_flags(self._active_transaction.prior_configs))
+        return self._control_config_probe(
+            expected_sha, expected_control_sha256,
+            required_state="READY" if full_armed else "AWAITING_CANARY",
+        )
+
+    def _control_config_probe(
+        self, expected_sha: str, expected_control_sha256: str, *,
+        required_state: str | None = None,
+    ) -> bool:
         """CEO-admission probe: fixed label + fixed socket + AWAITING_CANARY +
         wrapper-owned attestation validator.
 
@@ -4099,7 +4717,9 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         ):
             return False
         result = value["result"]
-        if result.get("service_state") != "AWAITING_CANARY":
+        if result.get("service_state") not in {"READY", "AWAITING_CANARY"}:
+            return False
+        if required_state is not None and result.get("service_state") != required_state:
             return False
         # The service resolves its host-owned socket declaration (on macOS,
         # /var/run is /private/var/run). Admit only these two fixed spellings;
@@ -4234,6 +4854,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         """
 
         if not self._loaded(CONTROL_LABEL):
+            self._persist_phase(transaction, "ROLLBACK_CONTROL_PROVEN")
             return
         try:
             self._reconcile_control_boundary(transaction.expected_sha)
@@ -4280,6 +4901,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         """
 
         self._active_transaction = transaction
+        paired = self._check_coexistence_rollback(transaction) if _full_autonomy_flags(transaction.prior_configs) else None
         control_candidate, _worker_candidate = self._candidate_paths(
             transaction.transaction_id
         )
@@ -4299,7 +4921,18 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
             replace=CONTROL_CONFIG.exists() or CONTROL_CONFIG.is_symlink(),
         )
-        self.write_ceo_submit_receipt(transaction, receipt)
+        self._control_observation_fresh_transaction = transaction
+        if paired is None:
+            self.write_ceo_submit_receipt(transaction, receipt)
+        else:
+            manifest, (autonomy_raw, ceo_raw) = paired
+            _atomic_file(AUTONOMY_RECEIPT, autonomy_raw, mode=0o444, uid=0, gid=0, replace=True)
+            if manifest["prior_ceo_receipt_present"]:
+                _atomic_file(CEO_SUBMIT_RECEIPT, ceo_raw, mode=0o444, uid=0, gid=0,
+                             replace=CEO_SUBMIT_RECEIPT.exists())
+            elif CEO_SUBMIT_RECEIPT.exists():
+                CEO_SUBMIT_RECEIPT.unlink()
+                _fsync_directory(CONFIG_ROOT)
         expected_armed = dict(transaction.candidates.control).get("ceo_submit_armed")
         if not isinstance(expected_armed, bool):
             raise TransactionEffectUnknown()
@@ -4319,6 +4952,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             raise TransactionEffectUnknown()
         self._prove_rolled_back_control_live(transaction)
         self._restore_control_launchd_preimage_if_recorded(transaction)
+        self._control_observation_rollback_proven = transaction
         self.complete_transaction(transaction)
 
     def recover_ceo_submit_effect_unknown(
@@ -4376,10 +5010,29 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             separation=separation,
             configs=prior,
         )
-        receipt = build_ceo_submit_receipt(
-            transaction, admission, armed=prior_armed, now=now
+        from ops.executive_os.control_observation import (
+            PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE,
+            verify_ceo_rollback_readback,
         )
-        self.rollback_ceo_submit(transaction, receipt)
+        if manifest['phase'] == PUBLICATION_PHASE:
+            # A projection response cannot authorize rolling back an already
+            # completed forward effect. Preserve this original uncertainty.
+            raise TransactionEffectUnknown()
+        if manifest['phase'] in {ROLLBACK_PUBLICATION_PHASE, 'CONTROL_OVERRIDE_RESTORED'}:
+            verify_ceo_rollback_readback(self, transaction, admission)
+            self.complete_transaction(transaction)
+        else:
+            # Only this incumbent recovery verb, after its original installed
+            # source/archive/launchd checks, may restore its archived preimage.
+            # The observer and a reconstructed context cannot select this path.
+            self._control_observation_recovery_owner = (
+                os.getpid(), self._transaction_owner_fd,
+                transaction.transaction_id, transaction.expected_sha,
+            )
+            receipt = build_ceo_submit_receipt(
+                transaction, admission, armed=prior_armed, now=now,
+            )
+            self.rollback_ceo_submit(transaction, receipt)
         state = "CEO_SUBMIT_ARMED" if prior_armed else "CEO_SUBMIT_DISARMED"
         return TransactionResult(
             state=state,
@@ -4389,9 +5042,14 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         )
 
     def proves_safe_coexistence(self, configs: ConfigEvidence) -> bool:
-        """Default is REFUSE: no source today proves coexistence with full autonomy."""
-
-        return False
+        """Require the current sealed full-arm generation, never flags alone."""
+        try:
+            receipt, metadata = load_receipt_file(AUTONOMY_RECEIPT)
+            return coexistence_receipt_eligible(
+                configs, receipt, metadata, expected_sha=str(configs.control.get("proof_base_sha", "")),
+            )
+        except (AutonomyRefusal, HostControlError, OSError, ValueError):
+            return False
 
     def incomplete_transaction_operation(self) -> str | None:
         """The operation of an extant marker, or None when the owner is free.
@@ -4543,6 +5201,59 @@ def main(
         ceo_host = ProductionCeoSubmitHost() if host is None else host
         return _run_ceo_submit_command(ceo_host, args, now=current)
 
+    if args.command == "arm-quiesce-control-uid":
+        arm_host = ProductionArmHost() if host is None else host
+        try:
+            require_root_privilege(arm_host.effective_uid())
+            installed = arm_host.require_exact_install(args.expected_sha)
+            if installed != args.expected_sha:
+                raise ArmAdmissionError("install_gate_failed")
+            arm_host.validate_acceptance(args.expected_sha)
+            configs = arm_host.load_unarmed_configs(args.expected_sha)
+            arm_host.require_runtime_quiescent(configs)
+            arm_host.require_services_already_stopped()
+            arm_host.require_transaction_absent()
+            signalled = arm_host.quiesce_control_uid_for_arm()
+            arm_host.require_service_uids_quiescent()
+            document = operation_document(
+                code="control_uid_quiesced",
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+                replayed=not signalled,
+            )
+            exit_code = 0
+        except ArmAdmissionError as exc:
+            document = operation_document(
+                code=exc.code,
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+            )
+            exit_code = 2
+        except Exception:
+            document = operation_document(
+                code="service_uid_process_unknown",
+                state=UNARMED,
+                status=UNARMED,
+                transaction_id=None,
+            )
+            exit_code = 2
+        print(json.dumps(document, sort_keys=True, separators=(",", ":")))
+        return exit_code
+
+    if args.command in {"dialogue-canary-publish", "dialogue-canary-reconcile"}:
+        from ops.executive_os.dialogue_wake_canary_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in A2_DISABLE_COMMANDS:
+        from ops.executive_os.a2_disable_preparation_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
+        from ops.executive_os.attended_control_staging import run_command
+        return run_command(args, host=host)
+
     transaction_host = ProductionTransactionHost() if host is None else host
     try:
         if args.command == "arm":
@@ -4554,6 +5265,8 @@ def main(
                     expected_credential_kind=args.expected_credential_kind,
                     workspace_binding_class=args.workspace_binding_class,
                     credential_expires_at=args.credential_expires_at,
+                    native_return=args.native_return,
+                    foreground_only=args.foreground_only,
                 ),
                 now=current,
             )
@@ -4608,4 +5321,10 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # The installed wrapper executes this file with -I -S -B. Publication
+    # imports this module by package name and requires its genuine classes;
+    # objects defined under __main__ have a different identity. Delegate the
+    # entry, not the type check, and do not alias an arbitrary module in sys.modules.
+    from ops.executive_os.autonomy_control import main as canonical_main
+
+    raise SystemExit(canonical_main())

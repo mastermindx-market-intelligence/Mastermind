@@ -783,25 +783,31 @@ class AppServerClient:
         )[0]
 
     def wait_notifications_through(
-        self, method: str, *, timeout: float = 15.0
+        self, method: str, *, timeout: float = 15.0,
+        predicate: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[dict[str, Any]]:
         """Consume the ordered queue prefix through a matching notification.
 
         The same queue/condition remains the sole notification owner. Later
         frames stay queued; no adapter has to reconstruct their arrival order.
+        An optional pure predicate selects the exact completion under the same
+        queue lock; timeout preserves the entire unconsumed prefix.
         """
         return self._wait_notification_prefix(
-            method, timeout=timeout, include_preceding=True
+            method, timeout=timeout, include_preceding=True, predicate=predicate
         )
 
     def _wait_notification_prefix(
-        self, method: str, *, timeout: float, include_preceding: bool
+        self, method: str, *, timeout: float, include_preceding: bool,
+        predicate: Callable[[dict[str, Any]], bool] | None = None,
     ) -> list[dict[str, Any]]:
         deadline = time.monotonic() + timeout
         with self._notification_condition:
             while True:
                 for index, existing in enumerate(self.notifications):
-                    if existing.get("method") == method:
+                    if existing.get("method") == method and (
+                        predicate is None or predicate(existing)
+                    ):
                         if include_preceding:
                             prefix = self.notifications[: index + 1]
                             del self.notifications[: index + 1]

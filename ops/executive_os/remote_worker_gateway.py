@@ -22,7 +22,11 @@ from control_plane.remote_worker_transport import (
     encode_frame,
     validate_request,
 )
-from ops.executive_os.remote_worker_gateway_config import RemoteWorkerGatewayConfig
+from ops.executive_os.remote_worker_gateway_config import (
+    FABRIC_BROKER_TARGET,
+    RemoteWorkerGatewayConfig,
+)
+from ops.executive_os.remote_assignment_control import seal_original_assignment
 
 
 class RemoteWorkerGateway:
@@ -30,9 +34,16 @@ class RemoteWorkerGateway:
 
     def __init__(self, config: RemoteWorkerGatewayConfig) -> None:
         self.config = config
+        client_arguments: dict[str, Any] = {}
+        if config.broker_target == FABRIC_BROKER_TARGET:
+            # Only the explicit Fabric target pins the broker peer uid; the
+            # socket path and identity always come from the config, never from
+            # a caller-supplied override.
+            client_arguments["expected_peer_uid"] = config.expected_broker_peer_uid
         self._broker_client = WorkerBrokerClient(
             config.broker_socket_path,
             timeout_seconds=config.request_timeout_seconds,
+            **client_arguments,
         )
         # Deliberate seam for hermetic tests; production uses the fixed AF_UNIX
         # WorkerBrokerClient above and never accepts a caller-supplied socket.
@@ -73,6 +84,18 @@ class RemoteWorkerGateway:
             timeout_seconds=self.config.request_timeout_seconds,
         )
 
+    async def _dispatch_authenticated(self, request: Mapping[str, Any]) -> dict[str, Any]:
+        if request["broker_operation"] == "assignment-seal":
+            binding = self.config.assignment_control
+            if binding is None:
+                raise ValueError("gateway assignment Control is not configured")
+            if self.config.broker_target == FABRIC_BROKER_TARGET:
+                return await seal_original_assignment(binding, request, self.broker_call,
+                                                      fabric_target=True)
+            return await seal_original_assignment(binding, request, self.broker_call)
+        return await self.broker_call(str(request["broker_operation"]),
+                                      dict(request["broker_request"]))
+
     async def _handle_connection(
         self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter
     ) -> None:
@@ -108,10 +131,7 @@ class RemoteWorkerGateway:
 
             try:
                 result = await asyncio.wait_for(
-                    self.broker_call(
-                        str(request["broker_operation"]),
-                        dict(request["broker_request"]),
-                    ),
+                    self._dispatch_authenticated(request),
                     timeout=self.config.request_timeout_seconds,
                 )
                 response = self._bound_response(

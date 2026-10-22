@@ -255,7 +255,7 @@ def inspect_artifact_evidence(directory: str) -> ArtifactEvidence:
             and claim.get("phase") == "claimed"
             and isinstance(claim_identity, dict)
             and claim_identity.get("action_id") == action_id
-            and purpose in {"text_patch", "closed_command"}
+            and purpose in {"text_patch", "closed_command", "browser_resource", "browser_action"}
             and result.get("schema") == "mastermind.workbench_action_result.v1"
             and result.get("durability") == "durable"
             and result.get("effect_state") in {"APPLIED", "NOT_APPLIED"}
@@ -272,7 +272,7 @@ def inspect_artifact_evidence(directory: str) -> ArtifactEvidence:
         if "process" in kinds:
             process = _bounded_json_file(root / f"{action_id}.process", 4096)
             qualified = qualified and (
-                purpose == "closed_command"
+                purpose in {"closed_command", "browser_resource"}
                 and process.get("schema") == "mastermind.workbench_command_process.v1"
                 and process.get("identity") == claim_identity
             )

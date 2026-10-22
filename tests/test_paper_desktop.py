@@ -65,6 +65,22 @@ class Fake:
         return {"content": [{"type": "text", "text": "ok"}]}
 
 
+class ReviewedCatalogFake(Fake):
+    def __init__(self, catalog=None):
+        super().__init__()
+        fixture = ROOT / "tests/fixtures/paper_desktop/1b9aff_full_catalog.json"
+        self.value = json.loads(fixture.read_text(encoding="utf-8")) if catalog is None else catalog
+        self.server = {"name": "paper-desktop", "version": "0.5.14"}
+        self.dispatched = []
+
+    def catalog(self):
+        return copy.deepcopy(self.value)
+
+    def call(self, name, arguments):
+        self.dispatched.append((name, copy.deepcopy(arguments)))
+        return super().call(name, arguments)
+
+
 class CoreTests(unittest.TestCase):
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
@@ -228,35 +244,39 @@ class CoreTests(unittest.TestCase):
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
                      "export_combined_pdf", "rename_pages", "list_files",
-                     "list_resources", "rename_resource"]:
+                     "delete_tokens"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
-            "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9",
+            "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db",
         )
 
     def test_reviewed_full_catalog_fixture_and_descriptor_mutations_fail_closed(self):
-        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "ac18857_full_catalog.json"
+        fixture_path = ROOT / "tests" / "fixtures" / "paper_desktop" / "1b9aff_full_catalog.json"
         catalog = json.loads(fixture_path.read_text(encoding="utf-8"))
         self.assertEqual(b.digest(catalog), b.SUPPORTED_CATALOG_SHA256)
         self.assertIn("write_html", catalog)
-        self.assertIn("rename_pages", catalog)
+        self.assertIn("arrange_pages", catalog)
+        self.assertIn("update_pages", catalog)
+        self.assertNotIn("rename_pages", catalog)
         self.assertNotIn("list_files", catalog)
 
-        class CatalogFake(Fake):
-            def __init__(self, value):
-                super().__init__()
-                self.value = value
-                self.server = {"name": "paper-desktop", "version": "0.5.14"}
-            def catalog(self):
-                return copy.deepcopy(self.value)
+        # Qualify the complete map using the production defaults, without a test pin override.
+        client = ReviewedCatalogFake(catalog)
+        result = b.execute(
+            "edit", tool="create_artboard", arguments={"fileId": "file-fixture"},
+            expected_snapshot=b.digest(client.info), operation_id="reviewed-v12-proof",
+            allow_write=True, client=client, lock_root=self.root,
+        )
+        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertEqual(client.calls.count("create_artboard"), 1)
 
-        for tool_name in ("write_html", "rename_pages"):
+        for tool_name in ("get_font_family_info", "get_jsx", "write_html", "update_pages"):
             with self.subTest(tool_name=tool_name):
                 mutated = copy.deepcopy(catalog)
                 mutated[tool_name]["description"] = mutated[tool_name].get("description", "") + " drift"
                 self.assertNotEqual(b.digest(mutated), b.SUPPORTED_CATALOG_SHA256)
-                client = CatalogFake(mutated)
+                client = ReviewedCatalogFake(mutated)
                 with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
                     self.call(
                         client=client,
@@ -266,6 +286,172 @@ class CoreTests(unittest.TestCase):
                         _catalog_pin=b.SUPPORTED_CATALOG_SHA256,
                     )
                 self.assertNotIn("create_artboard", client.calls)
+
+    def test_new_font_catalog_exact_delta_and_blocked_tools_preserved(self):
+        fixture_dir = ROOT / "tests" / "fixtures" / "paper_desktop"
+        previous = json.loads((fixture_dir / "ac18857_full_catalog.json").read_text(encoding="utf-8"))
+        current = json.loads((fixture_dir / "48b258_full_catalog.json").read_text(encoding="utf-8"))
+        self.assertEqual(set(previous), set(current))
+        self.assertEqual(len(current), 36)
+        self.assertEqual(
+            {name for name in previous if previous[name] != current[name]},
+            {"get_font_family_info"},
+        )
+        before = previous["get_font_family_info"]
+        after = current["get_font_family_info"]
+        self.assertEqual(before["inputSchema"]["required"], ["familyNames"])
+        self.assertEqual(after["inputSchema"]["required"], ["familyNames", "fileId"])
+        self.assertNotIn("fileId", before["inputSchema"]["properties"])
+        self.assertEqual(
+            after["inputSchema"]["properties"]["fileId"],
+            {"description": "The file ID that the tool should operate on.", "type": "string"},
+        )
+        self.assertEqual(
+            after["description"], before["description"].replace("available to the user", "available in a file"),
+        )
+        for name in ("delete_nodes", "export", "export_combined_pdf",
+                     "open_file", "rename_pages"):
+            with self.subTest(blocked_tool=name):
+                self.assertEqual(previous[name], current[name])
+                self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
+        # Do not allow catalog compatibility without the new required exact target.
+        drift = copy.deepcopy(current)
+        drift["get_font_family_info"]["inputSchema"]["required"].remove("fileId")
+        self.assertEqual(b.digest(current), "48b2587455d839a57b4b78f5cfdb2e75df8d530ad8059a3ad6af303c0d37224f")
+        self.assertNotEqual(b.digest(drift), b.digest(current))
+
+    def test_v12_full_catalog_exact_delta_preserves_existing_capability_boundary(self):
+        fixture_dir = ROOT / "tests/fixtures/paper_desktop"
+        previous = json.loads((fixture_dir / "48b258_full_catalog.json").read_text(encoding="utf-8"))
+        current = ReviewedCatalogFake().catalog()
+        self.assertEqual(len(current), 37)
+        self.assertEqual(set(current) - set(previous), {"arrange_pages", "update_pages"})
+        self.assertEqual(set(previous) - set(current), {"rename_pages"})
+        shared = set(previous) & set(current)
+        changed = {name for name in shared if previous[name] != current[name]}
+        self.assertEqual(changed, {"create_page", "get_basic_info", "get_jsx"})
+        self.assertEqual(len(shared - changed), 32)
+        blocked_survivors = shared - b.READ_TOOLS - b.EDIT_TOOLS - b.FILE_MANAGE_TOOLS
+        self.assertEqual(len(blocked_survivors), 4)
+        for name in blocked_survivors:
+            with self.subTest(blocked_tool=name):
+                self.assertEqual(previous[name], current[name])
+        self.assertEqual(set(current) - b.READ_TOOLS - b.EDIT_TOOLS - b.FILE_MANAGE_TOOLS,
+                         blocked_survivors)
+
+        for name, added in (("create_page", {"icon"}),
+                            ("get_jsx", {"includeNodeIds", "includeRootPositioning"})):
+            with self.subTest(tool=name):
+                old_schema = previous[name]["inputSchema"]
+                new_schema = copy.deepcopy(current[name]["inputSchema"])
+                self.assertEqual(set(new_schema["properties"]) - set(old_schema["properties"]), added)
+                self.assertEqual(new_schema["required"], old_schema["required"])
+                self.assertFalse(added & set(new_schema["required"]))
+                for field in added:
+                    prop = new_schema["properties"].pop(field)
+                    self.assertEqual(prop["type"], "string" if field == "icon" else "boolean")
+                self.assertEqual(new_schema, old_schema)
+        self.assertEqual(current["get_basic_info"]["inputSchema"],
+                         previous["get_basic_info"]["inputSchema"])
+        self.assertIn("divider", current["get_basic_info"]["description"])
+
+    def test_prior_v11_catalog_is_not_admitted_by_v12_write_pin(self):
+        fixture = ROOT / "tests/fixtures/paper_desktop/48b258_full_catalog.json"
+        client = ReviewedCatalogFake(json.loads(fixture.read_text(encoding="utf-8")))
+        with self.assertRaisesRegex(b.Refusal, "UPSTREAM_SCHEMA_UNREVIEWED"):
+            b.execute(
+                "edit", tool="create_artboard", arguments={"fileId": "file-fixture"},
+                expected_snapshot=b.digest(client.info), operation_id="old-catalog-proof",
+                allow_write=True, client=client, lock_root=self.root,
+            )
+        self.assertEqual(client.dispatched, [])
+
+    def test_divider_pages_preserve_exact_file_snapshot_and_explicit_page_target(self):
+        client = ReviewedCatalogFake()
+        client.info.update({"pageId": "page-real", "pages": [
+            {"id": "divider-first", "name": "Research", "type": "divider"},
+            {"id": "page-real", "name": "Design", "type": "page", "isActive": True},
+        ]})
+        before = b.snapshot(client, "file-fixture")
+        self.assertEqual(before["identity"], {"kind": "file-id", "id": "file-fixture"})
+        self.assertTrue(before["write_binding_ready"])
+        self.assertEqual(before["basic_info"], client.info)
+        self.assertEqual(before["snapshot_sha256"], b.digest(client.info))
+        arguments = {"fileId": "file-fixture", "pageId": "page-real"}
+        expected_arguments = copy.deepcopy(arguments)
+        result = b.execute(
+            "edit", tool="create_artboard", arguments=arguments,
+            expected_snapshot=before["snapshot_sha256"], operation_id="divider-binding-proof",
+            allow_write=True, client=client, lock_root=self.root,
+        )
+        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertIn(("create_artboard", expected_arguments), client.dispatched)
+        self.assertEqual(arguments, expected_arguments)
+        self.assertTrue(all(args == {"fileId": "file-fixture"}
+                            for name, args in client.dispatched if name == "get_basic_info"))
+
+        # Divider metadata is part of the complete guard; it is never selected as a page.
+        expected = result["after"]["snapshot_sha256"]
+        client.info["pages"][0]["name"] = "Changed research grouping"
+        client.dispatched.clear()
+        with self.assertRaisesRegex(b.Refusal, "DOCUMENT_CHANGED"):
+            b.execute(
+                "edit", tool="create_artboard", arguments=arguments,
+                expected_snapshot=expected, operation_id="divider-drift-proof",
+                allow_write=True, client=client, lock_root=self.root,
+            )
+        self.assertFalse(any(name == "create_artboard" for name, _ in client.dispatched))
+        self.assertEqual(arguments, expected_arguments)
+
+    def test_get_jsx_optional_booleans_pass_through_without_default_injection(self):
+        for options in ({}, {"includeNodeIds": False, "includeRootPositioning": True},
+                        {"includeNodeIds": True, "includeRootPositioning": False}):
+            with self.subTest(options=options):
+                client = ReviewedCatalogFake()
+                arguments = {"fileId": "file-fixture", "nodeId": "board-a", **options}
+                expected_arguments = copy.deepcopy(arguments)
+                result = b.execute(
+                    "read", tool="get_jsx", arguments=arguments,
+                    expected_snapshot=b.digest(client.info), client=client, lock_root=self.root,
+                )
+                self.assertEqual(result["state"], "OBSERVED")
+                self.assertEqual(result["result"], {"content": [{"type": "text", "text": "ok"}]})
+                self.assertEqual(client.dispatched, [
+                    ("get_basic_info", {"fileId": "file-fixture"}), ("get_jsx", expected_arguments),
+                ])
+                self.assertEqual(arguments, expected_arguments)
+
+    def test_create_page_optional_icon_remains_an_exact_target_guarded_edit(self):
+        client = ReviewedCatalogFake()
+        arguments = {"fileId": "file-fixture", "name": "Intelligence", "icon": "design"}
+        expected_arguments = copy.deepcopy(arguments)
+        params = dict(tool="create_page", arguments=arguments,
+                      expected_snapshot=b.digest(client.info), operation_id="page-icon-proof",
+                      client=client, lock_root=self.root)
+        with self.assertRaisesRegex(b.Refusal, "WRITE_DISABLED"):
+            b.execute("edit", **params)
+        self.assertEqual(client.dispatched, [])
+        result = b.execute("edit", allow_write=True, **params)
+        self.assertEqual(result["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertIn(("create_page", expected_arguments), client.dispatched)
+        self.assertEqual(arguments, expected_arguments)
+        self.assertEqual(result["before"]["identity"], {"kind": "file-id", "id": "file-fixture"})
+        self.assertEqual(result["before"]["snapshot_sha256"], params["expected_snapshot"])
+
+    def test_new_page_management_tools_refuse_before_initialize_or_dispatch(self):
+        for name in ("arrange_pages", "update_pages"):
+            for action in ("read",):
+                with self.subTest(tool=name, action=action):
+                    client = ReviewedCatalogFake()
+                    with patch.object(client, "initialize") as initialize:
+                        with self.assertRaisesRegex(b.Refusal, "TOOL_NOT_ALLOWED"):
+                            b.execute(
+                                action, tool=name, arguments={"fileId": "file-fixture"},
+                                expected_snapshot=b.digest(client.info), operation_id="blocked-page-proof",
+                                allow_write=True, client=client, lock_root=self.root,
+                            )
+                        initialize.assert_not_called()
+                    self.assertEqual(client.dispatched, [])
 
     def test_token_delete_refused_before_dispatch(self):
         self.client.info = {"fileId": "file-a", "artboards": []}

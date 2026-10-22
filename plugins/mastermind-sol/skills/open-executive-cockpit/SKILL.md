@@ -9,7 +9,14 @@ Use when the Chairman asks what is happening, what needs attention, which role o
 
 ## Mandatory current-source gate
 
-Read protected Mastermind `master`, record its exact commit, load `docs/sol_skills/INDEX.md`, `COLD_START.md`, and `RECONCILE_STATE.md` from that same exact commit, and verify compatibility before using packaged guidance. Run `bootstrap-mastermind` first. If compatibility cannot be established, modifying workflow is unavailable.
+Reuse the verified compatible mission pin. Read protected Mastermind `master` and bootstrap only
+at unfamiliar entry/recovery without a usable pin, or a material governing-procedure change. Load
+`docs/sol_skills/INDEX.md` and the needed companions from that same exact commit; never mix revisions.
+Action-specific references: `COLD_START.md`, `RECONCILE_STATE.md`.
+A worker return, tool call, new turn or phase completion alone does not restart bootstrap. If no
+verified compatible pin can be established, modifying workflow is unavailable for actions depending
+on that procedure. A failed refresh does not erase a usable pin for independent work whose governing
+constraints are unaffected. Apply gates only to the actual action under INDEX modification scoping.
 
 ## Required package reference
 

@@ -34,31 +34,65 @@ from integrations.executive_mcp.web_ceo_v3 import WEB_CEO_V3_PROFILE
 from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
 
 
-@pytest.mark.parametrize("profile", ["legacy", WEB_CEO_V3_PROFILE, PERSONAL_READ_PROFILE])
+@pytest.mark.parametrize("profile", ["legacy", PERSONAL_READ_PROFILE])
 def test_mission_activation_cannot_replace_a_different_ceo_profile(tmp_path, profile):
     _, coo, _, _ = helpers.setup(tmp_path)
     raw = install.base_document(); raw.update(coo=coo, executive_mcp_profile=profile)
     with pytest.raises(ValueError): entry.validate_document(raw)
 
 
+@pytest.mark.parametrize("profile", [WEB_CEO_V2_PROFILE, WEB_CEO_V3_PROFILE])
+def test_mission_activation_accepts_supported_web_ceo_profiles(tmp_path, profile):
+    _, coo, _, _ = helpers.setup(tmp_path)
+    raw = install.base_document(); raw.update(coo=coo, executive_mcp_profile=profile)
+    assert entry.validate_document(raw) == raw
+    source = tmp_path / raw["release_sha"]
+    settings = AppSettings(policies=load_app_policies(raw["policies"]), mastermind_root=source,
+        macro_root_flag=None, environ={}, ceo_ingress_socket_path=raw["ceo_ingress_socket_path"],
+        read_from_ceo_ingress=True)
+    selected = entry.build_installed_coo_settings(raw, source, tmp_path / "mcp.json", settings)
+    assert isinstance(selected.authority_provider.__self__, CooFactsClient)
+    assert selected.executive is settings
+
+
 @pytest.mark.parametrize("source_available", [True, False])
 def test_control_factory_wires_existing_workspace_into_guard(tmp_path, monkeypatch, source_available):
+    import os
     from scripts import executive_os_phase1c as cli
     from tests.test_c1_ceo_ingress_composition import _raw
     from tests.test_workspace_read_app import _workspace_policy
+    from tests.executive_installed_control_fixture import unix_listener
     from control_plane import executive_worker_broker, workspace_source_join
+    import control_plane.workspace_control_room_lifecycle as lifecycle_mod
     from control_plane.coo_principal_host import CooHostProvider
     raw = _raw(tmp_path)
     host, _, _, _ = helpers.setup(tmp_path)
     authority = {"schema": "mastermind.workspace_acquisition_bindings.v1", "profiles": {
         key: {"enabled": False, "binding": None} for key in ("web", "mac")}}
     raw.update(ceo_ingress_app_peer_uid=458, ceo_ingress_app_armed=False,
-        ceo_ingress_app_macro_root=tmp_path / "macro", workspace_control_room={"port": 8787},
+        ceo_ingress_app_macro_root=tmp_path / "macro",
+        workspace_control_room={"transport": "unix",
+                                "socket_path": "/var/run/mastermind-executive/workspace-control-room.sock",
+                                "launchd_socket_name": "WorkspaceControlRoom",
+                                "allowed_peer_uids": [raw["control_uid"]]},
         workspace_acquisition={}, workspace_resource_policy=json.loads(json.dumps(dataclasses.asdict(_workspace_policy()))),
         ceo_ingress_app_boot_python=tmp_path / "sealed-python", executive_mcp_profile=WEB_CEO_V2_PROFILE,
         coo_principal_armed=True)
+    from tests.executive_installed_control_fixture import spawn_workspace_room_listener
+    room_listener, room_path = spawn_workspace_room_listener(monkeypatch)
+    raw["workspace_control_room"] = {"transport": "unix",
+                                       "socket_path": room_path,
+                                       "launchd_socket_name": "WorkspaceControlRoom",
+                                       "allowed_peer_uids": [raw["control_uid"]]}
+    monkeypatch.setattr(lifecycle_mod, "_TRUSTED_SOCKET_PARENT_UID", os.geteuid())
     monkeypatch.setattr(cli, "_attest_app_boot_runtime", lambda p: p)
-    monkeypatch.setattr(cli, "activate_launchd_socket", lambda name: object())
+    fake_sockets = {"WorkspaceControlRoom": room_listener}
+    def activated(name):
+        if name not in fake_sockets:
+            listener, _path = unix_listener()
+            fake_sockets[name] = listener
+        return fake_sockets[name]
+    monkeypatch.setattr(cli, "activate_launchd_socket", activated)
     monkeypatch.setattr(executive_worker_broker, "WorkerBrokerClient", lambda *a, **k: object())
     captured = {}
     def composer(**kwargs):
@@ -69,21 +103,25 @@ def test_control_factory_wires_existing_workspace_into_guard(tmp_path, monkeypat
         def __init__(self, config, **kwargs):
             self.kwargs = kwargs
     monkeypatch.setattr(cli, "ExecutiveControlService", Service)
-    if not source_available:
-        with pytest.raises(cli.ServiceError, match="sealed source"):
-            cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority)
-        return
-    service = cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority,
-        coo_source=host.source)
-    binding = service.kwargs["ceo_ingress_app_binding"]
-    assert binding.armed is False and binding.principal_admission_armed is True
-    actual_runtime = object()
-    service._require_runtime = lambda: actual_runtime
-    service._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: actual)
-    provider = binding.principal_facts_factory(actual_runtime)
-    assert type(provider) is CooHostProvider and provider.source is host.source
-    assert provider.workspace.runtime is actual_runtime
-    assert callable(binding.principal_admission_guard)
+    try:
+        if not source_available:
+            with pytest.raises(cli.ServiceError, match="sealed source"):
+                cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority)
+            return
+        service = cli._service_from_config(raw, workspace_acquisition_loader=lambda: authority,
+            coo_source=host.source)
+        binding = service.kwargs["ceo_ingress_app_binding"]
+        assert binding.armed is False and binding.principal_admission_armed is True
+        actual_runtime = object()
+        service._require_runtime = lambda: actual_runtime
+        service._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: actual)
+        provider = binding.principal_facts_factory(actual_runtime)
+        assert type(provider) is CooHostProvider and provider.source is host.source
+        assert provider.workspace.runtime is actual_runtime
+        assert callable(binding.principal_admission_guard)
+    finally:
+        for listener in fake_sockets.values():
+            listener.close()
 
 
 def test_control_policy_and_grant_projection_are_stdlib_only(tmp_path):
@@ -98,6 +136,7 @@ def test_control_policy_and_grant_projection_are_stdlib_only(tmp_path):
         "from ops.executive_os.coo_principal_host import CooInstalledSource;"
         "from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry;"
         "raw=json.loads(sys.stdin.read());e.validate_document(raw);"
+        "assert 'integrations.mastermind_executive_app.os_commission_client' not in sys.modules;"
         "source=CooInstalledSource(lambda:raw['coo'],lambda:ExecutionCapabilityRegistry.load("
         + repr(str(registry)) + ",source_root=" + repr(root) + "));"
         "source.snapshot('WS:EXECUTIVE-CAPACITY-FABRIC');"
