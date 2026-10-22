@@ -56,6 +56,13 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 | 11:18:03 | #1703 merge | merge queue | — | — | QUEUED (`AWAITING_CHECKS`, position 5) | head `a641e69a45f40114b3ca70233c41cff5f283b1b6`, 9/9 checks green | RESEARCH merge authority: fixtures, own family, SR-1 applied, independent PASS (R-1703-r2) |
 | 11:20 | cleanup | ubuntu2, ubuntu3 | — | ls4-journey, r1704, ls5-modules, r1703 | CLEANED | — | worktrees removed; `~/lanes/tmp` capture and case-row copies deleted; `git worktree list` verified |
 | 11:25 | ledger SR-1 pass | m2 | docs | — | DONE | `/Volumes/Mastermind/evidence/pbr/research-reviews-originals-20261022T1125Z/` (SHA256SUMS, 0444) | verbatim PM prose in `packets/L-S3-factspec*` and `reviews/R-1701.REVIEW.md`, `R-1703.REVIEW.md` replaced by paraphrase or field references. Remaining 30-char matches are identifiers only (`lesson.v1.US_ONLY.cash_opportunity_c…`) |
+| 11:26 | R-1701 r3 review | ubuntu1 / glm-5.3 | review · C2 | pbr-res-r1701r3-g | DELIVERED · **PASS** | `reviews/R-1701-r3.REVIEW.md` (sha256 `a7b72a74…`) | D1–D4 pass, no findings. O1: one dateless MU top-level falsifier digest. O2: the 688062 original states a percentage, not a fraction (already ruled acceptable). Verified head `a654035` |
+| 11:27:19 | #1701 auto-merge | GitHub | — | — | ARMED (`--match-head-commit a654035`) | — | RESEARCH merge authority: spec + fixtures, own family, no live call path, independent PASS |
+| 11:53 | R-1735 review | ubuntu0 / qwen3.8-max | review · C2 | pbr-res-r1735 | DELIVERED · **PASS**, 6 MINOR | `reviews/R-1735.REVIEW.md` (sha256 `c95981a8…`) | head `0d8f0748`, base `0b960590`, capture MANIFEST verified, capture read-only. 90 passed / 3 skipped plain; 93 passed with `PBR_CAPTURE_DIR`; blast radius 196 passed. F1 rounded capture-size numerals in two test comments; F2 an invariant comment is off by the 2 list-framing bytes; F3 the worst-case sum is not enumerated for two raw-object terms; F4 the OVERSIZE receipt drops `rows_total`/`omitted_rows`; F5 a 90%-omitted tail still reads COMPLETE in the compact manifest; F6 a weak set-inequality assertion in the china test |
+| 11:55 | #1735 checks | GitHub | — | — | `test` pass; Vercel fail | — | Vercel also fails on the base `0b960590` (#673 head, where `test` fails too): pre-existing and unrelated. Returned to the seat for the SR-4 merge as-is at `0d8f0748`. Fixing the MINORs would void the PASS head, so F1/F2/F4 become a follow-up after the merge |
+| 11:55 | cleanup | ubuntu0, ubuntu1 | — | r1735, r1701r2, r1701r3-g | CLEANED | — | worktrees and `~/lanes/tmp` dirs removed, including the staged capture files; ubuntu2/3 re-verified at 0 worktrees / 0 tmp |
+| 11:55:52 | merge state | GitHub | — | — | #1701 auto-merge armed, `pytest shard 2` failed, `BEHIND` master | — | #1701 failure diagnosis below |
+| 11:56:07 | #1703 merge | merge queue | — | — | **MERGED** | merge commit `f3435a69d94569f8489bfb8db403ce1515d018d9` | W6 fixtures, SR-1 shape, merged by RESEARCH under its fixtures authority |
 
 ## Findings from the capture (facts, not verdicts)
 
@@ -102,13 +109,19 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 
 | id | ruling | RESEARCH action |
 |---|---|---|
-| SR-1 | Option (b) in-repo: typed, numeric and case fields stay; every narrative field becomes sha256 + length. Option (c) off-repo: verbatim rows only under `/Volumes/Mastermind/evidence/pbr/` behind `PBR_DECISION_CASE_INPUT_DIR`; env-gated tests skip with a reason | #1703 amended (`a641e69a`, R-1703-r2 PASS, queued). RESEARCH extended SR-1 to all of its artifacts in this public repo: #1701 spec, packets, reviews |
+| SR-1 | Option (b) in-repo: typed, numeric and case fields stay; every narrative field becomes sha256 + length. Option (c) off-repo: verbatim rows only under `/Volumes/Mastermind/evidence/pbr/` behind `PBR_DECISION_CASE_INPUT_DIR`; env-gated tests skip with a reason | #1703 amended (`a641e69a`, R-1703-r2 PASS) and merged as `f3435a69`. RESEARCH extended SR-1 to all of its artifacts in this public repo: #1701 spec, packets, reviews |
 | SR-2 | Adopt #1357's stricter clock set; `CALLER_SUPPLIED` is not a qualifying clock; add a `MACRO_VENDORED` rights class | not yet built: next bounded lane, stacked on #673 |
 | SR-3 | `brain/decision_research*` goes to RESEARCH in a separate wave, after S0 seals the real book | deferred |
-| SR-4 | The seat merges the L-S4 repair into the #673 carrier after an independent PASS | #1735 opened; R-1735 running |
+| SR-4 | The seat merges the L-S4 repair into the #673 carrier after an independent PASS | #1735 at `0d8f0748`: `test` green, R-1735 PASS (6 MINOR). Returned to the seat for the merge |
 | CR-R4 | RESEARCH owns `bot/decision_rows.py` for additive, optional identity fields only (context digest, amendment link); existing readers' semantics never change | no change made in wave 1 |
 | CR-R1 | Met on the fill side by ECON (fills carry `decision_id` / `submission_sha256`); `settlement_fill_ids` on the decision row becomes a derived projection, not a second writer | closed |
 | Findings 7, 8 | Accepted as W5 facts: historical reconstruction is impossible, and #673 cannot seal the real book. Prospective retention (CR-R3) is the only path, reserved for wave 2 | CR-R3 deferred to wave 2 |
+
+## Wave-2 P0 recorded from the seat (no wave-1 action)
+
+| id | ruling | RESEARCH action (wave 2) |
+|---|---|---|
+| W2-P0 supersedes | RUNTIME proved that the US manager's 2026-10-22 02:20Z and 06:20Z runs share asof 10-22, and `replace_for_asof` overwrote the 02:20 decision row; that run survives only in `run_events` and its run log. Seat ruling: correction-as-new-record. A later run on the same asof appends a new row carrying `supersedes=<prior decision_id>` and never overwrites | RESEARCH owns the row semantics in `bot/decision_rows.py` (CR-R4) as a wave-2 P0, with a regression test built from RUNTIME's captured `run_events`; RUNTIME passes the run identity. Precondition: this changes the write semantics of `replace_for_asof`, beyond CR-R4's additive-field grant. Before building, census every reader that assumes one decision row per asof (snapshot, forward evaluation, PRODUCT surfaces) and give each an explicit latest-non-superseded selection, so no existing reader's meaning changes silently |
 
 ## Public-history exposure (seat or GitHub decision; RESEARCH cannot purge)
 
