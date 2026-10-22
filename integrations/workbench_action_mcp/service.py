@@ -2,7 +2,8 @@
 
 This service composes the existing Business authentication, durable auth audit,
 shared bounded synchronous executor, selected-project Workbench Action runtime,
-and FastMCP server. It creates no credential/account, project registry, generic
+and FastMCP server. Explicit v5 enrollment enables bounded outgoing-token
+maintenance; it creates no account, grant, project registry, generic
 shell, Git publication path, Executive lifecycle, provider session, retry plane,
 or browser/desktop authority.
 
@@ -44,6 +45,7 @@ SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
 SERVICE_SCHEMA_V2 = "mastermind.workbench_action_service.v2"
 SERVICE_SCHEMA_V3 = "mastermind.workbench_action_service.v3"
 SERVICE_SCHEMA_V4 = "mastermind.workbench_action_service.v4"
+SERVICE_SCHEMA_V5 = "mastermind.workbench_action_service.v5"
 BROWSER_ACTIVATION_INTERVAL_SECONDS = 10.0
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
@@ -77,6 +79,7 @@ _CONFIG_KEYS_V3 = _CONFIG_KEYS_V2 | {
     "browser_fabric_policy_file", "browser_fabric_audit_directory"
 }
 _CONFIG_KEYS_V4 = _CONFIG_KEYS_V3 | {"browser_fabric_routes_file"}
+_CONFIG_KEYS_V5 = _CONFIG_KEYS_V4 | {"browser_fabric_credentials_file"}
 _BROWSER_KEYS = frozenset(
     {
         "source_root",
@@ -121,6 +124,7 @@ class ServiceConfigurationError(RuntimeError):
         {
             "SERVICE_CONFIGURATION_REFUSED",
             "SERVICE_BIND_REFUSED",
+            "SERVICE_RUNTIME_BINDING_REFUSED",
             "SERVICE_STARTUP_CLEANUP_UNCERTAIN",
             "BROWSER_ACTIVATION_BUDGET_TOO_SMALL",
         }
@@ -190,6 +194,7 @@ class ServiceConfig:
     browser_fabric_policy_file: str | None = None
     browser_fabric_audit_directory: str | None = None
     browser_fabric_routes_file: str | None = None
+    browser_fabric_credentials_file: str | None = None
 
     @property
     def allowed_hosts(self) -> tuple[str, ...]:
@@ -209,6 +214,8 @@ class ServiceState:
     stopping: bool = False
     shutdown_outcome: ShutdownOutcome | None = None
     browser_activation: tuple[dict[str, str], ...] = ()
+    acquisition_sha256: str | None = None
+    credential_maintenance: tuple[dict[str, str], ...] = ()
 
 
 def _refuse(code: str = "SERVICE_CONFIGURATION_REFUSED") -> None:
@@ -373,6 +380,7 @@ def parse_service_config(value: object) -> ServiceConfig:
     browser_fabric_policy_file = None
     browser_fabric_audit_directory = None
     browser_fabric_routes_file = None
+    browser_fabric_credentials_file = None
     if schema == SERVICE_SCHEMA:
         if set(value) != _CONFIG_KEYS:
             _refuse()
@@ -381,8 +389,9 @@ def parse_service_config(value: object) -> ServiceConfig:
         if set(value) != _CONFIG_KEYS_V2:
             _refuse()
         browser = parse_browser_service_config(value.get("browser"))
-    elif schema in {SERVICE_SCHEMA_V3, SERVICE_SCHEMA_V4}:
-        if set(value) != (_CONFIG_KEYS_V4 if schema == SERVICE_SCHEMA_V4 else _CONFIG_KEYS_V3):
+    elif schema in {SERVICE_SCHEMA_V3, SERVICE_SCHEMA_V4, SERVICE_SCHEMA_V5}:
+        keys = {SERVICE_SCHEMA_V3: _CONFIG_KEYS_V3, SERVICE_SCHEMA_V4: _CONFIG_KEYS_V4, SERVICE_SCHEMA_V5: _CONFIG_KEYS_V5}
+        if set(value) != keys[schema]:
             _refuse()
         selected = value.get("browser")
         browser = (parse_link_browser_service_config(selected)
@@ -396,10 +405,12 @@ def parse_service_config(value: object) -> ServiceConfig:
         )
         if browser_fabric_audit_directory == value.get("audit_directory"):
             _refuse()
-        if schema == SERVICE_SCHEMA_V4:
+        if schema in {SERVICE_SCHEMA_V4, SERVICE_SCHEMA_V5}:
             if type(browser) is not BrowserLinkServiceConfig:
                 _refuse()
             browser_fabric_routes_file = _absolute_path(value.get("browser_fabric_routes_file"))
+        if schema == SERVICE_SCHEMA_V5:
+            browser_fabric_credentials_file = _absolute_path(value.get("browser_fabric_credentials_file"))
     else:
         _refuse()
     if value.get("bind_host") != "127.0.0.1":
@@ -430,6 +441,7 @@ def parse_service_config(value: object) -> ServiceConfig:
         browser_fabric_policy_file=browser_fabric_policy_file,
         browser_fabric_audit_directory=browser_fabric_audit_directory,
         browser_fabric_routes_file=browser_fabric_routes_file,
+        browser_fabric_credentials_file=browser_fabric_credentials_file,
     )
 
 
@@ -766,8 +778,10 @@ def _call_receipt_sink(event: object) -> None:
         return
 
 
-async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
+async def create_runtime(config: ServiceConfig, *, acquisition=None) -> WorkbenchActionRuntime:
     policy_document = _secure_json(config.policy_file, maximum=MAX_POLICY_BYTES)
+    if acquisition is not None:
+        acquisition.document("policy", config.policy_file, policy_document)
     try:
         policy = load_resource_policy(policy_document)
     except Exception:
@@ -781,6 +795,8 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
     )
     authenticator = JwtAuthenticator(policy=policy, jwks_cache=cache)
     action_token_key = _secure_action_key(config.action_key_file)
+    if acquisition is not None:
+        acquisition.action_key(config.action_key_file, action_token_key)
     project_fd = -1
     audit_fd = -1
     artifact_fd = -1
@@ -791,6 +807,10 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
         project_fd = _open_safe_directory(config.project_root)
         audit_fd = _open_safe_directory(config.audit_directory)
         artifact_fd = _open_safe_directory(config.artifact_directory)
+        if acquisition is not None:
+            for name, descriptor in (("project_root", project_fd), ("audit_directory", audit_fd),
+                                     ("artifact_directory", artifact_fd)):
+                acquisition.directory(name, getattr(config, name), descriptor)
         runtime = WorkbenchActionRuntime.open(
             authenticator=authenticator,
             policy=policy,
@@ -852,6 +872,7 @@ async def create_runtime(config: ServiceConfig) -> WorkbenchActionRuntime:
 def create_browser_sibling(
     runtime: WorkbenchActionRuntime,
     config: ServiceConfig,
+    *, acquisition=None,
 ):
     """Compose Browser from the exact existing Workbench runtime services.
 
@@ -870,8 +891,11 @@ def create_browser_sibling(
         if type(selected) is BrowserLinkServiceConfig:
             from integrations.mastermind_browser_link.profile_grant import parse_profile_grants
             from integrations.mastermind_browser_link.tool_contract import tool_catalog
+            profile_document = _secure_json(selected.profiles_file, maximum=256 * 1024)
+            if acquisition is not None:
+                acquisition.document("profiles", selected.profiles_file, profile_document)
             grants = parse_profile_grants(
-                _secure_json(selected.profiles_file, maximum=256 * 1024),
+                profile_document,
                 lease=config.lease, host_binding=runtime.services.host_binding,
                 artifact_store=runtime.services.artifact_store,
             )
@@ -920,7 +944,8 @@ def create_browser_sibling(
 class _BrowserAuthAudit:
     """Service lifespan binding for the canonical policy-specific audit sink."""
 
-    def __init__(self, directory: str, policy_id: str) -> None:
+    def __init__(self, directory: str, policy_id: str, *, acquisition=None) -> None:
+        self._acquisition = acquisition
         self._directory = directory
         self._policy_id = policy_id
         self._sink = None
@@ -934,6 +959,8 @@ class _BrowserAuthAudit:
             _refuse()
         descriptor = _open_safe_directory(self._directory)
         try:
+            if self._acquisition is not None:
+                self._acquisition.directory("browser_fabric_audit_directory", self._directory, descriptor)
             self._sink = DurableAuthAuditSink.open(
                 descriptor, policy_id=self._policy_id
             )
@@ -972,6 +999,7 @@ class _BrowserAuthAudit:
 def create_browser_fabric_auth(
     runtime: WorkbenchActionRuntime,
     config: ServiceConfig,
+    *, acquisition=None,
 ):
     """Load an explicit Browser policy through the existing Business auth owner.
 
@@ -982,7 +1010,7 @@ def create_browser_fabric_auth(
     if config.browser_fabric_policy_file is None:
         return None
     if (
-        config.schema not in {SERVICE_SCHEMA_V3, SERVICE_SCHEMA_V4}
+        config.schema not in {SERVICE_SCHEMA_V3, SERVICE_SCHEMA_V4, SERVICE_SCHEMA_V5}
         or config.browser is None
         or config.browser_fabric_audit_directory is None
     ):
@@ -993,9 +1021,10 @@ def create_browser_fabric_auth(
             build_browser_http_auth,
         )
 
-        policy = load_resource_policy(
-            _secure_json(config.browser_fabric_policy_file, maximum=MAX_POLICY_BYTES)
-        )
+        policy_document = _secure_json(config.browser_fabric_policy_file, maximum=MAX_POLICY_BYTES)
+        if acquisition is not None:
+            acquisition.document("browser_policy", config.browser_fabric_policy_file, policy_document)
+        policy = load_resource_policy(policy_document)
         if (
             policy.required_scopes != (BROWSER_CONTROL_SCOPE,)
             or policy.resource == runtime.services.policy.resource
@@ -1018,7 +1047,7 @@ def create_browser_fabric_auth(
             policy=policy,
             now=runtime.services.now,
             audit_sink=_BrowserAuthAudit(
-                config.browser_fabric_audit_directory, policy.policy_id
+                config.browser_fabric_audit_directory, policy.policy_id, acquisition=acquisition
             ),
         )
     except ServiceConfigurationError:
@@ -1034,6 +1063,7 @@ def create_browser_fabric_sibling(
     *,
     authenticate,
     auth_challenge: str,
+    acquisition=None,
 ):
     """Compose the high-level Browser MCP over the same Workbench deployment.
 
@@ -1062,12 +1092,15 @@ def create_browser_fabric_sibling(
             create_workbench_browser_fabric_http_app,
         )
 
-        if config.schema == SERVICE_SCHEMA_V4:
+        if config.schema in {SERVICE_SCHEMA_V4, SERVICE_SCHEMA_V5}:
             from integrations.mastermind_browser_plugin.workbench_service import create_workbench_browser_estate_http_app
             from integrations.mastermind_browser_plugin.workbench_transport import parse_host_routes
             if type(config.browser) is not BrowserLinkServiceConfig or config.browser_fabric_routes_file is None:
                 _refuse()
-            routes = parse_host_routes(_secure_json(config.browser_fabric_routes_file, maximum=256 * 1024))
+            routes_document = _secure_json(config.browser_fabric_routes_file, maximum=256 * 1024)
+            if acquisition is not None:
+                acquisition.document("routes", config.browser_fabric_routes_file, routes_document)
+            routes = parse_host_routes(routes_document)
             return create_workbench_browser_estate_http_app(
                 deployment=browser_deployment, local_host_ref=runtime.services.host_binding.host_id,
                 routes=routes, action_token_key=runtime.services.action_token_key,
@@ -1093,6 +1126,32 @@ def create_browser_fabric_sibling(
         raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
 
 
+def create_browser_credential_publisher(runtime, config, browser_fabric, *, acquisition=None):
+    if config.browser_fabric_credentials_file is None:
+        return None
+    if config.schema != SERVICE_SCHEMA_V5 or browser_fabric is None:
+        _refuse()
+    try:
+        from integrations.mastermind_browser_plugin.workbench_credentials import (
+            WorkbenchCredentialPublisher, parse_enrollment,
+        )
+        from integrations.mastermind_browser_plugin.workbench_service import browser_broker_caller_from_lease
+        document = _secure_json(config.browser_fabric_credentials_file, maximum=256 * 1024, owner_only=True)
+        if acquisition is not None:
+            acquisition.document("credentials", config.browser_fabric_credentials_file, document)
+        enrollments = parse_enrollment(
+            document, routes=tuple(transport.route for transport in browser_fabric.composition.transports),
+            enrollment_file=config.browser_fabric_credentials_file)
+        local_caller = browser_broker_caller_from_lease(config.lease)
+        return WorkbenchCredentialPublisher(
+            enrollments=enrollments, now=runtime.services.now, monotonic=time.monotonic,
+            ensure_current=lambda: runtime.services.resolve_binding(local_caller, config.lease.project_ref) is not None)
+    except ServiceConfigurationError:
+        raise
+    except Exception as error:
+        raise ServiceConfigurationError("SERVICE_CONFIGURATION_REFUSED") from error
+
+
 def build_service_app(
     runtime: WorkbenchActionRuntime,
     config: ServiceConfig,
@@ -1100,6 +1159,7 @@ def build_service_app(
     *,
     browser_fabric_authenticate=None,
     browser_fabric_auth_challenge: str | None = None,
+    acquisition=None,
 ):
     from starlette.applications import Starlette
     from starlette.responses import JSONResponse, PlainTextResponse
@@ -1110,16 +1170,17 @@ def build_service_app(
     ):
         _refuse()
 
+    acquisition_options = {} if acquisition is None else {"acquisition": acquisition}
     configured_auth = None
     if config.browser_fabric_policy_file is not None:
         if browser_fabric_authenticate is not None:
             _refuse()
-        configured_auth = create_browser_fabric_auth(runtime, config)
+        configured_auth = create_browser_fabric_auth(runtime, config, **acquisition_options)
         browser_fabric_authenticate = configured_auth.authenticate
         browser_fabric_auth_challenge = configured_auth.auth_challenge
 
     inner = runtime.server.streamable_http_app()
-    browser_deployment = create_browser_sibling(runtime, config)
+    browser_deployment = create_browser_sibling(runtime, config, **acquisition_options)
     browser_inner = (
         browser_deployment.server.streamable_http_app()
         if browser_deployment is not None
@@ -1136,15 +1197,33 @@ def build_service_app(
             browser_deployment,
             authenticate=browser_fabric_authenticate,
             auth_challenge=browser_fabric_auth_challenge,
+            **acquisition_options,
         )
         browser_fabric_app = browser_fabric.app
+    credential_publisher = create_browser_credential_publisher(
+        runtime, config, browser_fabric, **acquisition_options)
 
     async def health(_request):
         return PlainTextResponse("OK\n", status_code=200)
 
     async def ready(_request):
         audit_ready = configured_auth is None or configured_auth.audit_sink.healthy
-        if audit_ready and is_ready(runtime, config, state):
+        runtime_ready = audit_ready and is_ready(runtime, config, state)
+        from .readiness import MEDIA_TYPE, snapshot
+        if _request.headers.get("accept") == MEDIA_TYPE:
+            if (_request.client is None or _request.client.host not in {"127.0.0.1", "::1"}
+                    or list(_request.query_params.keys()) != ["nonce"]
+                    or len(_request.query_params.getlist("nonce")) != 1):
+                return PlainTextResponse("READINESS_REQUEST_REFUSED\n", status_code=400)
+            try:
+                observed = snapshot(runtime, config, ready=runtime_ready,
+                                    nonce=_request.query_params["nonce"],
+                                    acquisition_sha256=state.acquisition_sha256)
+            except Exception:
+                return PlainTextResponse("READINESS_OBSERVATION_UNAVAILABLE\n", status_code=503)
+            return JSONResponse(observed, status_code=200 if runtime_ready else 503,
+                                headers={"Cache-Control": "no-store"})
+        if runtime_ready:
             return PlainTextResponse("READY\n", status_code=200)
         return PlainTextResponse("NOT_READY\n", status_code=503)
 
@@ -1160,13 +1239,18 @@ def build_service_app(
                         browser_deployment.server.session_manager.run()
                     )
                 if browser_fabric_app is not None:
-                    if config.schema == SERVICE_SCHEMA_V4:
+                    if config.schema in {SERVICE_SCHEMA_V4, SERVICE_SCHEMA_V5}:
                         await stack.enter_async_context(browser_fabric.composition.opened())
                     await stack.enter_async_context(
                         browser_fabric_app.router.lifespan_context(
                             browser_fabric_app
                         )
                     )
+                if acquisition is not None:
+                    # Every configured authority document and durable directory
+                    # has been checked from the exact consumed object/descriptor.
+                    # No configured profile may launch before this completes.
+                    state.acquisition_sha256 = acquisition.complete(config)
                 activation_task = None
                 if type(config.browser) is BrowserLinkServiceConfig and browser_deployment is not None:
                     from integrations.mastermind_browser_plugin.workbench_service import browser_broker_caller_from_lease
@@ -1174,6 +1258,8 @@ def build_service_app(
                     async def observe_configured_profiles():
                         state.browser_activation = await browser_deployment.activate_configured_profiles(
                             broker_caller, config.lease.project_ref)
+                        if credential_publisher is not None:
+                            state.credential_maintenance = await credential_publisher.refresh()
                     await observe_configured_profiles()
                     async def maintain_configured_profiles():
                         while True:
@@ -1239,8 +1325,9 @@ def build_service_app(
     return Starlette(routes=routes, lifespan=lifespan)
 
 
-async def run_service(config: ServiceConfig) -> int:
-    runtime = await create_runtime(config)
+async def run_service(config: ServiceConfig, *, acquisition=None) -> int:
+    acquisition_options = {} if acquisition is None else {"acquisition": acquisition}
+    runtime = await create_runtime(config, **acquisition_options)
     state = ServiceState()
     sock: socket.socket | None = None
     server = None
@@ -1256,7 +1343,7 @@ async def run_service(config: ServiceConfig) -> int:
                 return shutdown_exit_code(state.shutdown_outcome)
             raise
         state.socket_owned = True
-        app = build_service_app(runtime, config, state)
+        app = build_service_app(runtime, config, state, **acquisition_options)
         import uvicorn
 
         class _ServiceServer(uvicorn.Server):
@@ -1325,10 +1412,27 @@ async def run_service(config: ServiceConfig) -> int:
     return shutdown_exit_code(state.shutdown_outcome)
 
 
-def run_configured_service(path: str) -> int:
+def run_configured_service(
+    path: str, *, expected_browser_source: str | None = None,
+    expected_browser_python: str | None = None,
+    expected_acquisition: dict | None = None,
+) -> int:
     try:
+        if (expected_browser_source is None) != (expected_browser_python is None):
+            _refuse("SERVICE_RUNTIME_BINDING_REFUSED")
         config = load_service_config(path)
-        return asyncio.run(run_service(config))
+        if expected_browser_source is not None and (
+                type(config.browser) is not BrowserLinkServiceConfig
+                or config.browser.source_root != expected_browser_source
+                or config.browser.python_executable != expected_browser_python):
+            _refuse("SERVICE_RUNTIME_BINDING_REFUSED")
+        if expected_acquisition is None:
+            return asyncio.run(run_service(config))
+        if expected_browser_source is None:
+            _refuse("SERVICE_RUNTIME_BINDING_REFUSED")
+        from .acquisition import AcquisitionReceipt
+        acquisition = AcquisitionReceipt(expected_acquisition)
+        return asyncio.run(run_service(config, acquisition=acquisition))
     except ServiceConfigurationError as error:
         print(error.code, file=sys.stderr, flush=True)
         return 5 if error.code == "SERVICE_STARTUP_CLEANUP_UNCERTAIN" else 2

@@ -1759,7 +1759,8 @@ class TestCLI(unittest.TestCase):
         sub = next(a for a in parser._actions if hasattr(a, "choices") and a.choices)
         self.assertEqual(
             set(sub.choices),
-            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "seal-runtime", "start", "status", "stop"},
+            {"stage", "upgrade", "paper-runtime-upgrade", "fabric-backend-release", "seal-runtime", "start", "status", "stop",
+             "workbench-preview", "workbench-stage", "workbench-start", "workbench-inspect", "workbench-stop"},
         )
 
     def test_stage_requires_all_args(self):

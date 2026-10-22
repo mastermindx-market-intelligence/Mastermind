@@ -700,3 +700,46 @@ def test_reconcile_refuses_an_unavailable_store_writer(tmp_path: Path, monkeypat
     finally:
         os.close(fd)
         shutil.rmtree(relay_root, ignore_errors=True)
+
+
+@pytest.mark.parametrize("case", ["qualified", "legacy", "namespace", "verifier", "interpreter"])
+def test_root_owned_source_delegates_only_exact_link_runtime(tmp_path, monkeypatch, case):
+    from integrations.workbench_browser_mcp import resource_port as port
+    from ops.executive_os import company_mcp_edge as runtime_owner
+    from ops.executive_os import workbench_mcp_runtime as runtime
+    system = tmp_path / "system"
+    source = system / ("other" if case == "namespace" else "releases") / ("a" * 40)
+    source.mkdir(parents=True)
+    relay = _private(tmp_path / "relay")
+    output = _private(tmp_path / "output")
+    monkeypatch.setattr(runtime_owner, "SYSTEM", system)
+    monkeypatch.setattr(port.os, "geteuid", lambda: 501)
+    original = Path.lstat
+    def metadata(path, *args, **kwargs):
+        values = list(original(path, *args, **kwargs))
+        values[4] = 0 if path == source else 501
+        return os.stat_result(values)
+    monkeypatch.setattr(Path, "lstat", metadata)
+    calls = []
+    def qualified(sha, uid):
+        calls.append((sha, uid))
+        if case == "verifier":
+            raise runtime_owner.EdgeError("synthetic sealed-source refusal")
+        return {"python_executable": "/fixed/runtime/python"}
+    monkeypatch.setattr(runtime, "verify", qualified)
+    config = port.BrowserLinkHostConfig(source, "/changed/python" if case == "interpreter" else "/fixed/runtime/python",
+                                        relay, output)
+    if case == "legacy":
+        config = BrowserHostConfig(source, "/fixed/runtime/python", "/usr/bin/true", "/fixed/mcp",
+                                   "/fixed/chrome", relay, output, "/fixed/home", "/fixed/tmp")
+    if case == "qualified":
+        assert port.validate_host_config(config) is config
+        assert calls == [(source.name, 501)]
+        # A qualified source does not relax the private relay directory rule.
+        relay.chmod(0o777)
+        with pytest.raises(BrowserResourceRefused, match="RELAY_ROOT_UNSAFE"):
+            port.validate_host_config(config)
+    else:
+        with pytest.raises(BrowserResourceRefused, match="SOURCE_ROOT_UNSAFE"):
+            port.validate_host_config(config)
+        assert calls == ([] if case in {"legacy", "namespace"} else [(source.name, 501)])

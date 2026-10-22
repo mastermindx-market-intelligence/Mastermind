@@ -24,6 +24,7 @@ EXPECTED_SHA=""
 PROTECTED_MASTER_SHA=""
 ALLOW_FROZEN_ACCEPTED_ANCESTOR="0"
 STAGE_RELEASE_ONLY="0"
+STAGE_WORKBENCH_BROWSER_RELEASE_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
@@ -381,7 +382,7 @@ MASTERMIND_NATIVE_ACL_RUBY
 # --- END native ACL guard ---
 
 usage() {
-  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
+  /bin/echo "usage: $0 --source-repo PATH --expected-sha SHA --operator-user NAME [--stage-release-only --os-web-assets PATH | --stage-workbench-browser-release-only] [--control-config PATH] [--os-web-assets PATH] [--allow-frozen-accepted-ancestor --protected-master-sha SHA] [options]" >&2
   exit 64
 }
 
@@ -392,6 +393,7 @@ while [ "$#" -gt 0 ]; do
     --protected-master-sha) PROTECTED_MASTER_SHA="${2:-}"; shift 2 ;;
     --allow-frozen-accepted-ancestor) ALLOW_FROZEN_ACCEPTED_ANCESTOR="1"; shift ;;
     --stage-release-only) STAGE_RELEASE_ONLY="1"; shift ;;
+    --stage-workbench-browser-release-only) STAGE_WORKBENCH_BROWSER_RELEASE_ONLY="1"; shift ;;
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
@@ -410,6 +412,15 @@ done
 
 # --- BEGIN release staging option guard ---
 validate_release_staging_options() {
+  if [ "$STAGE_WORKBENCH_BROWSER_RELEASE_ONLY" = "1" ]; then
+    [ "$STAGE_RELEASE_ONLY" = "0" ] && [ -z "$OS_WEB_ASSETS" ] \
+      && [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] && [ -z "$PROTECTED_MASTER_SHA" ] \
+      && [ "$ARM_PRIVILEGED_BROKER" = "0" ] && [ -z "$CONTROL_CONFIG_SOURCE" ] || {
+        /bin/echo "Browser source stage excludes OS assets/staging, frozen source, arming and config replacement" >&2
+        return 65
+      }
+    return 0
+  fi
   [ "$STAGE_RELEASE_ONLY" = "1" ] || return 0
   [ "$ALLOW_FROZEN_ACCEPTED_ANCESTOR" = "0" ] \
     && [ "$ARM_PRIVILEGED_BROKER" = "0" ] \
@@ -1340,7 +1351,7 @@ require_native_no_acl one "$AUTH_PATH" || {
 }
 
 # --- BEGIN shared sealed release staging ---
-# Both entry paths use this exact archive/import/seal/publication implementation.
+# Every entry path uses this exact archive/import/seal/publication implementation.
 # Stage-only reaches it before installing any service trap or mutating helpers.
 verify_release_ancestry() {
   local ancestor metadata
@@ -1354,15 +1365,30 @@ verify_release_ancestry() {
   done
 }
 
+verify_workbench_browser_surface() {
+  [ "$STAGE_WORKBENCH_BROWSER_RELEASE_ONLY" = "1" ] || return 0
+  local root="$1" relative
+  for relative in ops/executive_os/workbench_mcp_runtime.py \
+    ops/executive_os/company_mcp_edge.py \
+    integrations/studio_direct_mcp/workbench_host_service.py \
+    integrations/workbench_action_mcp/service.py \
+    requirements/workbench-browser-macos-arm64-py312.lock; do
+    [ -f "$root/$relative" ] && [ ! -L "$root/$relative" ] || {
+      /bin/echo "Browser source surface is unavailable or unsafe: $relative" >&2
+      return 65
+    }
+  done
+}
+
 stage_sealed_release() {
   verify_release_ancestry || return 65
   # A previous attempt's stage is unresolved even if a canonical release exists.
-  if [ "$STAGE_RELEASE_ONLY" = "1" ] && { [ -e "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ] || [ -L "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ]; }; then
+  if { [ "$STAGE_RELEASE_ONLY" = "1" ] || [ "$STAGE_WORKBENCH_BROWSER_RELEASE_ONLY" = "1" ]; } && { [ -e "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ] || [ -L "$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA" ]; }; then
     /bin/echo "stage-only destination already occupied; preserve it for reconciliation" >&2
     return 65
   fi
   if [ ! -e "$RELEASE_ROOT" ] && [ ! -L "$RELEASE_ROOT" ]; then
-    if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+    if [ "$STAGE_RELEASE_ONLY" = "1" ] || [ "$STAGE_WORKBENCH_BROWSER_RELEASE_ONLY" = "1" ]; then
       STAGING="$SYSTEM_ROOT/releases/.stage.$EXPECTED_SHA"
       /bin/mkdir -m 0700 "$STAGING" || return 65
     else
@@ -1388,6 +1414,7 @@ stage_sealed_release() {
         --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
         --release-root "$STAGING" >/dev/null || return 65
     fi
+    verify_workbench_browser_surface "$STAGING" || return 65
     # Seal and verify while the directory is still operation-owned staging. A
     # settled interruption must never expose a canonical release without a seal.
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \
@@ -1404,6 +1431,7 @@ stage_sealed_release() {
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" verify \
       --root "$RELEASE_ROOT" --commit-sha "$EXPECTED_SHA" --tree-sha "$TREE_SHA" >/dev/null || return 65
   fi
+  verify_workbench_browser_surface "$RELEASE_ROOT" || return 65
   [ -x "$RELEASE_ROOT/ops/executive_os/autonomy-control.sh" ] \
     && [ -f "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
     && [ ! -L "$RELEASE_ROOT/ops/executive_os/autonomy_control.py" ] \
@@ -1428,10 +1456,14 @@ stage_sealed_release() {
 # --- END shared sealed release staging ---
 
 # --- BEGIN stage-only dispatch ---
-if [ "$STAGE_RELEASE_ONLY" = "1" ]; then
+if [ "$STAGE_RELEASE_ONLY" = "1" ] || [ "$STAGE_WORKBENCH_BROWSER_RELEASE_ONLY" = "1" ]; then
   # No cleanup/service trap: an interrupted stage or publication is retained.
   stage_sealed_release || exit 65
-  printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  if [ "$STAGE_WORKBENCH_BROWSER_RELEASE_ONLY" = "1" ]; then
+    printf '{"staged_unselected":true,"release_purpose":"workbench-browser","commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  else
+    printf '{"staged_unselected":true,"commit_sha":"%s","selection_changed":false,"services_changed":false,"configs_changed":false,"receipt_changed":false,"transaction_changed":false}\n' "$EXPECTED_SHA"
+  fi
   exit 0
 fi
 # --- END stage-only dispatch ---

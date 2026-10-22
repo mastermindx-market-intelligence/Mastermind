@@ -107,8 +107,15 @@ def _client_ref(claims: Mapping[str, Any], issuer: str) -> str:
         client_value = azp_value
     if client_value is None:  # pragma: no cover - guarded by the branches above
         _refuse(AuthErrorCode.TOKEN_CLAIMS_REFUSED)
+    return client_ref_digest(issuer=issuer, client_id=client_value)
+
+
+def client_ref_digest(*, issuer: str, client_id: str) -> str:
+    """Project one identifier in an already-qualified issuer namespace."""
+    issuer_value = _opaque_claim(issuer, maximum=2048)
+    client_value = _opaque_claim(client_id)
     return hashlib.sha256(
-        (issuer + "\nclient\n" + client_value).encode("utf-8")
+        (issuer_value + "\nclient\n" + client_value).encode("utf-8")
     ).hexdigest()
 
 

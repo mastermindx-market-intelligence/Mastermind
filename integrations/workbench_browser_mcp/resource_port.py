@@ -168,10 +168,34 @@ def _private_directory(path: Path, name: str) -> None:
         raise BrowserResourceRefused(f"{name.upper()}_UNSAFE")
 
 
+def _qualified_source_directory(value) -> None:
+    # Development/checkouts retain the incumbent same-user rule. Only the typed
+    # persistent Link runtime may consume a root-sealed release generation.
+    try:
+        info = value.source_root.lstat()
+    except (OSError, AttributeError) as error:
+        raise BrowserResourceRefused("SOURCE_ROOT_UNAVAILABLE") from error
+    if info.st_uid == os.geteuid():
+        _private_directory(value.source_root, "source_root")
+        return
+    if type(value) is not BrowserLinkHostConfig or info.st_uid != 0:
+        raise BrowserResourceRefused("SOURCE_ROOT_UNSAFE")
+    try:
+        from ops.executive_os import company_mcp_edge as runtime_owner
+        from ops.executive_os.workbench_mcp_runtime import verify
+        if value.source_root.parent != runtime_owner.SYSTEM / "releases":
+            raise ValueError("sealed source namespace differs")
+        qualified = verify(value.source_root.name, os.geteuid())
+        if value.python_executable != qualified["python_executable"]:
+            raise ValueError("sealed interpreter differs")
+    except Exception as error:
+        raise BrowserResourceRefused("SOURCE_ROOT_UNSAFE") from error
+
+
 def validate_host_config(value: object) -> BrowserHostConfig:
     if type(value) not in {BrowserHostConfig, BrowserLinkHostConfig}:
         raise BrowserResourceRefused("HOST_CONFIG_INVALID")
-    _private_directory(value.source_root, "source_root")
+    _qualified_source_directory(value)
     _private_directory(value.relay_root, "relay_root")
     _private_directory(value.output_root, "output_root")
     names = ("python_executable",) if type(value) is BrowserLinkHostConfig else (
