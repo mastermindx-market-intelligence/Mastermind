@@ -29,7 +29,7 @@ These are sha256 values. s0 re-verifies the three helpers; a mismatch aborts.
 
 | File | sha256 |
 |---|---|
-| `runbook/install_w1.sh` | `37d67e70b6500d2a617b360af84fff0f24ecff2e93f011a3b907bd4e177b998a` |
+| `runbook/install_w1.sh` | `2de95021c61fc27ed349155cccd21f7f963dbed7a50c0de026f56f9b05328f11` |
 | `runbook/pbr_rb.py` | `536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac` |
 | `runbook/remote_blob_manifest.py` | `49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf` |
 | `runbook/remote_dists.py` | `b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0` |
@@ -44,7 +44,7 @@ RB=research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook
 B=$(mktemp -d)
 git -C "$SEAT_WT" fetch -q origin claude/ssd-pbr-runtime-85f3de87bc7b8894
 git -C "$SEAT_WT" show "FETCH_HEAD:$RB/install_w1.sh" > "$B/install_w1.sh"
-echo "37d67e70b6500d2a617b360af84fff0f24ecff2e93f011a3b907bd4e177b998a  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
+echo "2de95021c61fc27ed349155cccd21f7f963dbed7a50c0de026f56f9b05328f11  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
 env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 # s0's last line prints:  export PBR_EV=/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>
 ```
@@ -70,7 +70,7 @@ PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/to
 **Host contact.** Every host contact is `ssh -o BatchMode=yes` to `root@146.190.142.17` with the deploy key, pipe-only.
 
 **Read and write steps.**
-- Read-only steps: s1, s2, s3-result, s4, s4a, s6, cycle, restart-check, proof-old, status.
+- Read-only steps: s1, s2, s3-result, s4, s4a, s6, cycle, restart-check, needrestart-check, proof-old, status.
 - Steps that change the host:
   - **s3**: the repo's deploy wrapper.
   - **s5 / s5-revert**: `/etc/needrestart` only.
@@ -94,6 +94,7 @@ PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/to
 | right after s4 PASS | `s4a` account-load check (D-ACCT-1), label `post-restart` | read |
 | after s4 PASS (or after proof-old if the seat wants the row anyway), before 05:40 | `s5` needrestart row | **write (/etc/needrestart)** |
 | after s5 | `s6` close (manifest + redaction scan) | none |
+| 06:15, then every ~15 min while it says "not yet" (apt-daily-upgrade fires 06:00–07:00 and runs ~5–10 min) | `needrestart-check` | read |
 | 07:05 | `cycle watch_us_overnight 06:20 autonomous`, then `s4a after-watch_us_overnight` | read |
 | 08:40 | `restart-check 08:30` | read |
 | 08:45 | `cycle china_daily 08:00 china`, then `s4a after-china_daily` | read |
@@ -381,6 +382,7 @@ This writes `manifest.json` (the sha256 of every evidence file) and runs a redac
 ```sh
 PBR_EV=… …/install_w1.sh cycle <job> <HH:MM> [book] [YYYY-MM-DD]
 PBR_EV=… …/install_w1.sh restart-check [HH:MM] [YYYY-MM-DD]
+PBR_EV=… …/install_w1.sh needrestart-check [YYYY-MM-DD]
 ```
 
 `cycle` refuses before fire + 45 min. It writes `cycles/<day>T<HHMM>Z_<job>[_<book>]/`, containing:
@@ -397,6 +399,22 @@ Every due cycle maps to exactly one §5 disposition: `not_due`, `disabled`, `sta
 **Account load at the cycle.** A book's `account.json` is definitively loaded by its first natural cycle, not necessarily at startup. After each first cycle read (`watch_us_overnight` for autonomous, `china_daily`, `hk_daily`), run `s4a after-<job>`. self_directed is outside D-ACCT-1 (own engine). An s4a HOLD is reported to the seat; it is not a rollback trigger by itself.
 
 `restart-check` refuses before fire + 10 min. It requires an `app_started` with `INSTALLED` after the timer, plus /health. A failure is an incident; it does not trigger a rollback.
+
+**needrestart-check (§6 #1, first real proof of the s5 row).** It refuses unless `NEEDRESTART.PASS` exists and s5 was not reverted. Its baseline is `rollback/proof/systemctl_show.txt` when `PROOF_OLD.PASS` exists, else s4's `captures/post/systemctl_show.txt`. The cut is `<day>T05:40Z`. It stops with exit 1 and "not yet" until `apt-daily-upgrade.service` has started after the cut and finished (`ActiveState` inactive/failed with an exit time); re-run it. It also stops if the host clock is not `+0000`, because the dpkg log is in host local time. It then reads, all pipe-only:
+- `/var/log/unattended-upgrades/unattended-upgrades-dpkg.log`, where needrestart writes its report (on 10-22 the journal carried none; see §6 #1). The driver keeps only the `Log started:` blocks at or after the cut.
+- `unattended-upgrades.log` since the cut, the journal since the cut filtered to `needrestart` (normally empty), and the pid-1 journal for `mastermind.service` since cut − 5 min.
+- `systemctl show mastermind.service` and the s5 perl verify.
+
+Matching is by exact token (`(^|\s)mastermind\.service(\s|$)`), so `mastermind-restart.service` and `mastermind-control-room-remote.service` never count. Verdicts:
+
+| Verdict | Exit | Meaning |
+|---|---|---|
+| `PROVEN` | 0 | `mastermind.service` is under `Service restarts being deferred:` and nothing restarted it. §6 #1 is proven. |
+| `LISTED` | 0 | Only under `Services to be restarted:` (list mode) and nothing restarted it. The restart-mode override was not exercised. |
+| `VACUOUS` | 0 | No needrestart block since the cut names `mastermind.service` (no relevant library upgrade). §6 #1 is still unproven; re-run on a later day with `needrestart-check <day>` (each run covers from that day's 05:40Z). |
+| `FAIL` | 1 | Any of: `mastermind.service` under `Restarting services...`; a pid-1 Stopping/Stopped/Starting/Started/Deactivated/Killing/Scheduled-restart line inside an unattended-upgrade interval (`[apt start − 5 s, apt exit + 120 s]` and each dpkg block `[start − 5 s, end + 120 s]`, so a run outside apt-daily-upgrade counts too); `ActiveEnterTimestamp` inside such an interval or unreadable; `NRestarts` higher than the baseline or unreadable; `ActiveState` not active; the s5 verify not rc 0. |
+
+A FAIL is an **INCIDENT**: report it to the seat with the evidence dir. It is not a rollback trigger, and s5-revert does not undo a restart that already happened. Notes (not failures) record an `InvocationID` change, an `NRestarts` decrease (a manual restart resets it) and an interval overlapping the 08:30Z `mastermind-restart.timer`.
 
 ## 4. Rollback decision table
 
@@ -462,6 +480,8 @@ captures/pre/                systemctl_show execstart_path environment_file_name
 captures/post/               systemctl_show health.json health_verdict app_started_verdict run_events.tail deploy_prev forward_marker forward_status
 needrestart/                 conf_include verify_before backup_sha256 99-mastermind-no-autorestart.conf dropin_sha256 verify_after [verify_after_revert]
 cycles/<day>T<HHMM>Z_<job>[_<book>]/  run_events.tail cycle.json decisions.trimmed health(+verdict) journal_pid1_unit [settlement_state]
+cycles/<day>T0540Z_needrestart/  host_clock apt_upgrade_show systemctl_show nr_verify_now dpkg_needrestart_blocks uu_log
+                             journal_needrestart journal_pid1_unit verdict.json   (raw log copies are deleted after judging)
 proof/account_load/<label>/  quarantine_census.txt run_events.tail.jsonl account_state_invalid_events.jsonl journal_hits.txt
                              status.<book>.json src/ (SHA's paper_account.py + package inits; account bytes deleted)
 gates/ACCT_<label>.PASS|HOLD  s4a verdict per label
@@ -473,7 +493,10 @@ manifest.json                sha256 of every file (s6)
 
 ## 6. Uncertainties and residual risks (read before 03:30Z)
 
-1. **needrestart host semantics are unverified.** The perl verify proves the config parses and the key matches. It does not prove that the installed needrestart version honours `override_rc` in its configured restart mode. The first real proof is the next unattended-upgrade library event: look for "mastermind.service" absent from needrestart's restart list in the journal.
+1. **needrestart host semantics are unverified until `needrestart-check` returns PROVEN.** The perl verify proves the config parses and the key matches. It does not prove that the installed needrestart (3.6-7ubuntu4.5; apt hook `/usr/lib/needrestart/apt-pinvoke -m u`) honours `override_rc` in its configured restart mode. Host facts from read-only observation on 10-22, which shape the s7 step:
+   - **The report is not in the journal.** It is written to `/var/log/unattended-upgrades/unattended-upgrades-dpkg.log` (root:adm 0644, rotated monthly) inside each `Log started: …` / `Log ended: …` block, under flush-left `Restarting services...` / `Service restarts being deferred:` headings, one indented line per command. The journal had 0 needrestart lines 05:40–06:30Z.
+   - **It restarted the bot on 10-22.** The 06:01:57 block lists `systemctl restart … mastermind.service …` under `Restarting services...`; pid 1 logged Stopping at 06:02:14.33Z and Started at 06:02:15.68Z. A second block (06:07:19) restarted nothing, and unattended-upgrades started again at 06:24:31 outside the apt-daily-upgrade run (06:01:03–06:07:38Z), so runs are not confined to that unit.
+   - **`NRestarts` does not see it.** It counts only `Restart=` auto-restarts; it stayed 0 across the 06:02 restart. A check of "no needrestart lines in the journal and `NRestarts` unchanged" would therefore have PASSed on 10-22. `needrestart-check` gates on the dpkg log, the pid-1 journal and `ActiveEnterTimestamp` instead, and keeps `NRestarts` as a secondary check. Replayed read-only against the real host for 10-22, it returns FAIL naming the 06:01:57Z block and the four pid-1 lines.
 2. **Timer next-elapse values are redrawn every 3 minutes.** NextElapseUSecRealtime includes the `RandomizedDelaySec` draw (observed: `apt-daily-upgrade.timer` `t 1792737190710641` = Fri 06:33:10Z at 14:21Z for `OnCalendar=6:00`, `RandomizedDelaySec=60m`). The host's `macro-update` cron job runs `systemctl daemon-reload` 10 times every 3 minutes (2857 reloads 00:00–14:25Z on 10-22), and each reload redraws the delay (`FixedRandomDelay` unset): the same timer read 06:53:33Z at 14:24Z. Two consequences:
    - G3's ≥ 05:55Z test stays sound: every draw for apt-daily-upgrade lies in `[06:00, 07:00]` Fri.
    - The delay collapses toward the calendar time. Once a draw lands in the past, the timer fires, so apt-daily-upgrade (unattended-upgrade, then needrestart) is expected at ~06:00–06:10Z, about 20 min after the window closes; on 10-22 it started at 06:01:02Z. `apt-daily` (`6,18:00`, 12 h delay; update/download only, no install) is expected to fire soon after 18:00Z Thu, so it is unlikely to land in W1. If it does run at s2, the G3 idle check holds; re-check.
@@ -523,6 +546,16 @@ manifest.json                sha256 of every file (s6)
   - a bad label → 1;
   - the `after-china_daily` label → 0.
 
+- needrestart-check against a fake host (fake `date`/`systemctl`/`journalctl`/`perl`, synthetic dpkg and unattended-upgrades logs), 42/42 assertions over 23 cases:
+  - PROVEN (deferred, with the 10-22 restart block before the cut excluded) → 0, keeping only the blocks since the cut, cutting the uu log, deleting the raw copies, an exact evidence file list and no restart hit from `mastermind-restart.service`/`mastermind-control-room-remote.service` lines; an InvocationID change near 08:30 → 0 with a note; VACUOUS, an absent dpkg log, LISTED, a failed apt-daily-upgrade, an `NRestarts` decrease (note) and the proof-old baseline → 0;
+  - `mastermind.service` under `Restarting services...` → 1; the same in a 06:24 block outside the apt-daily-upgrade run → 1; a pid-1 Stopping/Started inside an interval → 1; `ActiveEnterTimestamp` inside an interval → 1; `NRestarts` going 0 → 1 → 1; inactive → 1; s5 verify rc 3 → 1;
+  - apt-daily-upgrade not started since the cut, or still running → 1 "not yet"; host offset `+0800` → 1; a journal read failure → 1; no `NEEDRESTART.PASS`, s5 reverted, a bad day → 1; dispatch reaches the step.
+  - Every failing case was checked to fail for its own reason. Teeth: the previous driver (`37d67e70`, @ 6ba45237) answers `needrestart-check` with usage (rc 2) and fails 41 of the 42 assertions.
+  - Real-host replay (read-only, scratch evidence dir, 10-22 at 14:48Z): FAIL, as it must be: restart hit at the 06:01:57Z block, four pid-1 lines 06:02:14–06:02:15Z, and the s5 verify rc 3 (no drop-in yet). `journal_needrestart` was empty.
+- The G3 and s4a fixtures were re-run against this driver: G3 9/9 (+4 assertions), s4a 16/16.
+
 **Read-only host observations (2026-10-22):** 13:41Z, the forward marker is active. 14:21–14:27Z, systemd 255.4-1ubuntu8.18, TZ `Etc/UTC`; the new G3 timer probe returns `upgrade_timer_next_usec=1792738413683088` (Fri 06:53:33Z, a PASS); the reload churn in §6 #2 is from `journalctl _PID=1` and the cron journal.
 
-**Not tested:** anything on the real host beyond those reads. The first live run is the seat's s0/s1.
+14:30–14:48Z, needrestart 3.6-7ubuntu4.5, the dpkg-log report format and the 10-22 06:02 restart in §6 #1 (`dpkg -s`, `unattended-upgrades-dpkg.log`, `unattended-upgrades.log`, `journalctl _PID=1`, `systemctl show`).
+
+**Not tested:** anything on the real host beyond those reads. The first live run is the seat's s0/s1; the first PROVEN needs a library upgrade that touches a library the bot maps.

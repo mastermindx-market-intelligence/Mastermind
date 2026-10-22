@@ -31,6 +31,8 @@ PY=/usr/bin/python3
 PY_WT=/opt/homebrew/bin/python3
 BASH5=/opt/homebrew/bin/bash
 NR_DROPIN=/etc/needrestart/conf.d/99-mastermind-no-autorestart.conf
+UU_DPKG_LOG=/var/log/unattended-upgrades/unattended-upgrades-dpkg.log
+UU_LOG=/var/log/unattended-upgrades/unattended-upgrades.log
 PIN_RB=536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac
 PIN_MANIFEST=49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf
 PIN_DISTS=b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0
@@ -660,6 +662,136 @@ restart_check() {  # restart_check [HH:MM] [YYYY-MM-DD]: the 08:30Z mastermind-r
   say "restart-check PASS: timer restart came back on ${INSTALLED:-$SHA}"
 }
 
+# needrestart proof (§6 #1). needrestart writes nothing to the journal on this host: its "Restarting
+# services..." / "Service restarts being deferred:" report lands in the unattended-upgrades dpkg log
+# (host local time, required +0000). NRestarts counts only Restart= restarts, so a needrestart
+# "systemctl restart" is visible only as pid-1 journal lines and a new ActiveEnterTimestamp/InvocationID.
+nr_judge() {  # nr_judge <dir> <cut> <apt_start> <apt_exit> <host_now> <baseline_show> <nr_verify_rc>: verdict JSON; exit 0 PASS, 1 FAIL
+  "$PY" -I -B - "$@" <<'PY'
+import calendar, json, os, re, sys, time
+d, base = sys.argv[1], sys.argv[6]
+cut, st, ex, now, nrrc = (int(sys.argv[i]) for i in (2, 3, 4, 5, 7))
+TOK = re.compile(r'(^|\s)mastermind\.service(\s|$)')
+HEAD = {"Restarting services...": "restart", "Service restarts being deferred:": "deferred",
+        "Services to be restarted:": "listed"}
+VERB = re.compile(r'\b(Stopping|Stopped|Starting|Started|Deactivated|Main process exited|Scheduled restart|Killing)\b')
+iso = lambda t: time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(t))
+def ep(day, hms): return calendar.timegm(time.strptime(day + " " + hms, "%Y-%m-%d %H:%M:%S"))
+def lines(name): return open(os.path.join(d, name), errors="replace").read().splitlines()
+raw = lines(".dpkg_log.raw"); absent = raw[:1] == ["#absent"]
+blocks, cur = [], None
+for ln in ([] if absent else raw):
+    m = re.match(r'^Log started:\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s*$', ln)
+    if m:
+        cur = {"start": ep(*m.groups()), "end": None, "lines": [ln]}; blocks.append(cur); continue
+    if cur is None: continue
+    cur["lines"].append(ln)
+    m = re.match(r'^Log ended:\s+(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s*$', ln)
+    if m: cur["end"] = ep(*m.groups()); cur = None
+keep = [b for b in blocks if b["start"] >= cut]
+with open(os.path.join(d, "dpkg_needrestart_blocks.txt"), "w") as f:
+    for b in keep: f.write("\n".join(b["lines"]) + "\n")
+hits = {"restart": [], "deferred": [], "listed": []}; nr_blocks = 0
+for b in keep:
+    sec = None; ran = False
+    for ln in b["lines"]:
+        if ln[:1] in (" ", "\t"):
+            if sec and TOK.search(ln): hits[sec].append(iso(b["start"]))
+        else:
+            sec = HEAD.get(ln.strip()); ran = ran or sec is not None or ln.startswith("No services need")
+    nr_blocks += ran
+iv = [(st - 5, ex + 120)] + [(b["start"] - 5, (b["end"] if b["end"] is not None else now) + 120) for b in keep]
+inside = lambda t: any(a <= t <= z for a, z in iv)
+pid1 = []
+for ln in lines("journal_pid1_unit.txt"):
+    m = re.match(r'^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2}:\d{2})\S*\s', ln)
+    if m and inside(ep(*m.groups())) and VERB.search(ln): pid1.append(ln[:200])
+uu, on = [], False
+for ln in lines(".uu_log.raw"):
+    m = re.match(r'^(\d{4}-\d{2}-\d{2}) (\d{2}:\d{2}:\d{2}),', ln)
+    if m: on = ep(*m.groups()) >= cut
+    if on: uu.append(ln)
+with open(os.path.join(d, "uu_log.txt"), "w") as f: f.write("\n".join(uu) + ("\n" if uu else ""))
+def props(p):
+    out = {}
+    for ln in open(p, errors="replace"):
+        k, _, v = ln.rstrip("\n").partition("="); out[k] = v
+    return out
+cur_p, base_p = props(os.path.join(d, "systemctl_show.txt")), props(base)
+def tsu(v):
+    m = re.fullmatch(r'@(\d+)(\.\d+)?', v or ""); return int(m.group(1)) if m else None
+def num(v): return int(v) if re.fullmatch(r'\d+', v or "") else None
+ae, n_now, n_base = tsu(cur_p.get("ActiveEnterTimestamp")), num(cur_p.get("NRestarts")), num(base_p.get("NRestarts"))
+reasons, notes = [], []
+for t in hits["restart"]: reasons.append("mastermind.service is in a needrestart restart list (block %s)" % t)
+for ln in pid1: reasons.append("pid-1 journal inside an unattended-upgrade run: " + ln)
+if ae is None: reasons.append("ActiveEnterTimestamp unreadable now")
+elif inside(ae): reasons.append("ActiveEnterTimestamp %s is inside an unattended-upgrade run" % iso(ae))
+if n_now is None or n_base is None: reasons.append("NRestarts unreadable (baseline %r, now %r)" % (n_base, n_now))
+elif n_now > n_base: reasons.append("NRestarts %d -> %d since the baseline (a Restart= auto-restart) - incident" % (n_base, n_now))
+elif n_now < n_base: notes.append("NRestarts %d -> %d: flushed by a manual restart" % (n_base, n_now))
+if cur_p.get("ActiveState") != "active": reasons.append("mastermind.service ActiveState=%s now" % cur_p.get("ActiveState"))
+if nrrc != 0: reasons.append("the mastermind override is not configured now (nr_verify rc=%d)" % nrrc)
+same = cur_p.get("InvocationID") == base_p.get("InvocationID")
+if not same and ae is not None: notes.append("InvocationID changed since the baseline; last start %s (expected only from the 08:30Z mastermind-restart.timer)" % iso(ae))
+timer = any((z - 30600) // 86400 > (a - 1 - 30600) // 86400 for a, z in iv)
+if timer: notes.append("an unattended-upgrade interval spans 08:30Z (mastermind-restart.timer): seat adjudicates any pid-1 line")
+v = "FAIL" if reasons else "PROVEN" if hits["deferred"] else "LISTED" if hits["listed"] else "VACUOUS"
+print(json.dumps({"check": "needrestart", "verdict": v, "pass": not reasons, "reasons": reasons, "notes": notes,
+    "cut": iso(cut), "apt_daily_upgrade": [iso(st), iso(ex)], "dpkg_log_absent": absent,
+    "blocks_since_cut": len(keep), "needrestart_blocks": nr_blocks, "restart_hits": hits["restart"],
+    "deferred_hits": hits["deferred"], "listed_hits": hits["listed"], "pid1_in_upgrade": pid1,
+    "intervals": [[iso(a), iso(z)] for a, z in iv], "nrestarts": [n_base, n_now], "active_enter": iso(ae) if ae else None,
+    "invocation_same_as_baseline": same, "nr_verify_rc": nrrc, "overlaps_0830_timer": timer}, indent=1))
+sys.exit(0 if not reasons else 1)
+PY
+}
+needrestart_check() {  # needrestart_check [YYYY-MM-DD]: the first unattended upgrade after the window (§6 #1; read-only)
+  STEP=needrestart-check; load
+  local day=${1:-$DAY} cut base C now tz as st ex nrrc rc v
+  [[ $day =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}$ ]] || stop "bad day '$day'"
+  [ -f "$EV/gates/NEEDRESTART.PASS" ] || stop "s5 has not passed - there is no override to prove"
+  [ ! -e "$EV/needrestart/verify_after_revert.txt" ] || stop "s5 was reverted - there is no override to prove; seat"
+  if [ -f "$EV/gates/PROOF_OLD.PASS" ]; then base=$EV/rollback/proof/systemctl_show.txt
+  elif [ -f "$EV/gates/PROOF.PASS" ]; then base=$EV/captures/post/systemctl_show.txt
+  else stop "no s4/proof-old baseline"; fi
+  [ -s "$base" ] || stop "baseline $base is missing"
+  cut=$(epoch "${day}T05:40") || stop "bad day '$day'"
+  C="$EV/cycles/${day}T0540Z_needrestart"; mkdir -p "$C" || stop "mkdir $C"
+  "${VPS[@]}" 'date +"%s %z"' > "$C/host_clock.txt" || stop "host clock read failed"
+  read -r now tz < "$C/host_clock.txt"
+  [[ ${now:-} =~ ^[0-9]+$ ]] || stop "host clock unreadable"
+  [ "${tz:-}" = "+0000" ] || stop "host UTC offset is '${tz:-}', not +0000 - the dpkg log is in local time; seat"
+  "${VPS[@]}" "systemctl show apt-daily-upgrade.service --timestamp=unix -p ActiveState -p Result -p ExecMainStartTimestamp -p ExecMainExitTimestamp -p ExecMainStatus" \
+    > "$C/apt_upgrade_show.txt" || stop "apt-daily-upgrade read failed"
+  as=$(sed -n 's/^ActiveState=//p' "$C/apt_upgrade_show.txt")
+  st=$(sed -n 's/^ExecMainStartTimestamp=@\([0-9]*\).*/\1/p' "$C/apt_upgrade_show.txt")
+  ex=$(sed -n 's/^ExecMainExitTimestamp=@\([0-9]*\).*/\1/p' "$C/apt_upgrade_show.txt")
+  [ -n "$st" ] && [ "$st" -ge "$cut" ] \
+    || stop "not yet: apt-daily-upgrade has not started since ${day}T05:40Z (last start: $([ -n "$st" ] && date -u -r "$st" +%FT%TZ || echo none)) - re-run after it finishes (expected ~06:00-06:10Z; latest timer draw 07:00Z)"
+  { [ "$as" = inactive ] || [ "$as" = failed ]; } && [ -n "$ex" ] && [ "$ex" -ge "$st" ] \
+    || stop "not yet: apt-daily-upgrade is '$as' (started $(date -u -r "$st" +%FT%TZ)) - re-run after it finishes"
+  show_read "$C/systemctl_show.txt" || stop "systemctl show"
+  nr_verify > "$C/nr_verify_now.txt"; nrrc=$?
+  "${VPS[@]}" "test ! -e $UU_DPKG_LOG && echo '#absent' || cat -- $UU_DPKG_LOG" > "$C/.dpkg_log.raw" || stop "dpkg log read failed"
+  "${VPS[@]}" "test ! -e $UU_LOG && echo '#absent' || cat -- $UU_LOG" > "$C/.uu_log.raw" || stop "unattended-upgrades log read failed"
+  "${VPS[@]}" "bash -s -- $cut" > "$C/journal_needrestart.txt" <<'EOF' || stop "journal read failed"
+journalctl --since=@"$1" --no-pager -o short-iso-precise | grep -i needrestart
+r=("${PIPESTATUS[@]}"); [ "${r[0]}" -eq 0 ] && [ "${r[1]}" -le 1 ]
+EOF
+  "${VPS[@]}" "journalctl _PID=1 UNIT=$SVC --since=@$((cut - 300)) --no-pager -o short-iso-precise" > "$C/journal_pid1_unit.txt" \
+    || stop "pid-1 journal read failed"
+  nr_judge "$C" "$cut" "$st" "$ex" "$now" "$base" "$nrrc" > "$C/verdict.json"; rc=$?
+  rm -f -- "$C/.dpkg_log.raw" "$C/.uu_log.raw"
+  v=$(jget "$C/verdict.json" verdict 2>/dev/null) || stop "no verdict (judge rc=$rc) - see $C"
+  [ "$rc" -eq 0 ] || stop "needrestart-check FAIL: $(jget "$C/verdict.json" reasons) - INCIDENT, report to the seat (s5-revert does not undo a restart); evidence $C"
+  case $v in
+    '"PROVEN"') say "needrestart-check PASS (PROVEN): needrestart deferred mastermind.service and no unattended-upgrade run since ${day}T05:40Z restarted it - §6 #1 proven" ;;
+    '"LISTED"') say "needrestart-check PASS (LISTED): needrestart only listed mastermind.service (list mode) and nothing restarted it - restart-mode override not exercised" ;;
+    *) say "needrestart-check PASS (VACUOUS): no needrestart report named mastermind.service since ${day}T05:40Z ($(jget "$C/verdict.json" blocks_since_cut) dpkg blocks) - §6 #1 still unproven; re-run after the next library upgrade" ;;
+  esac
+}
+
 # ------------------------------------------------------------------ rollback
 proof_old() {  # identity proof of OLD after R-a / R-b / R-c (read-only)
   STEP=proof-old; load
@@ -758,10 +890,11 @@ case "${1:-}" in
   s6) s6 ;;
   cycle) shift; cycle "$@" ;;
   restart-check) shift; restart_check "$@" ;;
+  needrestart-check) shift; needrestart_check "$@" ;;
   proof-old) proof_old ;;
   rollback-b) rollback_b ;;
   rollback-c) rollback_c ;;
   rollback-c-result) rollback_c_result ;;
   status) status ;;
-  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status" >&2; exit 2 ;;
+  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|needrestart-check [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status" >&2; exit 2 ;;
 esac
