@@ -964,9 +964,10 @@ html[data-lang="zh"] .lang-toggle .zh-opt { color: #fff; }
   color: var(--muted);
   background: transparent;
 }
+/* Epistemic ink never rides --up: that variable flips red/green under ZH. */
 .mm-epi-badge.qualified {
-  color: var(--up);
-  border-color: color-mix(in srgb, var(--up) 45%, transparent);
+  color: var(--ok);
+  border-color: color-mix(in srgb, var(--ok) 45%, transparent);
 }
 .mm-epi-badge.provisional {
   color: var(--warn);

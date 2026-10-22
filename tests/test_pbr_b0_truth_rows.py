@@ -742,7 +742,7 @@ def _e13_invalid(quarantine_file):
 
 @requires_node
 @pytest.mark.parametrize("lang,word,ref,un", [
-    ("en", "Book unavailable — state invalid", "Quarantine ref " + SHA16, "unavailable"),
+    ("en", "Book unavailable — state invalid", "Quarantine ref " + SHA16, "Unavailable"),
     ("zh", "账本不可用 — 状态无效", "隔离编号 " + SHA16, "不可用"),
 ])
 def test_self_directed_invalid_account_is_the_canonical_cell_never_a_funded_book(
@@ -792,7 +792,7 @@ def test_self_directed_other_unavailable_reasons_keep_the_plain_word(tmp_path):
     book = {"status": "unavailable", "reason_code": "self_directed_read_failed", "nav": None,
             "quarantine_file": "account.quarantine." + SHA16 + ".json"}
     out = _self_header(tmp_path, book)
-    assert out["sd-nav"]["text"] == "unavailable"  # sd.unavailable, the p3b word
+    assert out["sd-nav"]["text"] == "Unavailable"  # sd.unavailable: the §3 word, capitalised
     assert "state invalid" not in out["sd-nav"]["html"]
 
 

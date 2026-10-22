@@ -229,7 +229,7 @@ def test_helpers_are_wrapped_by_exactly_one_marker_pair_immediately_above_render
 @pytest.mark.parametrize(
     ("key", "en", "zh"),
     [
-        ("sd.unavailable", "unavailable", "不可用"),
+        ("sd.unavailable", "Unavailable", "不可用"),
         ("sd.unavailable_reason",
          "Book unavailable — the account could not be read, so no balances are shown.",
          "组合数据不可用 —— 无法读取账户，因此不显示任何余额。"),
