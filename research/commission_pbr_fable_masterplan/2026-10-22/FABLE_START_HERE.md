@@ -12,6 +12,8 @@ sha256 `4c7a0d449f02de080e4d8d310af5db09515af86683ac6a3bca1298f2e034d970`, 804 l
 **Packets, owners, status:** `WORK_PACKAGES.md`. **Ledger:** `ORCHESTRATION.md`. **Lane packets/returns:** `lanes/`.
 
 ## 1. Frontier facts verified at commissioning (07:15–07:30Z, read-only)
+
+> **Correction 2026-10-22 07:35Z (seat-verified, read-only ssh).** The VPS live data root on the host namespace is `/opt/mastermind-live-data`, not `/opt/mastermind/data`. `mastermind.service` carries `BindPaths=/opt/mastermind-live-data:/opt/mastermind/data`, so only the service's private mount namespace sees live data at `/opt/mastermind/data`; a plain `ssh … ls /opt/mastermind/data` shows a stale July copy. All three books live at `/opt/mastermind-live-data/portfolios/<id>/` (autonomous `account.json` mtime 06:23Z today; `portfolio/` is an Aug-10 legacy dir). Code identity: `/opt/mastermind/.deployed_git_sha` = ff16c192… written 2026-10-21 15:32:17Z by `scripts/deploy_code_to_vps.sh` (rsync of a git archive; prior snapshot under `.deploy_prev/`). Blob comparison remains the identity proof. Reported by pbr-runtime; verified by the seat.
 - `origin/master` 230e9a301. Audited source files unchanged since the pin.
 - Carriers at the audit's heads, unchanged: #1357 draft 1e127060 · #673 draft 0b960590 · #1147 draft 6f192387 ·
   #824 open non-draft MERGEABLE 8aa934c1 · #726 draft 5eb4154a · #727 draft MERGEABLE 4e97c323 ·

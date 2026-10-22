@@ -13,10 +13,10 @@ Columns: `when (UTC)` · `unit` (orchestrator or lane id) · `host/model` · `cl
 | when | unit | host/model | class | run-id | state | artifact | note |
 |---|---|---|---|---|---|---|---|
 | 07:30 | W0 seat | m2 / Fable | commission | — | COMMISSIONED | this directory; issue #1693; PR #1695 | frontier recovered; four domain owners briefed; see FABLE_START_HERE.md |
-| 07:45 | pbr-econ | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-econ | W1 + W2 (ledger truth, prices/replay); sole writer of paper_account/marks/price_evidence/settle |
-| 07:45 | pbr-runtime | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-runtime | W4 (manager lifecycle, provider terminal, installed-identity proof) |
-| 07:45 | pbr-research | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-research | W5 + W6-contract (+ W7/W8 protocol freeze) |
-| 07:45 | pbr-product | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-product | W9 design + truthful partial views; Agent OS WS record |
+| 07:45 | pbr-econ | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | SSD wt claude/44ff44e73b840f81/pbr-econ-5cdda3f3a9259411 (branch claude/ssd-pbr-econ-5cdda3f3a9259411) | W1 + W2 (ledger truth, prices/replay); sole writer of paper_account/marks/price_evidence/settle |
+| 07:45 | pbr-runtime | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | SSD wt claude/44ff44e73b840f81/pbr-runtime-85f3de87bc7b8894 (branch claude/ssd-pbr-runtime-85f3de87bc7b8894) | W4 (manager lifecycle, provider terminal, installed-identity proof) |
+| 07:45 | pbr-research | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | SSD wt claude/44ff44e73b840f81/pbr-research-f428e2e2c1d3f7a9 (branch claude/ssd-pbr-research-f428e2e2c1d3f7a9) | W5 + W6-contract (+ W7/W8 protocol freeze) |
+| 07:45 | pbr-product | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | SSD wt claude/44ff44e73b840f81/pbr-product-2fcf6d6d0fd2ddc5 (branch claude/ssd-pbr-product-2fcf6d6d0fd2ddc5) | W9 design + truthful partial views; Agent OS WS record |
 
 ### Exit gate for wave 1 (written before launch)
 - W1: a per-book bridge document + any ledger-owner PR with tests; HK discrepancy either explained with evidence or bounded with an explicit unsupported interval. No balancing trades. ACCEPTED only with an independent review disposition.
@@ -33,3 +33,4 @@ Columns: `when (UTC)` · `unit` (orchestrator or lane id) · `host/model` · `cl
 4. A reviewer never returns → every build lane has a reserved review lane and a bounded wait; silence is absence of evidence.
 5. A worker "fixes" by resetting a book or inventing a balancing fill → forbidden in every packet; seat greps diffs for `reset`, `seed`, balancing writes before any merge.
 6. deploy_lag.json is trusted as installed identity → forbidden; blob comparison only.
+| 07:35 | seat | m2 / Fable | fact | — | RECORDED | FABLE_START_HERE.md §1 correction | live data root is /opt/mastermind-live-data (BindPaths); all captures redirected; .deployed_git_sha ff16c192 10-21 15:32Z |
