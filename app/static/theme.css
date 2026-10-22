@@ -1001,3 +1001,25 @@ html[data-lang="zh"] .lang-toggle .zh-opt { color: #fff; }
   font-size: var(--fs-micro, 10px);
   letter-spacing: .02em;
 }
+/* Evidence tier under the canonical cell: one reading sentence, then the validator's
+   own codes as quiet mono tokens (no colour carries meaning here). */
+.mm-book-invalid-reason { display: block; }
+.mm-book-invalid-problems {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 6px;
+  align-items: baseline;
+  margin-top: 4px;
+}
+.mm-book-invalid-problems-label { color: var(--muted); }
+.mm-book-invalid-problem {
+  font-family: var(--font-mono);
+  font-size: var(--fs-micro, 10px);
+  color: var(--text);
+  padding: 1px 5px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface-inset);
+  overflow-wrap: anywhere;
+}
+.mm-book-invalid-more { color: var(--muted); font-size: var(--fs-micro, 10px); }

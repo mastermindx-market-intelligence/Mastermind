@@ -249,7 +249,10 @@ def _archived_performance(portfolio_id: str) -> dict[str, Any]:
 
 
 def _account_state_probe(portfolio: str) -> dict[str, Any] | None:
-    """Display-only D-ACCT-1 probe: ``{"status": "invalid", "quarantine_sha16": ...}`` or None.
+    """Display-only D-ACCT-1 probe: ``{"status": "invalid", "quarantine_sha16", "problems"}`` or None.
+
+    ``problems`` are the validator's own problem codes (strings only, at most 20, each at
+    most 120 characters) for the page's evidence tier; nothing is derived or paraphrased.
 
     Uses only the read-only ``paper_account.account_file_status(path=...)``; never loads,
     recovers, quarantines or writes. Any failure (including the function not existing on an
@@ -262,9 +265,12 @@ def _account_state_probe(portfolio: str) -> dict[str, Any] | None:
         status = paper_account.account_file_status(path=path)
         if not isinstance(status, dict) or status.get("status") != "INVALID":
             return None
+        problems = status.get("problems")
         return {
             "status": "invalid",
             "quarantine_sha16": (status.get("sha256") or "")[:16] or None,
+            "problems": [str(code)[:120] for code in (problems if isinstance(problems, list) else [])
+                         if isinstance(code, str) and code][:20],
         }
     except Exception:  # noqa: BLE001 — a display probe must never change the response
         return None

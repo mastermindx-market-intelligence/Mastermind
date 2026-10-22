@@ -63,6 +63,10 @@ VOCAB = {
     "state.weight_unavailable": ("Unavailable", "不可用"),
     "state.book_invalid": ("Book unavailable — state invalid", "账本不可用 — 状态无效"),
     "state.quarantine_ref": ("Quarantine ref {sha}", "隔离编号 {sha}"),
+    "state.invalid_reason": ("The account file failed validation, so no balances are shown.",
+                             "账户文件未通过校验，因此不显示任何余额。"),
+    "state.problems_label": ("Validator problems:", "校验问题："),
+    "state.problems_more": ("+{n} more", "另有 {n} 项"),
 }
 
 FORBIDDEN_EMPTY = ("$1,000,000", "1,000,000", "0.00%", "0 actual", "HOLDING", "NaN", "undefined")
@@ -550,12 +554,32 @@ def test_t12_probe_reports_invalid_with_sha16(monkeypatch, no_account_load):
     monkeypatch.setattr(no_account_load, "account_file_status", _status("INVALID", "ab" * 32),
                         raising=False)
     assert web._account_state_probe("autonomous") == {"status": "invalid",
-                                                      "quarantine_sha16": SHA16}
+                                                      "quarantine_sha16": SHA16, "problems": []}
     # Unreadable bytes carry no sha: the state is still invalid, the ref is absent.
     monkeypatch.setattr(no_account_load, "account_file_status", _status("INVALID", None),
                         raising=False)
     assert web._account_state_probe("autonomous") == {"status": "invalid",
-                                                      "quarantine_sha16": None}
+                                                      "quarantine_sha16": None, "problems": []}
+
+
+def test_t12_probe_carries_the_validator_problem_codes_verbatim_and_bounded(
+        monkeypatch, no_account_load):
+    from app import web
+
+    codes = ["cash_invalid", 7, None, "", "x" * 300] + ["p%02d" % i for i in range(30)]
+
+    def _fn(*_a, path=None, **_k):
+        return {"status": "INVALID", "path": str(path), "sha256": "ab" * 32, "size": 3,
+                "problems": codes}
+    monkeypatch.setattr(no_account_load, "account_file_status", _fn, raising=False)
+    probe = web._account_state_probe("autonomous")
+    assert probe["problems"][:2] == ["cash_invalid", "x" * 120]
+    assert len(probe["problems"]) == 20
+    assert all(isinstance(c, str) and c for c in probe["problems"])
+    monkeypatch.setattr(no_account_load, "account_file_status",
+                        lambda *_a, path=None, **_k: {"status": "INVALID", "sha256": None,
+                                                      "problems": "cash_invalid"}, raising=False)
+    assert web._account_state_probe("autonomous")["problems"] == []
 
 
 @pytest.mark.parametrize("variant", ["VALID", "MISSING", "raises", "absent"])
@@ -599,7 +623,8 @@ def _perf_route(monkeypatch, paper_account, *, probe_kind, raise_perf):
 def test_t12_api_performance_carries_invalid_state(monkeypatch, no_account_load, raise_perf):
     resp = _perf_route(monkeypatch, no_account_load, probe_kind="INVALID", raise_perf=raise_perf)
     body = json.loads(resp.body)
-    assert body["account_state"] == {"status": "invalid", "quarantine_sha16": SHA16}
+    assert body["account_state"] == {"status": "invalid", "quarantine_sha16": SHA16,
+                                     "problems": []}
 
 
 def test_t12_api_performance_valid_is_byte_identical(monkeypatch, no_account_load):
@@ -634,6 +659,26 @@ def test_t12_invalid_state_renders_one_canonical_cell(tmp_path, lang, word, ref)
     assert dom["ec-legend"]["display"] == "none"
     for el in ("perf-ret", "perf-day", "perf-dd"):
         assert "0.00%" not in _slot(dom, el)
+
+
+@requires_node
+@pytest.mark.parametrize("lang,reason,label", [
+    ("en", "The account file failed validation, so no balances are shown.", "Validator problems:"),
+    ("zh", "账户文件未通过校验，因此不显示任何余额。", "校验问题："),
+])
+def test_t12_evidence_tier_lists_the_validator_codes_escaped_and_capped(tmp_path, lang, reason,
+                                                                         label):
+    codes = ["cash_invalid", "position_shares_invalid:<img src=x>"] + ["p%d" % i for i in range(7)]
+    state = dict(INVALID, problems=codes)
+    ev = _run(tmp_path, INVALID_SCENARIO.replace("STATE", json.dumps(state)), lang)["dom"]["perf-evidence"]["html"]
+    assert reason in ev and label in ev
+    assert ev.count('class="mm-book-invalid-problem"') == 6
+    assert "cash_invalid" in ev and "position_shares_invalid:&lt;img src=x&gt;" in ev
+    assert "<img" not in ev and "p5" not in ev
+    assert ("+3 more" if lang == "en" else "另有 3 项") in ev
+    # No codes: the reading sentence alone, never an empty list frame.
+    ev = _run(tmp_path, INVALID_SCENARIO.replace("STATE", json.dumps(INVALID)), lang)["dom"]["perf-evidence"]["html"]
+    assert reason in ev and label not in ev and "mm-book-invalid-problem" not in ev
 
 
 @requires_node
@@ -690,8 +735,9 @@ SELF_IDS.forEach(function(id) {
 def _e13_invalid(quarantine_file):
     # ECON E13 (#1756) unavailable shape for an existing-but-invalid account file.
     return {"status": "unavailable", "reason_code": "self_directed_account_invalid",
-            "problems": ["synthetic: schema check failed"], "quarantine_file": quarantine_file,
-            "nav": None, "cash": None}
+            "problems": ["cash_invalid", "position_shares_invalid:SYNA"],
+            "quarantine_file": quarantine_file, "nav": None, "cash": None, "invested": None,
+            "starting_nav": None, "positions": [], "pending": []}
 
 
 @requires_node
@@ -707,6 +753,9 @@ def test_self_directed_invalid_account_is_the_canonical_cell_never_a_funded_book
     assert out["sd-nav"]["attrs"] == {"data-availability": "unavailable"}
     assert out["sd-hb"]["attrs"] == {"data-availability": "unavailable"}
     assert out["sd-nav-status"]["hidden"] is False
+    ev = out["sd-nav-status"]["html"]
+    assert ("failed validation" if lang == "en" else "未通过校验") in ev
+    assert "cash_invalid" in ev and "position_shares_invalid:SYNA" in ev
     for tile in ("sd-cash", "sd-invested", "sd-unreal", "sd-return"):
         assert out[tile]["text"] == un, tile
     blob = json.dumps(out, ensure_ascii=False)
@@ -721,6 +770,21 @@ def test_self_directed_invalid_account_never_echoes_an_unshaped_ref(tmp_path, qf
     nav = _self_header(tmp_path, _e13_invalid(qfile))["sd-nav"]["html"]
     assert "Book unavailable — state invalid" in nav
     assert "Quarantine ref" not in nav and "<b>x" not in nav and "&lt;b&gt;" not in nav
+
+
+@requires_node
+def test_self_directed_invalid_account_accepts_a_path_but_shows_only_the_sha16(tmp_path):
+    nav = _self_header(tmp_path, _e13_invalid(
+        "/opt/x/portfolios/self_directed/account.quarantine." + SHA16 + ".json"))["sd-nav"]["html"]
+    assert "Quarantine ref " + SHA16 in nav and "/opt/x" not in nav and "portfolios" not in nav
+
+
+@requires_node
+def test_self_directed_invalid_problems_are_escaped(tmp_path):
+    book = dict(_e13_invalid(None), problems=["position_key_invalid:'<b>x'", 5, None])
+    ev = _self_header(tmp_path, book)["sd-nav-status"]["html"]
+    assert "position_key_invalid:&#39;&lt;b&gt;x&#39;" in ev or "position_key_invalid:'&lt;b&gt;x'" in ev
+    assert "<b>" not in ev and ev.count('class="mm-book-invalid-problem"') == 1
 
 
 @requires_node
