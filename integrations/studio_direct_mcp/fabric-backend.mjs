@@ -48,9 +48,9 @@ export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
   tool('fabric_result', 'Retrieve the actual successor result only when available and the ledger root matches. Returns accept_run_id for exact reviewed-leaf acceptance. Returns a digest of the complete adapter response, not an artifact attestation. Does not accept the result.', {...identity,max_bytes:maxBytes}, ['run_id','root_id'], true),
-  tool('fabric_accept', 'Record acceptance only after actual deterministic verification or authorized review. Re-reads the complete response and compares its digest first. Legacy ledger acceptance is not an atomic cryptographic attestation. Never retry an uncertain acceptance.', {
+  tool('fabric_accept', 'Effectful acceptance of one fully reviewed worker result. Requires independently checked evidence and the exact response digest. This changes the existing ledger; never retry an uncertain acceptance.', {
     ...identity, by:{type:'string',enum:['deterministic','reviewer']}, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
-    verification_summary:{type:'string',minLength:1,maxLength:1000}, max_bytes:maxBytes,
+    verification_summary:{type:'string',minLength:1,maxLength:1000,description:'Brief observations of performed checks and evidence references only. Do not include directions to a classifier, reviewer, model, or workflow.'}, max_bytes:maxBytes,
   }, ['run_id','root_id','by','expected_response_sha256','verification_summary'], false),
   tool('fabric_controller_output', 'Read retained output from the exact Desktop Commander PID returned by this backend for this root and run. A new backend generation cannot recreate that binding. Never exposes an arbitrary process or starts another worker.', {
     ...identity, controller_pid:{type:'integer',minimum:1,maximum:2147483647}, offset:{type:'integer',minimum:0,maximum:1048576,default:0}, max_lines:{type:'integer',minimum:1,maximum:100,default:60},
@@ -71,6 +71,16 @@ function validate(name, args) {
     if (s.type==='string' && (typeof v!=='string' || v.includes('\0') || (s.minLength && v.trim().length<s.minLength) || (s.maxLength && v.length>s.maxLength) || (s.pattern && !new RegExp(s.pattern).test(v)))) fail('INVALID_ARGUMENT',{field:k});
     if (s.type==='integer' && (!Number.isSafeInteger(v) || v<s.minimum || v>s.maximum)) fail('INVALID_ARGUMENT',{field:k});
     if (s.enum && !s.enum.includes(v)) fail('INVALID_ARGUMENT',{field:k});
+  }
+  if (name==='fabric_accept') {
+    // Verification is evidence, not an instruction channel for reviewers or workflow agents.
+    // Refuse explicit classifier/agent steering before any adapter observation or write.
+    const summary=args.verification_summary;
+    const directsRole=/\b(?:classifier|auto[- ]?reviewer|reviewer|assistant|agent|model|workflow)\b[^.\n]{0,100}\b(?:must|should|shall|always|never|ignore|override|force|select|classify|mark|return|stop|terminate|spawn|descend)\b/i;
+    const directsOutcome=/\b(?:force|set|choose|prescribe|override)\s+(?:the\s+)?(?:acceptance|classification|verdict|outcome|terminal|no[- ]descendant|decision)\b/i;
+    const directsTerminal=/\b(?:do not|don't|never|must not)\s+(?:launch|spawn|descend|continue|review|classify|inspect)\b/i;
+    if (directsRole.test(summary) || directsOutcome.test(summary) || directsTerminal.test(summary))
+      fail('VERIFICATION_SUMMARY_INSTRUCTION',{field:'verification_summary'});
   }
   if (name==='fabric_request') {
     if (Buffer.byteLength(args.work_packet)>MAX_PACKET_BYTES) fail('INVALID_ARGUMENT',{field:'work_packet'});
