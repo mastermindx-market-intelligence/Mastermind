@@ -152,6 +152,11 @@ def test_ambiguous_claimed_start_quarantines_instead_of_draining_another_root(tm
             await running.start()
             try:
                 assert await _until(lambda: running.service_state == "QUARANTINED")
+                # Quarantine is published before the original cycle thread returns.
+                # Observe completion before the fixture's 100 ms shutdown drain.
+                assert await _until(
+                    lambda: not running._physical_workers and not running._coo_action_tasks
+                ), running._coo_last_error
                 assert _children(running, ids[1]) == []
                 attempted = _children(running, ids[0])
                 assert len(attempted) == 1
