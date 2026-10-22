@@ -503,6 +503,7 @@ def _complete_ohf_role(
     role_result: dict[str, Any],
     *,
     identity_seed: int,
+    principal_identity_seed: int | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """Complete one typed role entirely through inert OHF Runtime boundaries."""
 
@@ -538,6 +539,7 @@ def _complete_ohf_role(
         provider_session_id=provider_session,
         process=process,
     )
+    principal_seed = identity_seed if principal_identity_seed is None else principal_identity_seed
     principal = OperatorPrincipalObservation(
         attempt_id=sealed.attempt_id,
         worker_id=str(sealed.worker_id),
@@ -549,14 +551,14 @@ def _complete_ohf_role(
             "process_start_identity": process.process_start_identity,
             "boot_id": process.boot_id,
         },
-        os_principal_name=f"fixture-principal-{identity_seed}",
-        os_principal_uid=identity_seed,
+        os_principal_name=f"fixture-principal-{principal_seed}",
+        os_principal_uid=(principal_seed),
         provider_home_identity={
-            "path": f"/tmp/phase1fc-codex-home-{identity_seed}",
-            "device": identity_seed,
-            "inode": identity_seed + 1,
-            "uid": identity_seed,
-            "gid": identity_seed,
+            "path": f"/tmp/phase1fc-codex-home-{principal_seed}",
+            "device": principal_seed,
+            "inode": (principal_seed) + 1,
+            "uid": principal_seed,
+            "gid": principal_seed,
             "mode": 0o700,
         },
         observed_at_ms=runtime.store.now_ms(),
@@ -2899,7 +2901,7 @@ def test_void_review_replacement_approval_reaches_handoff(tmp_path: Path) -> Non
         _cycle_through_completed_work(
             tmp_path,
             intent_id="CEO-CYCLE-VOID-REPLACEMENT",
-            review_workers=["worker-a", "worker-b"],
+            review_workers=["worker-b", "worker-b"],
         )
     )
     assert cycle.run_once(root.job_id).action == "REVIEW_CREATED"
@@ -2916,7 +2918,8 @@ def test_void_review_replacement_approval_reaches_handoff(tmp_path: Path) -> Non
         repair_round=0,
         verdict="approve",
     )
-    _complete_ohf_role(runtime, void_review, void_body, identity_seed=3203)
+    # Placement is distinct, but a shared physical principal must still void it.
+    _complete_ohf_role(runtime, void_review, void_body, identity_seed=3203, principal_identity_seed=3202)
 
     replacement = cycle.run_once(root.job_id)
     assert replacement.action == "REVIEW_CREATED"
@@ -3673,11 +3676,11 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # Both default producer contracts remain V1. Restoring the aggregation
-    # digest changes only this derived outer receipt pin; every scenario digest
-    # below remains unchanged. Explicit V2 is tested under its own selection.
+    # Fresh review placement now excludes the reviewed worker/account.
+    # The V2 void scenario proves shared physical identity is still rejected;
+    # only that fixture digest and the derived outer receipt change.
     assert receipt["receipt_digest"] == (
-        "b0d30cab1399fbd36eeef679ecbf71a1efc90eb9573a6ed3aaa25f81c6ec5b6d"
+        "8c117de85226ebd57ff9243ef443143c73d5ed0167d9d6c76e87169b647e12b9"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
@@ -3691,8 +3694,9 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert receipt["repair_path"]["acceptance_digest"] == (
         "235fd205730dc7c76f3b52519e89e4971d508d3c13fc765488813c4dd134b851"
     )
+    assert receipt["void_replacement"]["acceptance_id"] == "P1FC-VOID-REPLACEMENT-INDEPENDENCE-V2"
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "52c4c2820c7db353380965544480c65d057d5ca8566584c880222a7b36419fb8"
+        "747f6385fee5b4a9cd290d28b541e33fe35fd85c336720fdd098df265d1bcc40"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
         "de01a0e61bd21db927684ccf5622e856bd5a18306a7fd45b8769e7c8b9dbb89a"

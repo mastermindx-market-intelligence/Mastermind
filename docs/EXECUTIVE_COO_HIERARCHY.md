@@ -61,6 +61,41 @@ another root or ID. Unrelated reserved read-only branches may progress.
 Aggregation waits for all transitive descendants and unresolved dispatch-return
 markers before producing its immutable handoff.
 
+## Service dispatch and pool inheritance
+
+The Executive service derives each nested Job's execution binding from its
+immediate coordinator's admitted plan while keeping foreground authority,
+workspace custody, finite-operation ownership and recovery on the original
+root. Retained ancestry, exact inherited grants, all descendant limits and
+immutable Job fields are checked before dispatch. These observational checks
+also work after completion; Runtime continues to own fresh claim eligibility,
+handoff requirements, leases and command reconciliation.
+
+A new coordinator inherits its parent's exact host-admitted work-placement
+union. Its planner can see those approved pools and may narrow placement to an
+available pool/model through the existing v5 contract. Ordinary worker Jobs do
+not gain pool-delegation authority. Legacy coordinators whose stored constraints
+lack a union retain that absence on replay and expose no pool choices. If a
+retained explicit placement loses its admitted union, validation refuses and
+does not replace it with an automatic route. Present malformed or changed
+unions refuse. Absence by itself cannot distinguish a legacy record from a
+removed union; no missing authority is reconstructed.
+
+The original root's initial planner still requires a clean exact-base workspace.
+Nested planners may observe prior work in the same branch-bound, credentialless
+workspace. A coordinator executes its aggregate only after the existing Runtime
+handoff gate succeeds.
+
+Fresh review claims exclude the worker and account in the actual reviewed
+work or repair Attempt's sealed principal. Explicit worker/quota selection
+does not fall back if it cannot supply independent capacity; no Attempt or
+quota is consumed. Existing dispatch commands reconcile their original
+Attempt before fresh selection. Final review acceptance independently checks
+the actual OS principal, provider home and grant, so different account labels
+alone do not prove independence. The inert acceptance scenario
+`P1FC-VOID-REPLACEMENT-INDEPENDENCE-V2` exercises that physical-identity refusal
+and a qualifying replacement review.
+
 ## Project tracking
 
 The existing bounded Fabric view joins each descendant through its immediate

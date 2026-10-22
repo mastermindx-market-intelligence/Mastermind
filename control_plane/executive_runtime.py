@@ -9828,6 +9828,54 @@ def _validated_plan_admission(
         raise StateConflict("COO plan admission total reservation drifted")
     return admission, plan_body
 
+def _review_candidate_exclusions(
+    connection: sqlite3.Connection, review_job: sqlite3.Row
+) -> tuple[str, str]:
+    """Exclude known non-independent placement before spending a review claim.
+
+    The completed target's sealed identity supplies the exclusions. Final
+    review acceptance still checks the actual OS principal, provider home,
+    grant and full execution identity.
+    """
+    reviewed = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (review_job["reviews_job_id"],)
+    ).fetchone()
+    if (
+        reviewed is None or reviewed["orchestration_role"] not in {"work", "repair"}
+        or reviewed["root_job_id"] != review_job["root_job_id"]
+        or reviewed["parent_job_id"] != review_job["parent_job_id"]
+    ):
+        raise StateConflict("review claim lost its exact reviewed revision")
+    attempt, _seal, _terminal, _digest = _validated_role_completion_material(
+        connection, job_row=reviewed,
+        expected_role=str(reviewed["orchestration_role"]),
+        root_job_id=str(review_job["root_job_id"]),
+    )
+    try:
+        principal = _load_canonical_digest_pair(
+            attempt["execution_principal_snapshot_json"],
+            attempt["execution_principal_snapshot_digest"],
+            name="reviewed execution principal snapshot",
+        )
+    except PersistenceError as exc:
+        raise StateConflict("review target has no qualified execution identity") from exc
+    if (
+        not isinstance(principal, dict)
+        or set(principal) != {
+            "schema_version", "attempt_id", "worker_id", "quota_class", "provider",
+            "account_label", "placement_snapshot_digest", "os_principal_name",
+            "os_principal_uid", "provider_home_identity",
+        }
+        or principal["schema_version"] != "mastermind.execution_principal_snapshot/v1"
+        or principal["attempt_id"] != attempt["attempt_id"]
+        or principal["worker_id"] != attempt["worker_id"]
+        or not isinstance(principal["worker_id"], str) or not principal["worker_id"]
+        or not isinstance(principal["account_label"], str) or not principal["account_label"].strip()
+    ):
+        raise StateConflict("review target execution identity differs from its completed Attempt")
+    return principal["worker_id"], principal["account_label"]
+
+
 def _review_attempt_is_independent(
     connection: sqlite3.Connection,
     *,
@@ -11471,7 +11519,8 @@ def _insert_cycle_child(
     root_constraints = _normalise_constraints(
         _strict_canonical_json_loads(
             str(root_row["constraints_json"]), name="root constraints"
-        )
+        ),
+        host_admitted_placement_union=role == "aggregation",
     )
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
@@ -11485,7 +11534,9 @@ def _insert_cycle_child(
             ),
             plan_schema_version=plan_schema_version,
         )
-    constraints = _normalise_constraints(constraints)
+    constraints = _normalise_constraints(
+        constraints, host_admitted_placement_union=role == "aggregation"
+    )
     try:
         authority = ExecutiveAuthorityPolicy.load().authorize(
             requested_authorities,
@@ -11751,10 +11802,17 @@ def _reconcile_cycle_child_creation(
     impact = _normalise_business_impact(business_impact or root_row["business_impact"])
     if business_impact is not None and role != "aggregation":
         raise StateConflict("only coordinator steps may specify inherited impact")
+    # A pre-inheritance coordinator may retain the legacy no-pool shape.
+    # Preserve that absence; a present v3 union must still match exactly.
+    stored_constraints = _strict_canonical_json_loads(
+        str(row["constraints_json"]), name="cycle child constraints"
+    )
+    carries_union = role == "aggregation" and "work_placement_union" in stored_constraints
     root_constraints = _normalise_constraints(
         _strict_canonical_json_loads(
             str(root_row["constraints_json"]), name="root constraints"
-        )
+        ),
+        host_admitted_placement_union=carries_union,
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
@@ -11768,7 +11826,9 @@ def _reconcile_cycle_child_creation(
             ),
             plan_schema_version=plan_schema_version,
         )
-    expected_constraints = _normalise_constraints(expected_constraints)
+    expected_constraints = _normalise_constraints(
+        expected_constraints, host_admitted_placement_union=carries_union
+    )
     stored_authorities = _strict_canonical_json_loads(
         str(row["requested_authorities_json"]), name="cycle child authorities"
     )
@@ -11777,9 +11837,6 @@ def _reconcile_cycle_child_creation(
     )
     stored_validations = _strict_canonical_json_loads(
         str(row["validation_commands_json"]), name="cycle child validations"
-    )
-    stored_constraints = _strict_canonical_json_loads(
-        str(row["constraints_json"]), name="cycle child constraints"
     )
     evidence = dict(creation_evidence or {})
     manifest = None
@@ -16844,6 +16901,10 @@ class AttemptRegistry:
             constraints = _normalise_constraints(
                 _json_loads(job_row["constraints_json"], fallback={})
             )
+            review_exclusions = (
+                _review_candidate_exclusions(connection, job_row)
+                if orchestration_role == "review" else None
+            )
             candidate_rows = connection.execute("""
                 SELECT q.*,w.provider AS worker_provider,w.account_label,
                        w.identity_status
@@ -16859,6 +16920,11 @@ class AttemptRegistry:
             eligible_classes = set(constraints["eligible_quota_classes"])
             candidates: list[sqlite3.Row] = []
             for row in candidate_rows:
+                if review_exclusions is not None and (
+                    row["worker_id"] == review_exclusions[0]
+                    or row["account_label"] == review_exclusions[1]
+                ):
+                    continue
                 if (
                     orchestration_role is not None
                     and str(row["worker_id"]) in quarantined_workers
