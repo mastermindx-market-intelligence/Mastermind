@@ -45,6 +45,16 @@ TERMINAL_REASONS = {
     "aborted_streaming": "interrupted", "aborted_tools": "interrupted",
     "hook_stopped": "permission", "stop_hook_prevented": "permission",
 }
+# Derived outcomes contain closed diagnostics, never arbitrary provider text.
+# Raw event values remain local to classification and the private raw capture.
+CLI_SUBTYPES = frozenset({'success', 'error_during_execution', *STOP_REASONS})
+CLI_TERMINAL_REASONS = frozenset({'completed', *TERMINAL_REASONS})
+
+
+def _closed_cli_label(value: str | None, known: frozenset[str]) -> str | None:
+    return None if value is None else value if value in known else 'other'
+
+
 CODEX_ERRORS = {
     "ContextWindowExceeded": "context_limit",
     "SessionBudgetExceeded": "budget_limit",
@@ -238,7 +248,8 @@ def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
         "kind": kind, "command_rc": command_rc, "initial_rejection": initial_rejection,
         "complete_event_capture": complete, "api_status": code,
         "cli_command_rc": command_rc,
-        "cli_subtype": subtype, "cli_terminal_reason": terminal_reason,
+        "cli_subtype": _closed_cli_label(subtype, CLI_SUBTYPES),
+        "cli_terminal_reason": _closed_cli_label(terminal_reason, CLI_TERMINAL_REASONS),
         "permission_denial_count": len(denials) if isinstance(denials, list) else None,
         "permission_denials_role": ("historical_nonterminal" if denial_history_only
                                    else "failure_evidence" if denied else "none"),

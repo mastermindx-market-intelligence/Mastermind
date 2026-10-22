@@ -99,6 +99,58 @@ class PermissionHistory(unittest.TestCase):
         self.assertNotIn('accepted', fields)
         self.assertNotIn('retry_authorized', fields)
 
+    def test_terminal_metadata_uses_closed_labels_not_provider_text(self):
+        for field, key in (('subtype', 'cli_subtype'),
+                           ('terminal_reason', 'cli_terminal_reason')):
+            for raw in ('PRIVATE_METADATA_SENTINEL' + 'x' * 30000, '',
+                        'unknown_future_variant', {'private': 'PRIVATE_METADATA_SENTINEL'}):
+                with self.subTest(field=field, raw_type=type(raw).__name__):
+                    rows = completed(); rows[-1][field] = raw
+                    fields = self.parse(rows)[1]
+                    self.assertIn(fields[key], (None, 'other'))
+                    self.assertNotIn('PRIVATE_METADATA_SENTINEL', json.dumps(fields))
+                    self.assertLess(len(json.dumps(fields).encode()), 2048)
+                    self.assertFalse(fields['initial_rejection'])
+        for subtype in ('success', 'error_during_execution', *outcome.STOP_REASONS):
+            rows = completed(); rows[-1]['subtype'] = subtype
+            self.assertEqual(self.parse(rows)[1]['cli_subtype'], subtype)
+        for reason in ('completed', *outcome.TERMINAL_REASONS):
+            rows = completed(); rows[-1]['terminal_reason'] = reason
+            self.assertEqual(self.parse(rows)[1]['cli_terminal_reason'], reason)
+
+    def test_real_wrapper_keeps_oversized_terminal_fields_out_of_derived_receipt(self):
+        marker = 'PRIVATE_METADATA_SENTINEL'
+        for field, diagnostic in (('subtype', 'cli_subtype'),
+                                  ('terminal_reason', 'cli_terminal_reason')):
+            for cli_rc in (0, 1):
+                with self.subTest(field=field, cli_rc=cli_rc), tempfile.TemporaryDirectory() as directory:
+                    root = Path(directory)
+                    rows = completed(); rows[-1][field] = marker + 'x' * 30000
+                    capture = root / 'capture.jsonl'
+                    raw = ''.join(json.dumps(row) + '\n' for row in rows).encode()
+                    capture.write_bytes(raw)
+                    target = root / 'fixture-run.provider.json'
+                    env = {'PATH': os.environ.get('PATH', ''), 'HOME': directory,
+                           'POOL_OUTCOME_FILE': str(target),
+                           'REMOTE_SUB_RUN_ID': 'fixture-run', 'POOL_LEASE_ID': 'fixture-lease',
+                           'POOL_ACCOUNT': 'fixture-account', 'POOL_ORCHESTRATOR_ID': 'fixture-root',
+                           'LANE_REMOTE_HOST': 'fixture-host'}
+                    result = subprocess.run([sys.executable,
+                        str(ROOT / 'candidate/provider_outcome.py'), 'claude', str(capture),
+                        str(cli_rc), 'glm', 'fixture-model'], env=env,
+                        capture_output=True, text=True, timeout=10)
+                    self.assertEqual(result.returncode, 1)
+                    self.assertLess(len(target.read_bytes()), 4096)
+                    self.assertNotIn(marker, target.read_text() + result.stdout + result.stderr)
+                    receipt = json.loads(target.read_text())
+                    self.assertEqual(receipt[diagnostic], 'other')
+                    self.assertEqual(receipt['kind'], 'permission')
+                    self.assertEqual(receipt['cli_command_rc'], cli_rc)
+                    self.assertFalse(receipt['initial_rejection'])
+                    retained = root / receipt['diagnostic_capture']['file']
+                    self.assertEqual(retained.read_bytes(), raw)
+                    self.assertEqual(retained.stat().st_mode & 0o777, 0o600)
+
     def test_real_wrapper_does_not_rewrite_zero_exit_to_permission_failure(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
