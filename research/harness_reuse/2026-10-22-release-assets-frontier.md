@@ -75,3 +75,40 @@ head and merge-group checks, then use the incumbent accepted release owner for a
 client artifact. In parallel finish normal reader source delivery. Only after original runtime and
 permission gates clear can the full authenticated send -> native result -> original-parent acceptance
 journey be proven. No source-only success is to be relabeled as live chat.
+
+
+## Independent Fabric review and late publication correction — 2026-10-22
+
+The single independent read-only review `deepseek-os-assets-review-20261022-r1`,
+root `deepseek-harness-os-upgrade-20261022-web-001`, returned TERMINAL/rc0,
+exact PR1733 head `c5df975c7e4a79da83b510d51855083dcb423804`,
+response SHA256 `1314c17c5d9bc7c7a31141507f8b611c726c1eaf75eeb8c91219e7bbbff50eed`.
+**Verdict REQUEST_CHANGES**, not acceptance. This closes the original review
+wait and specifically blocks merging its then-reviewed head.
+
+Concrete finding: the original public-edge publisher
+`ops/executive_os/os_public_edge_publication.py:_load_stage` checked only
+index sizes 4/10 for legacy 3/9 assets. The rich13 manifest yields an index
+of 14 (manifest+13 assets), so actual `stage_host` passed but `publish`
+refused `asset index topology`. Prior verification did not cover this
+sixth release owner. The reviewer reproduced old9->new13 publication failure
+and a passing legacy9 control, without production effects.
+
+Corrected **in the existing PR1733 source workspace**, not a replacement
+worker or release plane: the canonical asset names/MIME module exposes
+closed per-profile file counts derived from its own required components;
+both `os_asset_mimes` and `_load_stage` use this one set.
+A new inert 9-to-13 complete publication regression first failed
+on the precise obsolete gate; the candidate subsequently passed
+the individual two-phase test. The six affected owner test modules then
+collected **395 tests** and exited **0**, with 395 passing marks and no
+skip/failure marks on the macOS test host; `git diff --check` also passed.
+Current-head hosted CI and any renewed independent-review requirement
+remain outstanding. No live host, Caddy,
+Runtime, worker, provider or session effect was undertaken.
+
+Existing root-sealed release and Content/Bridge/ACP permission gates
+remain unchanged. The preserved earlier verification receipts still
+describe their original head; the new head requires its own qualification
+and protected merge checks. Do not reinterpret this source correction
+as a production release or a completed authenticated conversation.

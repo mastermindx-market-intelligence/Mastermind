@@ -160,3 +160,22 @@ name/MIME owner; adding this profile does not introduce wildcard HTTP routes or
 change authentication, request methods, CSP, provider admission or service arming.
 It repairs source/build compatibility only. Production packaging/publication must
 still use the existing accepted release owner and all of its custody gates.
+
+
+### Staged public-edge publication compatibility
+
+The original publisher's staged file index contains the manifest *plus* each admitted
+asset, so the three closed asset profiles have 4, 10 and 14 index entries.
+`ops/executive_os/os_public_edge_publication.py` obtains the allowed index
+cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
+closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*
+reading caller-supplied stage labels; then the normal manifest/byte/receipt checks
+prove exact names, digest and source identity. Do not add wildcards or an
+independent hardcoded 14-file route policy.
+
+`tests/test_os_public_edge_publication.py` includes a full inert 9-to-13
+two-phase publication test, from qualified bundle and old seal through stage,
+prepare, cutover readiness and finalization. The test-host release switch and
+HTTP stand-in are fixtures only. These checks **do not** prove root-sealed
+production publication, permission activation, provider SEND or authentic
+original-parent consumption.
