@@ -79,10 +79,10 @@ def test_v2_carry_refuses_broken_chain(monkeypatch, fault):
 def _terminal_fixture(tmp_path, monkeypatch, *, marker=True):
     """Create the exact historical schema-v5 terminal-carry baseline."""
     from control_plane import executive_runtime as rt
-    # Freeze construction before the database exists; never relabel a v6 store.
+    # Freeze construction before the database exists; never relabel a current store.
     monkeypatch.setattr(rt, "_MIGRATIONS", rt._MIGRATIONS[:5])
     monkeypatch.setattr(rt, "SCHEMA_VERSION", 5)
-    monkeypatch.setattr(rt, "_NORMALIZED_V6_SCHEMA_DIGEST", rt._NORMALIZED_V5_SCHEMA_DIGEST)
+    monkeypatch.setattr(rt, "_NORMALIZED_V7_SCHEMA_DIGEST", rt._NORMALIZED_V5_SCHEMA_DIGEST)
     runtime, root_id, job_id, _command, attempt_id = _failed_planner(tmp_path, marker=marker)
     root = runtime.jobs.get_job(root_id)
     # Unit projection supplies the host binding; the Runtime fixture owns the claim.

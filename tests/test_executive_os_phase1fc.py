@@ -726,10 +726,11 @@ def test_fresh_schema_v4_has_exact_additive_columns_and_migration(tmp_path):
             row[1] for row in connection.execute("PRAGMA table_info(attempts)")
         ]
 
-    assert [tuple(row) for row in migrations][-3:] == [
+    assert [tuple(row) for row in migrations][3:] == [
         (4, "executive_phase1fc_orchestration_contract"),
         (5, "executive_finite_drive_arm_contract"),
-        (6, "executive_physical_resource_contract"),
+        (6, "executive_nested_coordinator_contract"),
+        (7, "executive_physical_resource_contract"),
     ]
     assert job_columns[-8:] == [
         "orchestration_role",
@@ -3584,7 +3585,8 @@ def test_run_once_cycle_persists_reviewed_policy_digest_when_policy_is_invalid(
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
 
-    def invalid_policy():
+    def invalid_policy(*, version):
+        assert version == 1
         raise executive_coo_cycle.CooCyclePolicyError("fixture policy drift")
 
     monkeypatch.setattr(
@@ -3671,29 +3673,29 @@ def test_offline_acceptance_receipt_is_deterministic_and_proves_tx9_quarantine()
     assert exhaustion["second_terminal_status"] == "LOST"
     assert exhaustion["blocked_reason"] == "plan_terminal_adverse"
     assert len(exhaustion["supervisor_dispatch_calls"]) == 2
-    # The controller-only authority changes the reviewed policy SHA; the
-    # acceptance producer binds that SHA into orchestration grants, so only
-    # derived digest goldens move while all non-digest behavior remains fixed.
+    # Both default producer contracts remain V1. Restoring the aggregation
+    # digest changes only this derived outer receipt pin; every scenario digest
+    # below remains unchanged. Explicit V2 is tested under its own selection.
     assert receipt["receipt_digest"] == (
-        "06599ec9b4843a33e6325799620dcd6b37b425a96c5f9bb4fd49f2f09c108c36"
+        "b0d30cab1399fbd36eeef679ecbf71a1efc90eb9573a6ed3aaa25f81c6ec5b6d"
     )
     assert receipt["dispatch_boundary"]["acceptance_digest"] == (
         "02af618a1a926bde4b6a92fb2e697aa3b2d41538ae81350dbd954891a5dd2bcc"
     )
     assert receipt["dispatch_crash_replay"]["acceptance_digest"] == (
-        "38e42503ea5426cbf82684f6704ae1989d46de6fe5bd10cbeec650bac45fb551"
+        "a3beaf6a567915e9c1c184b55247f14c151d6e7cf874e82965c281c87156be5a"
     )
     assert receipt["happy_path"]["acceptance_digest"] == (
-        "7a9c987d722816502bf1c5a9254872328aaca01db0a52937ae1822b9e5622ee7"
+        "aee0738902c6839d9c98622a00c718643ad6ab648c5f2954f4f839086ef7d104"
     )
     assert receipt["repair_path"]["acceptance_digest"] == (
-        "cfa81f98c2b8cf30f5eda5a4a98276a1fadc7e6e9dcaa65573f312753f5b7c3f"
+        "235fd205730dc7c76f3b52519e89e4971d508d3c13fc765488813c4dd134b851"
     )
     assert receipt["void_replacement"]["acceptance_digest"] == (
-        "63b4f2a845884aef0ecbde055236b85cf06ea2dcec1cf4332ebed88d3dc28051"
+        "52c4c2820c7db353380965544480c65d057d5ca8566584c880222a7b36419fb8"
     )
     assert receipt["cycle"]["acceptance_digest"] == (
-        "88ab6c7621304c174d9f2e0ac43a98d8d71bfa4fdb45528fda802700bf640e66"
+        "de01a0e61bd21db927684ccf5622e856bd5a18306a7fd45b8769e7c8b9dbb89a"
     )
     assert receipt["tx9"]["acceptance_digest"] == (
         "9a43476a06fb3ecc4351b96d5646c7b0e521fd30092c3882bc5e8d4532825585"
@@ -4248,7 +4250,7 @@ def test_fph0_v3_refuses_caller_union_collision(
 
 
 def test_fph0_d7_composition_and_v2_constant_are_byte_preserved():
-    assert executive_runtime.SCHEMA_VERSION == 6
+    assert executive_runtime.SCHEMA_VERSION == 7
     assert executive_runtime.V3_HOST_EXECUTION_BINDING_KEYS == (
         executive_runtime.V2_HOST_EXECUTION_BINDING_KEYS
         | {"work_placement_union"}

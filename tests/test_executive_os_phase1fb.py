@@ -128,10 +128,11 @@ def test_parent_child_fields_migrate_preserve_and_derive_root_depth(tmp_path):
         migrations = [tuple(row) for row in connection.execute(
             "SELECT version,name FROM schema_migrations ORDER BY version"
         )]
-        assert [row[0] for row in migrations] == [1, 2, 3, 4, 5, 6]
-        assert migrations[-2:] == [
+        assert [row[0] for row in migrations] == [1, 2, 3, 4, 5, 6, 7]
+        assert migrations[-3:] == [
             (5, "executive_finite_drive_arm_contract"),
-            (6, "executive_physical_resource_contract"),
+            (6, "executive_nested_coordinator_contract"),
+        (7, "executive_physical_resource_contract"),
         ]
 
 
@@ -163,7 +164,7 @@ def test_v1_populated_store_normal_open_refuses_without_mutation(tmp_path):
         "inventory": sorted(path.name for path in db_path.parent.iterdir()),
     }
     assert after == before
-    assert SCHEMA_VERSION == 6
+    assert SCHEMA_VERSION == 7
 
 
 def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
@@ -175,7 +176,7 @@ def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
         assert [
             int(row[0])
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3, 4, 5, 6]
+        ] == [1, 2, 3, 4, 5, 6, 7]
 
 
 def test_v1_restored_database_stays_inert_under_v4_code(tmp_path):

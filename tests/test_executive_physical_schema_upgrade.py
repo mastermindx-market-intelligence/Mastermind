@@ -1,4 +1,4 @@
-"""Offline schema-6 preservation and physical-history restore adversaries.
+"""Offline schema-7 preservation and physical-history restore adversaries.
 
 All databases, policy observations, release/census seams and resource effects in
 these tests are fixture-owned. No installed Runtime, service or provider is used.
@@ -21,22 +21,21 @@ from tests.test_executive_backup import (
 from tests.test_executive_os_sqlite import m2_store, _m2_reserve, _m2_envelope
 
 
-def _exact_v5(path: Path) -> Path:
+def _exact_v6(path: Path) -> Path:
     _exact_v4(path)
     _populate_v4_evidence(path)
     with sqlite3.connect(path) as connection:
-        version, name, statements = rt._MIGRATIONS[4]
-        assert version == 5
-        for statement in statements:
-            connection.execute(statement)
-        connection.execute("INSERT INTO schema_migrations VALUES(?,?,?,?)",
-                           (version, name, rt._migration_checksum(statements), -505))
+        for version, name, statements in rt._MIGRATIONS[4:6]:
+            for statement in statements:
+                connection.execute(statement)
+            connection.execute("INSERT INTO schema_migrations VALUES(?,?,?,?)",
+                               (version, name, rt._migration_checksum(statements), -101 * version))
     return path
 
 
-def _full_v5(path: Path) -> str:
+def _full_v6(path: Path) -> str:
     with backup._readonly_database(path) as connection:
-        return backup.full_v5_content_digest(connection)
+        return backup.full_v6_content_digest(connection)
 
 
 def _history(path: Path) -> str:
@@ -52,8 +51,8 @@ def _file_set(path: Path):
     }
 
 
-def test_normal_v5_open_refuses_before_writable_sqlite_or_metadata_change(tmp_path, monkeypatch):
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
+def test_normal_v6_open_refuses_before_writable_sqlite_or_metadata_change(tmp_path, monkeypatch):
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
     path.chmod(0o400)
     before = _file_set(path)
     connect = sqlite3.connect
@@ -65,30 +64,30 @@ def test_normal_v5_open_refuses_before_writable_sqlite_or_metadata_change(tmp_pa
         return connect(database, *args, **kwargs)
 
     monkeypatch.setattr(rt.sqlite3, "connect", readonly_only)
-    with pytest.raises(rt.ExecutiveSchemaUpgradeRequired, match="upgrade_v5_to_v6"):
+    with pytest.raises(rt.ExecutiveSchemaUpgradeRequired, match="upgrade_v6_to_v7"):
         rt.RuntimeStore(path.parent, database_path=path)
     assert calls and _file_set(path) == before
 
 
-def test_upgrade_preserves_all_v5_cells_timestamps_and_empty_physical_history(tmp_path, monkeypatch):
+def test_upgrade_preserves_all_v6_cells_timestamps_and_empty_physical_history(tmp_path, monkeypatch):
     release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
-    before = _full_v5(path)
-    receipt = backup.upgrade_v5_to_v6(path, tmp_path / "backups", release_sha=release)
-    assert receipt.source_schema_version == 5 and receipt.target_schema_version == 6
-    assert receipt.pre_full_v5_content_digest == before == receipt.post_full_v5_content_digest
-    assert receipt.full_v5_content_equal is True
-    assert _full_v5(path) == before
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
+    before = _full_v6(path)
+    receipt = backup.upgrade_v6_to_v7(path, tmp_path / "backups", release_sha=release)
+    assert receipt.source_schema_version == 6 and receipt.target_schema_version == 7
+    assert receipt.pre_full_v6_content_digest == before == receipt.post_full_v6_content_digest
+    assert receipt.full_v6_content_equal is True
+    assert _full_v6(path) == before
     assert receipt.physical_history_digest == _history(path)
     with backup._readonly_database(path) as connection:
-        assert connection.execute("SELECT applied_at_ms FROM schema_migrations WHERE version=5").fetchone()[0] == -505
+        assert connection.execute("SELECT applied_at_ms FROM schema_migrations WHERE version=6").fetchone()[0] == -606
         assert connection.execute("SELECT COUNT(*) FROM physical_resource_commitments").fetchone()[0] == 0
         assert connection.execute("SELECT COUNT(*) FROM physical_resource_demands").fetchone()[0] == 0
     for version, database, manifest in (
-        (5, receipt.v5_backup_path, receipt.v5_backup_manifest_path),
         (6, receipt.v6_backup_path, receipt.v6_backup_manifest_path),
+        (7, receipt.v7_backup_path, receipt.v7_backup_manifest_path),
     ):
-        assert _full_v5(Path(database)) == before
+        assert _full_v6(Path(database)) == before
         proof = backup.verify_restore_drill(database, manifest, expected_schema_version=version)
         assert proof.runtime_schema_version == version
     completion = json.loads(Path(receipt.completion_receipt_path).read_text())
@@ -96,18 +95,18 @@ def test_upgrade_preserves_all_v5_cells_timestamps_and_empty_physical_history(tm
     assert completion["physical_history_digest"] == receipt.physical_history_digest
     assert not (path.parent / backup._UPGRADE_BARRIER_NAME).exists()
     with pytest.raises(backup.ExecutiveSchemaUpgradeError, match="already exists"):
-        backup.upgrade_v5_to_v6(path, tmp_path / "again", release_sha=release)
+        backup.upgrade_v6_to_v7(path, tmp_path / "again", release_sha=release)
 
 
 @pytest.mark.parametrize("phase", [
-    "preflight_persisted", "exclusive_v5_verified",
-    *[f"after_m6_statement:{n:02d}" for n in range(1, len(rt._MIGRATIONS[5][2]) + 1)],
-    "after_m6_receipt", "before_v6_commit",
+    "preflight_persisted", "exclusive_v6_verified",
+    *[f"after_m7_statement:{n:02d}" for n in range(1, len(rt._MIGRATIONS[6][2]) + 1)],
+    "after_m7_receipt", "before_v7_commit",
 ])
-def test_every_precommit_fault_preserves_exact_v5_and_cleans_only_proven_barrier(tmp_path, monkeypatch, phase):
+def test_every_precommit_fault_preserves_exact_v6_and_cleans_only_proven_barrier(tmp_path, monkeypatch, phase):
     release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
-    before = _full_v5(path)
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
+    before = _full_v6(path)
 
     def fail(observed):
         if observed == phase:
@@ -115,21 +114,21 @@ def test_every_precommit_fault_preserves_exact_v5_and_cleans_only_proven_barrier
 
     monkeypatch.setattr(backup, "_SCHEMA_UPGRADE_TEST_HOOK", fail)
     with pytest.raises(backup.ExecutiveSchemaUpgradeError, match="rolled back"):
-        backup.upgrade_v5_to_v6(path, tmp_path / "backups", release_sha=release)
-    backup.verify_backup(path, expected_schema_version=5)
-    assert _full_v5(path) == before
+        backup.upgrade_v6_to_v7(path, tmp_path / "backups", release_sha=release)
+    backup.verify_backup(path, expected_schema_version=6)
+    assert _full_v6(path) == before
     assert not (path.parent / backup._UPGRADE_BARRIER_NAME).exists()
-    assert not (path.parent / backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME).exists()
+    assert not (path.parent / backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME).exists()
 
 
 @pytest.mark.parametrize("phase", [
-    "after_v6_commit_before_checkpoint", "after_v6_checkpoint",
+    "after_v7_commit_before_checkpoint", "after_v7_checkpoint",
     "completion_persisted", "before_barrier_unlink",
 ])
-def test_postcommit_failure_retains_v6_and_quarantines_normal_writers(tmp_path, monkeypatch, phase):
+def test_postcommit_failure_retains_v7_and_quarantines_normal_writers(tmp_path, monkeypatch, phase):
     release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
-    before = _full_v5(path)
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
+    before = _full_v6(path)
 
     def fail(observed):
         if observed == phase:
@@ -137,66 +136,69 @@ def test_postcommit_failure_retains_v6_and_quarantines_normal_writers(tmp_path, 
 
     monkeypatch.setattr(backup, "_SCHEMA_UPGRADE_TEST_HOOK", fail)
     with pytest.raises(backup.ExecutiveSchemaUpgradeError, match="forward fix"):
-        backup.upgrade_v5_to_v6(path, tmp_path / "backups", release_sha=release)
-    backup.verify_backup(path, expected_schema_version=6)
-    assert _full_v5(path) == before
+        backup.upgrade_v6_to_v7(path, tmp_path / "backups", release_sha=release)
+    backup.verify_backup(path, expected_schema_version=7)
+    assert _full_v6(path) == before
     assert (path.parent / backup._UPGRADE_BARRIER_NAME).exists()
     with pytest.raises(rt.PersistenceError, match="barrier"):
         rt.RuntimeStore(path.parent, database_path=path)
 
 
-def test_migration_five_timestamp_drift_is_detected_inside_exclusive_transaction(tmp_path, monkeypatch):
+@pytest.mark.parametrize("migration_version", range(1, 7))
+def test_prior_migration_timestamp_drift_is_detected_inside_exclusive_transaction(
+        tmp_path, monkeypatch, migration_version):
     release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
-    before = _full_v5(path)
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
+    before = _full_v6(path)
     original = backup._verify_connection
     changed = False
 
     def drift(connection, **kwargs):
         nonlocal changed
         value = original(connection, **kwargs)
-        if kwargs.get("expected_schema_version") == 6 and connection.in_transaction and not changed:
-            connection.execute("UPDATE schema_migrations SET applied_at_ms=12345 WHERE version=5")
+        if kwargs.get("expected_schema_version") == 7 and connection.in_transaction and not changed:
+            connection.execute("UPDATE schema_migrations SET applied_at_ms=12345 WHERE version=?",
+                               (migration_version,))
             changed = True
         return value
 
     monkeypatch.setattr(backup, "_verify_connection", drift)
     with pytest.raises(backup.ExecutiveSchemaUpgradeError, match="rolled back"):
-        backup.upgrade_v5_to_v6(path, tmp_path / "backups", release_sha=release)
-    assert changed and _full_v5(path) == before
-    backup.verify_backup(path, expected_schema_version=5)
+        backup.upgrade_v6_to_v7(path, tmp_path / "backups", release_sha=release)
+    assert changed and _full_v6(path) == before
+    backup.verify_backup(path, expected_schema_version=6)
 
 
 @pytest.mark.parametrize("aggregate,event_type", [
     ("physical_resource_operation", "FIXTURE_REFUSAL"),
     ("fixture", "PHYSICAL_RESOURCE_REFUSED"),
 ])
-def test_v5_with_physical_event_semantics_cannot_be_promoted_as_initial(tmp_path, monkeypatch, aggregate, event_type):
+def test_v6_with_physical_event_semantics_cannot_be_promoted_as_initial(tmp_path, monkeypatch, aggregate, event_type):
     release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
     with sqlite3.connect(path) as connection:
         connection.execute(
             "INSERT INTO events(aggregate_type,aggregate_id,sequence,event_type,command_id,actor,payload_json,created_at_ms)"
             " VALUES(?,?,1,?,'fixture:physical-event','fixture','{}',1)",
             (aggregate, "fixture", event_type),
         )
-    before = _full_v5(path)
+    before = _full_v6(path)
     with pytest.raises(backup.ExecutiveSchemaUpgradeError, match="rolled back"):
-        backup.upgrade_v5_to_v6(path, tmp_path / "backups", release_sha=release)
-    assert _full_v5(path) == before
-    backup.verify_backup(path, expected_schema_version=5)
+        backup.upgrade_v6_to_v7(path, tmp_path / "backups", release_sha=release)
+    assert _full_v6(path) == before
+    backup.verify_backup(path, expected_schema_version=6)
 
 
-def test_full_v5_digest_sees_migration_five_timestamp_where_full_v4_does_not(tmp_path):
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
+def test_full_v6_digest_sees_migration_six_timestamp_where_full_v5_does_not(tmp_path):
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
     with backup._readonly_database(path) as connection:
-        prior_v4 = backup.full_v4_content_digest(connection)
         prior_v5 = backup.full_v5_content_digest(connection)
+        prior_v6 = backup.full_v6_content_digest(connection)
     with sqlite3.connect(path) as connection:
-        connection.execute("UPDATE schema_migrations SET applied_at_ms=applied_at_ms+1 WHERE version=5")
+        connection.execute("UPDATE schema_migrations SET applied_at_ms=applied_at_ms+1 WHERE version=6")
     with backup._readonly_database(path) as connection:
-        assert backup.full_v4_content_digest(connection) == prior_v4
-        assert backup.full_v5_content_digest(connection) != prior_v5
+        assert backup.full_v5_content_digest(connection) == prior_v5
+        assert backup.full_v6_content_digest(connection) != prior_v6
 
 
 def _physical_state(runtime, request, state):
@@ -316,27 +318,27 @@ def test_cli_transition_is_closed_and_default_preserves_historical_entry():
     base = ["--database", "/fixture/db", "--backup-directory", "/fixture/backups",
             "--release-sha", "a" * 40]
     assert parser.parse_args(base).transition == "v3-to-v4"
-    assert parser.parse_args([*base, "--transition", "v5-to-v6"]).transition == "v5-to-v6"
+    assert parser.parse_args([*base, "--transition", "v6-to-v7"]).transition == "v6-to-v7"
     with pytest.raises(SystemExit):
         parser.parse_args([*base, "--transition", "auto"])
 
 
 @pytest.mark.parametrize("when,version", [
-    ("preflight_persisted", 5), ("before_barrier_unlink", 5), ("before_barrier_unlink", 6),
+    ("preflight_persisted", 6), ("before_barrier_unlink", 6), ("before_barrier_unlink", 7),
 ])
 @pytest.mark.parametrize("suffix", ["-wal", "-shm", "-journal"])
 @pytest.mark.parametrize("kind", ["file", "dangling_symlink"])
 def test_late_retained_backup_sidecars_never_qualify_completion(
         tmp_path, monkeypatch, when, version, suffix, kind):
     release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
-    path = _exact_v5(tmp_path / "runtime" / "executive.sqlite3")
+    path = _exact_v6(tmp_path / "runtime" / "executive.sqlite3")
     sidecars = []
 
     def tamper(phase):
         if phase != when:
             return
-        receipt_name = (backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME if version == 5
-                        else backup._UPGRADE_V5_TO_V6_COMPLETION_NAME)
+        receipt_name = (backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME if version == 6
+                        else backup._UPGRADE_V6_TO_V7_COMPLETION_NAME)
         receipt = json.loads((path.parent / receipt_name).read_text())
         source = Path(receipt[f"v{version}_backup"]["database_path"])
         sidecar = source.with_name(source.name + suffix)
@@ -350,7 +352,7 @@ def test_late_retained_backup_sidecars_never_qualify_completion(
     monkeypatch.setattr(backup, "_SCHEMA_UPGRADE_TEST_HOOK", tamper)
     match = "rolled back" if when == "preflight_persisted" else "forward fix"
     with pytest.raises(backup.ExecutiveSchemaUpgradeError, match=match):
-        backup.upgrade_v5_to_v6(path, tmp_path / "backups", release_sha=release)
+        backup.upgrade_v6_to_v7(path, tmp_path / "backups", release_sha=release)
     assert sidecars and os.path.lexists(sidecars[0])
     assert (path.parent / backup._UPGRADE_BARRIER_NAME).exists() == (when != "preflight_persisted")
 
@@ -497,3 +499,78 @@ def test_controller_crash_after_barrier_retains_stage_rollback_and_quarantine(m2
     assert target.read_bytes() == before
     with pytest.raises(rt.PersistenceError, match="barrier"):
         rt.Runtime.at(runtime.store.root)
+
+
+def test_explicit_hierarchy_then_physical_upgrade_retains_both_receipt_chains(tmp_path, monkeypatch):
+    release = _upgrade_test_release_and_census(monkeypatch, tmp_path)
+    path = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(path)
+    backups = tmp_path / "backups"
+    finite = backup.upgrade_v4_to_v5(path, backups, release_sha=release)
+    hierarchy = backup.upgrade_v5_to_v6(path, backups, release_sha=release)
+    assert (hierarchy.source_schema_version, hierarchy.target_schema_version) == (5, 6)
+    retained = {
+        Path(receipt_path): Path(receipt_path).read_bytes()
+        for receipt in (finite, hierarchy)
+        for receipt_path in (receipt.preflight_receipt_path, receipt.completion_receipt_path)
+    }
+    before = _full_v6(path)
+    with pytest.raises(rt.ExecutiveSchemaUpgradeRequired, match="upgrade_v6_to_v7"):
+        rt.RuntimeStore(path.parent, database_path=path)
+    backup.verify_backup(path, expected_schema_version=6)
+    physical = backup.upgrade_v6_to_v7(path, backups, release_sha=release)
+    assert (physical.source_schema_version, physical.target_schema_version) == (6, 7)
+    assert physical.pre_full_v6_content_digest == before == physical.post_full_v6_content_digest
+    assert all(p.read_bytes() == body for p, body in retained.items())
+    verified = backup.verify_backup(path, expected_schema_version=7)
+    assert [(m.version, m.name) for m in verified.migrations][-2:] == [
+        (6, "executive_nested_coordinator_contract"),
+        (7, "executive_physical_resource_contract"),
+    ]
+    with backup._readonly_database(path) as connection:
+        assert connection.execute("SELECT COUNT(*) FROM physical_resource_commitments").fetchone()[0] == 0
+        assert connection.execute("SELECT COUNT(*) FROM physical_resource_demands").fetchone()[0] == 0
+        assert connection.execute(
+            "SELECT name FROM sqlite_master WHERE name='jobs_one_coordinator_per_step'"
+        ).fetchone() is not None
+    rt.RuntimeStore(path.parent, database_path=path, create=False, existing_writable=True)
+
+
+def test_displaced_physical_v6_lineage_refuses_without_mutating_existing_store(tmp_path, monkeypatch):
+    path = _exact_v4(tmp_path / "runtime" / "executive.sqlite3")
+    _populate_v4_evidence(path)
+    legacy_vector = (
+        rt._MIGRATIONS[4],
+        (6, "executive_physical_resource_contract", rt._PHYSICAL_RESOURCE_SCHEMA_CANDIDATE),
+    )
+    with sqlite3.connect(path) as connection:
+        for version, name, statements in legacy_vector:
+            for statement in statements:
+                connection.execute(statement)
+            connection.execute("INSERT INTO schema_migrations VALUES(?,?,?,?)",
+                               (version, name, rt._migration_checksum(statements), -101 * version))
+    path.chmod(0o400)
+    before = _file_set(path)
+    original_connect = sqlite3.connect
+
+    def immutable_only(database, *args, **kwargs):
+        assert "mode=ro" in str(database) and "immutable=1" in str(database)
+        return original_connect(database, *args, **kwargs)
+
+    monkeypatch.setattr(rt.sqlite3, "connect", immutable_only)
+    with pytest.raises(rt.PersistenceError, match="migration 6 checksum/name"):
+        rt.RuntimeStore(path.parent, database_path=path)
+    assert _file_set(path) == before
+
+
+def test_cli_source_alias_is_closed_and_cannot_conflict_with_transition():
+    from scripts import executive_os_migrate as cli
+    parser = cli._parser()
+    base = ["--database", "/fixture/db", "--backup-directory", "/fixture/backups",
+            "--release-sha", "a" * 40]
+    for version in (3, 4, 5, 6):
+        assert parser.parse_args([*base, "--from-version", str(version)]).from_version == version
+    with pytest.raises(SystemExit):
+        parser.parse_args([*base, "--from-version", "7"])
+    with pytest.raises(SystemExit):
+        parser.parse_args([*base, "--from-version", "5", "--transition", "v6-to-v7"])
