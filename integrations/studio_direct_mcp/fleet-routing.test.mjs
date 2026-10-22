@@ -334,6 +334,8 @@ test('known modern integer-only search deltas bind and validate arguments locall
     ['get_more_search_results',{offset:0.75,length:5}],
     ['get_more_search_results',{offset:0,length:0}],
     ['get_more_search_results',{offset:0,length:1.25}],
+    ['get_more_search_results',{offset:9007199254740992,length:1}],
+    ['start_search',{maxResults:9007199254740992}],
   ]) {
     await assert.rejects(
       router.call('mini4',{name,arguments:args}),
