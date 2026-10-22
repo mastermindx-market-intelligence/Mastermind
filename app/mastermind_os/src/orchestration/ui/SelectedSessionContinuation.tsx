@@ -1,4 +1,5 @@
 import { useId, useRef, useState } from "react";
+import { useComposerKeyboard } from "./useComposerKeyboard";
 import {
   SESSION_TEXT_MAX_CODEPOINTS as MAX_CONDITION_CODEPOINTS,
   codePointLength,
@@ -163,6 +164,8 @@ export function SelectedSessionContinuation({
   const canContinue =
     sessionKey !== null && !unavailableReason && !dispatchBusy && !reading && !retainedPointer && !recoveryRequired && instructionValid && conditionValid;
 
+  const composerKeyDown = useComposerKeyboard(canContinue);
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     if (!canContinue || tokenRef.current !== null) return;
@@ -273,6 +276,7 @@ export function SelectedSessionContinuation({
                 id={instructionId}
                 value={instruction}
                 onChange={(e) => setField("instruction", e.target.value)}
+                onKeyDown={(event) => composerKeyDown(event)}
                 rows={3}
                 disabled={dispatchBusy}
                 aria-invalid={instructionPoints > MAX_CONDITION_CODEPOINTS}
@@ -293,6 +297,7 @@ export function SelectedSessionContinuation({
                 id={conditionId}
                 value={condition}
                 onChange={(e) => setField("condition", e.target.value)}
+                onKeyDown={(event) => composerKeyDown(event)}
                 rows={2}
                 placeholder={ui(locale, "Describe the change and its completion condition.")}
                 disabled={dispatchBusy}
@@ -304,6 +309,9 @@ export function SelectedSessionContinuation({
               </p>
             </div>
             <p id={`${formId}-bounds`} className="session-bounds">{ui(locale, "Use 1–700 characters.")} ({instructionPoints}/700 · {conditionPoints}/700)</p>
+            <p className="session-keyboard-hint">{locale === "zh-CN"
+              ? "准备就绪后按 Ctrl / Cmd + Enter 发送；Enter 或 Shift + Enter 换行。"
+              : "Ctrl / Cmd + Enter to send when ready. Enter and Shift + Enter insert new lines."}</p>
             <div className="form-actions">
               <button type="submit" disabled={!canContinue} className="primary">
                 {dispatchBusy ? ui(locale, "Sending\u2026") : ui(locale, "Send")}

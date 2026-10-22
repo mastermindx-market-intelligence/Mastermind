@@ -15,13 +15,14 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 import math
 import os
 import fcntl
 import threading
 from copy import deepcopy
 from contextlib import contextmanager
-from datetime import UTC, date, datetime, timezone
+from datetime import UTC, date, datetime, timedelta, timezone
 from numbers import Real
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
@@ -1698,9 +1699,267 @@ def reset_cost_basis_to_market(prices: dict[str, float] | None = None,
 # core account operations
 # ---------------------------------------------------------------------------
 
-def nav(prices: dict[str, float], portfolio_id: str | None = None) -> float:
-    """Current NAV = cash + market value of all positions."""
+class NavWithheld(ValueError):
+    """Raised by ``nav(strict=True)`` when a held line has no lawful price.
+
+    Carries the full :func:`valuation` result in ``.valuation`` so the caller can
+    see exactly which lines were unpriced instead of guessing.
+    """
+
+    def __init__(self, valuation: dict[str, Any]):
+        unpriced = [str(row.get("ticker")) for row in (valuation or {}).get("unpriced") or []]
+        super().__init__(f"nav withheld: unpriced held position(s): {', '.join(unpriced)}")
+        self.valuation = valuation
+
+
+def _valuation_day(value: Any) -> date | None:
+    """Parse an ISO day (first 10 chars) or return None — never raise."""
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except (TypeError, ValueError):
+        return None
+
+
+def valuation(prices: dict[str, float], asof: str, portfolio_id: str | None = None, *,
+              price_evidence: dict | None = None, state: dict[str, Any] | None = None) -> dict:
+    """Value the account classifying every held line's price evidence.
+
+    Pure — performs no writes; reads the account only when ``state`` is None.
+    Each held line (``shares != 0``) is classified in order:
+
+    - FRESH — a valid input price whose evidence is current (``stale_days`` in
+      (None, 0), a source that is not a carry, an ``observed_asof`` — when
+      present — equal to the valuation date, and ``close_qualified`` — when
+      present — not ``False``).
+    - CARRIED (input) — a valid input price whose evidence says carry, is stale,
+      or was observed before ``asof``. The line values at the input price but
+      keeps the observed date and an honest age.
+    - CARRIED (persisted) — no usable input price, but the position carries a
+      finite persisted ``current_price`` whose ``current_price_asof`` is within
+      ``stale_max`` days of ``asof`` and not in the future (a mark newer than
+      ``asof`` must never value an older date).
+    - UNATTESTED — a valid input price with no evidence entry for it, whose
+      otherwise-current evidence says ``close_qualified is False`` (an intraday
+      print, a seed, an injected float, an adjusted historical close), or whose
+      ``stale_days`` is present but not a finite number (the age is unreadable):
+      the value is used but the line cannot qualify.
+    - UNPRICED — anything else. Never booked at cost basis and never zero: the
+      line's value is None, the whole account is WITHHELD, and ``mark()`` does not
+      persist the rejected input as the position's last observed mark.
+
+    Status: QUALIFIED when every held line is FRESH (or the book holds nothing),
+    WITHHELD when any line is UNPRICED, else PROVISIONAL. ``nav``/``invested``
+    are None while WITHHELD; ``nav_qualified`` equals ``nav`` only when QUALIFIED.
+    """
+    try:
+        from portfolio.marks import _stale_max_days
+        stale_max = int(_stale_max_days())
+    except Exception:  # noqa: BLE001 — degrade-safe default, same as marks
+        stale_max = 30
+
+    asof_str = str(asof)[:10]
+    asof_day = _valuation_day(asof) or date.today()
+    account = state if state is not None else _load_account(portfolio_id)
+    evidence = price_evidence if isinstance(price_evidence, dict) else {}
+
+    lines: dict[str, dict] = {}
+    carried: list[str] = []
+    unattested: list[str] = []
+    unpriced: list[str] = []
+
+    for raw_ticker, pos in (account.get("positions") or {}).items():
+        ticker = str(raw_ticker)
+        pos = pos or {}
+        try:
+            shares = float(pos.get("shares") or 0.0)
+        except (TypeError, ValueError):
+            shares = 0.0
+        if shares == 0:
+            continue
+
+        raw_px = (prices or {}).get(ticker)
+        try:
+            px = float(raw_px) if raw_px is not None else None
+        except (TypeError, ValueError):
+            px = None
+        px_valid = px is not None and math.isfinite(px) and px > 0
+
+        cls: str | None = None
+        price: float | None = None
+        price_asof: str | None = None
+        source: str | None = None
+        age_days: int | None = None
+
+        if px_valid:
+            ev = evidence.get(ticker)
+            if not isinstance(ev, dict):
+                cls, price = "UNATTESTED", px
+            else:
+                ev_source = str(ev.get("source") or "")
+                raw_stale = ev.get("stale_days")
+                # A present stale_days that is not a finite number cannot attest freshness:
+                # it may value the line (UNATTESTED) but never qualify it. A fractional age
+                # rounds away from zero, so any non-zero age stays non-zero.
+                stale_days: int | None = None
+                stale_garbled = False
+                if raw_stale is not None:
+                    try:
+                        if isinstance(raw_stale, bool):
+                            raise TypeError("bool is not an age")
+                        stale_f = float(raw_stale)
+                        if not math.isfinite(stale_f):
+                            raise ValueError("non-finite age")
+                        stale_days = math.ceil(stale_f) if stale_f >= 0 else math.floor(stale_f)
+                    except (TypeError, ValueError, OverflowError):
+                        stale_garbled = True
+                observed = str(ev.get("observed_asof") or "")[:10]
+                observed_day = _valuation_day(observed) if observed else None
+                says_carry = "carry" in ev_source.lower()
+                observed_current = not observed or observed == asof_str
+                if (stale_days in (None, 0) and not stale_garbled and not says_carry
+                        and observed_current):
+                    # close_qualified is optional (today's mark_symbols() shape omits it);
+                    # only an explicit False demotes the line — it can value, never qualify.
+                    if ev.get("close_qualified") is False:
+                        cls, price, source = "UNATTESTED", px, (ev_source or None)
+                    else:
+                        cls, price, source = "FRESH", px, (ev_source or None)
+                elif (says_carry or (stale_days or 0) > 0
+                        or (observed_day is not None and observed_day < asof_day)):
+                    cls, price, source = "CARRIED", px, (ev_source or None)
+                    if observed:
+                        price_asof = observed
+                    else:
+                        price_asof = (asof_day - timedelta(days=max(stale_days or 0, 0))).isoformat()
+                    observed_day = _valuation_day(price_asof)
+                    age_days = (asof_day - observed_day).days if observed_day else None
+                elif stale_garbled and observed_current:
+                    cls, price, source = "UNATTESTED", px, (ev_source or None)
+                else:
+                    cls = "UNPRICED"  # e.g. an observation dated after asof — direction matters
+        else:
+            try:
+                persisted_px = float(pos.get("current_price"))
+            except (TypeError, ValueError):
+                persisted_px = None
+            persisted_day = _valuation_day(pos.get("current_price_asof"))
+            if (persisted_px is not None and math.isfinite(persisted_px) and persisted_px > 0
+                    and persisted_day is not None
+                    and 0 <= (asof_day - persisted_day).days <= stale_max):
+                cls = "CARRIED"
+                price = persisted_px
+                price_asof = persisted_day.isoformat()
+                age_days = (asof_day - persisted_day).days
+                source = pos.get("current_price_source")
+            else:
+                cls = "UNPRICED"
+
+        if cls == "UNPRICED":
+            price = None
+        value = shares * price if price is not None else None
+        lines[ticker] = {
+            "class": cls,
+            "price": round(price, 6) if price is not None else None,
+            "price_asof": price_asof,
+            "age_days": age_days,
+            "source": source,
+            "value": value,
+            "shares": shares,
+        }
+        if cls == "CARRIED":
+            carried.append(ticker)
+        elif cls == "UNATTESTED":
+            unattested.append(ticker)
+        elif cls == "UNPRICED":
+            unpriced.append(ticker)
+
+    cash = float(account.get("cash") or 0.0)
+    if unpriced:
+        nav_status = "WITHHELD"
+    elif carried or unattested:
+        nav_status = "PROVISIONAL"
+    else:
+        nav_status = "QUALIFIED"
+
+    nav_total: float | None = None
+    invested: float | None = None
+    if nav_status != "WITHHELD":
+        nav_total = cash + sum(l["value"] for l in lines.values())
+        invested = nav_total - cash
+    carried_value = float(sum(lines[t]["value"] for t in carried))
+    carried_fraction = (carried_value / invested) if invested else 0.0
+
+    carried_rows = []
+    for t in sorted(carried):
+        line = lines[t]
+        carried_rows.append({
+            "ticker": t,
+            "price": line["price"],
+            "price_asof": line["price_asof"],
+            "age_days": line["age_days"],
+            "source": line["source"],
+            "value": line["value"],
+            "weight_of_invested": round((line["value"] / invested) if invested else 0.0, 6),
+        })
+
+    unpriced_rows = []
+    for t in sorted(unpriced):
+        pos = (account.get("positions") or {}).get(t) or {}
+        try:
+            last_px = float(pos.get("current_price"))
+        except (TypeError, ValueError):
+            last_px = None
+        if last_px is None or not math.isfinite(last_px) or last_px <= 0:
+            last_px = None
+        unpriced_rows.append({
+            "ticker": t,
+            "shares": lines[t]["shares"],
+            "last_observed_price": last_px,
+            "last_observed_asof": pos.get("current_price_asof"),
+        })
+
+    return {
+        "asof": asof_str,
+        "nav_status": nav_status,
+        "nav": nav_total,
+        "nav_qualified": nav_total if nav_status == "QUALIFIED" else None,
+        "cash": cash,
+        "invested": invested,
+        "lines": lines,
+        "carried": carried_rows,
+        "carried_value": carried_value,
+        "carried_fraction": carried_fraction,
+        "unattested": sorted(unattested),
+        "unpriced": unpriced_rows,
+    }
+
+
+def nav(prices: dict[str, float], portfolio_id: str | None = None, *,
+        strict: bool = False, asof: str | None = None,
+        price_evidence: dict | None = None) -> float:
+    """Current NAV = cash + market value of all positions.
+
+    ``strict=False`` keeps the historical behaviour for legacy callers, including
+    the cost-basis substitution for a missing quote — each substitution that
+    actually enters the value is logged as a warning. ``strict=True`` routes
+    through :func:`valuation`: an unpriced held line raises :class:`NavWithheld`
+    instead of being silently booked at cost.
+    """
+    if strict:
+        v = valuation(prices, asof or date.today().isoformat(), portfolio_id,
+                      price_evidence=price_evidence)
+        if v["nav_status"] == "WITHHELD":
+            raise NavWithheld(v)
+        return float(v["nav"])
     state = _load_account(portfolio_id)
+    missing = sorted(
+        ticker for ticker, pos in state["positions"].items()
+        if ticker not in (prices or {}) and float((pos or {}).get("shares") or 0.0) != 0.0
+    )
+    if missing:
+        logging.getLogger(__name__).warning(
+            "nav_avg_cost_fallback_used portfolio=%s tickers=%s", portfolio_id, missing
+        )
     mktval = sum(
         pos["shares"] * prices.get(ticker, pos["avg_cost"])
         for ticker, pos in state["positions"].items()
@@ -3294,13 +3553,19 @@ def settle_target(prices: dict[str, float], asof: str,
 def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
          benchmark: str | None = None, *,
          mark_source: str = "paper_account_mark",
+         price_evidence: dict | None = None,
          _settlement_receipt_id: str | None = None,
-         _locked: bool = False) -> None:
+         _locked: bool = False) -> dict:
     """Snapshot NAV to nav_history.jsonl. Also initialises the benchmark shares on first call.
 
     The benchmark symbol is registry-resolved per book. Its normalized shares remain in the
     back-compat ``spy_shares`` slot, while ``benchmark_symbol`` records which index those shares
-    belong to so a benchmark change can never reuse the old instrument's scale."""
+    belong to so a benchmark change can never reuse the old instrument's scale.
+
+    Valuation goes through :func:`valuation`. A held line with no lawful price makes the
+    whole snapshot WITHHELD: no nav row is written (an existing row for the date stays
+    untouched) and the diagnosis lands in ``nav_withheld.jsonl``. Missing prices never
+    raise and never enter the value. Returns the :func:`valuation` result."""
     if not _locked:
         with _paper_transaction_lock(portfolio_id):
             return mark(
@@ -3309,6 +3574,7 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
                 portfolio_id=portfolio_id,
                 benchmark=benchmark,
                 mark_source=mark_source,
+                price_evidence=price_evidence,
                 _settlement_receipt_id=_settlement_receipt_id,
                 _locked=True,
             )
@@ -3346,11 +3612,18 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         state["benchmark_symbol"] = bench
         _save_account(state, portfolio_id)
 
+    # Value the book through the qualification path (pure — no writes) using the same
+    # loaded state, so the NAV row and the persisted per-position marks agree on one
+    # classification of every held line.
+    v = valuation(prices, asof, portfolio_id, price_evidence=price_evidence, state=state)
+
     # Persist each held position's latest *observed* mark so closed-market readers can value the
     # account at its last completed mark.  A missing quote MUST NOT overwrite that evidence with
     # avg_cost: doing so turns an absent feed into a fabricated zero P&L and destroys the only EOD
     # price the dashboard can carry overnight.  The mark's date/source travel with the value, and a
-    # backfill for an older date cannot roll a newer stored mark backward.  This metadata is display
+    # backfill for an older date cannot roll a newer stored mark backward.  A price classified
+    # CARRIED from input evidence keeps the date it was actually OBSERVED — re-stamping it with
+    # the mark date would launder a stale quote into a fresh one.  This metadata is display
     # provenance only; execution continues to require the explicit ``prices`` argument elsewhere.
     _marked_any = False
     _mark_asof = str(asof)[:10]
@@ -3363,24 +3636,68 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
             px = None
         if px is None or not math.isfinite(px) or px <= 0:
             continue
+        line = v["lines"].get(ticker)
+        if line is not None and line["class"] == "UNPRICED":
+            # The qualification rejected this input (e.g. observed after asof): it is not an
+            # observed mark for this date, so it must not become the persisted last mark.
+            continue
+        if line is not None and line["class"] == "CARRIED" and line.get("price_asof"):
+            stamp_asof = str(line["price_asof"])[:10]
+            stamp_source = line.get("source") or _mark_source
+        else:
+            stamp_asof = _mark_asof
+            stamp_source = _mark_source
         previous_asof = str(pos.get("current_price_asof") or "")[:10]
         try:
-            if previous_asof and date.fromisoformat(previous_asof) > date.fromisoformat(_mark_asof):
+            if previous_asof and date.fromisoformat(previous_asof) > date.fromisoformat(stamp_asof):
                 continue
         except (TypeError, ValueError):
             pass
         pos["current_price"] = round(px, 4)
-        pos["current_price_asof"] = _mark_asof
-        pos["current_price_source"] = _mark_source
+        pos["current_price_asof"] = stamp_asof
+        pos["current_price_source"] = stamp_source
         pos["current_price_time_kind"] = "portfolio_mark_date"
         _marked_any = True
     if _marked_any:
         _save_account(state, portfolio_id)
 
-    current_nav = state["cash"] + sum(
-        pos["shares"] * prices.get(ticker, pos["avg_cost"])
-        for ticker, pos in state["positions"].items()
-    )
+    if v["nav_status"] == "WITHHELD":
+        # An unpriced held line has no lawful value: never a cost-basis stand-in, never zero.
+        # Withhold the NAV point entirely — an existing row for this date stays byte-identical —
+        # and record the diagnosis next to the ledger. Never raise: settle.py reads a raise as a
+        # failure to finalize settlement, and a kept receipt blocks every later mark.
+        withheld_path = nav_path.with_name("nav_withheld.jsonl")
+        withheld_row = {
+            "date": asof,
+            "mark_source": _mark_source,
+            "unpriced": v["unpriced"],
+            "carried": v["carried"],
+            "reason": "unpriced_held_position",
+        }
+        wrows: list[dict] = []
+        if withheld_path.exists():
+            for line in withheld_path.read_text().splitlines():
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    r = json.loads(line)
+                except Exception:
+                    continue
+                if r.get("date") == asof and r.get("mark_source") == _mark_source:
+                    continue
+                wrows.append(r)
+        wrows.append(withheld_row)
+        # idempotent per (date, mark_source); keep the ledger in chronological order.
+        wrows.sort(key=lambda row: (str(row.get("date") or ""), str(row.get("mark_source") or "")))
+        _ensure_dir(portfolio_id)
+        _atomic_write_bytes(
+            withheld_path,
+            ("\n".join(json.dumps(r, default=str) for r in wrows) + "\n").encode("utf-8"),
+        )
+        return v
+
+    current_nav = v["nav"]
     invested = current_nav - state["cash"]
 
     spy_nav: float | None = None
@@ -3394,6 +3711,13 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         "invested": round(invested, 2),
         "spy_nav": round(spy_nav, 2) if spy_nav is not None else None,
         "benchmark": bench,
+        "nav_status": v["nav_status"],
+        "nav_qualified": round(v["nav_qualified"], 2) if v["nav_qualified"] is not None else None,
+        "carried": v["carried"],
+        "carried_value": round(v["carried_value"], 2),
+        "carried_fraction": round(v["carried_fraction"], 6),
+        "unattested": v["unattested"],
+        "mark_source": _mark_source,
     }
     # idempotent per date: keep exactly one NAV row per calendar date (replace, don't
     # append) so repeated book builds on the same day don't pile up duplicate points.
@@ -3419,6 +3743,7 @@ def mark(prices: dict[str, float], asof: str, portfolio_id: str | None = None,
         nav_path,
         ("\n".join(json.dumps(r, default=str) for r in rows) + "\n").encode("utf-8"),
     )
+    return v
 
 
 # ---------------------------------------------------------------------------

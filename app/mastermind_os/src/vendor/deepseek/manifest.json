@@ -1,0 +1,40 @@
+{
+  "schema": "mastermind.deepseek_client_donor.v1",
+  "repository": "deepseek-ai/deepseek-harness",
+  "revision": "687f282e8625c6b8d11ff58211a90524be2e4317",
+  "license": {
+    "spdx": "MIT",
+    "local_path": "LICENSE",
+    "upstream_path": "LICENSE",
+    "sha256": "ebb4f09972aee8608be255debaf78451a68e95c290f55c240dec2ecfa16ea6be"
+  },
+  "files": [
+    {
+      "local_path": "keyboard-composition.ts",
+      "upstream_path": "packages/client/ui-primitives/src/keyboard-composition.ts",
+      "sha256": "be1684e7f3b8306da3cb991f1a5e393065d74107892b78a1002cdf2624f23f6c",
+      "modifications": "NONE",
+      "consumer": "src/orchestration/ui/useComposerKeyboard.ts"
+    },
+    {
+      "local_path": "incremental-markdown.ts",
+      "upstream_path": "packages/client/ui-primitives/src/markdown/incremental.ts",
+      "sha256": "eaa266bb77dfb646738d0fdd79be4f1c4bc5490f7bf3f4127f9ffb72ef741ff8",
+      "modifications": "NONE",
+      "consumer": "src/conversations/SourceMarkdown.tsx"
+    }
+  ],
+  "excluded": [
+    "DeepSeek branding and image assets",
+    "Credentials, provider routing, telemetry and account stores",
+    "Session persistence, jobs, scheduling and control planes",
+    "Local file-media API and Markdown-directed navigation",
+    "Automatic upstream updates"
+  ],
+  "distribution": {
+    "license_path": "public/third-party/deepseek-harness-LICENSE.txt",
+    "dependency_notices_path": "public/third-party/deepseek-client-dependency-NOTICES.txt",
+    "dependency_notices_sha256": "b223731c3fbeff164176582f93fe39d18caa41807159157282351026bbaac6d4",
+    "new_runtime_dependency_count": 58
+  }
+}

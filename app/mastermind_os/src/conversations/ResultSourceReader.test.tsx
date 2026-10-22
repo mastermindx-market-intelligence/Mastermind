@@ -62,6 +62,27 @@ async function openReader() {
   await screen.findByRole("button", { name: "Add result summary to draft" });
 }
 
+describe("DeepSeek-derived formatted preview in the existing source reader", () => {
+  it("keeps formatting separate from exact evidence insertion and reads only once", async () => {
+    const f = await fixture();
+    const read = vi.fn().mockResolvedValue(f.result);
+    const { container } = render(<Harness projection={f.projection} readResult={read} />);
+    await openReader();
+    const original = f.result.result.content.summary;
+    expect(container.querySelector(".conversation-source-excerpt")?.textContent).toBe(original);
+    fireEvent.click(screen.getByRole("button", { name: "Formatted preview" }));
+    await waitFor(() => expect(container.querySelector(".source-markdown")).not.toBeNull());
+    expect(container.querySelector(".conversation-source-excerpt")).toBeNull();
+    expect(container.querySelector(".source-markdown")?.querySelectorAll("a,img,iframe")).toHaveLength(0);
+    fireEvent.click(screen.getByRole("button", { name: "Add result summary to draft" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toContain(original);
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toContain("Source: Executive review result");
+    fireEvent.click(screen.getByRole("button", { name: "View exact source" }));
+    expect(container.querySelector(".conversation-source-excerpt")?.textContent).toBe(original);
+    expect(read).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe("exact result source to original unsent draft", () => {
   it("localizes the reader without rereading or changing the original source insertion", async () => {
     const f = await fixture(); const read = vi.fn().mockResolvedValue(f.result);
