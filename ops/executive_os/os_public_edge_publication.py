@@ -276,7 +276,7 @@ def _load_stage(stage, expected_digest):
     manifests, captures = {}, {}
     for kind in ("old", "new"):
         index = d["indexes"][kind]
-        require(type(index) is dict and len(index) in (4, 10), "asset index topology")
+        require(type(index) is dict and len(index) in (4, 10, 12), "asset index topology")
         require(list(sorted(index.values())) == [f"{kind}-{i:02d}.blob" for i in range(len(index))],
                 "asset index labels differ")
         required.update(index.values())
