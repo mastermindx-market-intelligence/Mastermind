@@ -4513,9 +4513,9 @@ class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
                 yield
             finally:
                 observed.append(("lock-exit", account))
-        def operation(args):
+        def cmd_start(args):
             observed.append(("operation", args.account))
-        wrapper = svc._c2_lifecycle_serialized()(operation)
+        wrapper = svc._c2_lifecycle_serialized()(cmd_start)
         with mock.patch.object(svc, "_c2_lifecycle_mutex", side_effect=fake_mutex):
             for account in svc.FABRIC_POOL_PIN_MIGRATION:
                 before = len(observed)
@@ -4533,9 +4533,9 @@ class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
         def occupied(_):
             raise SystemExit("existing lifecycle mutation busy")
             yield
-        wrapper = svc._c2_lifecycle_serialized()(
-            lambda args: observed.append(args.account)
-        )
+        def cmd_stop(args):
+            observed.append(args.account)
+        wrapper = svc._c2_lifecycle_serialized()(cmd_stop)
         with mock.patch.object(svc, "_c2_lifecycle_mutex", side_effect=occupied):
             with self.assertRaisesRegex(SystemExit, "busy"):
                 wrapper(type("Args", (), {"account": "chatgpt1"})())
