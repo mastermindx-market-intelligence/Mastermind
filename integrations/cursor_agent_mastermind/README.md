@@ -137,3 +137,39 @@ reconcile its active owner before editing overlapping runtime endpoints.
 
 Never treat `QUEUED`, `CONTROLLER_CREATED`, MCP `ready`, green tests or
 a declared model as worker START, released source or accepted outcome.
+
+
+## Exact M2 installed guard reconciliation candidate (not installed)
+
+The active M2 Claude hook is not equal to the protected-repository guard and
+must **not** be replaced wholesale. At the October 22 readback it had
+SHA-256 `d1fabbcb39bfd7bfd1552d79acc5ada346f0ac47c887802fb6b021afe84a3840`
+and retained eight host-specific functions absent from the source candidate
+(including local CI cooldown state and legacy Macro root checks).
+
+`m2_host_guard_overlay.py` is a pure, SHA-gated, **source-only proposal**
+against that **exact** installed preimage. It composes a 23-line Cursor Task
+classifier before the existing Claude Agent/Task model fence; all original
+bytes remain unchanged when that insertion is removed. Candidate digest:
+`9c70114886c6ce80fdd1916ece254e6e3fc018d9dbfbd220a191f395f29a0633`.
+The companion policy digest at this release is
+`d9dd42958800ea888279d62d457814bd16230af4d1e9f6d9bca11c07bf0413dd`.
+
+The M2 local dry-run was executed **only on an isolated candidate copy**.
+Original Cursor custom Task denied as before; candidate permitted exactly the
+hash-pinned read-only explorer role. Claude Task with inherited
+`CURSOR_VERSION` remained denied; changed Cursor version and unadmitted
+implementation-worker role remained denied; unrelated Bash hook behavior
+matched; original installed hook checksum was unchanged. Actual child model,
+paid quota, START and Fabric admission were not proven. Two targeted
+follow-up reviewer invocations timed out without any usable verdict;
+independent host-overlay review remains **required**.
+
+**Do not install, execute, or copy the composed candidate over the M2 guard
+without incumbent policy-owner review and release authorization.** The incumbent provider-policy owner must reconcile against
+the same still-current installed SHA, verify the 32-line insertion and companion
+under the existing hook policy, obtain independent review and safe canary
+admission, and only then perform the original-owner guarded update with backup,
+effect reconciliation and live Cursor+Claude tests. Any changed preimage
+invalidates this candidate and requires new bounded reconciliation. It is
+not an external provider grant or new control plane.
