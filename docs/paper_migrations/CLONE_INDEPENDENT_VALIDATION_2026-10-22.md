@@ -39,3 +39,15 @@ This independent follow-up was executed via the existing M2 guarded `mcp__Master
 5. Keep all original source and existing clone pages unchanged until a supported native recovery pathway, exact page targeting, visual/asset/component fidelity and separate cleanup authorization are proved.
 
 **Actual Paper effects performed by this independent validation: 0. Actual source pages removed: 0. Actual clone pages pruned here: 0.**
+
+## Contentful scratch clone-prune: separate independent readback
+
+The adapter owner previously performed a separately authorized first-party native **clone then prune on a disposable source** and documented its operation at [Paper PR #1742](https://github.com/mastermindx-market-intelligence/Mastermind/pull/1742). This workstream independently verified the **post-prune result** from M2 with read-only exact-file tool calls, without reproducing deletion:
+
+| Identity | Exact native read |
+|---|---|
+| Scratch original `01M5HPWFPQ2Z5X79A9H8MJFKK0` | `Young harmony`: pages `p-1-0`, `p-3-0`; retained specimen on `p-1-0`: **5 nodes**, artboard `1-1` |
+| Pruned scratch clone `01M5HRAG5659SFE58D3PTA7D0V` | `Young harmony (copy)`: only `p-1-0`; retained specimen: **5 nodes**, artboard `1-1` |
+| `get_jsx(fileId,nodeId=1-1,format=inline-styles,includeNodeIds=true)` | Both returned **1,017-character JSX bodies with exact byte equality** after pruning. |
+
+This is a real, editable **five-node** contentful scratch clone-prune readback with preserved source; it does **not** prove full-file mixed assets/comments/fonts/components, permission to prune a 57-page clone, exact unattended UI page-ID targeting, or removal of the source's oversize warning. The candidate PR #1742 remains subject to its own review, CI, publication and higher-stakes live canary gates. Never rerun its existing deletion operation.
