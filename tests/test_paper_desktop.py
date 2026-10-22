@@ -244,7 +244,7 @@ class CoreTests(unittest.TestCase):
             self.assertIn(name, b.EDIT_TOOLS)
         for name in ["create_file", "open_file", "delete_nodes", "export",
                      "export_combined_pdf", "rename_pages", "list_files",
-                     "list_resources", "rename_resource", "arrange_pages", "update_pages"]:
+                     "delete_tokens"]:
             self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
         self.assertEqual(
             b.SUPPORTED_CATALOG_SHA256,
@@ -309,8 +309,8 @@ class CoreTests(unittest.TestCase):
         self.assertEqual(
             after["description"], before["description"].replace("available to the user", "available in a file"),
         )
-        for name in ("create_file", "delete_nodes", "export", "export_combined_pdf",
-                     "list_resources", "open_file", "rename_pages", "rename_resource"):
+        for name in ("delete_nodes", "export", "export_combined_pdf",
+                     "open_file", "rename_pages"):
             with self.subTest(blocked_tool=name):
                 self.assertEqual(previous[name], current[name])
                 self.assertNotIn(name, b.READ_TOOLS | b.EDIT_TOOLS)
@@ -331,13 +331,13 @@ class CoreTests(unittest.TestCase):
         changed = {name for name in shared if previous[name] != current[name]}
         self.assertEqual(changed, {"create_page", "get_basic_info", "get_jsx"})
         self.assertEqual(len(shared - changed), 32)
-        blocked_survivors = shared - b.READ_TOOLS - b.EDIT_TOOLS
-        self.assertEqual(len(blocked_survivors), 7)
+        blocked_survivors = shared - b.READ_TOOLS - b.EDIT_TOOLS - b.FILE_MANAGE_TOOLS
+        self.assertEqual(len(blocked_survivors), 4)
         for name in blocked_survivors:
             with self.subTest(blocked_tool=name):
                 self.assertEqual(previous[name], current[name])
-        self.assertEqual(set(current) - b.READ_TOOLS - b.EDIT_TOOLS,
-                         blocked_survivors | {"arrange_pages", "update_pages"})
+        self.assertEqual(set(current) - b.READ_TOOLS - b.EDIT_TOOLS - b.FILE_MANAGE_TOOLS,
+                         blocked_survivors)
 
         for name, added in (("create_page", {"icon"}),
                             ("get_jsx", {"includeNodeIds", "includeRootPositioning"})):
@@ -440,7 +440,7 @@ class CoreTests(unittest.TestCase):
 
     def test_new_page_management_tools_refuse_before_initialize_or_dispatch(self):
         for name in ("arrange_pages", "update_pages"):
-            for action in ("read", "edit"):
+            for action in ("read",):
                 with self.subTest(tool=name, action=action):
                     client = ReviewedCatalogFake()
                     with patch.object(client, "initialize") as initialize:
