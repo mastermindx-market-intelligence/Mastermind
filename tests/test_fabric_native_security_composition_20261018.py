@@ -34,10 +34,9 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # slot diagnostics with retention recovery and explicit acquisition correlation.
 # Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-# Merge current protected native overlays (slot/lane/runtime observation) with
-# PR #1694's candidate operator instructions, preserving all installed preimages.
-# Generated and byte-compared against the exact integrated 85-file stage.
-NATIVE_MANIFEST_SHA = "06157fd40c5c0fec2d557b3500110a0fa49245f684992c9c70dfa2a8c077e36a"
+# Integrated protected Fabric qualification and task/host overlays with
+# PR #1694 operator instructions, retaining all installed code preimages.
+NATIVE_MANIFEST_SHA = "a8aee00c6503f19c629af0fd2a234d5bc6f1efcb615621ee8aba0a94cc9d68b5"
 
 
 def _sha(raw):
