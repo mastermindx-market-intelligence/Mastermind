@@ -34,7 +34,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # slot diagnostics with retention recovery and explicit acquisition correlation.
 # Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "e5655954e70f1f2f97f97f303ccac6fdbd3129cca1c0948e99be8c1ba8a77823"
+NATIVE_MANIFEST_SHA = "e4097af2e1dc8e8b6e73c6420205419ab60b7f6699c22c691527d7a401110c99"
 
 
 def _sha(raw):
