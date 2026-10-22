@@ -18,7 +18,7 @@ from .installed import _principal
 from .reply_policy_selection import ReplyPolicySelection, ReplyPolicyDenied
 from .runtime_reply_authorization import capture_reply_authorization, policy_fingerprint
 from .runtime_reply_authorization_owner import RuntimeReplyAuthorizationOwner, ObservedReplyPolicyDenial
-from .runtime_reply_delivery import build_runtime_reply_delivery
+from .runtime_reply_delivery import build_runtime_reply_delivery, ReplyDeliveryUnavailable
 from .runtime_reply_subscriptions import RuntimeReplySubscriptionStore, ExecutiveReplyCipher
 from .runtime_return import RuntimeSessionReturn, RuntimeOriginalRequestResolver
 from .web_reply_callback_transport import send_once, CallbackHTTPReceipt
@@ -129,9 +129,14 @@ class RuntimeReplyEventHost:
             except ObservedReplyPolicyDenial as denial:
                 await self.audiences.revoke_observed(denial)
                 observations.append({"state":"NOT_SENT","parent_consumed":False})
-            except Exception:
-                # Never relabel or repeat the already committed native writer.
+            except (SubscriptionUnavailable, ReplyDeliveryUnavailable):
+                # Qualified pre-send refusal does not imply a callback attempt.
                 observations.append({"state":"UNAVAILABLE","parent_consumed":False})
+            except Exception:
+                # Failure after a possible send/settlement must never look like
+                # a proven unavailable/non-effectful callback. Reservation
+                # custody still prevents the original delivery from replaying.
+                observations.append({"state":"EFFECT_UNKNOWN","parent_consumed":False})
         return tuple(observations)
 
 
