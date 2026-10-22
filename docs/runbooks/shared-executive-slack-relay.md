@@ -35,6 +35,62 @@ No Socket Mode, Events API subscription, incoming webhook, slash command,
 interactivity surface, user OAuth scope, `chat:write.public`, `channels:read`,
 or workspace-wide channel-management scope is introduced by this migration.
 
+## Separate legacy Mastermind Relay — parked, not retired
+
+The older `Mastermind Agent Relay` Slack app (historical app ID
+`A0BUDHZ137A`) displays as **Mastermind Relay** (bot user
+`U0BTF3QGABF`). It is **not** the shared Executive Relay bot above.
+Its dedicated two-scope manifest at
+`config/slack_agent_relay_app_manifest.yaml` is retained as a precise
+legacy reference, *not* an instruction to install or use it for new A2
+service enrollment.
+
+The October 22, 2026 read-only census found both bots in public
+`#agent-dispatch`; no operating post from the separate bot was found in
+accessible indexed history. The native M2 A2 and C1 enrollment configs both
+named shared bot `U0BT71H4FQE`; neither pointed at the separate bot.
+Prior sampling found the legacy bot in additional channels. These results
+**do not prove the separate app has no live users**: Slack app-admin token
+inventory, Workflow Builder actions, DM/private histories and other-host
+sender credentials were not fully attested. Recent bot channel joins are
+membership activity, not evidence of an actual dialogue writer.
+
+**Disposition: KEEP INSTALLED; DISCOURAGE NEW DEDICATED ENROLLMENT.**
+No unattended remove, token rotation, channel leave or bot substitution is
+admitted by this runbook. The A2 native `enroll-shared` remains the normal
+path. The legacy `enroll` subcommand now refuses by default *before* TTY
+inspection or token consumption. Only a separate deliberate invocation with
+`--acknowledge-legacy-dedicated-app` can reach its existing narrow
+two-scope, root/TTY/host-disarmed identity-verification ceremony. The flag
+**is not** an approval to create another app or to bypass the Executive
+lifecycle owner. It applies to `enroll` only; already installed legacy A2
+enrollments still use the normal `verify` / `rebind-release` paths and
+their original identity/credential. Never reenroll to force convergence.
+
+A later Slack-admin **retirement** must be a separate approved effect, after
+all of these are independently evidenced:
+
+1. Inventory the installed app's exact app/bot IDs, token/connection use
+   metadata (not token values), OAuth scopes, Workflow Builder/Events/
+   webhook/Socket Mode bindings, all relevant channel/DM memberships and
+   message use across the available audit window. Reconcile the observed
+   October 22 additions to `#github-independent-reviews`,
+   `#dotsandgroksecretary` and `#initiatives` with their real inviter
+   and consumer.
+2. Search authorized live hosts, GitHub organization/repository credential
+   *names*, scheduled/CI actions and connected third-party automation owners
+   for dedicated-bot writers, including offline hosts that can return later.
+   Unknown credential bindings mean **KEEP**, not `no dependency`.
+3. Close or migrate every distinct identified consumer under its own owner,
+   and prove the shared C1 and A2 identities and real authorized dialogue
+   send/read/return path. A source merge, bot membership or healthy daemon
+   alone is not a canary.
+4. Record the Chairman/Slack-admin disposition and a recovery plan. Only
+   then can the authorized Slack admin uninstall the **dedicated** app
+   while preserving the shared Executive Relay token and C1/A2 services.
+   Recheck the shared path and record the uninstall receipt. A future
+   reinstall may create a new token/identity; rollback is not presumed.
+
 ## Safe sequencing
 
 1. Install the exact accepted Mastermind release containing both the shared-relay

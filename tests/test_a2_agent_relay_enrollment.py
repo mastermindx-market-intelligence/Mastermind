@@ -93,6 +93,12 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
     parsed = parser.parse_args(["enroll", "--expected-bot-user-id", BOT])
     assert parsed.command == "enroll"
     assert parsed.expected_bot_user_id == BOT
+    assert parsed.acknowledge_legacy_dedicated_app is False
+    enabled = parser.parse_args([
+        "enroll", "--expected-bot-user-id", BOT,
+        "--acknowledge-legacy-dedicated-app",
+    ])
+    assert enabled.acknowledge_legacy_dedicated_app is True
 
     options = {
         option
@@ -107,9 +113,53 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
         }
     assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release"}
     assert "--expected-bot-user-id" in options
+    assert "--acknowledge-legacy-dedicated-app" in options
     assert {"--token", "--workspace", "--channel", "--config", "--plist"}.isdisjoint(
         options
     )
+
+
+@pytest.mark.parametrize("enable_w3c", [False, True])
+def test_legacy_dedicated_enrollment_requires_explicit_ack_before_any_input(
+    monkeypatch, enable_w3c: bool
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    async def forbidden_enroll(**kwargs):
+        raise AssertionError("default dedicated enrollment must not call writer")
+    def forbidden_tty(_stdin):
+        raise AssertionError("default dedicated enrollment must not inspect TTY")
+    monkeypatch.setattr(enrollment, "_enroll", forbidden_enroll)
+    monkeypatch.setattr(enrollment, "_require_native_tty", forbidden_tty)
+    argv = ["enroll", "--expected-bot-user-id", BOT]
+    if enable_w3c:
+        argv.append("--enable-w3c")
+    rc = enrollment._run_invocation(
+        argv, stdin=_NoTokenRead(), stdout=stdout,
+        environ={"SAFE": "1"}, require_native_tty=True,
+    )
+    assert rc == 2
+    assert json.loads(stdout.getvalue()) == {
+        "error": "A2_ENROLLMENT_ARGUMENTS_REFUSED",
+        "schema": "mastermind.a2_agent_relay_enrollment.v1",
+        "status": "ERROR",
+    }
+    assert TOKEN not in stdout.getvalue()
+
+
+@pytest.mark.parametrize("verb", ["enroll-shared", "verify", "rebind-release"])
+def test_dedicated_ack_flag_cannot_apply_to_shared_or_existing_enrollment(
+    verb: str,
+):
+    enrollment = _module()
+    stdout = io.StringIO()
+    rc = enrollment.run(
+        [verb, "--expected-bot-user-id", BOT,
+         "--acknowledge-legacy-dedicated-app"],
+        stdin=_NoTokenRead(), stdout=stdout, environ={"SAFE": "1"},
+    )
+    assert rc == 2
+    assert json.loads(stdout.getvalue())["error"] == "A2_ENROLLMENT_ARGUMENTS_REFUSED"
 
 
 def test_token_input_reuses_bounded_one_line_no_echo_ceremony():
@@ -169,7 +219,8 @@ def test_production_main_refuses_piped_enroll_before_enroll(monkeypatch):
             monkeypatch.setattr(
                 enrollment.sys,
                 "argv",
-                ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
+                ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT,
+                 "--acknowledge-legacy-dedicated-app"],
             )
             monkeypatch.setattr(
                 enrollment.sys,
@@ -207,7 +258,8 @@ def test_production_main_refuses_missing_or_raising_fileno(
     monkeypatch.setattr(
         enrollment.sys,
         "argv",
-        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
+        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT,
+                 "--acknowledge-legacy-dedicated-app"],
     )
     monkeypatch.setattr(
         enrollment.sys,
@@ -239,7 +291,8 @@ def test_production_main_allows_tty_enroll_to_reach_enroll(monkeypatch):
     monkeypatch.setattr(
         enrollment.sys,
         "argv",
-        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT],
+        ["a2_agent_relay_enrollment.py", "enroll", "--expected-bot-user-id", BOT,
+                 "--acknowledge-legacy-dedicated-app"],
     )
     monkeypatch.setattr(enrollment.sys, "stdin", SimpleNamespace(buffer=stdin))
     monkeypatch.setattr(enrollment.sys, "stdout", stdout)
@@ -352,7 +405,8 @@ def test_injected_run_preserves_non_tty_enroll_seam(monkeypatch):
 
     assert (
         enrollment.run(
-            ["enroll", "--expected-bot-user-id", BOT],
+            ["enroll", "--expected-bot-user-id", BOT,
+             "--acknowledge-legacy-dedicated-app"],
             stdin=stdin,
             stdout=stdout,
             environ={"SAFE": "1"},
@@ -377,7 +431,8 @@ def test_enable_w3c_flag_reaches_only_the_enrollment_composition(monkeypatch):
 
     assert (
         enrollment.run(
-            ["enroll", "--expected-bot-user-id", BOT, "--enable-w3c"],
+            ["enroll", "--expected-bot-user-id", BOT, "--enable-w3c",
+             "--acknowledge-legacy-dedicated-app"],
             stdin=stdin,
             stdout=stdout,
             environ={"SAFE": "1"},
