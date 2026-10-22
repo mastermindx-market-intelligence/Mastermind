@@ -121,6 +121,53 @@ class PaperMigrationPlanTests(unittest.TestCase):
             self.assertEqual(denied.returncode, 2)
             self.assertEqual(existing.read_text(encoding="utf-8"), "preserve")
 
+    def _six_terminal_page_delta(self):
+        missing = ["p-21-0", "p-1V-0", "p-1O-0", "p-1G-0", "p-1D-0", "p-1C-0"]
+        return {"schema": "mastermind.paper-source-visibility-drift.v1",
+                "classification": "READ_ONLY_DELTA_NOT_PROOF_OF_MOVE_DELETE_OR_LOSSLESS_COPY",
+                "source_file_id": planner.SOURCE_FILE_ID,
+                "baseline_page_count": 63,
+                "current_visible_page_count": 57,
+                "added_visible_page_ids": [],
+                "unobserved_baseline_pages": [{"source_page_id": x} for x in missing]}
+
+    def test_visibility_delta_holds_six_absent_terminal_pages(self):
+        missing = self._six_terminal_page_delta()
+        plan = planner.make_plan(self.original, visibility_delta=missing)
+        self.assertEqual(plan["counts"]["last_observed_visible_pages"], 57)
+        self.assertEqual(plan["counts"]["whole_page_planning_candidates"], 51)
+        self.assertEqual(plan["counts"]["externally_absent_pages"], 6)
+        ids = {p["source_page_id"] for p in plan["externally_absent_unproven_pages"]}
+        self.assertEqual(ids, {p["source_page_id"] for p in missing["unobserved_baseline_pages"]})
+        self.assertFalse(ids.intersection({p["source_page_id"] for p in plan["whole_page_assignments"]}))
+        self.assertFalse(plan["source_deletion_authorized"])
+
+    def test_tampered_visibility_delta_fail_closed(self):
+        for change in ({"current_visible_page_count": 58}, {"added_visible_page_ids": ["p-NEW-0"]},
+                       {"source_file_id": "other"}):
+            delta = self._six_terminal_page_delta()
+            delta.update(change)
+            with self.assertRaises(planner.InventoryError):
+                planner.make_plan(self.original, visibility_delta=delta)
+
+    def test_cli_visibility_delta_changes_plan_and_checks_exactly(self):
+        script = ROOT / "scripts/paper_migration_planner.py"
+        with tempfile.TemporaryDirectory() as folder:
+            vis = Path(folder) / "delta.json"
+            out = Path(folder) / "plan.json"
+            vis.write_text(json.dumps(self._six_terminal_page_delta()), encoding="utf-8")
+            args = [sys.executable, str(script), "--inventory", str(INVENTORY),
+                    "--visibility-delta", str(vis)]
+            created = subprocess.run(args + ["--out", str(out)], capture_output=True, text=True)
+            self.assertEqual(created.returncode, 0, created.stderr)
+            observed = json.loads(out.read_text(encoding="utf-8"))
+            self.assertEqual(observed["counts"]["externally_absent_pages"], 6)
+            confirmed = subprocess.run(args + ["--check-plan", str(out)], capture_output=True, text=True)
+            self.assertEqual(confirmed.returncode, 0, confirmed.stderr)
+            missing_delta = subprocess.run([sys.executable, str(script), "--inventory", str(INVENTORY),
+                                            "--check-plan", str(out)], capture_output=True, text=True)
+            self.assertEqual(missing_delta.returncode, 2)
+
     def test_node_and_board_targets_are_planning_only(self):
         with self.assertRaises(planner.InventoryError):
             planner.make_plan(self.original, node_target=0)
