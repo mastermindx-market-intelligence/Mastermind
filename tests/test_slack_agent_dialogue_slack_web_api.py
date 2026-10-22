@@ -221,6 +221,133 @@ def test_oversize_response_never_yields_bounded_history_facts() -> None:
         run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
 
 
+def test_foreign_bot_posts_are_ineligible_without_losing_authorized_history() -> None:
+    foreign = message(
+        ts="1787471000.000001", user="U0C4BC13Q84", text="external app",
+    )
+    foreign["bot_id"] = "B0C45P45M6J"
+    eligible = message(ts="1787471000.000002", user=HUMAN, text="sol post")
+    query = {"channel": CHANNEL, "limit": "2"}
+    adapter, transport = client(
+        lambda call: response(
+            call["path"], page_payload([foreign, eligible]), query=call["query"]
+        )
+    )
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=2))
+
+    assert page.complete is True
+    assert page.mutation_evidence_complete is True
+    assert [(item.ts, item.author_user_id) for item in page.messages] == [
+        ("1787471000.000002", HUMAN)
+    ]
+    assert len(transport.calls) == 1
+    # The write-receipt parser still refuses foreign bot attribution.
+    with pytest.raises(ValueError, match="invalid bot identity"):
+        adapter._standard_message(foreign)
+
+
+@pytest.mark.parametrize("tamper", ["bot_id", "team", "edited", "user"])
+def test_foreign_bot_messages_with_unproven_identity_or_mutation_fail_closed(
+    tamper: str,
+) -> None:
+    foreign = message(ts="1787471000.000001", user="U0C4BC13Q84")
+    foreign["bot_id"] = "B0C45P45M6J"
+    if tamper == "bot_id":
+        foreign["bot_id"] = "not-a-bot-id"
+    elif tamper == "team":
+        foreign["team"] = "T0FOREIGNTEAM"
+    elif tamper == "edited":
+        foreign["edited"] = {"user": "U0C4BC13Q84", "ts": "1787471000.000002"}
+    else:
+        foreign["user"] = "not-a-user-id"
+    adapter, transport = client(
+        lambda call: response(
+            call["path"], page_payload([foreign]), query=call["query"]
+        )
+    )
+    with pytest.raises(SlackTransportUnavailable):
+        run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
+    assert len(transport.calls) == 1
+
+
+def test_large_channel_history_uses_small_complete_cursor_pages() -> None:
+    items = [
+        message(ts=f"1787471000.{index:06d}", text=f"message-{index}")
+        for index in range(1, 11)
+    ]
+
+    def handler(call):
+        query = call["query"]
+        if "cursor" not in query:
+            assert query == {"channel": CHANNEL, "limit": "8"}
+            return response(
+                call["path"],
+                page_payload(items[:8], has_more=True, cursor="cursor-8"),
+                query=query,
+            )
+        assert query == {"channel": CHANNEL, "cursor": "cursor-8", "limit": "2"}
+        return response(call["path"], page_payload(items[8:]), query=query)
+
+    adapter, transport = client(handler)
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=10))
+
+    assert page.complete is True
+    assert page.mutation_evidence_complete is True
+    assert len(page.messages) == 10
+    assert len(page.response_page_bytes) == 2
+    assert [call["query"]["limit"] for call in transport.calls] == ["8", "2"]
+
+
+def test_oversized_history_page_reduces_read_size_without_weaker_validation() -> None:
+    items = [
+        message(ts=f"1787471000.{index:06d}", text=f"safe-{index}")
+        for index in range(1, 5)
+    ]
+
+    def handler(call):
+        query = call["query"]
+        if query["limit"] == "8":
+            return response(
+                call["path"], b"x" * (MAX_RESPONSE_BYTES + 1), query=query
+            )
+        assert query == {"channel": CHANNEL, "limit": "4"}
+        return response(call["path"], page_payload(items), query=query)
+
+    adapter, transport = client(handler)
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=8))
+
+    assert page.complete is True
+    assert page.mutation_evidence_complete is True
+    assert len(page.messages) == 4
+    assert len(page.response_page_bytes) == 1
+    assert page.response_page_bytes[0] <= MAX_RESPONSE_BYTES
+    assert [call["query"]["limit"] for call in transport.calls] == ["8", "4"]
+    assert all(call["method"] == "GET" for call in transport.calls)
+
+
+@pytest.mark.parametrize("status,redirected", [(500, False), (200, True)])
+def test_oversized_untrusted_http_response_is_not_retried(
+    status: int, redirected: bool
+) -> None:
+    query = {"channel": CHANNEL, "limit": "8"}
+    adapter, transport = client(
+        lambda call: response(
+            call["path"],
+            b"x" * (MAX_RESPONSE_BYTES + 1),
+            query=call["query"],
+            status=status,
+            final_url=(
+                "https://untrusted.example/conversations.history"
+                if redirected else None
+            ),
+        )
+    )
+    with pytest.raises(SlackTransportUnavailable):
+        run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=8))
+    assert len(transport.calls) == 1
+    assert transport.calls[0]["query"] == query
+
+
 def test_unedited_history_and_thread_parse_exactly_and_preserve_limit() -> None:
     history_query = {"channel": CHANNEL, "limit": "7"}
     thread_query = {"channel": CHANNEL, "ts": THREAD_TS, "limit": "3"}
