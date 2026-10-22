@@ -13,7 +13,7 @@ def _catalog() -> dict:
 
 def test_all_three_subscription_providers_are_reviewed_and_inert_by_default():
     catalog = load_profiles()
-    assert set(catalog["profiles"]) == {"glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan"}
+    assert set(catalog["profiles"]) == {"glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan", "byteplus-coding-plan-personal"}
     for profile_id in catalog["profiles"]:
         profile = get_profile(profile_id, document=catalog)
         assert profile.autonomous_allowed is False

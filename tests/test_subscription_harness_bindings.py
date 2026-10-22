@@ -436,3 +436,17 @@ class SubscriptionHarnessBindingsTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def test_byteplus_plan_binding_inert_and_private():
+    profiles = load_profiles()
+    profile = get_profile("byteplus-coding-plan-personal", document=profiles)
+    assert profile.base_url == "https://ark.ap-southeast.bytepluses.com/api/coding"
+    assert profile.models["routine"] == "glm-5.3-flash"
+    assert profile.autonomous_allowed is False
+    assert profile.usage_policy["production_backend_allowed"] is False
+    catalog = load_bindings(profiles_document=profiles)
+    row = catalog["bindings"]["byteplus-coding-plan-personal.claude-code-anthropic"]
+    assert row["implementation_state"] == "SPEC_ONLY"
+    assert row["autonomous_allowed"] is False
+    assert "real_canary_passed" in row["activation_gates"]
