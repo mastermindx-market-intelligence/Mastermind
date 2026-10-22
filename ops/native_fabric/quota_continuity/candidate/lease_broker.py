@@ -926,7 +926,25 @@ class Broker:
                 )
                 if row["last_grant"] is not None
             }
+            # HTTP 429 soft caps preserve eligibility, but are a fallback for
+            # unpinned *new* grants if another qualified account is healthy.
+            # Exact-account pins above, model/host pairing, quota guards and
+            # the prior held/cap/history order inside each tier are unchanged.
+            def cooldown_priority(name: str) -> int:
+                if not self.external_gates:
+                    return 0
+                try:
+                    import bailian_keys
+                    cooldown = bailian_keys.cooldown_info(name)
+                except Exception:
+                    # Missing evidence is not evidence of a healthy account.
+                    return 1
+                if cooldown is None:
+                    return 0
+                return 2  # A current 429 is softly eligible, not preferred.
+
             scored.sort(key=lambda t: (
+                cooldown_priority(t[2]),
                 t[0], -t[1], recent.get(t[2], float("-inf")), t[2]
             ))
         else:
