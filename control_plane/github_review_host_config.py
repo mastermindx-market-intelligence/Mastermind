@@ -64,6 +64,7 @@ EXACT_REVIEW_DELIVERY_PATH = "/internal/github/review-intent/delivery"
 #: GitHub's exact PR permission vocabulary.  The receiver's closed
 #: current-permission gate clears ``push`` and ``admin`` only.
 _PERMISSION_RE = re.compile(r"^[a-z]{1,20}\Z")
+_REPOSITORY_RE = re.compile(r"^[A-Za-z0-9_.-]{1,100}/[A-Za-z0-9_.-]{1,100}\Z")
 MINIMUM_ACTOR_PERMISSION = frozenset({"push", "admin", "maintain"})
 
 #: Mirrors ``executive_runtime._MAX_…`` free bounds; a delivery is small.
@@ -143,6 +144,8 @@ class ReviewHostSettings:
 
         if not isinstance(self.expected_host, str) or _HOST_RE.fullmatch(self.expected_host) is None:
             raise ReviewHostConfigError("expected_host must be a canonical host[:port]")
+        if self.enabled and self.publication_enabled and not self.require_https:
+            raise ReviewHostConfigError("live review publication requires verified HTTPS")
         if self.expected_host == LOOPBACK_HOST and self.require_https:
             # A loopback listener cannot present a public certificate.  Making
             # that explicit prevents a "secure" setting that silently names a
@@ -177,7 +180,8 @@ class ReviewHostSettings:
                 "installation_ids must include the exact admin installation_id"
             )
         for value in self.repositories:
-            if not isinstance(value, str) or not value:
+            if (not isinstance(value, str)
+                    or _REPOSITORY_RE.fullmatch(value) is None):
                 raise ReviewHostConfigError("repositories must be canonical owner/name")
 
         if (
@@ -246,7 +250,8 @@ class ReviewHostSettings:
                 intent_command=self.intent_command,
                 allowed_associations=frozenset(self.allowed_associations),
                 minimum_permission=(
-                    "admin" if self.minimum_actor_permission == "admin" else "write"
+                    {"push": "write", "maintain": "maintain",
+                     "admin": "admin"}[self.minimum_actor_permission]
                 ),
                 require_current_permission_for_all_channels=True,
                 allow_static_actor_authority=False,

@@ -43,7 +43,8 @@ def test_host_can_enable_private_binding_without_publication():
 
 
 def test_publication_requires_explicit_separate_gate():
-    settings = _valid(enabled=True, publication_enabled=True)
+    settings = _valid(enabled=True, publication_enabled=True,
+                      expected_host="review.example.com", require_https=True)
     settings.require_enabled()
     settings.require_publication_enabled()
 
@@ -96,3 +97,17 @@ def test_issue_comment_cannot_use_plain_issue():
 def test_default_constructor_requires_explicit_host_enrollment():
     with pytest.raises(ReviewHostConfigError):
         ReviewHostSettings()
+
+def test_explicit_maintain_floor_does_not_degrade_to_write():
+    settings = _valid(minimum_actor_permission="maintain")
+    assert settings.review_policy().minimum_permission == "maintain"
+
+
+def test_live_plaintext_publication_refused():
+    with pytest.raises(ReviewHostConfigError, match="HTTPS"):
+        _valid(enabled=True, publication_enabled=True, require_https=False)
+
+
+def test_malformed_repository_name_refused_early():
+    with pytest.raises(ReviewHostConfigError, match="canonical owner/name"):
+        _valid(repositories=frozenset({"example/malformed/repo"}))

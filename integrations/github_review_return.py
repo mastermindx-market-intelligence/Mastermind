@@ -7,6 +7,7 @@ adjudicator. It never fabricates reviewer evidence or an approving GitHub verb.
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import Protocol
 
 from control_plane.executive_runtime import Runtime
@@ -111,7 +112,12 @@ class GitHubReviewReturn:
                 )
                 if record is not None:
                     candidate = record.payload.get("review_id")
-                    if isinstance(candidate, str):
+                    if (record.event_type == "GITHUB_REVIEW_PUBLICATION_CONFIRMED"
+                            and isinstance(candidate, str)
+                            and re.fullmatch(r"[A-Za-z0-9:._-]{1,128}", candidate) is not None
+                            and record.payload.get("schema") == "mastermind.github_review_publication_event.v1"
+                            and record.payload.get("original_command_id") == outcome.publication_command_id
+                            and record.payload.get("identity", {}).get("job_id") == job_id):
                         review_id = candidate
             if self._slack is not None and review_id is not None:
                 try:

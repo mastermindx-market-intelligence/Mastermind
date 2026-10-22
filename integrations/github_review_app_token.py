@@ -101,10 +101,12 @@ class GitHubAppInstallationTokens:
                 repositories = result.get("repositories")
                 if not isinstance(token, str) or not token or len(token) > 8192:
                     raise ValueError("missing installation token")
-                if not isinstance(permissions, dict) or any(
-                    permissions.get(k) != v
-                    for k, v in {"contents": "read", "pull_requests": "write"}.items()
-                ):
+                if (not isinstance(permissions, dict)
+                        or permissions not in (
+                            {"contents": "read", "pull_requests": "write"},
+                            {"contents": "read", "pull_requests": "write",
+                             "metadata": "read"},
+                        )):
                     raise ValueError("installation permission drift")
                 if (
                     not isinstance(repositories, list)

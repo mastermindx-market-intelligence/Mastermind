@@ -5,7 +5,7 @@ from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmiss
 from test_github_review_runtime_adapter import decision
 
 
-def completed_pair(tmp_path, *, identical_worker=False, review_verdict="approve"):
+def completed_pair(tmp_path, *, identical_worker=False, review_verdict="approve", builder_repository="example/repo", builder_sha="a" * 40):
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "builder-01", provider="claude", account_label="builder",
@@ -18,7 +18,16 @@ def completed_pair(tmp_path, *, identical_worker=False, review_verdict="approve"
             worker_type="mock", capabilities=["code"],
             quota_classes={"codex-native": ["code"]},
         )
-    builder = runtime.jobs.create_job("Build source for PR #42", constraints={"eligible_quota_classes": ["claude-native"]})
+    builder = runtime.jobs.create_job(
+        "Build source for PR #42",
+        constraints={"eligible_quota_classes": ["claude-native"]},
+        provenance={
+            "schema": "mastermind.github_review_builder_source.v1",
+            "repository": builder_repository,
+            "pull_number": 42,
+            "frozen_head_sha": builder_sha,
+        },
+    )
     runtime.jobs.assign_job(builder.job_id, "builder-01")
     runtime.jobs.complete_job(
         builder.job_id, JobPayload(summary="source completed")
@@ -71,5 +80,22 @@ def test_review_verdict_outside_closed_completion_vocabulary_refused(tmp_path):
     runtime, builder, review = completed_pair(tmp_path, review_verdict="")
     reader = ExecutiveVerifiedReviewResults(
         runtime=runtime, builder_job_id_for_review=lambda job_id: builder
+    )
+    assert reader.load_verified_result(job_id=review) is None
+
+def test_unrelated_builder_job_on_different_repository_is_not_independence(tmp_path):
+    runtime, builder, review = completed_pair(
+        tmp_path, builder_repository="attacker/unrelated"
+    )
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, builder_job_id_for_review=lambda _: builder
+    )
+    assert reader.load_verified_result(job_id=review) is None
+
+
+def test_same_repository_wrong_builder_head_is_not_independence(tmp_path):
+    runtime, builder, review = completed_pair(tmp_path, builder_sha="b" * 40)
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, builder_job_id_for_review=lambda _: builder
     )
     assert reader.load_verified_result(job_id=review) is None

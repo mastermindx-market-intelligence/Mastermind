@@ -122,6 +122,8 @@ class GitHubReviewAPI:
                 raise GitHubReviewAPIUnavailable("GITHUB_REVIEW_SUBMIT_REFUSED")
             raise GitHubReviewAPIUnavailable("GITHUB_READ_REFUSED")
         if len(response.content) > _MAX_RESPONSE:
+            if method == "POST":
+                raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN")
             raise GitHubReviewAPIUnavailable("GITHUB_RESPONSE_OVER_BOUND")
         try:
             return response.json()
@@ -181,7 +183,18 @@ class GitHubReviewAPI:
         if user["login"].casefold() != login.casefold():
             return None
         permission = obj.get("permission")
-        return permission if isinstance(permission, str) else None
+        role_name = obj.get("role_name")
+        # GitHub's legacy "permission" maps maintain->write and triage->read.
+        # For standard roles, use the exact authenticated role_name so an
+        # explicit maintain/admin policy can never silently weaken to write.
+        if role_name in {"admin", "maintain", "write", "triage", "read"}:
+            if role_name == "maintain" and permission == "write":
+                return "maintain"
+            if role_name == "triage" and permission == "read":
+                return "triage"
+            if role_name == permission:
+                return role_name
+        return permission if permission in {"admin", "write", "read", "none"} else None
 
     def submit_review(
         self,
@@ -199,17 +212,15 @@ class GitHubReviewAPI:
             raise GitHubReviewAPIUnavailable("GITHUB_EVENT_REFUSED")
         if not isinstance(body, str) or not body or len(body) > 16000:
             raise GitHubReviewAPIUnavailable("GITHUB_REVIEW_BODY_INVALID")
+        response = self._request(
+            "POST", f"{route}/reviews",
+            payload={"commit_id": commit_id, "event": event, "body": body},
+        )
+        # A 2xx is already an effect: a corrupt/absent review-id receipt is
+        # not evidence of no effect and must never trigger a second POST.
         try:
-            obj = _obj(self._request(
-                "POST", f"{route}/reviews",
-                payload={"commit_id": commit_id, "event": event, "body": body},
-            ))
-            return str(_number(obj.get("id")))
-        except GitHubReviewAPIUnavailable:
-            raise
-        except PublicationEffectUnknown:
-            raise
-        except (ValueError, TypeError):
+            return str(_number(_obj(response).get("id")))
+        except (GitHubReviewAPIUnavailable, ValueError, TypeError):
             raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
 
     def read_reviews(

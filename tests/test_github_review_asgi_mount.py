@@ -76,8 +76,9 @@ def test_explicit_receiver_only_intercepts_one_exact_path():
     mount = GitHubReviewASGIMount(existing_app=old, receiver=receiver())
     assert invoke(mount, path="/os/executive/submit") == 418
     assert old.calls == ["/os/executive/submit"]
-    assert invoke(mount, path=EXACT_REVIEW_DELIVERY_PATH) == 404
-    assert old.calls == ["/os/executive/submit"]
+    # Disabled mounts must preserve the incumbent route rather than shadow it.
+    assert invoke(mount, path=EXACT_REVIEW_DELIVERY_PATH) == 418
+    assert old.calls == ["/os/executive/submit", EXACT_REVIEW_DELIVERY_PATH]
 
 
 def test_receiver_cannot_shadow_os_or_mcp_route():

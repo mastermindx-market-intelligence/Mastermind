@@ -30,6 +30,7 @@ class GitHubReviewASGIMount:
             scope.get("type") == "http"
             and scope.get("path") == EXACT_REVIEW_DELIVERY_PATH
             and self._receiver is not None
+            and self._receiver._settings.enabled
         ):
             # Same installed ASGI process. All auth, body bounds and admission
             # are enforced by the injected receiver; no fallback to OAuth/MCP.

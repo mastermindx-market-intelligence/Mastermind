@@ -103,3 +103,20 @@ def test_redirect_is_not_followed_to_attacker():
     with pytest.raises(GitHubAppTokenUnavailable, match="UNAVAILABLE"):
         app.token_for_installation(installation_id=4242)
     assert len(calls) == 1 and "evil.example" not in calls[0]
+
+def test_broader_than_requested_app_scopes_refuse_even_if_requested_grants_present():
+    _, pem = private_key()
+    expires = datetime.datetime.fromtimestamp(
+        NOW + 2400, tz=datetime.timezone.utc
+    ).isoformat().replace("+00:00", "Z")
+    def handler(req):
+        return httpx.Response(201, json={
+            "token": "not-a-real-installation-token",
+            "expires_at": expires,
+            "permissions": {"metadata": "read", "contents": "read",
+                            "pull_requests": "write", "issues": "write"},
+            "repositories": [{"full_name": "example/repo"}],
+        })
+    app = make(handler, pem)
+    with pytest.raises(GitHubAppTokenUnavailable, match="UNAVAILABLE"):
+        app.token_for_installation(installation_id=4242)

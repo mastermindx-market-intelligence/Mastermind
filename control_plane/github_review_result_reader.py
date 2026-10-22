@@ -91,6 +91,42 @@ class ExecutiveVerifiedReviewResults:
             builder is None or builder.status is not JobStatus.COMPLETED
             or builder.job_id == job_id or not builder.assigned_worker_id
             or builder.assigned_worker_id == attempt.worker_id
+            or not builder.current_attempt_id
+        ):
+            return None
+        # Worker difference is necessary but not sufficient. The reviewed
+        # builder must carry an immutable, Executive-recorded source association
+        # to the SAME repository, PR number and exact frozen head SHA.
+        # A caller-selected completed job from an unrelated PR is not proof.
+        builder_events = self._runtime.store.list_events(job_id=builder_job_id)
+        origins = [e for e in builder_events
+                   if e.event_type == "JOB_CREATED"
+                   and e.job_id == builder_job_id]
+        finishes = [e for e in builder_events
+                    if e.event_type == "JOB_COMPLETED"
+                    and e.job_id == builder_job_id
+                    and e.attempt_id == builder.current_attempt_id
+                    and e.worker_id == builder.assigned_worker_id
+                    and e.payload.get("status") == "COMPLETED"]
+        if len(origins) != 1 or len(finishes) != 1:
+            return None
+        source = origins[0].payload.get("provenance")
+        if (
+            not isinstance(source, dict)
+            or source.get("schema") != "mastermind.github_review_builder_source.v1"
+            or source.get("repository") != provenance.get("repository")
+            or source.get("pull_number") != provenance.get("pull_number")
+            or source.get("frozen_head_sha") != provenance.get("frozen_head_sha")
+        ):
+            return None
+        builder_attempt = self._runtime.attempts.get_attempt(
+            builder.current_attempt_id
+        )
+        if (
+            builder_attempt is None
+            or builder_attempt.status is not AttemptStatus.COMPLETED
+            or builder_attempt.job_id != builder_job_id
+            or builder_attempt.worker_id != builder.assigned_worker_id
         ):
             return None
 

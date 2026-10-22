@@ -405,12 +405,18 @@ class ReconcilingReviewPublication:
         # GitHub state *before* attempting any new POST, not just on a
         # timeout from the current call. The installed transport scopes these
         # reads to the configured App publisher identity.
-        existing = reconcile_publication(
-            reviews=self._transport.read_reviews(
-                repository=repository, pull_number=pull_number, commit_id=head_sha
-            ),
-            commit_id=head_sha, event=event, body=body,
-        )
+        try:
+            existing = reconcile_publication(
+                reviews=self._transport.read_reviews(
+                    repository=repository, pull_number=pull_number, commit_id=head_sha
+                ),
+                commit_id=head_sha, event=event, body=body,
+            )
+        except Exception:
+            # A preflight GitHub outage cannot prove the prior write absent.
+            # The caller's durable reservation stays EFFECT_UNKNOWN; never
+            # turn an unavailable read into permission to POST again.
+            raise PublicationEffectUnknown("GITHUB_REVIEW_EFFECT_UNKNOWN") from None
         if existing is not None:
             return existing
         try:

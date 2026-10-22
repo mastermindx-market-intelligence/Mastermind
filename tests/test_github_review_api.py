@@ -183,3 +183,54 @@ def test_missing_local_receipt_does_not_duplicate_a_review_already_on_github():
         event="COMMENT", body="same review",
     ) == "867"
     assert posts == []
+
+def test_current_permission_uses_exact_standard_maintain_role_not_legacy_write():
+    def collaborator(req):
+        return httpx.Response(200, json={
+            "user": {"login": "alice"},
+            "permission": "write", "role_name": "maintain",
+        })
+    api, _ = source(collaborator)
+    assert api.read_current_permission(repository=REPO, login="alice") == "maintain"
+
+
+def test_oversized_successful_post_is_effect_unknown_not_no_effect():
+    def oversized(req):
+        return httpx.Response(201, content=b"z" * ((1 << 20) + 1))
+    api, _ = source(oversized)
+    with pytest.raises(PublicationEffectUnknown):
+        api.submit_review(
+            repository=REPO, pull_number=42, commit_id=SHA,
+            event="COMMENT", body="Published but receipt too large",
+        )
+
+
+def test_missing_review_id_on_success_is_effect_unknown_not_definite_refusal():
+    api, _ = source(lambda req: httpx.Response(200, json={"state": "COMMENTED"}))
+    with pytest.raises(PublicationEffectUnknown):
+        api.submit_review(
+            repository=REPO, pull_number=42, commit_id=SHA,
+            event="COMMENT", body="Published but no id",
+        )
+
+def test_preflight_read_unavailable_is_typed_effect_unknown_without_post():
+    posts = []
+    def outage(req):
+        if req.method == "POST":
+            posts.append(req)
+            return httpx.Response(200, json={"id": 222})
+        return httpx.Response(503, json={"message": "temporarily unavailable"})
+    api, _ = source(outage)
+    publisher = ReconcilingReviewPublication(
+        transport=api,
+        published=type("EmptyIndex", (), {
+            "published_command_ids": lambda self: frozenset(),
+        })(),
+    )
+    with pytest.raises(PublicationEffectUnknown):
+        publisher.publish_review(
+            publication_command_id="gh-review-publish:" + "a" * 32,
+            repository=REPO, pull_number=42, head_sha=SHA,
+            event="COMMENT", body="outage preflight",
+        )
+    assert posts == []
