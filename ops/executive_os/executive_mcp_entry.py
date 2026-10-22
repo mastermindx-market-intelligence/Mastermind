@@ -288,8 +288,8 @@ def build_os_asset_manifest(source):
             directories.add(path.relative_to(root).as_posix())
     from integrations.mastermind_executive_app.os_assets import os_asset_mimes
     mimes = os_asset_mimes(names)
-    expected_directories = {'assets'} | ({'licenses', 'licenses/fonts'} if len(names) in (9, 11) else set())
-    if len(names) == 11:
+    expected_directories = {'assets'} | ({'licenses', 'licenses/fonts'} if len(names) in (9, 11, 13) else set())
+    if len(names) in (11, 13):
         expected_directories.add('third-party')
     if directories != expected_directories:
         raise ValueError('OS asset directory differs')

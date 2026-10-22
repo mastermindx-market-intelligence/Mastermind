@@ -8,7 +8,7 @@ from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os.os_public_edge import asset_routes, render, stage
 
 
-def manifest(noir=False, notices=False):
+def manifest(noir=False, notices=False, markdown=False):
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     if noir:
         names += ["assets/atelier-office-a.jpg", "assets/Manrope-Variable-a.ttf",
@@ -17,15 +17,20 @@ def manifest(noir=False, notices=False):
     if notices:
         names += ["third-party/deepseek-client-dependency-NOTICES.txt",
                   "third-party/deepseek-harness-LICENSE.txt"]
+    if markdown:
+        names += ["assets/SourceMarkdown-_Pti-jmH.css", "assets/SourceMarkdown-uaH98n-2.js"]
     return {"schema": "mastermind.os_assets.v1", "files": [
         {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
         for name, mime in os_asset_mimes(names).items()
     ]}
 
 
-@pytest.mark.parametrize("noir,notices,count", [(False, False, 3), (True, False, 9), (True, True, 11)])
-def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
-    value = manifest(noir, notices)
+@pytest.mark.parametrize("noir,notices,markdown,count", [
+    (False, False, False, 3), (True, False, False, 9),
+    (True, True, False, 11), (True, True, True, 13),
+])
+def test_all_accepted_topologies_have_exact_routes(noir, notices, markdown, count):
+    value = manifest(noir, notices, markdown)
     routes = asset_routes(value)
     assert len(routes) == count
     config = render(value, 49152)
@@ -41,6 +46,35 @@ def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
             assert "/os/third-party/" + name in routes
             item = next(item for item in value["files"] if item["path"] == "third-party/" + name)
             assert item["mime"] == "text/plain; charset=utf-8"
+    if markdown:
+        assert "/os/assets/SourceMarkdown-_Pti-jmH.css" in routes
+        assert "/os/assets/SourceMarkdown-uaH98n-2.js" in routes
+
+
+@pytest.mark.parametrize("damage", ["missing_css", "missing_js", "wrong_prefix", "duplicate", "mime", "extra"])
+def test_markdown_route_layout_remains_closed(damage):
+    value = manifest(True, True, True)
+    css = next(row for row in value["files"] if row["path"].startswith("assets/SourceMarkdown-")
+               and row["path"].endswith(".css"))
+    js = next(row for row in value["files"] if row["path"].startswith("assets/SourceMarkdown-")
+              and row["path"].endswith(".js"))
+    if damage.startswith("missing_"):
+        value["files"].remove(css if damage == "missing_css" else js)
+    elif damage == "wrong_prefix":
+        js["path"] = "assets/OtherMarkdown-a.js"
+    elif damage == "duplicate":
+        js.update(css)
+    elif damage == "mime":
+        js["mime"] = "text/plain; charset=utf-8"
+    else:
+        value["files"].append({**js, "path": "assets/SourceMarkdown-extra.js"})
+    with pytest.raises(ValueError):
+        render(value, 49152)
+
+
+def test_markdown_pair_without_notices_is_not_an_admitted_eleven_file_layout():
+    with pytest.raises(ValueError, match="fixed OS asset set"):
+        manifest(True, False, True)
 
 
 @pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "duplicate", "traversal", "mime"])

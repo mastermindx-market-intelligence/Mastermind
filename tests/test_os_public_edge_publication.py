@@ -50,6 +50,9 @@ def make_dist(app, tag, *, noir_notices=False):
             "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
             **NOTICE_BYTES,
         }
+        if noir_notices == "markdown":
+            extra.update({f"assets/SourceMarkdown-{tag}.css": b".source-markdown{}",
+                          f"assets/SourceMarkdown-{tag}.js": b"export const markdown = true;"})
         for name, raw in extra.items():
             path = dist / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -216,20 +219,25 @@ def test_real_consumer_two_phase_order_and_single_selected_release(staged):
 
 @pytest.mark.parametrize("inputs,expected_counts", [
     ((False, True), (4, 12)), ((True, False), (12, 4)), ((True, True), (12, 12)),
+    ((False, "markdown"), (4, 14)), ((True, "markdown"), (12, 14)),
+    (("markdown", False), (14, 4)), (("markdown", True), (14, 12)),
+    (("markdown", "markdown"), (14, 14)),
 ], indirect=["inputs"])
-def test_eleven_asset_release_stage_load_and_cutover(staged, expected_counts):
+def test_current_asset_release_stage_load_and_cutover(staged, expected_counts):
     i, r, relay = staged
     with m.private(i["out"]) as stage:
         descriptor, manifests, _, _, _ = m._load_stage(stage, r["stage_digest"])
         for kind, count in zip(("old", "new"), expected_counts):
             index = descriptor["indexes"][kind]
-            has_notices = count == 12
+            has_notices = count in (12, 14)
             assert len(index) == count
             assert (set(NOTICE_BYTES) <= set(index)) == has_notices
             assert len(manifests[kind]["files"]) == len(index) - 1
             if has_notices:
                 for name, raw in NOTICE_BYTES.items():
                     assert stage.read(index[name]) == raw
+            for suffix in ("css", "js"):
+                assert (f"assets/SourceMarkdown-{kind}.{suffix}" in index) == (count == 14)
     assert publish(staged)["state"] == "PREPARED"
     assert ready(staged)["state"] == "CUTOVER_READY"
     relay.selected = "new"
@@ -237,6 +245,38 @@ def test_eleven_asset_release_stage_load_and_cutover(staged, expected_counts):
     paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
     for name in NOTICE_BYTES:
         assert ("/os/" + name in paths) == (name in descriptor["indexes"]["new"])
+    for suffix in ("css", "js"):
+        assert f"/os/assets/SourceMarkdown-old.{suffix}" not in paths
+        assert relay.http(49152, "GET", f"/os/assets/SourceMarkdown-old.{suffix}")[0] == 404
+        new_path = f"/os/assets/SourceMarkdown-new.{suffix}"
+        assert (new_path in paths) == (expected_counts[1] == 14)
+        assert relay.http(49152, "GET", new_path)[0] == (200 if expected_counts[1] == 14 else 404)
+
+
+@pytest.mark.parametrize("inputs", [("markdown", "markdown")], indirect=True)
+@pytest.mark.parametrize("damage", ["partial", "renamed", "mime", "bytes"])
+def test_markdown_capture_binds_the_exact_chunk_pair_and_bytes(staged, damage):
+    i, _, _ = staged
+    with m.private(i["out"]) as stage:
+        descriptor = m.decode(stage.read(m.DESCRIPTOR))
+        files = {name: stage.read(label) for name, label in descriptor["indexes"]["new"].items()}
+    manifest = m.decode(files["asset-manifest.json"])
+    assert len(files) == 14 and len(manifest["files"]) == 13
+    name = "assets/SourceMarkdown-new.js"
+    row = next(row for row in manifest["files"] if row["path"] == name)
+    if damage == "partial":
+        del files[name]
+        manifest["files"].remove(row)
+    elif damage == "renamed":
+        row["path"] = "assets/OtherMarkdown-new.js"
+        files[row["path"]] = files.pop(name)
+    elif damage == "mime":
+        row["mime"] = "text/plain; charset=utf-8"
+    else:
+        files[name] = b"changed chunk bytes"
+    files["asset-manifest.json"] = m.canonical(manifest)
+    with pytest.raises(ValueError):
+        m._manifest(files)
 
 
 @pytest.mark.parametrize("inputs", [(True, True)], indirect=True)

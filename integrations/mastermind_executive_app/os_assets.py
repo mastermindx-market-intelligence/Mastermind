@@ -25,23 +25,30 @@ _THIRD_PARTY_NOTICES = (
     "third-party/deepseek-client-dependency-NOTICES.txt",
     "third-party/deepseek-harness-LICENSE.txt",
 )
+_MARKDOWN = (
+    (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.css", "text/css; charset=utf-8"),
+    (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.js", "text/javascript; charset=utf-8"),
+)
 
 
 def os_asset_mimes(names) -> dict[str, str]:
-    """Exactly legacy three, Noir nine, or Noir eleven including both notices."""
+    """Closed legacy/Noir layouts, with notices and the paired Markdown chunks."""
     names = tuple(names)
     if (any(type(name) is not str for name in names)
-            or len(names) not in (3, 9, 11) or len(set(names)) != len(names)):
+            or len(names) not in (3, 9, 11, 13) or len(set(names)) != len(names)):
         raise ValueError("fixed OS asset set required")
     expected = {"index.html": "text/html; charset=utf-8"}
-    for pattern, mime in _BASE + (_NOIR if len(names) in (9, 11) else ()):
+    patterns = _BASE + (_NOIR if len(names) in (9, 11, 13) else ())
+    if len(names) == 13:
+        patterns += _MARKDOWN
+    for pattern, mime in patterns:
         matches = [name for name in names if re.fullmatch(pattern, name)]
         if len(matches) != 1:
             raise ValueError("fixed OS asset set required")
         expected[matches[0]] = mime
-    if len(names) in (9, 11):
+    if len(names) in (9, 11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _LICENSES})
-    if len(names) == 11:
+    if len(names) in (11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _THIRD_PARTY_NOTICES})
     if set(names) != set(expected):
         raise ValueError("fixed OS asset set required")
