@@ -1,6 +1,6 @@
 ---
 title: "Mastermind Portfolio Product — frozen view spec (V1–V7)"
-status: "FROZEN-DRAFT (awaiting independent review and seat design acceptance)"
+status: "FROZEN (seat design acceptance 2026-10-22 13:25Z of PR #1744 @ d8ea7769, spec sha256 5f69c20e…; seat ledger ORCHESTRATION.md rows 13:25 DESIGN ACCEPTANCE + commission; independent review r3 PASS)"
 date: 2026-10-22
 owner: pbr-product
 program: Mastermind#1693 — Portfolio Bot Rebuild, Wave 9
@@ -44,7 +44,8 @@ app does not ship. Where a field does not exist yet it is written as
 field; where a needed component does not exist in the canonical inventory it is written as
 `DESIGN-SYSTEM-GAP`. It specifies no implementation: no HTML, CSS, JS or Python beyond tiny
 token names. It proposes no route, IA or seat change as settled — each is marked
-`SEAT DECISION`.
+`SEAT DECISION`. The seat decided every one of them on 2026-10-22; §9 records each ruling, and
+a `SEAT DECISION` marker elsewhere in this document now resolves to that ruling.
 
 ---
 
@@ -119,7 +120,10 @@ needs and what would have to be redesigned if it moved.
   `revealActivePortfolioTab` behaviour (`index.html:6504-6513`) rather than minting a new idiom.
 - Selection writes the URL so every view is linkable and browser-back works. Today the SPA
   keeps `showView(name)` in memory and `applyPortfolioScope()` (`index.html:6529`) hides panels
-  by id; the move to real routes is a `SEAT DECISION` under the IA owner.
+  by id. **DECIDED (seat, 2026-10-22; §9 item 12):** hash routes inside the SPA —
+  `#/<book>/<view>` and `#/<book>/position/<ticker>`. Fragments never reach the server or the
+  response-cache key, `hashchange` gives browser-back, deep links work, and `app/web.py` gains no
+  route. Server routes are added only if share previews ever need them.
 - Cross-view entry points that must exist: a held ticker in V1 opens **V6**; a queued row in V3
   and a pending verdict chip in V1 both open **V6** on the same holding; a decision id in V2 opens
   the decision row that produced it; a rejected name in V5 opens its V6-style thesis card even
@@ -2442,22 +2446,45 @@ canonical inventory (`DS_components.md`) does not cover **and** that the Masterm
 
 **Gap index (assembled).** G1 tier-lock primitive; G2 type scale tokens; G3 unavailable value slot (metric tile with a null explanation); G4 counted overflow affordance; G5 skeleton loader at true final geometry; G6 lifecycle rail; G7 operational disposition chip family; G8 evidence lens (hover + focus + tap); G9 epistemic-qualification badge; G10 count ladder. G1 and G3 merge the names parts of this spec used for the same need.
 
-## 9. Seat decisions required
+**Seat ruling (2026-10-22) and landing plan.** Each accepted gap ships as a PRODUCT-owned primitive in
+the app's own `.mm-*` namespace, bound to `app/static/theme.css` variables and mirroring the anatomy
+and name of the canonical component it fills, so a later unification is a rename rather than a
+redesign. The `Filled` column is completed in the PR that lands the primitive.
 
-One line each: the question, this lane's recommendation, and the alternative.
+| Gap | Ruling | Lands with | Filled |
+|---|---|---|---|
+| G1 tier-lock primitive | Deferred: no entitlement gate exists in this process (§2); do not build it | — | — |
+| G2 type scale tokens | Accepted | B0 foundation | — |
+| G3 metric tile with a null explanation | Accepted | B0 foundation | — |
+| G4 counted overflow affordance | Accepted | B0 foundation | — |
+| G5 skeleton loader at true final geometry | Accepted | B0 foundation | — |
+| G6 lifecycle rail | Accepted | V6 | — |
+| G7 operational disposition chip family | Accepted | V7 | — |
+| G8 evidence lens (hover + focus + tap) | Accepted | V6 | — |
+| G9 epistemic-qualification badge | Accepted | B0 foundation | — |
+| G10 count ladder | Accepted | V5 | — |
 
-1. **V1 route (SEAT DECISION, §2)** — merge `#performance`/`#alloc`/`#positions`/`#safety` into one view? **Recommend yes**, with `#safety` demoted to support-2, because "the account is the answer" (art direction §1) fails while four panels compete for the top of the page. *Alternative:* keep four panels and let V1 be a tab over them, which preserves the shipped IA but leaves no single answer above the fold.
-2. **V2 route (SEAT DECISION, §2)** — promote `#decision-availability` from evidence panel to the page answer? **Recommend yes**; it is already the panel that carries the accepted decision and its consistency alerts. *Alternative:* keep the decision memo as the hero and the availability block as support-1, which reads more narratively and weakens the truth-first order.
-3. **V3 route (SEAT DECISION, §2)** — split the pending block out of Trade History? **Recommend yes**; pending intent and settled fills are different questions and mixing them is what let TR2 hide. *Alternative:* keep one blotter with a filter, which costs no IA but keeps the queued/settled ambiguity on one screen.
-4. **V4 route (SEAT DECISION, §2)** — give Performance its own route and take its as-of/strip with it? **Recommend yes**; a curve needs a wider canvas than a dashboard column and its qualification sentence needs to sit next to the curve, not above the fold of another view. *Alternative:* keep `#performance` in the V1 dashboard and let V4 be a deep link into it.
-5. **V5 route (SEAT DECISION, §2; the same question as §4 V5 SEAT DECISION V5-A)** — expose the currently unreachable Opportunities view to the product book? **Recommend yes**, gated on fixing the `/api/research_papers` flagship-tree join (`app/web.py:1912`) first, so the product book never reads the archived gate. *Alternative:* leave V5 flagship-only and answer Q5 for the product book from V2 + V6 evidence panels only.
-6. **V6 route (SEAT DECISION, §2)** — promote the `toggleExpand` disclosure to a linkable route? **Recommend yes**; a held ticker must be linkable from V1, V3 and a queued chip, and shareable, which an in-page disclosure cannot be. *Alternative:* keep it in-page and accept deep links as `#positions?expand=<idx>`, which is shareable but not keyboard-navigable as an entity.
-7. **V7 route (SEAT DECISION, §2)** — a new operator-facing view per book, with the Desk/scheduler lanes un-gated from flagship? **Recommend yes**, with the operator detail behind an operator-gated channel and **absent** — never disabled, never locked — for an anonymous reader. *Alternative:* keep the Desk flagship-only and give the product book only the R1 disposition strip, which answers "was today late?" but not "why".
-8. **Minimum closed-sample size for a win rate** — what n makes a win rate worth printing? **Recommend n ≥ 30 closed trades**, always printed as `57% · n = 42 closed` / `57% · 已平仓 n = 42`, and below it the label `Sample too small (n = <n> closed)` / `样本不足（已平仓 n = <n>）` with **no percentage at all**. *Alternative:* n ≥ 50 (slower to earn, harder to mislead), or print the rate with a "small sample" caveat (cheapest, but still puts a number where the eye rewards it — the thing TR-D forbids).
+## 9. Seat decisions (decided 2026-10-22)
 
-9. **`#positions` row cap (SEAT DECISION, §4 V1 Density)** — cap the shipped positions panel at 8 rows with a counted `See all N` landing on V6? **Recommend cap**; it is a behaviour change to a shipped panel, so it needs the seat. *Alternative:* keep the full table with in-panel scroll.
-10. **`account_preview.starting_nav` default (SEAT DECISION, §4 V1 Fields)** — the `or 1_000_000.0` default at `app/web.py:1342` must stop being silent. **Recommend** render `Unavailable` / `不可用` when the book has no recorded starting NAV, the same rule PR #1719 applies to the self-directed book. *Alternative:* keep the default but label it `Assumed starting capital` / `假定初始资金` everywhere it feeds a return.
-11. **V7 disposition display labels (SEAT DECISION, §4 V7)** — print #1711's dispositions through PRODUCT display labels (`started` → `Running`, `accepted_no_change` → `Accepted · no change`, `accepted_change` → `Accepted · change applied`, `incomplete_uncertain` → `Incomplete · uncertain`) or verbatim? **Recommend display labels**: the identifier stays the contract and the test key, and `Running` reads as a state where `Started` reads as an event. *Alternative:* title-case the identifiers (`Started`, `Accepted no change`, …), zero mapping but machine-sounding.
+One line each: the question, this lane's recommendation, and the alternative. Each item ends with
+the seat's ruling from the design acceptance of 2026-10-22 13:25Z (seat ledger `ORCHESTRATION.md`).
+The rulings bind every build.
+
+1. **V1 route (SEAT DECISION, §2)** — merge `#performance`/`#alloc`/`#positions`/`#safety` into one view? **Recommend yes**, with `#safety` demoted to support-2, because "the account is the answer" (art direction §1) fails while four panels compete for the top of the page. *Alternative:* keep four panels and let V1 be a tab over them, which preserves the shipped IA but leaves no single answer above the fold. **DECIDED:** YES, as recommended.
+2. **V2 route (SEAT DECISION, §2)** — promote `#decision-availability` from evidence panel to the page answer? **Recommend yes**; it is already the panel that carries the accepted decision and its consistency alerts. *Alternative:* keep the decision memo as the hero and the availability block as support-1, which reads more narratively and weakens the truth-first order. **DECIDED:** YES, as recommended.
+3. **V3 route (SEAT DECISION, §2)** — split the pending block out of Trade History? **Recommend yes**; pending intent and settled fills are different questions and mixing them is what let TR2 hide. *Alternative:* keep one blotter with a filter, which costs no IA but keeps the queued/settled ambiguity on one screen. **DECIDED:** YES, as recommended.
+4. **V4 route (SEAT DECISION, §2)** — give Performance its own route and take its as-of/strip with it? **Recommend yes**; a curve needs a wider canvas than a dashboard column and its qualification sentence needs to sit next to the curve, not above the fold of another view. *Alternative:* keep `#performance` in the V1 dashboard and let V4 be a deep link into it. **DECIDED:** YES, as recommended.
+5. **V5 route (SEAT DECISION, §2; the same question as §4 V5 SEAT DECISION V5-A)** — expose the currently unreachable Opportunities view to the product book? **Recommend yes**, gated on fixing the `/api/research_papers` flagship-tree join (`app/web.py:1912`) first, so the product book never reads the archived gate. *Alternative:* leave V5 flagship-only and answer Q5 for the product book from V2 + V6 evidence panels only. **DECIDED:** YES, as recommended. V5 is gated on the `app/web.py:1912` flagship-tree join fix landing first, as its own small truth PR.
+6. **V6 route (SEAT DECISION, §2)** — promote the `toggleExpand` disclosure to a linkable route? **Recommend yes**; a held ticker must be linkable from V1, V3 and a queued chip, and shareable, which an in-page disclosure cannot be. *Alternative:* keep it in-page and accept deep links as `#positions?expand=<idx>`, which is shareable but not keyboard-navigable as an entity. **DECIDED:** YES, as recommended; the route is `#/<book>/position/<ticker>` (item 12).
+7. **V7 route (SEAT DECISION, §2)** — a new operator-facing view per book, with the Desk/scheduler lanes un-gated from flagship? **Recommend yes**, with the operator detail behind an operator-gated channel and **absent** — never disabled, never locked — for an anonymous reader. *Alternative:* keep the Desk flagship-only and give the product book only the R1 disposition strip, which answers "was today late?" but not "why". **DECIDED:** YES, as recommended. Operator detail is ABSENT for an anonymous session — never disabled, never locked.
+8. **Minimum closed-sample size for a win rate** — what n makes a win rate worth printing? **Recommend n ≥ 30 closed trades**, always printed as `57% · n = 42 closed` / `57% · 已平仓 n = 42`, and below it the label `Sample too small (n = <n> closed)` / `样本不足（已平仓 n = <n>）` with **no percentage at all**. *Alternative:* n ≥ 50 (slower to earn, harder to mislead), or print the rate with a "small sample" caveat (cheapest, but still puts a number where the eye rewards it — the thing TR-D forbids). **DECIDED:** n ≥ 30 closed trades. n is always printed; below 30 the label renders with no percentage.
+
+9. **`#positions` row cap (SEAT DECISION, §4 V1 Density)** — cap the shipped positions panel at 8 rows with a counted `See all N` landing on V6? **Recommend cap**; it is a behaviour change to a shipped panel, so it needs the seat. *Alternative:* keep the full table with in-panel scroll. **DECIDED:** Cap at 8 rows with a counted `See all N` landing on the V6 list.
+10. **`account_preview.starting_nav` default (SEAT DECISION, §4 V1 Fields)** — the `or 1_000_000.0` default at `app/web.py:1342` must stop being silent. **Recommend** render `Unavailable` / `不可用` when the book has no recorded starting NAV, the same rule PR #1719 applies to the self-directed book. *Alternative:* keep the default but label it `Assumed starting capital` / `假定初始资金` everywhere it feeds a return. **DECIDED:** `starting_nav` renders `Unavailable` / `不可用` when no starting NAV is recorded; the silent `or 1_000_000.0` default goes.
+11. **V7 disposition display labels (SEAT DECISION, §4 V7)** — print #1711's dispositions through PRODUCT display labels (`started` → `Running`, `accepted_no_change` → `Accepted · no change`, `accepted_change` → `Accepted · change applied`, `incomplete_uncertain` → `Incomplete · uncertain`) or verbatim? **Recommend display labels**: the identifier stays the contract and the test key, and `Running` reads as a state where `Started` reads as an event. *Alternative:* title-case the identifiers (`Started`, `Accepted no change`, …), zero mapping but machine-sounding. **DECIDED:** Display labels. The identifier stays the contract and the test key.
+12. **Routing (the §2 open item)** — how does a view become linkable? **DECIDED:** hash routes inside the SPA, `#/<book>/<view>` and `#/<book>/position/<ticker>`. Fragments never reach the server or the response-cache key, `hashchange` gives browser-back, deep links work, and `app/web.py` gains no route. Server routes only if share previews ever need them.
+
+**Build order (seat commission, 2026-10-22).** One PR each, stacked on master: B0 foundation (G shell, view tabset, hash routing, book-switch cache invalidation per §2, §3 state vocabulary EN/ZH, G2–G5 and G9 primitives, and the §6 display fixes that need no new field: rows 1–3, 6–8, 12–15) → V1 → V6 → V3 and V4 in parallel → V2 → V5 (after the `app/web.py:1912` fix) → V7 (R1/R6 render `Unavailable` until RUNTIME delivers; the L-P4 ops states follow R1). A contract request never blocks a build: its slot renders the §3 word until the field is delivered.
 
 ---
 
