@@ -62,6 +62,21 @@ ROLE_PACKAGE = "mastermind-fabric-orchestration"
 CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
 # Git blob digest of the separately reviewed local Skill source; not a runtime grant.
 CLAUDE_FABRIC_SKILL_BLOB_SHA = "3dc63723e0e002bdb2337aaf68dfa97b7c0ced5f"
+CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
+CODEX_FABRIC_SKILL_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
+CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
+CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
+CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
+CODEX_FABRIC_ENTRY_BODY = """<!-- mastermind-codex-fabric-entrypoint-v1 -->
+## Codex -> existing Subagent Fabric
+
+When assigned an authorized M2 Codex orchestration mission, load the existing
+`~/.codex/skills/mastermind-fabric-delegate/SKILL.md` for the original-root,
+child request/status/result/accept and admitted operator-to-leaf procedures.
+Native Codex child spawning is not paid Fabric admission. Preserve the current
+thread lineage, provider grants, root budget and active effects; no second router.
+<!-- /mastermind-codex-fabric-entrypoint-v1 -->
+"
 FABRIC_ENTRY_BEGIN = "<!-- mastermind-claude-fabric-entrypoint-v1 -->"
 FABRIC_ENTRY_END = "<!-- /mastermind-claude-fabric-entrypoint-v1 -->"
 FABRIC_ENTRY_BODY = """<!-- mastermind-claude-fabric-entrypoint-v1 -->
@@ -606,6 +621,8 @@ def _paths(home: Path) -> dict[str, Path]:
             paths[f"{provider}_role_{index}"] = home / directory / "skills" / ROLE_PACKAGE / relative
     paths["claude_fabric_skill"] = (home / ".claude" / "skills" /
                                     CLAUDE_FABRIC_SKILL_PACKAGE / "SKILL.md")
+    paths["codex_fabric_skill"] = (home / ".codex" / "skills" /
+                                   CODEX_FABRIC_SKILL_PACKAGE / "SKILL.md")
     return paths
 
 
@@ -642,6 +659,18 @@ def _canonical_claude_fabric_skill() -> bytes:
     blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
     if not 0 < len(payload) <= 8192 or blob != CLAUDE_FABRIC_SKILL_BLOB_SHA:
         raise OrchestratorPolicyError("Claude Fabric Skill source digest mismatch")
+    return payload
+
+
+def _canonical_codex_fabric_skill() -> bytes:
+    """The existing M2 Codex skill, with a reviewed operator-tool quickstart."""
+    root = Path(__file__).resolve().parents[2]
+    source = root / "skills" / CODEX_FABRIC_SKILL_PACKAGE / "SKILL.md"
+    _preflight_destination(source, root)
+    payload = _regular_bytes(source)
+    blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
+    if not 0 < len(payload) <= 24576 or blob != CODEX_FABRIC_SKILL_BLOB_SHA:
+        raise OrchestratorPolicyError("Codex Fabric Skill source digest mismatch")
     return payload
 
 
@@ -1099,19 +1128,116 @@ def apply_claude_fabric_entrypoint(home: Path) -> dict[str, object]:
     return verify_claude_fabric_entrypoint(resolved)
 
 
+
+def _render_codex_fabric_entry_doc(raw: bytes) -> bytes:
+    """Preserve an existing Codex Fabric instruction pointer without duplication."""
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeError as exc:
+        raise OrchestratorPolicyError("Codex instructions are not UTF-8") from exc
+    if (text.count(CODEX_FABRIC_ENTRY_BEGIN) != text.count(CODEX_FABRIC_ENTRY_END)
+            or text.count(CODEX_FABRIC_ENTRY_BEGIN) > 1):
+        raise OrchestratorPolicyError("Codex Fabric entrypoint markers ambiguous")
+    if CODEX_FABRIC_ENTRY_BEGIN in text:
+        start = text.index(CODEX_FABRIC_ENTRY_BEGIN)
+        end = text.index(CODEX_FABRIC_ENTRY_END, start) + len(CODEX_FABRIC_ENTRY_END)
+        updated = text[:start] + CODEX_FABRIC_ENTRY_BODY.rstrip() + text[end:]
+        return (updated.rstrip() + "\n").encode("utf-8")
+    # The incumbent M2 AGENTS.md already names the exact installed skill.
+    if "~/.codex/skills/mastermind-fabric-delegate/SKILL.md" in text:
+        return raw
+    return ((text.rstrip() + "\n\n") if text.strip() else "").encode("utf-8") + CODEX_FABRIC_ENTRY_BODY.encode("utf-8")
+
+
+def verify_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Read back only this guide; never infer provider admission from files."""
+    paths = _paths(home)
+    expected = _canonical_codex_fabric_skill()
+    issues: list[str] = []
+    try:
+        _preflight_destination(paths["codex_fabric_skill"], Path(home).expanduser().resolve())
+        installed = _regular_bytes(paths["codex_fabric_skill"])
+    except OrchestratorPolicyError:
+        issues.append("codex_fabric_skill.missing_or_unsafe")
+    else:
+        if installed != expected:
+            issues.append("codex_fabric_skill.digest")
+    try:
+        doc = _regular_bytes(paths["codex_doc"]).decode("utf-8")
+        if (doc.count(CODEX_FABRIC_ENTRY_BEGIN) != doc.count(CODEX_FABRIC_ENTRY_END)
+                or doc.count(CODEX_FABRIC_ENTRY_BEGIN) > 1
+                or "~/.codex/skills/mastermind-fabric-delegate/SKILL.md" not in doc):
+            issues.append("codex_fabric_entrypoint.missing_or_ambiguous")
+    except (OrchestratorPolicyError, UnicodeError):
+        issues.append("codex_fabric_entrypoint.unreadable")
+    return {
+        "state": "READY" if not issues else "DRIFT",
+        "provider_scope": "codex-fabric",
+        "home": str(Path(home).expanduser().resolve()),
+        "issues": issues,
+        "codex_fabric_skill_blob_sha": CODEX_FABRIC_SKILL_BLOB_SHA,
+        "session_loading_proven": False, "runtime_admission_proven": False,
+        "native_capacity_modified": False, "provider_settings_modified": False,
+        "credentials_read": False,
+    }
+
+
+def apply_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
+    """Upgrade only the existing M2 Codex Fabric skill and optional discovery pointer.
+
+    Legacy preimage is exact SHA-bound; unknown content is never overwritten.
+    Keep the user's native agent 32/33 configuration, hooks, models and MCP untouched.
+    """
+    resolved = Path(home).expanduser().resolve()
+    paths = _paths(resolved)
+    for key in ("codex_doc", "codex_fabric_skill"):
+        _preflight_destination(paths[key], resolved)
+    candidate = _canonical_codex_fabric_skill()
+    existing = _regular_bytes(paths["codex_fabric_skill"], missing=b"")
+    if existing and existing != candidate and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256:
+        raise OrchestratorPolicyError("Codex Fabric installed Skill changed; refusing replacement")
+    original_doc = _regular_bytes(paths["codex_doc"], missing=b"")
+    updated_doc = _render_codex_fabric_entry_doc(original_doc)
+    modified: list[str] = []
+    try:
+        for key, payload in (("codex_fabric_skill", candidate), ("codex_doc", updated_doc)):
+            # Re-read exact preimage before a change; do not clobber concurrent edits.
+            current = _regular_bytes(paths[key], missing=b"")
+            expected = existing if key == "codex_fabric_skill" else original_doc
+            if current != expected:
+                raise OrchestratorPolicyError("Codex Fabric install source drift; reconcile current home")
+            if _atomic_write(paths[key], payload):
+                modified.append(str(paths[key]))
+    except OrchestratorPolicyError as exc:
+        if modified:
+            try:
+                issues = verify_codex_fabric_entrypoint(resolved)["issues"]
+            except Exception:
+                issues = ["verify_after_partial_apply_failed"]
+            raise OrchestratorPolicyApplyIncomplete(
+                "Codex Fabric install partially applied; verify the same home first",
+                modified_files=modified, verify_issues=issues,
+            ) from exc
+        raise
+    return verify_codex_fabric_entrypoint(resolved)
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("mode", choices=("verify", "apply"))
     parser.add_argument("--home", type=Path, default=Path.home())
     parser.add_argument("--guard-source", type=Path)
-    parser.add_argument("--provider", choices=("all", "codex", "claude", "claude-fabric"), default="all")
+    parser.add_argument("--provider", choices=("all", "codex", "claude", "claude-fabric", "codex-fabric"), default="all")
     return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
-        if args.provider == "claude-fabric":
+        if args.provider == "codex-fabric":
+            result = (apply_codex_fabric_entrypoint(args.home) if args.mode == "apply"
+                      else verify_codex_fabric_entrypoint(args.home))
+        elif args.provider == "claude-fabric":
             result = (apply_claude_fabric_entrypoint(args.home) if args.mode == "apply"
                       else verify_claude_fabric_entrypoint(args.home))
         elif args.provider == "all":
