@@ -6,6 +6,7 @@ import copy
 import datetime as dt
 import dataclasses
 import hashlib
+import inspect
 import json
 import re
 from collections.abc import Awaitable, Callable, Mapping
@@ -644,12 +645,30 @@ class CompanyConsultationGateway:
         observed_tool_schema_digest: str,
         utc_now: Callable[[], str],
         program_ref: str = "JOB-100/agent-fabric-end-to-end-fable-integration",
+        before_dispatch: Callable[[str, Mapping[str, Any]], None] | None = None,
     ) -> None:
         self.peer_resolver = peer_resolver
         self.dispatcher = dispatcher
         self.observed_tool_schema_digest = observed_tool_schema_digest
         self.utc_now = utc_now
         self.program_ref = program_ref
+        if before_dispatch is not None and (
+            not callable(before_dispatch)
+            or inspect.iscoroutinefunction(before_dispatch)
+            or inspect.iscoroutinefunction(getattr(before_dispatch, "__call__", None))
+        ):
+            raise TypeError("before_dispatch must be a synchronous owner-supplied callable")
+        self.before_dispatch = before_dispatch
+
+    def _guard_dispatch(self, tool_name: str, request: Mapping[str, Any]) -> None:
+        if self.before_dispatch is None:
+            return
+        # The guard observes a copy; it cannot mutate the normalized send payload.
+        result = self.before_dispatch(tool_name, copy.deepcopy(dict(request)))
+        if result is not None:
+            if inspect.iscoroutine(result):
+                result.close()
+            raise ConsultationPeerRefused("BINDING_UNAVAILABLE")
 
     async def call(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
         if self.observed_tool_schema_digest != COMPANY_CONSULTATION_TOOL_SCHEMA_DIGEST:
@@ -663,8 +682,7 @@ class CompanyConsultationGateway:
             if tool_name == "company.peers":
                 peers = [
                     peer.public_projection()
-                    for peer in self.peer_resolver.peers
-                    if peer.program_ref == self.program_ref
+                    for peer in self.peer_resolver.visible_peers(program_ref=self.program_ref)
                 ]
                 if not peers:
                     raise ConsultationPeerRefused("UNAVAILABLE")
@@ -686,6 +704,7 @@ class CompanyConsultationGateway:
                     raise
                 except Exception:
                     return _error(tool_name, "INTERNAL_ERROR")
+                self._guard_dispatch(tool_name, request)
                 dispatch_invoked = True
                 response = await self.dispatcher(tool_name, request)
                 return _result_after_dispatch(tool_name, self._service_data(response))
@@ -694,6 +713,7 @@ class CompanyConsultationGateway:
                 "operation": "reply" if tool_name == "company.reply" else "read",
                 "semantic": normalized,
             }
+            self._guard_dispatch(tool_name, request)
             dispatch_invoked = True
             response = await self.dispatcher(tool_name, request)
             return _result_after_dispatch(tool_name, self._service_data(response))
