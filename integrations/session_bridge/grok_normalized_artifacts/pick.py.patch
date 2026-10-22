@@ -1,0 +1,26 @@
+--- a/pick.py
++++ b/pick.py
+@@ -229 +229 @@
+-    return task_class is None or task_class in allowed
++    return task_class in allowed
+@@ -1035,2 +1035,2 @@
+-        if pool == "minimax":
+-            pair = _minimax_burn_down_window()
++        if pool in {"minimax", "grok"}:
++            pair = _minimax_burn_down_window() if pool == "minimax" else _grok_burn_down_window()
+@@ -2121,0 +2122,7 @@
++        if pool == "grok" and _grok_priority_active(doc, tc):
++            if floor_demotes(pool, tc, doc=doc, needs=needs):
++                continue
++            line = _emit(pool, "grok_expiring_priority", tc, doc, needs=needs, host_modes=host_modes,
++                         task_complexity=task_complexity, escalation_reason=escalation_reason)
++            if line.startswith("POOL="):
++                return line
+@@ -2303,3 +2310,4 @@
+-    if normalized_mode == "grok" and normalized_model == "grok-4.6" and _grok_priority_active(policy_doc, normalized_task):
+-        result.update(reason="grok_expiring_quota_authorization",
+-                      tier=model_tier.CLASS_TIER.get(normalized_task, "leaf-labor"))
++    if (normalized_mode == "grok" and normalized_model == "grok-4.6"
++            and model_tier.CLASS_TIER.get(normalized_task) == "leaf-labor"
++            and _grok_priority_active(policy_doc, normalized_task)):
++        result.update(reason="grok_expiring_quota_authorization", tier="leaf-labor")

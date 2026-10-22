@@ -76,6 +76,15 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/status",
 )
 
+#: Three fixed POST routes served by the opt-in selected-session transport.
+#: These are exactly the routes the accepted HTTP leaf owns; nothing else is
+#: added by supplying the installed bridge client.
+_OS_SESSION_EXECUTIVE_ROUTES: tuple[str, ...] = (
+    "/os/executive/session/context",
+    "/os/executive/session/send",
+    "/os/executive/session/reply",
+)
+
 __all__ = ["build_executive_mcp_app", "build_web_ceo_mcp_app", "build_web_ceo_sessions_mcp_app", "build_web_ceo_v3_mcp_app", "build_e1_mcp_app", "build_e1_tools", "build_personal_read_mcp_app", "build_personal_read_tools", "build_mcp_server", "build_tools", "build_web_ceo_tools", "build_web_ceo_sessions_tools", "run_stdio"]
 
 _E1_READ_NAMES = tuple(path.rsplit("/", 1)[-1] for path in sorted(E1_READ_PATHS))
@@ -536,7 +545,7 @@ class _ExecutivePathFence:
     """Literal, query-free routes for the private stateless HTTP transport."""
 
     def __init__(self, app: Any, metadata_path: str, *, workspace_app=None, content_app=None, os_app=None,
-                 os_executive_transport=None):
+                 os_executive_transport=None, os_session_transport=None):
         self._app = app
         self._routes = {metadata_path: "GET", "/mcp": "POST",
                         "/v1/tools/submit_ceo_intent/reconcile": "POST"}
@@ -549,13 +558,19 @@ class _ExecutivePathFence:
                 "/workspace/work/current",
                 "/workspace/mission/current",
                 "/workspace/mission/v3/current",
+                "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/plan/current",
+                "/workspace/operator/activity/current",
             ))
             # v2 routes carry a query string; the legacy v1 mission route does too.
             self._query_routes.update((
                 "/workspace/mission/current",
                 "/workspace/mission/v3/current",
+                "/workspace/mission/v4/current",
                 "/workspace/result/current",
+                "/workspace/plan/current",
+                "/workspace/operator/activity/current",
             ))
         if content_app is not None:
             self._workspace_routes.add("/workspace/window/current")
@@ -572,10 +587,23 @@ class _ExecutivePathFence:
             # exact single bearer plus the closed host/origin set.  They are
             # never query-bearing and never alias onto static GET routes.
             self._routes.update({path: "POST" for path in _OS_EXECUTIVE_ROUTES})
+        if os_session_transport is not None:
+            # The three fixed selected-session routes are POST and framing-
+            # checked here only.  The accepted HTTP leaf owns header, auth and
+            # effect mapping for them, so its refusals keep their own closed
+            # session envelope instead of an outer one.
+            self._routes.update({path: "POST" for path in _OS_SESSION_EXECUTIVE_ROUTES})
 
     async def __call__(self, scope: Any, receive: Any, send: Any) -> None:
         if scope.get("type") == "http":
-            path = scope.get("path", "")
+            path = scope.get("path")
+            if type(path) is not str:
+                # An unhashable or non-string path is never a route; refuse it
+                # before dictionary membership, isascii or encode.
+                await JSONResponse({"ok": False, "error": {
+                    "code": "not_found", "message": "unknown Executive transport route",
+                }}, status_code=404)(scope, receive, send)
+                return
             if (self._routes.get(path) != scope.get("method") or not path.isascii()
                     or scope.get("raw_path") != path.encode("ascii")
                     or (scope.get("query_string") and path not in self._query_routes)):
@@ -803,6 +831,7 @@ def _build_profile_mcp_app(
     enable_os_executive_transport: bool = False,
     os_executive_resource: str | None = None,
     os_commission_preparer: Any | None = None,
+    os_session_bridge_client: Any | None = None,
     reconcile_tool_name: str | None = None,
 ) -> Any:
     """Compose one compile-time selected MCP profile over the existing App.
@@ -815,7 +844,10 @@ def _build_profile_mcp_app(
     The OS Executive transport is opt-in via ``enable_os_executive_transport``;
     when enabled it requires the exact installed v3 composition (server 1.4.0/1.5.0,
     ``OsStaticApp``, ``read_from_ceo_ingress=True``) and exposes exactly three
-    POST routes around the existing :class:`BoundedE1App`.
+    POST routes around the existing :class:`BoundedE1App`.  Supplying the
+    exact installed ``os_session_bridge_client`` additionally mounts the three
+    fixed selected-session routes; without it no session route, client or
+    socket is ever created here.
     """
     from control_plane.ceo_request import app_request_ref, automated_intent_id
     from integrations.mastermind_executive_app.app import (
@@ -836,6 +868,8 @@ def _build_profile_mcp_app(
         raise ValueError("disabled OS transport refuses commission preparation")
     if not enable_os_executive_transport and os_executive_resource is not None:
         raise ValueError("OS Executive resource requires enabled transport")
+    if not enable_os_executive_transport and os_session_bridge_client is not None:
+        raise ValueError("OS session transport requires enabled OS Executive transport")
     if release_profile and any(app is not None for app in (workspace_app, content_app, os_app)):
         raise ValueError("release control profile refuses optional mounts")
     # This tuple is fixed by the builder, never selected by an MCP argument.
@@ -887,7 +921,7 @@ def _build_profile_mcp_app(
         configured.additional_policies,
         primary_jwks_cache=configured.jwks_cache,
     )
-    verifier = _ExecutivePolicyVerifiers(*(
+    verifier_pairs = tuple(
         tuple(
             MastermindTokenVerifier(
                 authenticator=authenticator,
@@ -902,7 +936,8 @@ def _build_profile_mcp_app(
         for authenticator_pair, policy_pair in zip(
             authenticator_variants, policy_variants
         )
-    ))
+    )
+    verifier = _ExecutivePolicyVerifiers(*verifier_pairs)
     read_authenticators = tuple(pair[0] for pair in authenticator_variants)
     submit_authenticators = tuple(pair[1] for pair in authenticator_variants)
     # Reuse the bounded ASGI seam. Its generic failure body is never evidence
@@ -913,6 +948,7 @@ def _build_profile_mcp_app(
     # MastermindTokenVerifier and matching submit JwtAuthenticator(s) — never a
     # read or workspace verifier.  No resource widening, no fallback.
     os_transport_handler = None
+    os_session_transport_handler = None
     if enable_os_executive_transport:
         from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp
 
@@ -926,13 +962,15 @@ def _build_profile_mcp_app(
             raise ValueError("OS Executive transport requires exact installed v3 composition")
 
         os_pairs = tuple(
-            (authenticator, policy)
-            for authenticator, policy in zip(submit_authenticators, policy_variants)
+            (index, authenticator, policy)
+            for index, (authenticator, policy) in enumerate(
+                zip(submit_authenticators, policy_variants)
+            )
             if policy.submit.resource == os_executive_resource
         )
         if type(os_executive_resource) is not str or len(os_pairs) != 1:
             raise ValueError("OS Executive transport requires one exact configured resource")
-        os_authenticator, os_policy = os_pairs[0]
+        os_pair_index, os_authenticator, os_policy = os_pairs[0]
         os_transport_handler = OsExecutiveTransportApp(
             inner_app,
             submit_verifier=MastermindTokenVerifier(
@@ -943,6 +981,29 @@ def _build_profile_mcp_app(
             clock=configured.clock,
             commission_preparer=os_commission_preparer,
         )
+        if os_session_bridge_client is not None:
+            # The opt-in selected-session leaf reuses this factory's audited
+            # verifier/authenticator pair for the one selected resource: same
+            # authenticator identity, exact read and submit policies, clock
+            # and audit sink.  No session client or socket is created here.
+            from integrations.mastermind_executive_app.os_session_transport import (
+                OsSessionTransportApp,
+            )
+            from integrations.session_bridge.installed import InstalledSessionBridgeClient
+
+            if type(os_session_bridge_client) is not InstalledSessionBridgeClient:
+                raise ValueError(
+                    "OS session transport requires the exact installed bridge client"
+                )
+            read_verifier, submit_verifier = verifier_pairs[os_pair_index]
+            os_session_transport_handler = OsSessionTransportApp(
+                os_session_bridge_client,
+                read_verifier=read_verifier,
+                read_authenticator=read_authenticators[os_pair_index],
+                submit_verifier=submit_verifier,
+                submit_authenticator=submit_authenticators[os_pair_index],
+                clock=configured.clock,
+            )
     server: Server = Server(profile_server_name, version=profile_server_version)
     def authenticated_tool(tool: mcp_types.Tool) -> mcp_types.Tool:
         policy = (
@@ -1047,7 +1108,13 @@ def _build_profile_mcp_app(
                 return result(payload, challenge=challenge)
             direct_submit = name in direct_submit_names
             try:
-                payload = await direct_handler(principal_or_response, name, validated)
+                if name == "session_summon":
+                    from integrations.session_bridge.http_foreground import bind_request
+                    with bind_request(request, principal_or_response, clock=configured.clock) as source:
+                        payload = await source.run(
+                            lambda: direct_handler(principal_or_response, name, validated))
+                else:
+                    payload = await direct_handler(principal_or_response, name, validated)
                 canonical_json(payload)
             except Exception:
                 payload = direct_error_factory(
@@ -1159,7 +1226,8 @@ def _build_profile_mcp_app(
                 required_scopes=list((configured.policies.submit if release_profile else configured.policies.read).required_scopes),
                 resource_metadata_url=configured.policies.read.resource_metadata_url),
             backend=BearerAuthBackend(verifier),
-        )
+        ),
+        foreground_requests="session_summon" in direct_tool_names,
     )
 
     @asynccontextmanager
@@ -1190,7 +1258,10 @@ def _build_profile_mcp_app(
                              "/workspace/work/current",
                              "/workspace/mission/current",
                              "/workspace/mission/v3/current",
-                             "/workspace/result/current"))
+                             "/workspace/mission/v4/current",
+                             "/workspace/result/current",
+                             "/workspace/plan/current",
+                             "/workspace/operator/activity/current"))
     if content_app is not None:
         outer_routes.append(Route("/workspace/window/current", content_app, methods=["GET"]))
     if os_app is not None:
@@ -1200,17 +1271,23 @@ def _build_profile_mcp_app(
     if os_transport_handler is not None:
         for route_path in _OS_EXECUTIVE_ROUTES:
             outer_routes.append(Route(route_path, os_transport_handler, methods=["POST"]))
+    if os_session_transport_handler is not None:
+        for route_path in _OS_SESSION_EXECUTIVE_ROUTES:
+            outer_routes.append(Route(route_path, os_session_transport_handler, methods=["POST"]))
     outer_app = Starlette(routes=outer_routes, lifespan=lifespan)
     outer_app.router.redirect_slashes = False
     #: Public, read-only view of the OS Executive transport handler (or None
     #: if disabled). Tests use this to wrap a recording verifier without
     #: reaching into private route tables.
     outer_app.os_transport = os_transport_handler
+    outer_app.os_session_transport = os_session_transport_handler
     guard = _DuplicateAuthorizationGuard(outer_app,
         fenced_app=_ExecutivePathFence(outer_app, metadata_path, workspace_app=workspace_app,
                                       content_app=content_app, os_app=os_app,
-                                      os_executive_transport=os_transport_handler))
+                                      os_executive_transport=os_transport_handler,
+                                      os_session_transport=os_session_transport_handler))
     guard.os_transport = os_transport_handler
+    guard.os_session_transport = os_session_transport_handler
     return guard
 
 
@@ -1478,6 +1555,7 @@ def build_web_ceo_v3_mcp_app(
     enable_os_executive_transport: bool = False,
     os_executive_resource: str | None = None,
     os_commission_preparer: Any | None = None,
+    os_session_bridge_client: Any | None = None,
 ) -> Any:
     """Web-CEO v3 over existing owners plus MDM and request reconciliation.
 
@@ -1500,6 +1578,24 @@ def build_web_ceo_v3_mcp_app(
         session_reply_handler,
         session_summon_handler,
     )
+    if os_session_bridge_client is not None:
+        # The opt-in OS session transport carries this exact installed client,
+        # so its direct handlers must be that same object's own bound methods:
+        # no foreign owner is silently substituted behind the transport.
+        from integrations.session_bridge.installed import InstalledSessionBridgeClient
+
+        if type(os_session_bridge_client) is not InstalledSessionBridgeClient:
+            raise TypeError("the exact installed Session Bridge client is required")
+        for name, bound in (
+            ("targets", session_target_projector),
+            ("send", session_reply_handler),
+            ("summon", session_summon_handler),
+        ):
+            if (getattr(bound, "__self__", None) is not os_session_bridge_client
+                    or bound != getattr(os_session_bridge_client, name, None)):
+                raise TypeError(
+                    "session handlers must be the installed client's own bound methods"
+                )
     configuration = dict(
         audit_sink=audit_sink,
         profile_server_name=WEB_CEO_V3_SERVER_NAME,
@@ -1516,12 +1612,20 @@ def build_web_ceo_v3_mcp_app(
         enable_os_executive_transport=enable_os_executive_transport,
         os_executive_resource=os_executive_resource,
         os_commission_preparer=os_commission_preparer,
+        os_session_bridge_client=os_session_bridge_client,
         **direct,
     )
     if session_reply_read_tool is not None:
         from integrations.session_bridge.return_tools import NativeReplyReadTool
         if type(session_reply_read_tool) is not NativeReplyReadTool:
             raise TypeError("the canonical reply-read tool is required")
+        if os_session_bridge_client is not None:
+            reader = getattr(session_reply_read_tool, "_reader", None)
+            if (getattr(reader, "__self__", None) is not os_session_bridge_client
+                    or reader != os_session_bridge_client.reply_read):
+                raise TypeError(
+                    "reply read must read the same installed Session Bridge client"
+                )
         configuration = session_reply_read_tool.extend_host_configuration(configuration)
     return _build_profile_mcp_app(settings, **configuration)
 
@@ -1542,6 +1646,8 @@ def build_web_ceo_v3_with_coo_mcp_app(
     enable_os_executive_transport: bool = False,
     os_executive_resource: str | None = None,
     os_commission_preparer: Any | None = None,
+    os_session_bridge_client: Any | None = None,
+    principal_ruling_target: Any | None = None,
 ) -> Any:
     """Opt-in COO route over the existing Web-CEO v3 listener and authority."""
     from integrations.mastermind_executive_app.coo import CooAppSettings
@@ -1556,7 +1662,8 @@ def build_web_ceo_v3_with_coo_mcp_app(
     configured = dataclasses.replace(settings, jwks_cache=cache)
     coo_configured = dataclasses.replace(coo_settings, executive=configured)
     _, metadata_path = _metadata_policy_and_path(configured.policies)
-    if metadata_path.startswith("/mcp/coo"):
+    if (metadata_path.startswith("/mcp/coo") or (principal_ruling_target is not None
+            and metadata_path.startswith("/mcp/principal-ruling"))):
         raise ValueError("metadata route collides with the static COO transport")
     metadata = protected_resource_metadata(configured.policies.submit)
     metadata["scopes_supported"] = sorted(
@@ -1576,8 +1683,10 @@ def build_web_ceo_v3_with_coo_mcp_app(
         enable_os_executive_transport=enable_os_executive_transport,
         os_executive_resource=os_executive_resource,
         os_commission_preparer=os_commission_preparer,
+        os_session_bridge_client=os_session_bridge_client,
     )
-    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink)
+    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink,
+        principal_ruling_target=principal_ruling_target)
     return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)
 
 
@@ -1780,7 +1889,7 @@ def describe(config: GatewayConfig) -> str:
     ).decode("utf-8")
 
 
-def build_coo_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
+def build_coo_mcp_app(settings: Any, *, audit_sink: Any, principal_ruling_target=None) -> Any:
     """Static COO route for composition in the existing listener; never a daemon."""
     from control_plane.coo_principal_request import principal_request_ref, principal_intent_id
     from control_plane import ceo_intent
@@ -1894,7 +2003,123 @@ def build_coo_mcp_app(settings: Any, *, audit_sink: Any) -> Any:
 
     app = Starlette(routes=[Route(COO_MCP_PATH, authenticated, methods=["POST"])], lifespan=lifespan)
     app.router.redirect_slashes = False
-    return _LiteralCooRoute(app)
+    coo = _LiteralCooRoute(app)
+    if principal_ruling_target is None:
+        return coo
+    return _CooWithPrincipalRuling(coo,
+        build_principal_ruling_mcp_app(core, target=principal_ruling_target))
+
+
+def build_principal_ruling_mcp_app(core: Any, *, target: Any) -> Any:
+    """Opt-in producer over an existing COO App; no launcher or profile change.
+
+    The host owns the core and its lifecycle. Only the MCP session manager is
+    owned here. A fixed target is not admission: every call goes through signed
+    JWT/current mission derivation and the existing App/Control COMMIT fence.
+    """
+    from integrations.mastermind_company_mcp.principal_schemas import (
+        PRINCIPAL_TOOL_SPECS, PrincipalGatewayError, validate_principal_tool_arguments,
+    )
+    from integrations.mastermind_executive_app.coo import CooApp
+    from integrations.mastermind_executive_app.gateway import TRANSPORT_SENT_UNKNOWN
+    from integrations.mastermind_executive_app.principal_dialogue import forward_principal_ruling
+    from integrations.mastermind_executive_app.principal_ruling_http import (
+        PRINCIPAL_RULING_MCP_PATH, PRINCIPAL_RULING_RESULT_SCHEMA,
+        PRINCIPAL_RULING_SERVER_NAME, PRINCIPAL_RULING_SERVER_VERSION,
+        PrincipalRulingHttpBoundary, PrincipalRulingTarget,
+    )
+
+    if type(core) is not CooApp or type(target) is not PrincipalRulingTarget:
+        raise ValueError("existing exact COO App and fixed host target required")
+    settings = core.settings
+    oauth = MastermindTokenVerifier(authenticator=core.authenticator, policy=settings.policy,
+        now=settings.executive.clock, audit_sink=core._audit_sink)
+
+    class BoundVerifier:
+        async def verify_token(self, token):
+            access = await oauth.verify_token(token)
+            if access is None:
+                return None
+            try:
+                principal, _ = await core.authorize_token(token)
+                if (access.client_id != principal.client_ref or access.subject != principal.subject_digest
+                        or access.resource != principal.resource or access.scopes != list(principal.scopes)):
+                    return None
+            except Exception:
+                return None
+            return access
+
+    server = Server(PRINCIPAL_RULING_SERVER_NAME, version=PRINCIPAL_RULING_SERVER_VERSION)
+    spec = next(item for item in PRINCIPAL_TOOL_SPECS if item.name == "ruling")
+    schemes = oauth_security_schemes(settings.policy.required_scopes)
+    tool = mcp_types.Tool(name=spec.name, description=spec.description,
+        inputSchema=spec.input_schema, annotations=mcp_types.ToolAnnotations(**spec.annotations),
+        securitySchemes=schemes, _meta={"securitySchemes": schemes})
+
+    @server.list_tools()
+    async def list_tools():
+        return [tool]
+
+    def result(payload, challenge=None):
+        return mcp_types.CallToolResult(content=[mcp_types.TextContent(type="text",
+            text=canonical_json(payload).decode("utf-8"))], isError=payload.get("ok") is not True,
+            _meta={"mcp/www_authenticate": [challenge]} if challenge else None)
+
+    def uncertain():
+        return {"schema": PRINCIPAL_RULING_RESULT_SCHEMA, "ok": False,
+            "obligation_id": target.obligation_id, "transport": TRANSPORT_SENT_UNKNOWN, "result": None}
+
+    @server.call_tool(validate_input=False)
+    async def call_tool(name, arguments):
+        request = server.request_context.request
+        if not isinstance(request, Request) or len(request.headers.getlist("authorization")) != 1:
+            return result({"ok": False, "error": {"code": "authority_refused", "message": "principal authority unavailable"}})
+        try:
+            if name != "ruling":
+                raise PrincipalGatewayError("INVALID_REQUEST")
+            validate_principal_tool_arguments(name, arguments)
+        except PrincipalGatewayError:
+            return result({"ok": False, "error": {"code": "invalid_input", "message": "invalid principal ruling request"}})
+        try:
+            # Preserve the original public arguments: the canonical validator's
+            # return is a derived Dialogue body, not the public ruling schema.
+            outcome = await forward_principal_ruling(core, request,
+                work_ref=target.work_ref, obligation_id=target.obligation_id,
+                reasoning_surface=target.reasoning_surface, arguments=arguments)
+            if isinstance(outcome, JSONResponse):
+                return result(json.loads(outcome.body), outcome.headers.get("www-authenticate"))
+            payload = {"schema": PRINCIPAL_RULING_RESULT_SCHEMA,
+                "ok": outcome.result is not None and outcome.result.get("ok") is True,
+                **dataclasses.asdict(outcome)}
+            reply = result(payload)
+            # Escaping the inner result into MCP text can expand it. Any lost or
+            # oversized post-send response remains uncertain with the original
+            # obligation; never convert it into a fresh-send recommendation.
+            if len(reply.model_dump_json(by_alias=True).encode("utf-8")) > MAX_RESPONSE_BYTES - 4096:
+                return result(uncertain())
+            return reply
+        except Exception:
+            return result(uncertain())
+
+    manager = StreamableHTTPSessionManager(server, stateless=True, json_response=True,
+        security_settings=TransportSecuritySettings(
+            allowed_hosts=["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "::1", "[::1]", "[::1]:*"],
+            allowed_origins=[]))
+    authenticated = AuthenticationMiddleware(
+        RequireAuthMiddleware(BoundedRequestApp(manager.handle_request),
+            required_scopes=list(settings.policy.required_scopes),
+            resource_metadata_url=settings.policy.resource_metadata_url),
+        backend=BearerAuthBackend(BoundVerifier()))
+
+    @asynccontextmanager
+    async def lifespan(_app):
+        async with manager.run():
+            yield
+
+    app = Starlette(routes=[Route(PRINCIPAL_RULING_MCP_PATH, authenticated, methods=["POST"])],
+        lifespan=lifespan)
+    app.router.redirect_slashes = False
+    return PrincipalRulingHttpBoundary(app)
 
 
 class _LiteralCooRoute:
@@ -1911,6 +2136,31 @@ class _LiteralCooRoute:
         await self._guard(scope, receive, send)
 
 
+class _CooWithPrincipalRuling:
+    """One COO core, separate static facets, explicitly composed lifetimes."""
+
+    def __init__(self, coo, ruling):
+        self._coo, self._ruling = coo, ruling
+
+        @asynccontextmanager
+        async def lifespan(_app):
+            async with AsyncExitStack() as owners:
+                # Reverse exit stops the ruling session manager before the
+                # existing COO lifespan closes their one shared core.
+                await owners.enter_async_context(coo._app.router.lifespan_context(coo._app))
+                await owners.enter_async_context(ruling._app.router.lifespan_context(ruling._app))
+                yield
+        self._app = Starlette(lifespan=lifespan)
+
+    async def __call__(self, scope, receive, send):
+        if scope.get("type") != "http":
+            await self._app(scope, receive, send)
+        elif str(scope.get("path", "")).startswith("/mcp/principal-ruling"):
+            await self._ruling(scope, receive, send)
+        else:
+            await self._coo(scope, receive, send)
+
+
 class _ExecutiveWithCoo:
     """Two fixed role routes, one host process and one shared resource document."""
     def __init__(self, ceo, coo, metadata_path, metadata):
@@ -1924,13 +2174,18 @@ class _ExecutiveWithCoo:
                 await owners.enter_async_context(coo._app.router.lifespan_context(coo._app))
                 yield
         self._app = Starlette(lifespan=lifespan)
+        #: Stable view of the composed selected-session transport (or None).
+        self.os_session_transport = getattr(ceo, "os_session_transport", None)
 
     async def __call__(self, scope, receive, send):
+        path = scope.get("path")
         if scope.get("type") != "http":
             await self._app(scope, receive, send)
-        elif scope.get("path", "").startswith("/mcp/coo"):
+        elif type(path) is str and (path.startswith("/mcp/coo")
+                or (isinstance(self._coo, _CooWithPrincipalRuling)
+                    and path.startswith("/mcp/principal-ruling"))):
             await self._coo(scope, receive, send)
-        elif (scope.get("path") == self._metadata_path and scope.get("method") == "GET"
+        elif (path == self._metadata_path and scope.get("method") == "GET"
                 and scope.get("raw_path") == self._metadata_path.encode("ascii") and not scope.get("query_string")):
             await JSONResponse(self._metadata, headers={"Cache-Control": "no-store"})(scope, receive, send)
         else:
@@ -1938,7 +2193,8 @@ class _ExecutiveWithCoo:
 
 
 def build_web_ceo_v2_with_coo_mcp_app(settings: Any, *, coo_settings: Any, audit_sink: Any,
-                                    workspace_app=None, content_app=None, os_app=None) -> Any:
+                                    workspace_app=None, content_app=None, os_app=None,
+                                    principal_ruling_target=None) -> Any:
     """Opt-in host composition only. Existing CEO-only builders stay unchanged."""
     from integrations.mastermind_executive_app.coo import CooAppSettings
     from integrations.mastermind_executive_app.app import _metadata_policy_and_path
@@ -1951,11 +2207,13 @@ def build_web_ceo_v2_with_coo_mcp_app(settings: Any, *, coo_settings: Any, audit
     configured = dataclasses.replace(settings, jwks_cache=cache)
     coo_configured = dataclasses.replace(coo_settings, executive=configured)
     _, metadata_path = _metadata_policy_and_path(configured.policies)
-    if metadata_path.startswith("/mcp/coo"):
+    if (metadata_path.startswith("/mcp/coo") or (principal_ruling_target is not None
+            and metadata_path.startswith("/mcp/principal-ruling"))):
         raise ValueError("metadata route collides with the static COO transport")
     metadata = protected_resource_metadata(configured.policies.submit)
     metadata["scopes_supported"] = sorted(set(metadata["scopes_supported"]) | set(coo_configured.policy.required_scopes))
     ceo = build_web_ceo_v2_mcp_app(configured, audit_sink=audit_sink,
         workspace_app=workspace_app, content_app=content_app, os_app=os_app)
-    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink)
+    coo = build_coo_mcp_app(coo_configured, audit_sink=audit_sink,
+        principal_ruling_target=principal_ruling_target)
     return _ExecutiveWithCoo(ceo, coo, metadata_path, metadata)

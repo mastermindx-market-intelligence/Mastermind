@@ -1,0 +1,52 @@
+LANE: C19-O8-WP08-CENSUS
+TIER: glm-5.3-flash (read-only census; no judgment calls beyond classification)
+TIME LAW: finish within ~30 minutes of wall clock. Do the CHECKOUT PROOF first, then ANSWER FIRST, then Q1..Q6 in order; if time runs short, emit the packet with the remaining questions listed under GAPS rather than running past the bound.
+PARENT: Commission 19 / Data Intelligence (Mastermind #1243, MAS-263, work package WP08 under orchestrator O8); seat 7ab343c8
+
+ANSWER FIRST: On Macro origin/main, at the point where a product consumer READS an engine artifact, does any existing receipt bind the consumed bytes (content hash of what was read, not a later re-read), the producer generation id, the data interval, the contract/watermark, the denominator (universe coverage), and the consumer version — all six, in one record? Answer YES / PARTIAL (name which of the six exist) / NO with file:line citations before anything else.
+
+MISSION: Read-only census of the source-health and consumer-receipt seam that WP08 must bind: engine/output_health.py (the T4/Data OS health producer), the receipt shapes it writes, the Macro consumer read seams that could carry such a receipt, and the existing tests. Produce a cited map of what exists so the seat can instrument only a demonstrated gap.
+
+WHY: WP08's gate is "reuse T4/Data OS rather than build monitoring; instrument only a demonstrated gap". Its positive proof needs a real consumer receipt that distinguishes fresh-producer/stale-reader, actual-use/unobserved-use, partial-universe coverage and source-specific staleness. The seat must know which of those four distinctions the current bytes already make.
+
+SCOPE (read-only, owned paths for READING):
+- engine/output_health.py
+- tests/test_output_health.py
+- tests/test_admin_intelligence_os.py (only the parts that touch output_health)
+- app/integrated_answer.py (its freshness/status handling only, lines ~40-130 and ~300-430)
+- Any module under engine/ or app/ that imports output_health (find them with grep)
+- data/governance/** and site/data/** ONLY by `git ls-tree`/`git show` to name the health artifacts output_health writes or reads; do not open large parquet/JSON blobs beyond `head -c 2000`
+You may grep anywhere under engine/, app/, scripts/, tests/ for callers.
+
+OUT OF SCOPE: any edit, commit, branch push, PR, label, comment, Slack post, or test-suite run; Terminal (charting-app) repository; Mastermind/brain/portfolio_intelligence.py; portfolio behaviour; alpha or sizing logic; building a monitor. Do not run pytest. Do not install packages.
+
+CHECKOUT PROOF (mandatory, first commands):
+  cd ~/lanes/repos/macro && git fetch origin main && git rev-parse origin/main
+The working tree in this clone is DIRTY and must not be trusted. Read every file as `git show origin/main:<path>` (pipe through `sed -n 'A,Bp'` or `grep -n`). If you need a grep over a tree, create a throwaway worktree: `git worktree add --detach ~/lanes/wt/c19-o8-wp08-census origin/main` and read there; never modify ~/lanes/repos/macro's index or working tree. Cite the origin/main sha you fetched in EVERY evidence line.
+
+QUESTIONS (answer each with file:line on origin/main; "not found" needs the grep you ran):
+Q1. What does engine/output_health.py produce? Name every public function/class, the artifact paths it writes, and the per-source record schema (field names). Which fields carry: content hash, generation id, data interval (start/end), contract/watermark, denominator/coverage, consumer version?
+Q2. For each of the four WP08 negative cases, say whether the current schema can already distinguish it, citing the field: (a) hash of a later re-read substituted for consumed bytes; (b) a missing receipt being read as "unused"; (c) coverage improving by denominator drift; (d) a fresh transport timestamp rescuing stale content.
+Q3. Which modules import or read output_health's artifacts (module:line)? For each, say whether it is a PRODUCER (writes health) or a CONSUMER (reads health to decide display/status).
+Q4. In app/integrated_answer.py, how does a leg's freshness/status get decided, and does it read anything from output_health? Cite the lines; note the fallback clock literal near line 334.
+Q5. What do tests/test_output_health.py and the output_health parts of tests/test_admin_intelligence_os.py actually assert about staleness, coverage and hashes? List test function names and the one-line claim each makes.
+Q6. Name the single narrowest existing read seam (module + function) where a consumed-bytes receipt could be attached without a second state store, and say why that seam and not another. This is a classification, not a design: one sentence plus the citation.
+
+NOT DONE UNLESS: every Q1-Q6 is answered with origin/main citations or an explicit bounded "not found"; the ANSWER FIRST question is answered YES/PARTIAL/NO naming which of the six fields exist; the fetched origin/main sha appears in the packet; no file was modified (`git -C ~/lanes/repos/macro status --porcelain | wc -l` reported before and after, unchanged).
+
+EVIDENCE REQUIRED: command lines with output tails (max 15 lines each), file:line citations with the sha, the field inventory as a table.
+
+HARD LAWS: never read, print or copy credentials (~/.glm, ~/.opencode-go, ~/.minimax, ~/.bailian, ~/.codex/auth*, ext/*/.token) or shim logs; never `git add -A`, never commit, never push, never force or rebase, never `git stash`; never `pkill -f`; no network calls except `git fetch origin main` and lazy blob fetches it triggers.
+
+RETURN (your final message IS the packet; nothing after the sentinel):
+STATUS: <PASS | PARTIAL | BLOCKED | FAIL>
+RESULT: <counts: questions answered N/6; fields present N/6; consumers found N; ANSWER FIRST verdict>
+EVIDENCE: <commands with output tails, file:line@sha citations, field table>
+GAPS: <criterion gaps vs disclosures, each labelled; "none" only if true>
+DEVIATIONS: <where you departed from this packet and why; "none" only if true>
+C19-O8-WP08-CENSUS: <STATUS word> <origin/main sha>
+
+Do not end a turn until you are emitting the return packet. If you catch yourself writing
+"now let me…" or "next I'll…", either keep going in the same turn or stop and return what
+you have. A partial packet with honest, specific GAPS is useful and I can act on it; another
+status note is not. Answer the ANSWER FIRST question before anything else.

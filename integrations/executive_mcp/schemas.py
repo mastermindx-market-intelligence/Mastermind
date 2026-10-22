@@ -869,6 +869,17 @@ def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+def validate_app_submit_arguments(arguments: Any) -> dict[str, Any]:
+    """Explicit authenticated OS extension; does not widen the MCP tool."""
+    if not isinstance(arguments, Mapping):
+        raise GatewayError("invalid_input", "arguments must be an object")
+    try:
+        return _ceo_request.normalize_app_request(arguments)
+    except _ceo_request.CeoRequestError as exc:
+        _raise_as_gateway_error(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
 def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
     """Strict server-side validation for one tool call.
 
@@ -997,14 +1008,18 @@ def bound_document(
          "field": "job.result.summary", "preview": "..."}
 
     so the result is always valid JSON and a bounded field can never be read as
-    a complete one.  If the document is still over the limit after every string
-    leaf has been bounded, this raises ``output_too_large`` rather than emitting
-    something misleading.
+    a complete one. Receipt growth shares the byte budget. Only replacements
+    that reduce the combined size are applied. If the document cannot fit,
+    this raises ``output_too_large`` rather than emitting something misleading.
     """
 
     receipts: list[dict[str, Any]] = []
     current = _jsonable(data)
-    if len(canonical_json(current)) <= limit:
+    def size() -> int:
+        return len(canonical_json(current)) + len(canonical_json(receipts)) - 2
+
+    current_size = size()
+    if current_size <= limit:
         return current, receipts
 
     sizes: list[tuple[int, tuple[str | int, ...]]] = []
@@ -1012,7 +1027,7 @@ def bound_document(
     sizes.sort(key=lambda item: (-item[0], _display_path(item[1])))
 
     for original_bytes, parts in sizes:
-        if len(canonical_json(current)) <= limit:
+        if current_size <= limit:
             break
         node: Any = current
         reachable = True
@@ -1035,17 +1050,20 @@ def bound_document(
             "field": display,
             "preview": preview,
         }
+        receipt = {key: value for key, value in replacement.items() if key != "preview"}
+        # Include JSON escaping, the new receipt and its list separator. Small
+        # leaves usually grow when wrapped and must remain byte-for-byte intact.
+        saving = len(canonical_json(node)) - len(canonical_json(replacement))
+        cost = len(canonical_json(receipt)) + (1 if receipts else 0)
+        if saving <= cost:
+            continue
         current = _replace_at(current, parts, replacement)
-        receipts.append(
-            {
-                "bounded": True,
-                "original_bytes": original_bytes,
-                "returned_bytes": len(preview.encode("utf-8")),
-                "field": display,
-            }
-        )
+        receipts.append(receipt)
+        # Leaf replacement and receipt append have exact canonical byte deltas.
+        # Do not re-encode a wide unboundable document for every small leaf.
+        current_size -= saving - cost
 
-    if len(canonical_json(current)) > limit:
+    if size() > limit:
         raise GatewayError(
             "output_too_large",
             f"response exceeds the {limit}-byte ceiling even after bounding "

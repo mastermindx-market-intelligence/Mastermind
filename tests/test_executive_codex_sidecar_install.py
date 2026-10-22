@@ -58,10 +58,11 @@ if command == 'stat':
         if fault == 'group': gid = 20
         print(f'{uid}:{gid}:{stat.S_IMODE(st.st_mode):o}')
     else: raise AssertionError(fmt)
-elif command == 'ls':
-    if fault == 'acl_observer_failure': sys.exit(1)
-    print(stat.filemode(path.lstat().st_mode)+'@ 1 root wheel 1 Sep 29 00:00 '+str(path))
-    if fault == 'acl': print(' 0: group:everyone allow write')
+elif command == 'native_acl':
+    # The component flow tests inject the ACL boundary, separately qualified
+    # by the actual native-reader tests. Other filesystem/signature fakes stay.
+    assert args[0] == 'one'
+    if fault in ('acl', 'acl_observer_failure'): sys.exit(65)
 elif command == 'codesign':
     if fault == 'signature': sys.exit(1)
     if '--verify' not in args:
@@ -146,9 +147,15 @@ def harness(tmp_path):
             final_replace_race=False, version="0.159.2", real_acl=False):
         setup["CODEX_VERSION"] = version
         script = "set -euo pipefail\n" + "\n".join(f"{k}={shlex.quote(v)}" for k, v in setup.items())
-        observed_functions = functions if real_acl else functions.replace(
-            "/bin/ls", f"{shlex.quote(sys.executable)} {shlex.quote(str(fake))} ls"
-        )
+        native_guard = text.split("# --- BEGIN native ACL guard ---\n", 1)[1].split(
+            "# --- END native ACL guard ---", 1)[0]
+        if not real_acl:
+            native_guard = ("require_native_no_acl() { "
+                + f"{shlex.quote(sys.executable)} {shlex.quote(str(fake))} native_acl"
+                + ' "$@"; }\n')
+        # Add after fixture /Library substitutions: the OS Ruby framework is
+        # intentionally the actual /System/Library path in native cases.
+        observed_functions = native_guard + "\n" + functions
         script += "\n" + observed_functions + "\ncleanup() {\n" + cleanup + "}\ntrap cleanup EXIT\n"
         script += preflight + "\nprepare_codex_code_mode_host || exit 65\n"
         if replace_race:

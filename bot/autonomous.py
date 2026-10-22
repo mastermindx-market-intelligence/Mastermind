@@ -20,6 +20,7 @@ Run:  python -m bot.autonomous        (or the APScheduler 'autonomous_daily' job
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import os
 from datetime import date, datetime, timezone
@@ -147,6 +148,13 @@ def run_autonomous(asof: str | None = None, *, force: bool = False, armed: bool 
             brain = _run_brain(asof, inaugural, directive=directive) if directive else _run_brain(asof, inaugural)
         except Exception as e:                       # noqa: BLE001
             brain = {"ok": False, "error": repr(e)[:300]}
+            try:
+                from brain.cli_bridge import provider_refusal_run_id
+                _refusal_run_id = provider_refusal_run_id(e, book=PORTFOLIO_ID)
+                if _refusal_run_id is not None:
+                    brain["run_id"] = _refusal_run_id
+            except Exception:
+                pass  # Evidence recovery cannot replace the original error/submission.
         # record this seat's known cost + token usage against the nightly per-book ledger.
         _usg = brain.get("usage") or {}
         cost_guard.record(
@@ -644,10 +652,14 @@ _PERSONA = (
 def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict:
     from brain import autonomous_mcp, cli_bridge
     from brain import self_mirror, risk_lens, student   # lazy; all flag-gated, byte-identical OFF
-    prompt = _build_prompt(asof, inaugural, directive=directive)
+    perception_capture: dict = {}
+    prompt = _build_prompt(asof, inaugural, directive=directive,
+                           perception_capture=perception_capture)
     prompt = student.inject(prompt, _safe_date(asof))   # #3 fast numeric prior (MASTERMIND_STUDENT; OFF→unchanged)
     persona = self_mirror.inject(_PERSONA, "autonomous", _safe_date(asof))
     persona = risk_lens.govern_persona(persona, "autonomous")   # RISK GOVERNOR mandate; OFF → unchanged
+    from brain import perception_receipt
+    captured_receipt = perception_receipt.seal(perception_capture, prompt)
     coro = cli_bridge.reason(
         prompt,
         role="deep",                 # opus, per config/agents.yml
@@ -658,15 +670,20 @@ def _run_brain(asof: str, inaugural: bool, directive: str | None = None) -> dict
         max_turns=_MAX_TURNS,
         book=PORTFOLIO_ID,           # bot records against cost_guard; skip bridge double-count
     )
-    return _run_coro(coro)
+    result = _run_coro(coro)
+    if isinstance(result, dict):
+        result = {**result, "perception_input": captured_receipt}
+    return result
 
 
-def _build_prompt(asof: str, inaugural: bool, directive: str | None = None) -> str:
+def _build_prompt(asof: str, inaugural: bool, directive: str | None = None,
+                  *, perception_capture: dict | None = None) -> str:
     from portfolio import paper_account
     state = paper_account._load_account(PORTFOLIO_ID)
     cash = float(state.get("cash") or 0.0)
     positions = state.get("positions") or {}
-    regime = _regime_brief()
+    regime = (_regime_brief() if perception_capture is None else
+              _regime_brief(perception_capture=perception_capture))
 
     lines = [f"# US Brain v2 — nightly stock-selection decision for {asof}", ""]
     if directive:
@@ -878,7 +895,11 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "cost_usd": brain.get("cost_usd") if isinstance(brain, dict) else None,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
+        "provider_failure": brain.get("provider_failure") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
+        # Trusted runner output, never model-submitted source_provenance.
+        "perception_input": copy.deepcopy(brain.get("perception_input"))
+        if isinstance(brain, dict) else None,
         **decision_submission.target_status_fields(target_status),
         **decision_rows.accepted_identity_fields(
             PORTFOLIO_ID, asof, submission, effective_target, target_status
@@ -1041,7 +1062,7 @@ def _regime_dict() -> dict:
     return lens_row("us")
 
 
-def _regime_brief() -> str:
+def _regime_brief(*, perception_capture: dict | None = None) -> str:
     """The persona's regime line — upgraded from the bare label to the full perception read.
 
     HOT PATCH (charter P1, 2026-07-02 incident): on 07-02 this brief fed the Brain exactly
@@ -1088,6 +1109,7 @@ def _regime_brief() -> str:
         # Read the market_view enrichment from _full_regime_slice (it's already computed there);
         # do NOT re-read the artifact (W2: consume once per call chain).
         _mv = fr.get("market_view") or {}
+        perception_start = len(lines)
         if _mv.get("label_vs_planes_line"):
             lines.append("")
             lines.append(f"PERCEPTION LAYER (market_view): {_mv['label_vs_planes_line']}")
@@ -1096,6 +1118,11 @@ def _regime_brief() -> str:
                 lines.append(f"Posture implication: {_mvb['posture_implication']}")
             if _mvb.get("wheres_the_risk"):
                 lines.append(f"Where the risk is: {_mvb['wheres_the_risk']}")
+        if perception_capture is not None:
+            from brain import perception_receipt
+            perception_capture.update(perception_receipt.capture_projection(
+                _mv, "\n".join(lines[perception_start:]),
+            ))
         return "\n".join(lines)
     except Exception:  # noqa: BLE001 — degrade to the legacy one-liner
         return label

@@ -31,6 +31,7 @@ from control_plane.remote_worker_transport import (
 _READ_ONLY_OPERATIONS = frozenset(
     {
         "capacity-observe/v1",
+        "attended-secret-canary",
         "ohf-identity",
         "ohf-materialization-status",
     }
@@ -154,6 +155,8 @@ class RemoteWorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
+        before_write=None,
     ) -> dict[str, Any]:
         if operation not in self.allowed_operations:
             raise TransportError("operation_not_allowed", TransportEffect.NO_EFFECT)
@@ -197,7 +200,20 @@ class RemoteWorkerBrokerClient:
         try:
             if not self._server_pin_matches(writer):
                 raise TransportError("server_identity_mismatch", TransportEffect.NO_EFFECT)
-
+            from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+            try:
+                require_start_transmission(operation, json.loads(encoded)["broker_request"],
+                                           foreground_start_receipt)
+            except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
+            if before_write is not None:
+                try:
+                    if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                            or not callable(before_write)
+                            or before_write(operation, json.loads(encoded)["broker_request"]) is not None):
+                        raise ValueError("invalid local foreground guard")
+                except Exception:
+                    raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
             write_started = True
             writer.write(frame)
             await asyncio.wait_for(writer.drain(), timeout=effective_timeout)
@@ -250,6 +266,7 @@ class RemoteWorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        before_write=None,
     ) -> dict[str, Any]:
         """Synchronous structural seam used by existing operator adapters."""
 
@@ -257,7 +274,8 @@ class RemoteWorkerBrokerClient:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(
-                self.request(operation, payload, timeout_seconds=timeout_seconds)
+                self.request(operation, payload, timeout_seconds=timeout_seconds,
+                             **({"before_write": before_write} if before_write is not None else {}))
             )
         raise TransportError("sync_context_invalid", TransportEffect.NO_EFFECT)
 

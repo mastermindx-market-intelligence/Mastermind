@@ -20,6 +20,7 @@ from common.company_consultation_host_contract import (
     decode_json_frame,
     encode_request,
 )
+from integrations.session_bridge.schemas import BridgeError
 from control_plane.executive_peer_identity import (
     _current_capture,
     capture_peer_identity,
@@ -72,6 +73,13 @@ def _validated_response(frame: bytes, tool: str) -> dict[str, Any]:
 class UnixCompanyConsultationGateway:
     """Thin tools-only frontend; socket and server UID are installed bindings."""
 
+    _tools = TOOLS
+    _effecting = _EFFECTING
+    _validate_arguments = staticmethod(validate_company_consultation_tool_arguments)
+    _encode_request = staticmethod(encode_request)
+    _response = staticmethod(_validated_response)
+    _error = staticmethod(_error)
+
     def __init__(
         self, *, socket_path: str, server_uid: int, timeout_seconds: float = 30.0,
     ) -> None:
@@ -89,14 +97,14 @@ class UnixCompanyConsultationGateway:
         self.timeout_seconds = timeout_seconds
 
     async def call(self, tool_name: str, arguments: Mapping[str, Any]) -> dict[str, Any]:
-        if type(tool_name) is not str or tool_name not in TOOLS:
-            return _error("unknown", "INVALID_REQUEST")
+        if type(tool_name) is not str or tool_name not in self._tools:
+            return self._error("unknown", "INVALID_REQUEST")
         # Existing semantic validation owns the tool argument contract.
         try:
-            normalized = validate_company_consultation_tool_arguments(tool_name, arguments)
-            request = encode_request(tool_name, normalized)
-        except (CompanyConsultationToolError, HostFrameError, TypeError, ValueError):
-            return _error(tool_name, "INVALID_REQUEST")
+            normalized = self._validate_arguments(tool_name, arguments)
+            request = self._encode_request(tool_name, normalized)
+        except (CompanyConsultationToolError, HostFrameError, BridgeError, TypeError, ValueError):
+            return self._error(tool_name, "INVALID_REQUEST")
         writer = None
         peer_socket = None
         send_started = False
@@ -107,13 +115,13 @@ class UnixCompanyConsultationGateway:
                 )
                 transport_socket = writer.get_extra_info("socket")
                 if transport_socket is None:
-                    return _error(tool_name, "UNAVAILABLE")
+                    return self._error(tool_name, "UNAVAILABLE")
                 # Retain a real duplicate of this exact accepted connection;
                 # never wrap/close the transport's owned descriptor.
                 peer_socket = socket.socket(fileno=os.dup(transport_socket.fileno()))
                 captured = capture_peer_identity(peer_socket)
                 if captured.euid != self.server_uid:
-                    return _error(tool_name, "ACCESS_REFUSED")
+                    return self._error(tool_name, "ACCESS_REFUSED")
                 _current_capture(captured)
                 send_started = True
                 writer.write(request)
@@ -125,15 +133,15 @@ class UnixCompanyConsultationGateway:
                 # EOF closes the authenticated peer; Darwin then withdraws its
                 # live audit token. This dedicated reader remains bound to the
                 # same connection authenticated before the request was sent.
-                return _validated_response(response, tool_name)
+                return self._response(response, tool_name)
         except asyncio.CancelledError:
-            if send_started and tool_name in _EFFECTING:
-                return _error(tool_name, "EFFECT_UNKNOWN")
+            if send_started and tool_name in self._effecting:
+                return self._error(tool_name, "EFFECT_UNKNOWN")
             raise
         except Exception:
-            return _error(
+            return self._error(
                 tool_name,
-                "EFFECT_UNKNOWN" if send_started and tool_name in _EFFECTING else "UNAVAILABLE",
+                "EFFECT_UNKNOWN" if send_started and tool_name in self._effecting else "UNAVAILABLE",
             )
         finally:
             if peer_socket is not None:
@@ -151,4 +159,38 @@ async def run_company_consultation_stdio(
     gateway = UnixCompanyConsultationGateway(
         socket_path=socket_path, server_uid=server_uid, timeout_seconds=timeout_seconds)
     from integrations.mastermind_company_mcp.server import run_company_consultation_stdio as run
+    await run(gateway)
+
+
+class UnixNativeReturnGateway(UnixCompanyConsultationGateway):
+    """Separate static facet over the same installed, peer-authenticated socket."""
+    from integrations.mastermind_company_mcp import native_return as _native
+    _tools = frozenset({_native.TOOL_NAME})
+    _effecting = _tools
+    _validate_arguments = staticmethod(lambda tool, args: UnixNativeReturnGateway._native.validate_arguments(args))
+    _encode_request = staticmethod(_native.encode_request)
+    _response = staticmethod(lambda frame, tool: UnixNativeReturnGateway._native.validated_response(frame))
+    _error = staticmethod(lambda tool, code: UnixNativeReturnGateway._native.envelope(error=code))
+
+
+async def run_native_return_stdio(*, socket_path: str, server_uid: int, timeout_seconds: float = 30.0) -> None:
+    gateway = UnixNativeReturnGateway(socket_path=socket_path, server_uid=server_uid, timeout_seconds=timeout_seconds)
+    from integrations.mastermind_company_mcp.server import run_native_return_stdio as run
+    await run(gateway)
+
+
+class UnixProductAcceptanceGateway(UnixCompanyConsultationGateway):
+    """Distinct selector using the existing one-request authenticated transport."""
+    from integrations.mastermind_company_mcp import product_acceptance as _acceptance
+    _tools = frozenset({_acceptance.TOOL_NAME})
+    _effecting = _tools
+    _validate_arguments = staticmethod(lambda tool, args: UnixProductAcceptanceGateway._acceptance.validate_arguments(args))
+    _encode_request = staticmethod(_acceptance.encode_request)
+    _response = staticmethod(lambda frame, tool: UnixProductAcceptanceGateway._acceptance.validated_response(frame))
+    _error = staticmethod(lambda tool, code: UnixProductAcceptanceGateway._acceptance.envelope(error=code))
+
+
+async def run_product_acceptance_stdio(*, socket_path: str, server_uid: int, timeout_seconds: float = 30.0) -> None:
+    gateway = UnixProductAcceptanceGateway(socket_path=socket_path, server_uid=server_uid, timeout_seconds=timeout_seconds)
+    from integrations.mastermind_company_mcp.server import run_product_acceptance_stdio as run
     await run(gateway)

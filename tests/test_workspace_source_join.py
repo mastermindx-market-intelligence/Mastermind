@@ -78,7 +78,7 @@ def test_actual_sqlite_to_canonical_program_and_partial_mission(tmp_path,actual,
 
 def test_unsupported_root_never_becomes_complete_empty_mapping(actual):
     writer,bound,namespace,job=actual
-    writer.jobs.create_job('unsupported fixture root')
+    writer.jobs.create_job('unsupported fixture root', provenance={'schema': 'unknown-origin'})
     inputs=join._bounded_runtime_inputs(bound())
     assert inputs[0] is None and inputs[1] is None and inputs[4]
     assert namespace.entries==namespace.exits
@@ -166,22 +166,54 @@ def test_configured_publisher_failure_never_falls_back(tmp_path, monkeypatch, fa
 
 @pytest.mark.parametrize('with_boot', [True, False])
 def test_installed_factory_is_inert_and_uses_late_service_custody(tmp_path, monkeypatch, with_boot):
+    import os
     from scripts import executive_os_phase1c as cli
     from tests.test_c1_ceo_ingress_composition import _raw
     from tests.test_workspace_read_app import _workspace_policy
+    from tests.executive_installed_control_fixture import unix_listener
     from integrations.executive_mcp.installed import InstalledBootPacketCollector
+    import control_plane.workspace_control_room_lifecycle as lifecycle_mod
     from control_plane import executive_worker_broker
     raw = _raw(tmp_path)
     authority = {'schema': 'mastermind.workspace_acquisition_bindings.v1', 'profiles': {
         key: {'enabled': False, 'binding': None} for key in ('web', 'mac')}}
     raw.update(ceo_ingress_app_peer_uid=458, ceo_ingress_app_armed=False,
-        ceo_ingress_app_macro_root=tmp_path/'macro', workspace_control_room={'port':8787},
+        ceo_ingress_app_macro_root=tmp_path/'macro',
+        workspace_control_room={'transport': 'unix',
+                                'socket_path': '/var/run/mastermind-executive/workspace-control-room.sock',
+                                'launchd_socket_name': 'WorkspaceControlRoom',
+                                'allowed_peer_uids': [raw['control_uid']]},
         workspace_acquisition={}, workspace_resource_policy=json.loads(json.dumps(dataclasses.asdict(_workspace_policy()))))
     if with_boot:
         raw['ceo_ingress_app_boot_python'] = tmp_path/'sealed-python'
+    monkeypatch.setattr(lifecycle_mod, '_TRUSTED_SOCKET_PARENT_UID', os.geteuid())
     monkeypatch.setattr(cli, '_attest_app_boot_runtime', lambda p: p)
-    monkeypatch.setattr(cli, 'activate_launchd_socket', lambda name: object())
+    from tests.executive_installed_control_fixture import spawn_workspace_room_listener
+    room_listener, room_path = spawn_workspace_room_listener(monkeypatch)
+    raw['workspace_control_room'] = {'transport': 'unix',
+                                      'socket_path': room_path,
+                                      'launchd_socket_name': 'WorkspaceControlRoom',
+                                      'allowed_peer_uids': [raw['control_uid']]}
+    fake_sockets = {'WorkspaceControlRoom': room_listener}
+    def activated(name):
+        if name not in fake_sockets:
+            listener, _path = unix_listener()
+            fake_sockets[name] = listener
+        return fake_sockets[name]
+    monkeypatch.setattr(cli, 'activate_launchd_socket', activated)
     monkeypatch.setattr(executive_worker_broker, 'WorkerBrokerClient', lambda *a, **k: object())
+    try:
+        _run_source_join_test(tmp_path, monkeypatch, raw, with_boot, authority)
+    finally:
+        for listener in fake_sockets.values():
+            listener.close()
+
+
+def _run_source_join_test(tmp_path, monkeypatch, raw, with_boot, authority):
+    from scripts import executive_os_phase1c as cli
+    from integrations.executive_mcp.installed import InstalledBootPacketCollector
+    from control_plane import workspace_source_join as join
+    from scripts import chairman_control_room as ccr
     captured = {}
     def composer(**kwargs):
         captured.update(kwargs)

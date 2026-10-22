@@ -44,6 +44,7 @@ from control_plane.executive_service import (
     CEO_WEB_CEO_V2_READ_SCHEMA,
     ServiceConfig,
     ServiceError,
+    CeoAdmissionPhaseRefusal,
     activate_launchd_socket,
     send_control_request,
 )
@@ -278,6 +279,7 @@ _CONFIG_OPTIONAL = frozenset(
         "workspace_resource_policy",
         "workspace_control_room",
         "coo_principal_armed",
+        "coo_principal_dialogue_armed",
         "proof_branch",
         "exact_worker_claim_target",
         "worker_id",
@@ -287,6 +289,7 @@ _CONFIG_OPTIONAL = frozenset(
         "effort",
         "cost_class",
         "coo_autonomy_armed",
+        "coo_foreground_only",
         "ceo_submit_armed",
         "coo_operator_harness_armed",
         "coo_tick_interval_seconds",
@@ -319,6 +322,11 @@ _CONFIG_OPTIONAL = frozenset(
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
         "python_runtime_provenance_digest",
+        "fabric_bindings_path",
+        "fabric_bindings_sha256",
+        "fabric_bridge_armed",
+        "fabric_attended_probe",
+        "native_capacity_v2",
     }
 )
 _CEO_INGRESS_CONFIG_KEYS = frozenset(
@@ -347,6 +355,71 @@ _DIALOGUE_BRIDGE_CONFIG_KEYS = frozenset(
     }
 )
 _CONFIG_DISABLED_EXTENSIONS = frozenset()
+
+
+class FabricActivationRefused(ServiceError):
+    """Shared Fabric execution has no admitted backend and isolation profile."""
+
+
+def _native_capacity_staging_only(raw: Mapping[str, Any]) -> bool:
+    """A source pin can be prepared only while every execution switch is off."""
+    return all(raw.get(key, False) is False for key in (
+        "coo_autonomy_armed", "coo_operator_harness_armed", "coo_foreground_only",
+        "ceo_submit_armed", "fabric_bridge_armed"))
+
+
+def _validate_fabric_bridge_config(raw: Mapping[str, Any]) -> bool:
+    armed = raw.get("fabric_bridge_armed", False)
+    if type(armed) is not bool:
+        raise ServiceError("fabric_bridge_armed must be boolean")
+    if armed:
+        raise FabricActivationRefused(
+            "Fabric activation is disabled until an actual backend and isolation profile are admitted"
+        )
+    pair = {"fabric_bindings_path", "fabric_bindings_sha256"}
+    present = set(raw) & pair
+    if present and present != pair:
+        raise ServiceError("Fabric bindings path and approved hash must be supplied together")
+    if present:
+        value, digest = raw["fabric_bindings_path"], raw["fabric_bindings_sha256"]
+        if (type(value) is not str or not value or not Path(value).is_absolute()
+                or ".." in Path(value).parts or str(Path(value)) != value or "\x00" in value
+                or type(digest) is not str or re.fullmatch(r"[0-9a-f]{64}", digest) is None):
+            raise ServiceError("Fabric bindings require a canonical absolute path and exact SHA-256")
+    if "fabric_attended_probe" in raw:
+        probe = raw["fabric_attended_probe"]
+        if (not present or type(probe) is not dict or set(probe) != {"worker_config_path"}
+                or type(probe["worker_config_path"]) is not str
+                or not Path(probe["worker_config_path"]).is_absolute()
+                or ".." in Path(probe["worker_config_path"]).parts
+                or str(Path(probe["worker_config_path"])) != probe["worker_config_path"]
+                or "\x00" in probe["worker_config_path"]):
+            raise ServiceError("Fabric attended probe requires one fixed worker definition")
+    if "native_capacity_v2" in raw:
+        stanza = raw["native_capacity_v2"]
+        if ("fabric_attended_probe" not in raw
+                or (not _native_capacity_staging_only(raw)
+                    and raw.get("coo_foreground_only") is not True)
+                or type(stanza) is not dict or set(stanza) != {"macro_release", "producer_sha256"}
+                or type(stanza["macro_release"]) is not str
+                or re.fullmatch(r"[0-9a-f]{40}", stanza["macro_release"]) is None
+                or type(stanza["producer_sha256"]) is not str
+                or re.fullmatch(r"[0-9a-f]{64}", stanza["producer_sha256"]) is None):
+            raise ServiceError("native V2 capacity requires fixed source and foreground Control custody")
+    return bool(present)
+
+
+def _staged_fabric_binding_source(raw: Mapping[str, Any]):
+    """Validate optional root-installed data without enabling its execution route."""
+    if not _validate_fabric_bridge_config(raw):
+        return None
+    from control_plane.executive_fabric_composition import (
+        FabricBindingSource, FabricCompositionError,
+    )
+    try:
+        return FabricBindingSource.from_path(raw["fabric_bindings_path"], raw["fabric_bindings_sha256"])
+    except FabricCompositionError as exc:
+        raise ServiceError("Staged Fabric binding source refused") from exc
 
 
 def _absolute_path(value: str) -> Path:
@@ -385,6 +458,11 @@ def _parser() -> argparse.ArgumentParser:
         ("backup", "Create an online DB backup in the configured backup root."),
     ):
         cmd_parser = sub.add_parser(name, help=help_text)
+        if name == "status":
+            cmd_parser.add_argument(
+                "--ceo-admission", action="store_true",
+                help="As Control UID, observe current CEO guard only; never submit work.",
+            )
         if name.startswith("content-observer-"):
             cmd_parser.add_argument(
                 "--profile-key",
@@ -805,17 +883,81 @@ _CANONICAL_COMPANY_CONSULTATION_SOCKET = "/var/run/mastermind-executive/company-
 _COMPANY_CONSULTATION_SOCKET_NAME = "CompanyConsultation"
 
 
+_CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET = "/var/run/mastermind-executive/workspace-control-room.sock"
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+
+
+def validate_workspace_control_room(stanza: Any, *, control_uid: int) -> dict[str, Any]:
+    """Closed unix/launchd stanza for the in-process workspace Control Room.
+
+    The legacy ``{"port": int}`` TCP shape is refused loudly so a forgotten
+    migration tool never silently degrades Control back onto a loopback socket.
+    """
+
+    if type(stanza) is dict and set(stanza) == {"port"}:
+        raise ServiceError(
+            "workspace Control Room legacy TCP port stanza refused; "
+            "migrate it with ops/executive_os/migrate_workspace_control_room.py"
+        )
+    if type(stanza) is not dict:
+        raise ServiceError("workspace Control Room topology refused")
+    expected = {"transport", "socket_path", "launchd_socket_name", "allowed_peer_uids"}
+    if set(stanza) != expected:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["transport"] != "unix":
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["socket_path"] != _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET:
+        raise ServiceError("workspace Control Room topology refused")
+    if stanza["launchd_socket_name"] != _WORKSPACE_CONTROL_ROOM_SOCKET_NAME:
+        raise ServiceError("workspace Control Room topology refused")
+    peers = stanza["allowed_peer_uids"]
+    if (type(peers) is not list or len(peers) == 0
+            or any(type(item) is not int for item in peers)
+            or any(item is True or item is False for item in peers)
+            or len(set(peers)) != len(peers)):
+        raise ServiceError("workspace Control Room topology refused")
+    if any(peer != control_uid for peer in peers):
+        raise ServiceError("workspace Control Room topology refused")
+    return {key: value for key, value in stanza.items()}
+
+
+def workspace_control_room_launchd_entry(
+    config: Mapping[str, Any], *, control_gid: int
+) -> dict[str, Any] | None:
+    """Closed optional host binding, shared by loader, installer and factory."""
+
+    if "workspace_control_room" not in config:
+        return None
+    validate_workspace_control_room(
+        config["workspace_control_room"], control_uid=int(config["control_uid"]))
+    if type(control_gid) is not int or control_gid <= 0:
+        raise ServiceError("workspace Control Room launchd entry requires a positive control gid")
+    return {
+        "SockPathName": _CANONICAL_WORKSPACE_CONTROL_ROOM_SOCKET,
+        "SockType": "stream", "SockPassive": True,
+        "SockPathOwner": int(config["control_uid"]),
+        "SockPathGroup": control_gid,
+        "SockPathMode": 0o600,
+    }
+
+
 def company_consultation_launchd_entry(config: Mapping[str, Any]) -> dict[str, Any] | None:
     """One closed optional host binding, shared by loader, installer and factory."""
     value = config.get("company_consultation")
     if "company_consultation" not in config:
         return None
     if (type(value) is not dict
-            or set(value) != {"armed", "socket_path", "launchd_socket_name"}
+            or not {"armed", "socket_path", "launchd_socket_name"} <= set(value)
+            or set(value) - {"armed", "socket_path", "launchd_socket_name", "native_return_armed", "product_acceptance_armed"}
+            or type(value.get("native_return_armed", False)) is not bool
+            or type(value.get("product_acceptance_armed", False)) is not bool
             or type(value["armed"]) is not bool
             or value["socket_path"] != _CANONICAL_COMPANY_CONSULTATION_SOCKET
             or value["launchd_socket_name"] != _COMPANY_CONSULTATION_SOCKET_NAME):
         raise ServiceError("Company consultation control binding is invalid")
+    if value.get("product_acceptance_armed", False) and (
+            value["armed"] is not True or config.get("coo_principal_dialogue_armed") is not True):
+        raise ServiceError("Product acceptance requires the Company socket and principal dialogue owner")
     if not value["armed"]:
         return None
     for key in ("control_uid", "worker_uid", "worker_gid"):
@@ -865,6 +1007,7 @@ def load_control_config(
         raise ServiceError(
             f"Executive control config fields drifted; missing={missing}, unknown={unknown}"
         )
+    _staged_fabric_binding_source(config)
     company_consultation_launchd_entry(config)
     arm = config.get("privileged_readiness_armed", False)
     broker_socket = config.get("privileged_broker_socket_path")
@@ -984,10 +1127,8 @@ def load_control_config(
     if keys & workspace_keys:
         if keys & workspace_keys != workspace_keys or app_present != _CEO_INGRESS_APP_CONFIG_KEYS:
             raise ServiceError("workspace acquisition requires its policy and installed App peer")
-        topology = config["workspace_control_room"]
-        if (type(topology) is not dict or set(topology) != {"port"}
-                or type(topology["port"]) is not int or not 1 <= topology["port"] <= 65535):
-            raise ServiceError("workspace Control Room topology refused")
+        config["workspace_control_room"] = validate_workspace_control_room(
+            config["workspace_control_room"], control_uid=config["control_uid"])
         from integrations.business_mcp_auth.contracts import load_resource_policy
         from integrations.mastermind_workspace_app.contract import validate_workspace_bindings
         try:
@@ -1146,6 +1287,12 @@ def load_control_config(
         config["coo_autonomy_armed"], bool
     ):
         raise ServiceError("control config coo_autonomy_armed must be boolean")
+    if type(config.get("coo_foreground_only", False)) is not bool:
+        raise ServiceError("control config coo_foreground_only must be boolean")
+    if config.get("coo_foreground_only", False) and (
+            config.get("coo_autonomy_armed") is not True
+            or config.get("coo_operator_model_alias") == "coo.operator.native-return"):
+        raise ServiceError("foreground-only mode requires armed ordinary foreground execution")
     if "ceo_submit_armed" in config and not isinstance(
         config["ceo_submit_armed"], bool
     ):
@@ -1410,6 +1557,8 @@ def _validate_canary_envelope(
     *,
     raw: Mapping[str, Any],
     control_attestation: Mapping[str, Any],
+    attended_config=None,
+    attended_binding=None,
 ) -> dict[str, Any]:
     """Validate an in-memory or persisted same-PID worker-bound envelope."""
 
@@ -1418,8 +1567,15 @@ def _validate_canary_envelope(
         SecretCanaryConfig,
         SecretCanaryError,
         validate_secret_canary_binding,
+        validate_attended_secret_canary_binding,
+        AttendedCanaryBinding,
     )
 
+    if ((attended_config is None) != (attended_binding is None)
+            or (attended_config is not None and (
+                type(attended_config) is not SecretCanaryConfig
+                or type(attended_binding) is not AttendedCanaryBinding))):
+        raise ServiceError("finite canary validation requires coupled typed owner inputs")
     required_envelope = {
         "schema_version",
         "secret_canary",
@@ -1463,10 +1619,10 @@ def _validate_canary_envelope(
         raise ServiceError("control-environment probe process identity is stale")
     worker_principal = probe.get("worker_principal")
     expected_worker_principal = {
-        "real_uid": int(raw["worker_uid"]),
-        "effective_uid": int(raw["worker_uid"]),
-        "real_gid": int(raw["worker_gid"]),
-        "effective_gid": int(raw["worker_gid"]),
+        "real_uid": attended_config.expected_worker_uid if attended_config else int(raw["worker_uid"]),
+        "effective_uid": attended_config.expected_worker_uid if attended_config else int(raw["worker_uid"]),
+        "real_gid": attended_config.expected_worker_gid if attended_config else int(raw["worker_gid"]),
+        "effective_gid": attended_config.expected_worker_gid if attended_config else int(raw["worker_gid"]),
     }
     if worker_principal != expected_worker_principal:
         raise ServiceError("control-environment probe worker principal differs")
@@ -1519,6 +1675,16 @@ def _validate_canary_envelope(
     if not isinstance(inner, Mapping):
         raise ServiceError("secret-canary envelope has no inner receipt")
     try:
+        if attended_config is not None:
+            if (attended_config.control_environment_probe_sha256 != probe_sha256
+                    or attended_config.control_uid != raw["control_uid"]
+                    or attended_config.control_gid != control_identity["effective_gid"]
+                    or any(getattr(attended_config, key) != getattr(canary_config, key) for key in (
+                        "administrative_checkout_sentinel", "executive_database",
+                        "other_worker_home_sentinel", "forbidden_production_sentinel"))):
+                raise ServiceError("finite probe targets differ from the actual Control layout")
+            return validate_attended_secret_canary_binding(
+                attended_config, attended_binding, principal, inner)
         return validate_secret_canary_binding(canary_config, principal, inner)
     except SecretCanaryError as exc:
         raise ServiceError(f"secret-canary binding is invalid: {exc.code}") from exc
@@ -1629,8 +1795,12 @@ def _service_from_config(
     claimed_operator_adapter_factory: Callable[..., Any] | None = None,
     remote_operator_binding_source: Callable[..., Any] | None = None,
     dialogue_canary_profile: Any | None = None,
+    native_dialogue_canary_profile_loader: Callable[[], Any] | None = None,
     remote_worker_binding_source: Callable[..., Any] | None = None,
     plan_schema_version: str = "mastermind.execution_plan/v1",
+    fabric_worker_binding_source: Any | None = None,
+    fabric_attended_probe_source: Any | None = None,
+    attended_work_placements: tuple = (),
 ) -> ExecutiveControlService:
     from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
     if dialogue_canary_profile is None:
@@ -1650,6 +1820,52 @@ def _service_from_config(
         or remote_operator_binding_source is not None
     ):
         raise ServiceError("versioned producer needs a trusted claim-bound adapter")
+    _validate_fabric_bridge_config(raw)
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
+    if (type(attended_work_placements) is not tuple
+            or len(attended_work_placements) > 6
+            or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
+        raise ServiceError('attended placements require bounded typed host configuration')
+    if qualification_for(attended_work_placements) is not None and raw.get('coo_foreground_only') is not True:
+        raise ServiceError('finite qualification requires foreground-only host configuration')
+    if attended_work_placements and (fabric_worker_binding_source is None
+                                    or fabric_attended_probe_source is None):
+        raise ServiceError('attended placements require the binding and startup probe sources')
+    if fabric_attended_probe_source is not None:
+        from control_plane.fabric_attended_canary import AttendedControlProbeSource
+        if type(fabric_attended_probe_source) is not AttendedControlProbeSource:
+            raise ServiceError('attended probe requires the exact startup-bound source')
+        fabric_attended_probe_source.require_definition(raw)
+    if fabric_worker_binding_source is not None:
+        from control_plane.executive_fabric_composition import FabricBindingSource
+        if type(fabric_worker_binding_source) is not FabricBindingSource:
+            raise ServiceError("Fabric worker composition requires the exact root-installed binding source")
+        if remote_worker_binding_source is not None:
+            raise ServiceError("Fabric and remote worker binding sources conflict")
+        if initial_canary is not None:
+            if fabric_attended_probe_source is None or not attended_work_placements:
+                raise FabricActivationRefused(
+                    "A dedicated-worker canary does not qualify shared Fabric execution"
+                )
+            from control_plane.executive_canary import validate_initial_secret_canary_verdict
+            validate_initial_secret_canary_verdict(initial_canary)
+        # Mixed ownership is keyed by worker_id, while physical lookup also
+        # includes host. One logical owner may not silently change principal
+        # according to binding-file order or the selected host.
+        principals = {}
+        for binding in fabric_worker_binding_source.bindings:
+            principal = (binding.worker_uid, binding.worker_gid)
+            previous = principals.setdefault(binding.worker_id, principal)
+            if previous != principal:
+                raise ServiceError("Fabric worker has conflicting physical principals")
+        if any(binding.worker_id == str(raw.get("worker_id") or "codex-01")
+               for binding in fabric_worker_binding_source.bindings):
+            raise ServiceError("Fabric binding cannot replace the primary worker")
+    if attended_work_placements:
+        from control_plane.model_router import ModelRouter
+        router = ModelRouter.load()
+        for placement in attended_work_placements:
+            placement_member(router, placement)
     if (remote_worker_binding_source is not None
             and not callable(remote_worker_binding_source)):
         raise ServiceError("remote worker binding source must be callable")
@@ -1746,10 +1962,12 @@ def _service_from_config(
         privileged_readiness_armed=raw.get("privileged_readiness_armed", False),
         privileged_broker_socket_path=raw.get("privileged_broker_socket_path"),
         coo_autonomy_armed=raw.get("coo_autonomy_armed", False),
+        coo_foreground_only=raw.get("coo_foreground_only", False),
         ceo_submit_armed=raw.get("ceo_submit_armed", False),
         coo_operator_harness_armed=raw.get(
             "coo_operator_harness_armed", False
         ),
+        coo_attended_work_placements=attended_work_placements,
         coo_tick_interval_seconds=float(
             raw.get("coo_tick_interval_seconds", 15.0)
         ),
@@ -1782,17 +2000,63 @@ def _service_from_config(
 
     recovery_controller = {}
 
+    def recovery_controller_for(attempt):
+        owners = recovery_controller.get("owners")
+        if owners is not None:
+            owner = owners.get(attempt.worker_id)
+            if owner is None:
+                raise ServiceError("proof recovery has no exact execution owner")
+            return owner.process_controller
+        return recovery_controller.get("current")
+
     def proof_capacity_recovery_observer(attempt):
-        controller = recovery_controller.get("current")
+        controller = recovery_controller_for(attempt)
         if controller is None or not controller.absence_verified(attempt):
             raise ServiceError("proof capacity has no fresh broker absence")
         return dict(controller.uid_sweep_receipt(attempt))
 
     def proof_capacity_recovery_worker_uid(attempt):
-        controller = recovery_controller.get("current")
+        controller = recovery_controller_for(attempt)
         if controller is None:
             raise ServiceError("proof capacity has no recovery controller")
         return controller.expected_worker_uid(attempt)
+
+    # The existing R2 selection carries original-intent review on every actual
+    # worker owner. Freeze the host-owned source before constructing a supervisor;
+    # no worker/model can choose or rotate a Macro root through its request.
+    product_acceptance_macro_root = None
+    product_acceptance_context_owner = None
+
+    def product_acceptance_basis_reader():
+        from control_plane.agentos_product_acceptance_basis import AgentOsProductAcceptanceBasisReader
+        if product_acceptance_macro_root is None:
+            raise ServiceError("Product acceptance requires its bound Macro source")
+        if product_acceptance_context_owner is not None:
+            return product_acceptance_context_owner.product_acceptance_basis_reader(
+                macro_root=product_acceptance_macro_root)
+        return AgentOsProductAcceptanceBasisReader(macro_root=product_acceptance_macro_root)
+    if raw.get("coo_principal_dialogue_armed", False) is True:
+        from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+        try:
+            if (not validate_control_coo(raw)
+                    or not _CEO_INGRESS_APP_CONFIG_KEYS <= set(raw)
+                    or type(coo_source) is not CooInstalledSource):
+                raise ValueError("incomplete principal binding")
+        except ValueError:
+            raise ServiceError("product acceptance review requires the sealed COO and complete App binding") from None
+        product_acceptance_macro_root = Path(raw["ceo_ingress_app_macro_root"])
+
+    native_capacity_source = None
+    if ("native_capacity_v2" in raw and _native_capacity_staging_only(raw)
+            and attended_work_placements):
+        raise ServiceError("staged native capacity cannot carry active placements")
+    if "native_capacity_v2" in raw and not _native_capacity_staging_only(raw):
+        if (len(attended_work_placements) != 1
+                or qualification_for(attended_work_placements) is None):
+            raise ServiceError("native V2 capacity requires the single original finite placement")
+        from control_plane.native_capacity_acquisition import NativeCapacitySource
+        native_capacity_source = NativeCapacitySource.from_startup(
+            fabric_attended_probe_source, fabric_worker_binding_source)
 
     def supervisor_factory(runtime):
         def validations(spec):
@@ -1800,6 +2064,8 @@ def _service_from_config(
             if job is None or job.current_attempt_id != spec.run_id:
                 raise ServiceError("remote validation lookup lost Job/Attempt identity")
             return tuple(tuple(command) for command in job.validation_commands)
+
+        from control_plane.worker_execution_contract import CleanupPolicy
 
         if remote_worker_binding_source is None:
             adapter = RemoteCodexWorkerAdapter(
@@ -1846,7 +2112,7 @@ def _service_from_config(
 
             claim_binding_id = str(realm["binding_id"])
         recovery_controller["current"] = process_controller
-        return ExecutiveSupervisor(
+        primary = ExecutiveSupervisor(
             runtime,
             adapter,
             runs_root=raw["worker_runs_root"],
@@ -1861,6 +2127,7 @@ def _service_from_config(
             shared_run_gid=raw["shared_run_gid"],
             secret_canary_verdict=canary,
             require_complete_launch_attestation=initially_ready,
+            cleanup_policy=CleanupPolicy.DEDICATED_UID,
             process_controller=process_controller,
             exact_target_provider=(
                 (lambda job_id: exact_target_source.for_job(job_id, now_ms=runtime.store.now_ms()))
@@ -1868,9 +2135,56 @@ def _service_from_config(
             ),
             subscription_canary_claim_provider=claim_provider,
             subscription_canary_binding_id=claim_binding_id,
+            product_acceptance_macro_root=product_acceptance_macro_root,
+            product_acceptance_context_reader=(product_acceptance_basis_reader()
+                if product_acceptance_context_owner is not None else None),
         )
+        if fabric_worker_binding_source is None:
+            return primary
+        from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
+        fabric_adapter = AttendedFabricWorkerAdapter(runtime, fabric_worker_binding_source,
+            request_client_factory=fabric_worker_binding_source.client_for,
+            attended_probe_source=fabric_attended_probe_source)
+        owners = {config.worker_id: primary}
+        for physical in fabric_worker_binding_source.bindings:
+            if physical.worker_id in owners:
+                continue  # Principal conflicts were refused before clients.
+            finite_definition = (fabric_attended_probe_source.configuration(physical)[1]
+                if fabric_attended_probe_source is not None else None)
+            # Keep canonical Job worktrees on Control. Only this finite owner's
+            # new Attempt inputs use its protected, separately enrolled store.
+            runs_root = (finite_definition['run_root'] if finite_definition is not None
+                         else raw['worker_runs_root'])
+            owners[physical.worker_id] = ExecutiveSupervisor(
+                runtime, fabric_adapter,
+                runs_root=runs_root,
+                isolation_roots=(raw["proof_workspace_root"], runs_root),
+                receipts_root=raw["receipts_root"],
+                worker_user=raw["worker_user"], worker_uid=physical.worker_uid,
+                worker_gid=physical.worker_gid,
+                # Ordinary Fabric retains Control's original filesystem group.
+                # The separately enrolled finite store uses its exact worker
+                # group; actual Control membership is checked before allocation.
+                shared_run_gid=(physical.worker_gid if finite_definition is not None
+                                else raw["shared_run_gid"]),
+                secret_canary_verdict={}, require_complete_launch_attestation=True,
+                cleanup_policy=CleanupPolicy.FABRIC_PROCESS_GROUP,
+                process_controller=fabric_adapter, instance_id=primary.instance_id,
+                product_acceptance_macro_root=product_acceptance_macro_root,
+                product_acceptance_context_reader=(product_acceptance_basis_reader()
+                    if product_acceptance_context_owner is not None else None),
+            )
+        initial_admission = None
+        if native_capacity_source is not None:
+            from control_plane.finite_initial_admission import FiniteInitialAdmission
+            initial_admission = FiniteInitialAdmission(native_capacity_source)
+        mixed = MixedExecutionOwnerSupervisor(primary, owners, initial_admission=initial_admission)
+        recovery_controller["owners"] = mixed.owners
+        return mixed
 
     def operator_supervisor_factory(runtime, sealed_supervisor):
+        from control_plane.mixed_worker_supervisor import MixedExecutionOwnerSupervisor
         def primary_factory(attempt, requested, turn_input_loader, *, recovery):
             # A fixed primary client must never carry another claimed worker.
             # Multi-worker composition supplies its current owner-bound factory.
@@ -1899,7 +2213,10 @@ def _service_from_config(
             runtime,
             claimed_adapter_factory=(factory if factory is not None else primary_factory),
             workspace_identity_source=workspace_source,
-            prompt_source=sealed_supervisor,
+            foreground_only=config.coo_foreground_only,
+            prompt_source=(sealed_supervisor.primary
+                           if type(sealed_supervisor) is MixedExecutionOwnerSupervisor
+                           else sealed_supervisor),
             plan_schema_version=plan_schema_version,
         )
 
@@ -2065,6 +2382,8 @@ def _service_from_config(
                     Path(raw["ceo_ingress_app_boot_python"])),
                 expected_source_sha=str(raw["proof_base_sha"]),
             )
+            if product_acceptance_macro_root is not None:
+                product_acceptance_context_owner = packet_collector
             compose_inputs = build_workspace_composer(
                 packet_collector=packet_collector,
                 repo_root=Path(raw["proof_source_repository"]),
@@ -2075,12 +2394,37 @@ def _service_from_config(
             )
             # Existing source paths and existing controller permissions only.
             # Bind the installation-selected incumbent topology before publishing.
-            port = raw["workspace_control_room"]["port"]
-            workspace_control_room = HostedControlRoom(ServerConfig(
-                repo_root=Path(raw["proof_source_repository"]),
-                macro_root=str(raw["ceo_ingress_app_macro_root"]), bindings_path=workspace_bindings_path,
-                token=secrets.token_urlsafe(32), origin=f"http://127.0.0.1:{port}", port=port,
-                compose_inputs=compose_inputs))
+            # Closed AF_UNIX launchd listener; never a TCP loopback port.
+            room_listener = activate_launchd_socket(_WORKSPACE_CONTROL_ROOM_SOCKET_NAME)
+            activated_listeners.append(room_listener)
+            from scripts.chairman_control_room import UNIX_CONTROL_ROOM_ORIGIN
+            workspace_control_room = HostedControlRoom(
+                ServerConfig(
+                    repo_root=Path(raw["proof_source_repository"]),
+                    macro_root=str(raw["ceo_ingress_app_macro_root"]),
+                    bindings_path=workspace_bindings_path,
+                    token=secrets.token_urlsafe(32),
+                    origin=UNIX_CONTROL_ROOM_ORIGIN,
+                    port=0,
+                    compose_inputs=compose_inputs,
+                ),
+                listener=room_listener,
+                socket_path=str(raw["workspace_control_room"]["socket_path"]),
+                allowed_peer_uids=tuple(raw["workspace_control_room"]["allowed_peer_uids"]),
+            )
+            from integrations.product_acceptance_read import read_acceptance
+            from integrations.product_acceptance_selector import read_original_acceptance_observation
+            from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
+            original_target = original_target_guard = None
+            if validate_control_coo(raw) and type(coo_source) is CooInstalledSource:
+                # Same installed source already selected by _serve_from_config.
+                # HTTP and Runtime rows cannot nominate or rotate this target.
+                target_reader = coo_source.original_acceptance_target
+                original_target = target_reader()
+                if original_target is not None:
+                    def original_target_guard():
+                        if target_reader() is not original_target:
+                            raise ServiceError("installed acceptance target changed")
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 armed={**{key: raw.get(key) if type(raw.get(key)) is bool else None for key in ARM_KEYS}, "source": "control.json"},
@@ -2088,7 +2432,13 @@ def _service_from_config(
                 # The factory is inert until the actual service has started.
                 # Namespace custody belongs to that service and validates the
                 # exact Runtime supplied by its App request handler.
-                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime))
+                bounded_runtime=lambda runtime: service._namespace_custody.bound_runtime(runtime),
+                product_acceptance_basis_reader=packet_collector.product_acceptance_basis_reader(
+                    macro_root=Path(raw["ceo_ingress_app_macro_root"])),
+                product_acceptance_owner_target=original_target,
+                product_acceptance_owner_guard=original_target_guard,
+                product_acceptance_read=read_acceptance,
+                product_acceptance_observe=read_original_acceptance_observation)
         coo_factories = {}
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         from control_plane.coo_principal_host import CooHostProvider
@@ -2099,6 +2449,22 @@ def _service_from_config(
                 return CooHostProvider(coo_source, workspace_factories["workspace_read_provider_factory"](runtime))
             coo_factories = dict(principal_facts_factory=coo_factory, principal_admission_armed=True,
                 principal_admission_guard=lambda envelope: coo_factory(service._require_runtime()).guard(envelope))
+            if raw.get("coo_principal_dialogue_armed", False) is True:
+                from integrations.mastermind_company_principal_app_receiver import PrincipalDialogueAppReceiver
+                from integrations.slack_agent_dialogue.host_local_observation import HostLocalDialogueObservationReader
+
+                def principal_dialogue_factory(runtime):
+                    # The incumbent namespace/Workspace owner validates this
+                    # Runtime; the reader additionally requires this exact
+                    # Control service and opens no Relay-only observation socket.
+                    service._namespace_custody.bound_runtime(runtime)
+                    authority = coo_factory(runtime)
+                    return PrincipalDialogueAppReceiver(runtime, authority,
+                        _CANONICAL_AGENT_RELAY_SOCKET,
+                        HostLocalDialogueObservationReader(service, runtime),
+                        product_acceptance_reader=product_acceptance_basis_reader())
+
+                coo_factories["principal_dialogue_provider_factory"] = principal_dialogue_factory
         session_factories = {}
         if installed_profile in {WEB_CEO_SESSIONS_PROFILE, WEB_CEO_V3_PROFILE}:
             from integrations.session_bridge.installed import build_runtime_session_bridge
@@ -2121,32 +2487,108 @@ def _service_from_config(
 
                 async def submit_summon(payload):
                     require_session_admission()
+                    from control_plane.foreground_operation import (
+                        ForegroundOperationRefusal, _current_foreground_operation_or_none,
+                    )
+                    from control_plane.ceo_intent import _FreshAdmissionObserverFailed
+                    try:
+                        operation = _current_foreground_operation_or_none()
+                        qualification = service._require_attended_qualification()
+                        if operation is not None:
+                            operation.require_arguments(payload)
+                    except ForegroundOperationRefusal as exc:
+                        raise BridgeError(exc.code, exc.message) from None
+
+                    expectation = None
+
+                    def require_summon_session(_envelope=None):
+                        require_session_admission(_envelope)
+                        if service._require_attended_qualification() != qualification:
+                            raise BridgeError("ingress_unavailable", "Executive qualification changed")
+                        if operation is not None:
+                            operation.require_arguments(payload)
+
+                    def require_summon_admission(_envelope=None):
+                        require_summon_session(_envelope)
+                        if operation is not None:
+                            try:
+                                if expectation is None:
+                                    raise ValueError("fresh foreground binding is unavailable")
+                                service._require_foreground_execution(expectation)
+                            except Exception:
+                                raise BridgeError("ingress_unavailable", "Executive admission is unavailable") from None
+
+                    def current_execution_binding():
+                        nonlocal expectation
+                        current = service._require_coo_admission_binding()
+                        if operation is not None:
+                            # This callback is fresh-only. Durable duplicates
+                            # do not require renewed autonomy or current routing.
+                            if expectation is None:
+                                expectation = service._foreground_execution_state(binding=current)
+                            # Exact immutable request-local binding, including
+                            # queued-mode reasons, must survive fresh admission.
+                            if current != json.loads(expectation.binding):
+                                raise ValueError("foreground binding changed")
+                            return json.loads(expectation.binding)
+                        return current
+
+                    def observe_fresh_admission(root_id, command_id):
+                        # This callback is post-commit. Configuration drift
+                        # retains the original root as EFFECT_UNKNOWN and
+                        # prevents binding/driving it; it is not rollback.
+                        require_summon_session()
+                        operation._bind_admitted_root(root_id, command_id)
+
                     request = dict(payload)
                     request_ref = ceo_request.app_request_ref(request.pop("operation_key"))
                     try:
                         observed = await session_ingress._observe_trusted_grounding(readers)
-                        require_session_admission()
-                        receipt = await session_ingress.handle_frame(
-                            {"schema": session_ingress.SUBMIT_SCHEMA_V2,
-                             "request_ref": request_ref, "observed_grounding": observed,
-                             "request": request},
-                            runtime=runtime, grounding_provider=readers,
-                            workspace_root=config.proof_workspace_root,
-                            service_state=service._service_state,
-                            ceo_ingress_armed=binding.armed,
-                            strict_v2_admission=True,
-                            execution_binding_provider=service._require_current_coo_binding,
-                            dialogue_source_provider=commission_source_provider,
-                            admission_guard=require_session_admission,
-                        )
+                        require_summon_session()
+                        async with service._foreground_cycle_scope(operation):
+                            receipt = await service._run_owned_coroutine(session_ingress.handle_frame(
+                                {"schema": session_ingress.SUBMIT_SCHEMA_V2,
+                                 "request_ref": request_ref, "observed_grounding": observed,
+                                 "request": request},
+                                runtime=runtime, grounding_provider=readers,
+                                workspace_root=config.proof_workspace_root,
+                                service_state=service._service_state,
+                                ceo_ingress_armed=binding.armed,
+                                strict_v2_admission=True,
+                                execution_binding_provider=current_execution_binding,
+                                frontier_selection_provider=service._resolve_ceo_frontier_selection,
+                                dialogue_source_provider=commission_source_provider,
+                                admission_guard=require_summon_admission,
+                                fresh_admission_observer=(
+                                    observe_fresh_admission if operation is not None else None
+                                ),
+                            ))
+                            if expectation and receipt.get("duplicate") is False:
+                                try:
+                                    operation.require_root(receipt["job_id"])
+                                    completion = await service._drive_foreground_cycle(operation, receipt["job_id"])
+                                except Exception:
+                                    raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                                # Preserve the immutable QUEUED admission receipt.
+                                # Result delivery is a distinct current-call fact.
+                                receipt = {**receipt, "foreground_completion": completion}
+                    except _FreshAdmissionObserverFailed:
+                        raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
+                    except ForegroundOperationRefusal as exc:
+                        # This occurs before the canonical sink's guarded
+                        # commit. Post-commit observer failures are above.
+                        raise BridgeError(exc.code, exc.message) from None
                     except session_ingress.CeoIngressError as exc:
                         # Canonical owner classifies its durable effect/refusal.
                         raise BridgeError(exc.code, exc.message) from None
                     # After the mutation owner returns, drift cannot be described
                     # as a zero-effect refusal. The private transport preserves it.
                     try:
-                        require_session_admission()
-                    except BridgeError:
+                        if receipt.get("duplicate") is True:
+                            require_summon_session()
+                        else:
+                            require_summon_admission()
+                    except (BridgeError, ForegroundOperationRefusal):
                         raise BridgeError("effect_unknown", "reconcile the original Executive operation") from None
                     return receipt
 
@@ -2180,7 +2622,8 @@ def _service_from_config(
     if (
         _DIALOGUE_BRIDGE_CONFIG_KEYS <= set(raw)
         and (raw["dialogue_bridge_armed"] is True
-             or dialogue_canary_profile.grant is not None)
+             or dialogue_canary_profile.grant is not None
+             or native_dialogue_canary_profile_loader is not None)
     ):
         from control_plane.dialogue_wake_canary_activation import DialogueWakeCanaryProfile
 
@@ -2212,6 +2655,7 @@ def _service_from_config(
                 # An absent grant stays an explicit disarmed profile; it must
                 # never select the generic carrier path after grant removal.
                 canary_profile=dialogue_canary_profile,
+                native_canary_profile_loader=native_dialogue_canary_profile_loader,
                 installed_release_sha=config.proof_base_sha,
                 canary_now_epoch_seconds=lambda: int(time.time()),
             ),
@@ -2226,6 +2670,12 @@ def _service_from_config(
 
         company_repository = Path(raw["proof_source_repository"])
         company_worker_uid = int(raw["worker_uid"])
+        acceptance_selected = raw["company_consultation"].get("product_acceptance_armed", False)
+        acceptance_reader = None
+        if acceptance_selected:
+            if product_acceptance_context_owner is None or product_acceptance_macro_root is None:
+                raise ServiceError("Product acceptance requires the sealed Context and Workspace owners")
+            acceptance_reader = product_acceptance_basis_reader()
         answer_bridge = dialogue_observation_kwargs.get("dialogue_wake_handler")
         if answer_bridge is None or answer_bridge.canary_profile is not None:
             # Company answer obligations keep their incumbent generic owner;
@@ -2247,11 +2697,22 @@ def _service_from_config(
                 return await answer_bridge.dispatch_requester_answer(
                     runtime, projection, before_effect=service._require_company_answer_attention,
                 )
+            acceptance_host = None
+            if acceptance_selected:
+                from integrations.product_acceptance_request_host import ProductAcceptanceRequestHost
+                service._namespace_custody.bound_runtime(runtime)
+                acceptance_host = ProductAcceptanceRequestHost(
+                    runtime=runtime, reader=acceptance_reader, worker_uid=company_worker_uid,
+                    relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
+                    workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
+                    armed=True, principal_authority=coo_factory(runtime))
             return CompanyConsultationHost(
                 runtime=runtime, repository_root=company_repository,
                 worker_uid=company_worker_uid, relay_socket_path=_CANONICAL_AGENT_RELAY_SOCKET,
                 workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
-                requester_answer_wake_dispatch=dispatch_answer)
+                requester_answer_wake_dispatch=dispatch_answer,
+                product_acceptance_host=acceptance_host,
+                native_return_armed=raw["company_consultation"].get("native_return_armed", False))
         company_listener = activate_launchd_socket(_COMPANY_CONSULTATION_SOCKET_NAME)
         activated_listeners.append(company_listener)
         company_binding = CompanyConsultationBinding(
@@ -2282,13 +2743,25 @@ def _service_from_config(
         from control_plane.executive_privileged_authority import PrivilegedReadinessController
         def readiness_factory(runtime):
             return PrivilegedReadinessController(runtime, release_sha=config.proof_base_sha)
+    attended_registration = None
+    if qualification_for(attended_work_placements) is not None:
+        from control_plane.fabric_attended_registration import register_fixed_finite
+        def attended_registration(runtime):
+            if native_capacity_source is not None:
+                from control_plane.finite_initial_registration import register_initial
+                return register_initial(runtime, attended_work_placements[0],
+                    native_capacity_source, autonomy_guard)
+            return register_fixed_finite(runtime, attended_work_placements[0],
+                fabric_worker_binding_source, fabric_attended_probe_source, autonomy_guard)
     service = ExecutiveControlService(
         config,
         supervisor_factory=supervisor_factory,
+        attended_worker_registration=attended_registration,
         privileged_readiness_controller_factory=readiness_factory,
         proof_capacity_recovery_observer=proof_capacity_recovery_observer,
         proof_capacity_recovery_worker_uid=(
-            int(raw["worker_uid"]) if remote_worker_binding_source is None
+            int(raw["worker_uid"]) if (remote_worker_binding_source is None
+                                       and fabric_worker_binding_source is None)
             else proof_capacity_recovery_worker_uid
         ),
         operator_supervisor_factory=operator_supervisor_factory,
@@ -2343,8 +2816,82 @@ async def _request_boot_autonomy_canary(
     return validated
 
 
-async def _serve_from_config(config_path: Path) -> None:
+def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
+                         attestation_loader: Callable[[], Mapping[str, Any]]) -> Callable[[], None]:
+    """One production callback shared by submission and private current observation."""
+    own_config_sha256 = _sha256_file(config_path)
+
+    def require_ceo_admission() -> None:
+        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
+        try:
+            attestation = attestation_loader()
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("attestation_refused") from exc
+        try:
+            current_config_bytes = config_path.read_bytes()
+            if (attestation["config_sha256"] != own_config_sha256
+                    or hashlib.sha256(current_config_bytes).hexdigest() != own_config_sha256):
+                raise ServiceError("CEO admission config changed")
+            receipt_config = raw
+            for field in ("ceo_ingress_socket_path", "ceo_ingress_app_macro_root"):
+                if isinstance(raw.get(field), Path):
+                    if receipt_config is raw:
+                        receipt_config = dict(raw)
+                        encoded_config = json.loads(current_config_bytes)
+                    # The loader resolves aliases for service I/O. Receipts bind
+                    # the exact JSON strings, not that resolved spelling. Parse
+                    # only the same bytes whose hash matched the attestation,
+                    # and refuse if they no longer describe the loaded route.
+                    encoded_path = encoded_config[field]
+                    if _path(encoded_path, field) != raw[field]:
+                        raise ServiceError("CEO admission loaded path changed")
+                    receipt_config[field] = encoded_path
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("config_binding_refused") from exc
+        try:
+            require_ceo_submit_runtime_admission(receipt_config, own_config_sha256=own_config_sha256)
+        except Exception as exc:
+            raise CeoAdmissionPhaseRefusal("receipt_refused") from exc
+
+    return require_ceo_admission
+
+
+async def _serve_from_config(config_path: Path, *, attended_work_placements: tuple = (),
+                             _installed_control: bool = False) -> None:
+    installed_config_sha256 = _sha256_file(config_path) if _installed_control else None
     raw = load_control_config(config_path)
+    # Only a fixed host composition may select typed placements. Merely
+    # staging a file or setting a JSON flag cannot activate its worker owners.
+    physical_source = _staged_fabric_binding_source(raw)
+    if _installed_control:
+        if attended_work_placements:
+            raise ServiceError('installed Control cannot replace its fixed source composition')
+        from control_plane.fabric_attended_routing import installed_control_placements, FINITE_SOCKET_PATH
+        attended_work_placements = installed_control_placements(raw)
+        if attended_work_placements and _sha256_file(config_path) != installed_config_sha256:
+            raise ServiceError('installed finite Control definition changed while loading')
+        if attended_work_placements and (physical_source is None
+                or len(physical_source.bindings) != 1
+                or physical_source.bindings[0].worker_id != 'minimax-finite-01'
+                or physical_source.bindings[0].provider != 'minimax'
+                or physical_source.bindings[0].socket_path != FINITE_SOCKET_PATH):
+            raise ServiceError('installed finite composition requires its one physical owner')
+    from control_plane.fabric_attended_routing import AttendedWorkPlacement, placement_member, qualification_for
+    if (type(attended_work_placements) is not tuple
+            or len(attended_work_placements) > 6
+            or any(type(item) is not AttendedWorkPlacement for item in attended_work_placements)):
+        raise ServiceError('attended placements require bounded typed host configuration')
+    if qualification_for(attended_work_placements) is not None and raw.get('coo_foreground_only') is not True:
+        raise ServiceError('finite qualification requires foreground-only host configuration')
+    if attended_work_placements:
+        if physical_source is None or 'fabric_attended_probe' not in raw:
+            raise ServiceError('attended placements require the binding and startup probe sources')
+        # Refuse an unselected/disabled catalogue before any host canary call.
+        # The constructor checks the current catalogue again before clients.
+        from control_plane.model_router import ModelRouter
+        router = ModelRouter.load()
+        for placement in attended_work_placements:
+            placement_member(router, placement)
     control_attestation = _load_control_environment_attestation(
         Path(raw["control_environment_attestation_path"]),
         config_path=config_path,
@@ -2386,9 +2933,16 @@ async def _serve_from_config(config_path: Path) -> None:
     initial_canary: Mapping[str, Any] | None = None
     if raw.get("coo_autonomy_armed") is True:
         own_config_sha256 = _sha256_file(config_path)
+        finite_installed = _installed_control and bool(attended_work_placements)
+        if finite_installed:
+            own_config_sha256 = control_attestation['config_sha256']
+            if own_config_sha256 != installed_config_sha256:
+                raise ServiceError('installed finite Control attestation changed')
         release_sha = str(raw["proof_base_sha"])
 
         def require_autonomy() -> None:
+            if finite_installed and _sha256_file(config_path) != own_config_sha256:
+                raise ServiceError('installed finite Control definition changed')
             try:
                 validate_runtime_guard_file(
                     AUTONOMY_RECEIPT,
@@ -2398,6 +2952,8 @@ async def _serve_from_config(config_path: Path) -> None:
                 )
             except AutonomyRefusal as exc:
                 raise ServiceError("Executive autonomy receipt refused") from exc
+            if finite_installed and _sha256_file(config_path) != own_config_sha256:
+                raise ServiceError('installed finite Control definition changed')
 
         autonomy_guard = require_autonomy
         require_autonomy()
@@ -2426,21 +2982,36 @@ async def _serve_from_config(config_path: Path) -> None:
         release_sha=raw["proof_base_sha"],
         grant=raw.get("dialogue_wake_canary_activation"),
     )
+    native_dialogue_canary_profile_loader = None
+    if (raw.get("coo_operator_model_alias") == "coo.operator.native-return"
+            and raw.get("company_consultation", {}).get("native_return_armed") is True):
+        from ops.executive_os.dialogue_wake_canary_control import require_native_selection, load_native_verified_profile
+        require_native_selection(raw)
+        bound_native_control_sha256 = control_attestation["config_sha256"]
+        def native_dialogue_canary_profile_loader():
+            # This changes only the bound grant. Ambient config/attestation,
+            # admission flags, Runtime and current writer retain their owners.
+            service._require_company_answer_attention()
+            current = content_attestation_loader()
+            if (current["config_sha256"] != bound_native_control_sha256
+                    or _sha256_file(config_path) != bound_native_control_sha256):
+                raise ServiceError("native grant cannot rebind Control configuration")
+            return load_native_verified_profile(service._require_runtime(),
+                control_sha256=bound_native_control_sha256, release_sha=raw["proof_base_sha"])
     # Bind fresh public CEO admission to the exact running config and the
     # existing root-owned receipt pair. Never read worker-codex.json as Control.
-    own_ceo_config_sha256 = _sha256_file(config_path)
-
-    def require_ceo_admission() -> None:
-        from ops.executive_os.autonomy_control import require_ceo_submit_runtime_admission
-        attestation = content_attestation_loader()
-        if (attestation["config_sha256"] != own_ceo_config_sha256
-                or _sha256_file(config_path) != own_ceo_config_sha256):
-            raise ServiceError("CEO admission config changed")
-        require_ceo_submit_runtime_admission(raw, own_config_sha256=own_ceo_config_sha256)
+    require_ceo_admission = _ceo_admission_guard(raw, config_path, content_attestation_loader)
+    from control_plane.fabric_attended_canary import AttendedControlProbeSource
 
     service = _service_from_config(
         raw,
+        fabric_worker_binding_source=physical_source if attended_work_placements else None,
+        attended_work_placements=attended_work_placements,
+        fabric_attended_probe_source=(
+            AttendedControlProbeSource.from_startup(config_path, raw, control_attestation)
+            if 'fabric_attended_probe' in raw else None),
         dialogue_canary_profile=dialogue_canary_profile,
+        native_dialogue_canary_profile_loader=native_dialogue_canary_profile_loader,
         canary_loader=load_canary,
         autonomy_guard=autonomy_guard,
         ceo_submit_admission_guard=require_ceo_admission,
@@ -2453,7 +3024,19 @@ async def _serve_from_config(config_path: Path) -> None:
     await service.serve_until_stopped()
 
 
+def serve_installed_control(config_path: Path) -> int:
+    """Canonical wrapper entry; same service/guard, fixed source composition."""
+    try:
+        asyncio.run(_serve_from_config(config_path, _installed_control=True))
+        return 0
+    except (OSError, RuntimeProofError, ServiceError, ValueError) as exc:
+        print(f'error: {exc}', file=sys.stderr)
+        return 2
+
+
 def _client_request(args: argparse.Namespace) -> tuple[str, dict[str, Any]]:
+    if args.command == "status" and getattr(args, "ceo_admission", False):
+        return "status", {"ceo_admission": True}
     if args.command in {
         "content-observer-enroll", "content-observer-status", "content-observer-revoke",
         "status",
@@ -2529,6 +3112,10 @@ async def _run(args: argparse.Namespace) -> int:
 def _jsonable(value: Any) -> Any:
     if hasattr(value, "to_dict"):
         return _jsonable(value.to_dict())
+    # asdict() skips to_dict() on nested dataclasses and leaves Enums as-is; neither
+    # applies to WakeRetryPolicy (flat, frozen, bool/int/None fields).
+    if dataclasses.is_dataclass(value) and not isinstance(value, type):
+        return _jsonable(dataclasses.asdict(value))
     if isinstance(value, Mapping):
         return {str(key): _jsonable(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):

@@ -155,9 +155,9 @@ installed `RELEASE_ROOT`, with the pinned Executive Python, run:
 The verb requires a coherent complete old generation. Under a private root
 flock it attests the existing token's metadata without reading its bytes,
 validates the old canonical config/plist, and replaces only their release
-binding. The existing admitted scope set and stored `w3c_enabled` boolean are
-preserved; there is no policy override or provider call. An already-current
-pair is a no-write success. Missing, mixed, unsafe or concurrently changed
+binding. With no flag, the existing admitted scope set and stored `w3c_enabled`
+boolean are preserved; there is no policy override or provider call. An
+already-current pair is a no-write success. Missing, mixed, unsafe or concurrently changed
 artifacts fail closed. A failed publication restores only identities still
 owned by that operation. `A2_REBIND_EFFECT_UNCERTAIN` or
 `A2_REBIND_MIXED_GENERATION` requires same-carrier reconciliation; do not retry,
@@ -173,9 +173,21 @@ Read-only identity reconciliation still distinguishes an operation-owned pair
 that was not restored (`A2_REBIND_MIXED_GENERATION`) from changed or unprovable
 identities (`A2_REBIND_EFFECT_UNCERTAIN`); neither permits another write.
 
+For the separately admitted native-return phase, the existing rebind owner has
+an explicit `rebind-release --enable-w3c` selection. Keep the relay disabled and
+unloaded, and use the same expected bot and installed release. That opt-in
+changes only the release binding and the stored W3C boolean to true, retaining
+the exact bot, scope set and credential inode without reading or copying its
+bytes. A false enrollment at the same release must converge to true; only an
+already-current true pair is a no-write success. Omitting the flag preserves
+both false and true states. It never disables a true enrollment, starts a
+service, authorizes a Runtime writer or proves native delivery. The same file
+CAS, rollback and uncertain-effect rules apply. Do not reenroll or modify the
+pair manually to enable W3C.
+
 After a successful rebind, use the installed `verify` with the expected bot.
-Supply `--enable-w3c` only when the preserved enrollment already has W3C enabled;
-a false enrollment remains false. The verification requalifies the existing
+Supply `--enable-w3c` when the rebound enrollment has W3C enabled; an ordinary
+no-flag rebind of a false enrollment remains false. The verification requalifies the existing
 Slack identity/history and exact release. Then use the separate installed
 `start-agent-relay` owner after its ordinary admission gates, including the
 existing logs/socket-parent prerequisites, and read back health. Rebinding

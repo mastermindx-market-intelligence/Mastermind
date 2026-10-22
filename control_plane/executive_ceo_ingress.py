@@ -62,7 +62,10 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import contextvars
 import re
+import time
+from contextlib import contextmanager
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, Protocol
@@ -227,6 +230,40 @@ def _classification_failure(code: str) -> CeoIngressError:
 # ---------------------------------------------------------------------------
 
 
+# The installed App selects a 65s private response wait. Reserve 5s for
+# settlement/response; the native foreground transport may be longer but does
+# not extend this work budget. This is independent of the 28s packet collector.
+GROUNDING_OBSERVATION_TIMEOUT_SECONDS = 60.0
+_grounding_clock = time.monotonic
+_GROUNDING_DEADLINE = contextvars.ContextVar("executive_grounding_deadline", default=None)
+
+
+def current_grounding_deadline() -> float | None:
+    """Trusted request-local deadline copied into the physical observer thread."""
+    return _GROUNDING_DEADLINE.get()
+
+
+def _require_grounding_budget() -> None:
+    deadline = current_grounding_deadline()
+    if deadline is not None and _grounding_clock() >= deadline:
+        raise _dependency_failure("grounding_unavailable")
+
+
+@contextmanager
+def grounding_observation_scope():
+    """A nested scope may shorten, never renew, this request's finite budget."""
+    deadline = _grounding_clock() + GROUNDING_OBSERVATION_TIMEOUT_SECONDS
+    inherited = current_grounding_deadline()
+    if inherited is not None:
+        deadline = min(deadline, inherited)
+    token = _GROUNDING_DEADLINE.set(deadline)
+    try:
+        _require_grounding_budget()
+        yield deadline
+    finally:
+        _GROUNDING_DEADLINE.reset(token)
+
+
 class GroundingProvider(Protocol):
     """Opaque, injected grounding source.
 
@@ -296,10 +333,28 @@ async def _observe_trusted_grounding(provider: GroundingProvider) -> dict[str, s
     itself carry a host path or other sensitive detail.
     """
 
+    _require_grounding_budget()
+    physical = asyncio.create_task(asyncio.to_thread(provider.observe))
     try:
-        raw = await asyncio.to_thread(provider.observe)
+        raw = await asyncio.shield(physical)
+    except asyncio.CancelledError:
+        # Cancellation must not detach a still-running source read. The installed
+        # observer passes its finite deadline to every Git child/proof loop.
+        # Settle this exact read, including repeated cancellation, then propagate
+        # cancellation so no later observation, guard or sink can run.
+        while not physical.done():
+            try:
+                await asyncio.shield(physical)
+            except asyncio.CancelledError:
+                continue
+            except Exception:
+                break
+        if not physical.cancelled():
+            physical.exception()
+        raise
     except Exception as exc:  # dependency boundary: opaque by design (R1 §3)
         raise _dependency_failure("grounding_unavailable") from exc
+    _require_grounding_budget()
     shape = _coerce_grounding_shape(raw)
     if shape is None:
         raise _dependency_failure("grounding_unavailable")
@@ -380,11 +435,13 @@ async def _submit(
     workspace_root: "Path | str",
     *,
     execution_binding: Mapping[str, Any] | None = None,
+    frontier_selection: Any = ceo_intent._FRONTIER_SELECTION_UNSET,
     dialogue_source: ExecutiveDialogueSource | None = None,
     require_dialogue_source: bool = False,
     principal_context: Any = None,
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Call the one v1 mutation sink; classify a raised refusal per §11.3/§12.1."""
 
@@ -394,6 +451,8 @@ async def _submit(
         }
         if execution_binding is not None:
             submit_kwargs["execution_binding"] = dict(execution_binding)
+        if frontier_selection is not ceo_intent._FRONTIER_SELECTION_UNSET:
+            submit_kwargs["frontier_selection"] = copy.deepcopy(frontier_selection)
         if dialogue_source is not None:
             submit_kwargs["dialogue_source"] = dialogue_source.to_dict()
         if require_dialogue_source:
@@ -402,12 +461,18 @@ async def _submit(
             submit_kwargs.update(principal_context=principal_context,
                 principal_request_ref=principal_request_ref,
                 principal_admission_guard=principal_admission_guard)
+        if fresh_admission_observer is not None:
+            submit_kwargs["fresh_admission_observer"] = fresh_admission_observer
         return await asyncio.to_thread(
             ceo_intent.submit_intent,
             runtime,
             envelope,
             **submit_kwargs,
         )
+    except ceo_intent._FreshAdmissionObserverFailed:
+        # Private attended composition must preserve this known root effect;
+        # the Session Bridge owner maps it to its existing effect_unknown.
+        raise
     except ceo_intent.CeoIntentConflict as exc:
         # A durable sibling with the same request fingerprint may still carry
         # different immutable admission provenance.  That is a real identity
@@ -444,6 +509,8 @@ def _build_envelope(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
 ) -> dict[str, Any]:
+    if "frontier_model_alias" in normalized and (not strict_v2 or principal_context is not None):
+        raise CeoIngressError("invalid_input", "frontier selection requires strict v2 admission")
     if principal_context is not None:
         from control_plane.coo_principal_envelope import derive_principal_envelope
         try:
@@ -467,6 +534,8 @@ def _build_envelope(
             envelope["schema"] = ceo_intent.INTENT_SCHEMA_V2
             envelope["intent_kind"] = "executive_coo_cycle"
             envelope["business_impact"] = "routine"
+            if "frontier_model_alias" in normalized:
+                envelope["frontier_model_alias"] = normalized["frontier_model_alias"]
         return ceo_intent.validate_intent(envelope)
     except ceo_intent.CeoIntentError as exc:
         raise CeoIngressError("invalid_input", str(exc)) from exc
@@ -526,10 +595,12 @@ async def _handle_submit_v2(
     workspace_root: "Path | str",
     strict_v2_admission: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """AD-ID1 automated submit with the same load-bearing v1 order.
 
@@ -558,8 +629,10 @@ async def _handle_submit_v2(
         workspace_root=workspace_root,
         strict_v2=strict_v2_admission,
         execution_binding_provider=execution_binding_provider,
+        frontier_selection_provider=frontier_selection_provider,
         dialogue_source_provider=dialogue_source_provider,
         admission_guard=admission_guard,
+        fresh_admission_observer=fresh_admission_observer,
     )
 
 
@@ -590,12 +663,14 @@ async def _handle_normalized_submit(
     workspace_root: "Path | str",
     strict_v2: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
     principal_context: Any = None,
     principal_request_ref: str | None = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Shared replay/grounding/sink law after version-specific validation.
 
@@ -618,6 +693,8 @@ async def _handle_normalized_submit(
         strict_v2=strict_v2,
         principal_context=principal_context, principal_request_ref=principal_request_ref,
     )
+    if fresh_admission_observer is not None and not strict_v2:
+        raise _dependency_failure("backend_refused")
     # 4. exact command-id lookup.
     command_id = ceo_intent.command_id_for(intent_id)
     existing = await _backend_call(runtime.store.find_event_by_command_id, command_id)
@@ -630,101 +707,145 @@ async def _handle_normalized_submit(
         return _finalize_receipt(
             await _submit(runtime, candidate_envelope, workspace_root,
                 principal_context=principal_context, principal_request_ref=principal_request_ref,
-                principal_admission_guard=admission_guard)
+                principal_admission_guard=admission_guard,
+                fresh_admission_observer=fresh_admission_observer)
         )
 
-    # 6. only when no canonical event exists, observe current trusted grounding.
-    trusted = await _observe_trusted_grounding(grounding_provider)
+    with grounding_observation_scope():
+        # 6. only when no canonical event exists, observe current trusted grounding.
+        trusted = await _observe_trusted_grounding(grounding_provider)
 
-    # 7. require exact equality with the caller's claim -> else grounding_mismatch.
-    if trusted != observed:
-        raise _classification_failure("grounding_mismatch")
+        # 7. require exact equality with the caller's claim -> else grounding_mismatch.
+        if trusted != observed:
+            raise _classification_failure("grounding_mismatch")
 
-    # 8. derive/revalidate the canonical envelope from TRUSTED grounding (never
-    #    silently reuse the caller's claimed envelope for the actual submit).
-    trusted_envelope = _build_envelope(
-        normalized,
-        intent_id=intent_id,
-        workspace_root=workspace_root,
-        grounding=trusted,
-        strict_v2=strict_v2,
-        principal_context=principal_context, principal_request_ref=principal_request_ref,
-    )
-
-    execution_binding: Mapping[str, Any] | None = None
-    admitted_source: ExecutiveDialogueSource | None = None
-    if strict_v2:
-        if not callable(execution_binding_provider):
-            raise _dependency_failure("backend_unavailable")
-        try:
-            execution_binding = dict(
-                await asyncio.to_thread(execution_binding_provider)
-            )
-        except Exception as exc:
-            raise _dependency_failure("backend_unavailable") from exc
-        work_ref = normalized.get("workstream")
-        if not isinstance(work_ref, str) or not callable(dialogue_source_provider):
-            raise _dependency_failure("backend_unavailable")
-        admitted_source = await _observe_dialogue_source(
-            dialogue_source_provider,
+        # 8. derive/revalidate the canonical envelope from TRUSTED grounding (never
+        #    silently reuse the caller's claimed envelope for the actual submit).
+        trusted_envelope = _build_envelope(
+            normalized,
             intent_id=intent_id,
-            work_ref=work_ref,
+            workspace_root=workspace_root,
+            grounding=trusted,
+            strict_v2=strict_v2,
+            principal_context=principal_context, principal_request_ref=principal_request_ref,
         )
 
-    # 9. call the SAME provider again immediately before the first canonical
-    #    submit; identity movement -> grounding_changed, zero Job.
-    reobserved = await _observe_trusted_grounding(grounding_provider)
-    if reobserved != trusted:
-        raise _classification_failure("grounding_changed")
+        selection: Any = ceo_intent._FRONTIER_SELECTION_UNSET
+        requested_alias = normalized.get("frontier_model_alias")
+        if requested_alias is not None:
+            if not callable(frontier_selection_provider):
+                raise _dependency_failure("backend_unavailable")
+            from control_plane.frontier_selection import validate_selection
+            try:
+                selection = validate_selection(
+                    await asyncio.to_thread(frontier_selection_provider, requested_alias),
+                    requested_alias=requested_alias,
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_refused") from exc
 
-    if admitted_source is not None:
-        assert callable(dialogue_source_provider)
-        reobserved_source = await _observe_dialogue_source(
-            dialogue_source_provider,
-            intent_id=intent_id,
-            work_ref=admitted_source.work_ref,
-        )
-        if reobserved_source != admitted_source:
-            raise _classification_failure("operation_conflict")
-
-    # 10. optional host-only admission gate.  Exactly one synchronous
-    #     callback over a DETACHED deep copy of the canonical trusted
-    #     envelope — the exact ``_build_envelope``/``validate_intent``
-    #     material the sink will receive, JSON-compatible, with no writable
-    #     alias into the trusted original (nested mappings/lists included).
-    #     A non-callable guard, a non-None return, or any raised exception
-    #     refuses with the FIXED existing ``backend_refused``
-    #     classification and ZERO sink calls, so callback text or private
-    #     content can never reach the wire.  ``None`` means admitted; the
-    #     guard cannot replace the envelope by returning another object, and
-    #     its success is not launch authority — the canonical sink/Runtime
-    #     still own final authority and the concurrent transactional checks.
-    if admission_guard is not None and principal_context is None:
-        if not callable(admission_guard):
-            raise _dependency_failure("backend_refused")
-        try:
-            verdict = await asyncio.to_thread(
-                admission_guard, copy.deepcopy(trusted_envelope)
+        execution_binding: Mapping[str, Any] | None = None
+        admitted_source: ExecutiveDialogueSource | None = None
+        if strict_v2:
+            if not callable(execution_binding_provider):
+                raise _dependency_failure("backend_unavailable")
+            try:
+                execution_binding = dict(
+                    await asyncio.to_thread(execution_binding_provider)
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_unavailable") from exc
+            work_ref = normalized.get("workstream")
+            if not isinstance(work_ref, str) or not callable(dialogue_source_provider):
+                raise _dependency_failure("backend_unavailable")
+            admitted_source = await _observe_dialogue_source(
+                dialogue_source_provider,
+                intent_id=intent_id,
+                work_ref=work_ref,
             )
-        except Exception as exc:
-            # Dependency boundary: opaque by design — the callback's own
-            # exception text is never forwarded (R1 §3.2 convention).
-            raise _dependency_failure("backend_refused") from exc
-        if verdict is not None:
-            raise _dependency_failure("backend_refused")
 
-    # 11. call the existing v1 mutation sink.
-    receipt = await _submit(
-        runtime,
-        trusted_envelope,
-        workspace_root,
-        execution_binding=execution_binding,
-        dialogue_source=admitted_source,
-        require_dialogue_source=strict_v2,
-        principal_context=principal_context, principal_request_ref=principal_request_ref,
-        principal_admission_guard=admission_guard,
-    )
-    return _finalize_receipt(receipt)
+        # 9. call the SAME provider again immediately before the first canonical
+        #    submit; identity movement -> grounding_changed, zero Job.
+        reobserved = await _observe_trusted_grounding(grounding_provider)
+        if reobserved != trusted:
+            raise _classification_failure("grounding_changed")
+
+        if admitted_source is not None:
+            assert callable(dialogue_source_provider)
+            reobserved_source = await _observe_dialogue_source(
+                dialogue_source_provider,
+                intent_id=intent_id,
+                work_ref=admitted_source.work_ref,
+            )
+            if reobserved_source != admitted_source:
+                raise _classification_failure("operation_conflict")
+
+        if requested_alias is not None:
+            try:
+                reobserved_selection = validate_selection(
+                    await asyncio.to_thread(frontier_selection_provider, requested_alias),
+                    requested_alias=requested_alias,
+                )
+            except Exception as exc:
+                raise _dependency_failure("backend_refused") from exc
+            if reobserved_selection != selection:
+                raise _classification_failure("operation_conflict")
+
+        # 10. optional host-only admission gate.  Exactly one synchronous
+        #     callback over a DETACHED deep copy of the canonical trusted
+        #     envelope — the exact ``_build_envelope``/``validate_intent``
+        #     material the sink will receive, JSON-compatible, with no writable
+        #     alias into the trusted original (nested mappings/lists included).
+        #     A non-callable guard, a non-None return, or any raised exception
+        #     refuses with the FIXED existing ``backend_refused``
+        #     classification and ZERO sink calls, so callback text or private
+        #     content can never reach the wire.  ``None`` means admitted; the
+        #     guard cannot replace the envelope by returning another object, and
+        #     its success is not launch authority — the canonical sink/Runtime
+        #     still own final authority and the concurrent transactional checks.
+        if admission_guard is not None and principal_context is None:
+            if not callable(admission_guard):
+                raise _dependency_failure("backend_refused")
+            try:
+                verdict = await asyncio.to_thread(
+                    admission_guard, copy.deepcopy(trusted_envelope)
+                )
+            except Exception as exc:
+                # Dependency boundary: opaque by design — the callback's own
+                # exception text is never forwarded (R1 §3.2 convention).
+                raise _dependency_failure("backend_refused") from exc
+            if verdict is not None:
+                raise _dependency_failure("backend_refused")
+
+        # Check the shared budget after all pre-effect work; never reinterpret a
+        # settled or uncertain sink result as a timeout/refusal.
+        _require_grounding_budget()
+
+        # Principal guards run inside the canonical sink immediately before
+        # Job creation. Retain that position and verdict while enforcing this
+        # same copied deadline on both sides of its fresh-only callback.
+        principal_guard = admission_guard
+        if principal_context is not None:
+            def principal_guard(envelope):
+                _require_grounding_budget()
+                result = admission_guard(envelope)
+                _require_grounding_budget()
+                return result
+
+        # 11. call the existing v1 mutation sink.
+        receipt = await _submit(
+            runtime,
+            trusted_envelope,
+            workspace_root,
+            execution_binding=execution_binding,
+            frontier_selection=selection,
+            dialogue_source=admitted_source,
+            require_dialogue_source=strict_v2,
+            principal_context=principal_context, principal_request_ref=principal_request_ref,
+            principal_admission_guard=principal_guard,
+            fresh_admission_observer=fresh_admission_observer,
+        )
+        return _finalize_receipt(receipt)
 
 
 # ---------------------------------------------------------------------------
@@ -889,12 +1010,14 @@ async def handle_frame(
     ceo_ingress_armed: bool = False,
     strict_v2_admission: bool = False,
     execution_binding_provider: Callable[[], Mapping[str, Any]] | None = None,
+    frontier_selection_provider: Callable[[str], Mapping[str, Any]] | None = None,
     dialogue_source_provider: (
         Callable[[str, str], Mapping[str, Any] | None] | None
     ) = None,
     admission_guard: "Callable[[Mapping[str, Any]], None] | None" = None,
     principal_peer_authorized: bool = False,
     principal_admission_guard: Any = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Validate and dispatch one already-parsed JSON frame (§7).
 
@@ -954,8 +1077,10 @@ async def handle_frame(
             workspace_root=workspace_root,
             strict_v2_admission=strict_v2_admission,
             execution_binding_provider=execution_binding_provider,
+            frontier_selection_provider=frontier_selection_provider,
             dialogue_source_provider=dialogue_source_provider,
             admission_guard=admission_guard,
+            fresh_admission_observer=fresh_admission_observer,
         )
     if schema == STATUS_SCHEMA_V2:
         _require_v2_admission(

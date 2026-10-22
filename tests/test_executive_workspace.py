@@ -596,6 +596,83 @@ def test_terminal_assignment_seal_fails_closed_for_unowned_or_world_boundary(
     assert stat.S_IMODE(run_dir.stat().st_mode) == 0o700
 
 
+def test_assignment_seal_binds_original_snapshot_and_retains_content(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    (root / "result").write_text("retained")
+    before = _seal_identity(root, root.stat())
+    receipt = seal_control_owned_paths(
+        {"run": root}, expected_identities={"run": before}
+    )
+    assert receipt["paths"]["run"]["before"] == before
+    assert stat.S_IMODE(root.stat().st_mode) == 0o700
+    assert (root / "result").read_text() == "retained"
+
+
+def test_assignment_seal_rejects_replacement_before_chmod(tmp_path):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    before = _seal_identity(root, root.stat())
+    root.rename(tmp_path / "original")
+    root.mkdir(mode=0o750)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root}, expected_identities={"run": before})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("edge", ["label", "path", "bool_inode", "missing"])
+def test_assignment_seal_malformed_snapshot_has_no_effect(tmp_path, edge):
+    from control_plane.executive_workspace import _seal_identity
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    snapshot = {"run": _seal_identity(root, root.stat())}
+    if edge == "label":
+        snapshot["foreign"] = snapshot.pop("run")
+    elif edge == "path":
+        snapshot["run"]["path"] = str(tmp_path / "other")
+    elif edge == "bool_inode":
+        snapshot["run"]["inode"] = True
+    else:
+        snapshot["run"].pop("inode")
+    with pytest.raises(AssignmentSealError, match="snapshot"):
+        seal_control_owned_paths({"run": root}, expected_identities=snapshot)
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
+@pytest.mark.parametrize("replace_at", ["open", "chmod"])
+def test_assignment_seal_refuses_path_swap_around_pinned_fd(tmp_path, monkeypatch, replace_at):
+    import control_plane.executive_workspace as module
+
+    root = tmp_path / "assignment"
+    root.mkdir(mode=0o750)
+    original_open, original_chmod = os.open, os.fchmod
+
+    def swap():
+        root.rename(tmp_path / "original")
+        root.mkdir(mode=0o750)
+
+    def swapped_open(path, flags, *args, **kwargs):
+        fd = original_open(path, flags, *args, **kwargs)
+        if Path(path) == root:
+            swap()
+        return fd
+
+    def swapped_chmod(fd, mode):
+        original_chmod(fd, mode)
+        swap()
+
+    monkeypatch.setattr(module.os, "open" if replace_at == "open" else "fchmod",
+                        swapped_open if replace_at == "open" else swapped_chmod)
+    with pytest.raises(AssignmentSealError, match="failed closed"):
+        seal_control_owned_paths({"run": root})
+    assert stat.S_IMODE(root.stat().st_mode) == 0o750
+
+
 # ---------------------------------------------------------------------------
 # A failed preparation must not leave a corpse behind.
 #
@@ -1236,3 +1313,47 @@ def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_pa
     assert released.removed is True
     assert not workspace.exists()
     assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "mixed"])
+def test_linked_release_explains_hidden_untracked_without_removing_files(tmp_path: Path, kind: str):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id="dirty-explanation", lane="web", base_sha=base,
+        branch="sol/web-dirty-explanation",
+    )
+    workspace = Path(receipt.workspace_path)
+    payloads = {}
+    if kind in {"tracked", "mixed"}:
+        payloads["README.md"] = b"uncommitted source must survive\n"
+    if kind in {"untracked", "mixed"}:
+        payloads["private-filename-marker.txt"] = b"untracked evidence must survive\n"
+    if kind == "ignored":
+        payloads[".pytest_cache/private-filename-marker"] = b"ignored evidence is not automatically disposable\n"
+    for relative, payload in payloads.items():
+        target = workspace / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    if kind == "ignored":
+        assert _git(workspace, "status", "--porcelain=v1") == ""
+    observed = executive_workspace.release_linked_worktree(
+        source, root, workspace, expected_operation_id="dirty-explanation",
+    )
+    assert observed.state == "PRESERVED_DIRTY"
+    assert observed.dirty is True and observed.removed is False
+    assert "including ignored files" in observed.reason
+    assert f"tracked_changes={'present' if kind in {'tracked', 'mixed'} else 'absent'}" in observed.reason
+    assert f"all_untracked={'absent' if kind == 'tracked' else 'present'}" in observed.reason
+    assert "git ls-files --others -z" in observed.reason
+    assert "retain needed source and evidence" in observed.reason
+    assert "No files were removed" in observed.reason
+    assert "private-filename-marker" not in observed.reason
+    assert len(observed.reason.encode("utf-8")) < 600
+    assert _git(workspace, "rev-parse", "HEAD") == base
+    for relative, payload in payloads.items():
+        assert (workspace / relative).read_bytes() == payload

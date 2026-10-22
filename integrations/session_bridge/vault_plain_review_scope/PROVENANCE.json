@@ -1,0 +1,22 @@
+{
+  "native_rollout": "/Users/chriswong/.codex/sessions/2026/10/12/rollout-2026-10-12T19-05-05-01a13301-995f-7631-8cee-d675d7de5671.jsonl",
+  "construction_dispatch_line": 27022,
+  "construction_timestamp": "2026-10-15T20:36:14.572Z",
+  "native_record_sha256": "51072601b9e90b5ca22aa351c3232a0106947bb5286b30bad16c65e8df1667aa",
+  "construction_command_sha256": "7498595173f75e9865977c47de7e3a4bb44af1af99f031841d4a3394a76f425e",
+  "reconstructed_sha256": "ed6b0c62d2d86b0cb9c292df2ed9db931354cc7bf31409c61ae155070e2d7133",
+  "retained_sha256": "ed6b0c62d2d86b0cb9c292df2ed9db931354cc7bf31409c61ae155070e2d7133",
+  "reconstructed_bytes": 115515,
+  "retained_bytes": 115515,
+  "byte_match": true,
+  "source_hashes": {
+    "engine/research_vault/generation_continuation.py": "510064452ef6094ec1eb14f1b36dd7579cdd61385b140927e74d9f608c5e0eb0",
+    "engine/research_vault/generation_recovery.py": "8a49dab6c67af95e841364117ee613569f6038fb3a89e123d84ba4157a6aa89a",
+    "engine/research_vault/generation_evidence.py": "85de8283ea4826c9a877af175184d76e361139b51589e73a92ec2d01bcd8e986",
+    "engine/research_vault/producer_generation_writer.py": "b5b0c01763fb4f07322ab2024aa5cd829861293c2e9cde4117da6b2aa9a58d39",
+    "tests/test_research_vault_generation_continuation.py": "5d380ded63ba192347b32343a4584438ce7148c748584a8b61c1c9f01354c81b",
+    "ops/research_producer/launch.py": "f4a15ba29d655a9645fdec3f6495c606eb2357d01af7f89e04b637209e182168",
+    "tests/research_read_mcp/test_original_parent_continuation.py": "d69fc5df400ff42265496309379f22ded561ec0dad13c37e4c39c0eff3d1a930"
+  },
+  "limitations": "Construction recipe and retained-source correlation. Macro source remains uncommitted; no historical producer-root authentication, causal packet-consumption, served-model, termination or lease-settlement claim."
+}

@@ -85,3 +85,12 @@ describe("T2 intent-id vector", () => {
     );
   });
 });
+
+it("binds an explicit CEO alias while preserving omitted-alias keys", () => {
+  const legacy = operationKeyForLaunch(BASE);
+  expect(operationKeyForLaunch({ ...BASE, frontier_model_alias: undefined })).toBe(legacy);
+  const first = operationKeyForLaunch({ ...BASE, frontier_model_alias: "frontier.one" });
+  const second = operationKeyForLaunch({ ...BASE, frontier_model_alias: "frontier.two" });
+  expect(new Set([legacy, first, second]).size).toBe(3);
+  expect(first).toBe("mmos-launch-056eb33de8d699fbb3c205913c93a1b4874f94e7");
+});

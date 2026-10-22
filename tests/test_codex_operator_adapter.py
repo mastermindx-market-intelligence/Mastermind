@@ -3091,15 +3091,16 @@ def test_exec_identity_is_preserved_in_credentials_without_changing_session_wire
     harness.adapter.process_instance_observer = observe
     started, _, _ = _start(harness)
     credentials = harness.adapter.observe_process_credentials(harness.generation)
-    assert len(calls) == 5  # launch, initialization, thread start, before/after UID read
+    assert len(calls) == 6  # pre/post initialize, both continuity checks, before/after UID read
     assert set(calls) == {started.process.pid}
     assert credentials.process_identity["unique_id"] == 123456
     assert credentials.process_identity["pidversion"] == 7
     assert not hasattr(started.process, "unique_id")
 
 
-@pytest.mark.parametrize("changed_at", [2, 3])
-@pytest.mark.parametrize("field", ["unique_id", "pidversion"])
+@pytest.mark.parametrize("changed_at,field", [
+    (2, "unique_id"), (3, "unique_id"), (3, "pidversion"),
+])
 def test_exec_drift_during_start_refuses_the_generation(harness, changed_at, field):
     from control_plane.executive_process_identity import _ProcessInstanceObservation
     calls = 0

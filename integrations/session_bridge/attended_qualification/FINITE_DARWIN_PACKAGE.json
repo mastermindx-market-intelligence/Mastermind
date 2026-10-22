@@ -1,0 +1,56 @@
+{
+  "classification": "REVIEWED_SOURCE_AND_INERT_DARWIN_OBSERVATION_NOT_INSTALLED",
+  "parent_digest_commit": "24d480901",
+  "changes": [
+    "Sealed namespaced materialization of original executor/physical process-owner; no ambient external imports or new lifecycle",
+    "Canonical Darwin boot/process/exec identity and protected actual-image hash; direct-image pin equality retained",
+    "Latched image/exec generation rechecked before and after original immutable START retention; uncertainty retains hold and once fence"
+  ],
+  "files": {
+    "control_plane/darwin_process_image.py": "32b6c887d14c8567b0acbb37c6d142f0aa056c71da56496acef5a4ad353b0f2f",
+    "integrations/session_bridge/bound_launch_capture/runtime/lane_runtime.py": "cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91",
+    "integrations/session_bridge/bound_launch_capture/runtime/remote_sub_exec.py": "5412b5e8fc1c3af2c4c64fced0a97d96e6c47c99608e19f8071244cd0d04d45e",
+    "integrations/session_bridge/bound_launch_capture/fabric_attended_backend.py": "85101ae3ff5a1f9675b93a07726d7cb13edaa497a4509a8ec901a98f3859d700",
+    "integrations/session_bridge/bound_launch_capture/fabric_owned_start.py": "8454896ec5810d605e23e999640d57caed8a9d045e8bf6f49b864052f32c2856",
+    "tests/test_darwin_owned_image.py": "2082ede7d80c554eea35cc4b4ef6279f6d2ef25e6f5f86b766c392d06ac38193",
+    "tests/test_finite_runtime_package.py": "c3e54149ca9d8cb62f9f642b2b0548c5fef8343ac995288defbb18ededcb3915"
+  },
+  "checks": {
+    "FINITE_PACKAGE_DARWIN_INITIAL.xml": {
+      "sha256": "64e2a599ef66c2bf53ee75f64983aa48d23e197d0c38006b8bd103ce87fe61e2",
+      "tests": 111,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    },
+    "DARWIN_PACKAGE_FINAL.xml": {
+      "sha256": "aed9df2c8d9a6ae31c8d99a0c8f95360b48ff8b41ae0929fdd468e7ae821227c",
+      "tests": 15,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0
+    }
+  },
+  "counting": "Scopes overlap; final15 covers repaired retention and explicit Linux projection, initial111 other affected source checks retained. No additive sum.",
+  "independent_review": {
+    "coordinator": "/root/native_activation_adjudication",
+    "classification": "SCOPED_SOURCE_PASS_AFTER_SINGLE_RETENTION_FINDING",
+    "reviewed_runtime_sha256": "cfb18bd9381fae4af1d13a257a8fa5986d903571f64b2aa5dc900439759e9b91",
+    "finding": "Missing actual retention re-observation fixed before/afterwrite. Hold and once semantics verified by parent affectedtests."
+  },
+  "actual_inert_darwin": {
+    "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/owner-resource-composition/DARWIN_OWNED_INERT_CHILD.json",
+    "sha256": "ec659cf080913aa54e7b6c963b10c91c174642fc794d28d80bf82b4dedb51e08",
+    "image": "/bin/sleep",
+    "returncode": 0,
+    "signals": 0,
+    "scope": "one newly owned inert child, no provider/Runtime/service/credential"
+  },
+  "remaining": [
+    "Protected release and exact installation",
+    "Selected Claude root-owned binary/principal/profile/realm and actual canary",
+    "Pending explicit existing MiniMax credential cross-principal enrollment consent",
+    "Original native operation NOT_SUBMITTED; authenticated same-original-parent result still required",
+    "Original Auth0 EFFECT_UNKNOWN preserved"
+  ]
+}

@@ -536,6 +536,8 @@ def _seed_dispatchable_operator_planner(
     commission_ref_commit: str | None = None,
     clock: _Clock | None = None,
     routing_capacity: bool = False,
+    operator_model_alias: str = "coo.operator.readonly",
+    interactive_operator: bool = False,
 ):
     workspace_root = tmp_path / "workspaces"
     workspace = workspace_root / "g2-planner"
@@ -578,7 +580,7 @@ def _seed_dispatchable_operator_planner(
     )
     router = ModelRouter.load()
     sealed = router.model_aliases["coo.sealed"]
-    operator = router.model_aliases["coo.operator.readonly"]
+    operator = router.model_aliases[operator_model_alias]
     binding = {
         "eligible_quota_classes": ["codex-coo", "codex-coo-default"],
         "provider": sealed.provider_alias,
@@ -693,10 +695,16 @@ def _seed_dispatchable_operator_planner(
     )
     root = runtime.jobs.get_job(receipt["job_id"])
     assert root is not None
-    planner = runtime.jobs.create_cycle_planner(
-        root.job_id,
-        command_id=f"coo-cycle:{root.job_id}:create-planner:0",
-    )
+    if interactive_operator:
+        planner = runtime.jobs.create_interactive_operator(
+            root.job_id,
+            command_id=f"coo-cycle:{root.job_id}:create-interactive:0",
+        )
+    else:
+        planner = runtime.jobs.create_cycle_planner(
+            root.job_id,
+            command_id=f"coo-cycle:{root.job_id}:create-planner:0",
+        )
     return runtime, root, planner
 
 

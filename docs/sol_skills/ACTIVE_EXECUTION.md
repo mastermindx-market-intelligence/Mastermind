@@ -67,6 +67,21 @@ bounded call history/status/readback when available. If the refused call is prov
 the tool and the intended mutation never began, record that action as `TOOL_DEGRADED / EFFECT_NONE`;
 do not promote it to `EFFECT_UNKNOWN` or a platform-wide outage.
 
+Establish refusal provenance before projecting it onto another session. Identify the actual
+tool/provider receipt, originating surface/carrier, action/target, and dispatch/effect state.
+A handoff's claim, an assistant's own refusal, a current system/developer policy restriction,
+a human-imposed scope restriction, and a current tool denial are different evidence.
+Preserve the named held effect while checking the record;
+never replay it to discover whether the earlier refusal was real. An unverified historical
+claim is not proof of a current platform-wide restriction or a requirement for an invented
+clearance receipt. Permitted non-effectful local inspection may establish the current surface.
+A later direct human instruction in the current session's own instruction record can revise
+human-imposed scope; a handoff's report of an earlier grant remains a claim to verify.
+It cannot clear an applicable
+system/developer restriction, real tool/provider denial, live lease or EFFECT_UNKNOWN. Local
+Codex/Claude native tools do not require optional Web/Studio Direct/Executive connectivity;
+they remain subject to their actual grants and all applicable effect fences.
+
 EFFECT_NONE is not retry permission. The first explicit safety or permission denial ends retry for
 that action. Do not rephrase it or change tools, carriers, accounts, models or providers to get the
 denied effect through. An unclear refusal reason is not evidence of a technical fault; establish the
@@ -110,6 +125,33 @@ observer, and consume its result before the gated merge/release; follow `docs/DE
 Do not bypass required checks or independent review, and do not generate empty pushes or repeated
 status turns. When changing the candidate is necessary, invalidate only evidence affected by that
 change and bind subsequent observation to the new head. Do not duplicate a worker's assigned work.
+
+<!-- mastermind-ci-observation-liveness-v1 -->
+**CI observation liveness.** A checkpoint records the last observation; it is not a
+completion-event source. A watcher request or PreToolUse admission is not a launched
+observer. Before relying on it, verify the successful tool return, exact repository,
+PR/head/run, retained handle and supported result-consumption path. If no idle wake is
+supported, consume that same handle at a useful foreground boundary; do not wait for
+an event that cannot arrive. Never duplicate a live or uncertain observer.
+
+The installed CI guard's `REDUNDANT POLL` is a finite read-frequency cooldown, not a
+permanent permission denial. Do not sleep/retry, reset its state, switch readers or
+mutate a PR merely to clear it. Continue useful work. At the next real integration
+boundary or existing scheduled wake after expiry, one bounded same-carrier read is
+eligible when no verified observer supplies completion. Permission, safety, custody
+and effect-unknown refusals remain binding; elapsed time does not clear them.
+
+After two equivalent no-progress wakes, diagnose the missing external observation or
+return path once and change tactic. Re-reading a self-written receipt is not progress
+and cannot prove the dependency remains pending. Reuse the existing observer and
+Class-M backoff (15m -> 30m -> 60m; default 60m) in
+`docs/AGENT_DIALOGUE_SESSION_CLOSE_LAW.md`; do not create another watcher or a new
+lifecycle ledger. If a human action is the only remaining path, name it once and keep
+its answer pending. Do not repeatedly ask, manufacture busywork or imply completion.
+Keep aggregate mission attention only under its existing lifetime rule; a blocked
+child does not authorize stopping it. Notify only on a material result or required
+action, and preserve original owners, roots, grants and unresolved effects.
+<!-- /mastermind-ci-observation-liveness-v1 -->
 
 **Problem-solve before escalating.** Reuse the current checkpoint and minimum relevant source; do
 not reload unrelated history. Inspect the exact failure, try the bounded lawful repair, or change to
@@ -257,6 +299,7 @@ cheapest accepted result. Keep substantial direct work when one of these reasons
 * `NO_ELIGIBLE_PRE_EFFECT_WORKER` — no suitable lawful worker exists and no conflicting effect began.
 
 Record the brief reason in the existing commission/checkpoint context, not a new ledger. Reassess when discovery becomes routine execution.
+Native children follow WEB_CEO_DELEGATION section 4: paid Fabric is the eligible-labor default; native Sol is for needed reasoning/coordinator roles, not routine labor or a silent response to a Fabric blocker.
 No fixed delegation percentage or tool-call quota substitutes for this decision. Repeated equivalent
 manual interactions are a reassessment signal, not permission to dispatch an unnecessary agent.
 
@@ -435,8 +478,11 @@ work in the present turn and report that limitation truthfully at the eventual s
 
 ## Step 7A — Preserve operational continuity before interruption
 
-Checkpoint after a material accepted result and before a long or effectful operation through the
-existing Runtime, Agent OS, and artifact owners as applicable. Keep the exact source/operation,
+Keep one recoverable frontier through the existing Runtime, Agent OS, and artifact owners as
+applicable. Save material decisions and accepted capability changes at coherent milestones, before
+genuine interruption/handoff, or before a long/risky action could lose the last known effect.
+Ordinary reads, reversible edits and focused tests do not need separate checkpoints, digest reports
+or approval recaps. Reuse accepted artifacts. Keep the exact source/operation,
 accepted and rejected work, pending decisions, active children, effect uncertainty, and next action
 recoverable. Use cumulative compact checkpoints, not another parallel store or repeated full history.
 A checkpoint never transfers a lease, source writer, or STARTed operation. On interruption, admitted
@@ -444,9 +490,8 @@ execution may continue only inside its existing grant; unresolved judgment stays
 owner or successor. Exact parent consumption must be proven, not inferred from delivery or a tab name.
 No supported continuation means an honest held result, not a fabricated wake.
 
-Maintain one cumulative working checkpoint, not a chain of historical handoffs. In addition to
-material results, update it before long/effectful/high-output operations. Do not defer all persistence
-to the final response. Preserve mission/scope and authority refs; exact operation/carrier/source
+Maintain one cumulative working checkpoint, not a chain of historical handoffs. Do not defer all
+persistence to the final response. Preserve mission/scope and authority refs; exact operation/carrier/source
 identities; last verified effect; accepted work and DO_NOT_REDO; rejected approaches and why;
 research hypotheses and falsifiers; active children/returns; unresolved effects; evidence refs;
 and the exact next action. A missing field stays explicitly unknown rather than being invented.

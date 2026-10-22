@@ -7689,7 +7689,7 @@ def test_host_bound_v2_cycle_uses_exact_profile_and_replays_one_attempt(
             root_id = submitted["result"]["job_id"]
             root = service.runtime.jobs.get_job(root_id)
             assert root is not None
-            assert root.constraints["routing_policy_version"] == "2026-08-24.stage4"
+            assert root.constraints["routing_policy_version"] == "2026-10-14.attended-qualification"
             assert root.constraints["execution_profile_id"] == (
                 "sealed.worker.write.no-extensions.v1"
             )

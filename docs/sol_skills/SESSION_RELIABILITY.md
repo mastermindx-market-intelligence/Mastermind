@@ -24,7 +24,8 @@ their existing authority.
 
 ## Active-turn frame
 
-Keep only the minimum frame needed for the current action:
+Reuse the ACTIVE_EXECUTION frontier. Add only fields needed to diagnose an actual continuity risk;
+this is not a second mandatory frame, report or per-tool checklist. Available diagnostic fields:
 
 ```text
 SESSION_HEALTH
@@ -71,12 +72,14 @@ Any one of:
 - one terminal generation failure;
 - one tool timeout;
 - output pressure plus a stale durable frontier or inability to keep further output bounded;
-- a material phase boundary without a recent checkpoint;
+- completed material work that is not recoverable and cannot now be saved;
 - unstable connector latency, browser behavior, or provider surface.
 
-Action: start no new modifying effect until current effects are clear; update the compact continuation;
-finish only the bounded read/reconciliation already in flight; reduce output; allow at most one bounded
-recovery when no effect is uncertain. That recovery may include a user-visible mode change such as
+Action: reconcile the exact failed request once and freeze only actions dependent on an uncertain
+effect. A read-only timeout or confirmed pre-dispatch failure does not freeze independent authorized
+edits or tests. Save the compact frontier at a coherent milestone and reduce output. A phase boundary
+alone is not a failure. Stop all modifications only when the surface itself is unsafe or all remaining
+work depends on the unresolved effect. Bounded technical recovery may include a user-visible mode change such as
 Extra High when task fit and current capability evidence justify it. Mode recovery is not context
 rotation, permission, carrier transfer, or proof of failure cause.
 
@@ -121,8 +124,8 @@ bloat and stale recovery state, not to force short Pro or Extra High runs.
 ### Per active turn
 
 - cumulative raw-output target: **32 KiB**;
-- after **six material tool calls**, synthesize and checkpoint before another broad phase; this is
-  a pressure trigger, not a mandatory stop or call ceiling;
+- use ACTIVE_EXECUTION's recovery-gap rule for coherent milestone saves; no tool-call counter
+  triggers a checkpoint, authority recap or stop;
 - do not load multiple complete source files, PR bodies, logs, metrics, schemas, or process tables when
   exact ranges or selected fields answer the question.
 

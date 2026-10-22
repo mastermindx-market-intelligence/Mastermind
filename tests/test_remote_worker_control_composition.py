@@ -98,7 +98,7 @@ def test_claimed_missing_remote_source_never_falls_back(tmp_path, monkeypatch, r
     assert calls == []
     spec = _spec(tmp_path, run_id=lease.attempt.attempt_id, job_id=job.job_id)
     with pytest.raises(RemoteAttemptTransportError) as error:
-        asyncio.run(supervisor.adapter.start(spec))
+        asyncio.run(supervisor.adapter.start(spec, lease=lease))
     assert error.value.code == "HOST_BINDING_UNAVAILABLE"
     assert calls == [(HOST_A, WORKER)]
     assert runtime.attempts.get_attempt(lease.attempt.attempt_id) == lease.attempt

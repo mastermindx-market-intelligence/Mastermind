@@ -8,11 +8,13 @@ is complete with lazy fetching disabled before removing only safe, empty
 from __future__ import annotations
 
 import argparse
+from contextlib import ExitStack
 import json
 import os
 import re
 import stat
 import subprocess
+import tempfile
 import time
 from pathlib import Path
 from typing import Sequence
@@ -46,21 +48,36 @@ def _run_git(
     checkout: Path, *args: str, maximum: int = _MAX_GIT_OUTPUT,
     input_bytes: bytes | None = None, deadline: float | None = None,
 ) -> bytes:
-    timeout = _GIT_TIMEOUT_SECONDS
+    observation_deadline = time.monotonic() + _GIT_TIMEOUT_SECONDS
     if deadline is not None:
-        timeout = min(timeout, deadline - time.monotonic())
+        observation_deadline = min(observation_deadline, deadline)
+    timeout = observation_deadline - time.monotonic()
     if timeout <= 0 or (input_bytes is not None and len(input_bytes) > maximum):
         raise AdminCheckoutError("Git observation exceeded its bound")
     try:
-        result = subprocess.run(
-            [_GIT, "-C", os.fspath(checkout), *args],
-            check=False,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            timeout=timeout,
-            input=input_bytes,
-            env=_git_env(),
-        )
+        with ExitStack() as stack:
+            stdin = None
+            if input_bytes is not None:
+                # Darwin poll can report a pipe writable before a blocking
+                # write can finish. Large bidirectional cat-file batches then
+                # deadlock inside communicate(), outside its timeout checks.
+                # These bounded object IDs need no pipe: use an anonymous,
+                # private file and keep the original observation deadline.
+                stdin = stack.enter_context(tempfile.TemporaryFile())
+                stdin.write(input_bytes)
+                stdin.seek(0)
+            remaining = observation_deadline - time.monotonic()
+            if remaining <= 0:
+                raise AdminCheckoutError("Git observation exceeded its bound")
+            result = subprocess.run(
+                [_GIT, "-C", os.fspath(checkout), *args],
+                check=False,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                timeout=remaining,
+                stdin=stdin,
+                env=_git_env(),
+            )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise AdminCheckoutError("Git observation failed") from exc
     if result.returncode != 0:

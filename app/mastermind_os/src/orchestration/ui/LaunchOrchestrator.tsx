@@ -14,6 +14,7 @@ export interface LaunchForm {
   goal: string;
   projectRef: string;
   profileRef: string;
+  frontierModelAlias?: string;
 }
 
 /** Explicit terminal outcome of one dispatched launch. */
@@ -49,8 +50,11 @@ export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 export interface LaunchOrchestratorProps {
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
+  frontierModels?: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
   submitting: boolean;
+  /** A retained operation or unreadable store prevents a new submission. */
+  blocked?: boolean;
   unavailableReason?: string;
   error?: string;
   onSubmit: (intent: LaunchForm, onComplete: LaunchCompletion) => void;
@@ -98,7 +102,9 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 export function LaunchOrchestrator({
   projects,
   profiles,
+  frontierModels,
   submitting,
+  blocked = false,
   unavailableReason,
   error,
   onSubmit,
@@ -108,11 +114,13 @@ export function LaunchOrchestrator({
   const goalId = `${formId}-goal`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
+  const frontierId = `${formId}-frontier`;
 
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState("");
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
+  const [draftFrontier, setDraftFrontier] = useState("");
 
   // In-flight launch owned by this component: armed synchronously when
   // onSubmit is dispatched, resolved only by its correlated completion.
@@ -152,16 +160,37 @@ export function LaunchOrchestrator({
   // it must stay disabled rather than submit a ref nobody can resolve.
   const projectStale = !selectedProjectChoice;
   const profileStale = !selectedProfileChoice;
+  const projectError = projectStale
+    ? selectedProject
+      ? "Your previous project is no longer available. Select an available project to continue."
+      : "No projects are currently available."
+    : selectedProjectChoice.unavailableReason;
+  const profileError = profileStale
+    ? selectedProfile
+      ? "Your previous profile is no longer available. Select an available profile to continue."
+      : "No profiles are currently available."
+    : selectedProfileChoice.unavailableReason;
+
+  const frontierRequired = frontierModels !== undefined || draftFrontier !== "";
+  const selectedFrontier = draftFrontier ||
+    frontierModels?.find((choice) => !choice.unavailableReason)?.ref ||
+    frontierModels?.[0]?.ref || "";
+  const frontierChoice = frontierModels?.find((choice) => choice.ref === selectedFrontier);
+  const frontierError = frontierRequired
+    ? (!frontierChoice ? "Select an available CEO choice to continue." : frontierChoice.unavailableReason)
+    : undefined;
 
   const goalBytes = utf8ByteLength(draftGoal);
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
   const goalBlank = draftGoal.trim().length === 0;
 
   const canSubmit =
+    !blocked &&
     !unavailableReason &&
     !launchPending &&
     !projectStale &&
     !profileStale &&
+    !frontierError &&
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
@@ -179,6 +208,7 @@ export function LaunchOrchestrator({
           goal: draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
+          ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
         },
         (outcome) => {
           try {
@@ -251,16 +281,23 @@ export function LaunchOrchestrator({
               value={selectedProject}
               onChange={(e) => setDraftProject(e.target.value)}
               disabled={launchPending}
+              aria-invalid={!!projectError}
+              aria-describedby={projectError ? `${projectId}-error` : undefined}
             >
+              {projectStale && (
+                <option value={selectedProject} disabled>
+                  {selectedProject ? "Previous project — unavailable" : "No projects available"}
+                </option>
+              )}
               {projects.map((p) => (
                 <option key={p.ref} value={p.ref} disabled={!!p.unavailableReason}>
                   {p.unavailableReason ? `${p.label} — ${p.unavailableReason}` : p.label}
                 </option>
               ))}
             </select>
-            {selectedProjectChoice?.unavailableReason && (
-              <p className="field-error" role="alert">
-                {selectedProjectChoice.unavailableReason}
+            {projectError && (
+              <p id={`${projectId}-error`} className="field-error" role="alert">
+                {projectError}
               </p>
             )}
           </div>
@@ -273,19 +310,49 @@ export function LaunchOrchestrator({
               value={selectedProfile}
               onChange={(e) => setDraftProfile(e.target.value)}
               disabled={launchPending}
+              aria-invalid={!!profileError}
+              aria-describedby={profileError ? `${profileId}-error` : undefined}
             >
+              {profileStale && (
+                <option value={selectedProfile} disabled>
+                  {selectedProfile ? "Previous profile — unavailable" : "No profiles available"}
+                </option>
+              )}
               {profiles.map((p) => (
                 <option key={p.ref} value={p.ref} disabled={!!p.unavailableReason}>
                   {p.unavailableReason ? `${p.label} — ${p.unavailableReason}` : p.label}
                 </option>
               ))}
             </select>
-            {selectedProfileChoice?.unavailableReason && (
-              <p className="field-error" role="alert">
-                {selectedProfileChoice.unavailableReason}
+            {profileError && (
+              <p id={`${profileId}-error`} className="field-error" role="alert">
+                {profileError}
               </p>
             )}
           </div>
+
+          {frontierRequired && (
+            <div className="form-field">
+              <label htmlFor={frontierId}>Requested CEO</label>
+              <select
+                id={frontierId}
+                value={selectedFrontier}
+                onChange={(e) => setDraftFrontier(e.target.value)}
+                disabled={launchPending}
+                aria-invalid={!!frontierError}
+                aria-describedby={frontierError ? `${frontierId}-error` : `${frontierId}-help`}
+              >
+                {!frontierChoice && <option value={selectedFrontier} disabled>CEO choice unavailable</option>}
+                {frontierModels?.map((choice) => (
+                  <option key={choice.ref} value={choice.ref} disabled={!!choice.unavailableReason}>
+                    {choice.unavailableReason ? `${choice.label} — ${choice.unavailableReason}` : choice.label}
+                  </option>
+                ))}
+              </select>
+              <p id={`${frontierId}-help`}>Records your requested CEO for this project.</p>
+              {frontierError && <p id={`${frontierId}-error`} className="field-error" role="alert">{frontierError}</p>}
+            </div>
+          )}
 
           {/* Error message */}
           {error && (

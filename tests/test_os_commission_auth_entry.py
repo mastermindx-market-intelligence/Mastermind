@@ -93,3 +93,22 @@ def test_noncanonical_policy_is_refused_explicitly_instead_of_silent_digest_drif
     with pytest.raises((AuthError, ValueError)):
         asyncio.run(authenticate_document(json.dumps({"bearer": token(rsa_key)}).encode(),
             config, audit_sink=sink, clock=lambda: fixture.NOW, jwks_cache=fixture._FakeJwksCache(rsa_key)))
+
+def test_explicit_ceo_choice_is_bound_to_original_authenticated_arguments(rsa_key):
+    arguments = {**ARGS, "frontier_model_alias": "frontier.orchestrator"}
+    result = run(rsa_key, {"bearer": token(rsa_key), "request_body": json.dumps({"arguments": arguments})})
+    original = run(rsa_key, {"bearer": token(rsa_key), "request_body": json.dumps({"arguments": ARGS})})
+    assert result["arguments_digest"] == hashlib.sha256(json.dumps(
+        arguments, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode()).hexdigest()
+    assert result["arguments_digest"] != original["arguments_digest"]
+    assert "frontier_selection" not in result
+    assert "attempt_limit" not in arguments
+
+
+@pytest.mark.parametrize("alias", ["Frontier.Orchestrator", "", " frontier.orchestrator", None, 123])
+def test_invalid_ceo_choice_refuses_at_commission_authentication(rsa_key, alias):
+    with pytest.raises(Exception):
+        run(rsa_key, {"bearer": token(rsa_key), "request_body": json.dumps({
+            "arguments": {**ARGS, "frontier_model_alias": alias},
+        })})

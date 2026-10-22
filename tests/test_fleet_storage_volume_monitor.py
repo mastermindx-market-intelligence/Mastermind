@@ -1,0 +1,166 @@
+"""Regression tests for existing storage-sweeper scripts (no live sweeps)."""
+import contextlib
+import importlib.util
+import io
+import json
+import pathlib
+import sys
+import tempfile
+import unittest
+from unittest import mock
+
+SOURCE = pathlib.Path(__file__).resolve().parents[1] / "ops/fleet_storage_cleanup"
+
+
+def load(name: str, path: pathlib.Path):
+    spec = importlib.util.spec_from_file_location(name, path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+class FleetStorageVolumeTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.sweep = load("fleet_test_sweep", SOURCE / "sweep.py")
+        cls.fleet = load("fleet_test_driver", SOURCE / "fleet_remote_sweep.py")
+
+    @staticmethod
+    def m1_sample(free=71.7):
+        return {
+            "mount": "/Volumes/STORAGE",
+            "state": "OK",
+            "free_gib": free,
+            "total_gib": 931.3,
+            "floor_gib": 130.4,
+            "warn_gib": 204.9,
+            "used_pct": round(100 * (931.3 - free) / 931.3, 1),
+        }
+
+    def test_split_root_external_breach_despite_healthy_system_disk(self):
+        row = {
+            "host": "m1", "rc": 0,
+            "sweep": {
+                "free_gib_after": 201.3,
+                "floor_gib": 120.0,
+                "external_volumes": [self.m1_sample()],
+            },
+        }
+        self.assertIsNone(self.fleet._space_pressure(row))
+        alert = self.fleet._external_volume_pressure(row)
+        self.assertEqual(len(alert), 1)
+        self.assertEqual(alert[0]["severity"], "BREACH")
+        self.assertEqual(alert[0]["mount"], "/Volumes/STORAGE")
+
+    def test_healthy_external_mount_does_not_warn(self):
+        row = {"host": "m1", "rc": 0,
+               "sweep": {"external_volumes": [self.m1_sample(free=400.0)]}}
+        self.assertEqual(self.fleet._external_volume_pressure(row), [])
+
+    def test_disconnected_mount_is_unverified_not_root_fallback(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            config = home / ".config/mastermind"
+            config.mkdir(parents=True)
+            (config / "worktree-storage.json").write_text(
+                json.dumps({"mount_point": "/Volumes/NOT_MOUNTED_MMX_TEST"}))
+            with mock.patch.object(self.sweep.Path, "home", return_value=home):
+                records = self.sweep._external_volume_snapshots()
+        self.assertIn(
+            {"mount": "/Volumes/NOT_MOUNTED_MMX_TEST", "state": "MOUNT_UNAVAILABLE"},
+            records,
+        )
+
+    def test_invalid_policy_never_masquerades_as_healthy(self):
+        with tempfile.TemporaryDirectory() as temp:
+            home = pathlib.Path(temp)
+            config = home / ".config/mastermind"
+            config.mkdir(parents=True)
+            (config / "worktree-storage.json").write_text("{")
+            with mock.patch.object(self.sweep.Path, "home", return_value=home):
+                records = self.sweep._external_volume_snapshots()
+        self.assertTrue(any(r["state"] == "POLICY_UNREADABLE" for r in records))
+
+    def test_invalid_metrics_fail_closed(self):
+        sample = self.m1_sample()
+        sample["floor_gib"] = 999999
+        row = {"host": "m1", "rc": 0, "sweep": {"external_volumes": [sample]}}
+        alert = self.fleet._external_volume_pressure(row)
+        self.assertEqual(len(alert), 1)
+        self.assertEqual(alert[0]["severity"], "UNVERIFIED")
+
+    def test_missing_remote_telemetry_is_unverified(self):
+        row = {"host": "m1", "rc": 0, "sweep": {"free_gib_after": 201.3,
+                                                "floor_gib": 120.0}}
+        got = self.fleet._external_volume_pressure(row)
+        self.assertEqual(got[0]["severity"], "UNVERIFIED")
+        self.assertEqual(got[0]["state"], "TELEMETRY_MISSING")
+
+    def test_bad_remote_policy_is_reported(self):
+        row = {"host": "m1", "rc": 0, "sweep": {"external_volumes": [
+            {"mount": "/Users/example/.config/mastermind/worktree-storage.json",
+             "state": "POLICY_UNREADABLE", "reason": "ValueError"}]}}
+        got = self.fleet._external_volume_pressure(row)
+        self.assertEqual(got[0]["severity"], "UNVERIFIED")
+        self.assertEqual(got[0]["state"], "POLICY_UNREADABLE")
+
+    def test_small_volume_bounds_are_consistent(self):
+        row = {"host": "peer", "rc": 0, "sweep": {"external_volumes": [
+            {"mount": "/Volumes/SMALL", "state": "OK", "total_gib": 32.0,
+             "free_gib": 10.0, "floor_gib": 32.0, "warn_gib": 32.0}]}}
+        result = self.fleet._external_volume_pressure(row)
+        self.assertEqual(result[0]["severity"], "BREACH")
+
+    def test_repeated_unreachable_carries_last_breach_until_recovery(self):
+        with tempfile.TemporaryDirectory() as temp:
+            state = pathlib.Path(temp)
+            fleet = self.fleet
+            with mock.patch.object(fleet, "STATE", state), (
+                 mock.patch.object(fleet, "LOCK", state / "fleet-remote-sweep.lock")
+            ), mock.patch.object(fleet, "SEEN", state / "fleet-host-state.json"), (
+                 mock.patch.object(fleet, "sync", return_value="ok")
+            ), mock.patch.object(
+                sys, "argv", ["fleet", "--hosts", "m1", "--no-sync", "--json"]
+            ):
+                failing = {
+                    "host": "m1", "rc": 0,
+                    "sweep": {
+                        "free_gib_after": 201.3,
+                        "floor_gib": 120.0,
+                        "external_volumes": [self.m1_sample()],
+                    },
+                }
+                healed = {
+                    "host": "m1", "rc": 0,
+                    "sweep": {
+                        "free_gib_after": 201.3,
+                        "floor_gib": 120.0,
+                        "external_volumes": [self.m1_sample(free=400.0)],
+                    },
+                }
+                for index, online in enumerate([True, False, False, False, True]):
+                    with mock.patch.object(
+                        fleet, "reachable", return_value=online
+                    ), mock.patch.object(
+                        fleet, "sweep", return_value=failing if index < 4 else healed
+                    ), contextlib.redirect_stdout(io.StringIO()) as output:
+                        self.assertEqual(fleet.main(), 0)
+                    report = json.loads(output.getvalue())
+                    self.assertEqual((state / "FLEET-ALERT").exists(), index < 4)
+                    if index == 0:
+                        self.assertEqual(
+                            report["external_volume_pressure_hosts"][0]["severity"],
+                            "BREACH",
+                        )
+                    if index in (1, 2, 3):
+                        self.assertEqual(
+                            report["unverified_prior_external_breaches"][0]["state"],
+                            "UNVERIFIED",
+                        )
+                    if index == 4:
+                        self.assertFalse(report["external_volume_pressure_hosts"])
+                        self.assertFalse(report["unverified_prior_external_breaches"])
+
+
+if __name__ == "__main__":
+    unittest.main()

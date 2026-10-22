@@ -369,10 +369,63 @@ class CeoIngressClient:
         self, socket_path: "Path | str", frame: Mapping[str, Any]
     ) -> CeoIngressResponse:
         """Send exactly one JSON frame; never retries internally."""
+        return await self._send_frame(socket_path, frame, keep_write_open=False)
+
+    async def send_foreground_frame(
+        self, socket_path: "Path | str", frame: Mapping[str, Any]
+    ) -> CeoIngressResponse:
+        """Keep this bounded summon connection duplex until its one response.
+
+        This is transport lifetime only, never attendance or launch authority.
+        The installed peer, live principal and actual host source still qualify
+        the in-process operation. No frame field can select this client mode.
+        """
+        from common.session_bridge_private_contract import PRIVATE_SCHEMA, FOREGROUND_PRIVATE_SCHEMA
+        if (not isinstance(frame, Mapping) or frame.get("schema") != PRIVATE_SCHEMA
+                or frame.get("tool") != "session_summon"):
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                detail="foreground transport requires a private summon frame")
+        from integrations.session_bridge.http_foreground import current_request, HttpForegroundClosed
+        try:
+            source = current_request()
+        except HttpForegroundClosed:
+            return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                detail="actual upstream foreground source unavailable")
+        wire_frame = {**frame, "schema": FOREGROUND_PRIVATE_SCHEMA}
+        return await self._send_frame(socket_path, wire_frame, keep_write_open=True,
+                                      foreground_source=source)
+
+    async def _send_frame(
+        self, socket_path: "Path | str", frame: Mapping[str, Any], *,
+        keep_write_open: bool,
+        foreground_source: Any = None,
+    ) -> CeoIngressResponse:
 
         request_ceiling = MAX_REQUEST_BYTES
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
+        principal_encoded = None
+        # This closed source-only frame has its own canonical byte bounds.
+        # Selecting transport limits grants no receiving-side admission.
+        from integrations.company_dialogue_principal_app_contract import (
+            APP_REQUEST_SCHEMA, decode_app_request,
+        )
+        if isinstance(frame, Mapping) and frame.get("schema") == APP_REQUEST_SCHEMA:
+            from integrations.company_dialogue_principal_host_contract import encode_json_frame
+            from common.company_dialogue_principal_app_protocol import (
+                MAX_REQUEST_BYTES as principal_request_limit,
+                MAX_APP_RESPONSE_BYTES as principal_response_limit,
+            )
+            try:
+                canonical_frame = encode_json_frame(dict(frame), limit=principal_request_limit)
+                decode_app_request(canonical_frame)
+            except Exception:
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="principal dialogue frame is invalid")
+            principal_encoded = canonical_frame[:-1]
+            request_ceiling = principal_request_limit
+            response_ceiling = principal_response_limit
+            stream_limit = response_ceiling + 4096
         # Only the separately versioned, closed release frame can use the
         # larger token envelope; every historical schema retains its limits.
         from control_plane import executive_release_ingress as release_ingress
@@ -387,9 +440,8 @@ class CeoIngressClient:
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
         try:
-            encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
-                "utf-8"
-            )
+            encoded = principal_encoded if principal_encoded is not None else json.dumps(
+                frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
         except (TypeError, ValueError) as exc:
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
@@ -413,7 +465,14 @@ class CeoIngressClient:
                 transport=TRANSPORT_NOT_SENT, detail=f"connect failed: {type(exc).__name__}"
             )
 
+        from integrations.session_bridge.http_foreground import HttpForegroundClosed
         try:
+            if foreground_source is not None:
+                try:
+                    foreground_source.attach_writer(writer)
+                except HttpForegroundClosed:
+                    return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                        detail="upstream foreground source ended before send")
             try:
                 writer.write(line)
                 await asyncio.wait_for(writer.drain(), timeout=self._connect_timeout)
@@ -427,19 +486,24 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN,
                     detail=f"send failed after connect: {type(exc).__name__}",
                 )
-            try:
-                writer.write_eof()
-            except (OSError, NotImplementedError):
-                pass
+            if not keep_write_open:
+                try:
+                    writer.write_eof()
+                except (OSError, NotImplementedError):
+                    pass
 
             try:
                 raw = await asyncio.wait_for(
-                    reader.readline(), timeout=self._read_timeout
+                    reader.readline(), timeout=(self._read_timeout if foreground_source is None
+                        else foreground_source.remaining_seconds())
                 )
             except asyncio.TimeoutError:
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="read timed out after send"
                 )
+            except HttpForegroundClosed:
+                return CeoIngressResponse(transport=TRANSPORT_SENT_UNKNOWN,
+                    detail="upstream foreground source ended after send")
             except (asyncio.LimitOverrunError, ValueError):
                 # StreamReader.readline converts an over-limit readuntil
                 # failure to ValueError. Bytes were sent: never report absence.
@@ -1283,6 +1347,74 @@ class CeoIngressReadGateway:
         return CeoIngressReadGateway._valid_job_payload(value)
 
     @staticmethod
+    def _valid_terminal_result(
+        value: object, *, job: Mapping[str, Any], attempt: object
+    ) -> bool:
+        from control_plane import executive_orchestration_result as result_owner
+        from control_plane.executive_runtime import (
+            StateConflict, _validate_orchestration_terminal_receipt_value,
+        )
+
+        if not (
+            type(value) is dict
+            and type(attempt) is dict
+            and attempt.get("job_id") == job.get("job_id")
+            and attempt.get("status") == "COMPLETED"
+            and job.get("orchestration_role") in result_owner.ROLES
+        ):
+            return False
+        try:
+            envelope = result_owner.validate_envelope(
+                value.get("result_envelope"),
+                expected_job_id=job["job_id"],
+                expected_run_id=attempt["attempt_id"],
+                expected_worker_id=attempt["worker_id"],
+                expected_role=job["orchestration_role"],
+                expected_root_job_id=job["root_job_id"],
+            )
+            # This checks the read wire only. Runtime remains the owner of the
+            # persisted seal and authority evidence used to complete an Attempt.
+            return _validate_orchestration_terminal_receipt_value(
+                value,
+                job_id=job["job_id"],
+                attempt_id=attempt["attempt_id"],
+                expected_role=job["orchestration_role"],
+                execution_mode=attempt["execution_mode"],
+                seal={
+                    "result_envelope": envelope,
+                    "result_envelope_digest": result_owner.canonical_digest(envelope),
+                    "effective_grant_digest": attempt["effective_grant_digest"],
+                },
+            ) == value
+        except (StateConflict, result_owner.OrchestrationResultError, KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
+    def _valid_sealed_launch_metadata(attempt: Mapping[str, Any]) -> bool:
+        import json
+        from control_plane.executive_runtime import (
+            PersistenceError, StateConflict, _validated_sealed_worker_launch_material,
+        )
+
+        if attempt.get("execution_mode") != "SEALED_WORKER":
+            return False
+        # The canonical validator uses immutable row values only; serialize the
+        # public Attempt fields into that representation without a DB read.
+        try:
+            row = dict(attempt)
+            for name in (
+                "launch_metadata", "effective_grant", "placement_snapshot",
+                "execution_principal_snapshot",
+            ):
+                row[f"{name}_json"] = json.dumps(
+                    attempt[name], sort_keys=True, separators=(",", ":"), ensure_ascii=False,
+                )
+            _validated_sealed_worker_launch_material(row)
+            return True
+        except (PersistenceError, StateConflict, KeyError, TypeError, ValueError):
+            return False
+
+    @staticmethod
     def _valid_requested_profile(value: object, digest: object) -> bool:
         from control_plane import operator_harness_wire
         from control_plane.operator_materialization_receipt import (
@@ -1498,6 +1630,10 @@ class CeoIngressReadGateway:
             return False
 
         for field in ("checkpoint", "result", "error"):
+            if field == "result" and CeoIngressReadGateway._valid_terminal_result(
+                attempt.get(field), job=job, attempt=attempt,
+            ):
+                continue
             if not CeoIngressReadGateway._valid_payload_or_bound(
                 attempt.get(field),
                 field=f"{prefix}.{field}",
@@ -1509,6 +1645,7 @@ class CeoIngressReadGateway:
         launch_metadata = attempt.get("launch_metadata")
         if not (
             launch_metadata == {}
+            or CeoIngressReadGateway._valid_sealed_launch_metadata(attempt)
             or CeoIngressReadGateway._valid_bounded_aggregate(
                 launch_metadata,
                 field=f"{prefix}.launch_metadata",
@@ -1676,6 +1813,14 @@ class CeoIngressReadGateway:
             return False
 
         for field in ("checkpoint", "result"):
+            if (
+                field == "result"
+                and job.get("status") == "COMPLETED"
+                and CeoIngressReadGateway._valid_terminal_result(
+                    job.get(field), job=job, attempt=value["latest_attempt"],
+                )
+            ):
+                continue
             if not CeoIngressReadGateway._valid_payload_or_bound(
                 job.get(field),
                 field=f"job.{field}",
@@ -2926,7 +3071,10 @@ class CeoIngressReadGateway:
         cls, upstream_code: str
     ) -> tuple[str, str]:
         code = "backend_unavailable"
-        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+        if upstream_code in {"output_too_large", "response_too_large"}:
+            code = "output_too_large"
+            message = "Executive reader response exceeds the installed byte limit."
+        elif upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
             message = "Executive reader is unavailable in the installed backend."
         else:
             code = "backend_refused"

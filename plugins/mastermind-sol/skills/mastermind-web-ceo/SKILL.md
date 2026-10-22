@@ -7,9 +7,14 @@ description: Use when leading a substantial Mastermind outcome across decisions,
 
 ## Mandatory current-source gate
 
-Run `bootstrap-mastermind` for the task. Read protected Mastermind `master`, record its exact revision, load `docs/sol_skills/INDEX.md` and required companions from that same exact commit, and verify compatibility. Reuse the verified pin and relevant procedures already loaded in the current turn while valid; new-turn recovery must re-establish current source. Material changes use the existing reconciliation procedure. If the read or compatibility fails, modifying workflow is unavailable; bounded read-only analysis may continue with explicit uncertainty.
-
-Read `../../references/authority-boundaries.md` before interpreting any app, record, or action as authority. This skill grants no authority. Current Chairman intent, protected source law and platform permissions govern. GitHub owns source and evidence; existing operational owners retain state, custody and execution.
+Reuse the verified pin for the mission; verify compatibility. Read protected Mastermind `master` and run `bootstrap-mastermind` only
+at unfamiliar entry/recovery without a usable pin, or a material governing-procedure change. Load
+`docs/sol_skills/INDEX.md` and the needed companions from that same exact commit; never mix revisions.
+Read `../../references/authority-boundaries.md` once before interpreting any app, record, or action as authority. This skill grants no authority; GitHub owns source/evidence and existing owners retain runtime, custody and effects.
+A worker return, tool call, new turn or phase completion alone does not restart bootstrap. If no
+verified compatible pin can be established, modifying workflow is unavailable for actions depending
+on that procedure. A failed refresh does not erase a usable pin for independent work whose governing
+constraints are unaffected. Apply gates only to the actual action under INDEX modification scoping.
 
 ## Do not use
 
@@ -23,6 +28,8 @@ Do not add this orchestration layer to a greeting, simple transformation, one fa
 4. Apply `ACTIVE_EXECUTION.md` as the sole active-turn and finalization procedure. Use `WEB_CEO_DELEGATION.md` and current routing law when deciding retained judgment versus bounded delegation. Delegate complete checkable outcomes, not individual commands; do not duplicate assigned work or default to scarce principal capacity.
 5. Execute the smallest useful capability step, then compare its result with the acceptance ruler. Reuse existing commission, reconciliation, return-review, PR-review and closeout skills at their actual boundaries. A good plan, delivered packet, green test or merge does not complete an end-to-end assignment.
 6. At a material return, inspect exact evidence, adjudicate what changed, and advance the unlocked dependency. Keep independent useful work moving while one lane is blocked. Choose mode and recovery through current source policy, not this skill's own mode table.
+
+For sustained delivery, load `skills/mastermind-fabric-orchestration/SKILL.md` and only the assigned role from the same exact commit already verified above. Prefer an admitted GLM/Grok-class operator for ordinary delegation, return adjudication, review/repair and integration; keep consequential principal decisions here. Direct worker dispatch retains adjudication. Role guidance is not tool availability, identity or admission; never create a native-helper bypass.
 
 ## Evidence and output
 

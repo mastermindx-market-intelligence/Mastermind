@@ -40,6 +40,7 @@ DEFAULT_SOCKET = Path("/var/run/mastermind-executive/privileged.sock")
 DEFAULT_CLIENT_TIMEOUT_SECONDS = 11 * 60
 _MAX_RESPONSE_BYTES = 128 * 1024
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _DEADLINE_EXPIRED = "privileged broker client deadline expired"
 
 
@@ -296,12 +297,198 @@ def validate_status_response(
     return result
 
 
+def send_forward_recovery(
+    request: Mapping[str, object],
+    *,
+    socket_path: Path = DEFAULT_SOCKET,
+    timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+    expected_release_sha: str | None = None,
+) -> dict[str, object]:
+    """Send the one closed dormant forward request; root peer first, once.
+
+    The response is validated against the caller's exact request before it is
+    returned; no automatic retry exists and a refusal is returned as-is.
+    """
+    from ops.executive_os.provider_incident_forward import validate_forward_request
+
+    response = _send_one_frame(
+        validate_forward_request(request)[0].to_dict(),
+        socket_path=socket_path,
+        timeout_seconds=timeout_seconds,
+        require_root_peer=True,
+    )
+    return validate_forward_recovery_response(
+        response, request, expected_release_sha=expected_release_sha
+    )
+
+
+def validate_forward_recovery_response(
+    response: Mapping[str, object],
+    request: Mapping[str, object],
+    *,
+    expected_release_sha: str | None = None,
+) -> dict[str, object]:
+    """Validate a forward effect response against the exact closed request.
+
+    The forward action is deliberately absent from the ordinary action
+    catalog, so ordinary ``validate_request`` cannot correlate this schema.
+    The canonical forward digest F is re-derived from the caller's exact
+    request and bound on the embedded terminal, together with the request id
+    and the forward action; ``expected_release_sha`` optionally binds the
+    repaired release.  The wire carries no commitment bytes, so none are
+    invented here: the receipt's stdout digest stays bound only to whatever
+    commitment evidence the receipt itself asserts.
+    """
+    from ops.executive_os.provider_incident_forward import (
+        validate_forward_request,
+    )
+
+    if response.get("schema") != WIRE_RESPONSE_SCHEMA or not isinstance(response.get("ok"), bool):
+        raise RuntimeError("privileged broker returned an invalid effect response")
+    if response["ok"] is False:
+        if frozenset(response) != frozenset({"schema", "ok", "error", "detail"}):
+            raise RuntimeError("privileged broker returned an invalid refusal response")
+        if not isinstance(response.get("error"), str) or not isinstance(response.get("detail"), str):
+            raise RuntimeError("privileged broker returned an invalid refusal response")
+        return dict(response)
+    if (
+        frozenset(response) != frozenset({"schema", "ok", "replayed", "receipt"})
+        or not isinstance(response.get("replayed"), bool)
+        or not isinstance(response.get("receipt"), dict)
+    ):
+        raise RuntimeError("privileged broker returned an invalid success response")
+    validated, forward_digest = validate_forward_request(request)
+    receipt = validate_terminal_receipt(
+        response["receipt"],
+        expected_request_id=validated.request_id,
+        expected_request_sha256=forward_digest,
+        expected_release_sha=expected_release_sha,
+        expected_action=validated.action,
+    )
+    if receipt["outcome"] != "SUCCEEDED" or receipt["exit_code"] != 0:
+        raise RuntimeError("privileged broker returned a non-success forward receipt")
+    return {"schema": response["schema"], "ok": True, "replayed": response["replayed"], "receipt": receipt}
+
+
+def send_forward_status(
+    request: Mapping[str, object],
+    *,
+    socket_path: Path = DEFAULT_SOCKET,
+    timeout_seconds: int = DEFAULT_CLIENT_TIMEOUT_SECONDS,
+) -> dict[str, object]:
+    """Send the closed forward status request; root peer first, once."""
+    from ops.executive_os.provider_incident_forward import (
+        validate_forward_status_request,
+    )
+
+    validated = validate_forward_status_request(request)
+    return _send_one_frame(
+        validated.to_dict(),
+        socket_path=socket_path,
+        timeout_seconds=timeout_seconds,
+        require_root_peer=True,
+    )
+
+
+def validate_forward_status_response(
+    response: Mapping[str, object],
+    *,
+    expected_forward_request_sha256: str | None = None,
+) -> dict[str, object]:
+    """Validate the closed forward status envelope and its embedded join.
+
+    A SUCCEEDED forward_state must carry the complete join evidence; any other
+    state must carry none.  The embedded terminal is bound to the envelope's
+    own installed release and the caller's trusted expected request digest F.
+    Successful status cannot be correlated without that external expectation;
+    the terminal's own digest does not establish it.
+    Validation grants no effect or retry authority and never reinterprets the
+    unchanged original UNKNOWN history.
+    """
+    from ops.executive_os.provider_incident_forward import (
+        FORWARD_RECOVERY_ACTION,
+        ORIGINAL_ISSUER_REQUEST_ID,
+    )
+
+    if (
+        not isinstance(response, Mapping)
+        or response.get("schema") != WIRE_RESPONSE_SCHEMA
+        or response.get("ok") is not True
+        or response.get("query") is not True
+        or response.get("request_id") != ORIGINAL_ISSUER_REQUEST_ID
+        or not isinstance(response.get("installed_release_sha"), str)
+        or _SHA40_RE.fullmatch(response["installed_release_sha"]) is None
+        or response.get("original_status") not in (
+            STATUS_TERMINAL, STATUS_EFFECT_UNKNOWN,
+            STATUS_RECONCILED_NOT_APPLIED, STATUS_NOT_FOUND,
+        )
+        or response.get("forward_state") not in (
+            "NOT_RESERVED", "RESERVED_OR_UNKNOWN", "SUCCEEDED",
+        )
+    ):
+        raise RuntimeError("privileged broker returned an invalid forward status response")
+    base_keys = frozenset({
+        "schema", "ok", "query", "original_status", "request_id",
+        "installed_release_sha", "forward_state",
+    })
+    forward_state = response["forward_state"]
+    if forward_state == "SUCCEEDED":
+        expected_keys = base_keys | {"forward"}
+    else:
+        expected_keys = base_keys
+        if "forward" in response:
+            raise RuntimeError("privileged broker returned an invalid forward status envelope")
+    if frozenset(response) != expected_keys:
+        raise RuntimeError("privileged broker returned an invalid forward status envelope")
+    result = dict(response)
+    if forward_state == "SUCCEEDED":
+        join = response["forward"]
+        if (
+            not isinstance(join, Mapping)
+            or frozenset(join) != {
+                "terminal", "commitment_sha256", "reservation_sha256", "grant_sha256",
+            }
+        ):
+            raise RuntimeError("privileged broker returned an invalid forward join")
+        receipt = validate_terminal_receipt(
+            join["terminal"],
+            expected_request_id=ORIGINAL_ISSUER_REQUEST_ID,
+            expected_action=FORWARD_RECOVERY_ACTION,
+        )
+        if receipt["release_sha"] != response["installed_release_sha"]:
+            # The embedded terminal belongs to this envelope's own repair, not
+            # to some other (older or newer) installed release.
+            raise RuntimeError("privileged broker forward terminal release differs from its envelope")
+        if (not isinstance(expected_forward_request_sha256, str)
+                or _SHA256_RE.fullmatch(expected_forward_request_sha256) is None):
+            raise RuntimeError("privileged broker forward success requires the expected request digest")
+        if receipt["request_sha256"] != expected_forward_request_sha256:
+            raise RuntimeError("privileged broker forward terminal digest differs from the expected request")
+        if receipt["outcome"] != "SUCCEEDED" or receipt["exit_code"] != 0:
+            raise RuntimeError("privileged broker returned a non-success forward terminal")
+        for field in ("commitment_sha256", "reservation_sha256", "grant_sha256"):
+            value = join[field]
+            if not isinstance(value, str) or _SHA256_RE.fullmatch(value) is None:
+                raise RuntimeError("privileged broker returned an invalid forward join digest")
+        result["forward"] = {
+            "terminal": receipt,
+            "commitment_sha256": join["commitment_sha256"],
+            "reservation_sha256": join["reservation_sha256"],
+            "grant_sha256": join["grant_sha256"],
+        }
+    return result
+
+
 __all__ = [
     "BrokerTrustError",
     "DEFAULT_SOCKET",
     "DEFAULT_CLIENT_TIMEOUT_SECONDS",
     "send_effect",
+    "send_forward_recovery",
+    "send_forward_status",
     "send_status",
     "validate_effect_response",
+    "validate_forward_recovery_response",
+    "validate_forward_status_response",
     "validate_status_response",
 ]

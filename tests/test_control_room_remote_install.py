@@ -451,7 +451,7 @@ def test_installer_exact_extracted_allowlist_boots_under_isolated_python(tmp_pat
     assert sum(
         path.startswith("control_plane/") and path.endswith(".py")
         for path in manifest["files"]
-    ) == 7
+    ) == 8
     assert "config/strategic_state.yml" in manifest["files"]
     assert not any(path.startswith(".git/") for path in manifest["files"])
     for unrelated in (
@@ -510,11 +510,14 @@ def test_exact_extracted_release_composes_degraded_remote_state_without_git_meta
 
     source_dir = tmp_path / "sources"
     source_dir.mkdir(mode=0o750)
+    source_dir.chmod(0o750)
+    os.chown(source_dir, -1, os.getgid())
     active = json.loads((fixtures / "active_builds_v1.json").read_text())
     active["collected_at"] = "2026-08-28T20:00:00+00:00"
     active_path = source_dir / "project-active-builds.json"
     active_path.write_text(json.dumps(active), encoding="utf-8")
     active_path.chmod(0o640)
+    os.chown(active_path, -1, os.getgid())
 
     harness = """
 import json, os, sys
@@ -561,7 +564,10 @@ print(json.dumps(remote.compose_collected(inputs, identity), sort_keys=True))
     projected = json.loads(result.stdout)
     assert projected["schema"] == remote.REMOTE_SCHEMA
     assert projected["source_freshness"]["agent_os_brief"]["state"] == "fresh"
-    assert projected["source_freshness"]["active_builds"]["state"] == "fresh"
+    assert projected["source_freshness"]["active_builds"]["state"] == "fresh", {
+        "active_builds": projected["source_freshness"]["active_builds"],
+        "degraded": projected["degraded"],
+    }
     assert projected["source_freshness"]["executive_runtime"]["state"] == "unavailable"
     assert all("/" not in reason for reason in projected["degraded"])
 
@@ -697,6 +703,9 @@ def test_installer_directory_guard_refuses_symlink_and_unsafe_mode_without_targe
     safe = tmp_path / "safe"
     safe.mkdir(mode=0o750)
     safe.chmod(0o750)
+    # macOS may inherit a temporary directory's group from its parent.
+    # Match the fixture to the process group the guard is asked to validate.
+    os.chown(safe, -1, os.getgid())
     accepted = _validate_installer_directory(safe, mode="0750")
     assert accepted.returncode == 0, accepted.stderr
 
@@ -719,6 +728,7 @@ def test_installer_directory_guard_refuses_symlink_and_unsafe_mode_without_targe
     unsafe = tmp_path / "unsafe"
     unsafe.mkdir(mode=0o770)
     unsafe.chmod(0o770)
+    os.chown(unsafe, -1, os.getgid())
     refused_mode = _validate_installer_directory(unsafe, mode="0750")
     assert refused_mode.returncode == 65
     assert refused_mode.stderr.strip() == "test_directory_mode"

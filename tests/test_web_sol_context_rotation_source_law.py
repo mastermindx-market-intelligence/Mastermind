@@ -341,7 +341,7 @@ def test_session_reliability_preserves_budgets_and_emergency_frontier() -> None:
         "16 KiB",
         "100 matches",
         "32 KiB",
-        "six material tool calls",
+        "no tool-call counter triggers a checkpoint",
         "15 seconds",
         "30 seconds",
         "12 KiB / 1500 words",
@@ -371,8 +371,8 @@ def test_isolated_failure_allows_only_bounded_mode_recovery() -> None:
 def test_compact_project_kernel_carries_adaptive_mode_and_rotation_boundary() -> None:
     kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
-        "Sol owns mode recommendations",
-        "Pro may support writes, lack specific tools/actions, or lose access mid-session",
+        "human-attended mode fit/stickiness",
+        "Capabilities vary by action/session",
         "Extra High is a recovery candidate, not guaranteed access",
         "Text cannot self-switch",
         "No unchanged retry/reconnect loops",
@@ -426,8 +426,8 @@ def test_session_reliability_preserves_long_mode_specific_work() -> None:
 def test_compact_kernel_projects_phase_fence_and_mode_stickiness() -> None:
     kernel = _normalized(_read("docs/sol_skills/BOOTSTRAP_KERNEL.md"))
     for phrase in (
-        "mode stickiness",
-        "active semantic phase",
+        "mode fit/stickiness",
+        "Keep DONE_WHEN and allowed surfaces",
         "Depth allowed; breadth fenced",
         "same healthy chat",
         "mission is incomplete",

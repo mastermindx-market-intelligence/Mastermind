@@ -40,7 +40,7 @@ _V1_EQUIVALENT_FIRST_TIERS = {
     ("review", "elevated"): ("standard.review",),
 }
 
-_V1_ROUTING_POLICY_VERSION = "2026-08-24.stage4"
+_CURRENT_ROUTING_POLICY_VERSION = "2026-10-14.attended-qualification"
 
 _JOB_CONSTRAINT_KEYS = {
     "task_kind",
@@ -93,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-10-03.company-consultation-edge-p0"
+    assert implementation.capability_policy_version == "2026-10-14.attended-qualification"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -365,7 +365,7 @@ def test_runtime_claim_honors_alias_order_before_worker_id_and_records_receipt(t
         "fast.engineering",
         "standard.engineering",
     ]
-    assert event.payload["routing_policy_version"] == _V1_ROUTING_POLICY_VERSION
+    assert event.payload["routing_policy_version"] == _CURRENT_ROUTING_POLICY_VERSION
     assert event.payload["execution_profile_id"] == "sealed.worker.write.no-extensions.v1"
     assert event.payload["execution_profile_digest"] == decision.execution_profile_digest
     assert event.payload["capability_policy_version"] == decision.capability_policy_version
@@ -624,7 +624,7 @@ def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_cont
     router = ModelRouter.load()
 
     assert ROUTER_SCHEMA_VERSION == "mastermind.executive_worker_routes/v2"
-    assert router.policy_version == _V1_ROUTING_POLICY_VERSION
+    assert router.policy_version == _CURRENT_ROUTING_POLICY_VERSION
     for (task_kind, risk), aliases in _V1_EQUIVALENT_FIRST_TIERS.items():
         decision = router.route(WorkRequest(task_kind, risk=risk))
         assert decision.suitability_tiers == (
@@ -634,7 +634,7 @@ def test_current_v2_schema_preserves_the_complete_v1_codex_route_and_policy_cont
         assert decision.to_dict()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["preferred_model_aliases"] == list(aliases)
         assert decision.job_constraints()["routing_policy_version"] == (
-            _V1_ROUTING_POLICY_VERSION
+            _CURRENT_ROUTING_POLICY_VERSION
         )
 
 

@@ -154,6 +154,7 @@ def build_parser() -> argparse.ArgumentParser:
         child.add_argument("--enable-w3c", action="store_true")
     child = commands.add_parser("rebind-release")
     child.add_argument("--expected-bot-user-id", required=True)
+    child.add_argument("--enable-w3c", action="store_true")
     return parser
 
 
@@ -1387,8 +1388,14 @@ class _A2Rebind:
         raise A2EnrollmentError("A2_REBIND_MIXED_GENERATION") from failure
 
 
-async def _rebind(*, bot_user_id: str) -> dict[str, object]:
-    """Bind a coherent existing A2 enrollment to the installed source release."""
+async def _rebind(*, bot_user_id: str, enable_w3c: bool = False) -> dict[str, object]:
+    """Bind an existing enrollment; only an explicit flag enables W3C.
+
+    Token, scopes, bot, disabled/unloaded admission and descriptor-bound pair
+    ownership remain unchanged. This does not activate the relay.
+    """
+    if type(enable_w3c) is not bool:
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
     release_sha = _assert_host_prepared()
     binding = _open_bound_config_directory()
     try:
@@ -1408,15 +1415,16 @@ async def _rebind(*, bot_user_id: str) -> dict[str, object]:
             except Exception:
                 raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
             tx.check()
-            if old_sha == release_sha:
+            desired_w3c = w3c_enabled or enable_w3c
+            if old_sha == release_sha and desired_w3c == w3c_enabled:
                 return {"action": "already-current", "bot_user_id": bot_user_id,
                         "release_sha": release_sha}
             target = {
                 PLIST_PATH: render_plist(bot_user_id=bot_user_id, release_sha=release_sha,
-                                        w3c_enabled=w3c_enabled),
+                                        w3c_enabled=desired_w3c),
                 CONFIG_PATH: _canonical_json_bytes(build_config_document(
                     bot_user_id=bot_user_id, release_sha=release_sha,
-                    scopes=scopes, w3c_enabled=w3c_enabled)),
+                    scopes=scopes, w3c_enabled=desired_w3c)),
             }
             try:
                 for path, payload in target.items():
@@ -1483,7 +1491,10 @@ def _run_invocation(
                 shared_kwargs["w3c_enabled"] = True
             receipt = asyncio.run(_enroll_shared(**shared_kwargs))
         elif args.command == "rebind-release":
-            receipt = asyncio.run(_rebind(bot_user_id=args.expected_bot_user_id))
+            rebind_kwargs = {"bot_user_id": args.expected_bot_user_id}
+            if args.enable_w3c:
+                rebind_kwargs["enable_w3c"] = True
+            receipt = asyncio.run(_rebind(**rebind_kwargs))
         elif args.command == "verify":
             verify_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
