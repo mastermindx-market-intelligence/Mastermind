@@ -158,3 +158,17 @@ This is an evidence checklist, **not a second lifecycle, state machine or deleti
 - **Critical path after canary:** large archival pages first, then active/product-linked pages with usual builder/link custody; do not prioritize by node count alone if semantic or effect risk is greater.
 
 **Current finalization: MORE_WORK_EXISTS, migration not accepted.** Do not mark the original file cleaned up merely because this companion is committed.
+
+
+## 8. Official Paper vendor capability and version compatibility research
+
+Official Paper documentation consulted on October 22, 2026:
+
+- https://paper.design/downloads now advertises **Paper Desktop and MCP v0.5.16, dated October 15, 2026**. The live inspected Mastermind adapter session reported paper-desktop **v0.5.14**. Do not infer current local update from the download page, and do not auto-upgrade a shared live desktop under an active bridge's 37-tool catalog pin. Capture actual installed vendor version **and complete catalog SHA** before accepting any new adapter write; if drift, fail closed and have the existing adapter-owner qualify it.
+- https://paper.design/docs/support documents native **selection copy/paste** keyboard shortcuts and multiple-file workflows in the desktop UI, but does not, by itself, prove lossless editable **cross-file page** transfer, component references or comment preservation. A source-artboard -> new-file paste is a **scratch canary hypothesis**, not an authorized backend/API path and not verified user-content relocation.
+- https://paper.design/docs/tokens explicitly documents copying tokens from one file's Theme tab to another. It also says copied tokens **do not update when changed in a different file**. Therefore each destination must have an explicit repository-derived token projection, post-copy token inventory and future drift checks. A copied palette is *not* a new shared live design-system authority.
+- https://paper.design/build-log advertises multiple-file desktop tabs and file duplication, plus later performance work for larger files. Those improvements do not prove that this original file's data-loss warning has disappeared or that the vendor imposes the provisional 6,000-node planning target.
+
+**Engineering inference, not vendor promise:** A compatible, authorized native clipboard copy can be tested on an entirely disposable pair of Paper files while waiting for a reviewed cross-file MCP tool. First copy tokens into the target scratch file, then copy ONE simple native artboard, then a component/image-rich board, and compare deeply. If fidelity fails, abandon this path; never recreate from HTML/JSX and call it lossless. The source 63-page file remains read-only during this feasibility check.
+
+**Specific adapter PR #1722 compatibility requirement:** treat release publication/installed source SHA/catalog SHA as distinct. The historical 0.5.14 full-catalog digest is not guaranteed to match 0.5.16. A version bump alone is not a proof of drift or compatibility; compare the actual reviewed catalog and accepted schema under the existing bridge and no-replay laws.
