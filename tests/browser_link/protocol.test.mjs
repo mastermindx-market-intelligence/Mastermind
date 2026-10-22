@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { validateCommand, BrowserLinkError, MAX_FRAME_BYTES } from '../../integrations/mastermind_browser_link/extension/protocol.mjs';
 const now = 1_000_000;
-const valid = () => ({ schema: 'mastermind.browser_link.command.v1', request_id: 'request-1', connection_generation: 'connection-1', tab_id: 0, consent_id: 'consent-1', document_revision: 0, expires_at_ms: now + 1000, command: 'snapshot', args: {} });
+const valid = () => ({ schema: 'mastermind.browser_link.command.v2', request_id: 'request-1', connection_generation: 'connection-1', tab_id: 0, consent_id: 'consent-1', document_revision: 0, expires_at_ms: now + 1000, command: 'snapshot', args: {} });
 const bad = (value, code = 'INVALID_COMMAND') => assert.throws(() => validateCommand(value, now), e => e instanceof BrowserLinkError && e.code === code);
 
 test('exact valid read is normalized and frozen', () => { const x = validateCommand(valid(), now); assert.equal(x.command, 'snapshot'); assert.equal(Object.isFrozen(x.args), true); });
@@ -17,3 +17,13 @@ test('expired and overlong lifetimes are refused', () => { bad({ ...valid(), exp
 test('output-independent input frame cap is enforced before parsing action', () => { assert.equal(MAX_FRAME_BYTES, 65536); bad({ ...valid(), args: { text: 'x'.repeat(70000) } }, 'FRAME_TOO_LARGE'); });
 test('navigate cannot target privileged protocols or URL credentials', () => { for (const url of ['file:///etc/passwd','chrome://settings','javascript:alert(1)','https://u:p@example.test/','data:text/html,x']) bad({ ...valid(), command: 'navigate', args: { url }, writer: { holder_ref: 'a', fence: 1 } }); });
 test('scroll magnitudes and text lengths are bounded', () => { bad({ ...valid(), command: 'scroll', args: { delta_x: 0, delta_y: 2001 }, writer: { holder_ref: 'a', fence: 1 } }); bad({ ...valid(), command: 'type', args: { element_ref: 'e', text: 'a'.repeat(16385) }, writer: { holder_ref: 'a', fence: 1 } }); });
+
+test('creation accepts one website URL but no model-selected window, focus, or incognito options', () => {
+  for (const command of ['create_tab', 'create_window']) {
+    const input = { ...valid(), command, args: { url: 'https://child.test' }, writer: { holder_ref: 'a', fence: 1 } };
+    assert.equal(validateCommand(input, now).args.url, 'https://child.test/');
+    for (const key of ['windowId', 'tabId', 'incognito', 'focused', 'active', 'urls']) bad({ ...input, args: { ...input.args, [key]: true } });
+    for (const url of ['file:///private/x', 'chrome://settings', 'https://user:pass@example.test/']) bad({ ...input, args: { url } });
+  }
+  bad({ ...valid(), schema: 'mastermind.browser_link.command.v1' });
+});

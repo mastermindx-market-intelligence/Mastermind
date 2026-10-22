@@ -137,7 +137,99 @@ export class ChromePort {
     if (typeof object?.objectId !== 'string') refuse('STALE_ELEMENT');
     guard.assertCurrent(); return object.objectId;
   }
+  async #createdSharing(request, guard, created, deadline) {
+    if (!Number.isSafeInteger(created.tab_id)) return { state: 'not_shared', code: 'CREATED_TAB_UNAVAILABLE' };
+    return new Promise(resolve => {
+      let done = false, revision = 0, running = false, again = false, timer = null;
+      const notShared = code => ({ state: 'not_shared', code });
+      const cleanup = () => {
+        clearTimeout(timer);
+        this.chrome.tabs.onUpdated.removeListener(updated);
+        this.chrome.tabs.onRemoved.removeListener(removed);
+        this.chrome.tabs.onReplaced.removeListener(replaced);
+      };
+      const finish = result => {
+        if (done) return;
+        done = true; cleanup(); resolve(result);
+      };
+      const probe = async () => {
+        if (done) return;
+        if (running) { again = true; return; }
+        running = true;
+        do {
+          again = false;
+          const observedRevision = revision;
+          try {
+            guard.assertCurrent();
+            if (this.now() >= deadline) { finish(notShared('CREATED_TAB_TIMEOUT')); break; }
+            const child = await this.chrome.tabs.get(created.tab_id);
+            if (done) break;
+            // An event during tabs.get invalidates that entire readback.
+            if (observedRevision !== revision) { again = true; continue; }
+            guard.assertCurrent();
+            if (this.now() >= deadline) { finish(notShared('CREATED_TAB_TIMEOUT')); break; }
+            if (child.id !== created.tab_id || child.windowId !== created.window_id || child.incognito !== false) {
+              finish(notShared('CREATED_TAB_CHANGED')); break;
+            }
+            if (child.status !== 'complete' || (typeof child.pendingUrl === 'string' && child.pendingUrl)) continue;
+            if (httpURL(child.url).origin !== httpURL(request.args.url).origin) {
+              finish(notShared('CREATED_TAB_ORIGIN_CHANGED')); break;
+            }
+            // Synchronous final guard and grant: no event can interleave here.
+            finish(guard.shareCreated(child));
+          } catch (error) {
+            finish(notShared(typeof error?.code === 'string' ? error.code : 'CREATED_TAB_UNAVAILABLE'));
+          }
+        } while (!done && again);
+        running = false;
+      };
+      const updated = tabId => { if (tabId === created.tab_id) { revision++; void probe(); } };
+      const removed = tabId => { if (tabId === created.tab_id) { revision++; finish(notShared('CREATED_TAB_CLOSED')); } };
+      const replaced = (_newId, oldId) => { if (oldId === created.tab_id) { revision++; finish(notShared('CREATED_TAB_REPLACED')); } };
+      this.chrome.tabs.onUpdated.addListener(updated);
+      this.chrome.tabs.onRemoved.addListener(removed);
+      this.chrome.tabs.onReplaced.addListener(replaced);
+      timer = setTimeout(() => finish(notShared('CREATED_TAB_TIMEOUT')), Math.max(0, deadline - this.now()));
+      void probe();
+    });
+  }
+  async #create(request, guard) {
+    const sharingDeadline = Math.min(request.expires_at_ms, this.now() + 10_000);
+    const anchor = await this.#origin(request, guard);
+    if (!Number.isSafeInteger(anchor.windowId) || anchor.windowId < 0 || anchor.incognito !== false) refuse('CREATION_CONTEXT_REFUSED');
+    const requested = httpURL(request.args.url).href;
+    let created, contextValid;
+    if (request.command === 'create_tab') {
+      if (typeof this.chrome.tabs.create !== 'function') refuse('CREATION_UNAVAILABLE');
+      guard.beforeEffect();
+      const result = await this.chrome.tabs.create({ windowId: anchor.windowId, url: requested, active: false });
+      if (!Number.isSafeInteger(result?.id) || result.id < 0 || !Number.isSafeInteger(result.windowId) || result.windowId < 0) refuse('CREATION_RESULT_UNAVAILABLE');
+      created = { kind: 'tab', window_id: result.windowId, tab_id: result.id };
+      guard.creationConfirmed(created);
+      contextValid = result.windowId === anchor.windowId && result.incognito === false;
+    } else {
+      if (typeof this.chrome.windows?.create !== 'function') refuse('CREATION_UNAVAILABLE');
+      guard.beforeEffect();
+      const result = await this.chrome.windows.create({ url: requested, type: 'normal', focused: false, incognito: false });
+      if (!Number.isSafeInteger(result?.id) || result.id < 0) refuse('CREATION_RESULT_UNAVAILABLE');
+      created = { kind: 'window', window_id: result.id };
+      const child = Array.isArray(result.tabs) && result.tabs.length === 1 ? result.tabs[0] : null;
+      if (Number.isSafeInteger(child?.id) && child.id >= 0 && child.id !== request.tab_id && child.windowId === result.id) created.tab_id = child.id;
+      guard.creationConfirmed(created);
+      contextValid = result.incognito === false && result.type === 'normal';
+    }
+    let sharing;
+    try {
+      sharing = contextValid ? await this.#createdSharing(request, guard, created, sharingDeadline)
+        : { state: 'not_shared', code: 'CREATED_CONTEXT_CHANGED' };
+    } catch (error) {
+      sharing = { state: 'not_shared', code: typeof error?.code === 'string' ? error.code : 'CREATED_TAB_UNAVAILABLE' };
+    }
+    return { kind: 'browser_creation', created, sharing };
+  }
   async mutate(request, guard) {
+    // Creation uses the exact anchor window but needs no debugger attachment.
+    if (request.command === 'create_tab' || request.command === 'create_window') return this.#create(request, guard);
     await this.#ensure(request, guard);
     if (request.command === 'navigate') {
       if (httpURL(request.args.url).origin !== guard.origin) refuse('ORIGIN_NOT_SHARED');

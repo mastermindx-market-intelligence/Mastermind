@@ -75,7 +75,7 @@ def test_managed_tab_cannot_smuggle_human_consent_identity():
 
 def test_every_high_level_action_is_closed_and_sorted():
     assert HIGH_LEVEL_ACTIONS == frozenset(
-        {"snapshot", "screenshot", "click", "type", "scroll", "navigate"}
+        {"snapshot", "screenshot", "click", "type", "scroll", "navigate", "create_tab", "create_window"}
     )
     with pytest.raises(BrowserTabRefError, match="ACTIONS_INVALID"):
         binding(allowed_actions=("snapshot", "shell"))

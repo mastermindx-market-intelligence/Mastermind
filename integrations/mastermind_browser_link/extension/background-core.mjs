@@ -25,7 +25,7 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
   function inventory(requestId = null) {
     if (!ready || !nativePort || !controller) return;
     try {
-      send(nativePort, { schema: 'mastermind.browser_link.inventory.v1',
+      send(nativePort, { schema: 'mastermind.browser_link.inventory.v2',
         connection_generation: controller.connectionGeneration, shared_tabs: controller.inventory(),
         ...(requestId === null ? {} : { request_id: requestId }) });
     } catch { closeConnection?.(); }
@@ -74,13 +74,13 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
         if (nativePort !== port) return;
         try {
           boundedJSON(message);
-          if (message?.schema === 'mastermind.browser_link.ready.v1' &&
+          if (message?.schema === 'mastermind.browser_link.ready.v2' &&
               Object.keys(message).sort().join(',') === 'connection_generation,schema' &&
               message.connection_generation === generation) {
             clearTimeout(handshakeTimer); handshakeTimer = null;
             ready = true; inventory(); badge(); return;
           }
-          if (ready && message?.schema === 'mastermind.browser_link.observe.v1' &&
+          if (ready && message?.schema === 'mastermind.browser_link.observe.v2' &&
               Object.keys(message).sort().join(',') === 'connection_generation,request_id,schema' &&
               message.connection_generation === generation && typeof message.request_id === 'string' &&
               /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(message.request_id)) {
@@ -94,7 +94,7 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
       });
       handshakeTimer = setTimeout(() => { if (nativePort === port && !ready) close(); }, HANDSHAKE_TIMEOUT_MS);
       try {
-        send(port, { schema: 'mastermind.browser_link.hello.v1', protocol_version: 1,
+        send(port, { schema: 'mastermind.browser_link.hello.v2', protocol_version: 2,
           extension_id: chrome.runtime.id, instance_ref: instanceRef, connection_generation: generation });
       } catch (error) { close(); throw error; }
       badge();
@@ -116,7 +116,7 @@ export function startBrowserLink({ chrome = globalThis.chrome, popupPath = 'popu
         if (!ready || controller !== requestedController || nativePort !== requestedPort) throw new BrowserLinkError('LINK_NOT_READY');
         if (!tab || !Number.isSafeInteger(tab.id)) throw new BrowserLinkError('TARGET_UNAVAILABLE');
         if (tab.status === 'loading' || (typeof tab.pendingUrl === 'string' && tab.pendingUrl)) throw new BrowserLinkError('TARGET_NAVIGATING');
-        controller.share(tab.id, httpURL(tab.url).origin); inventory(); badge();
+        controller.share(tab.id, httpURL(tab.url).origin, request.allow_create ?? false); inventory(); badge();
         return { shared: true, tab_id: tab.id };
       }
       const currentAdapter = adapter;

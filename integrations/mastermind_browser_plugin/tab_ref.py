@@ -29,7 +29,7 @@ MAX_BROWSER_SESSION_REF_BYTES = 16 * 1024
 MAX_BROKER_ACTION_REF_BYTES = 32 * 1024
 MAX_TAB_REF_LIFETIME_MS = 5 * 60 * 1000
 HIGH_LEVEL_ACTIONS = frozenset(
-    {"snapshot", "screenshot", "click", "type", "scroll", "navigate"}
+    {"snapshot", "screenshot", "click", "type", "scroll", "navigate", "create_tab", "create_window"}
 )
 
 _TOKEN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")

@@ -22,7 +22,8 @@ from .workbench_inventory import (
     _maybe, _clock, _opaque,
 )
 
-LINK_ACTIONS = ("click", "navigate", "screenshot", "scroll", "snapshot", "type")
+LINK_ACTIONS = ("click", "create_tab", "create_window", "navigate", "screenshot", "scroll", "snapshot", "type")
+LINK_TAB_ACTIONS = tuple(action for action in LINK_ACTIONS if action not in {"create_tab", "create_window"})
 LINK_READS = ("screenshot", "snapshot")
 _LINK_OBSERVATION_TTL_MS = 30_000
 
@@ -60,7 +61,8 @@ def parse_link_tab_group(value, *, resource, now_ms):
     for item in data["shared_tabs"]:
         if item["state"] in {"busy", "navigating"}:
             continue
-        capability = LINK_READS if item["state"] == "effect_unresolved" else LINK_ACTIONS
+        capability = (LINK_READS if item["state"] == "effect_unresolved" else
+                      LINK_ACTIONS if item["allow_create"] else LINK_TAB_ACTIONS)
         actions = tuple(sorted(set(capability) & set(resource.allowed_actions)))
         if not actions:
             continue

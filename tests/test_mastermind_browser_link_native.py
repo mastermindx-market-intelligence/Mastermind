@@ -62,7 +62,7 @@ class Peer:
             stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             bufsize=0,
         )
-        self.hello = {"schema": HELLO_SCHEMA, "protocol_version": 1,
+        self.hello = {"schema": HELLO_SCHEMA, "protocol_version": 2,
                       "extension_id": enrollment.extension_id, "instance_ref": enrollment.instance_id,
                       "connection_generation": generation}
         self.write_gate = threading.Lock()
@@ -77,7 +77,7 @@ class Peer:
     def ready(self):
         self.send(self.hello)
         reply = self.receive()
-        assert reply == {"schema": "mastermind.browser_link.ready.v1",
+        assert reply == {"schema": "mastermind.browser_link.ready.v2",
                          "connection_generation": self.generation}
 
     def result(self, command, effect="APPLIED", status="completed", **extra):
@@ -303,5 +303,25 @@ def test_malformed_closed_enums_refuse_without_unhashable_exception(value):
                          "status": value, "effect": "APPLIED"}, "g")
     with pytest.raises(LinkProtocolError):
         validate_inventory({"schema": INVENTORY_SCHEMA, "connection_generation": "g", "shared_tabs": [
-            {"tab_id": 1, "origin": "https://example.test", "consent_id": "c", "document_revision": 0, "state": value}
+            {"tab_id": 1, "origin": "https://example.test", "consent_id": "c", "document_revision": 0, "state": value, "allow_create": False}
         ]}, "g")
+
+
+def test_old_native_protocol_cannot_qualify_a_creation_capable_connection():
+    from integrations.mastermind_browser_link.native_channel import validate_hello
+    enrollment = LinkEnrollment(EXTENSION, INSTANCE, Path("/tmp/fixture/native.sock"))
+    hello = {"schema": HELLO_SCHEMA, "protocol_version": 2, "extension_id": EXTENSION,
+             "instance_ref": INSTANCE, "connection_generation": "generation"}
+    assert validate_hello(hello, enrollment) == hello
+    for changed in ({**hello, "protocol_version": 1},
+                    {**hello, "schema": "mastermind.browser_link.hello.v1"},
+                    {**hello, "protocol_version": True}):
+        with pytest.raises(LinkProtocolError):
+            validate_hello(changed, enrollment)
+
+
+def test_inventory_v2_requires_explicit_creation_permission():
+    row = {"tab_id": 7, "origin": "https://example.test", "consent_id": "consent",
+           "document_revision": 0, "state": "shared"}
+    with pytest.raises(LinkProtocolError):
+        validate_inventory({"schema": INVENTORY_SCHEMA, "connection_generation": "g", "shared_tabs": [row]}, "g")

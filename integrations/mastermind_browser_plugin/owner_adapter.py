@@ -232,7 +232,7 @@ class BrowserLinkProjector(WorkbenchManagedProjector):
             args = self._arguments(arguments, frozenset({"element_ref", "text"}))
             self._element_ref(args["element_ref"])
             self._text(args["text"])
-        elif action == "navigate":
+        elif action in {"navigate", "create_tab", "create_window"}:
             args = self._arguments(arguments, frozenset({"url"}))
             self._url(args["url"])
         elif action == "scroll":

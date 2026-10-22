@@ -19,7 +19,7 @@ class LinkDeployment(FakeDeployment):
         self.clock = [NOW]
         self.generation = "native-generation"
         self.rows = [{"tab_id": tab, "origin": "https://example.test", "consent_id": f"consent-{tab}",
-                      "document_revision": 0, "state": "shared"} for tab in (7, 8)]
+                      "document_revision": 0, "state": "shared", "allow_create": False} for tab in (7, 8)]
         self.status_calls = []
         self.tab_calls = []
         self.other = False
@@ -154,3 +154,32 @@ def test_exact_action_projection_has_no_caller_writer_or_target_override():
                 "args": {"delta_x": 0, "delta_y": 200, "tab_id": 7},
             })
     asyncio.run(exercise())
+
+
+def test_creation_actions_follow_exact_local_consent_and_never_another_tab():
+    deployment, composition, caller = setup()
+    deployment.rows[0]["allow_create"] = True
+    async def exercise():
+        _session, tabs = await tabs_for(composition, caller)
+        permitted, ordinary = [decoded(composition, caller, row["tab_ref"], deployment.clock[0]) for row in tabs]
+        assert {"create_tab", "create_window"} <= set(permitted.allowed_actions)
+        assert {"create_tab", "create_window"}.isdisjoint(ordinary.allowed_actions)
+        await composition.owner.prepare_browser_action(caller, {
+            "tab_ref": tabs[0]["tab_ref"], "action": "create_window", "args": {"url": "https://child.test/"}})
+        projected = [row for row in deployment.calls if row[0] == "prepare"][-1][4]
+        assert projected["command"] == "create_window"
+        assert projected["target"]["tab_id"] == 7
+        with pytest.raises(OwnerRefused):
+            await composition.owner.prepare_browser_action(caller, {
+                "tab_ref": tabs[1]["tab_ref"], "action": "create_tab", "args": {"url": "https://child.test/"}})
+        deployment.rows[0]["allow_create"] = False
+        assert not await composition.inventory.revalidate_tab(caller, permitted)
+    asyncio.run(exercise())
+
+
+@pytest.mark.parametrize("flag", [None, 0, 1, "", [], {}])
+def test_creation_permission_must_be_a_present_boolean(flag):
+    deployment, composition, caller = setup()
+    deployment.rows[0]["allow_create"] = flag
+    with pytest.raises(OwnerRefused):
+        asyncio.run(tabs_for(composition, caller))

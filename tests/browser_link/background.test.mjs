@@ -29,8 +29,8 @@ function fixture(storage = {}, expectedNativeHost = 'com.mastermind.browser_link
       async create(name, value) { alarmRows.set(name, value); created.push(name); } },
   };
   return { chrome, messages, ports, created, alarmRows, badges, detached, storage,
-    hello() { return messages.filter(row => row.schema === 'mastermind.browser_link.hello.v1').at(-1); },
-    ready() { ports.at(-1).onMessage.emit({schema:'mastermind.browser_link.ready.v1',connection_generation:this.hello().connection_generation}); },
+    hello() { return messages.filter(row => row.schema === 'mastermind.browser_link.hello.v2').at(-1); },
+    ready() { ports.at(-1).onMessage.emit({schema:'mastermind.browser_link.ready.v2',connection_generation:this.hello().connection_generation}); },
     async request(message, path='popup.html') {
       return await new Promise(resolve => {
         assert.equal(chrome.runtime.onMessage.listeners[0](message,
@@ -97,7 +97,7 @@ test('ready cancels the handshake timer; reconnect never restores tab consent', 
   await f.drop();
 });
 
-for (const bad of [{schema:'unknown'}, {schema:'mastermind.browser_link.ready.v1',connection_generation:'stale'}]) {
+for (const bad of [{schema:'unknown'}, {schema:'mastermind.browser_link.ready.v2',connection_generation:'stale'}]) {
   test('invalid native handshake cleans up without a local disconnect event: '+bad.schema, async () => {
     const f=fixture(); startBrowserLink({chrome:f.chrome}); await tick();
     f.ports[0].onMessage.emit(bad); await tick();

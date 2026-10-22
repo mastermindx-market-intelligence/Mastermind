@@ -18,12 +18,12 @@ from integrations.chairman_surfaces.web_sol_native_host import (
     open_private_server, close_private_server,
 )
 
-HELLO_SCHEMA = "mastermind.browser_link.hello.v1"
-READY_SCHEMA = "mastermind.browser_link.ready.v1"
-OBSERVE_SCHEMA = "mastermind.browser_link.observe.v1"
-INVENTORY_SCHEMA = "mastermind.browser_link.inventory.v1"
-COMMAND_SCHEMA = "mastermind.browser_link.command.v1"
-RESULT_SCHEMA = "mastermind.browser_link.result.v1"
+HELLO_SCHEMA = "mastermind.browser_link.hello.v2"
+READY_SCHEMA = "mastermind.browser_link.ready.v2"
+OBSERVE_SCHEMA = "mastermind.browser_link.observe.v2"
+INVENTORY_SCHEMA = "mastermind.browser_link.inventory.v2"
+COMMAND_SCHEMA = "mastermind.browser_link.command.v2"
+RESULT_SCHEMA = "mastermind.browser_link.result.v2"
 ENROLLMENT_SCHEMA = "mastermind.browser_link.enrollment.v2"
 MAX_LIFETIME_MS = 30_000
 MAX_TABS = 64
@@ -32,7 +32,7 @@ _HEX64 = re.compile(r"^[0-9a-f]{64}$")
 _EXTENSION = re.compile(r"^[a-p]{32}$")
 _CODE = re.compile(r"^[A-Z][A-Z0-9_]{0,95}$")
 READ_COMMANDS = frozenset({"snapshot", "screenshot"})
-WRITE_COMMANDS = frozenset({"click", "type", "scroll", "navigate"})
+WRITE_COMMANDS = frozenset({"click", "type", "scroll", "navigate", "create_tab", "create_window"})
 
 
 class LinkProtocolError(ValueError):
@@ -125,7 +125,7 @@ def validate_hello(value: Any, enrollment: LinkEnrollment) -> dict:
     data = snapshot(value)
     record(data, {"schema", "protocol_version", "extension_id", "instance_ref", "connection_generation"})
     if (data["schema"] != HELLO_SCHEMA or type(data["protocol_version"]) is not int
-            or data["protocol_version"] != 1 or data["extension_id"] != enrollment.extension_id
+            or data["protocol_version"] != 2 or data["extension_id"] != enrollment.extension_id
             or data["instance_ref"] != enrollment.instance_id):
         _refuse()
     reference(data["connection_generation"])
@@ -144,7 +144,9 @@ def validate_inventory(value: Any, generation: str) -> dict:
         _refuse()
     seen = set()
     for row in rows:
-        record(row, {"tab_id", "origin", "consent_id", "document_revision", "state"})
+        record(row, {"tab_id", "origin", "consent_id", "document_revision", "state", "allow_create"})
+        if type(row["allow_create"]) is not bool:
+            _refuse()
         integer(row["tab_id"])
         integer(row["document_revision"])
         reference(row["consent_id"])
@@ -201,7 +203,7 @@ def validate_command(value: Any, *, now_ms: int | None = None) -> dict:
             record(args, {"delta_x", "delta_y"})
             if any(type(args[k]) is not int or abs(args[k]) > 2000 for k in args):
                 _refuse()
-        elif command == "navigate":
+        elif command in {"navigate", "create_tab", "create_window"}:
             record(args, {"url"})
             http_url(args["url"])
     return data

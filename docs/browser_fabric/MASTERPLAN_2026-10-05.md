@@ -160,3 +160,9 @@ External documentation checked on 2026-10-05:
 - https://py.sdk.modelcontextprotocol.io/v1/
 
 Vendor documentation establishes supported mechanisms, not this system's installed behavior or authority.
+
+## 2026-10-22 source continuation: native owner transport and creation
+
+Current implementation evidence is in `IMPLEMENTATION_STATUS_2026-10-22.md`; historical material in this masterplan is retained as evidence of its own checkpoint. Commit `9b25a72a61` connects the normal Workbench v3 service, resource launch barrier, exact-profile native bridge, shared-tab inventory and bounded concurrent actions. The following source slice adds native protocol v2 and optional locally granted `create_tab`/`create_window` operations. Known creation remains APPLIED even when subsequent child sharing fails; child consent requires exact committed identity and does not inherit creation permission. The rebuilt extension campaign passes 84 tests; the real local service test covers creation and subsequent child action with a synthetic Chrome peer.
+
+These are source facts. Installed profiles remain untouched. Durable automatic activation/recovery, authenticated host inventory and central transport composition, reviewed installation, and actual one-host/two-host/client acceptance remain required. No new browser registry, scheduler, action owner or self-renewing lease is introduced.

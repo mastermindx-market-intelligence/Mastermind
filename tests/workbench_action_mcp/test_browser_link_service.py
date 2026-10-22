@@ -81,19 +81,26 @@ def test_actual_service_factory_subprocess_and_two_tab_public_actions(tmp_path):
                 peer = Peer(grant.enrollment, native_config)
                 peer.ready()
                 rows = [{"tab_id": tab, "origin": "https://example.test", "consent_id": f"consent-{tab}",
-                         "document_revision": 0, "state": "shared"} for tab in (7, 8)]
+                         "document_revision": 0, "state": "shared", "allow_create": tab == 7} for tab in (7, 8)]
                 def serve_native():
                     writes = []
                     try:
                         while True:
                             message = peer.receive()
-                            if message["schema"] == "mastermind.browser_link.observe.v1":
+                            if message["schema"] == "mastermind.browser_link.observe.v2":
                                 peer.send({"schema": INVENTORY_SCHEMA, "request_id": message["request_id"],
                                            "connection_generation": peer.generation, "shared_tabs": rows})
                             else:
                                 commands.append(message)
                                 if message["command"] in {"snapshot", "screenshot"}:
                                     peer.result(message, effect="NOT_APPLIED", output={"nodes": []})
+                                elif message["command"] in {"create_tab", "create_window"}:
+                                    rows.append({"tab_id": 9, "origin": "https://child.test", "consent_id": "child-consent",
+                                                 "document_revision": 0, "state": "shared", "allow_create": False})
+                                    rows[0]["document_revision"] += 1
+                                    peer.result(message, output={"kind": "browser_creation",
+                                        "created": {"kind": "tab", "window_id": 12, "tab_id": 9},
+                                        "sharing": {"state": "shared"}})
                                 else:
                                     writes.append(message)
                                     # Neither write gets a reply until both crossed the
@@ -101,6 +108,8 @@ def test_actual_service_factory_subprocess_and_two_tab_public_actions(tmp_path):
                                     if len(writes) == 2:
                                         for command in writes:
                                             peer.result(command, output={"scrolled": True})
+                                    elif len(writes) > 2:
+                                        peer.result(message, output={"scrolled": True})
                     except Exception as exc:
                         errors.append(type(exc).__name__)
                 reader = threading.Thread(target=serve_native, daemon=True)
@@ -136,6 +145,25 @@ def test_actual_service_factory_subprocess_and_two_tab_public_actions(tmp_path):
                     "tab_ref": tabs[0]["tab_ref"], "action_ref": prepared[0]["action_ref"]})
                 assert repeated["effect"] == "APPLIED"
                 assert len([command for command in commands if command["command"] == "scroll"]) == 2
+                session_ref = fleet["browsers"][0]["browser_ref"]
+                refreshed = (await owner.browser_tabs(outer, {"browser_ref": session_ref}))["tabs"]
+                created = await owner.prepare_browser_action(outer, {
+                    "tab_ref": refreshed[0]["tab_ref"], "action": "create_tab", "args": {"url": "https://child.test/page"}})
+                creation = await owner.run_browser_action(outer, {
+                    "tab_ref": refreshed[0]["tab_ref"], "action_ref": created["action_ref"]})
+                assert creation["effect"] == "APPLIED"
+                new_tabs = (await owner.browser_tabs(outer, {"browser_ref": session_ref}))["tabs"]
+                child = next(tab for tab in new_tabs if tab["url"] == "https://child.test")
+                decoded_child = composition.codec.decode(child["tab_ref"], now_ms=runtime.services.clock_ms())
+                assert decoded_child.tab_locator == 9 and decoded_child.consent_ref == "child-consent"
+                assert "create_tab" not in decoded_child.allowed_actions
+                child_action = await owner.prepare_browser_action(outer, {
+                    "tab_ref": child["tab_ref"], "action": "scroll", "args": {"delta_x": 0, "delta_y": 50}})
+                child_result = await owner.run_browser_action(outer, {
+                    "tab_ref": child["tab_ref"], "action_ref": child_action["action_ref"]})
+                assert child_result["effect"] == "APPLIED"
+                assert commands[-1]["tab_id"] == 9 and commands[-1]["consent_id"] == "child-consent"
+                assert len([command for command in commands if command["command"] == "create_tab"]) == 1
                 assert errors == []
             finally:
                 if browser_ref is not None:

@@ -14,7 +14,7 @@ ACTION_TOOL = "browser_link_action"
 LINK_TOOLS = frozenset({INVENTORY_TOOL, READ_TOOL, ACTION_TOOL})
 LINK_READ_TOOLS = frozenset({INVENTORY_TOOL, READ_TOOL})
 OWNER_CONNECTION_SCHEMA = "mastermind.browser_link.owner_connection.v1"
-OWNER_INVENTORY_SCHEMA = "mastermind.browser_link.owner_inventory.v1"
+OWNER_INVENTORY_SCHEMA = "mastermind.browser_link.owner_inventory.v2"
 OWNER_RESULT_SCHEMA = "mastermind.browser_link.owner_result.v1"
 
 
@@ -30,7 +30,7 @@ _TARGET = _object({"connection_generation": _REF, "tab_id": _INT,
                    "consent_id": _REF, "document_revision": _INT})
 _COMMON = {"target": _TARGET, "expires_at_ms": _INT}
 _READ = _object({**_COMMON, "command": {"enum": ["snapshot", "screenshot"]}, "args": _object({})})
-_ACTION = _object({**_COMMON, "command": {"enum": ["click", "type", "scroll", "navigate"]},
+_ACTION = _object({**_COMMON, "command": {"enum": ["click", "type", "scroll", "navigate", "create_tab", "create_window"]},
                    "args": {"type": "object"}})
 _ACTION["oneOf"] = [
     {"properties": {"command": {"const": "click"}, "args": _object({"element_ref": _REF})}},
@@ -39,8 +39,9 @@ _ACTION["oneOf"] = [
     {"properties": {"command": {"const": "scroll"}, "args": _object({
         "delta_x": {"type": "integer", "minimum": -2000, "maximum": 2000},
         "delta_y": {"type": "integer", "minimum": -2000, "maximum": 2000}})}},
-    {"properties": {"command": {"const": "navigate"}, "args": _object({
-        "url": {"type": "string", "maxLength": 2048, "pattern": "^https?://"}})}},
+    *[{"properties": {"command": {"const": command}, "args": _object({
+        "url": {"type": "string", "maxLength": 2048, "pattern": "^https?://"}})}}
+      for command in ("navigate", "create_tab", "create_window")],
 ]
 
 

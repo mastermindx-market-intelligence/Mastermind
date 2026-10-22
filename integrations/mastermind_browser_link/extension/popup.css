@@ -42,3 +42,7 @@ footer { padding: 12px 20px 16px; border-top: 1px solid #dbe4db; color: #657267;
   button:hover:enabled { background: #304e39; }
   .notice { color: #e6bf83; }
 }
+
+.creation-option { display: flex; gap: 9px; align-items: flex-start; margin: 14px 0 6px; font-size: 13px; line-height: 1.5; }
+.creation-option input { flex: 0 0 auto; margin-top: 4px; accent-color: #277b62; }
+.creation-detail { font-size: 12px; line-height: 1.5; }

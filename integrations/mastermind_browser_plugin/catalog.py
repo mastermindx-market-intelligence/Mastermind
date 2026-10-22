@@ -6,8 +6,8 @@ import hashlib
 import json
 
 SERVER_NAME = "mastermind-browser"
-SERVER_VERSION = "0.1.0"
-CATALOG_GENERATION = "mastermind.browser.mcp.v1"
+SERVER_VERSION = "0.2.0"
+CATALOG_GENERATION = "mastermind.browser.mcp.v2"
 
 
 def _object(properties, required=None):
@@ -36,16 +36,16 @@ _ACTIONS = [
             "delta_y": {"type": "integer", "minimum": -2000, "maximum": 2000},
         }),
     }),
-    _object({
-        "action": {"const": "navigate"},
+    *[_object({
+        "action": {"const": action},
         "args": _object({"url": {"type": "string", "maxLength": 2048, "pattern": "^https?://"}}),
-    }),
+    }) for action in ("navigate", "create_tab", "create_window")],
 ]
 _PREPARE = {
     "type": "object",
     "properties": {
         "tab_ref": _text(),
-        "action": {"enum": ["click", "type", "scroll", "navigate"]},
+        "action": {"enum": ["click", "type", "scroll", "navigate", "create_tab", "create_window"]},
         "args": {"type": "object"},
     },
     "required": ["tab_ref", "action", "args"],
@@ -100,7 +100,7 @@ _TOOLS = [
     ),
     _tool(
         "prepare_browser_action",
-        "Prepare one closed action through the existing owner; does not execute it.",
+        "Prepare one action for an authorized tab. Creating a tab or window needs local creation permission; args contains one HTTP(S) URL. Does not execute it.",
         _PREPARE,
         read_only=True,
     ),

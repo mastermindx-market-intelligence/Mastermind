@@ -5,6 +5,7 @@ export function validatePopupMessage(message, sender, extensionId, popupURL) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) refuse('INVALID_COMMAND');
   const keys = Object.keys(value).sort().join(',');
   if (['status', 'share_current'].includes(value.kind) && keys === 'kind') return value;
+  if (value.kind === 'share_current' && keys === 'allow_create,kind' && typeof value.allow_create === 'boolean') return value;
   if (value.kind === 'revoke' && keys === 'kind,tab_id' && Number.isSafeInteger(value.tab_id) && value.tab_id >= 0) return value;
   refuse('INVALID_COMMAND');
 }

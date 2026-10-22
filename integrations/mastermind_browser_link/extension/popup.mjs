@@ -12,7 +12,7 @@ const messages = {
   INVALID_COMMAND: 'Only http and https website tabs can be shared.',
   SHARE_LIMIT: 'Stop sharing a tab before adding another.',
 };
-const states = { shared: 'Shared', busy: 'Agent working', effect_unresolved: 'Needs review' };
+const states = { shared: 'Shared', busy: 'Agent working', navigating: 'Loading', effect_unresolved: 'Needs review' };
 
 async function request(message) {
   let timer;
@@ -47,7 +47,7 @@ function showStatus(value) {
     origin.textContent = tab.origin;
     const state = document.createElement('div');
     state.className = 'tab-state';
-    state.textContent = states[tab.state];
+    state.textContent = states[tab.state] + (tab.allow_create === true ? ' · Can open tabs and windows' : '');
     info.append(origin, state);
     const stop = document.createElement('button');
     stop.type = 'button';
@@ -93,7 +93,7 @@ async function change(message) {
     setPending(false);
   }
 }
-share.addEventListener('click', () => change({ kind: 'share_current' }));
+share.addEventListener('click', () => change({ kind: 'share_current', allow_create: byId('allow-create').checked }));
 await refresh();
 const polling = setInterval(() => { if (!pending) void refresh(); }, 1500);
 addEventListener('pagehide', () => clearInterval(polling), { once: true });

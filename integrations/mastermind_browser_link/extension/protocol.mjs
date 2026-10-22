@@ -1,10 +1,11 @@
 /** Closed native-host wire contract. These fields are NOT model-facing authority. */
 export const MAX_FRAME_BYTES = 65_536;
 export const MAX_LIFETIME_MS = 30_000;
-export const COMMAND_SCHEMA = 'mastermind.browser_link.command.v1';
-export const RESULT_SCHEMA = 'mastermind.browser_link.result.v1';
+export const COMMAND_SCHEMA = 'mastermind.browser_link.command.v2';
+export const RESULT_SCHEMA = 'mastermind.browser_link.result.v2';
 export const READ_COMMANDS = Object.freeze(['snapshot', 'screenshot']);
-const COMMANDS = new Set([...READ_COMMANDS, 'click', 'type', 'scroll', 'navigate']);
+export const CREATE_COMMANDS = Object.freeze(['create_tab', 'create_window']);
+const COMMANDS = new Set([...READ_COMMANDS, ...CREATE_COMMANDS, 'click', 'type', 'scroll', 'navigate']);
 const REF = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
 const encoder = new TextEncoder();
 
@@ -60,7 +61,7 @@ export function validateCommand(input, now) {
       keys(value.args, ['delta_x', 'delta_y']);
       for (const field of ['delta_x', 'delta_y']) if (!Number.isSafeInteger(value.args[field]) || Math.abs(value.args[field]) > 2000) refuse('INVALID_COMMAND');
     }
-    if (value.command === 'navigate') { keys(value.args, ['url']); value.args.url = httpURL(value.args.url).href; }
+    if (value.command === 'navigate' || CREATE_COMMANDS.includes(value.command)) { keys(value.args, ['url']); value.args.url = httpURL(value.args.url).href; }
     Object.freeze(value.writer);
   }
   Object.freeze(value.args);

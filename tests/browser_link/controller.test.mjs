@@ -14,7 +14,7 @@ function setup(overrides = {}) {
   const control = new SharedTabController({ adapter: port, connectionGeneration: 'connection-1', now: () => clock, nonce: () => `nonce-${++serial}` });
   const tab = control.share(7, 'https://example.test');
   const command = (name = 'snapshot', args = {}, extra = {}) => ({
-    schema: 'mastermind.browser_link.command.v1', request_id: `request-${++serial}`,
+    schema: 'mastermind.browser_link.command.v2', request_id: `request-${++serial}`,
     connection_generation: 'connection-1', tab_id: 7, consent_id: tab.consent_id,
     document_revision: tab.document_revision, expires_at_ms: START + 20_000,
     command: name, args,

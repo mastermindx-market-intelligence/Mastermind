@@ -89,7 +89,7 @@ class BrowserFacade:
             args = _snapshot(arguments)
             self._validators[name].validate(args)
             if name == "prepare_browser_action":
-                if args["action"] == "navigate":
+                if args["action"] in {"navigate", "create_tab", "create_window"}:
                     value = args["args"]["url"]
                     parsed = urlsplit(value)
                     if (
