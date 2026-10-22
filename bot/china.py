@@ -778,6 +778,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "cost_usd": brain.get("cost_usd") if isinstance(brain, dict) else None,
         "model": brain.get("model") if isinstance(brain, dict) else None,
         "error": brain.get("error") if isinstance(brain, dict) else None,
+        "provider_failure": brain.get("provider_failure") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
         **decision_submission.target_status_fields(target_status),
         **decision_rows.accepted_identity_fields(
