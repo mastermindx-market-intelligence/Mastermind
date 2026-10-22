@@ -119,9 +119,9 @@ It performs no writes. For every held line with `shares != 0`, in order:
   same unpriced line produces (i) a frozen decision through #824 and the builder fence,
   and (ii) a WITHHELD NAV row through A02. Neither depends on the other's merge order.
 - **With callers.** Wiring `price_evidence` is how a caller earns `QUALIFIED`.
-  - `app/scheduler.py:1300-1390` already holds `marks.mark_symbols()` output (`union_usd`).
-    It should pass `mark_symbols(...)["sources"]`, which carries `source` and `stale_days`
-    today and `observed_asof` once A03 lands. That one-line wiring belongs to the RUNTIME
+  - `app/scheduler.py:1300` builds `union_usd = marks.prices_for(us_want, asof)`; `prices_for` returns only `mark_symbols(...)["prices"]` (`marks.py:238-240`), so the per-symbol `sources` map (source / stale_days) is discarded there today (correction from review lr-docs-r2, finding #1699-1).
+    It should call `mark_symbols()` directly and pass its `["sources"]`, which carries `source` and `stale_days`
+    today and `observed_asof` once A03 lands. That small wiring belongs to the RUNTIME
     file family and is requested from RUNTIME (W4).
   - Callers left unwired produce `PROVISIONAL` rows. That label is honest, not a regression.
 - **`nav()`.** It keeps its float signature for back-compat. It gains
