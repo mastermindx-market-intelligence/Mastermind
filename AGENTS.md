@@ -36,6 +36,19 @@ and merge decisions follow the currently authorized role and operation, not a
 historical session name. Independent review and source/release protections still apply.
 These role descriptions do not themselves grant authority.
 
+### Durable plan and cold continuation for assigned principals
+
+For a **multi-phase** Chairman-assigned CEO/Meta-CEO project, follow the protected
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md` at the same Skillpack/source pin. Recover the
+existing versioned GitHub master plan and one Agent OS cumulative frontier; if none
+exists, create and read back a useful plan with stable task/subtask IDs, dependencies,
+acceptance evidence and next action **before major delegation or implementation**.
+At material changes and risky chat boundaries, persist the affected nodes and Agent OS
+checkpoint through their existing writers, verify exact revisions, and keep the active
+worker/lease/effect boundary. Do not create a new plan database, claim source custody
+from a dead chat, or stop merely because a save succeeded. This applies to assigned
+principals, not bounded worker tasks; it grants no GitHub/Executive write permission.
+
 ### Assigned Codex/Claude Meta-CEO: paid Fabric delegation first
 
 **Only a currently assigned principal or AI CEO** applies this profile. The
