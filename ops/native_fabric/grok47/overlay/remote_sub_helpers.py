@@ -208,16 +208,28 @@ def validate_usage():
             }
             if isinstance(usage, dict):
                 schema = usage.get("schema")
-                grok = schema == "mastermind.grok_usage.v1"
+                grok = schema in ("mastermind.grok_usage.v1", "mastermind.grok_usage.v2")
+                grok_v2 = schema == "mastermind.grok_usage.v2"
+                supported_grok = ("grok-4.6", "grok-4.7")
                 valid_schema = (
                     (schema in ("mastermind.codex_usage.v1", "mastermind.grok_usage.v1")
                      and set(usage) == required)
+                    or (schema == "mastermind.grok_usage.v2"
+                        and set(usage) == required | {"requested_model", "model_identity_source"})
                     or (schema == "mastermind.codex_usage.v2"
                         and set(usage) == required | {"native_compaction_records"})
                 )
                 valid_source = (
-                    (grok and usage.get("source") == "grok_native_headless"
-                     and usage.get("served_model") in ("grok-4.6", "grok-4.7"))
+                    (schema == "mastermind.grok_usage.v1"
+                     and usage.get("source") == "grok_native_headless"
+                     and usage.get("served_model") in supported_grok)
+                    or (grok_v2 and usage.get("source") == "grok_native_headless"
+                        and type(usage.get("requested_model")) is str
+                        and usage["requested_model"] in supported_grok
+                        and ((usage.get("served_model") is None
+                              and usage.get("model_identity_source") == "requested_cli_only")
+                             or (usage.get("served_model") == usage["requested_model"]
+                                 and usage.get("model_identity_source") == "native_headless_final_model_field")))
                     or (not grok and usage.get("source") == "codex_native_session"
                         and usage.get("served_model") is None)
                 )

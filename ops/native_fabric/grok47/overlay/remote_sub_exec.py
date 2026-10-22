@@ -72,8 +72,14 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
     full_input = noncached + cached + extra
     if full_input > 2**53 or full_input + output != observed_total:
         return text, None
+    # A CLI pin is a requested model, not a witnessed served-model identity.
+    # Some native JSON finals omit a model entirely. Do not invent one.
+    reported_model = parsed.get("model")
+    if reported_model is not None and reported_model != model:
+        raise ValueError("grok_final_model_conflict")
+    has_reported_model = type(reported_model) is str and reported_model == model
     return text, {
-        "schema": "mastermind.grok_usage.v1",
+        "schema": "mastermind.grok_usage.v2",
         "status": "observed",
         "reason": "native_headless_final",
         "session_ids": [sid],
@@ -82,7 +88,10 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         "output_tokens": output,
         "total_tokens": observed_total,
         "source": "grok_native_headless",
-        "served_model": model,
+        "served_model": reported_model if has_reported_model else None,
+        "requested_model": model,
+        "model_identity_source": ("native_headless_final_model_field"
+                                  if has_reported_model else "requested_cli_only"),
         "run_id": run_id,
     }
 
@@ -944,7 +953,17 @@ def _execute(argv: list[str], state: dict) -> int:
             if mode == "grok":
                 # Normalize even when the provider rc is nonzero. Never
                 # echo structured JSON including its private thought field.
-                display_stdout, usage_record = grok_plaintext_and_usage(result.stdout, key, model)
+                try:
+                    display_stdout, usage_record = grok_plaintext_and_usage(result.stdout, key, model)
+                except ValueError as exc:
+                    # No private JSON fields should reach the parent on an
+                    # observed native-final model conflict. The original
+                    # child already ran; never retry it to resolve identity.
+                    if str(exc) != "grok_final_model_conflict":
+                        raise
+                    if not result.cleanup_proven:
+                        return _fail("REMOTE_CLEANUP_UNPROVEN", 76)
+                    return _fail("GROK_NATIVE_FINAL_MODEL_CONFLICT", 76)
                 if (usage_record is not None and result.returncode == 0
                         and result.cleanup_proven
                         and not result.stdout_truncated and not result.stderr_truncated):

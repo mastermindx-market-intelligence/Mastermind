@@ -240,3 +240,30 @@ release input includes 85 files; code manifest
 This replaces stage `-003` *for release input only*. No production pointer,
 quota, account, Cursor-4.7 default or OS/Executive runtime was changed. The
 platform-held Cursor default action is still not attempted or activated.
+
+
+### Requested-versus-observed Grok usage (source candidate)
+
+The historical `served_model` value was copied from the requested CLI model,
+not from a native-final observation. New usage is now v2 with exact separate
+`requested_model`, nullable `served_model` and closed
+`model_identity_source`; missing self-reported model is explicitly unknown.
+Conflicting final-model fields produce a typed refusal without leaking private
+Grok final JSON. Existing v1 usage is read-compatible, not retrospectively
+relabeled. This improves honesty about release evidence but **does not prove
+actual served Grok 4.7 identity**; that still requires an admitted native-worker
+consumer and appropriately verified provider observations after release.
+
+
+### Stage -005 supersession and identity (2026-10-22)
+
+Following the requested/observed model-provenance correction, the current
+reproducible source is stage `fabric-grok47-stage-20261022-sol-005`, manifest
+SHA256 `b6180122f83214bbc4c48f67b976e86084ae4aebc04082d0689935c52d721905`,
+expected original-owner generation
+`cbf87f8c6e27f1cbae13f034ed8bc77fd1d8b047789c6c01be6f9734faf8ff28`.
+This stage supersedes `-004` and all earlier stages. All 85 source files are
+verified with the original publish/verify/select semantics in isolation, not
+published or selected live. The 35 new-candidate regression tests pass locally.
+A new protected head CI run and genuinely independent consequential review
+are still required; pre-existing review or an earlier green run is not acceptance.

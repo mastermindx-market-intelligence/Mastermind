@@ -66,8 +66,58 @@ class Grok47WorkerContracts(unittest.TestCase):
                 text,usage=worker.grok_plaintext_and_usage(raw,'run-xyz',model)
                 self.assertEqual(text,'VISIBLE_RESULT')
                 self.assertNotIn('HIDDEN_DATA',text)
-                self.assertEqual(usage['served_model'],model)
+                self.assertEqual(usage['schema'],'mastermind.grok_usage.v2')
+                self.assertIsNone(usage['served_model'])
+                self.assertEqual(usage['requested_model'],model)
+                self.assertEqual(usage['model_identity_source'],'requested_cli_only')
                 self.assertEqual((usage['input_tokens'],usage['cached_tokens'],usage['output_tokens'],usage['total_tokens']),(11,3,4,15))
+
+    def test_native_final_model_field_is_observed_but_not_provider_attestation(self):
+        worker=worker_functions()
+        raw=final('grok-4.7')
+        raw['model']='grok-4.7'
+        text,usage=worker.grok_plaintext_and_usage(json.dumps(raw),'run-xyz','grok-4.7')
+        self.assertEqual(text,'VISIBLE_RESULT')
+        self.assertEqual(usage['requested_model'],'grok-4.7')
+        self.assertEqual(usage['served_model'],'grok-4.7')
+        self.assertEqual(usage['model_identity_source'],'native_headless_final_model_field')
+
+    def test_native_final_conflicting_model_refuses_without_leaking_private_fields(self):
+        worker=worker_functions()
+        raw=final('grok-4.6')
+        raw['model']='grok-4.6'
+        with self.assertRaisesRegex(ValueError,'grok_final_model_conflict'):
+            worker.grok_plaintext_and_usage(json.dumps(raw),'run-xyz','grok-4.7')
+        body=(OVERLAY/'remote_sub_exec.py').read_text()
+        self.assertIn('GROK_NATIVE_FINAL_MODEL_CONFLICT',body)
+        self.assertIn('if not result.cleanup_proven:',body)
+
+    def test_v2_usage_validator_requires_truthful_requested_and_observed_identity(self):
+        valid={'schema':'mastermind.grok_usage.v2','status':'observed',
+               'reason':'native_headless_final','session_ids':['s1'],
+               'input_tokens':11,'cached_tokens':3,'output_tokens':4,'total_tokens':15,
+               'source':'grok_native_headless','served_model':None,
+               'requested_model':'grok-4.7','model_identity_source':'requested_cli_only',
+               'run_id':'run123'}
+        candidates=[
+            (True, dict(valid)),
+            (True, dict(valid, served_model='grok-4.7',
+                        model_identity_source='native_headless_final_model_field')),
+            (False,dict(valid,served_model='grok-4.6',
+                        model_identity_source='native_headless_final_model_field')),
+            (False,dict(valid,served_model='grok-4.7',
+                        model_identity_source='requested_cli_only')),
+            (False,dict(valid,requested_model='grok-4.8')),
+            (False,dict(valid,model_identity_source='claimed_by_caller')),
+        ]
+        with tempfile.TemporaryDirectory() as td:
+            file=Path(td)/'usage.json'
+            for expected,usage in candidates:
+                with self.subTest(expected=expected,served=usage['served_model'],source=usage['model_identity_source']):
+                    file.write_text(json.dumps(usage))
+                    proc=subprocess.run([sys.executable,str(OVERLAY/'remote_sub_helpers.py'),
+                        'validate-usage',str(file),'run123'],capture_output=True,text=True,timeout=5)
+                    self.assertEqual(proc.returncode==0,expected,(proc.stdout,proc.stderr))
 
     def test_reject_malformed_private_json_without_leaking_reasoning(self):
         worker=worker_functions()
