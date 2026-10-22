@@ -130,7 +130,11 @@ def main(argv: list[str] | None = None) -> int:
         result = run(json.loads(args.inventory.read_text(encoding="utf-8")), args.root)
         serialized = json.dumps(result, indent=2, ensure_ascii=False) + "\n"
         if args.out:
-            args.out.write_text(serialized, encoding="utf-8")
+            destination = args.out.resolve()
+            if any(destination.is_relative_to(Path(spec.split("=", 1)[1]).resolve()) for spec in args.root):
+                raise AuditError("Report output must be outside scanned Git repositories")
+            with args.out.open("x", encoding="utf-8") as handle:
+                handle.write(serialized)
             print(f"Wrote read-only link inventory: {args.out}")
         else:
             print(serialized, end="")
