@@ -2443,11 +2443,20 @@ def api_self_directed() -> JSONResponse:
             market = _sd._market_status()
         except Exception:  # noqa: BLE001 — the clock is independent of the failed account read
             market = None
-        return JSONResponse({"status": "unavailable",
-                             "reason_code": "self_directed_book_unreadable",
-                             "nav": None, "cash": None, "invested": None,
-                             "starting_nav": None, "positions": [], "pending": [],
-                             "allocation": None, "market": market, "error": str(exc)})
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_book_unreadable",
+                   "nav": None, "cash": None, "invested": None,
+                   "starting_nav": None, "positions": [], "pending": [],
+                   "allocation": None, "market": market, "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence instead
+        # of collapsing into the generic unreadable string.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/history")
@@ -2463,11 +2472,19 @@ def api_self_directed_history() -> JSONResponse:
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
         # Unreadable is not empty: a fabricated 0-fill blotter reads as "no trades yet".
-        return JSONResponse({"status": "unavailable",
-                             "reason_code": "self_directed_history_unreadable",
-                             "history": [], "pending": [], "realized_total": None,
-                             "n_closed": None, "n_buys": None, "win_rate": None,
-                             "error": str(exc)})
+        payload = {"status": "unavailable",
+                   "reason_code": "self_directed_history_unreadable",
+                   "history": [], "pending": [], "realized_total": None,
+                   "n_closed": None, "n_buys": None, "win_rate": None,
+                   "error": str(exc)}
+        # E13: the typed invalid-account error keeps its own reason code and evidence.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+            payload["quarantine_file"] = (
+                getattr(exc, "record", None) or {}).get("quarantine_file")
+        return JSONResponse(payload)
 
 
 @router.get("/api/self_directed/search")
@@ -2498,7 +2515,14 @@ def api_self_directed_order(req: _OrderReq) -> JSONResponse:
         return JSONResponse(self_directed.place_order(
             req.ticker, req.side, req.shares, notional=req.notional))
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+        payload = {"ok": False, "error": str(exc)}
+        # E13: the typed invalid-account error names itself; any other failure keeps the
+        # historical {ok, error} shape.
+        reason_code = getattr(exc, "reason_code", None)
+        if isinstance(reason_code, str) and reason_code:
+            payload["reason_code"] = reason_code
+            payload["problems"] = list(getattr(exc, "problems", []) or [])
+        return JSONResponse(payload, status_code=500)
 
 
 @router.post("/api/self_directed/thesis")
