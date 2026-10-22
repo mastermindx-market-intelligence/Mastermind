@@ -4,7 +4,7 @@
 Given --task-class and optional --prefer / --pool, applies hard filters then
 the R15/R17–R27 routing law in orch/fabric/pools.yaml. Prints ONE line:
 
-  POOL=<name> KEY=<bailian_key_name or -> MODEL=<default> REASON=<...> [ESCALATE_TO=<tier>]
+  POOL=<name> KEY=- MODEL=<default> REASON=<...> [ESCALATE_TO=<tier>]
   NONE reason=...
 
 Never prints key values. Reads config only at runtime.
@@ -1070,25 +1070,6 @@ def _score_pool(pool: str, task_class: str, prefer: Optional[str]) -> float:
     return score
 
 
-def _bailian_key_name() -> str:
-    """Pick the least-loaded usable bailian key name (no value printed)."""
-    parked = _parked_bailian_keys()
-    try:
-        sys.path.insert(0, HERE)
-        import bailian_keys
-        for name in bailian_keys.usable_names():
-            if name in parked:
-                continue
-            # CLI account aliases are public labels, never credential values.
-            # Refuse unbounded or control-character input at this boundary.
-            if (type(name) is str
-                    and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,63}", name)):
-                return name
-    except Exception:
-        pass
-    return "-"
-
-
 def _default_model(pool: str, task_class: Optional[str] = None) -> str:
     if pool == "glm":
         if (task_class or "").strip():
@@ -1609,9 +1590,11 @@ def _emit(pool: str, reason: str, task_class: str,
                           escalation_reason=escalation_reason)
     if not guard.get("allowed"):
         return "NONE reason=" + str(guard.get("reason") or "launch_policy_refused")
-    key = _bailian_key_name() if pool == "bailian" else "-"
+    # Account identity belongs to the incumbent lease broker. The advisory
+    # picker must never print names supplied by an account/credential source,
+    # even when one happens to resemble a harmless label.
     reason += suffix
-    line = f"POOL={pool} KEY={key} MODEL={resolved_model} REASON={reason}"
+    line = f"POOL={pool} KEY=- MODEL={resolved_model} REASON={reason}"
     if is_execute_class(task_class, doc):
         escalate = next_escalate(
             pool, doc, model=resolved_model, task_class=task_class

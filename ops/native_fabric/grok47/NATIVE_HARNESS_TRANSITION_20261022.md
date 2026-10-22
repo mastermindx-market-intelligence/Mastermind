@@ -306,3 +306,17 @@ predicted unpublished generation
 Earlier -001..-006 source stages are retired. This does not clear original
 Cursor 4.7 safety refusals, CI, independent review, quota/account admission,
 or real native-OS acceptance gates.
+
+
+### Stage -009 security supersession
+
+The only current source stage is `fabric-grok47-stage-20261022-sol-009`,
+manifest SHA256
+`6d318305654f2f8478a4e24f2478b1a148b62a44f64f5d68277edc5d4b3235af`,
+predicted unpublished native generation
+`09b1ff4204c49acc71bb228751c4efefc22c70c89092734d9ea2fafe3fff1a49`.
+It inherits the accepted M2 sequence-15 Fabric runtime fixes and
+eliminates dynamic account alias output in advisory `pool pick`.
+All previous source stages -001..-008 are retired. Current
+publication instructions are in `ops/native_fabric/grok47/README.md`
+alone. This is not permission for held Cursor 4.7 default changes.

@@ -6,15 +6,15 @@ generation, create workers, change routing policy, or use provider credentials.
 
 ## One authoritative release target
 
-- **Candidate stage:** `/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-008`
-- **Canonical code manifest SHA256:** `3e54c0b1217e68acf3fe98c849d8c4df72ce6570351efbc260f2fa76766891b0`
-- **Predicted native-generation identity:** `b440ec08d1fb6199160a230031e89b5e509048799f10a7067e4048f0a21c238b`
+- **Candidate stage:** `/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-009`
+- **Canonical code manifest SHA256:** `6d318305654f2f8478a4e24f2478b1a148b62a44f64f5d68277edc5d4b3235af`
+- **Predicted native-generation identity:** `09b1ff4204c49acc71bb228751c4efefc22c70c89092734d9ea2fafe3fff1a49`
 - **Release source:** original `mastermindx-market-intelligence/Mastermind`
   PR #1691, subject to current protected-master merge and release admission
 - **Installed M2 generation before release:**
   `3a1bbcf121e9ec63ffba7a035ca67a380736608023ad3d74c2f0a67325255178`,
   `CURRENT.json` sequence 15 at last verified read
-- **Historical stages:** `-001` through `-007` are superseded and must **never**
+- **Historical stages:** `-001` through `-008` are superseded and must **never**
   be published or selected. Historical proof remains in PR #1691 comments
   and the transition research; it is not a second release source.
 
@@ -122,9 +122,12 @@ The independent reviewer of prior head `86aef280` returned
 **CHANGES_REQUESTED**. This updated candidate repairs its explicit 4.6-pin
 regression, removes conflicting current-stage claims, and makes the
 incumbent-policy override an explicit release preflight. The old head also
-had a failing CodeQL check for the generic CLI output sink; the current
-candidate sanitizes returned alias labels and does not echo unknown requested
-model input, but **a new hosted CodeQL PASS is still required**. This
+had a failing CodeQL alert on a generic CLI output sink, caused by
+printing a Bailian account alias from the credential-source list. The
+current candidate no longer emits **any** account alias from `pool pick`;
+its output always says `KEY=-`, and the incumbent broker alone selects
+accounts at admission. This eliminates the sensitive flow rather than
+suppressing the security check. **A hosted CodeQL PASS is still required**. This
 document, local tests and the previous review are not approvals for the
 changed head.
 
@@ -140,7 +143,7 @@ Fabric PR #1730 (uncertain cleanup) has **merged** and its resulting
 installed generation is the pinned incumbent at sequence 15. This candidate
 preserves those accepted source changes. PR #1720 (provider-outcome
 qualification) remains open: if it publishes a newer selected generation,
-the exact predecessor CAS for stage -008 must refuse and qualification must
+the exact predecessor CAS for stage -009 must refuse and qualification must
 be repeated against the new owner. PR #1365's model-host selector overlaps
 `pick.py` semantically and requires original-owner review before combining
 those policy effects.
@@ -149,3 +152,14 @@ This document is the single current stage reference. The separate
 `NATIVE_HARNESS_TRANSITION_20261022.md` records historical research and the
 longer OS/Executive/Fabric delivery plan; its older stage names are
 superseded evidence, not publication instructions.
+
+## Account-alias non-disclosure (stage -009)
+
+The advisory selector previously included a Bailian key/account alias in
+`KEY=<alias>`, even though the result is not an account lease. That
+unnecessary flow was flagged by CodeQL as clear-text logging of sensitive
+data. The source now emits fixed `KEY=-` for every pool. It does not
+read credentials or select an account; the existing Capacity broker still
+owns account binding. A regression injects a credential-shaped alias and
+asserts it cannot appear in the selected result. All 50 tests pass
+locally; hosted CodeQL must independently qualify the current head.

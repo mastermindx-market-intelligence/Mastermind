@@ -87,14 +87,17 @@ class GrokUpgrade(unittest.TestCase):
         self.assertEqual(result,'NONE reason=unknown requested_model')
         self.assertNotIn(secret_input,result)
 
-    def test_bailian_key_label_refuses_control_chars(self):
+    def test_advisory_bailian_result_never_exposes_account_alias(self):
         picker=load('pick')
-        fake=SimpleNamespace(usable_names=lambda:[
-            'password\nleaked', 'safe-key-alias'
-        ])
+        secret='credential-label-should-not-leak'
+        fake=SimpleNamespace(usable_names=lambda:[secret])
         with patch.dict(sys.modules, {'bailian_keys':fake}), \
-             patch.object(picker,'_parked_bailian_keys',return_value=set()):
-            self.assertEqual(picker._bailian_key_name(),'safe-key-alias')
+             patch.object(picker,'_selection_model',return_value=('qwen3.8-flash','')), \
+             patch.object(picker,'launch_policy',return_value={'allowed':True}), \
+             patch.object(picker,'is_execute_class',return_value=False):
+            result=picker._emit('bailian','fixture','review',doc={'pools':{'bailian':{}}})
+        self.assertIn('POOL=bailian KEY=- MODEL=qwen3.8-flash',result)
+        self.assertNotIn(secret,result)
 
     def test_picker_cli_emits_one_bounded_response_line(self):
         picker=load('pick')
