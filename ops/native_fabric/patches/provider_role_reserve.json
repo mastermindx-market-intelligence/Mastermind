@@ -1,0 +1,20 @@
+{
+  "schema": "mastermind.native_source_patch.v1",
+  "upstream_pr": 1228,
+  "upstream_commit": "2837c45ad554cb75655b60bef3bbc29a6fb77540",
+  "patch": "provider_role_reserve.patch",
+  "files": [
+    {
+      "path": "ops/executive_os/provider_orchestrator_policy.py",
+      "before_sha256": "1d4658ac237217ac565e6feda922e55f9bc8a15a0448e8724d00d8ba5ec04594",
+      "after_sha256": "4d993fb27e840ee0aff731053f29c560ad13858cfabad525d54b059917bbabc7"
+    },
+    {
+      "path": "ops/executive_os/provider_orchestrator_guard.py",
+      "before_sha256": "0aea7e20c4c05ac40c24a89831bf863957ff35f6fc213dbea0caaa7ab2ffa4b2",
+      "after_sha256": "0d429eb2706357bf99b77740369dc842a0cf53ec6726d9f9f3e04f19c4b86ddc"
+    }
+  ],
+  "installed": false,
+  "scope": "Source amendment for incumbent PR 1228; no live hook install or model admission."
+}
