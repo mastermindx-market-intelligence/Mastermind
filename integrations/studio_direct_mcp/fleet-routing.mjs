@@ -170,12 +170,57 @@ function expectedContractMap(tools) {
   return result;
 }
 
-function validateContract(remoteTools, expectedTools) {
+// Allow only the reviewed Desktop Commander 0.2.x -> 0.3.x *stricter*
+// number-to-integer search schema deltas. Any additional drift still refuses.
+const MODERN_STRICT_INTEGERS = Object.freeze({
+  start_search: Object.freeze({ maxResults: 0, contextLines: 0, timeout_ms: 0 }),
+  get_more_search_results: Object.freeze({ offset: null, length: 1 }),
+});
+
+function strictModernSchema(name, legacyStableSchema) {
+  const fields = MODERN_STRICT_INTEGERS[name];
+  if (!fields) return null;
+  let schema;
+  try { schema = JSON.parse(legacyStableSchema); } catch { return null; }
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) return null;
+  for (const [field, min] of Object.entries(fields)) {
+    const node = schema.properties?.[field];
+    if (!node || node.type !== 'number') return null;
+    if (min !== null && Object.hasOwn(node, 'minimum')) return null;
+    node.type = 'integer';
+    if (min !== null) node.minimum = min;
+  }
+  return stable(schema);
+}
+
+function validateModernArguments(name, args) {
+  if (!args || typeof args !== 'object' || Array.isArray(args)) {
+    throw new Error('FLEET_ROUTE_TOOL_ARGUMENTS_INCOMPATIBLE');
+  }
+  for (const [field, min] of Object.entries(MODERN_STRICT_INTEGERS[name] ?? {})) {
+    if (!Object.hasOwn(args, field)) continue;
+    const value = args[field];
+    if (!Number.isInteger(value) || (min !== null && value < min)) {
+      throw new Error('FLEET_ROUTE_TOOL_ARGUMENTS_INCOMPATIBLE');
+    }
+  }
+}
+
+function validateContract(remoteTools, expectedTools, modernGuards = new Set()) {
   const remote = contractMap(remoteTools);
   const expected = expectedContractMap(expectedTools);
   if (expected.size === 0) throw new Error('FLEET_ROUTE_LOCAL_CONTRACT_UNAVAILABLE');
   for (const [name, schema] of expected) {
-    if (remote.get(name) !== schema) throw new Error('FLEET_ROUTE_CONTRACT_MISMATCH');
+    // Desktop Commander 0.3.x removed the nonessential get_prompts helper.
+    // This is the ONLY missing capability admitted; every present schema and
+    // all other expected tools remain strictly checked.
+    if (name === 'get_prompts' && !remote.has(name)) continue;
+    if (remote.get(name) === schema) continue;
+    if (remote.get(name) === strictModernSchema(name, schema)) {
+      modernGuards.add(name);
+      continue;
+    }
+    throw new Error('FLEET_ROUTE_CONTRACT_MISMATCH');
   }
   return Object.freeze([...remote.keys()].sort());
 }
@@ -228,7 +273,9 @@ export function createFleetRouter(rawConfig, deps = {}) {
           {},
           { timeout: cfg.requestTimeoutMs, signal },
         );
-        const toolNames = validateContract(listed?.tools, expectedTools);
+        const modernGuards = new Set();
+        const toolNames = validateContract(listed?.tools, expectedTools, modernGuards);
+        state.modernGuards = modernGuards;
         state.receipt = Object.freeze({
           schema: 'mastermind.studio_fleet_route_binding.v1',
           hostRef,
@@ -259,6 +306,14 @@ export function createFleetRouter(rawConfig, deps = {}) {
     if (!FLEET_BACKEND_TOOL_SET.has(name) && name !== 'studio_output_page') {
       throw new Error('FLEET_ROUTE_TOOL_NOT_ALLOWED');
     }
+    // Refuse optional tools missing on the selected remote host before any
+    // tools/call effect. The gateway-owned output pager is routed separately.
+    if (name !== 'studio_output_page' && !state.receipt.toolNames.includes(name)) {
+      throw new Error('FLEET_ROUTE_TOOL_UNAVAILABLE');
+    }
+    // Version-specific input narrowing must be enforced locally before any
+    // tools/call. Exact modern schemas were already checked at preflight.
+    if (state.modernGuards?.has(name)) validateModernArguments(name, request.arguments);
     // Exactly one remote tools/call. No retry/replay exists in this adapter.
     try {
       return await state.client.callTool(
