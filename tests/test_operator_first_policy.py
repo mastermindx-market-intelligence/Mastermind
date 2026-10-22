@@ -41,6 +41,20 @@ def load_installer(tmp_path, *, patched=True):
                        capture_output=True)
     if ASSETS.exists():
         shutil.copytree(ASSETS, source / "skills/mastermind-fabric-orchestration")
+        # This test intentionally replays a fixed historical installer patch.
+        # Do not rewrite that source artifact or its accepted evidence when the
+        # current six-file Skill evolves. Adapt only this disposable fixture's
+        # closed role digest map and continue verifying exact installed bytes,
+        # tamper detection, preflight refusal and partial-apply behavior.
+        import re
+        fixture = target.read_text(encoding="utf-8")
+        marker = re.search(r"^ROLE_SHA256 = (\{[^\n]*\})$", fixture, re.MULTILINE)
+        assert marker, "historical installer fixture missing closed role map"
+        current = {key: hashlib.sha256((ASSETS / key).read_bytes()).hexdigest()
+                   for key in ROLE_FILES}
+        target.write_text(fixture.replace(marker.group(0),
+                                          "ROLE_SHA256 = " + repr(current), 1),
+                          encoding="utf-8")
     name = "operator_policy_" + uuid.uuid4().hex
     spec = importlib.util.spec_from_file_location(name, target)
     module = importlib.util.module_from_spec(spec)
@@ -232,9 +246,20 @@ def test_patch_evidence_binds_exact_source_and_no_other_implementation_path(tmp_
     pins = json.loads((ROOT / "patches/operator-first/source-pins.json").read_text())
     candidate = source / "ops/executive_os/provider_orchestrator_policy.py"
     assert hashlib.sha256(BASELINE.read_bytes()).hexdigest() == pins["before_sha256"]
-    assert hashlib.sha256(candidate.read_bytes()).hexdigest() == pins["after_sha256"]
+    # Preserve the original patch receipt separately from the disposable
+    # latest-role fixture; a changed Skill must not rewrite past evidence.
+    historical_root = tmp_path / "historical"
+    historical = historical_root / "ops/executive_os/provider_orchestrator_policy.py"
+    historical.parent.mkdir(parents=True)
+    historical.write_bytes(BASELINE.read_bytes())
+    subprocess.run(["git", "apply", str(PATCH)], cwd=historical_root,
+                   check=True, capture_output=True)
+    assert hashlib.sha256(historical.read_bytes()).hexdigest() == pins["after_sha256"]
     assert hashlib.sha256(PATCH.read_bytes()).hexdigest() == pins["patch_sha256"]
-    assert m.ROLE_SHA256 == pins["role_source_sha256"]
+    assert m.ROLE_SHA256 == {key: hashlib.sha256((ASSETS / key).read_bytes()).hexdigest()
+                             for key in ROLE_FILES}
+    assert all(m.ROLE_SHA256[key] != pins["role_source_sha256"][key]
+               for key in ROLE_FILES)
     assert pins["guard_sha256"] == "6c3549eb0ff4616980ce34621548d76db7f784909716963927f1442e1a502e9e"
     changed = subprocess.run(["git", "apply", "--numstat", str(PATCH)], cwd=source,
                              check=True, text=True, capture_output=True).stdout.splitlines()

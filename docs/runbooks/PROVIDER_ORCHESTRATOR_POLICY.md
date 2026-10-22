@@ -94,3 +94,15 @@ Do not collapse these into one green state. A merged source file proves none of 
 A copied file proves neither provider selection nor hook execution. Never manufacture a Codex trusted
 hash or silently alter unrelated provider permissions/model/account settings. For an offline host, leave
 it `NOT_INSTALLED` rather than inferring convergence from another machine.
+
+## Product excellence and model-independent CEO adoption
+
+The shared core, loaded through the reviewed managed policy block, now directs an assigned Meta-CEO to act as Chairman-delegated **outcome and creative-quality steward**, not a peer builder or a source of additional permissions. The exact assigned role reference must also load through the incumbent trusted launch/capability owner. The policy requires original-intent product falsifiers, ambitious but evidence-based design quality, independent critique, real-path verification and economical operator-owned management. "Award-caliber" is an aspiration, never an award, certification or self-approval.
+
+Qualify at least two fresh-session scenarios separately: a small bounded task taking the shortest lawful route, and a complex design-intensive product in which the CEO commissions a concept/design owner, an admitted operator, bounded builders and an independent critique; reject generic, incomplete or inaccessible user journeys before final acceptance. Include screenshots or recordings, target mobile/desktop viewports and technical proof from the **actual** installed provider and authenticated Fabric lane. Static instruction assertions and fixture installation do not prove either end-to-end case.
+
+Before user-home apply, inspect the target's actual agent/concurrency/isolation configuration and reconcile with the reviewed installer. Do not silently reduce an existing high-capacity native configuration or broaden exceptions simply to achieve READY. Fresh-session load, existing provider trust, actual delegation, nested root conservation and independently accepted product quality remain distinct proof gates.
+
+### Independent reviewer route versus coordination
+
+For consequential source and design claims, prefer a separately admitted qualified paid-Fabric reviewer whose input is the exact candidate and original outcome, whose output is independent reproducible findings, and whose return is consumed by the source/product owner. Let Capacity/ModelRouter choose an eligible route; GLM/Grok are preferences, not unconditional bypasses or a model grant. ChatGPT Dot and other watchers can coordinate attention, but cannot substitute for a reviewer, production proof or required GitHub review. A pending review request is not a review. An admission or thermal refusal prevents that review START; record and honor the original refusal, and do not route the denied operation around its safety gate. Independent model review is separate from the GitHub/branch-protection and final Meta-CEO product-acceptance gates.

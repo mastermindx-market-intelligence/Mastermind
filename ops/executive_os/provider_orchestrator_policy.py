@@ -59,7 +59,7 @@ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 
 # Fixed source assets, not a role/identity/grant registry.
 ROLE_PACKAGE = "mastermind-fabric-orchestration"
-ROLE_SHA256 = {'SKILL.md': '2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
+ROLE_SHA256 = {'SKILL.md': '1766fa1ea65c1fd0d9efec12974f8259cbba01ea13c33dc20b8657519b8bb7ed', 'references/meta-ceo.md': '89aef416558151057aa02d21c1cafb37482f2968b663a3f698adaa50c6908809', 'references/program-ceo.md': '8cb99036eac3e033e6f65d318b29f6ad8934cac9409a4677b06eab3bceb35d01', 'references/operator.md': '64a93b5e7a480a2ef7c6fbd4755576feac8ea93897d10644e130ea1c81f62efc', 'references/worker.md': 'f9fbd9157ad44b4a6be417e8cadec868551031ea54cc148f4a9834309d84b574', 'references/reviewer.md': '3e9586f405e7f2e0c66188b1a1509fa655aa55042dcdd54438a2db8aa8a1f6ec'}
 
 POLICY_BODY = f"""{BEGIN}
 ## Mastermind CEO / orchestrator forward execution
