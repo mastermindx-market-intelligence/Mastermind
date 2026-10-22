@@ -1325,6 +1325,9 @@ def _install_canonical_host_gate_fakes(
     )
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_loaded", lambda _label: False)
     monkeypatch.setattr(enrollment.c1_enrollment, "_launchd_disabled", lambda _label: True)
+    # The socket parent is covered by separate mode/owner/symlink tests.
+    # These fixtures isolate principal and credential-host invariants.
+    monkeypatch.setattr(enrollment, "_socket_parent_prepared", lambda: True)
     return library, support, system_root
 
 
