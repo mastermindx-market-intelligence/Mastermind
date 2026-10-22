@@ -52,7 +52,7 @@ the verified (list in the RETURN block).
 | HK (HKD) | **+5,240.56** | +5,170.71 (81 days) | +69.85 (1 row, k=2) | 0.00 | 0.00 | **0.00** |
 
 Accrual-day totals: US 84, CN 79 (77 visible + 2 hidden behind the deleted 06-23 row),
-HK 83 (82 single-day rows + one k=2 row spanning the deleted 06-23 row).
+HK 83 (81 single-day rows + one k=2 row spanning the deleted 06-23 row).
 
 Cash identity (ending cash = opening + Σ flows + residual), exact for all three:
 
@@ -134,10 +134,11 @@ The scrub is cash-neutral overall (fills removed AND cash debited); what leaked 
   venue-gated) and **still zero sweep on those Sundays** — the accrual gate held.
 - **Never twice per date.** `cash_yield_through` makes the sweep idempotent per (book,
   date); every bridge row matched exactly k=1 (or k=2 only where a row was deleted).
-  Base ordering varies with build timing: on 26 US / 22 CN / 18 HK fill-days the sweep
+  Base ordering varies with build timing: on 0 US / 8 CN / 11 HK fill-days the sweep
   ran BEFORE the day's fills (base = previous row's cash; the day's later fills land in
-  the replaced row), and on the other fill-days fills preceded the sweep (base =
-  prev+fills). Both orderings are the same single accrual.
+  the replaced row), and on 26 US / 22 CN / 18 HK fill-days fills preceded the sweep
+  (base = prev+fills). Both orderings are the same single accrual. (Counts corrected
+  2026-10-22 per lr-w1-r1 finding 1; the earlier text inverted the two labels.)
 - **Missed accrual days are lost forever** (no backfill): 2026-07-27 and 2026-07-28
   (Mon/Tue) have no NAV rows and no accruals in ALL THREE books — only one sweep day
   exists across the 07-25 → 07-29 span (k=1 matches exactly on 07-29). This coincides
