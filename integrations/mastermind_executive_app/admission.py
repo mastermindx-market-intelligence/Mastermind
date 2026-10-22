@@ -3,14 +3,14 @@
 Composes, in the load-bearing order below, the exact steps BSC-E1's FROZEN
 SPEC requires for ``submit_ceo_intent``:
 
-1. Validate the caller payload against the EXISTING public five-tool request
-   shape (:func:`integrations.executive_mcp.schemas.validate_tool_arguments`
-   — reused verbatim, never copied).  A caller/model cannot supply ``actor``,
-   ``authority``, raw capabilities, ``branch``, ``worktree``, ``grounding``,
-   ``request_ref``, intent/job/status, provider/account/session, or a socket
-   target: none of those names appear in that schema's
-   ``additionalProperties: false`` object, so they are structurally
-   impossible, not merely refused by a runtime check.
+1. Validate the caller payload through the authenticated-app extension
+   (:func:`integrations.executive_mcp.schemas.validate_app_submit_arguments`).
+   Legacy requests reuse the frozen five-tool law; the app alone may carry
+   an exact requested ``frontier_model_alias``. A caller/model cannot supply
+   ``actor``, ``authority``, raw capabilities, ``branch``, ``worktree``,
+   ``grounding``, ``request_ref``, intent/job/status, provider/account/session,
+   or a socket target: the closed validator rejects those fields before any
+   transport effect.
 2. Derive one stable ``req-*`` outer identity via
    :func:`control_plane.ceo_request.app_request_ref` — depends ONLY on the
    validated ``operation_key`` (the approved logical operation identity),
@@ -144,7 +144,8 @@ def _validate_five_tool_shape(payload: Any) -> dict[str, Any]:
     """
 
     try:
-        return validate_tool_arguments(MODIFYING_TOOL, payload)
+        from integrations.executive_mcp.schemas import validate_app_submit_arguments
+        return validate_app_submit_arguments(payload)
     except GatewayError as exc:
         raise AdmissionError("invalid_input", exc.message) from exc
 

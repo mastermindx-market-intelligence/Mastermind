@@ -1094,3 +1094,37 @@ describe("LaunchOrchestrator stale selection retention", () => {
     ).toBe("proj-gamma");
   });
 });
+
+describe("requested CEO selection", () => {
+  const frontierModels = [{ ref: "frontier.one", label: "First CEO" }, { ref: "frontier.two", label: "Second CEO" }];
+  it("submits the explicit choice and preserves it after a refusal", () => {
+    const onSubmit = vi.fn();
+    render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    fireEvent.submit(goalForm());
+    expect(onSubmit.mock.calls[0][0].frontierModelAlias).toBe("frontier.two");
+    act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+    expect((screen.getByLabelText("Requested CEO") as HTMLSelectElement).value).toBe("frontier.two");
+  });
+  it("blocks a selected CEO removed from the current catalog", () => {
+    const onSubmit = vi.fn();
+    const view = render(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    fireEvent.change(screen.getByLabelText("Requested CEO"), { target: { value: "frontier.two" } });
+    view.rerender(<LaunchOrchestrator {...makeProps({ onSubmit, frontierModels: [frontierModels[0]] })} />);
+    expect(launchButton().disabled).toBe(true);
+    fireEvent.submit(goalForm());
+    expect(onSubmit).not.toHaveBeenCalled();
+  });
+  it("blocks all unavailable choices and leaves legacy launches unchanged", () => {
+    const view = render(<LaunchOrchestrator {...makeProps({ frontierModels: [
+      { ref: "frontier.one", label: "First CEO", unavailableReason: "Not qualified" },
+    ] })} />);
+    fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Build a project" } });
+    expect(launchButton().disabled).toBe(true);
+    view.unmount();
+    render(<LaunchOrchestrator {...makeProps()} />);
+    expect(screen.queryByLabelText("Requested CEO")).toBeNull();
+  });
+});

@@ -14,6 +14,7 @@ export interface LaunchForm {
   goal: string;
   projectRef: string;
   profileRef: string;
+  frontierModelAlias?: string;
 }
 
 /** Explicit terminal outcome of one dispatched launch. */
@@ -49,6 +50,7 @@ export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 export interface LaunchOrchestratorProps {
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
+  frontierModels?: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
   submitting: boolean;
   /** A retained operation or unreadable store prevents a new submission. */
@@ -100,6 +102,7 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 export function LaunchOrchestrator({
   projects,
   profiles,
+  frontierModels,
   submitting,
   blocked = false,
   unavailableReason,
@@ -111,11 +114,13 @@ export function LaunchOrchestrator({
   const goalId = `${formId}-goal`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
+  const frontierId = `${formId}-frontier`;
 
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState("");
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
+  const [draftFrontier, setDraftFrontier] = useState("");
 
   // In-flight launch owned by this component: armed synchronously when
   // onSubmit is dispatched, resolved only by its correlated completion.
@@ -166,6 +171,15 @@ export function LaunchOrchestrator({
       : "No profiles are currently available."
     : selectedProfileChoice.unavailableReason;
 
+  const frontierRequired = frontierModels !== undefined || draftFrontier !== "";
+  const selectedFrontier = draftFrontier ||
+    frontierModels?.find((choice) => !choice.unavailableReason)?.ref ||
+    frontierModels?.[0]?.ref || "";
+  const frontierChoice = frontierModels?.find((choice) => choice.ref === selectedFrontier);
+  const frontierError = frontierRequired
+    ? (!frontierChoice ? "Select an available CEO choice to continue." : frontierChoice.unavailableReason)
+    : undefined;
+
   const goalBytes = utf8ByteLength(draftGoal);
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
   const goalBlank = draftGoal.trim().length === 0;
@@ -176,6 +190,7 @@ export function LaunchOrchestrator({
     !launchPending &&
     !projectStale &&
     !profileStale &&
+    !frontierError &&
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
@@ -193,6 +208,7 @@ export function LaunchOrchestrator({
           goal: draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
+          ...(frontierRequired ? { frontierModelAlias: selectedFrontier } : {}),
         },
         (outcome) => {
           try {
@@ -314,6 +330,29 @@ export function LaunchOrchestrator({
               </p>
             )}
           </div>
+
+          {frontierRequired && (
+            <div className="form-field">
+              <label htmlFor={frontierId}>Requested CEO</label>
+              <select
+                id={frontierId}
+                value={selectedFrontier}
+                onChange={(e) => setDraftFrontier(e.target.value)}
+                disabled={launchPending}
+                aria-invalid={!!frontierError}
+                aria-describedby={frontierError ? `${frontierId}-error` : `${frontierId}-help`}
+              >
+                {!frontierChoice && <option value={selectedFrontier} disabled>CEO choice unavailable</option>}
+                {frontierModels?.map((choice) => (
+                  <option key={choice.ref} value={choice.ref} disabled={!!choice.unavailableReason}>
+                    {choice.unavailableReason ? `${choice.label} — ${choice.unavailableReason}` : choice.label}
+                  </option>
+                ))}
+              </select>
+              <p id={`${frontierId}-help`}>Records your requested CEO for this project.</p>
+              {frontierError && <p id={`${frontierId}-error`} className="field-error" role="alert">{frontierError}</p>}
+            </div>
+          )}
 
           {/* Error message */}
           {error && (

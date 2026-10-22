@@ -8,9 +8,11 @@ Keep the existing Workspace, Content, Executive, Studio, Git and Runtime owners.
 
 An OS launch key is the SHA-256-derived "mmos-launch-<40hex>" of the authenticated
 principal namespace and the exact form. Backend normalization adds defaults, so
-publication validates the form under the canonical five-tool law but preserves
-its original semantic fields for the key. The inner submit uses normalized
-arguments and the same key.
+publication validates the form through the authenticated-app request extension
+and preserves its original semantic fields for the key. Legacy omission uses
+the frozen five-tool law unchanged; an explicit requested frontier_model_alias
+is included in the key, argument digest and immutable commission. The inner
+submit uses normalized arguments and the same key.
 
 The App forwards the original bearer and original arguments to one installed
 loopback Studio port, fixed route /os-internal/commission/prepare. Studio
@@ -53,7 +55,9 @@ Its exact fields are:
   principal_scope comes from verified OS context for the intended client and
   subject. template contains exact workstream, department, priority,
   execution_profile and any actually emitted optional allowed_write_paths,
-  validation, attempt_limit. Objective and operation key are not template fields.
+  validation, attempt_limit, frontier_model_alias. An explicit alias must match
+  exactly; it is never stripped before comparing the sealed template.
+  Objective and operation key are not template fields.
 - audit_directory:
   /Library/Application Support/MastermindExecutive/audit/os-commission-publication.
   Provision its existing durable auth sink access for the actual Studio identity.

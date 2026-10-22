@@ -2542,6 +2542,7 @@ def _service_from_config(
                                 ceo_ingress_armed=binding.armed,
                                 strict_v2_admission=True,
                                 execution_binding_provider=current_execution_binding,
+                                frontier_selection_provider=service._resolve_ceo_frontier_selection,
                                 dialogue_source_provider=commission_source_provider,
                                 admission_guard=require_summon_admission,
                                 fresh_admission_observer=(

@@ -1554,3 +1554,25 @@ describe("T14 App-outcome shape matrix", () => {
     });
   });
 });
+
+describe("requested CEO custody", () => {
+  const choices = [{ ref: "frontier.one", label: "One" }, { ref: "frontier.two", label: "Two" }];
+  const idle = makeClient(() => barePreflight("not_found"));
+  it("keeps the selected alias in the payload and exact operation identity", () => {
+    const binding = makeBinding(idle.client, { ...RESEARCH_CONFIG, frontierModels: choices });
+    const first = binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.one" })!;
+    const second = binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.two" })!;
+    expect(first.payload.frontier_model_alias).toBe("frontier.one");
+    expect(first.payload.operation_key).not.toBe(second.payload.operation_key);
+    expect(binding.getView().frontierModels).toEqual(choices);
+    expect(binding.makeLaunchIntent(RESEARCH_FORM)).toBeNull();
+  });
+  it("refuses unknown, unavailable, and unenrolled choices without falling back", () => {
+    const binding = makeBinding(idle.client, { ...RESEARCH_CONFIG,
+      frontierModels: [{ ref: "frontier.one", label: "One", unavailableReason: "Not qualified" }] });
+    for (const frontierModelAlias of ["frontier.one", "frontier.other", " FRONTIER.ONE"]) {
+      expect(binding.makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias })).toBeNull();
+    }
+    expect(makeBinding(idle.client).makeLaunchIntent({ ...RESEARCH_FORM, frontierModelAlias: "frontier.one" })).toBeNull();
+  });
+});

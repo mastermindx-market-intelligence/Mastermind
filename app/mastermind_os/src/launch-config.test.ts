@@ -28,3 +28,18 @@ describe("immutable operator launch configuration", () => {
     }
   });
 });
+
+describe("operator-supplied requested CEO choices", () => {
+  it("retains immutable explicit choices and their availability", () => {
+    const frontierModels = [{ ref: "frontier.one", label: "One", unavailableReason: "Not qualified" }];
+    const config = decodeLaunchBindingConfig(JSON.stringify({ ...manifest, frontierModels }))!;
+    expect(config.frontierModels).toEqual(frontierModels);
+    expect(Object.isFrozen(config.frontierModels?.[0])).toBe(true);
+    expect(decodeLaunchBindingConfig(JSON.stringify(manifest))?.frontierModels).toBeUndefined();
+  });
+  it.each([[], [{ ref: "UPPER", label: "Bad" }], [{ ref: "a", label: "A", provider: "caller" }],
+    [{ ref: "frontier.one\n", label: "One" }], [{ ref: "frontier.one\r\n", label: "One" }],
+    [{ ref: "a", label: "A" }, { ref: "a", label: "Duplicate" }]].map((frontierModels) => ({ frontierModels })))("refuses malformed choices", ({ frontierModels }) => {
+      expect(decodeLaunchBindingConfig(JSON.stringify({ ...manifest, frontierModels }))).toBeNull();
+  });
+});

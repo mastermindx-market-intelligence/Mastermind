@@ -869,6 +869,17 @@ def _validate_submit(arguments: Mapping[str, Any]) -> dict[str, Any]:
         raise AssertionError("unreachable")  # pragma: no cover
 
 
+def validate_app_submit_arguments(arguments: Any) -> dict[str, Any]:
+    """Explicit authenticated OS extension; does not widen the MCP tool."""
+    if not isinstance(arguments, Mapping):
+        raise GatewayError("invalid_input", "arguments must be an object")
+    try:
+        return _ceo_request.normalize_app_request(arguments)
+    except _ceo_request.CeoRequestError as exc:
+        _raise_as_gateway_error(exc)
+        raise AssertionError("unreachable")  # pragma: no cover
+
+
 def validate_tool_arguments(tool_name: str, arguments: Any) -> dict[str, Any]:
     """Strict server-side validation for one tool call.
 
