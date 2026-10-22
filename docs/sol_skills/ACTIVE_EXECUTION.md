@@ -27,6 +27,24 @@ Advance the highest-leverage unfinished capability through the real critical pat
 A detailed status artifact is not a substitute for capability advancement. A blocker on one lane is
 not permission to end the whole turn while another in-scope critical-path lane remains executable.
 
+## Durable project plan at the start, not only at handoff
+
+For any multi-phase initiative, first recover the existing source-owned hierarchical
+plan and cumulative frontier, or create a useful initial plan when no legitimate one
+exists. Follow `docs/CEO_PROJECT_PLAN_CONTINUITY.md` from this same protected pin.
+Record stable task/subtask IDs, dependencies, `DONE_WHEN`, expected evidence, review,
+and the source/Agent OS linkage. Verify the first durable GitHub save and the authorized
+Agent OS pointer/readback as available **before major delegation or construction**.
+This is a phase-level safety requirement, not an approval loop or a requirement to
+pre-write every tiny implementation command. If a writer is unavailable, identify
+which record is missing and never pretend an unsaved plan is durable.
+
+On material progress, accepted rulings, child returns, dependency changes and risky
+session boundaries, revise the affected plan nodes through the original source writer,
+read back their revision, and update the *one* cumulative Agent OS recovery record.
+Keep completed work and pending effects precise. A saved plan/checkpoint does not end
+the active turn or grant a new operator, runtime or chat authority.
+
 ## Start and recover without administrative ceremony
 
 These are decision checks, not additional forms or approval messages. Apply them to Web, Claude,
