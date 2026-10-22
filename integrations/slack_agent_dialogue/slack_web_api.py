@@ -18,6 +18,8 @@ from typing import Any, Mapping, Protocol
 
 from integrations.slack_executive.slack_web_api import _default_ssl_context
 
+from integrations.slack_agent_dialogue.contract import PARENT_DISCRIMINATOR
+from integrations.slack_agent_dialogue.contract_v2 import PARENT_DISCRIMINATOR_V2
 from integrations.slack_agent_dialogue.engine import (
     HistoryPage,
     SlackEffectUnknown,
@@ -590,6 +592,14 @@ class SlackWebApiDialogueClient:
             )
         ):
             raise ValueError("invalid foreign bot message")
+        # Unlike unrelated bot chatter, a protocol-shaped parent from a
+        # non-Relay bot is competing parent evidence. Suppressing it would
+        # bypass the V2 engine's exact/near-context foreign-author conflict
+        # guard, so fail closed before choosing any trusted parent.
+        if raw["text"].startswith(
+            (PARENT_DISCRIMINATOR, PARENT_DISCRIMINATOR_V2)
+        ):
+            raise ValueError("foreign bot parent frame")
         return True
 
     def _history_page(

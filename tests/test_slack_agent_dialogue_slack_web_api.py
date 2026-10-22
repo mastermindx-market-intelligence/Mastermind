@@ -8,6 +8,8 @@ import urllib.request
 import pytest
 
 import integrations.slack_agent_dialogue.slack_web_api as slack_web_api_module
+from integrations.slack_agent_dialogue.contract import PARENT_DISCRIMINATOR
+from integrations.slack_agent_dialogue.contract_v2 import PARENT_DISCRIMINATOR_V2
 from integrations.slack_agent_dialogue.engine import (
     HistoryPage,
     SlackEffectUnknown,
@@ -219,6 +221,37 @@ def test_oversize_response_never_yields_bounded_history_facts() -> None:
         SlackTransportUnavailable, match="^SLACK_TRANSPORT_UNAVAILABLE$"
     ):
         run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=1))
+
+
+@pytest.mark.parametrize(
+    "parent_discriminator",
+    [PARENT_DISCRIMINATOR, PARENT_DISCRIMINATOR_V2],
+    ids=["legacy-parent", "v2-parent"],
+)
+def test_foreign_bot_protocol_parent_cannot_disappear_before_engine_conflict_check(
+    parent_discriminator: str,
+) -> None:
+    forged = message(
+        ts="1787471000.000001",
+        user="U0C4BC13Q84",
+        text=parent_discriminator + '{"work_ref":"WS:CHAIRMAN-CONTROL-ROOM"}',
+    )
+    forged["bot_id"] = "B0C45P45M6J"
+    trusted = message(ts="1787471000.000002", text="legitimate message")
+    adapter, transport = client(
+        lambda call: response(
+            call["path"],
+            page_payload([forged, trusted]),
+            query=call["query"],
+        )
+    )
+    # Do not turn an unauthorized matching parent into 'no evidence';
+    # otherwise V2 might falsely bind a legitimate parent beside a spoof.
+    with pytest.raises(
+        SlackTransportUnavailable, match="^SLACK_TRANSPORT_UNAVAILABLE$"
+    ):
+        run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=2))
+    assert len(transport.calls) == 1
 
 
 def test_foreign_bot_posts_are_ineligible_without_losing_authorized_history() -> None:
