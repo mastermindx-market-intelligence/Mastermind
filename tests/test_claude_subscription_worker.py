@@ -730,13 +730,7 @@ def test_broker_execution_refuses_reviewed_spec_only_adapter_before_config_read(
     wire["model"] = adapter.selected_model
     wire["authorities"] = ["READ"]
     workspace = Path(wire["workspace_path"])
-    _git(workspace, "init", "-q")
-    _git(workspace, "config", "user.email", "fixture@example.invalid")
-    _git(workspace, "config", "user.name", "Fixture")
-    (workspace / "README.md").write_text("fixture\n", encoding="utf-8")
-    _git(workspace, "add", "README.md")
-    _git(workspace, "commit", "-qm", "fixture")
-    wire["expected_base_sha"] = _git(workspace, "rev-parse", "HEAD")
+    assert wire["expected_base_sha"] == _git(workspace, "rev-parse", "HEAD")
     Path(wire["run_dir"]).chmod(0o700)
     isolation_roots = [Path(value) for value in wire["isolation_roots"]]
     run_dir = Path(wire["run_dir"])

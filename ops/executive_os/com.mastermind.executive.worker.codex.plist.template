@@ -34,7 +34,7 @@
   <key>AbandonProcessGroup</key>
   <false/>
   <key>ProcessType</key>
-  <string>Background</string>
+  <string>Interactive</string>
   <key>Umask</key>
   <integer>63</integer>
   <key>HardResourceLimits</key>

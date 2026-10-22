@@ -191,7 +191,7 @@ async def test_pre_write_connect_failure_is_no_effect(paths: _Paths) -> None:
 
     client._open_connection = unavailable
     with pytest.raises(TransportError) as raised:
-        await client.request("start", {"run_id": "RUN-001"})
+        await client.request("start", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert attempts == 1
     assert "private" not in str(raised.value)
@@ -215,7 +215,7 @@ async def test_modifying_post_write_uncertainty_is_effect_unknown_and_zero_retry
 
     client._open_connection = exchange
     with pytest.raises(TransportError) as raised:
-        await client.request("start", {"run_id": "RUN-001"})
+        await client.request("start", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.EFFECT_UNKNOWN
     assert calls == 1
     assert "private" not in str(raised.value)
@@ -232,7 +232,7 @@ async def test_read_only_post_write_loss_is_no_effect_and_zero_retry(paths: _Pat
 
     client._open_connection = exchange
     with pytest.raises(TransportError) as raised:
-        await client.request("status", {"run_id": "RUN-001"})
+        await client.request("status", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert calls == 1
 
@@ -240,7 +240,7 @@ async def test_read_only_post_write_loss_is_no_effect_and_zero_retry(paths: _Pat
 @pytest.mark.parametrize(
     ("operation", "payload"),
     [
-        ("validate", {"run_id": "RUN-001", "argv": ["true"], "timeout_seconds": 1}),
+        ("validate", {"run_id": "ATT-001", "argv": ["true"], "timeout_seconds": 1}),
         ("ohf-validate", {"requested": {}}),
         ("ohf-reconcile-absence", {}),
         ("status", {"fresh_uid_sweep": True}),
@@ -266,6 +266,24 @@ async def test_effectful_broker_operations_become_effect_unknown_after_write(
         await client.request(operation, payload)
     assert raised.value.classification is TransportEffect.EFFECT_UNKNOWN
     assert calls == 1
+
+
+async def test_generation_identity_can_be_bound_once_after_runtime_allocation(paths: _Paths) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"ohf-reconcile"},
+    )
+    client.bind_payload_identity(**_BOUND_PAYLOAD_IDENTITY)
+    assert client.bound_payload_identity == _BOUND_PAYLOAD_IDENTITY
+    # Re-observing the exact same Runtime identity is idempotent; a different
+    # generation is a retarget and must refuse before any network request.
+    client.bind_payload_identity(**_BOUND_PAYLOAD_IDENTITY)
+    with pytest.raises(TransportValidationError, match="already bound"):
+        client.bind_payload_identity(
+            session_epoch_id="EPOCH-OTHER",
+            process_generation_id="GEN-OTHER",
+        )
 
 
 async def test_generation_identity_requires_explicit_binding(paths: _Paths) -> None:
@@ -367,7 +385,7 @@ async def test_server_pin_mismatch_refuses_before_any_request_bytes(paths: _Path
 
     client._open_connection = exchange
     with pytest.raises(TransportError) as raised:
-        await client.request("start", {"run_id": "RUN-001"})
+        await client.request("start", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert raised.value.code == "server_identity_mismatch"
     assert writer.written == b""
@@ -380,6 +398,7 @@ async def test_server_pin_mismatch_refuses_before_any_request_bytes(paths: _Path
         {"nested": {"worker_id": "WORKER-002"}},
         {"items": [{"host_ref": "b" * 64}]},
         {"attempt_id": "ATT-002"},
+        {"run_id": "ATT-002"},
     ],
 )
 async def test_payload_cannot_retarget_bound_authority(paths: _Paths, payload: dict) -> None:
@@ -424,14 +443,14 @@ async def test_adapter_identity_echo_and_operation_id_payload_are_allowed_when_b
 async def test_unknown_operation_is_refused_before_network(paths: _Paths) -> None:
     client = _client(paths)
     with pytest.raises(TransportError) as raised:
-        await client.request("collect", {"run_id": "RUN-001"})
+        await client.request("collect", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert raised.value.code == "operation_not_allowed"
 
 
 async def test_bound_response_identity_drift_hides_broker_payload(paths: _Paths) -> None:
     client = _client(paths)
-    request = build_request(IDENTITY, "status", {"run_id": "RUN-001"})
+    request = build_request(IDENTITY, "status", {"run_id": "ATT-001"})
     response = _response(
         request,
         broker_response={"secret": "broker-payload"},
@@ -443,21 +462,21 @@ async def test_bound_response_identity_drift_hides_broker_payload(paths: _Paths)
 
     client._open_connection = exchange
     with pytest.raises(TransportError) as raised:
-        await client.request("status", {"run_id": "RUN-001"})
+        await client.request("status", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert "broker-payload" not in str(raised.value)
 
 
 async def test_remote_refusal_is_no_effect_even_for_modifying_operation(paths: _Paths) -> None:
     client = _client(paths)
-    request = build_request(IDENTITY, "start", {"run_id": "RUN-001"})
+    request = build_request(IDENTITY, "start", {"run_id": "ATT-001"})
 
     async def exchange() -> object:
         return _Reader(_frame(_response(request, outcome="refused"))), _Writer()
 
     client._open_connection = exchange
     with pytest.raises(TransportError) as raised:
-        await client.request("start", {"run_id": "RUN-001"})
+        await client.request("start", {"run_id": "ATT-001"})
     assert raised.value.classification is TransportEffect.NO_EFFECT
     assert raised.value.code == "refused"
 
@@ -478,7 +497,7 @@ async def test_remote_error_after_modifying_forward_is_effect_unknown(paths: _Pa
 
 async def test_read_only_success_returns_only_validated_broker_response(paths: _Paths) -> None:
     client = _client(paths)
-    request = build_request(IDENTITY, "status", {"run_id": "RUN-001"})
+    request = build_request(IDENTITY, "status", {"run_id": "ATT-001"})
 
     async def exchange() -> object:
         return _Reader(
@@ -486,7 +505,7 @@ async def test_read_only_success_returns_only_validated_broker_response(paths: _
         ), _Writer()
 
     client._open_connection = exchange
-    result = await client.request("status", {"run_id": "RUN-001"})
+    result = await client.request("status", {"run_id": "ATT-001"})
     assert result == {"state": "RUNNING"}
 
 
@@ -515,8 +534,8 @@ async def test_real_client_crosses_mtls_gateway_to_fixed_broker(tmp_path: Path) 
         allowed_operations={"status"},
     )
     try:
-        result = await client.request("status", {"run_id": "RUN-001"})
-        assert result == {"worker": "RUN-001"}
+        result = await client.request("status", {"run_id": "ATT-001"})
+        assert result == {"worker": "ATT-001"}
     finally:
         await _close_gateway(fixture)
 
@@ -526,3 +545,32 @@ def test_request_sync_structural_seam_matches_existing_worker_client() -> None:
     local = inspect.signature(WorkerBrokerClient.request_sync)
     assert tuple(remote.parameters) == tuple(local.parameters)
     assert "timeout_seconds" in remote.parameters
+
+
+async def test_capacity_observe_post_write_loss_is_no_effect_and_zero_retry(
+    paths: _Paths,
+) -> None:
+    client = RemoteWorkerBrokerClient(
+        _binding(paths),
+        IDENTITY,
+        allowed_operations={"capacity-observe/v1"},
+    )
+    calls = 0
+
+    async def exchange() -> object:
+        nonlocal calls
+        calls += 1
+        return _Reader(b""), _Writer()
+
+    client._open_connection = exchange
+    with pytest.raises(TransportError) as raised:
+        await client.request(
+            "capacity-observe/v1",
+            {
+                "schema_version": (
+                    "mastermind.executive_worker_capacity_observe_request/v1"
+                )
+            },
+        )
+    assert raised.value.classification is TransportEffect.NO_EFFECT
+    assert calls == 1

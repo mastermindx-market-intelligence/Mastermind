@@ -125,9 +125,11 @@ def test_parent_child_fields_migrate_preserve_and_derive_root_depth(tmp_path):
     assert child.reviews_job_id is None
     assert Runtime.at(tmp_path).jobs.get_job(child.job_id) == child
     with Runtime.at(tmp_path).store.read() as connection:
-        assert connection.execute(
-            "SELECT version FROM schema_migrations ORDER BY version DESC LIMIT 1"
-        ).fetchone()[0] == 4
+        migrations = [tuple(row) for row in connection.execute(
+            "SELECT version,name FROM schema_migrations ORDER BY version"
+        )]
+        assert [row[0] for row in migrations[:-1]] == [1, 2, 3, 4]
+        assert migrations[-1] == (5, "executive_finite_drive_arm_contract")
 
 
 def test_v1_populated_store_normal_open_refuses_without_mutation(tmp_path):
@@ -158,7 +160,7 @@ def test_v1_populated_store_normal_open_refuses_without_mutation(tmp_path):
         "inventory": sorted(path.name for path in db_path.parent.iterdir()),
     }
     assert after == before
-    assert SCHEMA_VERSION == 4
+    assert SCHEMA_VERSION == 5
 
 
 def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
@@ -170,7 +172,7 @@ def test_opening_an_already_migrated_store_is_idempotent(tmp_path):
         assert [
             int(row[0])
             for row in connection.execute("SELECT version FROM schema_migrations ORDER BY version")
-        ] == [1, 2, 3, 4]
+        ] == [1, 2, 3, 4, 5]
 
 
 def test_v1_restored_database_stays_inert_under_v4_code(tmp_path):

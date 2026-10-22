@@ -331,6 +331,77 @@ def test_wrong_resource_audience_refuses(rsa_key, tmp_path):
     assert response.json()["error"]["code"] == "resource_refused"
 
 
+def test_configured_exact_resource_variant_accepts_but_foreign_resource_refuses(
+    rsa_key,
+):
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    cache = _FakeJwksCache(rsa_key)
+    primary = app_module.JwtAuthenticator(
+        policy=_read_policy(), jwks_cache=cache
+    )
+    alternate = app_module.JwtAuthenticator(
+        policy=_read_policy(resource=alternate_resource), jwks_cache=cache
+    )
+    token = _read_token(rsa_key, aud=alternate_resource)
+    principal = asyncio.run(
+        app_module._verify_exact_resource_set(
+            (primary, alternate), f"Bearer {token}", now=NOW
+        )
+    )
+    assert principal.resource == alternate_resource
+
+    foreign = _read_token(
+        rsa_key, aud="https://executive-app-foreign.mastermind.example.test/mcp"
+    )
+    with pytest.raises(app_module.AuthError) as exc_info:
+        asyncio.run(
+            app_module._verify_exact_resource_set(
+                (primary, alternate), f"Bearer {foreign}", now=NOW
+            )
+        )
+    assert exc_info.value.code.value == "resource_refused"
+
+
+def test_app_settings_resource_variant_may_change_only_exact_resource(
+    rsa_key, tmp_path
+):
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    primary = AppPolicies(read=_read_policy(), submit=_submit_policy())
+    alternate = AppPolicies(
+        read=_read_policy(resource=alternate_resource),
+        submit=_submit_policy(resource=alternate_resource),
+    )
+    settings = AppSettings(
+        policies=primary,
+        additional_policies=(alternate,),
+        mastermind_root=tmp_path,
+        macro_root_flag=None,
+        environ={},
+        ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+        jwks_cache=_FakeJwksCache(rsa_key),
+        clock=lambda: NOW,
+    )
+    assert settings.additional_policies == (alternate,)
+
+    widened = AppPolicies(
+        read=dataclasses.replace(
+            alternate.read, max_token_lifetime_seconds=800
+        ),
+        submit=alternate.submit,
+    )
+    with pytest.raises(ValueError, match="may differ only by resource"):
+        AppSettings(
+            policies=primary,
+            additional_policies=(widened,),
+            mastermind_root=tmp_path,
+            macro_root_flag=None,
+            environ={},
+            ceo_ingress_socket_path="/tmp/never-used-e1.sock",
+            jwks_cache=_FakeJwksCache(rsa_key),
+            clock=lambda: NOW,
+        )
+
+
 def test_wrong_algorithm_none_refuses(rsa_key, tmp_path):
     client, _ = _client(rsa_key, mastermind_root=tmp_path)
     # PyJWT refuses to encode "none" with a key unless explicitly permitted;

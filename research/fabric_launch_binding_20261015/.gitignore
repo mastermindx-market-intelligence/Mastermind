@@ -1,0 +1,11 @@
+baseline*/
+candidate-tmp/
+compat/
+*.log
+*.xml
+*.stdout
+*.stderr
+__pycache__/
+.pytest_cache/
+REVIEW_*
+new_helper.txt

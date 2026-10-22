@@ -21,6 +21,8 @@ finally:
     sys.path.pop(0)
 
 from integrations.executive_mcp import server as transport
+from integrations.business_mcp_auth.contracts import AuthErrorCode
+from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
 from integrations.mastermind_executive_app.app import create_app
 
 rsa_key = fixture.rsa_key
@@ -43,6 +45,130 @@ class Sink:
         self.events.append(event)
 
 
+def _coded_verifier(name, calls, result):
+    verifier = object.__new__(MastermindTokenVerifier)
+
+    async def verify_token_with_code(token):
+        calls.append((name, token))
+        return result
+
+    verifier.verify_token_with_code = verify_token_with_code
+    return verifier
+
+
+def test_mcp_verifier_scope_fallback_stays_within_one_resource():
+    calls = []
+    accepted = object()
+    verifier = transport._ExecutivePolicyVerifiers(
+        (
+            _coded_verifier(
+                "resource-1-read",
+                calls,
+                (None, AuthErrorCode.SCOPE_REFUSED),
+            ),
+            _coded_verifier("resource-1-submit", calls, (accepted, None)),
+        ),
+        (
+            _coded_verifier("resource-2-read", calls, (accepted, None)),
+            _coded_verifier("resource-2-submit", calls, (accepted, None)),
+        ),
+    )
+
+    assert asyncio.run(verifier.verify_token("opaque")) is accepted
+    assert calls == [
+        ("resource-1-read", "opaque"),
+        ("resource-1-submit", "opaque"),
+    ]
+
+
+def test_mcp_verifier_resource_refusal_advances_to_next_resource():
+    calls = []
+    accepted = object()
+    verifier = transport._ExecutivePolicyVerifiers(
+        (
+            _coded_verifier(
+                "resource-1-read",
+                calls,
+                (None, AuthErrorCode.RESOURCE_REFUSED),
+            ),
+            _coded_verifier("resource-1-submit", calls, (accepted, None)),
+        ),
+        (
+            _coded_verifier("resource-2-read", calls, (accepted, None)),
+            _coded_verifier("resource-2-submit", calls, (accepted, None)),
+        ),
+    )
+
+    assert asyncio.run(verifier.verify_token("opaque")) is accepted
+    assert calls == [
+        ("resource-1-read", "opaque"),
+        ("resource-2-read", "opaque"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "code",
+    [
+        AuthErrorCode.TOKEN_SIGNATURE_REFUSED,
+        AuthErrorCode.ISSUER_REFUSED,
+        AuthErrorCode.TOKEN_EXPIRED,
+        AuthErrorCode.SUBJECT_REFUSED,
+        AuthErrorCode.KEY_NOT_FOUND,
+        AuthErrorCode.INTERNAL_ERROR,
+    ],
+)
+def test_mcp_verifier_non_resource_refusal_is_terminal(code):
+    calls = []
+    accepted = object()
+    verifier = transport._ExecutivePolicyVerifiers(
+        (
+            _coded_verifier("resource-1-read", calls, (None, code)),
+            _coded_verifier("resource-1-submit", calls, (accepted, None)),
+        ),
+        (
+            _coded_verifier("resource-2-read", calls, (accepted, None)),
+            _coded_verifier("resource-2-submit", calls, (accepted, None)),
+        ),
+    )
+
+    assert asyncio.run(verifier.verify_token("opaque")) is None
+    assert calls == [("resource-1-read", "opaque")]
+
+
+def test_mcp_verifier_rejects_more_than_seventeen_exact_resources():
+    calls = []
+    pairs = tuple(
+        (
+            _coded_verifier(
+                f"resource-{index}-read",
+                calls,
+                (None, AuthErrorCode.RESOURCE_REFUSED),
+            ),
+            _coded_verifier(
+                f"resource-{index}-submit",
+                calls,
+                (None, AuthErrorCode.RESOURCE_REFUSED),
+            ),
+        )
+        for index in range(18)
+    )
+
+    with pytest.raises(TypeError, match="exceeds 17 resources"):
+        transport._ExecutivePolicyVerifiers(*pairs)
+
+
+def test_mcp_verifier_explicit_legacy_composition_has_one_resource_pair():
+    calls = []
+    verifier = transport._ExecutivePolicyVerifiers(
+        (
+            _coded_verifier("primary-read", calls, (object(), None)),
+            _coded_verifier("primary-submit", calls, (object(), None)),
+        )
+    )
+
+    assert len(verifier._verifier_pairs) == 1
+
+
 @pytest.fixture
 def settings(rsa_key, tmp_path, short_socket_root):
     mastermind = tmp_path / "mastermind"
@@ -51,6 +177,10 @@ def settings(rsa_key, tmp_path, short_socket_root):
     (macro / "scripts").mkdir(parents=True)
     (macro / "scripts" / "agentos.py").write_text("")
     (macro / "agentos").mkdir()
+    # The installed reader binds the complete filesystem path set to HEAD. Keep
+    # the fixture's Agent OS directory represented in Git instead of leaving an
+    # untracked empty directory that production correctly refuses.
+    (macro / "agentos" / ".keep").write_text("")
     fixture._git_repo(macro)
     return fixture._real_app_settings(
         rsa_key, mastermind_root=mastermind, macro_root=macro,
@@ -113,6 +243,51 @@ def test_native_scan_and_read_accept_both_existing_exact_policies(settings, rsa_
                 assert body["ok"] is True, body
                 assert body["schema"] == "mastermind.executive_mcp_result.v1"
                 assert body["tool"] == "executive_state"
+    asyncio.run(exercise())
+
+
+def test_native_mcp_admits_primary_and_secondary_exact_resource_tokens(
+    settings, rsa_key, monkeypatch
+):
+    from integrations.mastermind_executive_app import gateway as gateway_module
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_default_jwks_cache",
+        lambda _policy: fixture._FakeJwksCache(rsa_key),
+    )
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    alternate = fixture.AppPolicies(
+        read=fixture._read_policy(resource=alternate_resource),
+        submit=fixture._submit_policy(resource=alternate_resource),
+    )
+    configured = dataclasses.replace(settings, additional_policies=(alternate,))
+
+    async def exercise():
+        async with connection(configured) as client:
+            for token in (
+                fixture._read_token(rsa_key),
+                fixture._submit_token(rsa_key),
+                fixture._read_token(rsa_key, aud=alternate_resource),
+                fixture._submit_token(rsa_key, aud=alternate_resource),
+            ):
+                initialized = await rpc(
+                    client,
+                    token,
+                    "initialize",
+                    {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "multi-resource-test",
+                            "version": "1",
+                        },
+                    },
+                )
+                assert "tools" in initialized["capabilities"]
+                listed = await rpc(client, token, "tools/list")
+                assert len(listed["tools"]) == 5
+
     asyncio.run(exercise())
 
 
@@ -205,7 +380,7 @@ def test_real_mcp_admission_duplicate_conflict_and_same_request_status(
             async with connection(bound) as client:
                 token = fixture._submit_token(rsa_key)
                 _, body = await call(client, token, "submit_ceo_intent", PAYLOAD)
-                assert body["status"] == "accepted", body
+                assert body.get("status") == "accepted", body
                 receipt = body["receipt"]
                 assert receipt["status"] == "QUEUED"
                 assert receipt["dispatched"] is False
@@ -382,6 +557,64 @@ def test_audit_failure_refuses_even_a_valid_submit_token(settings, rsa_key):
                 json={"jsonrpc": "2.0", "id": 1, "method": "tools/list"})
             assert response.status_code == 401
     asyncio.run(exercise())
+
+
+def test_transient_refusal_audit_failure_cannot_advance_resource(
+    settings, rsa_key, monkeypatch
+):
+    from integrations.mastermind_executive_app import gateway as gateway_module
+
+    class FirstEmitFails:
+        def __init__(self):
+            self.calls = 0
+            self.events = []
+
+        def emit(self, event):
+            self.calls += 1
+            if self.calls == 1:
+                raise OSError("audit temporarily unavailable")
+            self.events.append(event)
+
+    monkeypatch.setattr(
+        gateway_module,
+        "_default_jwks_cache",
+        lambda _policy: fixture._FakeJwksCache(rsa_key),
+    )
+    alternate_resource = "https://executive-app-c1.mastermind.example.test/mcp"
+    alternate = fixture.AppPolicies(
+        read=fixture._read_policy(resource=alternate_resource),
+        submit=fixture._submit_policy(resource=alternate_resource),
+    )
+    configured = dataclasses.replace(settings, additional_policies=(alternate,))
+    sink = FirstEmitFails()
+
+    async def exercise():
+        async with connection(configured, sink=sink) as client:
+            response = await client.post(
+                "/mcp",
+                headers=headers(
+                    fixture._read_token(rsa_key, aud=alternate_resource)
+                ),
+                json={
+                    "jsonrpc": "2.0",
+                    "id": 1,
+                    "method": "initialize",
+                    "params": {
+                        "protocolVersion": "2025-06-18",
+                        "capabilities": {},
+                        "clientInfo": {
+                            "name": "audit-failure-test",
+                            "version": "1",
+                        },
+                    },
+                },
+            )
+            assert response.status_code == 401
+
+    asyncio.run(exercise())
+
+    assert sink.calls == 1
+    assert sink.events == []
 
 
 def test_native_routes_are_literal_private_and_bounded(settings, rsa_key):

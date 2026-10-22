@@ -1,0 +1,222 @@
+{
+  "reports": [
+    {
+      "topic": 1,
+      "title": "Events and government",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8399,
+      "commit": "e66c8382a4b8f04100df7c2f7c0e3493f132f1ca",
+      "orchestrator": "O2",
+      "dossier_source": "S22",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8399",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 2,
+      "title": "Company expectations",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8402,
+      "commit": "63208615f081804e388c8c30a8d2c0fe6ec86dd4",
+      "orchestrator": "O3",
+      "dossier_source": "S23",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8402",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 3,
+      "title": "Company operating drivers",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8401,
+      "commit": "415618837bbba6344c18ee6fb839452a6a43ad1c",
+      "orchestrator": "O2",
+      "dossier_source": "S22",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8401",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 4,
+      "title": "Economic relationships",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8406,
+      "commit": "47b15a07cb169d311a9a8cabf33999a22c47c20b",
+      "orchestrator": "O2",
+      "dossier_source": "S22",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8406",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 5,
+      "title": "Temporal truth",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1221,
+      "commit": "ebfd9d5b6bcabc7b011f763c2f808e8a84c5d97b",
+      "orchestrator": "O1",
+      "dossier_source": "S24",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1221",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 7,
+      "title": "Evidence overlap",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1232,
+      "commit": "5dcd57fb22f0be6c4a5cfe750c4c3829f762f235",
+      "orchestrator": "O1",
+      "dossier_source": "S25",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1232",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 8,
+      "title": "Observability",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1224,
+      "commit": "7cbb03a85cfa96b2a880c297b01fd1c8df3038d4",
+      "orchestrator": "O8",
+      "dossier_source": "S26",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1224",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 9,
+      "title": "Evaluation",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1242,
+      "commit": "ac9c7345201e2c369a950663c297411f42837f03",
+      "orchestrator": "O7",
+      "dossier_source": "S11",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1242",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 10,
+      "title": "Ownership A",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1235,
+      "commit": "35e0e5ae81d3c1f24c3644a80eec2e779a2d7a98",
+      "orchestrator": "O5",
+      "dossier_source": "S27",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1235",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 10,
+      "title": "Ownership B",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1239,
+      "commit": "e46ccc9862628d362e41e5c0eb3a51c8a4128b28",
+      "orchestrator": "O5",
+      "dossier_source": "S27",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1239",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 11,
+      "title": "Short and borrow",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8421,
+      "commit": "74d3b6fb9f45cf35625eeac2fb208fc584acd9cb",
+      "orchestrator": "O5",
+      "dossier_source": "S28",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8421",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 12,
+      "title": "Physical telemetry",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1233,
+      "commit": "94304a03d228672859709c0d366131e0eabe11aa",
+      "orchestrator": "O6",
+      "dossier_source": "S29",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1233",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 13,
+      "title": "Capital actions",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8419,
+      "commit": "d0f655c65cd3dac332f22bb47693be206cbc229e",
+      "orchestrator": "O4",
+      "dossier_source": "S24",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8419",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 14,
+      "title": "Issuer credit",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1237,
+      "commit": "2784878636c4a27dae176f311e2ef126a1932f28",
+      "orchestrator": "O4",
+      "dossier_source": "S24",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1237",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 15,
+      "title": "Microstructure",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8424,
+      "commit": "a09f0aa8aa133a985f9235b0c719172fbc79005c",
+      "orchestrator": "O5",
+      "dossier_source": "S28",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8424",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 16,
+      "title": "Operational sensors A",
+      "repository": "mastermindx-market-intelligence/macro",
+      "pr": 8420,
+      "commit": "5a1400c4817e3f239d50de066aca00343171a6b5",
+      "orchestrator": "O6",
+      "dossier_source": "S30",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/macro/pull/8420",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 16,
+      "title": "Operational sensors B",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1238,
+      "commit": "087566cb8a11d33a4b1d02d8e5177fa772fbbd94",
+      "orchestrator": "O6",
+      "dossier_source": "S30",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1238",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 17,
+      "title": "Macro expectations",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1234,
+      "commit": "7b92c866ddb20fc9f6e204c5c47edfeac1704f8b",
+      "orchestrator": "O3",
+      "dossier_source": "S31",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1234",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    },
+    {
+      "topic": 18,
+      "title": "Regional parity",
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "pr": 1229,
+      "commit": "b502668857526d7da9fd69b9801493d387df951c",
+      "orchestrator": "O6",
+      "dossier_source": "S26",
+      "pr_url": "https://github.com/mastermindx-market-intelligence/Mastermind/pull/1229",
+      "inspection": "Original manifest retained from S01; corrected family dossier inspected. No blanket rereproduction of the original study."
+    }
+  ],
+  "missing_topics": [
+    {
+      "topic": 6,
+      "title": "Surprise / residual methods",
+      "status": "NOT_LOCATED_IN_BOUNDED_SEARCH",
+      "owner": "O3 with Fable original-source recovery",
+      "policy": "No rerun disguised as recovery; no universal surprise score accepted."
+    }
+  ]
+}

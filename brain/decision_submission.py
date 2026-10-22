@@ -203,11 +203,11 @@ def _json_value(value: Any, max_chars: int = 12000) -> Any:
 
 
 def _latest_holdings(book: str) -> dict[str, dict]:
-    """Reconstruct the actual account book, using average cost when quotes are down.
+    """Reconstruct the actual account book using the existing market-price owner.
 
     The account is the position authority.  Published rows only enrich its rationale.
-    If even a conservative mark is unavailable for one held line, normalization freezes
-    instead of accidentally treating the line as absent.
+    If a usable mark is unavailable for one held line, normalization freezes
+    instead of substituting historical cost or treating the line as absent.
     """
     from portfolio import fx, paper_account, registry
 
@@ -289,14 +289,12 @@ def _latest_holdings(book: str) -> dict[str, dict]:
                 price = fx.usd_to(price, currency)
             except (AttributeError, TypeError, ValueError):
                 price = None
-        # ``avg_cost`` is historical transaction evidence, NOT a current market observation, so
-        # it is never read here. Substituting it fabricated a current portfolio composition in
-        # whichever direction the old fill happened to sit — a name bought at 100 and now near
-        # 55 was valued at 100, and one now near 180 was also valued at 100 — and on a regional
-        # book it additionally smuggled a raw USD cost into a CNY/HKD NAV, skipping the
-        # conversion a real mark receives. Absence of current valuation authority must stay
-        # absence: freeze before any numeric target is built and let the caller preserve the
-        # standing book. Cost basis keeps its legitimate roles (P&L, provenance) elsewhere.
+        # ``avg_cost`` is historical transaction evidence, not a current market observation.
+        # It cannot establish current valuation, regardless of the currency in which it is
+        # stored. Substitution makes the asserted current composition depend on an old fill
+        # price rather than an available mark. Freeze before constructing numeric targets
+        # so the caller preserves the standing book. Cost basis keeps its legitimate
+        # historical and P&L roles elsewhere.
         if price is None or not math.isfinite(price) or price <= 0:
             raise DecisionBoundaryFreeze(f"unpriceable_held_position:{ticker}")
         marked[ticker] = (raw_rec, shares, price, "live_quote")

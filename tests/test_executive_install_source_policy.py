@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
 import pytest
 
+import ops.executive_os.install_source_policy as source_policy
 from ops.executive_os.install_source_policy import (
     InstallSourcePolicyError,
     validate_install_source,
@@ -191,3 +193,314 @@ def test_installer_exposes_explicit_frozen_mode_without_reusing_historical_sourc
     assert "--protected-master-sha" in install
     assert '"$SCRIPT_DIR/install_source_policy.py"' in install
     assert "refs/remotes/origin/master" not in install
+
+
+def test_git_uses_exact_command_scoped_safe_directory(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls: list[list[str]] = []
+
+    def fake_run(argv, **_kwargs):
+        calls.append(list(argv))
+        return subprocess.CompletedProcess(argv, 0, stdout="ok\n", stderr="")
+
+    monkeypatch.setattr(source_policy.subprocess, "run", fake_run)
+    result = source_policy._git(repo, "rev-parse", "HEAD")
+
+    trusted = str(repo.resolve())
+    assert result.stdout == "ok\n"
+    assert calls == [[
+        "/usr/bin/git", "--no-optional-locks",
+        "-c", f"safe.directory={trusted}",
+        "-C", trusted, "rev-parse", "HEAD",
+    ]]
+
+
+def test_git_refuses_symlink_alias_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    alias = tmp_path / "alias"
+    alias.symlink_to(repo, target_is_directory=True)
+    monkeypatch.setattr(
+        source_policy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Git must not spawn for an alias"),
+    )
+    with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
+        source_policy._git(alias, "rev-parse", "HEAD")
+
+
+def test_git_refuses_wildcard_safe_directory_value_before_spawn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    repo = tmp_path / "repo*"
+    repo.mkdir()
+    monkeypatch.setattr(
+        source_policy.subprocess,
+        "run",
+        lambda *_args, **_kwargs: pytest.fail("Git must not spawn for wildcard trust"),
+    )
+    with pytest.raises(InstallSourcePolicyError, match="path is unsafe"):
+        source_policy._git(repo, "rev-parse", "HEAD")
+
+
+@pytest.mark.parametrize("linked", [False, True])
+@pytest.mark.parametrize("operation", ["tree", "archive", "clone"])
+def test_installer_source_reads_work_without_persistent_ownership_trust(
+    tmp_path: Path, operation: str, linked: bool
+) -> None:
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if linked:
+        worktree = tmp_path / "linked-source"
+        _git(repo, "worktree", "add", "--detach", str(worktree), protected)
+        repo = worktree
+    source_config = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir")) / "config"
+    config_before = source_config.read_bytes()
+    staging = tmp_path / "staging"
+    staging.mkdir()
+    checkout = tmp_path / "admin"
+    env = {
+        **os.environ,
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_TEST_ASSUME_DIFFERENT_OWNER": "1",
+        "GIT_TERMINAL_PROMPT": "0",
+        "SOURCE_REPO": str(repo.resolve()),
+        "EXPECTED_SHA": protected,
+        "STAGING": str(staging),
+        "ADMIN_CHECKOUT": str(checkout),
+    }
+    baseline = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "rev-parse", "HEAD"],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert baseline.returncode != 0
+    assert "dubious ownership" in baseline.stderr
+
+    selectors = {
+        "tree": 'TREE_SHA="$(',
+        "archive": 'archive --format=tar "$EXPECTED_SHA"',
+        "clone": 'clone --no-hardlinks --no-checkout',
+    }
+    statements = [
+        line.strip() for line in INSTALL.read_text(encoding="utf-8").splitlines()
+        if selectors[operation] in line
+    ]
+    assert len(statements) == 1
+    script = "set -euo pipefail\n" + statements[0] + "\n"
+    if operation == "archive":
+        # Exercise the complete production archive/extraction statement, which
+        # may include a stream-draining consumer before ownership is applied.
+        lines = INSTALL.read_text(encoding="utf-8").splitlines()
+        start = next(i for i, line in enumerate(lines) if selectors[operation] in line)
+        end = next(i for i in range(start + 1, len(lines)) if "/usr/sbin/chown" in lines[i])
+        script = "set -euo pipefail\n" + "\n".join(lines[start:end]) + "\n"
+    if operation == "tree":
+        script += 'printf "%s\\n" "$TREE_SHA"\n'
+    completed = subprocess.run(
+        ["/bin/bash", "-c", script],
+        env=env, capture_output=True, text=True, check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    if operation == "tree":
+        assert completed.stdout.strip() == _git(repo, "rev-parse", f"{protected}^{{tree}}")
+    elif operation == "archive":
+        assert (staging / "state.txt").read_text(encoding="utf-8") == "protected\n"
+    else:
+        assert _git(checkout, "rev-parse", "HEAD") == protected
+        assert not (checkout / "state.txt").exists()
+        assert "safe.directory" not in (checkout / ".git" / "config").read_text(encoding="utf-8")
+    assert source_config.read_bytes() == config_before
+
+
+@pytest.mark.parametrize("linked", [False, True])
+def test_acceptance_reads_different_owner_without_changing_git_state(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, linked: bool
+) -> None:
+    from ops.executive_os.acceptance import Acceptance
+
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if linked:
+        linked_repo = tmp_path / "acceptance-source"
+        _git(repo, "worktree", "add", "--detach", str(linked_repo), protected)
+        repo = linked_repo
+    tree = _git(repo, "rev-parse", f"{protected}^{{tree}}")
+    git_dir = Path(_git(repo, "rev-parse", "--absolute-git-dir"))
+    common = Path(_git(repo, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+    paths = [git_dir / "index", common / "config"]
+    before = [(p.read_bytes(), p.stat()) for p in paths]
+    # Force status to inspect a changed stat without permitting index refresh.
+    tracked = repo / "state.txt"
+    info = tracked.stat()
+    os.utime(tracked, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", os.devnull)
+    monkeypatch.setenv("GIT_CONFIG_NOSYSTEM", "1")
+    monkeypatch.setenv("GIT_TEST_ASSUME_DIFFERENT_OWNER", "1")
+    bare = subprocess.run(
+        ["/usr/bin/git", "-C", str(repo), "rev-parse", "HEAD"],
+        capture_output=True, text=True, check=False,
+    )
+    assert bare.returncode != 0 and "dubious ownership" in bare.stderr
+
+    proof = object.__new__(Acceptance)
+    proof.source_repository = repo
+    proof.expected_sha = protected
+    assert proof._source_tree_sha() == tree
+    for path, (raw, old_stat) in zip(paths, before):
+        assert path.read_bytes() == raw
+        current = path.stat()
+        # Reading the index/config may advance atime on the host filesystem.
+        # Keep every write, ownership and inode invariant, including nanosecond
+        # timestamps; access time is not evidence of a Git state mutation.
+        for field in ("st_dev", "st_ino", "st_nlink", "st_mode", "st_uid", "st_gid",
+                      "st_size", "st_mtime_ns", "st_ctime_ns"):
+            assert getattr(current, field) == getattr(old_stat, field), field
+    assert not (git_dir / "index.lock").exists()
+
+
+@pytest.mark.parametrize("failure", ["dirty", "head", "remote", "alias", "wildcard"])
+def test_acceptance_source_refuses_drift_and_unsafe_trust(
+    tmp_path: Path, failure: str
+) -> None:
+    from ops.executive_os.acceptance import Acceptance, AcceptanceError
+
+    repo, accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    if failure == "dirty":
+        (repo / "untracked.txt").write_text("unreviewed", encoding="utf-8")
+    elif failure == "head":
+        _git(repo, "checkout", "--detach", accepted)
+    elif failure == "remote":
+        _git(repo, "update-ref", "refs/remotes/origin/master", accepted)
+    elif failure == "alias":
+        alias = tmp_path / "source-alias"
+        alias.symlink_to(repo, target_is_directory=True)
+        repo = alias
+    elif failure == "wildcard":
+        renamed = tmp_path / "source*"
+        repo.rename(renamed)
+        repo = renamed
+
+    proof = object.__new__(Acceptance)
+    proof.source_repository = repo
+    proof.expected_sha = protected
+    with pytest.raises(AcceptanceError) as caught:
+        proof._source_tree_sha()
+    assert isinstance(caught.value.__cause__, InstallSourcePolicyError)
+
+
+_COMPLETE_STATUS_ARGS = ("status", "--porcelain=v1", "--untracked-files=normal")
+
+
+def _observe_slow_status(monkeypatch, *, elapsed=16.34, returncode=None):
+    """Model the observed deadline crossing, while retaining real Git results.
+
+    Sleeping would test scheduler speed. Only the subprocess deadline boundary
+    is simulated; clean/dirty/ref/ancestor decisions still consume real Git.
+    """
+    real_run = subprocess.run
+    observed = []
+
+    def run(argv, **kwargs):
+        if tuple(argv[-3:]) == _COMPLETE_STATUS_ARGS:
+            observed.append((list(argv), dict(kwargs)))
+            if kwargs["timeout"] < elapsed:
+                raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+            if returncode is not None:
+                return subprocess.CompletedProcess(argv, returncode, stdout="", stderr="unavailable")
+        return real_run(argv, **kwargs)
+
+    monkeypatch.setattr(source_policy.subprocess, "run", run)
+    return observed
+
+
+@pytest.mark.parametrize("mode", ["exact", "acceptance", "frozen"])
+def test_slow_complete_clean_status_remains_usable_without_skipping_source_checks(
+    tmp_path, monkeypatch, mode
+):
+    repo, accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    expected = accepted if mode == "frozen" else protected
+    _git(repo, "checkout", "--detach", expected)
+    tree = _git(repo, "rev-parse", f"{expected}^{{tree}}")
+    observed = _observe_slow_status(monkeypatch)
+
+    if mode == "acceptance":
+        assert source_policy.validate_acceptance_source(source_repo=repo, expected_sha=expected) == tree
+    else:
+        result = validate_install_source(
+            source_repo=repo, expected_sha=expected,
+            protected_master_sha=protected if mode == "frozen" else None,
+            allow_frozen_accepted_ancestor=mode == "frozen",
+        )
+        assert result["expected_sha"] == expected
+        assert result["protected_master_sha"] == protected
+    assert len(observed) == 1  # Completion is not an automatic retry.
+    argv, options = observed[0]
+    assert argv == ["/usr/bin/git", "--no-optional-locks", "-c",
+                    f"safe.directory={repo.resolve()}", "-C", str(repo.resolve()),
+                    *_COMPLETE_STATUS_ARGS]
+    assert options["stdin"] == subprocess.DEVNULL
+    assert options["timeout"] == 60
+
+
+@pytest.mark.parametrize("dirty", ["tracked", "untracked"])
+def test_slow_complete_status_still_rejects_actual_dirty_source(tmp_path, monkeypatch, dirty):
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    (repo / ("state.txt" if dirty == "tracked" else "new.txt")).write_text("unreviewed\n")
+    observed = _observe_slow_status(monkeypatch)
+    with pytest.raises(InstallSourcePolicyError, match="source checkout is not clean"):
+        source_policy.validate_acceptance_source(source_repo=repo, expected_sha=protected)
+    assert len(observed) == 1
+
+
+def test_slow_complete_status_still_rejects_actual_protected_ref_drift(tmp_path, monkeypatch):
+    repo, accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    _git(repo, "update-ref", "refs/remotes/origin/master", accepted)
+    observed = _observe_slow_status(monkeypatch)
+    with pytest.raises(InstallSourcePolicyError, match="exact origin/master"):
+        source_policy.validate_acceptance_source(source_repo=repo, expected_sha=protected)
+    assert len(observed) == 1
+
+
+@pytest.mark.parametrize("check", [True, False])
+def test_complete_status_deadline_exhaustion_still_refuses_once(tmp_path, monkeypatch, check):
+    repo, _accepted, _protected = _repo_with_accepted_ancestor(tmp_path)
+    observed = _observe_slow_status(monkeypatch, elapsed=61)
+    with pytest.raises(InstallSourcePolicyError, match="could not inspect source checkout") as caught:
+        source_policy._git(repo, *_COMPLETE_STATUS_ARGS, check=check)
+    assert len(observed) == 1
+    assert isinstance(caught.value.__cause__, subprocess.TimeoutExpired)
+    assert caught.value.__cause__.timeout == 60
+
+
+@pytest.mark.parametrize("args", [
+    ("rev-parse", "HEAD"),
+    ("rev-parse", "refs/remotes/origin/master"),
+    ("status", "--porcelain=v1", "--untracked-files=no"),
+    (*_COMPLETE_STATUS_ARGS, "--ignored"),
+])
+def test_status_budget_does_not_expand_other_git_commands(tmp_path, monkeypatch, args):
+    repo = tmp_path / "repo"
+    repo.mkdir()
+    calls = []
+
+    def run(argv, **kwargs):
+        calls.append(kwargs)
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    monkeypatch.setattr(source_policy.subprocess, "run", run)
+    with pytest.raises(InstallSourcePolicyError) as caught:
+        source_policy._git(repo, *args)
+    assert len(calls) == 1
+    assert caught.value.__cause__.timeout == 15
+
+
+def test_slow_nonzero_status_is_not_clean_or_retried(tmp_path, monkeypatch):
+    repo, _accepted, protected = _repo_with_accepted_ancestor(tmp_path)
+    observed = _observe_slow_status(monkeypatch, returncode=128)
+    with pytest.raises(InstallSourcePolicyError, match="could not inspect source checkout"):
+        source_policy.validate_acceptance_source(source_repo=repo, expected_sha=protected)
+    assert len(observed) == 1

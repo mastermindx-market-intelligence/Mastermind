@@ -1,0 +1,84 @@
+{
+  "schema_version": "mastermind.craft_brief.v1",
+  "role": "orchestrator",
+  "assignment_ref": null,
+  "mission": "Compile the first usable Mastermind role-method package and integrate its delivery plan with the existing harness, capability, Paper, and operator-environment owners.",
+  "why": "A model subscription alone does not give a worker reliable tools, context, workspace ownership, or a useful delivery method.",
+  "user_journey": "Chris asks for a capability; the correct worker receives a complete bounded brief, uses its actual approved tools, returns attributable evidence, and leaves an exact next action without manual account allocation.",
+  "machine_outcome": "The existing execution and capability owners can consume a complete task prompt without a new router, installer, identity, queue, or permission service.",
+  "source_refs": [
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+      "path": "docs/sol_skills/INDEX.md"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "9ed16bf0fcc5b47e870350ff2413ff5c8c73b447",
+      "path": "control_plane/worker_execution_contract.py"
+    },
+    {
+      "repository": "mastermindx-market-intelligence/Mastermind",
+      "commit": "194fa4fa34719faba9481e4f82f14e52535595cf",
+      "path": "docs/superpowers/plans/2026-09-13-web-ceo-native-operator-environment.md"
+    }
+  ],
+  "scope": {
+    "proposed_write_paths": [
+      "research/worker_craft"
+    ],
+    "non_goals": [
+      "No shared marketplace or validator changes.",
+      "No live provider, broker, registry, workspace, account, or worker changes.",
+      "Do not duplicate Paper PR585, operator-environment PR584, or active HF1/ACP adapter work."
+    ]
+  },
+  "workspace": {
+    "workspace_ref": null,
+    "host_ref": null
+  },
+  "inputs": [
+    "Current live Chairman request and continuation.",
+    "Protected source and current source-candidate metadata, distinguished from runtime evidence.",
+    "Current primary vendor documentation."
+  ],
+  "data_contract": {
+    "time": "Source references are exact commits. Vendor and host observations are dated evidence, not an evergreen health claim.",
+    "missing": "Unknown runtime, workspace, auth, and provider readiness stay unknown; null bindings are authoring-only.",
+    "corrections": "Recompile when mission or method bytes change. These hashes are not canonical capability-generation or authorization receipts.",
+    "rights": "Use original playbooks, public source metadata and official documentation. Do not publish credentials, private captures, or account homes."
+  },
+  "methods": {
+    "deterministic": [
+      "Validate a closed brief shape, exact source SHA syntax, bounded input and normalized relative paths.",
+      "Compile the common method and exactly one role, with reproducible authoring hashes."
+    ],
+    "model": [
+      "Synthesize the user and machine outcomes, preserve existing owner boundaries, and define useful role-specific acceptance."
+    ]
+  },
+  "deliverables": [
+    "Reusable skill source with eight progressive-loading role methods.",
+    "Dependency-free compiler, complete examples and focused executable tests.",
+    "Owner-preserving master plan and exact integration handoff."
+  ],
+  "acceptance": [
+    "Actual CLI input produces a complete method-enriched brief for each role.",
+    "Malformed, incomplete, oversized and misleading-structure inputs fail without executing anything.",
+    "Outputs never assert execution authority, live readiness, source authentication or acceptance.",
+    "Native Skill/tool behavior remains unproven until the existing owner completes its real-path canary."
+  ],
+  "stop_conditions": [
+    "Any requested effect overlaps an incumbent source owner.",
+    "A modifying response becomes ambiguous or a required tool/policy gate is unavailable.",
+    "The next step requires actual runtime admission, provider enrollment or app authorization absent in this session."
+  ],
+  "resource_constraints": [
+    "Do not launch additional model workers for this bounded authoring slice.",
+    "Use the sandbox for source authoring and focused tests; preserve active Studio workers."
+  ],
+  "continuation": {
+    "record_owner": "Implementation and full research in Mastermind; organizational continuity only through Macro Agent OS after resolving its existing parent.",
+    "next_action": "Admit the reviewed craft package through the existing package/capability owner and consume the compiled task content through one accepted harness; do not change the four-Skill canary."
+  }
+}

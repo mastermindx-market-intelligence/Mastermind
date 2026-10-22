@@ -32,6 +32,18 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from ops.executive_os.acceptance_maintenance import Maintenance
+from ops.executive_os.install_source_policy import (
+    InstallSourcePolicyError,
+    validate_acceptance_source,
+)
+from ops.executive_os.a2_agent_relay_enrollment import (
+    RELAY_GID as AGENT_RELAY_GID,
+    RELAY_GROUP as AGENT_RELAY_GROUP,
+    RELAY_HOME as AGENT_RELAY_HOME,
+    RELAY_UID as AGENT_RELAY_UID,
+    RELAY_USER as AGENT_RELAY_USER,
+)
 
 
 SCHEMA_VERSION = "mastermind.executive_host_acceptance/v1"
@@ -99,6 +111,20 @@ _REFUSAL_DETAIL_LIMIT = 300
 _REFUSAL_TRUNCATION_MARKER = "...[truncated]"
 _REFUSAL_REDACTION = "<redacted>"
 _REFUSAL_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# The artifact's own format survives newlines and tabs so the user can still
+# read the stream; the rest collapse to a space.
+_FAILURE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# Bounded diagnostic capture for failing host-service calls. The artifact name
+# is fixed per call site (see _FAILURE_ARTIFACTS); the size bounds are the same
+# contract another lane's maintenance tool already admits against
+# host-service-status-failure.txt (see acceptance_maintenance).
+_FAILURE_STREAM_LIMIT = 64 * 1024
+_FAILURE_ARGV_LIMIT = 4 * 1024
+_FAILURE_ARTIFACT_LIMIT = 256 * 1024
+_FAILURE_ARTIFACTS = {
+    "host service status": "host-service-status-failure.txt",
+    "final host status": "final-host-status-failure.txt",
+}
 # Secret shapes this runtime actually mints are ``secrets.token_hex`` (hex) and
 # ``secrets.token_urlsafe`` (base64url).  ``/`` is deliberately excluded from the
 # token class so that filesystem paths (the most useful part of a workspace
@@ -125,6 +151,61 @@ _GIT_OBJECT_ID_RE = re.compile(r"[0-9a-f]{40}")
 
 class AcceptanceError(RuntimeError):
     pass
+
+
+class CommandFailure(AcceptanceError):
+    """A failing `_run` call whose captured streams must reach the operator.
+
+    ``str(exc)`` is exactly the historical `_run` message
+    ``f"{label} failed with exit {rc}"`` so every existing
+    ``except AcceptanceError`` site keeps catching it without text matching.
+    """
+
+    def __init__(
+        self,
+        *,
+        label: str,
+        argv: list[str],
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+    ) -> None:
+        super().__init__(f"{label} failed with exit {returncode}")
+        self.label = label
+        self.argv = argv
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
+
+
+def _validate_operator_harness_policy(
+    config: Mapping[str, Any], worker_config: Mapping[str, Any]
+) -> None:
+    # Match ServiceConfig's quota identifier/distinctness contract. Historical
+    # names are defaults, not permission to rewrite an old Runtime policy row.
+    # Current binding/metadata admission remains with Control and Runtime.
+    quota_names = (
+        config.get("quota_class", "codex-native"),
+        config.get("coo_quota_class", "codex-coo"),
+        config.get("coo_default_quota_class", "codex-coo-default"),
+        config.get("coo_operator_quota_class"),
+    )
+    if (
+        any(type(name) is not str or _ID_RE.fullmatch(name) is None for name in quota_names)
+        or len(set(quota_names)) != 4
+    ):
+        raise AcceptanceError("installed proof and COO quota selectors are invalid or collide")
+    if (
+        not isinstance(config.get("coo_operator_harness_armed"), bool)
+        or config.get("coo_operator_model_alias") != "coo.operator.readonly"
+        or worker_config.get("schema_version")
+        != "mastermind.executive_worker_broker_config/v4"
+        or worker_config.get("operator_harness_armed")
+        is not config.get("coo_operator_harness_armed")
+    ):
+        raise AcceptanceError(
+            "installed Operator Harness policy differs across control and worker"
+        )
 
 
 def _now() -> str:
@@ -162,7 +243,13 @@ def _run(
         env=dict(env) if env is not None else None,
     )
     if check and completed.returncode != 0:
-        raise AcceptanceError(f"{label} failed with exit {completed.returncode}")
+        raise CommandFailure(
+            label=label,
+            argv=[os.fspath(value) for value in argv],
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     return completed
 
 
@@ -306,6 +393,34 @@ def _canonical_canary_paths(config: Mapping[str, Any]) -> dict[str, Path]:
     }
 
 
+def _configured_assignment_root(path: Path) -> Path:
+    """Resolve a trusted configured root, including the macOS /var alias."""
+    try:
+        if not path.is_absolute():
+            raise ValueError("relative configured root")
+        canonical = path.resolve(strict=True)
+        if not canonical.is_dir():
+            raise ValueError("configured root is not a directory")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AcceptanceError("configured assignment root is unavailable") from exc
+    return canonical
+
+
+def _canonical_durable_path(raw: str) -> Path:
+    """Require producer evidence to be canonical; never repair its spelling."""
+    path = Path(raw)
+    try:
+        if (
+            not path.is_absolute()
+            or raw != os.fspath(path)
+            or path.resolve(strict=True) != path
+        ):
+            raise ValueError("noncanonical durable path")
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise AcceptanceError("durable assignment paths escaped their configured roots") from exc
+    return path
+
+
 def _durable_assignment_paths(
     job: Mapping[str, Any],
     attempt: Mapping[str, Any],
@@ -330,16 +445,48 @@ def _durable_assignment_paths(
         or not isinstance(result_raw, str)
     ):
         raise AcceptanceError("durable assignment identity is incomplete")
-    workspace = Path(workspace_raw)
-    run_dir = Path(result_raw).parent.parent
+    workspace_root = _configured_assignment_root(workspace_root)
+    run_root = _configured_assignment_root(run_root)
+    workspace = _canonical_durable_path(workspace_raw)
+    result = Path(result_raw)
+    run_dir = result.parent.parent
     if (
-        not workspace.is_absolute()
-        or workspace.parent != workspace_root
+        workspace.parent != workspace_root
+        or result_raw != os.fspath(result)
         or run_dir != run_root / attempt_id
-        or Path(result_raw) != run_dir / "output" / "result.json"
+        or result != run_dir / "output" / "result.json"
+        or not workspace.is_dir()
+        or not run_dir.is_dir()
+        or not result.parent.is_dir()
+        or attempt.get("status") not in {"COMPLETED", "LOST"}
     ):
         raise AcceptanceError("durable assignment paths escaped their configured roots")
+    _canonical_durable_path(os.fspath(run_dir))
+    _canonical_durable_path(os.fspath(result.parent))
+    try:
+        result_info = result.lstat()
+    except FileNotFoundError as exc:
+        # LOST preserves the admitted path, not a provider's completed output.
+        if attempt["status"] != "LOST":
+            raise AcceptanceError("completed assignment result is missing") from exc
+    else:
+        if not stat.S_ISREG(result_info.st_mode) or result_info.st_nlink != 1:
+            raise AcceptanceError("assignment result is not a single regular file")
+        _canonical_durable_path(result_raw)
     return workspace, run_dir
+
+
+
+def _durable_rotation_paths(
+    *, workspace_root: Path, job_id: str, attempt_id: str,
+    archive_path: str, receipt_path: str,
+) -> tuple[Path, Path]:
+    root = _configured_assignment_root(workspace_root)
+    expected_archive = root / ".lost-attempts" / job_id / attempt_id
+    expected_receipt = expected_archive.with_name(f"{attempt_id}.rotation.json")
+    if archive_path != os.fspath(expected_archive) or receipt_path != os.fspath(expected_receipt):
+        raise AcceptanceError("workspace rotation proof path drifted")
+    return _canonical_durable_path(archive_path), _canonical_durable_path(receipt_path)
 
 
 def _validate_assignment_seal_payload(
@@ -686,6 +833,87 @@ def _directory_values(record: str, attribute: str) -> tuple[str, ...]:
     return tuple(first + continuation)
 
 
+def _protected_control_definition(path: Path, control_gid: int) -> tuple[dict[str, Any], str]:
+    """Read the same protected bytes before considering any finite group exception."""
+    from control_plane.codex_provider_realm import _native_open, _native_read_config
+
+    with _native_open(path) as (descriptor, info):
+        if (info.st_gid != control_gid or stat.S_IMODE(info.st_mode) != 0o440
+                or not 0 < info.st_size <= 65536):
+            raise AcceptanceError("Control definition custody drifted")
+        chunks = []
+        remaining = 65537
+        while remaining:
+            chunk = os.read(descriptor, min(8192, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) != info.st_size:
+            raise AcceptanceError("Control definition changed during read")
+        digest = hashlib.sha256(raw).hexdigest()
+        document = _native_read_config(path, digest)
+    return document, digest
+
+
+def _attended_worker_membership(
+    config: Mapping[str, Any], *, control_uid: int, control_gid: int,
+    primary_worker_uid: int, primary_worker_gid: int, ops_gid: int,
+) -> dict[str, Any] | None:
+    """Derive one group from the protected current finite composition, never CLI input."""
+    from control_plane.executive_fabric_composition import FabricBindingSource
+    from control_plane.fabric_attended_canary import definition
+
+    stanza = config.get("fabric_attended_probe")
+    if stanza is None:
+        return None
+    if type(stanza) is not dict or set(stanza) != {"worker_config_path"}:
+        raise AcceptanceError("finite worker probe definition is malformed")
+    source = FabricBindingSource.from_path(config.get("fabric_bindings_path"),
+                                           config.get("fabric_bindings_sha256"))
+    candidates = [item for item in source.bindings if item.provider == "minimax"]
+    if len(candidates) != 1:
+        raise AcceptanceError("exactly one finite worker binding is required")
+    physical = candidates[0]
+    path = stanza["worker_config_path"]
+    if type(path) is not str or not Path(path).is_absolute():
+        raise AcceptanceError("finite worker definition path is invalid")
+    raw = definition(Path(path), physical)
+    if source(physical.host_ref, physical.worker_id) != physical:
+        raise AcceptanceError("finite worker binding changed")
+    uid, gid = raw.get("worker_uid"), raw.get("worker_gid")
+    reserved = {control_uid, control_gid, primary_worker_uid, primary_worker_gid,
+                ops_gid, AGENT_RELAY_UID, AGENT_RELAY_GID, 454, 455, 456}
+    if (control_uid != 450 or control_gid != 450
+            or any(type(value) is not int or not 400 <= value < 500 or value in reserved
+                   for value in (uid, gid))
+            or raw.get("control_uid") != control_uid or raw.get("control_gid") != control_gid
+            or raw.get("allowed_supplementary_gids") != []):
+        raise AcceptanceError("finite worker principal or group contract drifted")
+    user = raw.get("worker_user")
+    if (type(user) is not str or len(user) > 31
+            or re.fullmatch(r"_mastermind_[a-z0-9_]+", user) is None
+            or user in {CONTROL_USER, WORKER_USER, OPS_GROUP, AGENT_RELAY_USER}):
+        raise AcceptanceError("finite worker account name is invalid")
+    try:
+        group = grp.getgrgid(gid)
+    except KeyError as exc:
+        raise AcceptanceError("finite worker group is absent") from exc
+    name = group.gr_name
+    if (len(name) > 31 or re.fullmatch(r"_mastermind_[a-z0-9_]+", name) is None
+            or name in {CONTROL_GROUP, WORKER_GROUP, OPS_GROUP, AGENT_RELAY_GROUP}):
+        raise AcceptanceError("finite worker group name is invalid")
+    home = Path(raw["provider_home"])
+    expected_home = Path("/private/var/db/mastermind-executive/workers") / physical.worker_id / "provider-home"
+    if home != expected_home or str(home) != raw["provider_home"]:
+        raise AcceptanceError("finite worker HOME is outside the selected host")
+    return {"worker_user": user, "worker_uid": uid, "worker_group": name, "worker_gid": gid,
+            "provider_home": str(home), "worker_id": physical.worker_id,
+            "worker_config_path": path, "worker_config_sha256": physical.worker_source_config_digest,
+            "bindings_sha256": source.expected_sha256, "physical_binding_sha256": physical.digest}
+
+
 def _validate_protected_membership_snapshot(
     snapshot: Mapping[str, Any],
     *,
@@ -698,6 +926,8 @@ def _validate_protected_membership_snapshot(
     control_gid: int,
     worker_gid: int,
     ops_gid: int,
+    agent_relay_present: bool = False,
+    attended_worker: Mapping[str, Any] | None = None,
 ) -> dict[str, list[str]]:
     """Prove all four macOS membership representations are exact."""
 
@@ -716,6 +946,54 @@ def _validate_protected_membership_snapshot(
         OPS_GROUP: (ops_gid, set(), {operator_user}),
     }
     reviewed_users = {control_user, worker_user, operator_user}
+    reviewed_user_ids = {
+        control_user: control_uid,
+        worker_user: worker_uid,
+        operator_user: operator_uid,
+    }
+    protected_group_ids = {
+        CONTROL_GROUP: control_gid,
+        WORKER_GROUP: worker_gid,
+        OPS_GROUP: ops_gid,
+    }
+    if attended_worker is not None:
+        name = attended_worker["worker_user"]
+        group = attended_worker["worker_group"]
+        uid, gid = attended_worker["worker_uid"], attended_worker["worker_gid"]
+        if (name in reviewed_users or group in protected_group_ids
+                or uid in reviewed_user_ids.values() or gid in protected_group_ids.values()
+                or uid in {AGENT_RELAY_UID, 454, 455, 456}
+                or gid in {AGENT_RELAY_GID, 454, 455, 456}):
+            raise AcceptanceError("finite worker identity collides with protected principals")
+        expected[group] = (gid, {name}, {control_user})
+        reviewed_users.add(name)
+        reviewed_user_ids[name] = uid
+        protected_group_ids[group] = gid
+    if agent_relay_present:
+        expected[AGENT_RELAY_GROUP] = (
+            AGENT_RELAY_GID,
+            {AGENT_RELAY_USER},
+            {control_user},
+        )
+        reviewed_users.add(AGENT_RELAY_USER)
+        reviewed_user_ids[AGENT_RELAY_USER] = AGENT_RELAY_UID
+        protected_group_ids[AGENT_RELAY_GROUP] = AGENT_RELAY_GID
+    else:
+        reserved_uid_owners = {
+            str(candidate)
+            for candidate, candidate_record in users.items()
+            if isinstance(candidate_record, Mapping)
+            and candidate_record.get("unique_uid") == AGENT_RELAY_UID
+        }
+        if reserved_uid_owners:
+            raise AcceptanceError("reserved Agent Relay UID has unexpected owners")
+        reserved_gid_owners = {
+            str(candidate)
+            for candidate, candidate_gid in group_primary_gids.items()
+            if candidate_gid == AGENT_RELAY_GID
+        }
+        if reserved_gid_owners:
+            raise AcceptanceError("reserved Agent Relay GID has unexpected owners")
     reviewed_uuids: dict[str, str] = {}
     for name in reviewed_users:
         record = users.get(name)
@@ -726,11 +1004,7 @@ def _validate_protected_membership_snapshot(
     if len(set(reviewed_uuids.values())) != len(reviewed_uuids):
         raise AcceptanceError("reviewed account GeneratedUID values are not unique")
 
-    for name, uid in (
-        (control_user, control_uid),
-        (worker_user, worker_uid),
-        (operator_user, operator_uid),
-    ):
+    for name, uid in reviewed_user_ids.items():
         record = users.get(name)
         if not isinstance(record, Mapping) or record.get("unique_uid") != uid:
             raise AcceptanceError(f"reviewed account {name} UniqueID drifted")
@@ -743,11 +1017,7 @@ def _validate_protected_membership_snapshot(
         if owners != {name}:
             raise AcceptanceError(f"UniqueID {uid} has duplicate or aliased owners")
 
-    for name, gid in (
-        (CONTROL_GROUP, control_gid),
-        (WORKER_GROUP, worker_gid),
-        (OPS_GROUP, ops_gid),
-    ):
+    for name, gid in protected_group_ids.items():
         owners = {
             str(candidate)
             for candidate, candidate_gid in group_primary_gids.items()
@@ -795,6 +1065,8 @@ def _validate_service_directory_group_sets(
     worker_groups: Sequence[int],
     control_gid: int,
     worker_gid: int,
+    agent_relay_gid: int | None = None,
+    attended_worker_gid: int | None = None,
 ) -> set[int]:
     if dict(system_group_gids) != _REVIEWED_MACOS_ACCOUNT_GROUPS:
         raise AcceptanceError("reviewed macOS system group identities drifted")
@@ -807,6 +1079,15 @@ def _validate_service_directory_group_sets(
         "com.apple.access_disabled"
     ]
     expected_control = common | {control_gid, worker_gid}
+    if agent_relay_gid is not None:
+        if agent_relay_gid != AGENT_RELAY_GID:
+            raise AcceptanceError("agent relay group identity drifted")
+        expected_control.add(agent_relay_gid)
+    if attended_worker_gid is not None:
+        if (type(attended_worker_gid) is not int or not 400 <= attended_worker_gid < 500
+                or attended_worker_gid in {control_gid, worker_gid, AGENT_RELAY_GID, 453, 454, 455, 456}):
+            raise AcceptanceError("finite worker group identity drifted")
+        expected_control.add(attended_worker_gid)
     expected_worker = common | {worker_gid}
     observed_control = set(control_groups)
     observed_worker = set(worker_groups)
@@ -845,7 +1126,10 @@ def _numeric_directory_census(
     return result
 
 
-def _live_directory_membership_snapshot(*, operator_user: str) -> dict[str, Any]:
+def _live_directory_membership_snapshot(
+    *, operator_user: str, agent_relay_present: bool = False,
+    attended_worker: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     user_primary_gids = _numeric_directory_census(
         "Users", "PrimaryGroupID", label="local user primary-GID census"
     )
@@ -859,14 +1143,24 @@ def _live_directory_membership_snapshot(*, operator_user: str) -> dict[str, Any]
         }
         for name in set(user_primary_gids) | set(user_unique_uids)
     }
-    for name in (CONTROL_USER, WORKER_USER, operator_user):
+    reviewed_users = [CONTROL_USER, WORKER_USER, operator_user]
+    if attended_worker is not None:
+        reviewed_users.append(attended_worker["worker_user"])
+    if agent_relay_present:
+        reviewed_users.append(AGENT_RELAY_USER)
+    for name in reviewed_users:
         if name not in users:
             raise AcceptanceError(f"reviewed account is absent from local census: {name}")
         users[name]["generated_uid"] = _directory_attribute(
             f"/Users/{name}", "GeneratedUID"
         )
     groups: dict[str, dict[str, Any]] = {}
-    for name in (CONTROL_GROUP, WORKER_GROUP, OPS_GROUP):
+    reviewed_groups = [CONTROL_GROUP, WORKER_GROUP, OPS_GROUP]
+    if attended_worker is not None:
+        reviewed_groups.append(attended_worker["worker_group"])
+    if agent_relay_present:
+        reviewed_groups.append(AGENT_RELAY_GROUP)
+    for name in reviewed_groups:
         groups[name] = {
             "primary_gid": int(_directory_attribute(f"/Groups/{name}", "PrimaryGroupID")),
             "generated_uid": _directory_attribute(f"/Groups/{name}", "GeneratedUID"),
@@ -945,7 +1239,7 @@ def _prepare_acceptance_receipt_root(
 class Acceptance:
     def __init__(self, args: argparse.Namespace) -> None:
         self.args = args
-        self.source_repository = args.source_repo.resolve(strict=True)
+        self.source_repository = args.source_repo
         self.expected_sha = args.expected_sha
         self.operator_user = args.operator_user
         self.python = Path(sys.executable).resolve(strict=True)
@@ -960,6 +1254,7 @@ class Acceptance:
         self.worker_config: dict[str, Any] = {}
         self.receipt_root = RUNTIME_ROOT / "control" / "acceptance" / self.expected_sha
         self.services_started = False
+        self.maintenance: Maintenance | None = None
         self.helper: subprocess.Popen[bytes] | None = None
         self.helper_pid: int | None = None
         self.nonexecutive_disabled_before: str | None = None
@@ -981,7 +1276,7 @@ class Acceptance:
             "TZ=UTC",
         ]
 
-    def _write_bytes(self, name: str, payload: bytes) -> Path:
+    def _write_bytes(self, name: str, payload: bytes, *, replace: bool = False) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
             raise AcceptanceError("unsafe acceptance receipt name")
         destination = self.receipt_root / name
@@ -1003,15 +1298,167 @@ class Acceptance:
             os.close(descriptor)
         os.chown(temporary, self.control_identity.pw_uid, self.control_group.gr_gid)
         os.chmod(temporary, 0o400)
-        temporary.replace(destination)
+        try:
+            if replace:
+                os.replace(temporary, destination)
+            else:
+                # Receipts are write-once: link() refuses an existing destination
+                # (including a dangling symlink) where replace() would clobber it.
+                os.link(temporary, destination)
+        except FileExistsError:
+            raise AcceptanceError("acceptance receipt already exists") from None
+        finally:
+            temporary.unlink(missing_ok=True)
         return destination
 
-    def _write_json(self, name: str, value: Any) -> Path:
+    def _write_json(self, name: str, value: Any, *, replace: bool = False) -> Path:
         payload = (
             json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
             + "\n"
         ).encode("utf-8")
-        return self._write_bytes(name, payload)
+        return self._write_bytes(name, payload, replace=replace)
+
+    def _redact_failure_stream(self, payload: bytes) -> str:
+        """Render one bounded, redacted stream for the failure artifact.
+
+        Exact secrets held by the run plus every readable sentinel file value
+        are replaced first (longest match wins); then the same hex / token-shape
+        redaction the operator-visible refusal fragment uses; control
+        characters other than ``\\n`` and ``\\t`` collapse to a space so the
+        format's own line structure survives; every line is then prefixed with
+        ``"| "`` so stream content cannot forge the artifact's own header lines;
+        the result is bounded on encoded bytes with the existing truncation
+        marker (decode drops a split trailing code point so the bound is exact
+        in UTF-8 even for invalid input).
+        """
+
+        text = self._redact_failure_text(payload.decode("utf-8", errors="replace"))
+        if text:
+            text = "| " + text.replace("\n", "\n| ")
+        encoded = text.encode("utf-8")
+        if len(encoded) > _FAILURE_STREAM_LIMIT:
+            encoded = encoded[:_FAILURE_STREAM_LIMIT]
+            text = encoded.decode("utf-8", errors="ignore") + _REFUSAL_TRUNCATION_MARKER
+        return text
+
+    def _redact_failure_text(self, text: str) -> str:
+        """Apply the held-secret + sentinel + hex + token redaction to one fragment."""
+        secrets_to_redact: list[str] = []
+        held = self._refusal_redactions()
+        secrets_to_redact.extend(secret for secret in held if isinstance(secret, str))
+        for source in self._sentinel_sources():
+            try:
+                raw = source.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            value = raw.strip()
+            if value:
+                secrets_to_redact.append(value)
+        for secret in sorted(
+            {item for item in secrets_to_redact if isinstance(item, str)},
+            key=len,
+            reverse=True,
+        ):
+            text = text.replace(secret, _REFUSAL_REDACTION)
+        text = _FAILURE_CONTROL_CHARS_RE.sub(" ", text)
+        text = _REFUSAL_HEX_SECRET_RE.sub(_redact_secret_shaped, text)
+        text = _REFUSAL_TOKEN_SECRET_RE.sub(_redact_secret_shaped, text)
+        return text
+
+    def _build_failure_payload(
+        self,
+        *,
+        label: str,
+        argv: list[str],
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+        timeout: float | None = None,
+    ) -> bytes:
+        if timeout is not None and returncode == -1:
+            returncode_repr = f"timeout after {timeout}s"
+        else:
+            returncode_repr = str(returncode)
+        argv_text = self._redact_failure_text(" ".join(argv)).replace("\n", " ")
+        if len(argv_text) > _FAILURE_ARGV_LIMIT:
+            argv_text = argv_text[:_FAILURE_ARGV_LIMIT] + _REFUSAL_TRUNCATION_MARKER
+        stdout_text = self._redact_failure_stream(stdout or b"")
+        stderr_text = self._redact_failure_stream(stderr or b"")
+        body = (
+            f"label: {label}\n"
+            f"argv: {argv_text}\n"
+            f"returncode: {returncode_repr}\n"
+            f"--- stdout ({len(stdout or b'')} bytes, redacted, bounded) ---\n"
+            f"{stdout_text}\n"
+            f"--- stderr ({len(stderr or b'')} bytes, redacted, bounded) ---\n"
+            f"{stderr_text}\n"
+        )
+        payload = body.encode("utf-8")
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            overflow = len(payload) - _FAILURE_ARTIFACT_LIMIT
+            cutoff = len(argv_text) - overflow
+            if cutoff < 0:
+                cutoff = 0
+            argv_text = (
+                argv_text[:cutoff] + _REFUSAL_TRUNCATION_MARKER
+                if cutoff > 0
+                else _REFUSAL_TRUNCATION_MARKER
+            )
+            body = (
+                f"label: {label}\n"
+                f"argv: {argv_text}\n"
+                f"returncode: {returncode_repr}\n"
+                f"--- stdout ({len(stdout or b'')} bytes, redacted, bounded) ---\n"
+                f"{stdout_text}\n"
+                f"--- stderr ({len(stderr or b'')} bytes, redacted, bounded) ---\n"
+                f"{stderr_text}\n"
+            )
+            payload = body.encode("utf-8")
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            raise AcceptanceError(
+                "failure artifact exceeded its bound"
+            )
+        return payload
+
+    def _run_recorded(
+        self,
+        argv: Sequence[str | os.PathLike[str]],
+        *,
+        label: str,
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[bytes]:
+        if label not in _FAILURE_ARTIFACTS:
+            raise AcceptanceError(f"unknown failure-artifact label: {label}")
+        timeout = kwargs.get("timeout")
+        try:
+            return _run(argv, label=label, **kwargs)
+        except (CommandFailure, subprocess.TimeoutExpired) as exc:
+            artifact_name = _FAILURE_ARTIFACTS[label]
+            try:
+                if isinstance(exc, CommandFailure):
+                    payload = self._build_failure_payload(
+                        label=exc.label,
+                        argv=list(exc.argv),
+                        returncode=exc.returncode,
+                        stdout=exc.stdout,
+                        stderr=exc.stderr,
+                    )
+                else:
+                    captured_argv = [os.fspath(value) for value in argv]
+                    payload = self._build_failure_payload(
+                        label=label,
+                        argv=captured_argv,
+                        returncode=-1,
+                        stdout=getattr(exc, "stdout", None) or b"",
+                        stderr=getattr(exc, "stderr", None) or b"",
+                        timeout=getattr(exc, "timeout", None) or timeout,
+                    )
+                self._write_bytes(artifact_name, payload)
+            except Exception as recording_exc:  # noqa: BLE001 - keep the original
+                exc.add_note(
+                    "failure artifact not recorded: " + type(recording_exc).__name__
+                )
+            raise
 
     def _refusal_redactions(self) -> tuple[str, ...]:
         """Plaintext secrets this run holds that must never reach the operator.
@@ -1076,7 +1523,7 @@ class Acceptance:
             self._write_json(persist, response)
         return response
 
-    def _broker_status(self, persist: str) -> dict[str, Any]:
+    def _broker_status(self, persist: str | None = None) -> dict[str, Any]:
         code = (
             "import json,sys; "
             "from control_plane.executive_worker_broker import WorkerBrokerClient; "
@@ -1133,8 +1580,21 @@ class Acceptance:
             or value.get("quarantined_reason") is not None
         ):
             raise AcceptanceError("worker broker did not attest the dedicated principal boundary")
-        self._write_json(persist, value)
+        if persist is not None:
+            self._write_json(persist, value)
         return value
+
+    def _wait_replacement_broker(self, expected_pid: int) -> dict[str, Any]:
+        deadline = time.monotonic() + 45.0
+        while time.monotonic() < deadline:
+            try:
+                broker = self._broker_status()
+                if broker.get("broker_pid") == expected_pid:
+                    return broker
+            except AcceptanceError:
+                pass
+            time.sleep(0.25)
+        raise AcceptanceError("replacement worker broker socket did not become ready")
 
     def _launchd_pid(self, label: str) -> int | None:
         completed = _run(
@@ -1416,12 +1876,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         attempt_id = str(attempt["attempt_id"])
         expected_seal = (
-            Path(self.config["receipts_root"])
+            _configured_assignment_root(Path(self.config["receipts_root"]))
             / attempt_id
             / "assignment-seal-receipt.json"
         )
-        if seal_path is not None and Path(seal_path) != expected_seal:
+        if seal_path is not None and seal_path != os.fspath(expected_seal):
             raise AcceptanceError("assignment seal receipt path drifted")
+        _canonical_durable_path(os.fspath(expected_seal))
         info = expected_seal.lstat()
         if (
             stat.S_ISLNK(info.st_mode)
@@ -1461,6 +1922,15 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         return workspace, run_dir
 
+    def _source_tree_sha(self) -> str:
+        try:
+            return validate_acceptance_source(
+                source_repo=self.source_repository,
+                expected_sha=self.expected_sha,
+            )
+        except InstallSourcePolicyError as exc:
+            raise AcceptanceError(str(exc)) from exc
+
     def validate_install(self) -> None:
         if os.geteuid() != 0 or sys.platform != "darwin":
             raise AcceptanceError("real host acceptance requires root on macOS")
@@ -1470,6 +1940,38 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             raise AcceptanceError("operator account name is invalid")
         if self.control_identity.pw_uid == self.worker_identity.pw_uid:
             raise AcceptanceError("control and worker service accounts are not distinct")
+        try:
+            agent_relay_identity = pwd.getpwnam(AGENT_RELAY_USER)
+        except KeyError:
+            agent_relay_identity = None
+        try:
+            agent_relay_group = grp.getgrnam(AGENT_RELAY_GROUP)
+        except KeyError:
+            agent_relay_group = None
+        if (agent_relay_identity is None) != (agent_relay_group is None):
+            raise AcceptanceError("agent relay principal is only partially provisioned")
+        agent_relay_present = agent_relay_identity is not None
+        if agent_relay_present:
+            if agent_relay_identity is None or agent_relay_group is None:
+                raise AcceptanceError("agent relay principal reconciliation failed")
+            if (
+                agent_relay_identity.pw_uid != AGENT_RELAY_UID
+                or agent_relay_identity.pw_gid != AGENT_RELAY_GID
+                or agent_relay_group.gr_gid != AGENT_RELAY_GID
+                or _directory_attribute(
+                    f"/Groups/{AGENT_RELAY_GROUP}", "RealName"
+                )
+                != f"{AGENT_RELAY_GROUP} service group"
+            ):
+                raise AcceptanceError("agent relay principal identity drifted")
+
+        early_control, early_control_sha256 = _protected_control_definition(
+            CONTROL_CONFIG, self.control_group.gr_gid)
+        attended = _attended_worker_membership(early_control,
+            control_uid=self.control_identity.pw_uid, control_gid=self.control_group.gr_gid,
+            primary_worker_uid=self.worker_identity.pw_uid, primary_worker_gid=self.worker_group.gr_gid,
+            ops_gid=self.ops_group.gr_gid)
+        self.attended_worker_membership = attended
         expected_accounts = {
             CONTROL_USER: (
                 self.control_identity.pw_uid,
@@ -1482,6 +1984,15 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 os.fspath(RUNTIME_ROOT / "workers" / "codex-01" / "provider-home"),
             ),
         }
+        if agent_relay_present:
+            expected_accounts[AGENT_RELAY_USER] = (
+                AGENT_RELAY_UID,
+                AGENT_RELAY_GID,
+                os.fspath(AGENT_RELAY_HOME),
+            )
+        if attended is not None:
+            expected_accounts[attended["worker_user"]] = (
+                attended["worker_uid"], attended["worker_gid"], attended["provider_home"])
         for account, (uid, gid, home) in expected_accounts.items():
             expected_attributes = {
                 "UniqueID": str(uid),
@@ -1526,9 +2037,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             ),
             control_gid=self.control_group.gr_gid,
             worker_gid=self.worker_group.gr_gid,
+            agent_relay_gid=AGENT_RELAY_GID if agent_relay_present else None,
+            attended_worker_gid=attended["worker_gid"] if attended is not None else None,
         )
         membership_snapshot = _live_directory_membership_snapshot(
-            operator_user=self.operator_user
+            operator_user=self.operator_user,
+            agent_relay_present=agent_relay_present,
+            attended_worker=attended,
         )
         self.protected_group_effective = _validate_protected_membership_snapshot(
             membership_snapshot,
@@ -1541,46 +2056,11 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_gid=self.control_group.gr_gid,
             worker_gid=self.worker_group.gr_gid,
             ops_gid=self.ops_group.gr_gid,
+            agent_relay_present=agent_relay_present,
+            attended_worker=attended,
         )
 
-        head = _run(
-            ["/usr/bin/git", "-C", self.source_repository, "rev-parse", "HEAD"],
-            label="source HEAD",
-        ).stdout.decode().strip()
-        remote = _run(
-            [
-                "/usr/bin/git",
-                "-C",
-                self.source_repository,
-                "rev-parse",
-                "refs/remotes/origin/master",
-            ],
-            label="origin/master",
-        ).stdout.decode().strip()
-        dirty = _run(
-            [
-                "/usr/bin/git",
-                "--no-optional-locks",
-                "-C",
-                self.source_repository,
-                "status",
-                "--porcelain=v1",
-                "--untracked-files=normal",
-            ],
-            label="source cleanliness",
-        ).stdout
-        if head != self.expected_sha or remote != self.expected_sha or dirty:
-            raise AcceptanceError("source is not a clean checkout of exact origin/master")
-        tree_sha = _run(
-            [
-                "/usr/bin/git",
-                "-C",
-                self.source_repository,
-                "rev-parse",
-                f"{self.expected_sha}^{{tree}}",
-            ],
-            label="source tree identity",
-        ).stdout.decode().strip()
+        tree_sha = self._source_tree_sha()
         _run(
             [
                 self.python,
@@ -1599,7 +2079,14 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             label="installed release manifest",
         )
 
-        self.config = _safe_json(CONTROL_CONFIG)
+        self.config, current_control_sha256 = _protected_control_definition(
+            CONTROL_CONFIG, self.control_group.gr_gid)
+        if (self.config != early_control or current_control_sha256 != early_control_sha256
+                or _attended_worker_membership(self.config,
+                    control_uid=self.control_identity.pw_uid, control_gid=self.control_group.gr_gid,
+                    primary_worker_uid=self.worker_identity.pw_uid, primary_worker_gid=self.worker_group.gr_gid,
+                    ops_gid=self.ops_group.gr_gid) != attended):
+            raise AcceptanceError("protected finite composition changed during group acceptance")
         self.worker_config = _safe_json(WORKER_CONFIG)
         for config_path, group_gid in (
             (CONTROL_CONFIG, self.control_group.gr_gid),
@@ -1647,18 +2134,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         }
         if any(self.config.get(key) != value for key, value in expected_config.items()):
             raise AcceptanceError("installed control config differs from exact host policy")
-        if (
-            not isinstance(self.config.get("coo_operator_harness_armed"), bool)
-            or self.config.get("coo_operator_model_alias") != "coo.operator.readonly"
-            or self.config.get("coo_operator_quota_class") != "codex-coo-operator"
-            or self.worker_config.get("schema_version")
-            != "mastermind.executive_worker_broker_config/v4"
-            or self.worker_config.get("operator_harness_armed")
-            is not self.config.get("coo_operator_harness_armed")
-        ):
-            raise AcceptanceError(
-                "installed Operator Harness policy differs across control and worker"
-            )
+        _validate_operator_harness_policy(self.config, self.worker_config)
         if self.operator_identity.pw_uid not in self.config.get("allowed_peer_uids", []):
             raise AcceptanceError("operator UID is not allowed by the control service")
         if (
@@ -1825,17 +2301,21 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             raise AcceptanceError("control environment canary file is not root/control 0440")
 
         database = Path(self.config["runtime_root"]) / "data" / "control_plane" / "executive.sqlite3"
-        if database.exists() or database.is_symlink():
-            raise AcceptanceError("Executive runtime is not clean; archive it before acceptance")
-        for field, label in (
-            ("proof_workspace_root", "proof workspace root"),
-            ("worker_runs_root", "worker runs root"),
-            ("receipts_root", "launch receipts root"),
-            ("backup_root", "backup root"),
-        ):
-            _empty_directory(Path(self.config[field]), label=label)
-        if Path(self.config["secret_canary_receipt_path"]).exists():
-            raise AcceptanceError("a prior secret-canary receipt exists")
+        maintenance_digest = getattr(self.args, "maintenance_descriptor_sha256", None)
+        if maintenance_digest is not None:
+            self.maintenance = Maintenance(self.expected_sha, maintenance_digest, self.config)
+        else:
+            if database.exists() or database.is_symlink():
+                raise AcceptanceError("Executive runtime is not clean; archive it before acceptance")
+            for field, label in (
+                ("proof_workspace_root", "proof workspace root"),
+                ("worker_runs_root", "worker runs root"),
+                ("receipts_root", "launch receipts root"),
+                ("backup_root", "backup root"),
+            ):
+                _empty_directory(Path(self.config[field]), label=label)
+            if Path(self.config["secret_canary_receipt_path"]).exists():
+                raise AcceptanceError("a prior secret-canary receipt exists")
         _prepare_acceptance_receipt_root(
             self.receipt_root,
             control_uid=self.control_identity.pw_uid,
@@ -1851,6 +2331,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             {
                 "passed": True,
                 "effective_members": self.protected_group_effective,
+                "attended_worker_membership": self.attended_worker_membership,
+                "control_definition_sha256": early_control_sha256,
                 "primary_gid_census": "COMPLETE",
                 "name_members": "EXACT",
                 "uuid_members": "EXACT",
@@ -1905,7 +2387,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         production_sentinel = paths["forbidden_production_sentinel"]
         protected = [admin_sentinel, other_sentinel, production_sentinel]
         for path in protected:
-            self._create_sentinel(path)
+            if getattr(self, "maintenance", None) is not None and path != admin_sentinel:
+                info = path.lstat()
+                if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1
+                        or info.st_uid != self.control_identity.pw_uid
+                        or info.st_gid != self.control_group.gr_gid
+                        or stat.S_IMODE(info.st_mode) != 0o600
+                        or info.st_size != 65 or has_macos_acl(path)):
+                    raise AcceptanceError("preserved canary sentinel identity drifted")
+            else:
+                self._create_sentinel(path)
 
     def install_secret_canary_receipt(
         self,
@@ -1976,7 +2467,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         os.chown(temporary, self.control_identity.pw_uid, self.control_group.gr_gid)
         os.chmod(temporary, 0o400)
         temporary.replace(destination)
-        self._write_json("secret-canary-envelope.json", envelope)
+        # Every live canary activation (_activate_live_canary) re-records its
+        # envelope, so this is the one receipt rewritten in place; all other
+        # receipts are write-once.
+        self._write_json("secret-canary-envelope.json", envelope, replace=True)
 
     def _assert_process_principal(self, pid: int, uid: int, gid: int, label: str) -> None:
         completed = _run(
@@ -2141,7 +2635,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 },
             },
         )
-        status = _run(
+        status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="host service status",
         )
@@ -2246,7 +2740,137 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             return True
         return True
 
-    def interrupted_job(self, old_control_pid: int) -> tuple[str, int]:
+    def _assert_owner_loss_reconciliation(
+        self, outcome: Any, evidence: Any, startup_sweep: dict[str, Any], worker_pid: int,
+    ) -> None:
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "MISSING_LOST"
+            or outcome.get("process_was_live") is not False
+        ):
+            raise AcceptanceError("restart did not prove exact missing owner loss")
+        if (
+            not isinstance(evidence, dict)
+            or evidence.get("schema_version") != "mastermind.executive_reconciliation_evidence/v1"
+            or evidence.get("outcome") != {**outcome, "uid_sweep_receipt_path": None}
+        ):
+            raise AcceptanceError("durable reconciliation outcome differs from exact live outcome")
+        sweep = evidence.get("uid_sweep")
+        preceding_startup = (
+            sweep.get("preceding_broker_startup_sweep") if isinstance(sweep, dict) else None
+        )
+        if (
+            not isinstance(sweep, dict)
+            or not _uid_sweep_is_passing(sweep)
+            or sweep.get("reason") != "status_absence"
+            or sweep.get("worker_uid") != self.worker_identity.pw_uid
+            or sweep.get("broker_pid") != worker_pid
+            or preceding_startup != startup_sweep
+        ):
+            raise AcceptanceError("control-owned startup and fresh UID sweeps did not pass")
+        try:
+            startup_at = datetime.fromisoformat(startup_sweep["observed_at"])
+            absent_at = datetime.fromisoformat(sweep["observed_at"])
+            if absent_at.utcoffset() is None or absent_at < startup_at:
+                raise ValueError("absence observation predates startup")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AcceptanceError("fresh absence sweep time is invalid") from exc
+
+    def _restart_interrupted_owners(
+        self, old_control_pid: int, old_worker_pid: int, helper_pid: int,
+        attempt_started_at: str,
+    ) -> tuple[int, int, dict[str, Any]]:
+        # A control-only restart must recover the existing broker-owned run.
+        # For this LOST proof, interrupt both canonical owners, control first.
+        _run(
+            ["/bin/launchctl", "kill", "SIGKILL", f"system/{CONTROL_LABEL}"],
+            label="abrupt active control-service kill",
+        )
+        _run(
+            ["/bin/launchctl", "kill", "SIGKILL", f"system/{WORKER_LABEL}"],
+            label="abrupt active worker-broker kill",
+        )
+        worker_pid = self._wait_pid(WORKER_LABEL, different_from=old_worker_pid)
+        control_pid = self._wait_control(different_from=old_control_pid)
+        pending = self._control_request(
+            "status", persist="interrupted-preactivation-control-status.json"
+        )["result"]
+        if (
+            pending.get("service_state") != "AWAITING_CANARY"
+            or pending.get("startup_reconciliation") != []
+        ):
+            raise AcceptanceError("replacement control reconciled before canary activation")
+        self._assert_process_principal(
+            control_pid, self.control_identity.pw_uid, self.control_group.gr_gid,
+            "replacement control service",
+        )
+        self._assert_process_principal(
+            worker_pid, self.worker_identity.pw_uid, self.worker_group.gr_gid,
+            "replacement worker broker",
+        )
+        broker = self._wait_replacement_broker(worker_pid)
+        startup = broker.get("startup_sweep")
+        if (
+            broker.get("adapter_id") != "codex-cli"
+            or broker.get("broker_pid") != worker_pid
+            or broker.get("worker_uid") != self.worker_identity.pw_uid
+            or broker.get("active_run_id") is not None
+            or broker.get("active_operator_attempt_id") is not None
+            or broker.get("active_operator_generation_id") is not None
+            or broker.get("starting") is not False
+            or broker.get("validation_busy") is not False
+            or broker.get("status_sweep_busy") is not False
+            or broker.get("quarantined_reason") is not None
+            or not isinstance(startup, dict)
+            or not _uid_sweep_is_passing(startup)
+            or startup.get("reason") != "broker_startup"
+            or startup.get("worker_uid") != self.worker_identity.pw_uid
+            or startup.get("broker_pid") != worker_pid
+            or helper_pid not in startup.get("residual_pids_before", [])
+        ):
+            raise AcceptanceError("replacement broker has no exact startup cleanup proof")
+        try:
+            started = datetime.fromisoformat(attempt_started_at)
+            swept = datetime.fromisoformat(startup["observed_at"])
+            if started.utcoffset() is None or swept.utcoffset() is None or swept <= started:
+                raise ValueError("startup sweep predates the interrupted attempt")
+        except (KeyError, TypeError, ValueError) as exc:
+            raise AcceptanceError("replacement broker startup time is invalid") from exc
+        if self._pid_exists(helper_pid):
+            raise AcceptanceError("replacement startup left the detached helper alive")
+        self._write_json("interrupted-preactivation-broker-status.json", broker)
+        self._activate_live_canary(control_pid, worker_pid)
+        return control_pid, worker_pid, startup
+
+    def _recover_requeued_proof_capacity(
+        self, job_id: str, lost_attempt: dict[str, Any]
+    ) -> None:
+        """Requeue leaves ERROR capacity unheld and undispatchable.
+
+        Requalify only this fixed proof quota using the existing broker's fresh
+        startup/absence evidence before permitting the higher-fence dispatch.
+        """
+        response = self._control_request(
+            "recover-proof-capacity", job_id, lost_attempt["attempt_id"],
+            persist="requeued-capacity-recovery.json",
+        )
+        recovery = response.get("result")
+        snapshot = recovery.get("previous_snapshot") if isinstance(recovery, dict) else None
+        if (
+            not isinstance(recovery, dict) or not isinstance(snapshot, dict)
+            or recovery.get("schema_version") != "mastermind.executive_proof_capacity_recovery/v1"
+            or recovery.get("job_id") != job_id
+            or recovery.get("lost_attempt_id") != lost_attempt["attempt_id"]
+            or recovery.get("worker_id") != lost_attempt.get("worker_id")
+            or recovery.get("quota_class") != lost_attempt.get("quota_class")
+            or recovery.get("status") != "AVAILABLE"
+            or snapshot.get("fence_generation") != lost_attempt.get("fence_generation")
+        ):
+            raise AcceptanceError("proof quota recovery receipt is incomplete")
+
+    def interrupted_job(
+        self, old_control_pid: int, old_worker_pid: int
+    ) -> tuple[str, int, int]:
         created = self._control_request("create-proof-job", persist="interrupted-job-created.json")
         job_id = created["result"].get("job_id")
         if not isinstance(job_id, str):
@@ -2262,17 +2886,16 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         interrupted_attempt_id = running.get("current_attempt_id")
         if not isinstance(interrupted_attempt_id, str):
             raise AcceptanceError("active proof job has no durable attempt identity")
-        self._assert_attempt_attestation(running, "interrupted-attempt-before-kill.json")
+        interrupted_attempt = self._assert_attempt_attestation(
+            running, "interrupted-attempt-before-kill.json"
+        )
         helper_pid = self._spawn_detached_helper()
         still_active = self._job(job_id)
         if still_active.get("status") not in {"RUNNING", "CHECKPOINTED"}:
             raise AcceptanceError("proof job finished before abrupt-restart fault injection")
-        _run(
-            ["/bin/launchctl", "kill", "SIGKILL", f"system/{CONTROL_LABEL}"],
-            label="abrupt active control-service kill",
+        new_pid, new_worker_pid, startup_sweep = self._restart_interrupted_owners(
+            old_control_pid, old_worker_pid, helper_pid, interrupted_attempt.get("started_at")
         )
-        new_pid = self._wait_control(different_from=old_control_pid)
-        self._activate_live_canary(new_pid, self._wait_pid(WORKER_LABEL))
         lost = self._wait_job(job_id, {"LOST"}, timeout=90.0)
         if not lost.get("checkpoint"):
             raise AcceptanceError("LOST attempt did not preserve its checkpoint")
@@ -2299,8 +2922,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         evidence_path_raw = (
             outcome.get("uid_sweep_receipt_path") if isinstance(outcome, dict) else None
         )
-        if not isinstance(evidence_path_raw, str):
-            raise AcceptanceError("restart reconciliation has no control-owned UID evidence")
+        if (
+            not isinstance(outcome, dict)
+            or outcome.get("status") != "MISSING_LOST"
+            or outcome.get("process_was_live") is not False
+            or not isinstance(evidence_path_raw, str)
+        ):
+            raise AcceptanceError("restart reconciliation has no exact MISSING_LOST UID evidence")
         evidence_path = Path(evidence_path_raw)
         evidence_info = evidence_path.lstat()
         if (
@@ -2311,20 +2939,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         ):
             raise AcceptanceError("restart reconciliation UID evidence is not control-private")
         evidence = _safe_json(evidence_path)
-        sweep = evidence.get("uid_sweep")
-        terminal_sweep = (
-            sweep.get("preceding_terminal_sweep") if isinstance(sweep, dict) else None
+        self._assert_owner_loss_reconciliation(
+            outcome, evidence, startup_sweep, new_worker_pid
         )
-        if (
-            not isinstance(sweep, dict)
-            or not _uid_sweep_is_passing(sweep)
-            or sweep.get("reason") != "status_absence"
-            or not isinstance(terminal_sweep, dict)
-            or not _uid_sweep_is_passing(terminal_sweep)
-            or terminal_sweep.get("reason") != "run_terminal"
-            or helper_pid not in terminal_sweep.get("residual_pids_before", [])
-        ):
-            raise AcceptanceError("control-owned terminal and fresh UID sweeps did not pass")
         self._write_json("interrupted-reconciliation-evidence.json", evidence)
 
         seal_path_raw = (
@@ -2362,16 +2979,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             or not isinstance(rotation.get("receipt_path"), str)
         ):
             raise AcceptanceError("workspace rotation evidence is incomplete")
-        archive_path = Path(rotation["archive_path"])
-        expected_archive = (
-            Path(self.config["proof_workspace_root"])
-            / ".lost-attempts"
-            / job_id
-            / interrupted_attempt_id
+        archive_path, rotation_receipt_path = _durable_rotation_paths(
+            workspace_root=Path(self.config["proof_workspace_root"]),
+            job_id=job_id,
+            attempt_id=interrupted_attempt_id,
+            archive_path=rotation["archive_path"],
+            receipt_path=rotation["receipt_path"],
         )
-        if archive_path != expected_archive:
-            raise AcceptanceError("archived prior workspace path drifted")
-        rotation_receipt_path = Path(rotation["receipt_path"])
         rotation_info = rotation_receipt_path.lstat()
         archive_info = archive_path.lstat()
         fresh_info = prior_workspace.lstat()
@@ -2419,6 +3033,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "archived_raw_worker_probe": archived_probe,
             },
         )
+        self._recover_requeued_proof_capacity(job_id, lost_attempt)
         dispatch_response = self._control_request(
             "dispatch", job_id, persist="requeued-dispatch.json"
         )
@@ -2435,6 +3050,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             not isinstance(fresh_attempt_id, str)
             or dispatched_attempt.get("job_id") != job_id
             or fresh_attempt_id == interrupted_attempt_id
+            or not isinstance(dispatched_attempt.get("fence_generation"), int)
+            or dispatched_attempt["fence_generation"] <= lost_attempt["fence_generation"]
         ):
             raise AcceptanceError("requeued dispatch returned no fresh attempt identity")
         fresh_probe = self._raw_worker_path_probe(
@@ -2482,7 +3099,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 "raw_worker_probe": archive_after_terminal,
             },
         )
-        return job_id, new_pid
+        return job_id, new_pid, new_worker_pid
 
     def backup_restore(self, expected_jobs: Sequence[str]) -> None:
         backup = self._control_request("backup", persist="backup-created.json")
@@ -2553,9 +3170,40 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 label=f"TCP listener scan for {account}",
                 check=False,
             )
+            # Darwin lsof uses exit 1 with completely empty stdout/stderr when
+            # a privileged query has no matches.  That exact observation is the
+            # only negative proof accepted here; every other non-listener shape
+            # is UNKNOWN and must fail closed rather than becoming a false zero.
+            if (
+                completed.returncode == 1
+                and not completed.stdout
+                and not completed.stderr
+            ):
+                continue
+
             lines = completed.stdout.splitlines()
-            if len(lines) > 1:
-                raise AcceptanceError(f"{account} owns a TCP listener")
+            if completed.returncode == 0 and len(lines) > 1:
+                header = lines[0].split()
+                rows = [line.split() for line in lines[1:] if line.strip()]
+                valid_table = (
+                    len(header) >= 2
+                    and header[0] == b"COMMAND"
+                    and header[1] == b"PID"
+                    and header[-1] == b"NAME"
+                    and bool(rows)
+                    and all(
+                        len(row) >= 10
+                        and row[-3] == b"TCP"
+                        and row[-1] == b"(LISTEN)"
+                        for row in rows
+                    )
+                )
+                if valid_table:
+                    raise AcceptanceError(f"{account} owns a TCP listener")
+
+            raise AcceptanceError(
+                f"TCP listener scan for {account} did not produce a complete observation"
+            )
         if not CONTROL_SOCKET.is_socket() or not WORKER_SOCKET.is_socket():
             raise AcceptanceError("private Unix launchd sockets are unavailable")
 
@@ -2633,11 +3281,23 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
     def run(self) -> None:
         self.validate_install()
         self.initialize_runtime_and_fixtures()
-        control_pid, _worker_pid = self.start_and_attest_services()
+        control_pid, worker_pid = self.start_and_attest_services()
+        if self.maintenance is not None and self.maintenance.predecessor_recovery_required:
+            descriptor = self.maintenance.descriptor
+            self._control_request(
+                "recover-proof-capacity", descriptor["recovery_job_id"],
+                descriptor["recovery_attempt_id"], persist="predecessor-capacity-recovered.json",
+            )
         success_job_id = self.successful_job()
         control_pid = self.restart_after_completion(success_job_id, control_pid)
-        interrupted_job_id, control_pid = self.interrupted_job(control_pid)
+        interrupted_job_id, control_pid, worker_pid = self.interrupted_job(
+            control_pid, worker_pid
+        )
+        if self.maintenance is not None:
+            self.maintenance.verify([success_job_id, interrupted_job_id])
         self.backup_restore((success_job_id, interrupted_job_id))
+        if self.maintenance is not None:
+            self.maintenance.verify([success_job_id, interrupted_job_id])
         control_pid = self._wait_control()
         self._wait_pid(WORKER_LABEL)
         if self._control_request("status")["result"].get("service_state") != "READY":
@@ -2654,7 +3314,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         self._assert_no_public_listener()
         self.leakage_scan(control_pid)
-        final_status = _run(
+        final_status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="final host status",
         )
@@ -2681,20 +3341,44 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             },
         )
 
+        if self.maintenance is not None:
+            self.maintenance.finish(
+                [success_job_id, interrupted_job_id], self.receipt_root / "acceptance-summary.json")
+
     def cleanup_after_failure(self) -> None:
-        if self.services_started:
-            self._capture_failure_observability()
-        if self.helper_pid is not None and self._pid_exists(self.helper_pid):
-            try:
-                os.kill(self.helper_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if self.services_started and self.release.is_dir():
-            _run(
-                ["/bin/bash", self.release / "ops" / "executive_os" / "service-control.sh", "stop"],
-                label="failure cleanup service stop",
-                check=False,
-            )
+        try:
+            if self.services_started:
+                try:
+                    self._capture_failure_observability()
+                except Exception as exc:
+                    # Observability is best effort (e.g. the 90 s control client
+                    # call can raise TimeoutExpired); it must never skip the
+                    # helper kill or the service stop below.
+                    print(
+                        f"acceptance cleanup: failure observability capture raised "
+                        f"{type(exc).__name__}; continuing to service stop",
+                        file=sys.stderr,
+                    )
+            if self.helper_pid is not None and self._pid_exists(self.helper_pid):
+                try:
+                    os.kill(self.helper_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    print(
+                        f"acceptance cleanup: helper kill raised {type(exc).__name__}; "
+                        f"continuing to service stop",
+                        file=sys.stderr,
+                    )
+        finally:
+            # Whatever the steps above raised (including KeyboardInterrupt), the
+            # service stop is the one step that must run.
+            if self.services_started and self.release.is_dir():
+                _run(
+                    ["/bin/bash", self.release / "ops" / "executive_os" / "service-control.sh", "stop"],
+                    label="failure cleanup service stop",
+                    check=False,
+                )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -2704,6 +3388,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--source-repo", type=Path, required=True)
     parser.add_argument("--expected-sha", required=True)
     parser.add_argument("--operator-user", required=True)
+    parser.add_argument("--maintenance-descriptor-sha256",
+                        help="Exact root-sealed maintenance descriptor; default remains clean-only.")
     parser.add_argument("--success-timeout", type=float, default=2400.0)
     parser.add_argument("--active-timeout", type=float, default=120.0)
     return parser
@@ -2721,10 +3407,15 @@ def main() -> int:
     try:
         acceptance = Acceptance(args)
         acceptance.run()
-    except (AcceptanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
-        if acceptance is not None:
-            acceptance.cleanup_after_failure()
+    except (Exception, KeyboardInterrupt) as exc:
+        # Any failure after the services started (not only the expected acceptance
+        # errors) must still stop them, and the original error must still be printed.
         print(f"acceptance error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        if acceptance is not None:
+            try:
+                acceptance.cleanup_after_failure()
+            except Exception as cleanup_exc:
+                print(f"acceptance cleanup: raised {type(cleanup_exc).__name__}", file=sys.stderr)
         return 1
     print(f"Phase 1C-A acceptance PASS; receipts: {acceptance.receipt_root}")
     return 0

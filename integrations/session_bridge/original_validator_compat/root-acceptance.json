@@ -1,0 +1,23 @@
+{
+  "schema": "research_vault.collector_compat_root_review.v1",
+  "decision": "ACCEPT_PATCH_ONLY_FOR_ORIGINAL_OWNER_INTEGRATION",
+  "root": "01a13301-995f-7631-8cee-d675d7de5671",
+  "at": "2026-10-14T02:51:16.041185+00:00",
+  "patch_sha256": "5ab29de43f84bcd9ed68d2d3ee8552c2212c1e9af5d89f8d0665071b39467345",
+  "parent_review_sha256": "a803e9c308624ef7e217a193de95e5017a9af9683526c7d7b3492ba2b72bdfd2",
+  "verification": [
+    "Read complete 11325-byte patch",
+    "Verified current installed preimages and proposal postimages against parent manifest",
+    "Verified installed future producer e126 and reader e2 unchanged",
+    "Independently ran16inerttests:PASS in0.239seconds",
+    "Historical validator fixedpath/fullhash, fresh secure local_file checks, explicit context bound to support digest",
+    "Default current validator and original root/parent/run/completion/manifest fences retained"
+  ],
+  "effects": {
+    "installed_files_mutated": false,
+    "original_collect_retried": false,
+    "unknown_runs_replayed": false,
+    "settlement_claimed": false
+  },
+  "next": "Fabric Integration owner integrate and qualify install/freshload in incumbent carrier; root waits for exact original recovery instruction; no permission to retry frozen effects inferred"
+}

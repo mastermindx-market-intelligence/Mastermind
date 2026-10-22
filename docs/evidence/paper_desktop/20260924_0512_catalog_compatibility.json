@@ -1,0 +1,44 @@
+{
+  "candidate": {
+    "bridge_sha256": "0d889a071cc7add29a98d8418ab48300b8fe65f9460174a7e552ff9b0f4dac27",
+    "deployed": false,
+    "live_write_proven": false,
+    "runtime_generation": "v4"
+  },
+  "compatibility": {
+    "allowlisted_tool_classes_unchanged": true,
+    "catalog_digest_unchanged": true,
+    "file_id_bindings_preserved": true,
+    "schema_change": "none observed; server version string only"
+  },
+  "host": {
+    "device": "admins-Mini-652.ts.net lan",
+    "hardware": "Mac Studio / Apple M1 Max"
+  },
+  "observed": {
+    "blocked_tools": [
+      "create_file",
+      "delete_nodes",
+      "export",
+      "export_combined_pdf",
+      "open_file"
+    ],
+    "catalog_sha256": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570",
+    "edit_tools": 12,
+    "read_tools": 17,
+    "server": [
+      "paper-desktop",
+      "0.5.12"
+    ]
+  },
+  "observed_at": "2026-09-24",
+  "prior": {
+    "catalog_sha256": "ca90a537ee97f3e371ac945a8a3b9a928ba7fac9ffaeb67e31491075a0790570",
+    "server": [
+      "paper-desktop",
+      "0.5.11"
+    ]
+  },
+  "protected_base": "4fe4d25e3ee268e24162f33c35d176ebf9ab02e6",
+  "schema": "mastermind.paper_catalog_compatibility.v1"
+}

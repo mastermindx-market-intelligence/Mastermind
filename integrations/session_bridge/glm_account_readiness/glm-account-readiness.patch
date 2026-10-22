@@ -1,0 +1,124 @@
+--- a/glm_keys.py
++++ b/glm_keys.py
+@@ -10,6 +10,7 @@
+ POOL_LIMITS.md §GLM defaults when absent.
+ 
+ Usage:
++  glm_keys.py account-ready <already-selected-account>
+   glm_keys.py enabled
+   glm_keys.py cap
+   glm_keys.py model
+@@ -126,7 +127,7 @@
+     print(f"WARN {msg}", file=sys.stderr)
+ 
+ 
+-def accounts() -> Dict[str, Dict[str, str]]:
++def accounts(*, quiet: bool = False) -> Dict[str, Dict[str, str]]:
+     """Return the ordered dict {name: {api_key, plan, added}} from config.
+ 
+     When the config has no top-level ``accounts`` dict (or it is empty),
+@@ -157,14 +158,16 @@
+     out: Dict[str, Dict[str, str]] = {}
+     for name, info in raw_accounts.items():
+         if not isinstance(info, dict):
+-            _warn(f"glm_keys.accounts: skipping malformed entry name={name!r}")
++            if not quiet:
++                _warn(f"glm_keys.accounts: skipping malformed entry name={name!r}")
+             continue
+         api_key = info.get("api_key")
+         if not isinstance(api_key, str) or not api_key:
+-            _warn(
+-                f"glm_keys.accounts: skipping entry name={name!r} "
+-                "(missing api_key)"
+-            )
++            if not quiet:
++                _warn(
++                    f"glm_keys.accounts: skipping entry name={name!r} "
++                    "(missing api_key)"
++                )
+             continue
+         plan = info.get("plan", "")
+         if not isinstance(plan, str):
+@@ -174,6 +177,29 @@
+             added = ""
+         out[str(name)] = {"api_key": api_key, "plan": plan, "added": added}
+     return out
++
++
++def selected_account_key(account: str, account_map: object) -> str:
++    """Exact already-selected account only. No fallback, network or authority."""
++    info = account_map.get(account) if isinstance(account_map, dict) else None
++    key = info.get("api_key") if isinstance(info, dict) else None
++    if not isinstance(key, str) or not key or any(c in key for c in "\r\n\0"):
++        raise ValueError("account credential unavailable")
++    return key
++
++
++def cmd_account_ready(argv: List[str]) -> int:
++    """Bounded readiness bit only; never print keys, config or account inventories."""
++    if len(argv) != 1:
++        print(0)
++        return 2
++    try:
++        selected_account_key(argv[0], accounts(quiet=True))
++    except (OSError, ValueError, TypeError):
++        print(0)
++        return 1
++    print(1)
++    return 0
+ 
+ 
+ def cap() -> int:
+@@ -520,6 +546,7 @@
+ 
+ 
+ COMMANDS = {
++    "account-ready": cmd_account_ready,
+     "enabled": cmd_enabled,
+     "cap": cmd_cap,
+     "model": cmd_model,
+--- a/glm_bound_claude.py
++++ b/glm_bound_claude.py
+@@ -101,10 +101,11 @@
+         if accounts is None:
+             import glm_keys
+             accounts=glm_keys.accounts()
+-        info=accounts.get(account) if isinstance(accounts,dict) else None
+-        key=info.get("api_key") if isinstance(info,dict) else None
+-        if not isinstance(key,str) or not key or any(x in key for x in "\r\n"):
+-            raise BindingRefused("account credential unavailable")
++        from glm_keys import selected_account_key
++        try:
++            key=selected_account_key(account,accounts)
++        except (ValueError,TypeError) as exc:
++            raise BindingRefused("account credential unavailable") from exc
+         if environ.get('FABRIC_OPERATOR_CAPABILITY'):
+             from fabric_operator_client import prepare_claude_hook
+             argv.extend(prepare_claude_hook(HERE, environ))
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -808,6 +808,24 @@
+   exit "$RC"
+ fi
+ 
++# The already leased GLM account must exist on this exact selected host.
++# This is a readiness read, not account selection or a provider request. The
++# launcher repeats the same key validator immediately before its actual exec.
++if [ "$MODE" = "glm" ]; then
++  GLM_ACCOUNT_QUOTED=$("$REMOTE_SUB_PYTHON" -c 'import shlex,sys; print(shlex.quote(sys.argv[1]))' "${POOL_ACCOUNT:-}") || {
++    RC=78; log "GLM_ACCOUNT_READINESS_ENCODING_FAILED rc=$RC"; exit "$RC";
++  }
++  GLM_ACCOUNT_READY=""
++  GLM_ACCOUNT_READ_RC=0
++  GLM_ACCOUNT_READY=$("$SSH_CMD" -T -o BatchMode=yes -o ConnectTimeout=15 "$SSH_ALIAS" \
++    "$RPATH; $HOST_ENV; python3 \"\$HOME/lanes/support-releases/$SUPPORT_DIGEST/ext/glm_keys.py\" account-ready $GLM_ACCOUNT_QUOTED" \
++    2>/dev/null) || GLM_ACCOUNT_READ_RC=$?
++  if [ "$GLM_ACCOUNT_READ_RC" -ne 0 ] || [ "$GLM_ACCOUNT_READY" != "1" ]; then
++    RC=78; log "GLM_EXACT_ACCOUNT_READINESS_REFUSED read_rc=$GLM_ACCOUNT_READ_RC rc=$RC"; exit "$RC";
++  fi
++  log "GLM_EXACT_ACCOUNT_READY"
++fi
++
+ # GLM-Codex remote workers prefer a short-lived capability signed by the
+ # controller shim and bound to this exact broker lease/root/account/model/run/host.
+ # A host-local native GLM installation remains a compatibility fallback (M1).

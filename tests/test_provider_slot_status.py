@@ -77,6 +77,32 @@ def test_status_missing_receipt_is_sanitized_and_never_opens_credential(
     assert "_mastermind_codex_01" not in rendered
 
 
+def test_personal_pro_receipt_metadata_uses_exact_slot_reader_contract(
+    tmp_path: Path, monkeypatch
+) -> None:
+    module = _load()
+    slot = module.worker_slots.get_slot("codex-pro-01")
+    captured = {}
+
+    def lstat_identity(path, **kwargs):
+        captured["path"] = path
+        captured.update(kwargs)
+        return {"ok": 1}
+
+    monkeypatch.setattr(module.readiness, "lstat_identity", lstat_identity)
+    monkeypatch.setattr(module.readiness, "_assert_no_macos_acl", lambda _path: None)
+
+    assert module._receipt_metadata_valid(
+        tmp_path / "receipt.json",
+        workspace_binding_class=slot.workspace_binding_class,
+        worker_gid=slot.worker_gid,
+    ) is True
+    assert captured["expected_uid"] == 0
+    assert captured["expected_gid"] == 454
+    assert captured["expected_mode"] == 0o440
+    assert captured["require_nonempty"] is True
+
+
 def test_status_ready_validation_is_bound_to_exact_slot_without_identity_output(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -89,7 +115,7 @@ def test_status_ready_validation_is_bound_to_exact_slot_without_identity_output(
     slot.readiness_receipt.chmod(0o400)
     captured = {}
 
-    monkeypatch.setattr(module, "_receipt_metadata_valid", lambda _path: True)
+    monkeypatch.setattr(module, "_receipt_metadata_valid", lambda _path, **_kwargs: True)
 
     def validate_receipt_file(path, **kwargs):
         captured["path"] = path
@@ -128,7 +154,7 @@ def test_status_maps_unreviewed_exception_text_to_bounded_refusal(
     slot.auth_path.write_bytes(b"opaque")
     slot.auth_path.chmod(0o600)
     slot.readiness_receipt.write_text("{}", encoding="utf-8")
-    monkeypatch.setattr(module, "_receipt_metadata_valid", lambda _path: True)
+    monkeypatch.setattr(module, "_receipt_metadata_valid", lambda _path, **_kwargs: True)
 
     def refuse(*_args, **_kwargs):
         raise module.readiness.ReadinessError(

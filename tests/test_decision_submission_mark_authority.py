@@ -461,3 +461,111 @@ def test_refusal_never_emits_an_exit_or_liquidation(tmp_path, monkeypatch):
     assert not (tmp_path / "_pending_decision.json").exists()
     for word in ("exit", "sell", "liquidat", "trim"):
         assert word not in text.lower(), f"refusal leaked a {word} instruction"
+
+
+@pytest.mark.parametrize(
+    "book,ticker,currency,fx_rate",
+    [
+        ("autonomous", "AAPL", "USD", 1.0),
+        ("china", "600519.SS", "CNY", 7.0),
+        ("hk", "0700.HK", "HKD", 7.8),
+    ],
+)
+def test_later_quote_loss_preserves_real_prior_submission(
+    tmp_path, monkeypatch, book, ticker, currency, fx_rate
+):
+    """A refused second submit cannot replace this turn's real first submission.
+
+    Account, quote, FX and instrument identity are isolated fixture inputs. The
+    actual regional handler, normalizer, allocator, atomic writer and reader run;
+    this does not assert settlement acceptance or whole-run absence of effects.
+    """
+    import importlib
+
+    from portfolio import registry
+
+    monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    mcp = importlib.import_module(f"brain.{book}_mcp")
+    assert mcp.PORTFOLIO_ID == book
+    quotes = {ticker: 100.0}
+    _seed_account(
+        monkeypatch,
+        positions={ticker: {"shares": 5.0, "avg_cost": 1.0}},
+        cash=500.0 * fx_rate,
+        price=quotes,
+        currency=currency,
+        fx_rate=fx_rate,
+    )
+
+    def identity(requested_book, requested_ticker):
+        assert (requested_book, requested_ticker) == (book, ticker)
+        return {
+            "kind": "common_stock", "status": "synthetic_common_stock",
+            "verified": True, "market": book,
+        }
+
+    monkeypatch.setattr(ds, "_instrument_identity_for_book", identity)
+    mutations = _MutationSentinel(monkeypatch)
+    allocations = []
+    submission_writes = []
+    allocate = ds._allocate_deterministically
+    write_atomic = ds.write_atomic
+
+    def observe_allocation(requested_book, holdings, posture):
+        allocations.append(requested_book)
+        return allocate(requested_book, holdings, posture)
+
+    def observe_submission_write(path, payload):
+        submission_writes.append(path)
+        return write_atomic(path, payload)
+
+    monkeypatch.setattr(ds, "_allocate_deterministically", observe_allocation)
+    monkeypatch.setattr(ds, "write_atomic", observe_submission_write)
+    prior = mcp.submission_path()
+    assert prior == tmp_path / "data" / "portfolios" / book / "_pending_decision.json"
+    assert mcp.read_submission() is None
+
+    args = _args([{
+        "ticker": ticker, "action": "hold", "conviction": "high",
+        "rationale": "Preserve the existing fixture holding after review.",
+    }])
+    args["summary"] = "First priceable submission in this turn."
+    first = asyncio.run(mcp.submit_book.handler(args))
+    first_text = first["content"][0]["text"]
+    assert mcp.BOOK_MARKER in first_text
+    assert "SUBMISSION REJECTED" not in first_text
+    before = prior.read_bytes()
+    retained = mcp.read_submission()
+    assert retained == json.loads(before)
+    assert retained["schema"] == "mastermind.target_book.v2"
+    assert retained["summary"] == args["summary"]
+    assert [row["ticker"] for row in retained["holdings"]] == [ticker]
+    assert retained["holdings"][0]["weight"] == pytest.approx(0.5)
+    assert retained["holdings"][0]["holding_mark_source"] == "live_quote"
+    assert retained["submission_audit"]["quote_fallback_holdings"] == []
+    assert allocations == [book]
+    assert submission_writes == [prior]
+    assert mutations.calls == []
+    before_tree = {
+        str(path.relative_to(tmp_path)): None if path.is_dir() else path.read_bytes()
+        for path in tmp_path.rglob("*")
+    }
+
+    quotes[ticker] = None
+    args["summary"] = "Second submission must be refused after quote loss."
+    second = asyncio.run(mcp.submit_book.handler(args))
+    second_text = second["content"][0]["text"]
+    assert "SUBMISSION REJECTED" in second_text
+    assert "prior paper book preserved unchanged" in second_text
+    assert f"unpriceable_held_position:{ticker}" in second_text
+    assert mcp.BOOK_MARKER not in second_text
+    # Sticky counters detect forbidden work even if a handler catches an error.
+    assert allocations == [book], "the refused submit reached numeric allocation"
+    assert submission_writes == [prior], "the refused submit invoked a target writer"
+    assert mutations.calls == [], f"boundary writers were called: {mutations.calls}"
+    assert prior.read_bytes() == before
+    assert mcp.read_submission() == retained
+    assert {
+        str(path.relative_to(tmp_path)): None if path.is_dir() else path.read_bytes()
+        for path in tmp_path.rglob("*")
+    } == before_tree

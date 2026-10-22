@@ -24,6 +24,8 @@ import threading
 from collections.abc import Iterable
 from typing import Any
 
+from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+
 from .contracts import (
     AUTH_AUDIT_SCHEMA,
     CHANNEL_AUDIT_SCHEMA,
@@ -48,11 +50,37 @@ _CHANNEL_TOOLS = frozenset(
         "run_project_command",
         "read_action_result",
         "reconcile_action",
+        "prepare_browser_resource",
+        "start_browser_resource",
+        "reconcile_browser_resource",
+        "browser_console_messages",
+        "browser_network_requests",
+        "browser_snapshot",
+        "browser_take_screenshot",
+        "browser_wait_for",
+        "prepare_browser_click",
+        "prepare_browser_close",
+        "prepare_browser_fill_form",
+        "prepare_browser_hover",
+        "prepare_browser_navigate",
+        "prepare_browser_press_key",
+        "prepare_browser_select_option",
+        "prepare_browser_tabs",
+        "prepare_browser_type",
+        "run_browser_action",
+        "reconcile_browser_action",
     }
 )
 # Modifying tools are the only admissions that can precede an effect
-# dispatch.  Read/reconcile admissions never claim or publish anything.
-_CHANNEL_MODIFYING_TOOLS = frozenset({"commit_text_patch", "run_project_command"})
+# dispatch. Read/prepare/reconcile admissions never claim or publish anything.
+_CHANNEL_MODIFYING_TOOLS = frozenset(
+    {
+        "commit_text_patch",
+        "run_project_command",
+        "start_browser_resource",
+        "run_browser_action",
+    }
+)
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
 _CHANNEL_LINE_KEYS = frozenset(
     {"accepted", "action_digest", "channel_ref", "code", "policy_id", "schema", "tool"}
@@ -183,6 +211,7 @@ class DurableAuthAuditSink:
             cls._check_directory_stat(owned_stat)
             if _directory_identity(owned_stat) != _directory_identity(host_stat):
                 raise AuditSinkPoisoned("audit directory identity changed")
+            cls._check_directory_acl(owned_directory, owned_stat)
             if os.get_inheritable(owned_directory):
                 raise AuditSinkPoisoned("audit directory descriptor is inheritable")
 
@@ -200,6 +229,7 @@ class DurableAuthAuditSink:
             cls._check_file_stat(named_stat)
             if _identity(file_stat) != _identity(named_stat):
                 raise AuditSinkPoisoned("audit file identity changed during open")
+            cls._check_file_acl(audit_fd, named_stat)
             if file_stat.st_size > file_budget:
                 raise AuditSinkPoisoned("audit file exceeds its fixed budget")
             cls._check_file_flags(audit_fd)
@@ -243,6 +273,23 @@ class DurableAuthAuditSink:
             raise AuditSinkPoisoned("audit directory security refused")
 
     @staticmethod
+    def _check_directory_acl(directory_fd: int, directory_stat: os.stat_result) -> None:
+        """Refuse a Darwin extended ACL on the verified directory descriptor.
+
+        Its access-control state is independent of POSIX mode bits. Reuse the
+        same descriptor-bound observer as the named audit file and fail closed
+        if that observation is unavailable or uncertain.
+        """
+        try:
+            extended_acl = has_macos_acl(
+                ".", expected_identity=directory_stat, descriptor=directory_fd
+            )
+        except FilesystemSecurityError as error:
+            raise AuditSinkPoisoned("audit directory ACL observation refused") from error
+        if extended_acl:
+            raise AuditSinkPoisoned("audit directory extended ACL refused")
+
+    @staticmethod
     def _check_file_stat(value: os.stat_result) -> None:
         if (
             not stat.S_ISREG(value.st_mode)
@@ -251,6 +298,23 @@ class DurableAuthAuditSink:
             or value.st_nlink != 1
         ):
             raise AuditSinkPoisoned("audit file security refused")
+
+    @staticmethod
+    def _check_file_acl(audit_fd: int, named_stat: os.stat_result) -> None:
+        """Refuse a Darwin ACL on the already-verified named audit descriptor.
+
+        Never reopen via a pathname: the existing directory and file identity
+        checks establish the trusted object, and the shared ACL observer binds
+        its check to that same open descriptor. Off Darwin this is inert.
+        """
+        try:
+            extended_acl = has_macos_acl(
+                _AUDIT_NAME, expected_identity=named_stat, descriptor=audit_fd
+            )
+        except FilesystemSecurityError as error:
+            raise AuditSinkPoisoned("audit file ACL observation refused") from error
+        if extended_acl:
+            raise AuditSinkPoisoned("audit file extended ACL refused")
 
     @staticmethod
     def _check_file_flags(audit_fd: int) -> None:
@@ -351,6 +415,7 @@ class DurableAuthAuditSink:
             or _directory_identity(relative_directory) != self._directory_identity
         ):
             raise AuditSinkPoisoned("audit directory identity changed")
+        self._check_directory_acl(self._directory_fd, relative_directory)
 
         opened = os.fstat(self._audit_fd)
         named = os.stat(_AUDIT_NAME, dir_fd=self._directory_fd, follow_symlinks=False)
@@ -363,6 +428,7 @@ class DurableAuthAuditSink:
             or named.st_size != expected_size
         ):
             raise AuditSinkPoisoned("named audit file identity or size changed")
+        self._check_file_acl(self._audit_fd, named)
         self._check_file_flags(self._audit_fd)
         self._prove_owner_lock(expected_size=expected_size)
 

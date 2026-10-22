@@ -1,0 +1,40 @@
+--- a/remote_sub_exec.py
++++ b/remote_sub_exec.py
+@@ -10,0 +11 @@
++import hashlib
+@@ -83,0 +85,28 @@
++def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout, env):
++    """Original producer binds normalized output; never backfills an old run."""
++    import artifact_production
++    if grok_plaintext_and_usage(raw_stdout, contract['run_id'], 'grok-4.6')[0] != display_stdout:
++        raise ValueError('grok_output_transform_mismatch')
++    row = json.loads(Path(receipt).read_text().splitlines()[-1])
++    raw = raw_stdout.encode('utf-8');normalized = display_stdout.encode('utf-8')
++    if (row.get('schema') != 'mastermind.local_owned_process_receipt.v1'
++            or row.get('label') != contract['run_id']
++            or row.get('returncode') != 0 or row.get('timed_out') is not False
++            or row.get('stdout_truncated') is not False or row.get('stderr_truncated') is not False
++            or not cleanup_receipt_is_proven(row.get('cleanup') or {})
++            or row.get('stdout_bytes') != len(raw)
++            or row.get('stdout_sha256') != hashlib.sha256(raw).hexdigest()):
++        raise ValueError('grok_output_capture_unqualified')
++    scope = {k:env.get(v,'') for k,v in {'root':'POOL_ORCHESTRATOR_ID',
++        'parent':'POOL_PARENT_RUN_ID','run_id':'REMOTE_SUB_RUN_ID','host':'LANE_REMOTE_HOST',
++        'lease_id':'POOL_LEASE_ID','account':'POOL_ACCOUNT','support_digest':'SUPPORT_DIGEST'}.items()}
++    if any(scope[k] != contract[k] for k in ('root','parent','run_id','support_digest')):
++        raise ValueError('grok_output_scope')
++    if not all(native_remote.IDENT.fullmatch(scope[k]) for k in ('root','parent','run_id','host','lease_id','account')):
++        raise ValueError('grok_output_scope')
++    return dict(schema='mastermind.grok_normalized_output.v1', algorithm='grok_plaintext_and_usage_v1',
++        **scope, mode='grok', model='grok-4.6', raw_bytes=len(raw),raw_sha256=hashlib.sha256(raw).hexdigest(),
++        normalized_bytes=len(normalized),normalized_sha256=hashlib.sha256(normalized).hexdigest(),
++        contract=contract,manifest=manifest)
++
++
+@@ -244,0 +274,3 @@
++                    if mode == "grok":
++                        state['output_binding'] = grok_output_binding(
++                            receipt, artifact_contract, manifest, result.stdout, display_stdout, child_env)
+@@ -296 +328 @@
+-            native_remote.terminal(Path(__file__).resolve().parent, argv[1], argv[2], argv[5], os.environ, state["started"], rc, timing=state.get("timing"))
++            native_remote.terminal(Path(__file__).resolve().parent, argv[1], argv[2], argv[5], os.environ, state["started"], rc, timing=state.get("timing"), output_binding=state.get("output_binding"))

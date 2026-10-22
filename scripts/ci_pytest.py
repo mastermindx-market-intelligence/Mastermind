@@ -3,14 +3,32 @@
 Every ``tests/**/test_*.py`` module runs unless its exact path is listed in
 ``ci/pytest_exclusions.toml``. New tests are included automatically. Exclusions
 are fail-closed and cannot remove constitutional/security modules.
+
+``--jobs N`` splits the *already resolved* included set across N concurrent
+pytest processes inside this one gate invocation. It is a placement decision
+only: the discovery/exclusion policy above runs first and unchanged, and the
+partition is verified to be a total, disjoint cover of that exact set before
+any process starts. The gate therefore executes the same modules whatever
+``--jobs`` is, and a nonzero exit from any shard fails the whole gate.
+
+The default ``--jobs`` command runs concurrent subprocesses inside one job.
+A separately qualified workflow may instead dispatch the same verified
+partition to distinct hosted runners. In that arrangement a fail-closed fan-in
+job named ``test`` must require every matrix member to succeed and must
+reverify the canonical complete plan. The branch-protection context remains
+exactly ``test``; dynamic ``pytest shard N`` contexts alone cannot replace it.
 """
 from __future__ import annotations
 
 import argparse
+import hashlib
 import re
 import subprocess
 import sys
+import threading
+import time
 import tomllib
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
@@ -165,16 +183,177 @@ def coverage_plan(
     }
 
 
-def format_plan(plan: Mapping[str, int]) -> str:
-    return (
+def format_plan(plan: Mapping[str, int], *, shards: Sequence[Sequence[str]] | None = None) -> str:
+    rendered = (
         f"discovered={plan['discovered']} "
         f"excluded={plan['excluded']} "
         f"running={plan['running']}"
     )
+    if shards is not None:
+        sizes = ",".join(str(len(shard)) for shard in shards)
+        rendered += f" jobs={len(shards)} shard_modules={sizes}"
+    return rendered
 
 
-def pytest_argv(included: Sequence[str], *, python: str | None = None) -> list[str]:
-    return [python or sys.executable, "-m", "pytest", "-q", *included]
+def pytest_argv(
+    included: Sequence[str], *, python: str | None = None, progress: bool = False,
+) -> list[str]:
+    # Observability only: report bounded slowest setup/call/teardown durations
+    # without dropping a test, changing its order, or creating new CI contexts.
+    prefix = [python or sys.executable]
+    if progress:
+        prefix.append("-u")
+    prefix.extend(["-m", "pytest"])
+    if progress:
+        prefix.extend(["-p", "scripts.ci_pytest_timing"])
+    return [*prefix, "--durations=25", "-q", *included]
+
+
+_MEASURED_THREE_JOB_PLACEMENT = {
+    # Keep the measured protected-master hot-module pins. The capacity-host and
+    # walkforward swap is retired: the observed queue profile shows it overloads
+    # shard 1 with cold setup. Unlisted modules retain SHA-256 placement, and
+    # every test still runs exactly once.
+    "tests/test_executive_runtime_bounded_acquisition.py": 1,
+    "tests/test_mastermind_window_reader_static_fences.py": 1,
+    # The protected one-runner CI gate measured these further slow modules.
+    "tests/test_market_view.py": 1,
+    "tests/test_product_acceptance_original_selector.py": 1,
+    "tests/test_executive_os_phase1fc.py": 2,
+}
+
+
+def partition_modules(
+    included: Sequence[str], *, jobs: int
+) -> tuple[tuple[str, ...], ...]:
+    """Split ``included`` into ``jobs`` shards that exactly re-cover it.
+
+    A module's shard is a stable function of its own path, not of its position
+    in the list. Round-robin would be perfectly balanced, but adding a single
+    test file shifts every module after it into a different shard -- and since
+    sharding changes which modules share a pytest process, that reshuffle can
+    surface a latent cross-module ordering dependency in a completely unrelated
+    PR. (This is not hypothetical: `--jobs 4` exposed one on its first CI run,
+    where `tests/test_governance_ledger.py` was leaking `sys.modules` stubs.)
+    Hashing keeps that blast radius to the file actually being added or removed.
+
+    sha256 rather than ``hash()``: the builtin is salted per process, so the
+    same checkout would shard differently on every run and a failure would not
+    reproduce.
+
+    For the production three-job gate, the explicitly measured hot modules
+    are pinned to less-loaded shards. Every other path keeps stable hash
+    placement, including when a new test is added. Other job counts retain
+    unmodified hashes. This is placement, not exclusion: verify_partition
+    checks the exact complete test coverage.
+    Shard sizes remain visible in the plan line. (Do not introduce bare
+    three-digit constants outside tests/: the identity guard forbids them.)
+    """
+
+    if jobs < 1:
+        raise PolicyError("jobs must be at least 1")
+    if jobs > len(included):
+        raise PolicyError(
+            f"jobs ({jobs}) cannot exceed the number of included modules "
+            f"({len(included)})"
+        )
+    buckets: list[list[str]] = [[] for _ in range(jobs)]
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        hashed = int.from_bytes(digest[:8], "big") % jobs
+        target = _MEASURED_THREE_JOB_PLACEMENT.get(path, hashed) if jobs == 3 else hashed
+        buckets[target].append(path)
+    shards = tuple(tuple(bucket) for bucket in buckets)
+    verify_partition(included, shards)
+    return shards
+
+
+def verify_partition(
+    included: Sequence[str], shards: Sequence[Sequence[str]]
+) -> None:
+    """Fail closed unless the shards are a total, disjoint cover of ``included``.
+
+    This is the whole safety argument for ``--jobs``: a partition bug must
+    never be able to drop a module and still let the gate report success.
+    Checked against multiset equality, so a duplicated module (which would
+    hide a dropped one behind an equal total) is rejected too.
+    """
+
+    flattened = [path for shard in shards for path in shard]
+    if len(flattened) != len(included):
+        raise PolicyError(
+            f"shard plan runs {len(flattened)} modules but the gate resolved "
+            f"{len(included)}"
+        )
+    if sorted(flattened) != sorted(included):
+        raise PolicyError("shard plan is not an exact cover of the included set")
+    if any(not shard for shard in shards):
+        raise PolicyError("shard plan contains an empty shard")
+
+
+def run_shards(
+    shards: Sequence[Sequence[str]],
+    *,
+    root: Path,
+    python: str | None = None,
+) -> int:
+    """Run every shard and return the lowest-indexed nonzero exit code, else 0.
+
+    Every shard is always waited on, even after one fails: a partial result
+    would make the gate's own report unreliable, and the remaining shards'
+    failures are exactly what a reviewer needs in one pass.
+
+    Ordinary output stays grouped under its shard's final banner. Only the
+    timing plugin's module records stream immediately, under a shard label,
+    so a job timeout leaves the unfinished module and prior module timings.
+    These records are diagnostics only; every process exit still governs.
+    """
+
+    output_lock = threading.Lock()
+
+    def _run(index: int) -> tuple[int, int, str, float]:
+        started = time.monotonic()
+        captured: list[str] = []
+        with subprocess.Popen(
+            pytest_argv(shards[index], python=python, progress=True),
+            cwd=root,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+        ) as process:
+            assert process.stdout is not None
+            for line in process.stdout:
+                if line.startswith("CI_MODULE "):
+                    with output_lock:
+                        print(f"--- shard {index + 1}/{len(shards)} progress --- "
+                              + line.rstrip("\n"), flush=True)
+                else:
+                    captured.append(line)
+            returncode = process.wait()
+        elapsed = max(0.0, time.monotonic() - started)
+        return index, returncode, "".join(captured), elapsed
+
+    codes: dict[int, int] = {}
+    with ThreadPoolExecutor(max_workers=len(shards)) as pool:
+        futures = [pool.submit(_run, index) for index in range(len(shards))]
+        for future in as_completed(futures):
+            index, returncode, output, elapsed = future.result()
+            codes[index] = returncode
+            with output_lock:
+                print(
+                    f"--- shard {index + 1}/{len(shards)} "
+                    f"({len(shards[index])} modules) exit={returncode} elapsed_s={elapsed:.2f} ---",
+                    flush=True,
+                )
+                print(output, end="" if output.endswith("\n") else "\n", flush=True)
+
+    # Lowest shard index wins so the reported code is stable across runs
+    # rather than depending on which shard happened to finish first.
+    for index in sorted(codes):
+        if codes[index] != 0:
+            return codes[index]
+    return 0
 
 
 def workflow_contains_positive_allowlist(text: str) -> bool:
@@ -411,16 +590,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         default=None,
         help="repository root (defaults to the checkout that contains this script)",
     )
+    parser.add_argument(
+        "--jobs",
+        type=int,
+        default=1,
+        help=(
+            "run the resolved module set as this many concurrent pytest "
+            "processes (default 1). Placement only: the same modules run "
+            "either way, and any shard failing fails the gate."
+        ),
+    )
     args = parser.parse_args(list(argv) if argv is not None else None)
     root = Path(args.root).resolve() if args.root else repo_root()
     try:
+        if args.jobs < 1:
+            raise PolicyError("jobs must be at least 1")
         gate = resolve_gate(root)
+        # jobs=1 keeps the historical single-process argv exactly, so the
+        # default gate invocation is unchanged by this feature.
+        shards = (
+            partition_modules(gate["included"], jobs=args.jobs)
+            if args.jobs > 1
+            else None
+        )
     except PolicyError as exc:
         print(f"ci_pytest policy error: {exc}", file=sys.stderr)
         return 2
-    print(format_plan(gate["plan"]))
+    print(format_plan(gate["plan"], shards=shards), flush=True)
     if args.plan_only:
         return 0
+    if shards is not None:
+        return run_shards(shards, root=root)
     completed = subprocess.run(
         pytest_argv(gate["included"]),
         cwd=root,

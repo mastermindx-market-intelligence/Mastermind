@@ -29,6 +29,7 @@ from control_plane.worker_execution_contract import (
 from integrations.acp_worker.turn import (
     AcpCandidate, AcpProfile, AcpReadOnlyTurn, _nonfinite, _object_pairs,
 )
+from integrations.acp_worker.tool_admission import AcpToolAdmission
 from scripts.ohf.acp_probe_boundary import ProbeClient, ProbeLimits
 
 _SHA256 = re.compile(r"[0-9a-f]{64}\Z")
@@ -68,10 +69,13 @@ class _TurnFrameGuard(ProbeClient):
 
     def admit_update(self, update: Any) -> int:
         # Structural bounds remain in StrictFrameReader. The typed production
-        # turn applies the phase/session-aware read-only policy below.
-        self._turn.validate_update(update, commit=False)
-        if self._turn._error:
-            raise ValueError(self._turn._error)
+        # turn applies the phase/session-aware read-only policy below. A
+        # pre-existing cancellation/refusal must not turn a valid already-in-
+        # flight frame into a framing violation; reject only when THIS update
+        # introduces a semantic refusal.
+        reason = self._turn.validate_update(update, commit=False)
+        if reason is not None:
+            raise ValueError(reason)
         return 0
 
 
@@ -105,6 +109,7 @@ class AcpRunResources:
     launch_attestation: Any
     result_schema: Any
     finish: Callable[[str | None], Awaitable[AcpProcessCompletion]]
+    prepare_prompt: Callable[[str, str], Awaitable[AcpToolAdmission]] | None = None
 
 
 @dataclasses.dataclass
@@ -200,7 +205,8 @@ class AcpWorkerAdapter:
                     or (spec.expected_worker_uid is not None and ref.effective_uid != spec.expected_worker_uid)
                     or (spec.expected_worker_gid is not None and ref.effective_gid != spec.expected_worker_gid)
                     or not callable(resources.finish) or resources.launch_attestation is None
-                    or resources.result_schema != schema):
+                    or resources.result_schema != schema
+                    or (resources.prepare_prompt is not None and not callable(resources.prepare_prompt))):
                 raise BrokerProtocolError("ACP native resources do not match admission")
             run = _Run(spec, resources, baseline, schema, AcpReadOnlyTurn(self.profile))
             self._runs[spec.run_id] = run
@@ -220,11 +226,20 @@ class AcpWorkerAdapter:
     async def _execute(self, run: _Run) -> CollectionReceipt:
         resources, spec = run.resources, run.spec
         driver_error: BaseException | None = None
+
+        async def prepare_prompt(session_id: str, model: str) -> AcpToolAdmission:
+            admission = await resources.prepare_prompt(session_id, model)
+            if (not isinstance(admission, AcpToolAdmission)
+                    or not admission.matches(spec, resources.process_ref, session_id, model)):
+                raise BrokerProtocolError("ACP pre-prompt admission binding refused")
+            return admission
+
         try:
             run.candidate = await run.turn.run(
                 spec, resources.writer, resources.reader, cancelled=run.cancelled,
                 validate_output=lambda value: validate_json_schema(value, run.schema),
                 frame_guard=_TurnFrameGuard(run.turn),
+                prepare_prompt=prepare_prompt if resources.prepare_prompt is not None else None,
             )
         except BaseException as exc:
             driver_error = exc
@@ -300,10 +315,26 @@ class AcpWorkerAdapter:
                 result_hash, status = candidate.output_sha256, WorkerRunStatus.SUCCEEDED
             except Exception:
                 output, result_hash, error = None, None, "ACP_CANONICAL_RESULT_REFUSED"
+        usage = dict(candidate.usage)
+        admission = run.turn.tool_admission
+        if admission is not None:
+            # Existing common result metadata carries owner evidence. This is
+            # observational provenance, not provider usage or a new result store.
+            usage["acp_tool_observation"] = {
+                "schema": "mastermind.acp_tool_observation/v1",
+                "run_id": spec.run_id, "job_id": spec.job_id, "worker_id": spec.worker_id,
+                "process_ref_sha256": hashlib.sha256(json.dumps(dataclasses.asdict(ref),
+                    sort_keys=True, separators=(",", ":")).encode()).hexdigest(),
+                "session_id": admission.session_id, "model": admission.model,
+                "projection_sha256": admission.projection_sha256,
+                "artifact_sha256": admission.artifact_sha256,
+                "admitted_tools": [dataclasses.asdict(tool) for tool in admission.tools],
+                "observations": dict(run.turn.tool_observations),
+            }
         return CollectionReceipt(
             process_ref=dataclasses.replace(ref, provider_session_id=candidate.session_id),
             result=WorkerResult(spec.job_id, spec.run_id, spec.worker_id, status, output,
-                (), git_manifest, candidate.usage, candidate.session_id, completion.exit_code,
+                (), git_manifest, usage, candidate.session_id, completion.exit_code,
                 ref.started_at, completion.finished_at, error),
             stdout_sha256=completion.stdout_sha256, stderr_sha256=completion.stderr_sha256,
             result_sha256=result_hash,

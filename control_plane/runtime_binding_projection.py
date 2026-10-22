@@ -12,7 +12,18 @@ from control_plane.operator_harness_contract import runtime_binding_id_for
 from control_plane.session_targets import RuntimeBinding, SessionTarget
 
 
-_PROVIDER_TO_REASONING_SURFACE = {"openai-codex": "codex"}
+_PROVIDER_TO_REASONING_SURFACE = {
+    "chatgpt": "chatgpt-sol",
+    "openai-codex": "codex",
+}
+
+
+def reasoning_surface_for_provider(provider: str) -> str:
+    token = str(provider or "").strip()
+    surface = _PROVIDER_TO_REASONING_SURFACE.get(token)
+    if surface is None:
+        raise StateConflict("runtime binding provider surface is not accepted")
+    return surface
 
 
 def active_operator_binding_facts(
@@ -32,10 +43,9 @@ def active_operator_binding_facts(
     facts = runtime.current_harness_binding_source(
         attempt_id, connection=connection
     )
-    surface = _PROVIDER_TO_REASONING_SURFACE.get(facts.provider)
+    surface = reasoning_surface_for_provider(facts.provider)
     if (
         facts.owner_seat != target.target_seat
-        or surface is None
         or target.reasoning_surface != surface
     ):
         raise StateConflict("runtime binding target/provider surface is not accepted")
@@ -69,4 +79,8 @@ def project_runtime_binding(
     )
 
 
-__all__ = ["active_operator_binding_facts", "project_runtime_binding"]
+__all__ = [
+    "active_operator_binding_facts",
+    "project_runtime_binding",
+    "reasoning_surface_for_provider",
+]

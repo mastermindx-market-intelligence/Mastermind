@@ -1,0 +1,23 @@
+{
+  "installed_preimage": "c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e",
+  "candidate_sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+  "scope": "Future artifact production only. Historical rc65, retained output and missing completion seal unchanged. No old run export or acceptance.",
+  "installation": {
+    "at": "2026-10-13T22:31:09.502730+00:00",
+    "path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/artifact_production.py",
+    "before_sha256": "c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e",
+    "installed_sha256": "e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf",
+    "backup": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/artifact_production.c0f17c3e.before.py",
+    "paid_review_stdout_sha256": "e32de27dd8d2ebcc8d4ecdc842da5e1cce2ba54bf8925c800d0ff820ccaaf42c",
+    "other_original_parent_collection_receipt": "b384615888d6f53f42576f27afbdd02da73477183bcdb627bb00d3c5d0577c69",
+    "scope": "future artifact production only; old rc65 and missing seal unchanged",
+    "adapter_or_hook_changed": false
+  },
+  "installed_checks": {
+    "passed": 24,
+    "failed": 0,
+    "errors": 0,
+    "skipped": 0,
+    "evidence_sha256": "fe40064593287257b6946eadb2e93ca2679ea7cbbcf5f8e957c810a38cd25ecf"
+  }
+}

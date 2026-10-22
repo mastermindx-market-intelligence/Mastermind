@@ -22,6 +22,7 @@ from control_plane.executive_orchestration_result import RawRoleResultObservatio
 from control_plane.operator_harness_contract import (
     AdapterFailureClass,
     AttentionTurnObservation,
+    AttentionCompanyReadProjection,
     AuthIdentityConfidence,
     AuthRealmFact,
     AuthRealmRequirement,
@@ -337,6 +338,12 @@ def attention_turn_observation(value: Any) -> AttentionTurnObservation:
         raw,
         name="attention turn observation",
         wake_ack_projection=nested,
+        company_read_projection=(
+            None if raw["company_read_projection"] is None else _construct(
+                AttentionCompanyReadProjection, raw["company_read_projection"],
+                name="attention Company read projection",
+            )
+        ),
     )
 
 

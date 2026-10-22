@@ -86,6 +86,54 @@ def _append_nw_context_audit(root: Path, run_id: str, audit_row: dict) -> None:
         pass  # best-effort append; never raise
 
 
+def _append_glt_audit(root: Path, run_id: str, audit_row: dict) -> None:
+    """Append one liquidity_transmission (W-LIQ.2 GLT) audit row to its JSONL sidecar.
+
+    Mirrors ``_append_nw_context_audit`` / ``_append_treasury_context_audit`` so it can be
+    unit-tested directly.  Append-only; best-effort — never raises.
+
+    The two producer clocks are written SEPARATELY and neither is derived from the other:
+    ``observed_at`` is the evidence-availability boundary (what the state could have been
+    known from) and ``known_at`` is when the producer first published it.  Keeping both on
+    the row is what lets a later reader tell a stale artifact from a current one without
+    trusting the wrapper's own generated_at.
+
+    Args:
+        root:      repo root Path (locates data/brain/glt_audit.jsonl).
+        run_id:    current run identifier string.
+        audit_row: dict as returned by liquidity_transmission.audit_row(); 'ts' injected here.
+    """
+    try:
+        import json as _json
+        audit_path = root / "data" / "brain" / "glt_audit.jsonl"
+        audit_path.parent.mkdir(parents=True, exist_ok=True)
+        row = {
+            "ts": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+            "run_id": run_id,
+            "status": audit_row.get("status"),
+            "reason": audit_row.get("reason"),
+            "mode": audit_row.get("mode"),
+            "observed_at": audit_row.get("observed_at"),
+            "known_at": audit_row.get("known_at"),
+            "age_days": audit_row.get("age_days"),
+            "state_label": audit_row.get("state_label"),
+            "quality": audit_row.get("quality"),
+            "coverage": audit_row.get("coverage"),
+            "confidence": audit_row.get("confidence"),
+            "schema": audit_row.get("schema"),
+            "producer_version": audit_row.get("producer_version"),
+            "model_version": audit_row.get("model_version"),
+            "data_version": audit_row.get("data_version"),
+            "source_snapshot_hash": audit_row.get("source_snapshot_hash"),
+            "signs_posture": audit_row.get("signs_posture"),
+            "decision_effect": audit_row.get("decision_effect"),
+        }
+        with audit_path.open("a", encoding="utf-8") as fh:
+            fh.write(_json.dumps(row, default=str) + "\n")
+    except Exception:
+        pass  # best-effort append; never raise
+
+
 def _append_treasury_context_audit(root: Path, run_id: str, audit_row: dict) -> None:
     """Append one treasury_context_audit row to the persistent JSONL sidecar.
 
@@ -943,9 +991,42 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
     except Exception:
         _rl_log(_run_id, "perception", "treasury_context", "treasury_context unavailable")
 
+    # —— W-LIQ.2: Global Liquidity Transmission — flag-independent read + audit row ——
+    # SHADOW plane.  The reader and its audit row always accrue (observability is never
+    # gated); MASTERMIND_GLT_MODE governs only the typed decision chokepoint, which is
+    # inert at every rung this wave.  The plane itself is assembled unconditionally: it
+    # carries direction=None / magnitude=None, so a present plane and an absent one differ
+    # only in what the runlog can SEE, never in what the book does.
+    _glt_plane: dict = {}
+    try:
+        from brain import liquidity_transmission as _glt_mod
+        _glt_audit = _glt_mod.audit_row()
+        _rl_log(_run_id, "perception", "liquidity_transmission",
+                f"status={_glt_audit.get('status')} mode={_glt_audit.get('mode')} "
+                f"observed_at={_glt_audit.get('observed_at')} "
+                f"known_at={_glt_audit.get('known_at')} "
+                f"age_days={_glt_audit.get('age_days')} "
+                f"state={_glt_audit.get('state_label')} "
+                f"quality={_glt_audit.get('quality')} "
+                f"coverage={_glt_audit.get('coverage')} "
+                f"decision_effect={_glt_audit.get('decision_effect')}",
+                **_glt_audit)
+        try:
+            _append_glt_audit(
+                Path(__file__).resolve().parent.parent,
+                _run_id,
+                _glt_audit,
+            )
+        except Exception:
+            pass  # best-effort append; never raise
+        _glt_plane = _glt_mod.market_plane()
+    except Exception:
+        _rl_log(_run_id, "perception", "liquidity_transmission",
+                "liquidity_transmission unavailable")
+
     # —— E0.5: perception runlog step — P5: perception logged BEFORE any position decision ——
-    # Assemble + PUBLISH THE one market view (P7: data/market_view/latest.json, all books read the
-    # one artifact) before the book is touched.  Read-only enrichment — the wave contract is ZERO
+    # Assemble a local preview only. Canonical paired publication is owned by the
+    # existing macro-refresh job; this retained legacy path must never race its writes. ZERO
     # behaviour change: nothing downstream sizes off this in W-E.0.  Lazy import so this degrades
     # gracefully if brain/market_view.py (E0.3) is absent; any failure logs "unavailable" and the
     # build proceeds unchanged (a perception organ never blocks the book — masterplan §4).
@@ -956,14 +1037,14 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
         _nw_out_for_build = _nw_plane if _nw_plane else None
         _pv = _mv_mod.build(
             "us",
-            write=True,
+            write=False,
             distribution_tells_out=_mv_inputs.get("distribution_tells"),
             liquidity_quality_out=_mv_inputs.get("liquidity_quality"),
             regime_nowcast_out=_mv_inputs.get("regime_nowcast"),
             neural_web_out=_nw_out_for_build,
+            liquidity_transmission_out=_glt_plane if _glt_plane else None,
         )
-        # Publish the typed AI-facing contract beside market_view.v1.  This is read-only and
-        # preserves every existing authority boundary.
+        # Preview the typed contract without changing canonical publication or history.
         try:
             from brain import decision_context as _dc
 
@@ -972,7 +1053,7 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
                 regime=regime,
                 market_view=_pv,
                 neural_web=_nwc_mod.context() if "_nwc_mod" in locals() else {},
-                write=True,
+                write=False,
                 seq=int(_pv.get("seq") or 0),
             )
         except Exception:
@@ -981,7 +1062,7 @@ def run(asof: str | None = None, force: bool = False, research: bool = False,
         _pv_conflict = (_pv.get("label_vs_planes") or {}).get("conflict", False)
         _pv_coverage = (_pv.get("assembly") or {}).get("fresh", "?")
         _rl_log(_run_id, "perception", "market_view",
-                f"conflict={_pv_conflict} coverage_fresh={_pv_coverage} | {_pv_brief}",
+                f"unpublished preview: conflict={_pv_conflict} coverage_fresh={_pv_coverage} | {_pv_brief}",
                 conflict=_pv_conflict,
                 coverage_fresh=_pv_coverage,
                 label_vs_planes=_pv.get("label_vs_planes"),

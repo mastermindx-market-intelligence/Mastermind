@@ -1,0 +1,17 @@
+{
+  "run_id": "mm-os-incident-issuer-custody-preflight-20261013-01a104e6",
+  "scope": {
+    "root": "01a104e6-58f8-76d3-8d99-1302a1cca072",
+    "parent": "01a104e6-58f8-76d3-8d99-1302a1cca072",
+    "host": "ubuntu2",
+    "support_digest": "4014714eb8865585f11b2a0120975479c10f0567cad968c5a57e5101f8c8f114",
+    "packet_path": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/state/remote_sub/mm-os-incident-issuer-custody-preflight-20261013-01a104e6.packet.16qpaved",
+    "packet_sha256": "7c9ec569638e276a47bb311a748b5bdcb3b905e253f031c74bd91676c3078e61",
+    "log_prefix_bytes": 1693,
+    "log_prefix_sha256": "cb5b9ec957b240025a62b5e090967909fb18df00ea65dab58076a51143a9a9dd"
+  },
+  "installed_preimages": {
+    "run_observation.py": "1292043bc05fd8e41e40a6f1e2194b80959f934e727fd002e585ef5d6af8a59b",
+    "run_observation_delivery.py": "7cd94dd2452862bd32f2c15a028881742845c9325c2a46146cf0ad85b0ee456b"
+  }
+}

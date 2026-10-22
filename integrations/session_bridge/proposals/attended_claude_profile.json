@@ -1,0 +1,20 @@
+{
+  "status": "UNINSTALLED_PROPOSAL",
+  "profile_id": "fabric.attended.claude.bounded.v1",
+  "profile": {
+    "enabled": false,
+    "execution_surface": "claude-code",
+    "auth_realm": "dedicated-worker-account",
+    "sandbox_policy": "read-only",
+    "approval_policy": "never",
+    "network_policy": "disabled",
+    "write_capable": false,
+    "native_helper_policy": "disabled",
+    "native_helper": null,
+    "skills": [],
+    "mcp_servers": [],
+    "resources": [],
+    "plugins": [],
+    "forbidden": []
+  }
+}

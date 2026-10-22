@@ -1,0 +1,84 @@
+{
+  "casebook_provenance": {
+    "evidence_grade": "RESEARCH_RETROSPECTIVE_PUBLIC_PAGE_TWO_DAY_ADJ_CLOSE_ONLY",
+    "first_release_clock_caveat": "First public release instant not established. A dated company release and later after-close public wire/reprint corroborate a market-session publication window; earlier private leaks or public notices are not exhaustively excluded.",
+    "market_price_caveat": "Yahoo Finance adjusted closes are retrospective, may change with corporate actions; two-session historical label only, no PIT trading data assertion.",
+    "factor_caveat": "ETF benchmarks are contemporaneous, not ex-issuer, beta-neutral or causally estimated, and may include the issuer itself.",
+    "rights": "Research citation and tiny derived fact sample only; no bulk rehosting or live/vendor feed"
+  },
+  "event": {
+    "event_ref": "earnings:CIK:1652044:2025Q4",
+    "issuer_ref": "CIK:1652044",
+    "fiscal_target": "2025Q4",
+    "first_public_source_ref": "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000012/googexhibit991q42025.htm",
+    "first_publication_clock_status": "AFTER_CLOSE_WINDOW_CORROBORATED",
+    "first_published_utc": null,
+    "after_close_session": "2026-02-04",
+    "observed_public_by_utc": "2026-02-04T21:05:00Z",
+    "public_by_source_kind": "PRESS_RELEASE_REPRINT",
+    "after_close_evidence_refs": [
+      "https://www.sec.gov/Archives/edgar/data/1652044/000165204426000012/googexhibit991q42025.htm",
+      "https://www.marketscreener.com/news/alphabet-2025-q4-earnings-press-release-ce7e5adad089f622"
+    ]
+  },
+  "evaluated_asof_utc": "2026-08-01T04:00:00Z",
+  "sessions": [
+    {
+      "date": "2026-02-04",
+      "open_utc": "2026-02-04T14:30:00Z",
+      "close_utc": "2026-02-04T21:00:00Z"
+    },
+    {
+      "date": "2026-02-05",
+      "open_utc": "2026-02-05T14:30:00Z",
+      "close_utc": "2026-02-05T21:00:00Z"
+    }
+  ],
+  "price_series": {
+    "issuer": {
+      "adjustment": "split_dividend_adjusted_close",
+      "source_ref": "https://finance.yahoo.com/quote/GOOGL/history/",
+      "ticker": "GOOGL",
+      "bars": [
+        {
+          "date": "2026-02-04",
+          "adjusted_close": 332.39
+        },
+        {
+          "date": "2026-02-05",
+          "adjusted_close": 330.61
+        }
+      ]
+    },
+    "market": {
+      "adjustment": "split_dividend_adjusted_close",
+      "source_ref": "https://finance.yahoo.com/quote/SPY/history/",
+      "ticker": "SPY",
+      "bars": [
+        {
+          "date": "2026-02-04",
+          "adjusted_close": 680.87
+        },
+        {
+          "date": "2026-02-05",
+          "adjusted_close": 672.37
+        }
+      ]
+    },
+    "sector": {
+      "adjustment": "split_dividend_adjusted_close",
+      "source_ref": "https://finance.yahoo.com/quote/XLC/history/",
+      "ticker": "XLC",
+      "bars": [
+        {
+          "date": "2026-02-04",
+          "adjusted_close": 115.74
+        },
+        {
+          "date": "2026-02-05",
+          "adjusted_close": 115.16
+        }
+      ]
+    }
+  }
+}
