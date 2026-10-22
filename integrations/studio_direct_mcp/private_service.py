@@ -208,6 +208,85 @@ SEALED_V2_FLEET_GATEWAY_PREDECESSORS = {
 # hashes are provenance checks, NOT a repository access grant. The Gateway
 # target source is the independently reviewed fleet v0.1.10 generation; the
 # Git publisher/workspace layer is pinned to the reviewed #1535 source.
+# Closed original-on-M2 migration cohort. Each tuple: original manifest raw
+# SHA256, original config SHA256, successor manifest raw SHA256, successor
+# config SHA256 and successor manifest canonical SHA256. No grants expand.
+# Successors change exactly the native pool-launcher hash; never paths or keys.
+FABRIC_POOL_ORIGINAL_SHA256 = "95dad5ac680d605200252f7152ecc80b77a767016874028288822a98b2b72c78"
+FABRIC_POOL_SELECTED_SHA256 = "6a49d3c4330889af6fcb4e21be3c25c1a18b5315a8e41fb9e5bd23e4c9dd32ff"
+FABRIC_POOL_PIN_MIGRATION = {
+    "admin-business": (
+        "5dc83dd6aa840b3d321502045db1c4dcaf6fa9d09d5cca8422d5717c84191b1a",
+        "ca8502fb423b719a4e56eda05f6696ac3b8a51da33f93a9cd4fe900a73f0342b",
+        "0bb104c44cf1bcd5a7d9f2a82d42075ee63be18ea718e0b527ce269961050e53",
+        "8f57c1f49380c4f1ab7c2d91ee73b97d93ba02e32ac0f5f0d4f501b9a8df52e4",
+        "ed89e4224d37ab13aa4cd6276bac7410ae453fa1996bb10426eeea075a6b5ece",
+    ),
+    "chatgpt1": (
+        "e4120854ec7451424f414e9178a02f4a2964b185208e5459e20388183bf3534f",
+        "95e172659942bc4452838e84fac71050487a7f2497b7d9b1f2268068194477ab",
+        "a2dc55b4f3d4edbccc531e0eb5718d54c1152479a79384671509061287c8f035",
+        "3847505a40141dba67ad910d045a1d357454cbf816cc099d65f3be78c8e211d9",
+        "3cdc33edbffd9aad61edbf91113677b840993e02104a515a9d60fbefd1383c36",
+    ),
+    "chatgpt2-business": (
+        "c82cba9c6ca4de2eb3dd062c3dadb1439392a852d386479b5fbda052a7ea420b",
+        "2d5250233085d2bf3222272a856e5dc6f743d686d30c610053ef321dd7024e45",
+        "da8d34bdc9caed2c780d866f8fb8598bd96509e4ba7409f3565252723017003e",
+        "f657d1109c0c80b11afd134b0c89407369bca527374ea2d4ab22577786605364",
+        "ed04f2b1af14c8e34ba9ff654500f9bd831414b902fffebc92a248c215803186",
+    ),
+    "chatgpt2-personal": (
+        "a6d86809b5ceb958fbf07b325c8c4f023c1a2214afdf64c3af20be8c8e48d761",
+        "e03ce3cd52852e103752275a8ed2cc1e39bd1f20ee2f211675c37969aa406653",
+        "237265c32d6ae6b5df3dbd084c1e59336bc6281e73242a389cc4ec08c98e7f07",
+        "305190adbd5492326030b7f61e64606f6a5593b191964f26fb7b73f9fa0c65c8",
+        "27810891a5724a37ccc673d80181b0911b5744c3ffb6fe5750cf71c3df641f00",
+    ),
+    "chatgpt3": (
+        "e0d49b19cc25f9b7b9022ffcf5d29e397efe3cacb1c509ae665771dd2e29d30a",
+        "2ec90646a57053978c7b91f044618a805ed3c29d9549bf6e5b53b4c45797ec80",
+        "d0df1da4002b973a267fd301c2ac44087efc1fe2b83d1c6d1c3b6df2b5541eb2",
+        "6d15792a6f9c3f0e218dd7945cb311857f0cad643e1b3c6e6c58ba96e5a03c0f",
+        "84ba6ce1314a65fc3bf6e547ef17342ef3f7e3ef7665d3b0cdad9e3e24977a41",
+    ),
+    "chatgpt3-w570f6f34": (
+        "5462b46a30a5d67fbc3dcee368bfe2675eb409b3bacecbeddc70e9a5a3d9a123",
+        "84b2a98aad0f748b08676dbe5bd55b7a2b595ac00b6e8b066dd74727606bc8d7",
+        "c0871b1474f9c39b1b698d45c2d8a1d25de1e09b5650f45b459c69c742eb022c",
+        "308a00ea8670b8d6617c4eaa0cfc4ff3ba8ee9275e191e6aed6cfb288fc41f6c",
+        "a7244e7de975cd4d0aff768ad563074e0061361736e6cd8510159914a854a210",
+    ),
+    "chatgpt3-wa2a9e6f9": (
+        "39c6bbe7ddfb69b8ac837be37f7b9fed06f10645967dc1675221dad4b5040879",
+        "919a3e3733a2e2f1be2fafb8d43bd4bd8bfe9ec2beaa1ffeff8c197b0962ed76",
+        "cdcee139c6a798b797115218aad5213b2bf08d3286cd57606630b0c4f62f857b",
+        "9ff08c9dd72c0b229c3ce148eda8a34f9e22746aaa40b614d1d9ddcb2a4daa01",
+        "0e0e6a6807e1c7d003e9458591f6422ce5cefa74a70b3761c6cce30123854547",
+    ),
+    "chatgpt4": (
+        "5b7e4ea4b83d1cff6f371dc1ccb3862762222336ba9bb24c0444ad42d3d959c9",
+        "e6c1495c7552241a847b3d541f99913e6a74838e0fb5aee9477b861e92d2a48b",
+        "177c1581d981ff33c152b0c3cc03cf6462d6b3b12c3246218e939c9695baffdf",
+        "5344cc96ea7cd1730a5deb72b42e4fcd85763931f7a0a306f9c1a15e6c80747e",
+        "641e0fa60f25afa5ebe8dbdcd2828d2e6a2f171874e797a4832f7ebab67b51ef",
+    ),
+    "fabric-design": (
+        "0481da04b267ea610a917e78203ac7829c1799a2a83e226502978c6d8bc7d2f9",
+        "529becd75ecbb401f7086e19bd61416b237014f107ab7e62eb0c275570d1e55a",
+        "167afb6fef438bf96dc87a5f1fef0b1333b07abec70fb09de5cfa808cade403a",
+        "3229f1887fea96b12353e715ad468489e21c37da50f449b04d0c3872cce03a43",
+        "268bf65303485ecf9be5982e78dd791f4c88bb315038c8b4817ac23238ffde8c",
+    ),
+    "fabric-read": (
+        "c0fda20241050072ccdecc4cfa5e31d4322a3e0a645404666e7116db372954d3",
+        "02b2cddb81d9ca14ec5880f3a9e4444dfff60ebe0c4665f9d0f53226804fed02",
+        "6403ed50328f70d0b59d8b68a7c61dbbfe030db0ab58e21e0f5fcf4a7f0cb7c0",
+        "b9f563056076ca818343a40c1922de1224b4d38712167f459649db303f4d38d4",
+        "b83a915c302fd1bbc07b14750c63526f3bc7b6dee71568544b9ab383cf61d6d3",
+    ),
+}
+
 C2_BUSINESS_V10_ORIGINAL_BLOBS = {
     "fleet-routing.mjs": "7a1d770bf59d9198f1b29f94f56c2e845c4e1b55",
     "fleet-status.mjs": "f04630857f75d712f701360f18e84d42ac8ae8ba",
@@ -411,6 +490,22 @@ def _sealed_v2_fleet_gateway_predecessor(data: dict, account: str) -> bool:
             and frozenset(files) == entry[2]
             and _canonical_json_sha256(data) == entry[0])
 
+
+
+def _sealed_fabric_pool_pin_successor(data: dict, account: str) -> bool:
+    """Recognize one exact successor generation; no caller-chosen seals."""
+    entry = FABRIC_POOL_PIN_MIGRATION.get(account)
+    if entry is None or not isinstance(data, dict):
+        return False
+    if (data.get("version") != MANIFEST_VERSION
+            or data.get("account") != account
+            or data.get("label") != f"com.mastermind.studio-direct-private.{account}"
+            or data.get("configHash") != entry[3]):
+        return False
+    if account in SEALED_V2_FLEET_GATEWAY_PREDECESSORS:
+        if frozenset(data.get("files", {})) != SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][2]:
+            return False
+    return _canonical_json_sha256(data) == entry[4]
 
 
 def _sha256_hex(value: str) -> bool:
@@ -695,7 +790,8 @@ def _c2_lifecycle_mutex(account: str):
     inode while the previous one is still held. Closing the descriptor (including
     process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
     """
-    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"}):
+    if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS
+                        | frozenset(FABRIC_POOL_PIN_MIGRATION)):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
@@ -1032,7 +1128,8 @@ def _valid_manifest(data, account: str, label: str) -> bool:
                     and fileset == V2_C2_BUSINESS_FLEET_PREDECESSOR)
             ))
             and not c2_paper_predecessor and not c4_paper_cohort
-            and not _sealed_v2_fleet_gateway_predecessor(data, account)):
+            and not _sealed_v2_fleet_gateway_predecessor(data, account)
+            and not _sealed_fabric_pool_pin_successor(data, account)):
         return False
     if any(not _sha256_hex(digest) for digest in files.values()):
         return False
@@ -1071,6 +1168,9 @@ def _read_manifest(
         # accept only the original immutable on-disk manifest bytes.
         expected_bytes_sha = SEALED_V2_FLEET_GATEWAY_PREDECESSORS[account][1]
         if _sha256_file(manifest_path) != expected_bytes_sha:
+            raise SystemExit("corrupt manifest")
+    if _sealed_fabric_pool_pin_successor(data, account):
+        if _stable_regular_file_hash(manifest_path, label="manifest") != FABRIC_POOL_PIN_MIGRATION[account][2]:
             raise SystemExit("corrupt manifest")
     return data
 
@@ -1592,7 +1692,8 @@ def _sealed_historical_tailnet_launch_argv(
     """
     if account not in {"fabric-design", "fabric-read"}:
         return False
-    if not _sealed_v2_fleet_gateway_predecessor(manifest, account):
+    if not (_sealed_v2_fleet_gateway_predecessor(manifest, account)
+            or _sealed_fabric_pool_pin_successor(manifest, account)):
         return False
     if "tailnet-gateway.mjs" not in manifest.get("files", {}):
         return False
