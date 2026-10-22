@@ -83,4 +83,6 @@ checklist: 1=ok 2=ok 3=ok 4=ok 5=ok 6=ok 7=ok 8=ok 9=ok 10=ok
 7. NIT (zero h1) — lands with V1 (one h1 per view).
 
 Post-review delta (proof-found): the Self-Directed stat tiles rendered the lower-case `unavailable`
-in EN (`sd.unavailable`); the §3 word is `Unavailable`, so the key now carries it. Two lines plus pins.
+in EN (`sd.unavailable`); the §3 word is `Unavailable`, so the key now carries it. The delta is
+three source lines plus one comment across two changes (that word, and disposition 3's
+`.mm-epi-badge.qualified` rule on `--ok`), plus the three test pins. Scoped re-review: r2.
