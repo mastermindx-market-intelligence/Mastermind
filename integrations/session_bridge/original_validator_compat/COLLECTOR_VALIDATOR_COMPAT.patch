@@ -1,0 +1,205 @@
+--- a/artifact_delivery.py
++++ b/artifact_delivery.py
+@@ -620,16 +620,103 @@
+     return result
+ 
+ 
+-def validate_ordinary_producer(request, stdout, process_raw):
++_ORIGINAL_PRODUCER_PATH = Path('/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/original-parent-host-selection-20261013/artifact_production.c0f17c3e.before.py')
++_ORIGINAL_PRODUCER_SHA256 = 'c0f17c3e489c83bdb369d6c1ea9adc2757f4732f515cbc76e230fe154a61f67e'
++_CURRENT_PRODUCER_SHA256 = 'e126d6432135725a7a7846cbe9f9749305dfe9dd7cfe37037fc413a1136248bf'
++_ORIGINAL_READER_SHA256 = 'e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469'
++
++
++def _original_validator_source():
++    """Secure fixed-file checks precede every historical validation operation."""
++    raw = local_file(_ORIGINAL_PRODUCER_PATH, 128 * 1024)
++    if digest(raw) != _ORIGINAL_PRODUCER_SHA256:
++        raise ValueError('original_producer_validator_changed')
++    if digest(local_file(HERE / 'artifact_reader.py', 128 * 1024)) != _ORIGINAL_READER_SHA256:
++        raise ValueError('original_producer_validator_changed')
++    return raw
++
++
++class _OriginalValidatorContext:
++    """Fixed reviewed validator, bound to one exact support manifest digest.
++
++    No caller module, source path or source code is accepted. Each operation
++    rereads fixed secure files and executes only the full-hash-qualified source
++    in a fresh private namespace. The installed producer/imports are untouched.
++    """
++    __slots__ = ('_support_digest',)
++
++    def __setattr__(self, name, value):
++        raise AttributeError('original validator context is immutable')
++
++    def _namespace(self):
++        source = _original_validator_source()
++        namespace = {'__name__': 'fixed_original_producer_validator'}
++        exec(compile(source, str(_ORIGINAL_PRODUCER_PATH), 'exec'), namespace)
++        return namespace
++
++    def _bind(self, contract):
++        if contract['support_digest'] != self._support_digest:
++            raise ValueError('original_support_mismatch')
++        return contract
++
++    def parse_packet(self, text):
++        contract = self._namespace()['parse_packet'](text)
++        return None if contract is None else self._bind(contract)
++
++    def validate_contract(self, value):
++        return self._bind(self._namespace()['validate_contract'](value))
++
++    def paths(self, contract):
++        namespace = self._namespace()
++        return namespace['paths'](self._bind(namespace['validate_contract'](contract)))
++
++    def manifest_from_stdout(self, text, **scope):
++        return self._namespace()['manifest_from_stdout'](text, **scope)
++
++
++def original_validator_context(manifest):
++    """Select only the two reviewed versions from an exact original support map.
++
++    Historical c0 receives an explicit immutable validator context; current e126
++    continues through the existing default validator. Unknown versions refuse.
++    """
++    if (type(manifest) is not dict or not manifest
++            or any(type(k) is not str or type(v) is not str
++                   or re.fullmatch(r'[0-9a-f]{64}', v) is None for k, v in manifest.items())
++            or manifest.get('artifact_reader.py') != _ORIGINAL_READER_SHA256
++            or digest(local_file(HERE / 'artifact_reader.py', 128 * 1024)) != _ORIGINAL_READER_SHA256):
++        raise ValueError('original_producer_validator_changed')
++    producer_sha = manifest.get('artifact_production.py')
++    if producer_sha == _CURRENT_PRODUCER_SHA256:
++        if digest(local_file(HERE / 'artifact_production.py', 128 * 1024)) != producer_sha:
++            raise ValueError('original_producer_validator_changed')
++        return None
++    if producer_sha != _ORIGINAL_PRODUCER_SHA256:
++        raise ValueError('original_producer_validator_changed')
++    _original_validator_source()
++    context = object.__new__(_OriginalValidatorContext)
++    object.__setattr__(context, '_support_digest', digest(reader.canonical(
++        {'schema': 'remote-support-code.v1', 'files': manifest})))
++    return context
++
++
++def validate_ordinary_producer(request, stdout, process_raw, *, original_validator=None):
+     """Pure producer proof; no controller terminal flag or lease settlement."""
+     import artifact_production
++    if original_validator is not None:
++        if type(original_validator) is not _OriginalValidatorContext:
++            raise ValueError('original_validator_context_invalid')
++        artifact_production = original_validator
++        ordinary_modes = {'glm', 'qwen'}
++    else:
++        ordinary_modes = artifact_production.ORDINARY_MODES
+     rid = request['run_id']
+     validate_capsule_process(process_raw, stdout, rid)
+     completion = reader.strict_json(process_raw)['artifact_production']
+     if (type(completion) is not dict or set(completion) != {
+             'schema', 'mode', 'contract', 'manifest', 'stdout_sha256'}
+             or completion['schema'] != 'mastermind.fabric_artifact_completion.v1'
+-            or completion['mode'] not in artifact_production.ORDINARY_MODES
++            or completion['mode'] not in ordinary_modes
+             or completion['stdout_sha256'] != digest(stdout)
+             or request.get('stdout_sha256', digest(stdout)) != digest(stdout)):
+         raise ValueError('glm_producer_completion_unqualified')
+--- a/original_delivery_collector.py
++++ b/original_delivery_collector.py
+@@ -110,7 +110,16 @@
+         if sha(data) != item['sha256']:
+             raise ValueError('original_source_changed')
+         source[name] = data
+-    contract = production.parse_packet(source['packet'].decode('utf-8'))
++    manifest = reader.strict_json(source['support'])
++    if (type(manifest) is not dict or not manifest
++            or any(type(k) is not str or type(v) is not str or not HEX.fullmatch(v)
++                   for k,v in manifest.items())):
++        raise ValueError('original_support_mismatch')
++    original_validator = None
++    if plain is None:
++        original_validator = delivery.original_validator_context(manifest)
++    validator = original_validator if original_validator is not None else production
++    contract = validator.parse_packet(source['packet'].decode('utf-8'))
+     if plain is not None:
+         if contract is not None:
+             raise ValueError('plain_original_artifact_contract_conflict')
+@@ -123,16 +132,14 @@
+     if (any(contract[k] != value[k] for k in ('run_id','root','parent'))
+             or contract['names'] != value['artifact_names']):
+         raise ValueError('original_packet_scope_mismatch')
+-    manifest = reader.strict_json(source['support'])
+-    if (type(manifest) is not dict or not manifest
+-            or any(type(k) is not str or type(v) is not str or not HEX.fullmatch(v)
+-                   for k,v in manifest.items())
+-            or sha(canonical({'schema':'remote-support-code.v1','files':manifest})) != contract['support_digest']):
++    if sha(canonical({'schema':'remote-support-code.v1','files':manifest})) != contract['support_digest']:
+         raise ValueError('original_support_mismatch')
+-    # The pure producer validator must be the same reviewed source as the run.
+-    for name in ('artifact_production.py','artifact_reader.py'):
+-        if manifest.get(name) != sha(delivery.local_file(HERE/name, 128*1024)):
+-            raise ValueError('original_producer_validator_changed')
++    # Ordinary runs use the explicitly bound, full-hash-qualified validator.
++    # Preserve the incumbent plaintext scope's installed-source check unchanged.
++    if plain is not None:
++        for name in ('artifact_production.py','artifact_reader.py'):
++            if manifest.get(name) != sha(delivery.local_file(HERE/name, 128*1024)):
++                raise ValueError('original_producer_validator_changed')
+     prefix = (r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}Z \[remote_sub id=' + re.escape(run_id)
+               + r' host=' + re.escape(value['host']) + r'\] (.*)')
+     events=[]
+@@ -155,7 +162,7 @@
+             or type(host.get('ssh_alias')) is not str
+             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',host['ssh_alias'])):
+         raise ValueError('original_host_registry_unavailable')
+-    return value, raw, source, contract, host['ssh_alias'], registry_raw
++    return value, raw, source, contract, host['ssh_alias'], registry_raw, original_validator
+ 
+ 
+ def remote_read(request, *, home=None):
+@@ -271,7 +278,7 @@
+     return code
+ 
+ 
+-def validate_response(raw,request,mode):
++def validate_response(raw,request,mode,*,original_validator=None):
+     if len(raw)>MAX_RESPONSE:raise ValueError('collection_response_limit')
+     row=reader.strict_json(raw)
+     reject_failure_envelope(row, request, SCHEMA)
+@@ -300,12 +307,14 @@
+         if process.get('stdout_sha256') != sha(blobs['stdout']) or 'artifact_production' in process:
+             raise ValueError('plain_capture_digest_mismatch')
+         return blobs,[],None
+-    manifest=delivery.validate_ordinary_producer(request,blobs['stdout'],blobs['process'])
++    manifest=delivery.validate_ordinary_producer(request,blobs['stdout'],blobs['process'],
++        original_validator=original_validator)
++    validator=original_validator if original_validator is not None else production
+     process=reader.strict_json(blobs['process'])
+     if (process['artifact_production']['contract']!=request['contract']
+             or process['artifact_production']['mode']!=mode):raise ValueError('original_completion_scope_mismatch')
+     artrequest={'schema':reader.SCHEMA,**{k:request[k] for k in ('root','parent','run_id','host')},
+-                'stdout_sha256':sha(blobs['stdout']),'paths':production.paths(request['contract'])}
++                'stdout_sha256':sha(blobs['stdout']),'paths':validator.paths(request['contract'])}
+     artresponse={'schema':reader.SCHEMA,'request_sha256':sha(canonical(artrequest)),'files':row['artifacts']}
+     artifacts=delivery.validate_response(canonical(artresponse),artrequest)
+     if len(artifacts)!=len(manifest['files']):raise ValueError('original_artifact_count')
+@@ -316,7 +325,7 @@
+ 
+ 
+ def collect(path,*,run_id,root,parent,destination):
+-    value,binding_raw,source,contract,alias,registry=load_binding(path,run_id=run_id,root=root,parent=parent)
++    value,binding_raw,source,contract,alias,registry,original_validator=load_binding(path,run_id=run_id,root=root,parent=parent)
+     if value['mode']=='minimax' and str(destination)!=PLAIN_SCOPES[run_id]['destination']:
+         raise ValueError('plain_original_destination_changed')
+     request={'schema':SCHEMA,**{k:value[k] for k in ('run_id','root','parent','host')},'contract':contract}
+@@ -337,7 +346,7 @@
+         # These new evidence files are never copied over an original run file.
+         for index,offset in enumerate(range(0,len(response),reader.MAX_FILE)):
+             delivery.write_exclusive(chain.fd,f'read-response.{index:03d}',response[offset:offset+reader.MAX_FILE])
+-        verified=validate_response(response,request,value['mode'])
++        verified=validate_response(response,request,value['mode'],original_validator=original_validator)
+         def verify_source():
+             current=load_binding(path,run_id=run_id,root=root,parent=parent)
+             if current[1:4]!=(binding_raw,source,contract) or current[5]!=registry:

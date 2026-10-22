@@ -244,7 +244,7 @@ class CurrentGrantOwner:
 def compose_runtime(deployment: Deployment, *, release_verifier=verify_git_release,
                     policy_loader=None, authenticator_factory, read_service_factory,
                     adapter_factory, context_factory, readiness, mount_health_routes, audit_sink, clock,
-                    owner_uid: int):
+                    owner_uid: int, compatibility_factory=None):
     """Compose the existing app with owner-supplied actual adapter/service factories.
 
     Factories are explicit until their real source closure is integrated. No
@@ -276,11 +276,25 @@ def compose_runtime(deployment: Deployment, *, release_verifier=verify_git_relea
     owner = CurrentGrantOwner(deployment, clock=clock, owner_uid=owner_uid)
     service = read_service_factory(deployment)
     port = adapter_factory(service, owner.quote_limit, deployment)
+    compatibility_port = None
+    if compatibility_factory is not None:
+        from .compatibility_v1 import CompatibilityPortV1
+        if not callable(compatibility_factory):
+            raise RuntimeRefused("COMPATIBILITY_COMPOSITION_REFUSED")
+        compatibility_port = compatibility_factory(port)
+        # Explicit owner opt-in only. Both callbacks retain this adapter and its
+        # context type; no second service, grant owner or resolver is created.
+        if (type(compatibility_port) is not CompatibilityPortV1
+                or compatibility_port.context_type is not getattr(port, "context_type", None)
+                or getattr(compatibility_port.search_items, "__self__", None) is not port
+                or getattr(compatibility_port.resolve_item, "__self__", None) is not port):
+            raise RuntimeRefused("COMPATIBILITY_COMPOSITION_REFUSED")
     app = create_authenticated_research_server(
         policy=policy, authenticator=authenticator_factory(policy), now=clock,
         audit_sink=audit_sink, port=port, entitlement_resolver=owner.entitlement,
         context_builder=context_factory, allowed_hosts=deployment.allowed_hosts,
-        allowed_origins=deployment.allowed_origins,
+        allowed_origins=deployment.allowed_origins, compatibility_port=compatibility_port,
+        selection_scope=getattr(port, "capture_selection", None),
     )
 
     def health():

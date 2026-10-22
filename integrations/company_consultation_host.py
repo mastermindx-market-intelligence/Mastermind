@@ -159,6 +159,7 @@ class CompanyConsultationHost:
         self, *, runtime: Runtime, repository_root: Path, worker_uid: int,
         relay_socket_path: Path, workspace_id: str, channel_id: str,
         inspector=None, requester_answer_wake_dispatch=None, native_return_armed=False,
+        product_acceptance_host=None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("Company host requires canonical Runtime")
@@ -175,6 +176,16 @@ class CompanyConsultationHost:
         self.worker_uid, self.relay_socket_path = worker_uid, path
         self.workspace_id, self.channel_id = workspace_id, channel_id
         self.inspector = inspector
+        if product_acceptance_host is not None:
+            from integrations.product_acceptance_request_host import ProductAcceptanceRequestHost
+            selected = product_acceptance_host
+            if (type(selected) is not ProductAcceptanceRequestHost
+                    or selected.runtime is not runtime
+                    or selected.worker_uid != worker_uid
+                    or selected.relay_socket_path != path
+                    or selected.workspace_id != workspace_id or selected.channel_id != channel_id):
+                raise TypeError("product acceptance must share the exact Company host binding")
+        self.product_acceptance_host = product_acceptance_host
         if requester_answer_wake_dispatch is not None and not callable(requester_answer_wake_dispatch):
             raise TypeError("requester answer Wake dispatch must be callable")
         self._requester_answer_wake_dispatch = requester_answer_wake_dispatch
@@ -338,6 +349,7 @@ class CompanyConsultationHost:
 
     async def call(self, peer: PeerIdentity, frame: bytes) -> bytes:
         from integrations.mastermind_company_mcp.native_return import REQUEST_SCHEMA
+        from integrations.mastermind_company_mcp import product_acceptance as acceptance
         try:
             value = decode_json_frame(frame, limit=MAX_REQUEST_BYTES)
         except HostFrameError:
@@ -345,6 +357,10 @@ class CompanyConsultationHost:
         if value.get("schema") == REQUEST_SCHEMA:
             from integrations.native_reply_host import call_native_reply
             return await call_native_reply(self, peer, frame)
+        if value.get("schema") == acceptance.REQUEST_SCHEMA:
+            if self.product_acceptance_host is None:
+                return encode_json_frame(acceptance.envelope(error="ACCESS_REFUSED"), limit=MAX_RESPONSE_BYTES)
+            return await self.product_acceptance_host.call(peer, frame)
         tool, authority, dispatch_started = "unknown", None, False
         try:
             tool, arguments = decode_request(frame)

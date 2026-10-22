@@ -1,0 +1,36 @@
+{
+  "classification": "REVIEWED_SOURCE_ONLY_NOT_INSTALLED",
+  "base": "f66bc8006dff0cd9d0894760ba97de02493e4684",
+  "review": {
+    "run": "fabric-finite-digest-review-01a11e90-v1",
+    "root": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "parent": "01a11e90-4b5d-7f53-b966-8aaaad38701f",
+    "provider": "minimax",
+    "host": "ubuntu3",
+    "return_bytes": 4783,
+    "return_sha256": "d9d9a7b8e94d9b989cb55f65c5eccae0d68529740565a40d890561fad365fcf4",
+    "adjudication": "PASS scoped source review; no unresolved defect. Correct reviewer wording: supplied arbitrary digests are refused, not ignored. Canonical values are derived. No live claim.",
+    "acceptance": "reviewer outcome recorded once, rc0; initial CLI parse-error rc2 caused no effect"
+  },
+  "checks": {
+    "initial": {
+      "tests": 7,
+      "failures": 7,
+      "sha256": "50a3ad4165a796bce3910c4aed559a27f42cc8d8eb5414e285d0b80dd263b7c7",
+      "scope": "new producer API and real source/permission drift regressions"
+    },
+    "final": {
+      "tests": 184,
+      "failures": 0,
+      "errors": 0,
+      "skipped": 0,
+      "sha256": "da2bb699318ffbe9a2a155c6bd06ad94f5cced0fd8fd2bf001b972a277dda41d"
+    }
+  },
+  "limits": [
+    "No installation or native START",
+    "Packaging and Darwin image qualification remain separate actual defects",
+    "Original native operation NOT_SUBMITTED",
+    "Enrollment consent pending; Auth0 EFFECT_UNKNOWN preserved"
+  ]
+}

@@ -2237,7 +2237,15 @@ def inspect_linked_worktree(
             dirty=True,
             recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
             removed=False,
-            reason="tracked or untracked workspace changes are present",
+            reason=(
+                "tracked or untracked workspace changes are present; "
+                f"tracked_changes={'present' if cleanliness.status else 'absent'}; "
+                f"all_untracked={'present' if cleanliness.all_untracked else 'absent'} "
+                "(including ignored files). Ordinary git status may hide ignored files. "
+                "Inspect git ls-files --others -z; retain needed source and evidence, "
+                "and remove only verified disposable outputs before requesting release. "
+                "No files were removed."
+            ),
         )
 
     if head.lower() == base.lower():

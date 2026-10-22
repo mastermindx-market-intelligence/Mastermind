@@ -1,0 +1,32 @@
+{
+  "schema": "mastermind.native_broker_support_source.v1",
+  "installed": false,
+  "files": {
+    "support_bundle.py": {
+      "pre_sha256": "2790f29690bac70f111b118ddb3defd8da49ecc2653a8a2cd3caa2be69121f51",
+      "candidate_sha256": "7ca2266283f59afb5ee4a139e86d704c47c1f8cb2f8d03ad44f4441f6ae12a9f",
+      "patch_sha256": "3f57115d3e94a5f72990af420c6d9fd7221f73b21a4b8e08d70cb365b6903d58"
+    },
+    "remote_sub.sh": {
+      "pre_sha256": "e2ec7dfe2efa0680b4bf961ac73ce916adf5f1dc90e510f6c8ff6ed50e069deb",
+      "candidate_sha256": "0da2fce6da29d9fde2d1d7a0d3ff2b9e010680e270210f7f907a993a5f10249f",
+      "patch_sha256": "413b0e255e96a3bf4d7f59a8cc6a8e42e31e35f15cffc94066347334adeb2dcb"
+    }
+  },
+  "obligations": [
+    "original-owner publication and old-loader quiescence",
+    "same DB and lock retained",
+    "source closure and native module installed together",
+    "no historical support generation mutation"
+  ],
+  "patch_application": {
+    "format": "zero-context unified diff",
+    "command": [
+      "git",
+      "apply",
+      "--unidiff-zero",
+      "<patch>"
+    ],
+    "precondition": "Verify the exact pre_sha256 before applying; verify candidate_sha256 afterward."
+  }
+}

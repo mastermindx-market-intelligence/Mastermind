@@ -40,9 +40,9 @@ _ID = re.compile(r'[A-Za-z0-9][A-Za-z0-9._:-]{0,127}')
 _DIGEST = re.compile(r'[0-9a-f]{64}')
 _COMMIT = re.compile(r'[0-9a-f]{40}')
 _BINDING_FIELDS = frozenset({'root_id','job_id','attempt_id','effective_grant_digest','commission_sha256'})
-_ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-finalize'})
+_ASSIGNMENT_OPERATIONS = frozenset({'assignment-seal', 'assignment-seal-prepare', 'assignment-seal-commit', 'assignment-seal-finalize'})
 _MODIFYING_OPERATIONS = frozenset({'start', 'cancel', 'validate'}) | _ASSIGNMENT_OPERATIONS
-_OPERATIONS = frozenset({'start','status','collect','cancel','validate'}) | _ASSIGNMENT_OPERATIONS
+_OPERATIONS = frozenset({'start','status','collect','cancel','validate','attended-secret-canary','service-readiness','native-capacity-observation'}) | _ASSIGNMENT_OPERATIONS
 _TRUSTED_CONFIG = object()
 _ERROR_CODES = frozenset({'BrokerProtocolError','PeerAuthorizationError','ConfigTrustError',
     'EFFECT_UNKNOWN','BridgeIdentityError','SocketBindingError','BackendNotConfiguredError',
@@ -371,7 +371,8 @@ class FabricBridgeBroker:
     def require_service_identity(self):
         if os.geteuid()!=self.config.bridge_uid:
             _refuse('BridgeIdentityError','Bridge must run as its configured principal')
-        # The bridge principal is shared: NEVER enumerated, swept or claimed dedicated.
+        # The configured bridge UID alone never qualifies a dedicated realm or
+        # grants sweep authority. Actual Backend qualification owns that boundary.
 
     def _authorize_peer(self,peer):
         if (not isinstance(peer,PeerCredentials) or type(peer.uid) is not int
@@ -380,8 +381,11 @@ class FabricBridgeBroker:
 
     def _payload(self,operation,payload):
         extra={'start':{'launch_spec','validation_commands'},'status':{'run_id'},
+               'attended-secret-canary':{'run_id','launch_spec','control_environment_attestation'},
                'collect':{'run_id'},'cancel':{'run_id','reason'},'validate':{'run_id','argv','timeout_seconds'},
                'assignment-seal': {'run_id', 'worker_id', 'process_ref'},
+               'assignment-seal-prepare': {'run_id', 'worker_id', 'process_ref'},
+               'assignment-seal-commit': {'run_id', 'worker_id', 'process_ref', 'snapshot_sha256', 'seal'},
                'assignment-seal-finalize': {'run_id', 'worker_id', 'process_ref', 'observation_sha256', 'retention_sha256'}}[operation]
         if operation=='start' and type(payload) is dict and 'control_start' in payload:
             extra=extra|{'control_start'}
@@ -409,6 +413,9 @@ class FabricBridgeBroker:
             ref = _object(payload['process_ref'], {f.name for f in dataclasses.fields(WorkerProcessRef)})
             if ref['run_id'] != payload['run_id']:
                 _refuse(message='Assignment process differs from original Attempt')
+            if operation == 'assignment-seal-commit':
+                _digest(payload['snapshot_sha256'])
+                _object(payload['seal'], {'schema_version','control_uid','sealed_at','passed','paths'})
             if operation == 'assignment-seal-finalize':
                 _digest(payload['observation_sha256']); _digest(payload['retention_sha256'])
         if operation=='status' and 'cleanup_query' in payload:
@@ -416,7 +423,7 @@ class FabricBridgeBroker:
                 cleanup_transport.validate_query(payload['cleanup_query'],run_id=payload['run_id'])
             except (ValueError,TypeError,KeyError) as exc:
                 raise BridgeProtocolError('BrokerProtocolError','Invalid bound cleanup query') from exc
-        if operation=='start':
+        if operation in {'start','attended-secret-canary'}:
             spec=payload['launch_spec']
             fields={f.name for f in dataclasses.fields(OrchestrationLaunchSpec)}
             required={'run_id','job_id','worker_id','workspace_path','run_dir','prompt','result_schema_path',
@@ -440,9 +447,13 @@ class FabricBridgeBroker:
             if type(spec['prompt']) is not str or '\x00' in spec['prompt']:_refuse()
             if type(spec['expected_base_sha']) is not str or _COMMIT.fullmatch(spec['expected_base_sha']) is None:_refuse()
             _digest(spec['isolation_manifest_sha256'])
-            commands=payload['validation_commands']
-            if type(commands) is not list or len(commands)>32:_refuse()
-            for argv in commands:self._validation_argv(argv)
+            if operation == 'start':
+                commands=payload['validation_commands']
+                if type(commands) is not list or len(commands)>32:_refuse()
+                for argv in commands:self._validation_argv(argv)
+            else:
+                from scripts.executive_os_phase1c_worker import _CONTROL_ENV_ATTESTATION_FIELDS
+                _object(payload['control_environment_attestation'], _CONTROL_ENV_ATTESTATION_FIELDS)
         elif operation=='cancel':
             if type(payload['reason']) is not str or not 1<=len(payload['reason'])<=500 or '\x00' in payload['reason']:_refuse()
         elif operation=='validate':
@@ -455,52 +466,83 @@ class FabricBridgeBroker:
         if type(argv) is not list or any(type(v) is not str for v in argv) or tuple(argv) not in self.config.validation_commands:
             _refuse(message='Validation argv is not in the root-installed allowlist')
 
-    def _assignment_result(self, operation, result, payload, common):
-        from control_plane.broker_assignment_seal import digest, validate_control_seal
+    def _assignment_snapshot(self, snapshot, snapshot_sha256, payload):
+        from control_plane.broker_assignment_seal import digest
         from control_plane.executive_worker_broker import uid_sweep_receipt_is_passing
-
-        if operation == 'assignment-seal-finalize':
-            _object(result, common | {'acknowledgement'})
-            expected = {key: payload[key] for key in (
-                'run_id', 'observation_sha256', 'retention_sha256')}
-            if result['acknowledgement'] != expected:
-                _refuse('EFFECT_UNKNOWN', 'Original assignment acknowledgement differs')
-            return
-        _object(result, common | {'observation'})
-        observation = _object(result['observation'], {
-            'schema_version', 'snapshot', 'snapshot_sha256', 'control_seal', 'worker_denial'})
-        snapshot = _object(observation['snapshot'], {
-            'schema_version', 'run_id', 'job_id', 'worker_id', 'effective_grant_digest',
-            'process_ref', 'paths', 'uid_sweep'})
-        if (observation['schema_version'] != 'mastermind.worker_assignment_seal_commit/v1'
-                or snapshot['schema_version'] != 'mastermind.worker_assignment_seal_prepare/v1'
-                or observation['snapshot_sha256'] != digest(snapshot)
+        _object(snapshot, {'schema_version', 'run_id', 'job_id', 'worker_id',
+            'effective_grant_digest', 'process_ref', 'paths', 'uid_sweep'})
+        if (snapshot['schema_version'] != 'mastermind.worker_assignment_seal_prepare/v1'
+                or snapshot_sha256 != digest(snapshot)
                 or snapshot['run_id'] != payload['run_id']
                 or snapshot['job_id'] != payload['binding']['job_id']
                 or snapshot['worker_id'] != payload['worker_id']
                 or snapshot['effective_grant_digest'] != payload['binding']['effective_grant_digest']
                 or snapshot['process_ref'] != payload['process_ref']
                 or not uid_sweep_receipt_is_passing(snapshot['uid_sweep'])
-                or snapshot['uid_sweep']['worker_uid'] != payload['process_ref']['effective_uid']
+                or snapshot['uid_sweep']['worker_uid'] != payload['process_ref']['effective_uid']):
+            _refuse('EFFECT_UNKNOWN', 'Original assignment preparation differs')
+        _object(snapshot['paths'], {'workspace', 'run'})
+        for item in snapshot['paths'].values():
+            _object(item, {'path', 'device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns'})
+            _absolute(item['path'])
+            if any(type(item[k]) is not int or item[k] < 0 for k in
+                   ('device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns')):
+                _refuse('EFFECT_UNKNOWN', 'Assignment root identity is malformed')
+        roots = snapshot['paths']
+        owner = roots['workspace']['uid']
+        if (owner <= 0 or roots['run']['uid'] != owner
+                or owner == payload['process_ref']['effective_uid']):
+            _refuse('EFFECT_UNKNOWN', 'Assignment does not use distinct Control custody')
+        return owner
+
+    def _assignment_result(self, operation, result, payload, common):
+        from control_plane.broker_assignment_seal import validate_control_seal
+        if operation == 'assignment-seal-finalize':
+            extra = {'physical_release'} if 'physical_release' in result else set()
+            _object(result, common | {'acknowledgement'} | extra)
+            expected = {key: payload[key] for key in (
+                'run_id', 'observation_sha256', 'retention_sha256')}
+            if result['acknowledgement'] != expected:
+                _refuse('EFFECT_UNKNOWN', 'Original assignment acknowledgement differs')
+            if extra:
+                from control_plane.broker_assignment_seal import validate_physical_release, AssignmentObservationError
+                try:
+                    validate_physical_release(result['physical_release'], run_id=payload['run_id'])
+                except AssignmentObservationError:
+                    _refuse('EFFECT_UNKNOWN', 'Original physical release differs')
+            return
+        if operation == 'assignment-seal-prepare':
+            _object(result, common | {'snapshot', 'snapshot_sha256'})
+            owner = self._assignment_snapshot(result['snapshot'], result['snapshot_sha256'], payload)
+            if owner != self.config.control_uid:
+                _refuse('EFFECT_UNKNOWN', 'Prepared assignment is outside authenticated Control custody')
+            return
+        _object(result, common | {'observation'})
+        observation = _object(result['observation'], {
+            'schema_version', 'snapshot', 'snapshot_sha256', 'control_seal', 'worker_denial'})
+        owner = self._assignment_snapshot(observation['snapshot'], observation['snapshot_sha256'], payload)
+        if (observation['schema_version'] != 'mastermind.worker_assignment_seal_commit/v1'
                 or observation['worker_denial'] != {
                     label: {'open': 'EACCES', 'traverse': 'EACCES', 'list': 'EACCES'}
                     for label in ('workspace', 'run')}):
             _refuse('EFFECT_UNKNOWN', 'Original assignment observation differs')
-        _identifier(snapshot['worker_id'])
-        _object(snapshot['paths'], {'workspace', 'run'})
-        roots = snapshot['paths']
-        for label in ('workspace', 'run'):
-            _object(roots[label], {'path', 'device', 'inode', 'mode', 'uid', 'gid', 'mtime_ns'})
-        owner = roots['workspace']['uid']
-        if (type(owner) is not int or owner <= 0 or roots['run']['uid'] != owner
-                or owner == payload['process_ref']['effective_uid']):
-            _refuse('EFFECT_UNKNOWN', 'Assignment does not use distinct Control custody')
-        validate_control_seal(snapshot, observation['control_seal'], owner)
+        if operation == 'assignment-seal-commit' and (
+                owner != self.config.control_uid
+                or observation['snapshot_sha256'] != payload['snapshot_sha256']
+                or observation['control_seal'] != payload['seal']):
+            _refuse('EFFECT_UNKNOWN', 'Original prepared snapshot or submitted seal differs')
+        validate_control_seal(observation['snapshot'], observation['control_seal'], owner)
 
     def _operation_result(self,operation,result,payload):
         common={'adapter_id','binding','physical_binding_sha256'}
         if result.get('physical_binding_sha256')!=payload['physical_binding_sha256']:
             _refuse('EFFECT_UNKNOWN','Backend route differs from the Runtime-pinned physical binding')
+        if operation == 'attended-secret-canary':
+            from control_plane.fabric_attended_canary import digest
+            _object(result, common | {'probe_request_sha256','envelope'})
+            if result['probe_request_sha256'] != digest(payload) or type(result['envelope']) is not dict:
+                _refuse('BackendRefusedError','Original probe request differs')
+            return
         if operation in _ASSIGNMENT_OPERATIONS:
             self._assignment_result(operation, result, payload, common)
             return
@@ -588,6 +630,38 @@ class FabricBridgeBroker:
         # Canonical JSON copy prevents trusted backend mutation from rewriting the
         # caller's binding/hash while a response is being checked.
         payload=_strict_json(_canonical(request['payload']))
+        if operation in {'service-readiness', 'native-capacity-observation'}:
+            # Authenticated by _authorize_peer above and before wire reads in
+            # handle_connection. No Backend or Runtime/Attempt operation.
+            _object(payload, {'nonce'})
+            if type(payload['nonce']) is not str or re.fullmatch(r'[0-9a-f]{32}', payload['nonce']) is None:
+                _refuse()
+            self.require_service_identity()
+            if operation == 'service-readiness':
+                from ops.executive_os.finite_service_lifecycle import bridge_readiness
+                result = bridge_readiness(self.config)
+            else:
+                # Read-only fixed owner acquisition; no request-selected path,
+                # identity, generation, callback, run or provider probe.
+                from control_plane.codex_provider_realm import ProviderRealmError
+                from ops.executive_os.host_capacity_probe import HostCapacityProbeError
+                from ops.executive_os.capacity_source_contract import (
+                    CapacitySourceContractError, validate_native_identity_observation,
+                )
+                try:
+                    result = await self.backend.execute(operation, {})
+                    if type(result) is not dict or set(result) != {'observation'}:
+                        _refuse('BackendUnavailableError', 'Native observation owner is unavailable')
+                    result = {'observation': validate_native_identity_observation(result['observation'])}
+                except (ProviderRealmError, HostCapacityProbeError, CapacitySourceContractError) as exc:
+                    raise BridgeProtocolError('BackendUnavailableError',
+                        'Current native observation is unavailable') from exc
+            response = dict(schema_version=BROKER_RESPONSE_SCHEMA_VERSION,
+                request_id=request['request_id'], operation=operation, ok=True,
+                result=dict(result, nonce=payload['nonce']))
+            if len(_canonical(response))+1 > self.config.max_response_bytes:
+                _refuse(message='Readiness response ceiling exceeded')
+            return response
         binding=self._payload(operation,payload)
         if operation=='start':
             digest=start_request_sha256(payload)
@@ -702,6 +776,16 @@ class FabricBridgeBroker:
                 if response is not None:
                     writer.write(_canonical(response)+b'\n')
                     await writer.drain()
+                    if operation == 'service-readiness' and response.get('ok') is True:
+                        # Keep this authenticated connection alive while Control
+                        # captures Darwin's peer audit token after our send.
+                        # One fixed-size ACK, bounded wait, no backend dispatch.
+                        try:
+                            ack = await asyncio.wait_for(reader.readexactly(33), timeout=5)
+                            if ack != response['result']['nonce'].encode('ascii') + b'\n':
+                                _refuse(message='Readiness acknowledgement changed')
+                        except (asyncio.TimeoutError, asyncio.IncompleteReadError, BridgeProtocolError):
+                            pass
             finally:
                 writer.close()
                 try:await writer.wait_closed()

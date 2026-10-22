@@ -1,7 +1,97 @@
 {
   "source_sha256": "c6b4292cdb7d106d5b376587f29276da1550e5eee02268f479abd7ad2ea61189",
-  "candidate_sha256": "0055ccc7b98df0fd5948a38fac43a3ffe7a7fc2462e355cc6ce52feb0273c0cd",
+  "candidate_sha256": "eee7012f78277a07fa07e1636d9df457c21e9ee1b8be81ba57462adcf14d9c36",
   "classification": "SOURCE_ONLY_UNINSTALLED",
-  "patch_sha256": "f42f1211619097b36714f120c5768b03e297ae62a3f775a861c1dafcbd40e7f4",
-  "validation": "19 affected ownership/async checks PASS; 9 executor parity checks PASS; narrow source review approved; original lease through assignment ACK remains required."
+  "patch_sha256": "e63dd33a6dee126315267804381c711d0c58760b085866bc0dfe2c38b1a9864d",
+  "validation": "Final combined fixture/materialized checks retained in CAPTURE_ASSEMBLY_FINAL_v3.xml; source-only local-child FD/pipe mechanics and inert identity/issuer fixtures. Nested early-receipt checks are included in one outer node, never added to the outer count.",
+  "parent_delta": "Original prepared descriptor/private FD capture and canonical parser; Control-manifest run/store coordinates; entry-once publication; exact reason/real cancellation telemetry; sole-finisher immutable terminal bytes; uncertainty retains original lease and no replay.",
+  "original_symbols": 5,
+  "changed_existing_symbols": [
+    "_execute"
+  ],
+  "added_symbols": [
+    "_run_lease_process",
+    "_prepare_reserved_attended_under_lease",
+    "_run_reserved_attended_under_lease",
+    "_retain_original_cleanup_hold",
+    "_begin_lease_process",
+    "_begin_reserved_attended_under_lease",
+    "_verify_reserved_realm_observation"
+  ],
+  "capture_worker": {
+    "id": "fabric-owned-capture-build-01a11e90-v1",
+    "result_bytes": 4134,
+    "result_sha256": "d938fd841d9838d33b45b7e1fbd7cd9456162ce790f9c6e64b799e18f9f82a56",
+    "exported_patch_sha256": "9a3417da4c1b8cdc7e87cbf2e192d5623f9d371cd1fad760ecba471aa5a1fd88",
+    "classification": "NOT_ACCEPTED_AS_PRODUCED; coordinator corrections integrated"
+  },
+  "limits": [
+    "SOURCE_ONLY_UNINSTALLED",
+    "PRE_EXEC remains immutable and does not prove exec",
+    "Capture and group cleanup are not authenticated realm, dedicated UID sweep, assignment seal or Supervisor ACK",
+    "No production factory, public bound CLI, profile, credential, enrollment, service or host activation",
+    "Original lease/exclusion must remain through actual assignment seal/worker denial/durable Supervisor ACK"
+  ],
+  "credential_boundary": {
+    "classification": "SOURCE_ONLY_UNINSTALLED",
+    "secret_key": "ANTHROPIC_AUTH_TOKEN",
+    "loader": "Existing fixed CredentialLoader/_safe_credential after current typed SubscriptionRealmOwner observation and original Control/owner qualification.",
+    "authority": "Control/Runtime retains ordinary task authority. Existing physical.worker_source_config_digest pins each current realm observation; physical digest equals original authenticated correlation. Actual controller UID/GID and policy credential HOME must match fixed physical worker; original Popen performs no identity transition. V2 run-bound canary remains independently required; no legacy HMAC/interactive-canary substitution.",
+    "not_enabled": [
+      "production factory",
+      "provider realm enrollment",
+      "credentials",
+      "profile activation"
+    ],
+    "validation": {
+      "classification": "AFFECTED_SOURCE_QUALIFIED_NOT_PRODUCTION",
+      "checks": {
+        "CURRENT_REALM_JOIN_INITIAL.xml": {
+          "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/native-closure-20261012/bound-launch-producer/complete-start/assignment-control-join/CURRENT_REALM_JOIN_INITIAL.xml",
+          "bytes": 20764,
+          "sha256": "535d863853918524e2f1ddd7fc699f779bca63c79395f97344054a1ed590d5b5",
+          "tests": 74,
+          "failures": 1,
+          "errors": 0,
+          "skipped": 0
+        },
+        "CURRENT_REALM_JOIN_NEGATIVES.xml": {
+          "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/native-closure-20261012/bound-launch-producer/complete-start/assignment-control-join/CURRENT_REALM_JOIN_NEGATIVES.xml",
+          "bytes": 2091,
+          "sha256": "80febf827b319b73c6c966bb9258827bf2aa8aea9758dcfbb4493cee1ac8e470",
+          "tests": 10,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "CURRENT_REALM_PHYSICAL_JOIN.xml": {
+          "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/native-closure-20261012/bound-launch-producer/complete-start/assignment-control-join/CURRENT_REALM_PHYSICAL_JOIN.xml",
+          "bytes": 31130,
+          "sha256": "f936be898ddc19d6ed87a176b007398891140c8368a942faa74025e90c0927fc",
+          "tests": 94,
+          "failures": 2,
+          "errors": 0,
+          "skipped": 0
+        },
+        "CURRENT_REALM_PHYSICAL_FINAL.xml": {
+          "path": "/Volumes/Mastermind/evidence/fabric-reliability-codex-20261008/recovery-engineering/native-closure-20261012/bound-launch-producer/complete-start/assignment-control-join/CURRENT_REALM_PHYSICAL_FINAL.xml",
+          "bytes": 11282,
+          "sha256": "290e1260a67610b4608d8956b5c455d0080a55c0ed748d68c8b6bd5db7baf1ba",
+          "tests": 42,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0
+        },
+        "CURRENT_REALM_PATCH_GUARD.xml": {
+          "tests": 8,
+          "failures": 0,
+          "errors": 0,
+          "skipped": 0,
+          "sha256": "8e34b04c37f6a527fb96f784110b8cc66ad2cfda4af7ed336f5ee3d84a990a2c"
+        }
+      },
+      "retained_failures": "Initial74 has actual F3 failure; later94 has two stale test fixture keyword failures corrected, final42 affected nodes PASS. Other52 from94 passed before final equality tightening; counts overlap, not additive.",
+      "actual_composition": "Typed realm observer producers remain pending separate original paid return. No real secret/host/provider use."
+    }
+  }
 }

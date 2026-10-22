@@ -1,0 +1,79 @@
+{
+  "at": "2026-10-14T01:58:13.241967+00:00",
+  "status": "SCOPED_COMBINED_SOURCE_PASS_UNINSTALLED",
+  "parents": [
+    "07c9d51dfa40a77f2e55efde82ba3f46499ec9a9",
+    "5d8bc6c2fb6f59225226a8f8419143ef5264bf1d"
+  ],
+  "source_sha256": {
+    "ops/executive_os/bootstrap-host.sh": "805279ecceb16965ded44f94ab62aa882090accf45edf8a2e7ab86487bca04ce",
+    "ops/executive_os/acceptance.py": "54cbcfa7379efec31ec909256603ef04e9658b0d9cfb2b584470b4e6bcf8de35",
+    "ops/executive_os/install.sh": "dc62eeee43ea231577681c4e0e5729f918c33ef5c1358f8bf93c760f1806b7cb",
+    "tests/test_secondary_worker_bootstrap.py": "cecc4b7efeac2ca719cce5c91c3933d373f128e8b593b6654abc4bc1aef2c8c7",
+    "tests/test_attended_worker_group_acceptance.py": "ef67d5e97758d0e1a4fe5ca376f5d87f8f96c5f346491cd7e8c19901bed4d45d",
+    "tests/test_executive_installer_native_acl.py": "67f553802370b941ee33715b09e98923dcbb4546fdb3ad0e1d637493ca3391ec",
+    "tests/test_executive_codex_sidecar_install.py": "d84565d5a0ecb97ddf66b85ea5ba8aab1a30aee1a75273c6f140c405032a5354",
+    "tests/test_foreground_operator_eligibility.py": "e43d41f3c779da9504cdb9631c515e39712d52a977c2caaa26f1306578c4e2da",
+    "tests/executive_identity_review.py": "1ff485a6e41a82a55d071e29f62a825dad71586bebff8f2156296544fd0cf607",
+    "tests/test_fabric_attended_private_mode_source_review.py": "69e43c6d4e5acf28478fb6b1f8e73ec0d44e9c638256dce10eea83efb0655be6"
+  },
+  "retained_qualification": {
+    "finite_composition_distinct_pass": 236,
+    "finite_receipt_sha256": "e9fc84eda778ac1caa719ada143e3e7e2c05b8cc1e1c6a11ecad037fb5e7e7f3",
+    "secondary_revision3_distinct_pass": 96,
+    "secondary_receipt_sha256": "ecd2c25c286cc1e9075af1b43910a8b05a292d24908331dcabb93184d87dd5d3",
+    "installer_distinct_pass": 103,
+    "installer_xml_sha256": "8943fed9ca9a9358f23815ec65f05d10b64b05f96628e42ae52f1bd817401519",
+    "counts_are_not_additive": true
+  },
+  "affected_join_reports": {
+    "FOREGROUND_FIXTURE_FINAL.xml": {
+      "sha256": "0a7c47cdb2ca1f76234788ca3546e686109fcc3e526a8244306698c8f663cabe",
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "62",
+          "time": "85.602",
+          "timestamp": "2026-10-13T18:55:34.789385-07:00",
+          "hostname": "m2studio"
+        }
+      ]
+    },
+    "INSTALLER_FINITE_JOIN.xml": {
+      "sha256": "5181189dfac518f12e68c8517dcd13c41d28751a0f407d5289202be524f5637e",
+      "suites": [
+        {
+          "name": "pytest",
+          "errors": "0",
+          "failures": "0",
+          "skipped": "0",
+          "tests": "5",
+          "time": "1.367",
+          "timestamp": "2026-10-13T18:54:34.506109-07:00",
+          "hostname": "m2studio"
+        }
+      ]
+    }
+  },
+  "independent_reviews": [
+    "native_activation_adjudication bootstrap805279ec and acceptance54cbcfa PASS",
+    "retained_recovery_coordination fixture-only correction PASS",
+    "SourceOS secondary repaired source3e352ef2 PASS",
+    "NativeCore installer607fd5a9 PASS",
+    "NativeCore foreign5d structural reviewca892 and failure supplementee24 preserved"
+  ],
+  "retained_failure_disposition": {
+    "prior_14_identity_counts": "Foreign3b81 exact four private-mode pins restore33 identity sites; focused identity/private-mode/launchd check returned0 on07c",
+    "prior_coo_template": "Foreign808169 optional coo_foreground_only compatibility; same focused check0",
+    "new_foreground_negative": "Foreign5d fixture wrongly inherited qualified base; actual23-case run22PASS/1FAIL. Removed false inheritance/import only. Production guards unchanged; final affected foreground/endpoint checks pass",
+    "secondary_pre_effect": "Two exact REDs retained; full Control verification and orphan PrimaryGroupID census now precede mutations;56bootstrap+40unchangedacceptance cases pass"
+  },
+  "limits": [
+    "No host provisioning, credential enrollment, service install, provider call or original native submission",
+    "Native original operation remains NOT_SUBMITTED; qualified live foreground and same-parent result consumption remain mandatory",
+    "Original Auth0 and issuer EFFECT_UNKNOWN, permission refusals and protected release gates preserved"
+  ]
+}

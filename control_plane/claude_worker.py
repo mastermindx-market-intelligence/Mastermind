@@ -666,6 +666,12 @@ def _tool_policy(
     spec: WorkerLaunchSpec,
 ) -> tuple[tuple[str, ...], tuple[str, ...], tuple[str, ...]]:
     requested = _requested_capabilities(spec)
+    return _compile_tool_policy(requested, write_paths=(
+        _allowed_write_paths(spec) if "WRITE_BRANCH" in requested else ()))
+
+
+def _compile_tool_policy(requested, *, write_paths=()):
+    """Pure policy compiler; callers separately validate actual authority."""
     tools: list[str] = []
     preapproved: list[str] = []
     forbidden = list(_FORBIDDEN_TOOLS)
@@ -674,7 +680,7 @@ def _tool_policy(
         tools.extend(_READ_TOOLS)
         preapproved.extend(f"{tool}(./**)" for tool in _READ_TOOLS)
     if "WRITE_BRANCH" in requested:
-        paths = _allowed_write_paths(spec)
+        paths = write_paths
         if not paths:
             raise ClaudeWorkerContractError("unsupported or unmapped Claude capabilities")
         tools.extend(_WRITE_TOOLS)

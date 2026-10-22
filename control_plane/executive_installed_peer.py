@@ -1322,6 +1322,24 @@ _EXPECTED_PLIST_PROFILES = {
 }
 
 
+# The optional workspace Control Room socket (install.sh adds it only when the
+# Control config carries the unix stanza). Owner, group and mode derive from
+# the existing Control topology; mode is owner read/write only.
+_WORKSPACE_CONTROL_ROOM_SOCKET_NAME = "WorkspaceControlRoom"
+_WORKSPACE_CONTROL_ROOM_SOCKET = {
+    "SockPassive": True,
+    "SockPathGroup": _ROLE_TOPOLOGIES["control"].config_gid,
+    "SockPathMode": stat.S_IRUSR | stat.S_IWUSR,
+    "SockPathName": "/var/run/mastermind-executive/workspace-control-room.sock",
+    "SockPathOwner": _ROLE_TOPOLOGIES["control"].service_uid,
+    "SockType": "stream",
+}
+_CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM = {
+    **_EXPECTED_PLIST_PROFILES["control"],
+    "Sockets": {**_CONTROL_SOCKETS, _WORKSPACE_CONTROL_ROOM_SOCKET_NAME: _WORKSPACE_CONTROL_ROOM_SOCKET},
+}
+
+
 def _lstat(path: str) -> os.stat_result:
     """Single lstat seam so link races stay testable without root."""
     return os.lstat(path)
@@ -1715,6 +1733,13 @@ _READ_ONLY_COMMANDS = (_CODESIGN_VERIFY_ARGV, _CODESIGN_METADATA_ARGV)
 
 def _profile_matches(template: object, value: object, releases: list) -> bool:
     """Closed structural match; only exact release-SHA substitution may vary."""
+    if (
+        template is _EXPECTED_PLIST_PROFILES["control"]
+        and type(value) is dict
+        and type(value.get("Sockets")) is dict
+        and _WORKSPACE_CONTROL_ROOM_SOCKET_NAME in value["Sockets"]
+    ):
+        template = _CONTROL_PROFILE_WITH_WORKSPACE_CONTROL_ROOM
     if type(template) is str:
         if type(value) is not str or not value.isascii():
             return False
@@ -2547,7 +2572,63 @@ def _joined(first, second, code: str):
     return second
 
 
-def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
+def _verify_studio_control_observation(budget: _Budget) -> _ConfigObservation:
+    """Read only the root's closed seal; never open private Control contents."""
+    from control_plane.executive_control_observation import (
+        CONTROL_PATH, OBSERVATION_PATH, TRANSACTION_PATH, MAX_BYTES,
+        object_identity, parse_observation, validate_identity,
+    )
+
+    def require_no_transaction():
+        budget.check()
+        try:
+            _lstat(TRANSACTION_PATH)
+        except FileNotFoundError:
+            return
+        except OSError:
+            raise _refuse('SERVICE_TRANSACTION_OBSERVATION_UNAVAILABLE') from None
+        raise _refuse('SERVICE_CONFIG_TRANSACTION_ACTIVE')
+
+    require_no_transaction()
+    ancestors = _observe_ancestors(CONTROL_PATH, budget)
+    try:
+        before = validate_identity(object_identity(_lstat(CONTROL_PATH)))
+    except (OSError, ValueError):
+        raise _refuse('SERVICE_CONFIG_METADATA_UNAVAILABLE') from None
+    raw, _ = _read_trusted_bytes(OBSERVATION_PATH, budget=budget,
+        maximum=MAX_BYTES, expected_mode=0o444, expected_gid=0)
+    try:
+        value = parse_observation(raw)
+        if tuple(value['control_identity']) != before:
+            raise ValueError()
+        after = validate_identity(object_identity(_lstat(CONTROL_PATH)))
+    except (OSError, ValueError):
+        raise _refuse('SERVICE_CONTROL_OBSERVATION_MISMATCH') from None
+    _joined(before, after, 'SERVICE_CONFIG_CHANGED')
+    _joined(_observe_ancestors(CONTROL_PATH, budget), ancestors, 'SERVICE_ANCESTOR_CHANGED')
+    require_no_transaction()
+    return _ConfigObservation(digest=value['control_sha256'],
+        provenance_digest=value['python_runtime_provenance_digest'],
+        release=value['source_release_sha'], identity=before,
+        ancestor_identities=ancestors)
+
+
+def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget, *, studio_control=False):
+    if studio_control and role != 'control':
+        raise _refuse('SERVICE_STUDIO_CONTROL_ONLY')
+
+    def read_config(release):
+        if not studio_control:
+            return _verify_role_config(topology, release, budget)
+        value = _verify_studio_control_observation(budget)
+        if value.release != release:
+            raise _refuse('SERVICE_CONFIG_RELEASE_MISMATCH')
+        return value
+
+    def read_projection():
+        return (_verify_studio_control_observation(budget) if studio_control
+                else _verify_control_projection(budget))
+
     budget.check()
     if peer.euid != topology.service_uid:
         raise _refuse("SERVICE_SERVICE_UID_MISMATCH")
@@ -2574,10 +2655,10 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
     if launchd.working_directory != release_path:
         raise _refuse("SERVICE_PLIST_WORKING_DIRECTORY_MISMATCH")
 
-    config = _verify_role_config(topology, plist.release, budget)
+    config = read_config(plist.release)
     _deadline_fence(budget)
     budget.check()
-    projection = _verify_control_projection(budget)
+    projection = read_projection()
     _deadline_fence(budget)
     budget.check()
     if topology.role == "control" and projection.release != plist.release:
@@ -2619,12 +2700,12 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
     )
     _deadline_fence(budget)
     _joined(
-        _verify_role_config(topology, plist.release, budget),
+        read_config(plist.release),
         config,
         "SERVICE_CONFIG_CHANGED",
     )
     _deadline_fence(budget)
-    _joined(_verify_control_projection(budget), projection, "SERVICE_CONFIG_CHANGED")
+    _joined(read_projection(), projection, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
     budget.check()
     _recheck_release(release, budget)
@@ -2637,9 +2718,9 @@ def _qualify(topology: _RoleTopology, peer, role: str, budget: _Budget):
 
     _joined(_verify_role_plist(topology, budget, expected_release=plist.release), plist, "SERVICE_PLIST_CHANGED")
     _deadline_fence(budget)
-    _joined(_verify_role_config(topology, plist.release, budget), config, "SERVICE_CONFIG_CHANGED")
+    _joined(read_config(plist.release), config, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
-    _joined(_verify_control_projection(budget), projection, "SERVICE_CONFIG_CHANGED")
+    _joined(read_projection(), projection, "SERVICE_CONFIG_CHANGED")
     _deadline_fence(budget)
     _joined(_observe_real_boot_id(**_deadline_probe_kwargs(budget)), boot, "SERVICE_BOOT_ID_CHANGED")
     _deadline_fence(budget)
@@ -2698,7 +2779,20 @@ def _qualify_installed_peer_with_deadline(peer, *, role, deadline_monotonic_ns):
         peer, role=role, deadline_monotonic_ns=deadline_monotonic_ns)
 
 
-def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None):
+def _qualify_installed_control_for_studio(peer, *, deadline_monotonic_ns):
+    """Fixed Studio entry only; no wire-selectable observer or permission fallback.
+
+    The entry additionally qualifies its own installed receiver and consumes the
+    process-local peer context on this same live descriptor. This factory proves
+    the actual Control peer, not a native Broker operation or account grant.
+    """
+    if type(deadline_monotonic_ns) is not int or deadline_monotonic_ns <= 0:
+        raise _refuse(_DEADLINE_INVALID_CODE)
+    return _qualify_installed_peer_core(peer, role='control',
+        deadline_monotonic_ns=deadline_monotonic_ns, studio_control=True)
+
+
+def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None, studio_control=False):
     try:
         topology = _role_topology(role)
         budget = (_Budget(_SERVICE_BUDGET_SECONDS) if deadline_monotonic_ns is None
@@ -2708,7 +2802,8 @@ def _qualify_installed_peer_core(peer, *, role, deadline_monotonic_ns=None):
         _deadline_fence(budget)
         if type(capture) is not _peer_identity._CaptureState:
             raise _refuse("PEER_CAPTURE_PROVENANCE_REQUIRED")
-        observation = _qualify(topology, peer, role, budget)
+        observation = (_qualify(topology, peer, role, budget, studio_control=True)
+                       if studio_control else _qualify(topology, peer, role, budget))
         budget.check()
         binding = _owner_binding(peer, observation)
         budget.check()

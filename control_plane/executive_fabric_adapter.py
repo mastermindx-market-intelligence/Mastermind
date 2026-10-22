@@ -232,6 +232,7 @@ class AttendedFabricWorkerAdapter:
     def __init__(self, runtime: Runtime, binding_source: Callable[[str, str], FabricHostBinding],
                  *, client_factory: Callable[[FabricHostBinding], Any] | None = None,
                  request_client_factory: Callable[[FabricHostBinding, Mapping[str, Any]], Any] | None = None,
+                 attended_probe_source=None,
                  heartbeat_interval_seconds: float = 5.0):
         if not isinstance(runtime, Runtime) or not callable(binding_source):
             raise BrokerStateError("Fabric adapter requires trusted Runtime composition")
@@ -243,6 +244,10 @@ class AttendedFabricWorkerAdapter:
             raise BrokerStateError("Fabric request transport factory must be callable")
         self.runtime = runtime
         self.binding_source = binding_source
+        from control_plane.fabric_attended_canary import AttendedControlProbeSource
+        if attended_probe_source is not None and type(attended_probe_source) is not AttendedControlProbeSource:
+            raise BrokerStateError('Fabric probe requires the fixed Control definition source')
+        self._attended_probe_source = attended_probe_source
         legacy_client = client_factory or _fixed_client
         self._client_factory = request_client_factory or (lambda physical, payload: legacy_client(physical))
         self._heartbeat_interval = heartbeat_interval_seconds
@@ -254,6 +259,67 @@ class AttendedFabricWorkerAdapter:
         self._control_recovery: dict[str, dict[str, str]] = {}
         self._cleanup_pairs: dict[tuple[str, str], tuple[dict, dict, dict]] = {}
         self._cleanup_not_before: dict[str, float] = {}
+        self._physical_release_receipts: dict[str, bytes] = {}
+
+    async def prepare_attended_launch_spec(self, spec, *, lease):
+        """Observe this claimed Attempt before START; no pin or task reservation."""
+        from control_plane.fabric_attended_canary import OPERATION, digest
+        from control_plane.foreground_operation import current_foreground_operation
+        job = self.runtime.jobs.get_job(spec.job_id)
+        if job is None:
+            raise BrokerStateError('Original Fabric job is unavailable')
+        if 'attended_route' not in job.constraints:
+            return spec
+        if self._attended_probe_source is None or spec.run_id in self._bound:
+            raise BrokerStateError('Finite Fabric probe owner is not configured or START already attempted')
+        if not isinstance(lease, AttemptLease) or lease.attempt.attempt_id != spec.run_id:
+            raise BrokerStateError('Finite Fabric probe requires its original lease')
+
+        def current():
+            with self.runtime.store.read() as connection:
+                self.runtime.attempts._leased_row(connection, attempt_id=spec.run_id,
+                    fence_generation=lease.attempt.fence_generation, lease_token=lease.lease_token,
+                    timestamp=self.runtime.store.now_ms(), statuses={AttemptStatus.CLAIMED})
+            attempt, physical, start = self._resolve(spec, launch=True)
+            if attempt != lease.attempt:
+                raise BrokerStateError('Finite Fabric claim changed before START')
+            snap = self._attended_probe_source.snapshot(physical, spec)
+            bound_spec = snap[3].spec
+            bound_attempt, bound_physical, start = self._resolve(bound_spec, launch=True)
+            if bound_attempt != attempt or bound_physical != physical:
+                raise BrokerStateError('Finite Fabric principal binding changed its original claim')
+            foreground = current_foreground_operation()
+            foreground._current_claim(start['binding'], physical.digest, digest(start))
+            payload = dict(binding=start['binding'], physical_binding_sha256=physical.digest,
+                run_id=spec.run_id, launch_spec=start['launch_spec'],
+                control_environment_attestation=snap[2])
+            return physical, payload, snap, foreground
+
+        physical, payload, original_snapshot, foreground = current()
+        # The finite Supervisor allocated this Attempt's input once. Prepare
+        # only its credentialless workspace before any probe or START pin.
+        from control_plane.fabric_attended_assignment import prepare_assignment
+        if spec.run_id in self._control_recovery:
+            raise BrokerStateError('Finite assignment was already prepared; no replay permitted')
+        spec, context = prepare_assignment(original_snapshot[3].spec, original_snapshot[1], job)
+        self._control_recovery[spec.run_id] = context
+        check, payload, snapshot, check_foreground = current()
+        if (check != physical or snapshot[:3] != original_snapshot[:3]
+                or check_foreground is not foreground):
+            raise BrokerStateError('Finite assignment source changed during preparation')
+        client = self._client_factory(physical, payload)
+        result = await client.request(OPERATION, payload, timeout_seconds=30.0)
+        check, check_payload, check_snapshot, check_foreground = current()
+        if (check != physical or check_payload != payload or check_snapshot != snapshot
+                or check_foreground is not foreground
+                or type(result) is not dict
+                or set(result) != {'adapter_id','binding','physical_binding_sha256','probe_request_sha256','envelope'}
+                or result['adapter_id'] != ADAPTER_ID or result['binding'] != payload['binding']
+                or result['physical_binding_sha256'] != physical.digest
+                or result['probe_request_sha256'] != digest(payload)):
+            raise BrokerStateError('Finite Fabric probe returned a changed owner or request')
+        verdict = self._attended_probe_source.validate(snapshot, result)
+        return dataclasses.replace(snapshot[3].spec, secret_canary_verdict=verdict)
 
     @property
     def process_controller(self):
@@ -486,11 +552,25 @@ class AttendedFabricWorkerAdapter:
         self._pin_matches(current, check, check_payload)
         validated = self.runtime.attempts.validate_pinned_remote_launch(pinned, lease_token=lease.lease_token)
         from control_plane.fabric_control_start import command_from_validated_pin
-        command = command_from_validated_pin(validated, payload)
+        from control_plane.foreground_operation import _current_foreground_operation_or_none, require_start
+        from control_plane.executive_fabric_bridge_broker import start_request_sha256
+        foreground = _current_foreground_operation_or_none()
+        receipt = (foreground.start_receipt(payload["binding"], physical.digest,
+            start_request_sha256(payload)) if foreground is not None else None)
+        command = command_from_validated_pin(validated, payload,
+            runtime=self.runtime, foreground_receipt=receipt)
+        # Only a present live invocation adds attended evidence. Legacy queued
+        # commands stay unchanged; an expired present scope cannot fall back.
+        if receipt is not None:
+            require_start(receipt, payload["binding"], physical.digest, start_request_sha256(payload))
+            current, check, check_payload = self._resolve(spec, launch=False)
+            self._pin_matches(current, check, check_payload)
+            self.runtime.attempts.validate_pinned_remote_launch(pinned, lease_token=lease.lease_token)
         self._bound[spec.run_id] = (client, payload, physical, spec)
         self._leases[spec.run_id] = lease
+        options = {} if receipt is None else dict(foreground_start_receipt=receipt)
         task = asyncio.create_task(client.request("start", {**payload, "control_start": command},
-            timeout_seconds=float(spec.timeout_seconds) + 60.0))
+            timeout_seconds=float(spec.timeout_seconds) + 60.0, **options))
         try:
             while not task.done():
                 done, _ = await asyncio.wait({task}, timeout=self._heartbeat_interval)
@@ -622,7 +702,32 @@ class AttendedFabricWorkerAdapter:
             retention_sha256=acknowledgement["retention_sha256"])
         if result.get("acknowledgement") != acknowledgement:
             raise BrokerProtocolError("Fabric retained assignment acknowledgement differs")
+        if 'physical_release' in result:
+            from control_plane.broker_assignment_seal import (
+                canonical, validate_physical_release, AssignmentObservationError,
+            )
+            try:
+                receipt = canonical(validate_physical_release(result['physical_release'], run_id=ref.run_id))
+            except AssignmentObservationError as exc:
+                raise BrokerProtocolError("Fabric physical release is unconfirmed") from exc
+            previous = self._physical_release_receipts.get(ref.run_id)
+            if previous is not None and previous != receipt:
+                raise BrokerProtocolError("Fabric original physical release changed")
+            self._physical_release_receipts[ref.run_id] = receipt
         return dict(acknowledgement)
+
+    def assignment_physical_release(self, ref):
+        """Retained authenticated readback, separate from Supervisor's ACK.
+
+        Legacy ACK-only backends cannot supply this evidence. No new release
+        is issued, and this receipt by itself cannot settle a native account.
+        """
+        self._known(ref)
+        self._validate_lease(ref.run_id)
+        raw = self._physical_release_receipts.get(ref.run_id)
+        if raw is None:
+            raise BrokerStateError("Fabric physical release has not been retained")
+        return json.loads(raw)
 
     async def collect_result(self, ref):
         spec = self._known(ref)[3]

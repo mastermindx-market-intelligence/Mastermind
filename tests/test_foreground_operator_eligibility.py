@@ -24,6 +24,24 @@ from tests.test_foreground_operation import frame
 from tests.test_executive_operator_supervisor import _ActiveAdapter, _CommissionPromptSource
 
 
+class _InertForegroundAdapter(_ActiveAdapter):
+    """Unqualified inert adapter; never impersonates the actual transport owner."""
+    def __init__(self, *args, **kwargs):
+        _ActiveAdapter.__init__(self, *args, **kwargs)
+        self._fresh_effect_guard = None
+        self._foreground_attempt_id = None
+
+    def start_session(self, **kwargs):
+        assert self._fresh_effect_guard is not None
+        self._fresh_effect_guard()
+        return super().start_session(**kwargs)
+
+    def begin_turn(self, **kwargs):
+        assert self._fresh_effect_guard is not None
+        self._fresh_effect_guard()
+        return super().begin_turn(**kwargs)
+
+
 @asynccontextmanager
 async def real_factory(tmp_path, socket_root, monkeypatch, *, armed=True, harness=True):
     raw = installed._raw_for_factory(tmp_path, socket_root, profile=WEB_CEO_SESSIONS_PROFILE)
@@ -67,7 +85,7 @@ async def real_factory(tmp_path, socket_root, monkeypatch, *, armed=True, harnes
             raise ValueError("fixture receipt expired")
     def claimed(attempt, requested, loader, *, recovery):
         assert not recovery and attempt.worker_id == requested.worker_id == "codex-01"
-        adapter = _ActiveAdapter(service._require_runtime(), loader, cancel_during_collect=False)
+        adapter = _InertForegroundAdapter(service._require_runtime(), loader, cancel_during_collect=False)
         holder["adapters"].append(adapter)
         return adapter
     service = None
@@ -132,51 +150,26 @@ async def invoke(service, owner, f):
         return await owner.handle_frame(f)
 
 
-def test_qualified_factory_returns_one_real_operator_result_and_duplicate_is_idle(tmp_path, short_socket_root, monkeypatch):
+def test_unqualified_foreground_adapter_refuses_without_provider_start(tmp_path, short_socket_root, monkeypatch):
+    """A live Web foreground request must not adopt the former inert adapter.
+
+    The ordinary Supervisor's standalone non-foreground tests retain their
+    positive execution proof. A Web path requires the genuinely qualified
+    RemoteOperatorHarnessAdapter, not a mock that only mimics its interface.
+    """
     async def run():
         async with real_factory(tmp_path, short_socket_root, monkeypatch) as (s, owner, f, h):
             result = await invoke(s, owner, f)
-            assert result["ok"], (result.get("error"), h.get("driver_error"), s._dispatch_errors)
-            data = result["data"]
-            assert data["dispatched"] is False and data["duplicate"] is False
-            value = data["foreground_completion"]
-            assert value["state"] == "OPERATOR_COMPLETED" and value["delivery"] == "INCOMPLETE"
-            runtime = s._require_runtime()
-            root = runtime.jobs.get_job(data["job_id"])
-            assert root.status is JobStatus.QUEUED and root.attempt_count == 0
-            assert s._coo_binding_for_root(root) == s._require_current_coo_binding()
-            assert root.constraints["operator_harness_armed"] is True
-            children = [j for j in runtime.jobs.list_jobs() if j.parent_job_id == root.job_id]
-            assert len(children) == 1 and children[0].orchestration_role == "plan"
-            planner = children[0]
-            assert planner.status is JobStatus.COMPLETED
-            assert planner.constraints["execution_profile_id"] == "operator.appserver.readonly.docs-mcp.native-helper.v1"
-            assert planner.constraints["eligible_quota_classes"] == [s.config.coo_operator_quota_class]
-            assert planner.requested_authorities == ["READ"] and planner.allowed_write_paths == []
-            material = runtime.validated_role_completion(planner.job_id, expected_attempt_id=planner.current_attempt_id)
-            completion = value["operator_completion"]
-            assert completion == {"job_id": planner.job_id, "attempt_id": planner.current_attempt_id,
-                "role": "plan", "result_digest": material.result_digest,
-                "role_result_digest": material.role_result_digest, "result_envelope": material.result_envelope}
-            assert value["operator_delivery"] == "COMPLETE"
-            assert len(runtime.attempts.list_attempts()) == len(h["adapters"]) == 1
+            assert not result["ok"], result
+            assert result["error"]["code"] == "effect_unknown", result
+            assert "qualified transport owner" in h.get("driver_error", "")
+            assert len(h["adapters"]) == 1
             adapter = h["adapters"][0]
-            assert (adapter.begin_turn_calls, adapter.stop_calls, adapter.cancel_calls) == (1, 1, 0)
-            assert h["guard"] > 0 and h["identity"] == 1
-            assert not [e for e in runtime.events.list_events(job_id=root.job_id) if e.event_type == "COO_PLAN_ADMITTED"]
-            replay = await invoke(s, owner, f)
-            assert replay["ok"] and replay["data"]["duplicate"] is True
-            assert "foreground_completion" not in replay["data"] and len(h["adapters"]) == 1
-            # Canonical duplicate recovery bypasses fresh receipt/worker/binding
-            # qualification; it still retains the original session/argument fence.
-            h["valid_receipt"] = False
-            s._coo_execution_binding["model"] = "drift-after-original"
-            before_guards = h["guard"]
-            replay = await invoke(s, owner, f)
-            assert replay["ok"] and replay["data"]["duplicate"] is True
-            assert "foreground_completion" not in replay["data"]
-            assert len(h["adapters"]) == 1 and h["guard"] == before_guards
-            assert s._foreground_cycle_owner is None and not s._coo_action_tasks
+            assert (adapter.begin_turn_calls, adapter.stop_calls, adapter.cancel_calls) == (0, 0, 0)
+            assert adapter.prompts == []
+            assert not any(attempt.status.value in {"RUNNING", "COMPLETED"}
+                           for attempt in s._require_runtime().attempts.list_attempts())
+            # A claimed-but-unstarted original Attempt is not permission to retry.
     asyncio.run(run())
 
 

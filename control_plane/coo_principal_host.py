@@ -116,6 +116,16 @@ class CooHostProvider:
             _refuse()
         self.source, self.workspace = source, workspace
 
+    async def read_workspace_retained_activity(self, frame):
+        """Delegate one *read-only* original Executive OHF observation.
+
+        The installed COO provider already owns this source and its existing
+        Workspace reader. No new grant registry, new host or action token.
+        """
+        from common.executive_workspace_activity_contract import validate_frame
+        validate_frame(frame)
+        return await self.workspace.handle_activity_from_original_coo(frame, self.source)
+
     def facts(self, frame):
         validate_facts_frame(frame)
         before = self.source.for_principal(frame["principal"], frame["work_ref"])
@@ -194,6 +204,46 @@ class CooHostProvider:
             or self.source.snapshot(row["work_ref"]) != before
         ):
             _refuse()
+        return None
+
+    def guard_dialogue(self, *, context, root_job_id, capability_profile_digest):
+        """Revalidate a trusted App caller at the existing Control effect seam.
+
+        This method authenticates no transport and grants no action. Only an
+        already-authorized host may supply these facts; an App peer still needs
+        its separate kernel-peer gate. Child/Relay identity and single COMMIT
+        remain with their existing owners. No source selection or fallback.
+        """
+        try:
+            if type(context) is not PrincipalAdmissionContext:
+                _refuse()
+            before = self.source.snapshot(context.work_ref)
+            row, principal, authority = before
+            current = PrincipalAdmissionContext(
+                row["work_ref"], principal.principal_binding_digest,
+                authority.mission_authority_ref, authority.authority_generation_digest,
+            )
+            if (row["enabled"] is not True or context != current
+                    or authority.capability_profile_digest != capability_profile_digest
+                    or "governed_orchestration" not in authority.principal_actions):
+                _refuse()
+            def read_mandate():
+                return project_coo_principal_mandate(principal=principal,
+                    authority=authority,
+                    mission_workspace=self.workspace.read_mission_for_work_ref(context.work_ref))
+            mandate = read_mandate()
+            mission = mandate["mission"]
+            if (mandate["new_effect_gate"] != "OPEN"
+                    or mandate["decision_posture"] != "DECIDE_CONTINUE"
+                    or mission["work_ref"] != context.work_ref
+                    or mission["root_job_id"] != root_job_id
+                    or mission["accountable_seat"] != "coo"
+                    or mission["owed_turn"]["seat"] != "coo"
+                    or read_mandate() != mandate
+                    or self.source.snapshot(context.work_ref) != before):
+                _refuse()
+        except Exception:
+            raise ValueError("installed COO authority unavailable") from None
         return None
 
 

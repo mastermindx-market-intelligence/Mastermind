@@ -17,7 +17,9 @@ an unknown launchd state, or an unknown worker state never grants restart.
 
 The bounded diagnostic observes up to 64 KiB of each of the two most recent
 Runner_*.log files per runner and reports recent broker HTTP timeout/shutdown
-events within a 20-minute clock window. An offline/busy runner is explicitly
+events, plus two or more BrokerServer ResponseEnded failures, within a
+20-minute clock window. A single short-lived ResponseEnded does not count as
+degraded by itself. An offline/busy runner is explicitly
 degraded even when the timeout event is stale. These readings never expand
 restart eligibility or cancel running jobs.
 

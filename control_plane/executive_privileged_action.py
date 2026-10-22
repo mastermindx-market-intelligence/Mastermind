@@ -63,6 +63,12 @@ ACTION_EFFECT_CLASS = {
     "executive.worker_auth.recover_transaction": "CREDENTIAL_ADMIN_RECOVERY",
     "executive.worker_auth.issue_due10_incident_grant":
         "CREDENTIAL_ADMIN_INCIDENT_ISSUANCE",
+    # Registered only for closed terminal-receipt validation of the dormant
+    # forward transition.  It is deliberately absent from every action set
+    # above, so the ordinary v1 action-request route always refuses it; only
+    # the dedicated inactive-policy dispatcher can admit it.
+    "executive.worker_auth.forward_recover_due10_incident_issuer":
+        "CREDENTIAL_ADMIN_INCIDENT_FORWARD_RECOVERY",
     "executive.host.prepare_secondary_power_policy": "HOST_POWER_POLICY",
 }
 ACTION_EFFECT_UNKNOWN_EXIT_CODE = {

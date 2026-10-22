@@ -15,11 +15,15 @@ from __future__ import annotations
 
 import asyncio
 import functools
+import inspect
 import json
 import os
+import re
 import shutil
 import time
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Callable
 
 import yaml
 
@@ -47,6 +51,103 @@ try:
     _SDK = True
 except Exception:                       # SDK not installed -> subprocess fallback
     _SDK = False
+
+
+class ProviderStartRefused(RuntimeError):
+    """Veto before an SDK/subprocess/model effect; no retry/fallback allowed."""
+
+
+@dataclass(frozen=True, slots=True)
+class _ProviderRefusalRunBinding:
+    """Identity owned by one existing Claude invocation, not an effect verdict."""
+
+    run_id: str
+    book: str
+    role: str
+
+
+_REFUSAL_RUN_ID = re.compile(r"[A-Za-z0-9_.:+-]{1,160}\Z")
+
+
+def _valid_refusal_run_binding(value) -> bool:
+    return (
+        type(value) is _ProviderRefusalRunBinding
+        and type(value.run_id) is str
+        and _REFUSAL_RUN_ID.fullmatch(value.run_id) is not None
+        and type(value.book) is str
+        and value.book in _CLAUDE_BOOK_SERVERS
+        and type(value.role) is str
+        and 0 < len(value.role) <= 64
+        and value.role.isascii()
+    )
+
+
+def _bind_provider_refusal_run(
+    exc: ProviderStartRefused, run_id: str | None, book: str | None, role: str,
+) -> None:
+    """Attach only this invocation's identity; ambiguity stays unavailable.
+
+    Early waterfall/Codex dispatch and low-level transports do not own this
+    run-log identity and must not call this helper. Metadata never enters the
+    exception's args/text or grants provider, retry or submission authority.
+    """
+    if type(exc) is not ProviderStartRefused:
+        return
+    binding = _ProviderRefusalRunBinding(run_id, book, role)
+    fields = exc.__dict__
+    if type(fields) is not dict:
+        return
+    key = "_provider_refusal_run"
+    if not _valid_refusal_run_binding(binding):
+        fields[key] = None
+    elif key not in fields:
+        fields[key] = binding
+    elif not _valid_refusal_run_binding(fields[key]) or fields[key] != binding:
+        # An explicit unavailable state cannot be rebound by a later wrapper.
+        fields[key] = None
+
+
+def provider_refusal_run_id(
+    exc: BaseException, *, book: str, role: str = "deep",
+) -> str | None:
+    """Return the exact locally bound ID only to its matching book/role."""
+    if (type(exc) is not ProviderStartRefused
+            or type(book) is not str or type(role) is not str):
+        return None
+    fields = exc.__dict__
+    if type(fields) is not dict:
+        return None
+    binding = fields.get("_provider_refusal_run")
+    if (not _valid_refusal_run_binding(binding)
+            or binding.book != book or binding.role != role):
+        return None
+    return binding.run_id
+
+
+def _require_provider_start(guard: Callable[[], None] | None) -> None:
+    """Existing provider's last local veto. Never mints admission authority.
+
+    The source owner supplies its original immutable observation/deadline
+    callback. Only a synchronous, successful None verdict permits continuing;
+    a denial is a non-started provider attempt, not an auth/quota failure.
+    """
+    if guard is None:
+        return
+    if not callable(guard) or inspect.iscoroutinefunction(guard):
+        raise ProviderStartRefused("source admission revoked before provider start")
+    try:
+        verdict = guard()
+    except Exception:
+        raise ProviderStartRefused("source admission revoked before provider start") from None
+    if verdict is not None:
+        try:
+            close = getattr(verdict, "close", None)
+            if callable(close):
+                close()
+        except Exception:
+            # Cleanup cannot turn an invalid verdict into a retry-classified error.
+            pass
+        raise ProviderStartRefused("source admission revoked before provider start")
 
 
 def _block_kind(b) -> str:
@@ -215,6 +316,89 @@ def _subscription_env(env_name: str | None = None) -> dict:
     return e
 
 
+def _new_sdk_diagnostic(run_id, book, role, candidate_ordinal):
+    """Build one passive candidate collector before SDK option/provider work."""
+    if not run_id:
+        return None
+    state = {"collector": None, "observation_failed": False}
+    try:
+        from brain.sdk_diagnostics import SDKInvocationDiagnostics
+        sdk_version = cli_version = None
+        try:
+            from importlib.metadata import version
+            sdk_version = version("claude-agent-sdk")
+        except Exception:
+            pass
+        try:
+            from claude_agent_sdk._cli_version import __cli_version__
+            cli_version = __cli_version__
+        except Exception:
+            pass
+        state["collector"] = SDKInvocationDiagnostics(
+            run_id=run_id, book=book, role=role, candidate_ordinal=candidate_ordinal,
+            sdk_version=sdk_version, cli_version=cli_version,
+        )
+    except Exception:
+        pass
+    return state
+
+
+def _observe_sdk_diagnostic(state, *, message=None, query_entered=False):
+    """Observe without changing the original SDK handler or its scalar result."""
+    if state is None or state["collector"] is None:
+        return
+    try:
+        if query_entered:
+            state["collector"].mark_query_entered()
+        else:
+            state["collector"].observe_message(message)
+    except Exception:
+        state["observation_failed"] = True
+
+
+def _record_sdk_diagnostic(state, run_id, end_state, exception=None):
+    """Best-effort nested event; never a classifier input or success verdict.
+
+    The collector caps its canonical UTF-8 envelope at 16 KiB. The existing
+    logger ASCII-escapes that envelope; its complete row has a different byte
+    size. Missing appends cannot be represented as successful capture.
+    """
+    if not run_id:
+        return
+    try:
+        from brain import runlog
+        if state is None or state["collector"] is None:
+            runlog.log_step(
+                run_id, "provider_diagnostic", "SDK diagnostic unavailable",
+                "The diagnostic collector could not be initialized; execution effects remain unverified.",
+                provider_diagnostic_capture={"status": "unavailable", "reason": "collector_unavailable"},
+            )
+            return
+        try:
+            envelope = state["collector"].finish(end_state, exception)
+        except Exception:
+            runlog.log_step(
+                run_id, "provider_diagnostic", "SDK diagnostic unavailable",
+                "Diagnostic finalization failed; execution effects remain unverified.",
+                provider_diagnostic_capture={"status": "unavailable", "reason": "finalization_failed"},
+            )
+            return
+        partial = state["observation_failed"]
+        runlog.log_step(
+            run_id, "provider_diagnostic",
+            "SDK diagnostic capture partial" if partial else "SDK invocation diagnostics",
+            ("Some diagnostic observations failed. " if partial else "") +
+            "Counts cover observed SDK messages only; execution effects have not been reconciled.",
+            provider_diagnostic=envelope,
+            provider_diagnostic_capture={
+                "status": "partial" if partial else "available",
+                "reason": "observer_call_failed" if partial else "collector_projection_available",
+            },
+        )
+    except Exception:
+        pass
+
+
 async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  system: str | None = None, append_system: str | None = None,
                  allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -224,13 +408,17 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  log_run: bool = True,
                  book: str | None = None,
                  seat: str | None = None,
-                 record_book: str | None = None) -> dict:
+                 record_book: str | None = None,
+                 before_provider_start: Callable[[], None] | None = None) -> dict:
     """Run a headless Claude Code reasoning pass. With arm=True, attaches MCP tools (read the
     dashboard + write conclusions back) + WebSearch/WebFetch and runs a multi-turn research loop.
     Pass `mcp_servers` (with a matching `allowed_tools`) to arm a CUSTOM tool surface — e.g. the
     autonomous desk's free-form trade tools — instead of the default gated bot server. Returns
     {ok, text, model, role, armed, tools_used, cost_usd, session_id, usage, backend, error,
-     key_id}.
+     key_id}. The codex backend adds ``failed_write_tools`` (attempted write tools whose call
+    status was "failed"); when non-empty, ``ok`` is False, ``error`` is the fixed
+    ``codex_bridge.WRITE_TOOL_FAILURE_ERROR`` and the tool effect is UNKNOWN — reconcile the
+    book state rather than treating the turn as not applied or replaying it.
 
     book: when the caller will record cost against cost_guard themselves (e.g. bot/autonomous.py
     which knows its exact PORTFOLIO_ID book name), pass the book name here so cli_bridge skips
@@ -267,7 +455,14 @@ async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
         book=book,
         seat=seat,
         record_book=record_book,
+        **({"before_provider_start": before_provider_start}
+           if before_provider_start is not None else {}),
     )
+
+
+# A reported SDK terminal error is not evidence of a pre-start auth/quota failure.
+# Keep this owned outcome outside the string classifiers that authorize replay.
+_SDK_TERMINAL_ERROR = "sdk_terminal_error"
 
 
 async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
@@ -281,8 +476,16 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                   seat: str | None = None,
                   record_book: str | None = None,
                   _backend_override: str | None = None,
-                  _oauth_candidates: list[dict] | None = None) -> dict:
-    """Internal dispatcher with explicit provider overrides for the shared pool."""
+                  _subscription_slots: list[dict] | None = None,
+                  before_provider_start: Callable[[], None] | None = None) -> dict:
+    """Internal dispatcher with explicit provider overrides for the shared pool.
+
+    ``_subscription_slots`` contains slot IDs, environment-variable names and
+    optional cooling metadata. Credential values are resolved separately when
+    constructing the selected transport environment.
+    """
+    _veto_kw = ({"before_provider_start": before_provider_start}
+                if before_provider_start is not None else {})
     selected_backend = _selected_backend(_backend_override)
     if selected_backend == "waterfall":
         from brain import provider_waterfall
@@ -303,6 +506,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            **_veto_kw,
         )
     if selected_backend == "codex":
         from brain import codex_bridge
@@ -324,6 +528,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
             book=book,
             seat=seat,
             record_book=record_book,
+            **_veto_kw,
         )
         try:
             _record_cli_cost(
@@ -418,8 +623,8 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     try:
         from brain import key_rotor as _kr
         _pool = (
-            list(_oauth_candidates)
-            if _oauth_candidates is not None
+            list(_subscription_slots)
+            if _subscription_slots is not None
             else _kr.candidates()
         )
     except Exception:
@@ -434,7 +639,7 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     # partial thinking is discarded with its result (same rule as the macro lanes).
     _think_box: list = []
 
-    for _cand in _cands_to_try:
+    for _candidate_ordinal, _cand in enumerate(_cands_to_try):
         _key_id: str | None = _cand["key_id"] if _cand is not None else None
         _env_name: str | None = _cand["env_name"] if _cand is not None else None
 
@@ -442,12 +647,25 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
         _think_box.clear()
 
         if _SDK:
+            _sdk_diagnostic = _new_sdk_diagnostic(_run_id, book, role, _candidate_ordinal)
+            _sdk_call_finished = False
             try:
                 result = await _via_sdk(
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     _HEADLESS_PERMISSION_MODE, mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
+                    **({"_diagnostic": _sdk_diagnostic}
+                       if _sdk_diagnostic is not None else {}),
+                    **_veto_kw,
                 )
+                _sdk_call_finished = True
+                _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "exhausted")
+                # The SDK observed an error terminal. A tool-capable attempt may
+                # already have effects; its answer text cannot authorize another
+                # credential attempt, including when it resembles auth/quota text.
+                if result.get("error") == _SDK_TERMINAL_ERROR:
+                    used_key_id = _key_id
+                    break
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
                 _classified = None
@@ -478,6 +696,19 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                 used_key_id = _key_id
                 break
 
+            except ProviderStartRefused as _refusal:
+                _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "raised", _refusal)
+                    except BaseException:
+                        # Diagnostic failure cannot replace the original local refusal.
+                        pass
+                # This veto stops the next provider entry; an earlier invocation
+                # may already have effects. Never classify it as auth/quota,
+                # rotate keys, fall back, or infer that the whole turn was unapplied.
+                raise
             except Exception as e:
                 # Two derivations of the same exception, on purpose.
                 #
@@ -503,6 +734,16 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     try:
                         _classified = _kr.classify_failure(_sdk_exc_classify)
                     except Exception:
+                        pass
+
+                # Freeze the existing exception strings and classification first.
+                # Rich diagnostic fields never become cooling/fallback inputs.
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "raised", e)
+                    except BaseException:
+                        # Preserve the already pending SDK failure and its legacy fallback.
                         pass
 
                 if _classified and _pool and _key_id is not None:
@@ -546,10 +787,15 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     # result it would ride with is a different generation (and the CLI
                     # JSON backend exposes no thinking blocks at all).
                     _think_box.clear()
-                    result = await _via_subprocess(
-                        prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                        _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
-                    )
+                    try:
+                        result = await _via_subprocess(
+                            prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
+                            _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
+                            **_veto_kw,
+                        )
+                    except ProviderStartRefused as _refusal:
+                        _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                        raise
                     # Classify subprocess result for key failure too
                     _classified2 = None
                     if _pool and _key_id is not None:
@@ -576,6 +822,17 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     used_key_id = _key_id
                     break
 
+            except BaseException as _sdk_interruption:
+                if not _sdk_call_finished:
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "interrupted", _sdk_interruption,
+                        )
+                    except BaseException:
+                        # A diagnostic failure must not replace the original interruption.
+                        pass
+                raise
+
         elif not _SDK:
             # No SDK at all — subprocess only
             if arm:
@@ -583,10 +840,15 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                           "error": "armed research needs the Agent SDK + a subscription credential"}
                 used_key_id = _key_id
                 break
-            result = await _via_subprocess(
-                prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
-                _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
-            )
+            try:
+                result = await _via_subprocess(
+                    prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
+                    _HEADLESS_PERMISSION_MODE, base, env_name=_env_name,
+                    **_veto_kw,
+                )
+            except ProviderStartRefused as _refusal:
+                _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                raise
             _classified3 = None
             if _pool and _key_id is not None:
                 try:
@@ -732,7 +994,9 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm,
                    mcp_servers, resume, arm, run_id: str | None = None,
                    env_name: str | None = None,
-                   thinking_out: list | None = None) -> dict:
+                   thinking_out: list | None = None,
+                   before_provider_start: Callable[[], None] | None = None,
+                   _diagnostic: dict | None = None) -> dict:
     """thinking_out: optional side-channel list; when provided, the turn's reasoning
     trace (a list of `mastermind.response_log.v1` thinking segments) is appended as ONE
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
@@ -753,6 +1017,7 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     if append_system:
         opts.append_system_prompt = append_system
     text, cost, sid, usage, used = None, None, None, None, []
+    terminal_error = False
     _think: list[dict] = []   # LOG-ONLY reasoning capture (see thinking_out)
     _round = 0                # assistant-message counter → segment "round"
 
@@ -764,64 +1029,81 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         _rl = None
         _log = None
 
+    # The first SDK query iteration may start a remote provider/model effect.
+    # Evaluate the source owner's veto AFTER SDK/MCP option preparation and
+    # immediately BEFORE handing it to the original SDK owner.
+    _require_provider_start(before_provider_start)
+    _observe_sdk_diagnostic(_diagnostic, query_entered=True)
     async for msg in _sdk_query(prompt=prompt, options=opts):
-        if hasattr(msg, "result"):                         # ResultMessage
-            text = getattr(msg, "result", None) or text
-            cost = getattr(msg, "total_cost_usd", None)
-            sid = getattr(msg, "session_id", None)
-            usage = getattr(msg, "usage", None)
-        elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
-            _round += 1
-            for b in (getattr(msg, "content", []) or []):
-                bt = _block_kind(b)
-                if bt == "thinking":
-                    # Reasoning block — capture for the response ledger only.
-                    _txt = getattr(b, "thinking", "")
-                    if not _txt and isinstance(b, dict):
-                        _txt = b.get("thinking") or ""
-                    _txt = str(_txt or "")
-                    if _txt.strip():
+        try:
+            if hasattr(msg, "result"):                         # ResultMessage
+                # Preserve an explicit error even if a later terminal says success.
+                # A subtype named "success" and nonempty text cannot override it.
+                terminal_error = terminal_error or getattr(msg, "is_error", None) is True
+                text = getattr(msg, "result", None) or text
+                cost = getattr(msg, "total_cost_usd", None)
+                sid = getattr(msg, "session_id", None)
+                usage = getattr(msg, "usage", None)
+            elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
+                _round += 1
+                for b in (getattr(msg, "content", []) or []):
+                    bt = _block_kind(b)
+                    if bt == "thinking":
+                        # Reasoning block — capture for the response ledger only.
+                        _txt = getattr(b, "thinking", "")
+                        if not _txt and isinstance(b, dict):
+                            _txt = b.get("thinking") or ""
+                        _txt = str(_txt or "")
+                        if _txt.strip():
+                            _think.append({"round": _round, "phase": "tool",
+                                           "model": mdl, "text": _txt})
+                    elif bt == "redacted_thinking":
+                        # Text unavailable by design; the segment still records that the
+                        # model reasoned here, so the trace doesn't silently look shorter.
                         _think.append({"round": _round, "phase": "tool",
-                                       "model": mdl, "text": _txt})
-                elif bt == "redacted_thinking":
-                    # Text unavailable by design; the segment still records that the
-                    # model reasoned here, so the trace doesn't silently look shorter.
-                    _think.append({"round": _round, "phase": "tool",
-                                   "model": mdl, "text": "", "redacted": True})
-                elif bt == "text" and getattr(b, "text", ""):
-                    chunk = b.text
-                    text = (text or "") + chunk if text is None else chunk
-                    # log reasoning chunk
-                    if run_id and _log:
-                        try:
-                            _log(run_id, "reasoning", "assistant text",
-                                 chunk[:2000])
-                        except Exception:
-                            pass
-                elif bt == "tool_use":
-                    name = getattr(b, "name", "?")
-                    used.append(name)
-                    # log tool call
-                    if run_id and _log:
-                        try:
-                            inp = getattr(b, "input", {}) or {}
-                            _log(run_id, "tool_call", f"call {name}",
-                                 json.dumps(inp, default=str)[:2000],
-                                 tool=name, args=inp)
-                        except Exception:
-                            pass
-        # ToolResult messages (some SDK versions)
-        elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
-            if run_id and _log:
-                try:
-                    content = getattr(msg, "content", "") or ""
-                    if isinstance(content, list):
-                        content = " ".join(
-                            getattr(c, "text", str(c)) for c in content)
-                    _log(run_id, "tool_result", "tool result",
-                         str(content)[:2000], result=str(content)[:2000])
-                except Exception:
-                    pass
+                                       "model": mdl, "text": "", "redacted": True})
+                    elif bt == "text" and getattr(b, "text", ""):
+                        chunk = b.text
+                        text = (text or "") + chunk if text is None else chunk
+                        # log reasoning chunk
+                        if run_id and _log:
+                            try:
+                                _log(run_id, "reasoning", "assistant text",
+                                     chunk[:2000])
+                            except Exception:
+                                pass
+                    elif bt == "tool_use":
+                        name = getattr(b, "name", "?")
+                        used.append(name)
+                        # log tool call
+                        if run_id and _log:
+                            try:
+                                inp = getattr(b, "input", {}) or {}
+                                _log(run_id, "tool_call", f"call {name}",
+                                     json.dumps(inp, default=str)[:2000],
+                                     tool=name, args=inp)
+                            except Exception:
+                                pass
+            # ToolResult messages (some SDK versions)
+            elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
+                if run_id and _log:
+                    try:
+                        content = getattr(msg, "content", "") or ""
+                        if isinstance(content, list):
+                            content = " ".join(
+                                getattr(c, "text", str(c)) for c in content)
+                        _log(run_id, "tool_result", "tool result",
+                             str(content)[:2000], result=str(content)[:2000])
+                    except Exception:
+                        pass
+        except BaseException:
+            try:
+                _observe_sdk_diagnostic(_diagnostic, message=msg)
+            except BaseException:
+                pass
+            raise
+        else:
+            _observe_sdk_diagnostic(_diagnostic, message=msg)
 
     # The last assistant message is the synthesis — retag its segments so the
     # upstream FIRST-(N-1)+LAST truncation keeps the decision segment and the
@@ -835,13 +1117,16 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
         thinking_out.append(_think)
     # LEAK LAW: `_think` must never be added to this result dict — callers feed
     # result["text"] into decision paths, and thinking is log-only by contract.
-    return {"ok": bool(text), "text": text, "model": mdl, "role": role, "armed": arm,
+    return {"ok": bool(text) and not terminal_error, "text": text,
+            "model": mdl, "role": role, "armed": arm,
             "tools_used": used, "cost_usd": cost, "session_id": sid,
-            "usage": _as_dict(usage), "backend": "sdk"}
+            "usage": _as_dict(usage), "backend": "sdk",
+            **({"error": _SDK_TERMINAL_ERROR} if terminal_error else {})}
 
 
 async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs, turns, workdir, perm, base,
-                          env_name: str | None = None) -> dict:
+                          env_name: str | None = None,
+                          before_provider_start: Callable[[], None] | None = None) -> dict:
     # NOTE: `--output-format json` returns only the final result text — no content
     # blocks arrive here, so this backend has no thinking to capture; the response
     # ledger still logs the turn (with thinking=[]) from reason().
@@ -855,6 +1140,9 @@ async def _via_subprocess(prompt, mdl, role, system, append_system, tools, dirs,
         argv += ["--system-prompt", system]
     if append_system:
         argv += ["--append-system-prompt", append_system]
+    # The caller's veto is not a provider selection/budget grant. It is
+    # checked after argv preparation, before any process effect occurs.
+    _require_provider_start(before_provider_start)
     proc = await asyncio.create_subprocess_exec(
         *argv, stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE, cwd=workdir, env=_subscription_env(env_name))

@@ -1,0 +1,31 @@
+{
+  "installed_preimages": {
+    "run_observation.py": "7a041b0b1496bd886f0675d75834da6f024c00180f99452664de55d66f3fd4fd",
+    "run_observation_delivery.py": "b05f1f8c57c6eac1da102d13075ee90e8402918a8f0a10a0726d38bfb3048e6b",
+    "fabric_task.py": "b8cb82fbf919562b6a49d9d402bfa58fb111c411781d9c20bea2715c2cebb78d"
+  },
+  "original_authority": "existing assigning parent; metadata-only observation; no acceptance/lifecycle grant",
+  "protected_base": "6409f135e8fbf6bdcb32d6a59d0c90b0482e75ab",
+  "candidate_sha256": {
+    "run_observation.py": "1151cf3e5a3b4c582935b82c08719b6cb0c271c4327fa0607be9067a2ca4c6d5",
+    "run_observation_delivery.py": "db54aa15630e29535980e0fccb406c3904cc7df92c66d17ec520f40d4fd5447b",
+    "fabric_task.py": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686"
+  },
+  "checks": "120 final affected candidate checks PASS; current-producer sentinel RED corrected; duplicate broker snapshot RED corrected; actual candidates used for legacy checks",
+  "review": {
+    "run_id": "fabric-original-observation-review-01a11e90-v1",
+    "result_sha256": "382c981ead25e896630065c44bfff43a281ca3dd44b5799c9394e8c23951eff7",
+    "bytes": 9335,
+    "characters": 9287,
+    "bound": 8000,
+    "worker_verdict": "NOT_ACCEPTED_OUTPUT_BOUND",
+    "source_verdict": "FINDINGS_ADJUDICATED_SOURCE_QUALIFIED",
+    "accept_command_executed": false
+  },
+  "verified_existing_dependencies": {
+    "remote_sub.sh": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
+    "artifact_delivery.py": "28af21eba16fa54ee47b29c6848ae5ec0f3d5f6052ac59746e3e35254cf60eea",
+    "artifact_production.py": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
+    "artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469"
+  }
+}

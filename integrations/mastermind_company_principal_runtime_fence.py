@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import dataclasses
 import hashlib
+import inspect
 import re
 from collections.abc import Awaitable, Callable, Mapping
 from dataclasses import dataclass
@@ -22,6 +23,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Protocol
 
+from control_plane.coo_principal_envelope import PrincipalAdmissionContext
 from control_plane.executive_runtime import Runtime
 from integrations.mastermind_company_mcp.adapter import DialogueBinding
 from integrations.mastermind_company_mcp.principal_adapter import (
@@ -100,6 +102,18 @@ class PrincipalCommitObservation:
             "event_id": self.event_id,
             "canonical_digest": self.canonical_digest,
         }
+
+
+@dataclass(frozen=True)
+class PrincipalCommittedMessageRead:
+    """Exact original message, available only for a qualified committed read.
+
+    This is a carrier observation, not a product acceptance verdict. The
+    consumer must still join the issued request and the current result.
+    """
+
+    observation: PrincipalCommitObservation
+    message: dict[str, Any] | None
 
 
 def _digest(value: Any) -> str:
@@ -284,6 +298,7 @@ class PrincipalDialogueRuntimeCommitOwner:
         *,
         socket_path: Path,
         service_call: ServiceCall = call_service,
+        principal_authority_guard: Callable[..., None] | None = None,
     ) -> None:
         if type(runtime) is not Runtime:
             raise TypeError("runtime must be the exact Executive Runtime owner")
@@ -292,16 +307,25 @@ class PrincipalDialogueRuntimeCommitOwner:
             raise ValueError("socket_path must be absolute")
         if not callable(service_call):
             raise TypeError("service_call must be callable")
+        if principal_authority_guard is not None and (
+            not callable(principal_authority_guard)
+            or inspect.iscoroutinefunction(principal_authority_guard)
+        ):
+            raise TypeError("principal authority guard must be synchronous and callable")
         self.runtime = runtime
         self.binding_resolver = binding_resolver
         self.socket_path = path
         self.service_call = service_call
+        self.principal_authority_guard = principal_authority_guard
 
-    def before_commit(self, intent: PrincipalCommitIntent) -> PrincipalCommitFenceReceipt:
+    def before_commit(self, intent: PrincipalCommitIntent, *,
+                      expected_binding: DialogueBinding | None = None) -> PrincipalCommitFenceReceipt:
         """Persist the sole COMMIT-start fact after a fresh exact binding recheck."""
 
         intent = _validate_intent(intent)
         snapshot = _binding_snapshot(self.binding_resolver.resolve())
+        if expected_binding is not None and snapshot != _binding_snapshot(expected_binding):
+            raise PrincipalRuntimeFenceError("principal source binding changed")
         _require_binding_intent_match(snapshot, intent)
         actor = snapshot["context"]["actor_ref"]
         payload = _event_payload(intent, snapshot)
@@ -371,6 +395,48 @@ class PrincipalDialogueRuntimeCommitOwner:
                 raise PrincipalRuntimeFenceError(
                     "principal dialogue COMMIT may already have occurred"
                 )
+
+            # Different foreground surfaces can derive different outbound keys
+            # for the same original request. Fence the semantic request inside
+            # this existing BEGIN IMMEDIATE transaction as well as the key.
+            # Caller/authority rotation and an uncertain prior send do not grant
+            # another disposition. Reconciliation retains the first message key.
+            prior_disposition = connection.execute(
+                """
+                SELECT event_id FROM events
+                WHERE aggregate_type=? AND event_type=? AND job_id=?
+                  AND json_extract(payload_json, '$.intent.reply_to_message_key')=?
+                LIMIT 1
+                """,
+                (PRINCIPAL_RUNTIME_AGGREGATE_TYPE, PRINCIPAL_RUNTIME_EVENT_TYPE,
+                 intent.child_job_id, intent.reply_to_message_key),
+            ).fetchone()
+            if prior_disposition is not None:
+                raise PrincipalRuntimeFenceError(
+                    "principal dialogue request already has a COMMIT"
+                )
+
+            if self.principal_authority_guard is not None:
+                try:
+                    # Receiving Control rechecks its enrolled mission while it
+                    # holds the same write transaction that records COMMIT.
+                    # The callback comes from host composition, never the tool.
+                    guarded = self.principal_authority_guard(
+                        context=PrincipalAdmissionContext(
+                            intent.work_ref, actor["principal_binding_digest"],
+                            actor["mission_authority_ref"], actor["authority_generation_digest"],
+                        ),
+                        root_job_id=actor["root_job_id"],
+                        capability_profile_digest=actor["capability_profile_digest"],
+                    )
+                    if guarded is not None:
+                        if inspect.iscoroutine(guarded):
+                            guarded.close()
+                        raise ValueError("principal guard must return synchronously")
+                except Exception:
+                    raise PrincipalRuntimeFenceError(
+                        "principal dialogue authority is no longer current"
+                    ) from None
 
             self.runtime.store.append_event(
                 connection,
@@ -447,17 +513,117 @@ class PrincipalDialogueRuntimeCommitOwner:
     async def reconcile(self, message_key: str) -> PrincipalCommitObservation:
         """Read the original carrier; never admit or repeat a COMMIT."""
 
+        return (await self.read_committed_message(message_key)).observation
+
+    async def reconcile_obligation(
+        self, *, obligation_id: str, context: PrincipalAdmissionContext,
+        root_job_id: str, receiving_read_guard: Callable[[], None],
+    ) -> PrincipalCommitObservation | None:
+        """Recover an original reply when its transport response was lost.
+
+        The authenticated host supplies the original caller scope and a current
+        synchronous read-permission guard. New-effect arming and an unanswered
+        source are deliberately unnecessary. Exact principal/generation/mission
+        scope is still required; this does not grant a successor access to a
+        predecessor's records. No binding resolver, new-effect guard, write or
+        fresh source acquisition runs. None means no matching COMMIT was observed
+        at this instant, never permission to replay an uncertain request.
+        """
+        from control_plane.principal_dialogue_obligation import (
+            read_original_principal_dialogue_obligation,
+        )
+
+        def guard():
+            if not callable(receiving_read_guard):
+                raise ValueError
+            result = receiving_read_guard()
+            if result is not None:
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise ValueError
+
+        try:
+            guard()
+            if type(context) is not PrincipalAdmissionContext:
+                raise ValueError
+            anchor = read_original_principal_dialogue_obligation(self.runtime,
+                obligation_id=obligation_id, expected_work_ref=context.work_ref,
+                expected_root_job_id=root_job_id)
+            physical = anchor.physical_source
+            child = physical.candidate
+            matches = []
+            for event in self.runtime.events.list_events(job_id=child.job_id,
+                    attempt_id=child.attempt_id,
+                    aggregate_type=PRINCIPAL_RUNTIME_AGGREGATE_TYPE):
+                stored = self._event_for_message_key(event.aggregate_id)
+                if stored is None or stored[0] != event:
+                    raise ValueError
+                _, intent = stored
+                if (intent.reply_to_message_key != physical.predecessor_message_key
+                        or intent.thread_ts != physical.thread_ts):
+                    continue
+                snapshot = event.payload["binding"]
+                _require_binding_intent_match(snapshot, intent)
+                actor = snapshot["context"]["actor_ref"]
+                if (intent.work_ref != context.work_ref
+                        or intent.operation_key != physical.operation_key
+                        or intent.child_worker_id != child.worker_id
+                        or intent.principal_binding_digest != context.principal_binding_digest
+                        or intent.authority_generation_digest != context.authority_generation_digest
+                        or actor.get("mission_authority_ref") != context.mission_authority_ref
+                        or actor.get("root_job_id") != root_job_id
+                        or actor.get("kind") != "executive_principal"
+                        or actor.get("seat") != "coo"
+                        or intent.message_type != "RULING"):
+                    raise ValueError
+                matches.append(intent.message_key)
+            if len(matches) > 1:
+                raise ValueError
+            guard()
+            if not matches:
+                return None
+            observation = await self.reconcile(matches[0])
+            guard()  # Do not disclose a read after its receiving permission moved.
+            return observation
+        except Exception:
+            raise PrincipalRuntimeFenceError(
+                "principal original reply unavailable"
+            ) from None
+
+    def _committed_read(
+        self,
+        state: PrincipalCommitObservationState,
+        *,
+        message_key: str,
+        intent: PrincipalCommitIntent | None,
+        event: Any | None,
+        message: dict[str, Any] | None = None,
+    ) -> PrincipalCommittedMessageRead:
+        if (state is PrincipalCommitObservationState.APPLIED) is not (message is not None):
+            raise PrincipalRuntimeFenceError("committed message read is inconsistent")
+        return PrincipalCommittedMessageRead(
+            observation=self._observation(state, message_key=message_key, intent=intent, event=event),
+            message=copy.deepcopy(message),
+        )
+
+    async def read_committed_message(self, message_key: str) -> PrincipalCommittedMessageRead:
+        """Acquire canonical body using the retained original COMMIT identity.
+
+        No replay, resolver reselection, or state write occurs. Unknown delivery
+        and a duplicate or changed message never produce a consumable body.
+        """
+
         try:
             stored = self._event_for_message_key(message_key)
         except PrincipalRuntimeFenceError:
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.CONFLICT,
                 message_key=str(message_key),
                 intent=None,
                 event=None,
             )
         if stored is None:
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.NOT_APPLIED,
                 message_key=message_key,
                 intent=None,
@@ -512,7 +678,7 @@ class PrincipalDialogueRuntimeCommitOwner:
             ]
             matches = [m for m in messages if m["message_key"] == message_key]
             if not matches:
-                return self._observation(
+                return self._committed_read(
                     PrincipalCommitObservationState.EFFECT_UNKNOWN,
                     message_key=message_key,
                     intent=intent,
@@ -523,27 +689,28 @@ class PrincipalDialogueRuntimeCommitOwner:
                 or matches[0]["fingerprint"] != intent.message_fingerprint
                 or matches[0]["message_type"] != intent.message_type
             ):
-                return self._observation(
+                return self._committed_read(
                     PrincipalCommitObservationState.CONFLICT,
                     message_key=message_key,
                     intent=intent,
                     event=event,
                 )
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.APPLIED,
                 message_key=message_key,
                 intent=intent,
                 event=event,
+                message=matches[0],
             )
         except (DialogueContractError, DialogueServiceError, TypeError, ValueError):
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.EFFECT_UNKNOWN,
                 message_key=message_key,
                 intent=intent,
                 event=event,
             )
         except Exception:
-            return self._observation(
+            return self._committed_read(
                 PrincipalCommitObservationState.EFFECT_UNKNOWN,
                 message_key=message_key,
                 intent=intent,

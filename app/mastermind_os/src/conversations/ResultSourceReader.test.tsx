@@ -42,7 +42,7 @@ async function fixture() {
     conversation: { context, source: { ...source, owner: "CURRENT_WINDOW", ref: "private:window", revision: "w1", coverage: "OBSERVED_WINDOW" }, value: window } };
   return { result, selection, context, reads, projection: projectOffice(reads, context) };
 }
-function Harness({ projection, readResult }: { projection: OfficeProjection; readResult: MissionResultRead }) {
+function Harness({ projection, readResult, locale = "en" }: { projection: OfficeProjection; readResult: MissionResultRead; locale?: "en" | "zh-CN" }) {
   const [drafts, setDrafts] = useState(() => emptyDrafts(projection.context.authGeneration));
   const latest = useRef(drafts); latest.current = drafts;
   const context = projection.context;
@@ -50,7 +50,7 @@ function Harness({ projection, readResult }: { projection: OfficeProjection; rea
     if (next === latest.current) return false;
     latest.current = next; setDrafts(next); return true;
   };
-  return <ConversationWindow projection={projection} readResult={readResult}
+  return <ConversationWindow projection={projection} readResult={readResult} locale={locale}
     draft={readDraft(drafts, context)} draftRevision={readDraftRevision(drafts, context)} draftInsertion={readDraftInsertion(drafts, context)}
     onDraftChange={text => publish(writeDraft(latest.current, context, text))}
     onAppendSource={(source, revision) => publish(appendDraftSource(latest.current, context, revision, source))}
@@ -63,6 +63,45 @@ async function openReader() {
 }
 
 describe("exact result source to original unsent draft", () => {
+  it("localizes the reader without rereading or changing the original source insertion", async () => {
+    const f = await fixture(); const read = vi.fn().mockResolvedValue(f.result);
+    const { rerender } = render(<Harness projection={f.projection} readResult={read} locale="zh-CN" />);
+    fireEvent.change(screen.getByRole("textbox"), { target: { value: "保留我的问题。 Original question." } });
+    fireEvent.click(screen.getByRole("button", { name: "审阅证据" }));
+    fireEvent.click(screen.getByRole("button", { name: "阅读精确结果来源" }));
+    const add = await screen.findByRole("button", { name: "将结果摘要添加到草稿" });
+    const region = screen.getByRole("region", { name: "结果来源阅读器" });
+    expect(document.activeElement).toBe(region);
+    expect(screen.getByText("完整来源详情")).toBeTruthy();
+    expect(region.querySelector("blockquote")?.textContent).toBe(f.result.result.content.summary);
+    fireEvent.click(add);
+    const inserted = screen.getByRole<HTMLTextAreaElement>("textbox").value;
+    expect(inserted).toContain(`保留我的问题。 Original question.\n\n“${f.result.result.content.summary}”\nSource: Executive review result`);
+    expect(screen.getByRole("status").textContent).toBe("已添加到草稿 · 未发送");
+    rerender(<Harness projection={f.projection} readResult={read} locale="en" />);
+    expect(screen.getByRole("region", { name: "Result source reader" })).toBe(region);
+    expect(screen.getByRole("status").textContent).toBe("Added to draft · Not sent");
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe(inserted);
+    rerender(<Harness projection={f.projection} readResult={read} locale="zh-CN" />);
+    fireEvent.click(screen.getByRole("button", { name: "撤销来源插入" }));
+    expect(screen.getByRole<HTMLTextAreaElement>("textbox").value).toBe("保留我的问题。 Original question.");
+    expect(screen.getByRole("status").textContent).toBe("已移除插入的来源，原草稿已保留。");
+    expect(read).toHaveBeenCalledExactlyOnceWith({ ...f.selection, signal: expect.any(AbortSignal) });
+    expect(read.mock.calls[0][0].signal.aborted).toBe(false);
+    fireEvent.click(screen.getByRole("button", { name: "返回证据" }));
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "阅读精确结果来源" }));
+  });
+  it("localizes unavailable content without exposing a malformed result", async () => {
+    const f = await fixture(); const read = vi.fn().mockResolvedValue({ ...f.result, unexpected: true });
+    render(<Harness projection={f.projection} readResult={read} locale="zh-CN" />);
+    fireEvent.click(screen.getByRole("button", { name: "审阅证据" }));
+    fireEvent.click(screen.getByRole("button", { name: "阅读精确结果来源" }));
+    await screen.findByText("结果内容不可用，无法添加摘录。");
+    expect(document.querySelector("blockquote")).toBeNull();
+    expect(screen.queryByRole("button", { name: "将结果摘要添加到草稿" })).toBeNull();
+    expect(screen.getByRole("button", { name: "重新核对精确结果" })).toBeTruthy();
+    expect(read).toHaveBeenCalledTimes(1);
+  });
   it("does not offer a result from another root even in a contradictory projection", async () => {
     const f = await fixture(); const read = vi.fn().mockResolvedValue(f.result);
     const projection = structuredClone(f.projection);

@@ -94,6 +94,11 @@ _COEXISTENCE_MANIFEST_FIELDS = frozenset({
     "prior_ceo_receipt_present", "prior_ceo_receipt_sha256",
     "target_ceo_receipt_sha256",
 })
+_FINITE_RECEIPT_ARCHIVE = "prior-finite-disarmed-receipt.json"
+_FINITE_RECEIPT_FIELDS = frozenset({
+    "finite_prior_receipt_present", "finite_prior_receipt_sha256",
+    "finite_target_receipt_sha256",
+})
 
 _CONTROL_LAUNCHD_PREIMAGE_FIELD = "control_launchd_disabled_before_reconcile"
 _CONTROL_LAUNCHD_DISABLED_ROW_RE = re.compile(
@@ -192,7 +197,7 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
@@ -400,6 +405,7 @@ class ArmRequest:
     workspace_binding_class: str
     credential_expires_at: str
     native_return: bool = False
+    foreground_only: bool = False
 
 
 @dataclasses.dataclass(frozen=True)
@@ -693,6 +699,8 @@ def _parser() -> argparse.ArgumentParser:
     arm.add_argument("--credential-expires-at", action=_StoreOnce, required=True)
     arm.add_argument("--native-return", action="store_true",
                      help="Select the bounded native-return profile after full v5 acceptance; requires the installed Company listener.")
+    arm.add_argument("--foreground-only", action="store_true",
+                     help="Allow only fresh authenticated same-call cycles; keep background selection disabled across restart.")
 
     arm_quiesce = sub.add_parser(
         "arm-quiesce-control-uid",
@@ -754,6 +762,11 @@ def _parser() -> argparse.ArgumentParser:
     for command in sorted(A2_DISABLE_COMMANDS):
         a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
         a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    finite_stage = sub.add_parser('finite-control-stage', help='Stage the fixed finite definition while stopped and disarmed.')
+    finite_stage.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
+    finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
+    finite_reconcile = sub.add_parser('finite-control-stage-reconcile', help='Prove an already-published finite stage without replay.')
+    finite_reconcile.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
     return parser
 
 
@@ -825,7 +838,8 @@ def _native_selection_matches(control: Mapping[str, Any], native_return: bool) -
 
 
 def derive_candidate_configs(
-    configs: ConfigEvidence, *, armed: bool, native_return: bool = False
+    configs: ConfigEvidence, *, armed: bool, native_return: bool = False,
+    foreground_only: bool = False,
 ) -> CandidateConfigs:
     control_value = copy.deepcopy(dict(configs.control))
     worker_value = copy.deepcopy(dict(configs.worker))
@@ -836,6 +850,9 @@ def derive_candidate_configs(
     ):
         raise ArmTransactionError("arm_rolled_back")
     if type(native_return) is not bool or (native_return and not armed):
+        raise ArmAdmissionError("native_selection_invalid")
+    if (type(foreground_only) is not bool or (foreground_only and not armed)
+            or (foreground_only and native_return)):
         raise ArmAdmissionError("native_selection_invalid")
     if native_return:
         _require_native_preselection(control_value)
@@ -854,6 +871,8 @@ def derive_candidate_configs(
         raise ArmAdmissionError("native_selection_invalid")
     control_value["coo_autonomy_armed"] = armed
     control_value["coo_operator_harness_armed"] = armed
+    if foreground_only or "coo_foreground_only" in control_value:
+        control_value["coo_foreground_only"] = foreground_only
     worker_value["operator_harness_armed"] = armed
     control_bytes = encode_config(control_value)
     worker_bytes = encode_config(worker_value)
@@ -1562,7 +1581,8 @@ def evaluate_arm_admission(
 ) -> ArmAdmission:
     """Evaluate all arm gates in fixed order without mutating host state."""
 
-    if type(request.native_return) is not bool:
+    if (type(request.native_return) is not bool or type(request.foreground_only) is not bool
+            or (request.foreground_only and request.native_return)):
         raise ArmAdmissionError("native_selection_invalid")
     _request_expiry(request, now=now)
     host.require_exact_install(request.expected_sha)
@@ -1601,7 +1621,8 @@ def evaluate_arm_admission(
 def execute_arm(
     host: TransactionHost, request: ArmRequest, *, now: datetime
 ) -> TransactionResult:
-    if type(request.native_return) is not bool:
+    if (type(request.native_return) is not bool or type(request.foreground_only) is not bool
+            or (request.foreground_only and request.native_return)):
         raise ArmAdmissionError("native_selection_invalid")
     existing = host.existing_arm(request, now=now)
     if existing is not None:
@@ -1612,7 +1633,8 @@ def execute_arm(
         expected_sha=request.expected_sha,
         prior_configs=admission.configs,
         candidates=derive_candidate_configs(admission.configs, armed=True,
-                                            native_return=request.native_return),
+                                            native_return=request.native_return,
+                                            foreground_only=request.foreground_only),
         admission=admission,
     )
     try:
@@ -1625,7 +1647,6 @@ def execute_arm(
         host.write_autonomy_receipt(transaction, receipt)
         host.start_services(request.expected_sha)
         host.prove_services_ready(request.expected_sha)
-        host.complete_transaction(transaction)
     except ArmAdmissionError:
         # A marker that appeared between the read-only admission check and the
         # atomic mkdir belongs to another root transaction. Never "recover"
@@ -1657,6 +1678,14 @@ def execute_arm(
         except Exception as rollback_exc:
             raise TransactionEffectUnknown() from rollback_exc
         raise ArmTransactionError("arm_rolled_back") from exc
+    try:
+        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        # Publication/terminal cleanup has started; rollback cannot erase that
+        # boundary and publish again, even if cleanup raises an ordinary error.
+        raise TransactionEffectUnknown() from exc
     return TransactionResult(
         state="ARMED",
         status="ARMED_READY",
@@ -1692,7 +1721,10 @@ def execute_disarm(
         host.replace_control_config(transaction)
         receipt = build_transaction_receipt(transaction, state="DISARMED", now=now)
         host.write_autonomy_receipt(transaction, receipt)
-        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        # A lost publication/ownership acknowledgement is not an instruction
+        # to rewrite the configs, receipt or original journal through rollback.
+        raise
     except Exception as exc:
         try:
             host.stop_services(expected_sha)
@@ -1705,6 +1737,15 @@ def execute_disarm(
         except Exception as rollback_exc:
             raise TransactionEffectUnknown() from rollback_exc
         raise ArmTransactionError("disarm_recovered") from exc
+    try:
+        # Closeout may publish the observation and then remove journal files.
+        # Any failure here (including an ordinary cleanup OSError) is ambiguous;
+        # never enter rollback, which itself calls complete_transaction again.
+        host.complete_transaction(transaction)
+    except TransactionEffectUnknown:
+        raise
+    except Exception as exc:
+        raise TransactionEffectUnknown() from exc
     return TransactionResult(
         state="DISARMED",
         status="UNARMED",
@@ -2990,6 +3031,10 @@ class ProductionTransactionHost(ProductionArmHost):
         if descriptor is None:
             raise TransactionEffectUnknown()
         self._transaction_owner_fd = None
+        self._control_observation_origin = None
+        self._control_observation_fresh_transaction = None
+        self._control_observation_recovery_owner = None
+        self._control_observation_rollback_proven = None
         os.close(descriptor)
 
     def _manifest(self) -> dict[str, Any]:
@@ -3020,6 +3065,13 @@ class ProductionTransactionHost(ProductionArmHost):
                            for field in _COEXISTENCE_MANIFEST_FIELDS - {"prior_ceo_receipt_present"})):
                 raise TransactionEffectUnknown()
             required |= _COEXISTENCE_MANIFEST_FIELDS
+        if set(value) & _FINITE_RECEIPT_FIELDS:
+            if (value.get("operation") != "FINITE_CONTROL_STAGE"
+                    or type(value.get("finite_prior_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _FINITE_RECEIPT_FIELDS - {"finite_prior_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _FINITE_RECEIPT_FIELDS
         if value.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             required |= _CANARY_MANIFEST_FIELDS
             if (
@@ -3096,6 +3148,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
         if current is not None and set(current) & _COEXISTENCE_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _COEXISTENCE_MANIFEST_FIELDS})
+        if current is not None and set(current) & _FINITE_RECEIPT_FIELDS:
+            value.update({key: current[key] for key in _FINITE_RECEIPT_FIELDS})
         _atomic_file(
             self._manifest_path(),
             _encoded_json(value),
@@ -3366,6 +3420,12 @@ class ProductionTransactionHost(ProductionArmHost):
                     fcntl.flock(lock, fcntl.LOCK_UN)
                 finally:
                     os.close(lock)
+            # Actual creator provenance remains process-local and bound to the
+            # held marker inode. Reclaiming an old marker never creates it.
+            self._control_observation_origin = (
+                os.getpid(), descriptor, transaction.transaction_id,
+                transaction.expected_sha,
+            )
         except Exception as exc:
             if descriptor >= 0 and self._transaction_owner_fd == descriptor:
                 # Successful or uncertain publication retains the original
@@ -3414,6 +3474,7 @@ class ProductionTransactionHost(ProductionArmHost):
             raise ArmAdmissionError("changed_arm_evidence") from exc
         if (control_digest != snapshot.control_config_sha256
                 or worker_digest != snapshot.worker_config_sha256
+                or control.get("coo_foreground_only", False) is not request.foreground_only
                 or not _native_selection_matches(control, request.native_return)):
             raise ArmAdmissionError("changed_arm_evidence")
         if request.native_return:
@@ -3614,6 +3675,9 @@ class ProductionTransactionHost(ProductionArmHost):
             gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
         )
         self._persist_phase(transaction, "CONTROL_REPLACED")
+        # Process-local publication provenance. Reconstructed recovery contexts
+        # can verify the derivative observation, never issue another write.
+        self._control_observation_fresh_transaction = transaction
 
     def write_autonomy_receipt(
         self, transaction: TransactionContext, receipt: Mapping[str, Any]
@@ -3732,6 +3796,8 @@ class ProductionTransactionHost(ProductionArmHost):
             or manifest.get("expected_sha") != transaction.expected_sha
         ):
             raise TransactionEffectUnknown()
+        from ops.executive_os.control_observation import publish_for_transaction
+        publish_for_transaction(self, transaction)
         control_candidate, worker_candidate = self._candidate_paths(
             transaction.transaction_id
         )
@@ -3742,6 +3808,9 @@ class ProductionTransactionHost(ProductionArmHost):
         if set(manifest) & _COEXISTENCE_MANIFEST_FIELDS:
             expected.update(_COEXISTENCE_ARCHIVES)
             archives.extend(AUTONOMY_TRANSACTION / name for name in _COEXISTENCE_ARCHIVES)
+        if set(manifest) & _FINITE_RECEIPT_FIELDS:
+            expected.add(_FINITE_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _FINITE_RECEIPT_ARCHIVE)
         if manifest.get("operation") in DIALOGUE_CANARY_OPERATIONS:
             expected.add(_CANARY_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _CANARY_RECEIPT_ARCHIVE)
@@ -4785,6 +4854,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
         """
 
         if not self._loaded(CONTROL_LABEL):
+            self._persist_phase(transaction, "ROLLBACK_CONTROL_PROVEN")
             return
         try:
             self._reconcile_control_boundary(transaction.expected_sha)
@@ -4851,6 +4921,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             gid=grp.getgrnam(CONTROL_GROUP).gr_gid,
             replace=CONTROL_CONFIG.exists() or CONTROL_CONFIG.is_symlink(),
         )
+        self._control_observation_fresh_transaction = transaction
         if paired is None:
             self.write_ceo_submit_receipt(transaction, receipt)
         else:
@@ -4881,6 +4952,7 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             raise TransactionEffectUnknown()
         self._prove_rolled_back_control_live(transaction)
         self._restore_control_launchd_preimage_if_recorded(transaction)
+        self._control_observation_rollback_proven = transaction
         self.complete_transaction(transaction)
 
     def recover_ceo_submit_effect_unknown(
@@ -4938,10 +5010,29 @@ class ProductionCeoSubmitHost(ProductionTransactionHost):
             separation=separation,
             configs=prior,
         )
-        receipt = build_ceo_submit_receipt(
-            transaction, admission, armed=prior_armed, now=now
+        from ops.executive_os.control_observation import (
+            PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE,
+            verify_ceo_rollback_readback,
         )
-        self.rollback_ceo_submit(transaction, receipt)
+        if manifest['phase'] == PUBLICATION_PHASE:
+            # A projection response cannot authorize rolling back an already
+            # completed forward effect. Preserve this original uncertainty.
+            raise TransactionEffectUnknown()
+        if manifest['phase'] in {ROLLBACK_PUBLICATION_PHASE, 'CONTROL_OVERRIDE_RESTORED'}:
+            verify_ceo_rollback_readback(self, transaction, admission)
+            self.complete_transaction(transaction)
+        else:
+            # Only this incumbent recovery verb, after its original installed
+            # source/archive/launchd checks, may restore its archived preimage.
+            # The observer and a reconstructed context cannot select this path.
+            self._control_observation_recovery_owner = (
+                os.getpid(), self._transaction_owner_fd,
+                transaction.transaction_id, transaction.expected_sha,
+            )
+            receipt = build_ceo_submit_receipt(
+                transaction, admission, armed=prior_armed, now=now,
+            )
+            self.rollback_ceo_submit(transaction, receipt)
         state = "CEO_SUBMIT_ARMED" if prior_armed else "CEO_SUBMIT_DISARMED"
         return TransactionResult(
             state=state,
@@ -5159,6 +5250,10 @@ def main(
         from ops.executive_os.a2_disable_preparation_control import run_command
         return run_command(args, host=host)
 
+    if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
+        from ops.executive_os.attended_control_staging import run_command
+        return run_command(args, host=host)
+
     transaction_host = ProductionTransactionHost() if host is None else host
     try:
         if args.command == "arm":
@@ -5171,6 +5266,7 @@ def main(
                     workspace_binding_class=args.workspace_binding_class,
                     credential_expires_at=args.credential_expires_at,
                     native_return=args.native_return,
+                    foreground_only=args.foreground_only,
                 ),
                 now=current,
             )
@@ -5225,4 +5321,10 @@ def main(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    # The installed wrapper executes this file with -I -S -B. Publication
+    # imports this module by package name and requires its genuine classes;
+    # objects defined under __main__ have a different identity. Delegate the
+    # entry, not the type check, and do not alias an arbitrary module in sys.modules.
+    from ops.executive_os.autonomy_control import main as canonical_main
+
+    raise SystemExit(canonical_main())

@@ -787,13 +787,14 @@ def test_partial_issuance_stays_the_same_operation_and_cannot_be_replaced(
     # Simulate a crash between the grant write and the terminal: the issuer
     # terminal and its replay evidence are gone.
     broker.receipt_path(ISSUER_REQUEST_ID).unlink()
-    # A retry meets the create-only grant and must never rewrite it.
+    # Without either lifecycle record this is an orphaned grant, not a
+    # resumable operation. Refuse before creating another marker or grant.
     monkeypatch.setattr(rec, "PRODUCTION_INCIDENT_POLICY", incident_policy(s))
-    with pytest.raises(EffectUnknownError, match="cannot be replaced"):
+    with pytest.raises(PrivilegedBrokerError, match="recovery_custody_slot_occupied"):
         broker.handle(incident_request_raw(), peer_uid=501)
     assert rec.RECOVERY_INCIDENT_GRANT_PATH.exists()
     assert not commitment_path.exists()
-    assert broker.inflight_path(ISSUER_REQUEST_ID).exists()
+    assert not broker.inflight_path(ISSUER_REQUEST_ID).exists()
 
 
 # ---------------------------------------------------------------------------
@@ -827,6 +828,9 @@ def test_incident_consumer_finalizes_ready_and_never_reallocates(recovery, monke
     issue_incident(s, monkeypatch)
     incident_state(s)
     reserve_incident(s)
+    # Finalization must retain the exact reserved expiry, even across a second
+    # boundary. Recomputing now + 55 minutes fabricates a different credential.
+    reserved_expiry = json.loads(s.receipt.read_bytes())["credential_expires_at"]
     canary_path = s.tmp / "canary.json"
     write_json(canary_path, canary(True))
     post = s.tmp / "post-identity.json"
@@ -836,7 +840,7 @@ def test_incident_consumer_finalizes_ready_and_never_reallocates(recovery, monke
         "--post-identity-command-status", "0", "--canary-json", str(canary_path),
         "--canary-command-status", "0", "--expected-kind", "device-auth",
         "--workspace-binding-class", r.COMPANY_WORKSPACE_BINDING_CLASS,
-        "--credential-expires-at", iso(datetime.now(UTC) + timedelta(minutes=55)),
+        "--credential-expires-at", reserved_expiry,
     ]) == 0
     assert json.loads(s.receipt.read_bytes())["passed"] is True
     assert rec.read_allocation()["consumed"] is True

@@ -4,13 +4,14 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import os
 from pathlib import Path
 import sys
 
 import pytest
 
 from test_fabric_owned_process_phases import lr
-from test_fabric_original_owner_runner import setup
+from test_fabric_original_owner_runner import setup, _inject_owner_test_keys
 from test_fabric_bound_controller_wire import patched
 
 
@@ -18,9 +19,11 @@ def original(tmp_path, monkeypatch, lr):
     ns, args, _ = setup(tmp_path, monkeypatch)
     tree = ast.parse(patched(tmp_path, 'remote_sub_exec.py', 'EXECUTOR_SOURCE.json'))
     names = {'_begin_reserved_attended_under_lease', '_prepare_reserved_attended_under_lease',
-             '_begin_lease_process', '_retain_original_cleanup_hold'}
+             '_begin_lease_process', '_retain_original_cleanup_hold', '_verify_reserved_realm_observation'}
     functions = [n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name in names]
-    ns.update(asyncio=asyncio, begin_owned_process=lr.begin_owned_process,
+    ns.update(asyncio=asyncio, os=os, LaneRuntimeError=lr.LaneRuntimeError,
+              _launch_receipt_directory=lr._launch_receipt_directory,
+              begin_owned_process=lr.begin_owned_process,
               abort_owned_process=lr.abort_owned_process,
               start_owned_process_finisher=lr.start_owned_process_finisher,
               OwnedProcessStartError=lr.OwnedProcessStartError)

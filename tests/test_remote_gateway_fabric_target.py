@@ -206,10 +206,10 @@ def test_fabric_target_refuses_unknown_or_bool_target(tmp_path: Path) -> None:
             )
 
 
-def test_fabric_target_refuses_assignment_control_binding(
+def test_fabric_target_refuses_unqualified_assignment_control_binding(
     tmp_path: Path, control_uid: int
 ) -> None:
-    with pytest.raises(ValueError, match="must not carry"):
+    with pytest.raises(ValueError, match="Control binding differs"):
         _config(
             tmp_path,
             broker_target=FABRIC_BROKER_TARGET,
@@ -218,16 +218,26 @@ def test_fabric_target_refuses_assignment_control_binding(
         )
 
 
-def test_fabric_seal_operations_allowed_without_control_binding(
+def _assignment_binding(tmp_path: Path, *, control_uid: int = 501, worker_uid: int = 502):
+    from ops.executive_os.remote_assignment_control import AssignmentControlBinding
+    return AssignmentControlBinding("WORKER-001", control_uid, 551, worker_uid, 552,
+                                    tmp_path / "workspace", tmp_path / "runs")
+
+
+def test_fabric_seal_requires_bound_control_and_original_worker(
     tmp_path: Path, control_uid: int
 ) -> None:
-    config = _config(
-        tmp_path,
-        broker_target=FABRIC_BROKER_TARGET,
-        expected_broker_peer_uid=502,
-        allowed_operations={"assignment-seal", "assignment-seal-finalize"},
-    )
+    values = dict(broker_target=FABRIC_BROKER_TARGET,
+                  expected_broker_peer_uid=502,
+                  allowed_operations={"assignment-seal", "assignment-seal-finalize"})
+    with pytest.raises(ValueError, match="explicit Control binding"):
+        _config(tmp_path, **values)
+    config = _config(tmp_path, **values, assignment_control=_assignment_binding(tmp_path))
     assert config.allowed_operations <= FABRIC_ALLOWED_OPERATIONS
+    for binding in (_assignment_binding(tmp_path, worker_uid=503),
+                    _assignment_binding(tmp_path, control_uid=500)):
+        with pytest.raises(ValueError, match="Control binding differs"):
+            _config(tmp_path, **values, assignment_control=binding)
 
 
 def test_default_seal_still_requires_control_binding(tmp_path: Path) -> None:
@@ -332,38 +342,31 @@ def test_loader_refuses_unpaired_or_malformed_fabric_fields(
 # --- dispatch: intercept vs forward ---------------------------------------
 
 
-async def test_fabric_assignment_seal_forwards_through_broker_call(
+async def test_fabric_assignment_seal_uses_configured_control_not_forward_fallback(
     tmp_path: Path, control_uid: int, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     factory = _StubClientFactory()
     monkeypatch.setattr(gateway_module, "WorkerBrokerClient", factory)
     _no_tls(monkeypatch)
+    binding = _assignment_binding(tmp_path)
+    sealed = []
 
-    def _forbidden_seal(*_args: object, **_kwargs: object) -> object:
-        raise AssertionError("Fabric target must never intercept assignment-seal")
+    async def _seal(control, request, broker_call, *, fabric_target):
+        sealed.append((control, request, broker_call, fabric_target))
+        return {"sealed": True}
 
-    monkeypatch.setattr(gateway_module, "seal_original_assignment", _forbidden_seal)
-    gateway = RemoteWorkerGateway(
-        _config(
-            tmp_path,
-            broker_target=FABRIC_BROKER_TARGET,
-            expected_broker_peer_uid=502,
-            allowed_operations={"assignment-seal"},
-        )
-    )
-    forwards: list[tuple[str, dict]] = []
+    monkeypatch.setattr(gateway_module, "seal_original_assignment", _seal)
+    gateway = RemoteWorkerGateway(_config(tmp_path,
+        broker_target=FABRIC_BROKER_TARGET, expected_broker_peer_uid=502,
+        allowed_operations={"assignment-seal"}, assignment_control=binding))
 
-    async def broker_call(operation: str, payload: dict) -> dict:
-        forwards.append((operation, payload))
-        return {"ok": True}
+    async def forbidden(*args, **kwargs):
+        raise AssertionError("assignment seal must not fall back to forwarding")
 
-    gateway.broker_call = broker_call
-    request = {
-        "broker_operation": "assignment-seal",
-        "broker_request": {"seal": "wire"},
-    }
-    assert await gateway._dispatch_authenticated(request) == {"ok": True}
-    assert forwards == [("assignment-seal", {"seal": "wire"})]
+    gateway.broker_call = forbidden
+    request = {"broker_operation": "assignment-seal", "broker_request": {}}
+    assert await gateway._dispatch_authenticated(request) == {"sealed": True}
+    assert sealed == [(binding, request, gateway.broker_call, True)]
     assert factory.construction[0]["expected_peer_uid"] == 502
     assert factory.construction[0]["socket_path"] == gateway.config.broker_socket_path
 

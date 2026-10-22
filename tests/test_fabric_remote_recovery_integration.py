@@ -121,8 +121,18 @@ def test_supervisor_rejects_foreign_control_coordinates_before_prompt_read(tmp_p
 
 def test_finite_profile_is_not_runtime_admission_and_native_profile_is_preserved(tmp_path):
     registry = ExecutionCapabilityRegistry.load()
-    with pytest.raises(CapabilityPolicyError, match='unknown execution capability profile'):
-        registry.resolve('fabric.attended.claude.bounded.v1')
+    # The reviewed finite capability contract is now source-qualified. Its
+    # existence alone still cannot select or admit an ordinary paid worker.
+    profile = registry.resolve('fabric.attended.claude.bounded.v1')
+    assert profile.execution_surface == 'claude-code'
+    assert profile.sandbox_policy == 'read-only' and not profile.write_capable
+    assert profile.network_policy == 'disabled'
+    from control_plane.model_router import ModelRouter, RoutingPolicyError
+    router = ModelRouter.load()
+    assert not router.providers['minimax'].enabled
+    assert not router.model_aliases['minimax.attended'].worker_eligible
+    with pytest.raises(RoutingPolicyError):
+        router.resolve_model_alias('minimax.attended')
     proposal = json.loads(Path(
         'integrations/session_bridge/proposals/attended_claude_profile.json').read_text())
     assert proposal['status'] == 'UNINSTALLED_PROPOSAL'
@@ -133,7 +143,7 @@ def test_finite_profile_is_not_runtime_admission_and_native_profile_is_preserved
     candidate_path.write_text(json.dumps(candidate))
     with pytest.raises(CapabilityPolicyError, match='disabled'):
         ExecutionCapabilityRegistry.load(candidate_path).resolve(proposal['profile_id'])
-    assert registry.policy_version == '2026-10-11.native-return-host-selection'
+    assert registry.policy_version == '2026-10-14.attended-qualification'
     assert registry.resolve('operator.appserver.interactive.native-return.v1').enabled
     assert adapter_supports_execution_surface('attended-fabric', 'claude-code')
     assert not adapter_supports_execution_surface('attended-fabric', 'codex-app-server')

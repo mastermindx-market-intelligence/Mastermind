@@ -35,6 +35,7 @@ FABRIC_ALLOWED_OPERATIONS = frozenset(
         "collect",
         "cancel",
         "validate",
+        "attended-secret-canary",
         "assignment-seal",
         "assignment-seal-finalize",
     }
@@ -113,12 +114,8 @@ class RemoteWorkerGatewayConfig:
         if isinstance(self.broker_target, bool) or not isinstance(self.broker_target, str):
             raise ValueError("remote worker gateway broker target is invalid")
         if self.broker_target == FABRIC_BROKER_TARGET:
-            # The attended Fabric broker owns assignment seals; the gateway must
-            # carry no Control binding and a pinned, non-Control peer uid.
-            if self.assignment_control is not None:
-                raise ValueError(
-                    "gateway Fabric target must not carry an assignment Control binding"
-                )
+            # The fixed Unix peer owns the original Worker observations;
+            # configured Control owns the finite filesystem seal, not a run.
             peer_uid = self.expected_broker_peer_uid
             if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid <= 0:
                 raise ValueError("remote worker gateway Fabric broker peer uid is invalid")
@@ -130,6 +127,12 @@ class RemoteWorkerGatewayConfig:
                 raise ValueError("remote worker gateway Fabric operation allowlist is invalid")
             object.__setattr__(self, "broker_target", FABRIC_BROKER_TARGET)
             object.__setattr__(self, "expected_broker_peer_uid", peer_uid)
+            if self.assignment_control is not None and (
+                not isinstance(self.assignment_control, AssignmentControlBinding)
+                or self.assignment_control.control_uid != CONTROL_UID
+                or self.assignment_control.worker_uid != peer_uid
+            ):
+                raise ValueError("gateway assignment Control binding differs from Fabric principals")
         elif self.broker_target == WORKER_BROKER_TARGET:
             if self.expected_broker_peer_uid is not None:
                 raise ValueError(
@@ -145,7 +148,6 @@ class RemoteWorkerGatewayConfig:
         if (
             "assignment-seal" in operations
             and self.assignment_control is None
-            and self.broker_target != FABRIC_BROKER_TARGET
         ):
             raise ValueError("gateway assignment seal requires explicit Control binding")
 

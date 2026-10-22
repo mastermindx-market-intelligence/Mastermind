@@ -32,7 +32,7 @@ if os.fspath(_RELEASE_ROOT) not in sys.path:
     sys.path.insert(0, os.fspath(_RELEASE_ROOT))
 
 from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
-from ops.executive_os.acceptance_maintenance import Maintenance, MaintenanceError
+from ops.executive_os.acceptance_maintenance import Maintenance
 from ops.executive_os.install_source_policy import (
     InstallSourcePolicyError,
     validate_acceptance_source,
@@ -111,6 +111,20 @@ _REFUSAL_DETAIL_LIMIT = 300
 _REFUSAL_TRUNCATION_MARKER = "...[truncated]"
 _REFUSAL_REDACTION = "<redacted>"
 _REFUSAL_CONTROL_CHARS_RE = re.compile(r"[\x00-\x1f\x7f-\x9f]")
+# The artifact's own format survives newlines and tabs so the user can still
+# read the stream; the rest collapse to a space.
+_FAILURE_CONTROL_CHARS_RE = re.compile(r"[\x00-\x08\x0b-\x1f\x7f-\x9f]")
+# Bounded diagnostic capture for failing host-service calls. The artifact name
+# is fixed per call site (see _FAILURE_ARTIFACTS); the size bounds are the same
+# contract another lane's maintenance tool already admits against
+# host-service-status-failure.txt (see acceptance_maintenance).
+_FAILURE_STREAM_LIMIT = 64 * 1024
+_FAILURE_ARGV_LIMIT = 4 * 1024
+_FAILURE_ARTIFACT_LIMIT = 256 * 1024
+_FAILURE_ARTIFACTS = {
+    "host service status": "host-service-status-failure.txt",
+    "final host status": "final-host-status-failure.txt",
+}
 # Secret shapes this runtime actually mints are ``secrets.token_hex`` (hex) and
 # ``secrets.token_urlsafe`` (base64url).  ``/`` is deliberately excluded from the
 # token class so that filesystem paths (the most useful part of a workspace
@@ -137,6 +151,31 @@ _GIT_OBJECT_ID_RE = re.compile(r"[0-9a-f]{40}")
 
 class AcceptanceError(RuntimeError):
     pass
+
+
+class CommandFailure(AcceptanceError):
+    """A failing `_run` call whose captured streams must reach the operator.
+
+    ``str(exc)`` is exactly the historical `_run` message
+    ``f"{label} failed with exit {rc}"`` so every existing
+    ``except AcceptanceError`` site keeps catching it without text matching.
+    """
+
+    def __init__(
+        self,
+        *,
+        label: str,
+        argv: list[str],
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+    ) -> None:
+        super().__init__(f"{label} failed with exit {returncode}")
+        self.label = label
+        self.argv = argv
+        self.returncode = returncode
+        self.stdout = stdout
+        self.stderr = stderr
 
 
 def _validate_operator_harness_policy(
@@ -204,7 +243,13 @@ def _run(
         env=dict(env) if env is not None else None,
     )
     if check and completed.returncode != 0:
-        raise AcceptanceError(f"{label} failed with exit {completed.returncode}")
+        raise CommandFailure(
+            label=label,
+            argv=[os.fspath(value) for value in argv],
+            returncode=completed.returncode,
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+        )
     return completed
 
 
@@ -788,6 +833,87 @@ def _directory_values(record: str, attribute: str) -> tuple[str, ...]:
     return tuple(first + continuation)
 
 
+def _protected_control_definition(path: Path, control_gid: int) -> tuple[dict[str, Any], str]:
+    """Read the same protected bytes before considering any finite group exception."""
+    from control_plane.codex_provider_realm import _native_open, _native_read_config
+
+    with _native_open(path) as (descriptor, info):
+        if (info.st_gid != control_gid or stat.S_IMODE(info.st_mode) != 0o440
+                or not 0 < info.st_size <= 65536):
+            raise AcceptanceError("Control definition custody drifted")
+        chunks = []
+        remaining = 65537
+        while remaining:
+            chunk = os.read(descriptor, min(8192, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        if len(raw) != info.st_size:
+            raise AcceptanceError("Control definition changed during read")
+        digest = hashlib.sha256(raw).hexdigest()
+        document = _native_read_config(path, digest)
+    return document, digest
+
+
+def _attended_worker_membership(
+    config: Mapping[str, Any], *, control_uid: int, control_gid: int,
+    primary_worker_uid: int, primary_worker_gid: int, ops_gid: int,
+) -> dict[str, Any] | None:
+    """Derive one group from the protected current finite composition, never CLI input."""
+    from control_plane.executive_fabric_composition import FabricBindingSource
+    from control_plane.fabric_attended_canary import definition
+
+    stanza = config.get("fabric_attended_probe")
+    if stanza is None:
+        return None
+    if type(stanza) is not dict or set(stanza) != {"worker_config_path"}:
+        raise AcceptanceError("finite worker probe definition is malformed")
+    source = FabricBindingSource.from_path(config.get("fabric_bindings_path"),
+                                           config.get("fabric_bindings_sha256"))
+    candidates = [item for item in source.bindings if item.provider == "minimax"]
+    if len(candidates) != 1:
+        raise AcceptanceError("exactly one finite worker binding is required")
+    physical = candidates[0]
+    path = stanza["worker_config_path"]
+    if type(path) is not str or not Path(path).is_absolute():
+        raise AcceptanceError("finite worker definition path is invalid")
+    raw = definition(Path(path), physical)
+    if source(physical.host_ref, physical.worker_id) != physical:
+        raise AcceptanceError("finite worker binding changed")
+    uid, gid = raw.get("worker_uid"), raw.get("worker_gid")
+    reserved = {control_uid, control_gid, primary_worker_uid, primary_worker_gid,
+                ops_gid, AGENT_RELAY_UID, AGENT_RELAY_GID, 454, 455, 456}
+    if (control_uid != 450 or control_gid != 450
+            or any(type(value) is not int or not 400 <= value < 500 or value in reserved
+                   for value in (uid, gid))
+            or raw.get("control_uid") != control_uid or raw.get("control_gid") != control_gid
+            or raw.get("allowed_supplementary_gids") != []):
+        raise AcceptanceError("finite worker principal or group contract drifted")
+    user = raw.get("worker_user")
+    if (type(user) is not str or len(user) > 31
+            or re.fullmatch(r"_mastermind_[a-z0-9_]+", user) is None
+            or user in {CONTROL_USER, WORKER_USER, OPS_GROUP, AGENT_RELAY_USER}):
+        raise AcceptanceError("finite worker account name is invalid")
+    try:
+        group = grp.getgrgid(gid)
+    except KeyError as exc:
+        raise AcceptanceError("finite worker group is absent") from exc
+    name = group.gr_name
+    if (len(name) > 31 or re.fullmatch(r"_mastermind_[a-z0-9_]+", name) is None
+            or name in {CONTROL_GROUP, WORKER_GROUP, OPS_GROUP, AGENT_RELAY_GROUP}):
+        raise AcceptanceError("finite worker group name is invalid")
+    home = Path(raw["provider_home"])
+    expected_home = Path("/private/var/db/mastermind-executive/workers") / physical.worker_id / "provider-home"
+    if home != expected_home or str(home) != raw["provider_home"]:
+        raise AcceptanceError("finite worker HOME is outside the selected host")
+    return {"worker_user": user, "worker_uid": uid, "worker_group": name, "worker_gid": gid,
+            "provider_home": str(home), "worker_id": physical.worker_id,
+            "worker_config_path": path, "worker_config_sha256": physical.worker_source_config_digest,
+            "bindings_sha256": source.expected_sha256, "physical_binding_sha256": physical.digest}
+
+
 def _validate_protected_membership_snapshot(
     snapshot: Mapping[str, Any],
     *,
@@ -801,6 +927,7 @@ def _validate_protected_membership_snapshot(
     worker_gid: int,
     ops_gid: int,
     agent_relay_present: bool = False,
+    attended_worker: Mapping[str, Any] | None = None,
 ) -> dict[str, list[str]]:
     """Prove all four macOS membership representations are exact."""
 
@@ -829,6 +956,19 @@ def _validate_protected_membership_snapshot(
         WORKER_GROUP: worker_gid,
         OPS_GROUP: ops_gid,
     }
+    if attended_worker is not None:
+        name = attended_worker["worker_user"]
+        group = attended_worker["worker_group"]
+        uid, gid = attended_worker["worker_uid"], attended_worker["worker_gid"]
+        if (name in reviewed_users or group in protected_group_ids
+                or uid in reviewed_user_ids.values() or gid in protected_group_ids.values()
+                or uid in {AGENT_RELAY_UID, 454, 455, 456}
+                or gid in {AGENT_RELAY_GID, 454, 455, 456}):
+            raise AcceptanceError("finite worker identity collides with protected principals")
+        expected[group] = (gid, {name}, {control_user})
+        reviewed_users.add(name)
+        reviewed_user_ids[name] = uid
+        protected_group_ids[group] = gid
     if agent_relay_present:
         expected[AGENT_RELAY_GROUP] = (
             AGENT_RELAY_GID,
@@ -926,6 +1066,7 @@ def _validate_service_directory_group_sets(
     control_gid: int,
     worker_gid: int,
     agent_relay_gid: int | None = None,
+    attended_worker_gid: int | None = None,
 ) -> set[int]:
     if dict(system_group_gids) != _REVIEWED_MACOS_ACCOUNT_GROUPS:
         raise AcceptanceError("reviewed macOS system group identities drifted")
@@ -942,6 +1083,11 @@ def _validate_service_directory_group_sets(
         if agent_relay_gid != AGENT_RELAY_GID:
             raise AcceptanceError("agent relay group identity drifted")
         expected_control.add(agent_relay_gid)
+    if attended_worker_gid is not None:
+        if (type(attended_worker_gid) is not int or not 400 <= attended_worker_gid < 500
+                or attended_worker_gid in {control_gid, worker_gid, AGENT_RELAY_GID, 453, 454, 455, 456}):
+            raise AcceptanceError("finite worker group identity drifted")
+        expected_control.add(attended_worker_gid)
     expected_worker = common | {worker_gid}
     observed_control = set(control_groups)
     observed_worker = set(worker_groups)
@@ -981,7 +1127,8 @@ def _numeric_directory_census(
 
 
 def _live_directory_membership_snapshot(
-    *, operator_user: str, agent_relay_present: bool = False
+    *, operator_user: str, agent_relay_present: bool = False,
+    attended_worker: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     user_primary_gids = _numeric_directory_census(
         "Users", "PrimaryGroupID", label="local user primary-GID census"
@@ -997,6 +1144,8 @@ def _live_directory_membership_snapshot(
         for name in set(user_primary_gids) | set(user_unique_uids)
     }
     reviewed_users = [CONTROL_USER, WORKER_USER, operator_user]
+    if attended_worker is not None:
+        reviewed_users.append(attended_worker["worker_user"])
     if agent_relay_present:
         reviewed_users.append(AGENT_RELAY_USER)
     for name in reviewed_users:
@@ -1007,6 +1156,8 @@ def _live_directory_membership_snapshot(
         )
     groups: dict[str, dict[str, Any]] = {}
     reviewed_groups = [CONTROL_GROUP, WORKER_GROUP, OPS_GROUP]
+    if attended_worker is not None:
+        reviewed_groups.append(attended_worker["worker_group"])
     if agent_relay_present:
         reviewed_groups.append(AGENT_RELAY_GROUP)
     for name in reviewed_groups:
@@ -1125,7 +1276,7 @@ class Acceptance:
             "TZ=UTC",
         ]
 
-    def _write_bytes(self, name: str, payload: bytes) -> Path:
+    def _write_bytes(self, name: str, payload: bytes, *, replace: bool = False) -> Path:
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}", name):
             raise AcceptanceError("unsafe acceptance receipt name")
         destination = self.receipt_root / name
@@ -1147,15 +1298,167 @@ class Acceptance:
             os.close(descriptor)
         os.chown(temporary, self.control_identity.pw_uid, self.control_group.gr_gid)
         os.chmod(temporary, 0o400)
-        temporary.replace(destination)
+        try:
+            if replace:
+                os.replace(temporary, destination)
+            else:
+                # Receipts are write-once: link() refuses an existing destination
+                # (including a dangling symlink) where replace() would clobber it.
+                os.link(temporary, destination)
+        except FileExistsError:
+            raise AcceptanceError("acceptance receipt already exists") from None
+        finally:
+            temporary.unlink(missing_ok=True)
         return destination
 
-    def _write_json(self, name: str, value: Any) -> Path:
+    def _write_json(self, name: str, value: Any, *, replace: bool = False) -> Path:
         payload = (
             json.dumps(value, sort_keys=True, indent=2, ensure_ascii=False, allow_nan=False)
             + "\n"
         ).encode("utf-8")
-        return self._write_bytes(name, payload)
+        return self._write_bytes(name, payload, replace=replace)
+
+    def _redact_failure_stream(self, payload: bytes) -> str:
+        """Render one bounded, redacted stream for the failure artifact.
+
+        Exact secrets held by the run plus every readable sentinel file value
+        are replaced first (longest match wins); then the same hex / token-shape
+        redaction the operator-visible refusal fragment uses; control
+        characters other than ``\\n`` and ``\\t`` collapse to a space so the
+        format's own line structure survives; every line is then prefixed with
+        ``"| "`` so stream content cannot forge the artifact's own header lines;
+        the result is bounded on encoded bytes with the existing truncation
+        marker (decode drops a split trailing code point so the bound is exact
+        in UTF-8 even for invalid input).
+        """
+
+        text = self._redact_failure_text(payload.decode("utf-8", errors="replace"))
+        if text:
+            text = "| " + text.replace("\n", "\n| ")
+        encoded = text.encode("utf-8")
+        if len(encoded) > _FAILURE_STREAM_LIMIT:
+            encoded = encoded[:_FAILURE_STREAM_LIMIT]
+            text = encoded.decode("utf-8", errors="ignore") + _REFUSAL_TRUNCATION_MARKER
+        return text
+
+    def _redact_failure_text(self, text: str) -> str:
+        """Apply the held-secret + sentinel + hex + token redaction to one fragment."""
+        secrets_to_redact: list[str] = []
+        held = self._refusal_redactions()
+        secrets_to_redact.extend(secret for secret in held if isinstance(secret, str))
+        for source in self._sentinel_sources():
+            try:
+                raw = source.read_bytes().decode("utf-8", errors="replace")
+            except OSError:
+                continue
+            value = raw.strip()
+            if value:
+                secrets_to_redact.append(value)
+        for secret in sorted(
+            {item for item in secrets_to_redact if isinstance(item, str)},
+            key=len,
+            reverse=True,
+        ):
+            text = text.replace(secret, _REFUSAL_REDACTION)
+        text = _FAILURE_CONTROL_CHARS_RE.sub(" ", text)
+        text = _REFUSAL_HEX_SECRET_RE.sub(_redact_secret_shaped, text)
+        text = _REFUSAL_TOKEN_SECRET_RE.sub(_redact_secret_shaped, text)
+        return text
+
+    def _build_failure_payload(
+        self,
+        *,
+        label: str,
+        argv: list[str],
+        returncode: int,
+        stdout: bytes,
+        stderr: bytes,
+        timeout: float | None = None,
+    ) -> bytes:
+        if timeout is not None and returncode == -1:
+            returncode_repr = f"timeout after {timeout}s"
+        else:
+            returncode_repr = str(returncode)
+        argv_text = self._redact_failure_text(" ".join(argv)).replace("\n", " ")
+        if len(argv_text) > _FAILURE_ARGV_LIMIT:
+            argv_text = argv_text[:_FAILURE_ARGV_LIMIT] + _REFUSAL_TRUNCATION_MARKER
+        stdout_text = self._redact_failure_stream(stdout or b"")
+        stderr_text = self._redact_failure_stream(stderr or b"")
+        body = (
+            f"label: {label}\n"
+            f"argv: {argv_text}\n"
+            f"returncode: {returncode_repr}\n"
+            f"--- stdout ({len(stdout or b'')} bytes, redacted, bounded) ---\n"
+            f"{stdout_text}\n"
+            f"--- stderr ({len(stderr or b'')} bytes, redacted, bounded) ---\n"
+            f"{stderr_text}\n"
+        )
+        payload = body.encode("utf-8")
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            overflow = len(payload) - _FAILURE_ARTIFACT_LIMIT
+            cutoff = len(argv_text) - overflow
+            if cutoff < 0:
+                cutoff = 0
+            argv_text = (
+                argv_text[:cutoff] + _REFUSAL_TRUNCATION_MARKER
+                if cutoff > 0
+                else _REFUSAL_TRUNCATION_MARKER
+            )
+            body = (
+                f"label: {label}\n"
+                f"argv: {argv_text}\n"
+                f"returncode: {returncode_repr}\n"
+                f"--- stdout ({len(stdout or b'')} bytes, redacted, bounded) ---\n"
+                f"{stdout_text}\n"
+                f"--- stderr ({len(stderr or b'')} bytes, redacted, bounded) ---\n"
+                f"{stderr_text}\n"
+            )
+            payload = body.encode("utf-8")
+        if len(payload) > _FAILURE_ARTIFACT_LIMIT:
+            raise AcceptanceError(
+                "failure artifact exceeded its bound"
+            )
+        return payload
+
+    def _run_recorded(
+        self,
+        argv: Sequence[str | os.PathLike[str]],
+        *,
+        label: str,
+        **kwargs: Any,
+    ) -> subprocess.CompletedProcess[bytes]:
+        if label not in _FAILURE_ARTIFACTS:
+            raise AcceptanceError(f"unknown failure-artifact label: {label}")
+        timeout = kwargs.get("timeout")
+        try:
+            return _run(argv, label=label, **kwargs)
+        except (CommandFailure, subprocess.TimeoutExpired) as exc:
+            artifact_name = _FAILURE_ARTIFACTS[label]
+            try:
+                if isinstance(exc, CommandFailure):
+                    payload = self._build_failure_payload(
+                        label=exc.label,
+                        argv=list(exc.argv),
+                        returncode=exc.returncode,
+                        stdout=exc.stdout,
+                        stderr=exc.stderr,
+                    )
+                else:
+                    captured_argv = [os.fspath(value) for value in argv]
+                    payload = self._build_failure_payload(
+                        label=label,
+                        argv=captured_argv,
+                        returncode=-1,
+                        stdout=getattr(exc, "stdout", None) or b"",
+                        stderr=getattr(exc, "stderr", None) or b"",
+                        timeout=getattr(exc, "timeout", None) or timeout,
+                    )
+                self._write_bytes(artifact_name, payload)
+            except Exception as recording_exc:  # noqa: BLE001 - keep the original
+                exc.add_note(
+                    "failure artifact not recorded: " + type(recording_exc).__name__
+                )
+            raise
 
     def _refusal_redactions(self) -> tuple[str, ...]:
         """Plaintext secrets this run holds that must never reach the operator.
@@ -1662,6 +1965,13 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             ):
                 raise AcceptanceError("agent relay principal identity drifted")
 
+        early_control, early_control_sha256 = _protected_control_definition(
+            CONTROL_CONFIG, self.control_group.gr_gid)
+        attended = _attended_worker_membership(early_control,
+            control_uid=self.control_identity.pw_uid, control_gid=self.control_group.gr_gid,
+            primary_worker_uid=self.worker_identity.pw_uid, primary_worker_gid=self.worker_group.gr_gid,
+            ops_gid=self.ops_group.gr_gid)
+        self.attended_worker_membership = attended
         expected_accounts = {
             CONTROL_USER: (
                 self.control_identity.pw_uid,
@@ -1680,6 +1990,9 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 AGENT_RELAY_GID,
                 os.fspath(AGENT_RELAY_HOME),
             )
+        if attended is not None:
+            expected_accounts[attended["worker_user"]] = (
+                attended["worker_uid"], attended["worker_gid"], attended["provider_home"])
         for account, (uid, gid, home) in expected_accounts.items():
             expected_attributes = {
                 "UniqueID": str(uid),
@@ -1725,10 +2038,12 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             control_gid=self.control_group.gr_gid,
             worker_gid=self.worker_group.gr_gid,
             agent_relay_gid=AGENT_RELAY_GID if agent_relay_present else None,
+            attended_worker_gid=attended["worker_gid"] if attended is not None else None,
         )
         membership_snapshot = _live_directory_membership_snapshot(
             operator_user=self.operator_user,
             agent_relay_present=agent_relay_present,
+            attended_worker=attended,
         )
         self.protected_group_effective = _validate_protected_membership_snapshot(
             membership_snapshot,
@@ -1742,6 +2057,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             worker_gid=self.worker_group.gr_gid,
             ops_gid=self.ops_group.gr_gid,
             agent_relay_present=agent_relay_present,
+            attended_worker=attended,
         )
 
         tree_sha = self._source_tree_sha()
@@ -1763,7 +2079,14 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             label="installed release manifest",
         )
 
-        self.config = _safe_json(CONTROL_CONFIG)
+        self.config, current_control_sha256 = _protected_control_definition(
+            CONTROL_CONFIG, self.control_group.gr_gid)
+        if (self.config != early_control or current_control_sha256 != early_control_sha256
+                or _attended_worker_membership(self.config,
+                    control_uid=self.control_identity.pw_uid, control_gid=self.control_group.gr_gid,
+                    primary_worker_uid=self.worker_identity.pw_uid, primary_worker_gid=self.worker_group.gr_gid,
+                    ops_gid=self.ops_group.gr_gid) != attended):
+            raise AcceptanceError("protected finite composition changed during group acceptance")
         self.worker_config = _safe_json(WORKER_CONFIG)
         for config_path, group_gid in (
             (CONTROL_CONFIG, self.control_group.gr_gid),
@@ -2008,6 +2331,8 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
             {
                 "passed": True,
                 "effective_members": self.protected_group_effective,
+                "attended_worker_membership": self.attended_worker_membership,
+                "control_definition_sha256": early_control_sha256,
                 "primary_gid_census": "COMPLETE",
                 "name_members": "EXACT",
                 "uuid_members": "EXACT",
@@ -2142,7 +2467,10 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         os.chown(temporary, self.control_identity.pw_uid, self.control_group.gr_gid)
         os.chmod(temporary, 0o400)
         temporary.replace(destination)
-        self._write_json("secret-canary-envelope.json", envelope)
+        # Every live canary activation (_activate_live_canary) re-records its
+        # envelope, so this is the one receipt rewritten in place; all other
+        # receipts are write-once.
+        self._write_json("secret-canary-envelope.json", envelope, replace=True)
 
     def _assert_process_principal(self, pid: int, uid: int, gid: int, label: str) -> None:
         completed = _run(
@@ -2307,7 +2635,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 },
             },
         )
-        status = _run(
+        status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="host service status",
         )
@@ -2986,7 +3314,7 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
         )
         self._assert_no_public_listener()
         self.leakage_scan(control_pid)
-        final_status = _run(
+        final_status = self._run_recorded(
             ["/bin/bash", self.release / "ops" / "executive_os" / "status.sh"],
             label="final host status",
         )
@@ -3018,19 +3346,39 @@ print(json.dumps(value,sort_keys=True,separators=(",",":")))
                 [success_job_id, interrupted_job_id], self.receipt_root / "acceptance-summary.json")
 
     def cleanup_after_failure(self) -> None:
-        if self.services_started:
-            self._capture_failure_observability()
-        if self.helper_pid is not None and self._pid_exists(self.helper_pid):
-            try:
-                os.kill(self.helper_pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-        if self.services_started and self.release.is_dir():
-            _run(
-                ["/bin/bash", self.release / "ops" / "executive_os" / "service-control.sh", "stop"],
-                label="failure cleanup service stop",
-                check=False,
-            )
+        try:
+            if self.services_started:
+                try:
+                    self._capture_failure_observability()
+                except Exception as exc:
+                    # Observability is best effort (e.g. the 90 s control client
+                    # call can raise TimeoutExpired); it must never skip the
+                    # helper kill or the service stop below.
+                    print(
+                        f"acceptance cleanup: failure observability capture raised "
+                        f"{type(exc).__name__}; continuing to service stop",
+                        file=sys.stderr,
+                    )
+            if self.helper_pid is not None and self._pid_exists(self.helper_pid):
+                try:
+                    os.kill(self.helper_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                except Exception as exc:
+                    print(
+                        f"acceptance cleanup: helper kill raised {type(exc).__name__}; "
+                        f"continuing to service stop",
+                        file=sys.stderr,
+                    )
+        finally:
+            # Whatever the steps above raised (including KeyboardInterrupt), the
+            # service stop is the one step that must run.
+            if self.services_started and self.release.is_dir():
+                _run(
+                    ["/bin/bash", self.release / "ops" / "executive_os" / "service-control.sh", "stop"],
+                    label="failure cleanup service stop",
+                    check=False,
+                )
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -3059,10 +3407,15 @@ def main() -> int:
     try:
         acceptance = Acceptance(args)
         acceptance.run()
-    except (AcceptanceError, MaintenanceError, KeyError, OSError, subprocess.TimeoutExpired) as exc:
-        if acceptance is not None:
-            acceptance.cleanup_after_failure()
+    except (Exception, KeyboardInterrupt) as exc:
+        # Any failure after the services started (not only the expected acceptance
+        # errors) must still stop them, and the original error must still be printed.
         print(f"acceptance error: {type(exc).__name__}: {exc}", file=sys.stderr)
+        if acceptance is not None:
+            try:
+                acceptance.cleanup_after_failure()
+            except Exception as cleanup_exc:
+                print(f"acceptance cleanup: raised {type(cleanup_exc).__name__}", file=sys.stderr)
         return 1
     print(f"Phase 1C-A acceptance PASS; receipts: {acceptance.receipt_root}")
     return 0

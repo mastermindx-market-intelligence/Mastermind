@@ -150,7 +150,15 @@ _SPECS = (
     _Spec("gateway", "com.mastermind.executive.mcp", "_mastermind_executive_mcp", "_mastermind_executive_mcp", 458, _ROOT + "/config/executive-mcp.json", 0, 0o644, "ops/executive_os/executive_mcp_entry.py"),
     _Spec("broker", "com.mastermind.executive.privileged", "root", "wheel", 0, _ROOT + "/config/privileged-broker.json", 0, 0o400, "scripts/executive_os_privileged_broker.py"),
 )
-_COMMANDS = (peer._SYSCTL_OSRELEASE_ARGV, peer._SYSCTL_BOOT_ID_ARGV) + tuple(
+# Reading installed content does not admit a privileged release-control caller.
+# Keep the peer qualifier's narrower profile list unchanged.
+_OBSERVED_GATEWAY_MCP_PROFILES = (*peer._GATEWAY_MCP_PROFILES, "web_ceo_v3")
+
+_ROOT_PID_UID_ARGV = ("/bin/ps", "-axo", "pid=,uid=")
+_PRINT_DISABLED_ARGV = ("/bin/launchctl", "print-disabled", "system")
+_INSTALLER_BACKUP_PRINT_ARGV = ("/bin/launchctl", "print", "system/com.mastermind.executive.backup")
+_COMMANDS = (peer._SYSCTL_OSRELEASE_ARGV, peer._SYSCTL_BOOT_ID_ARGV,
+             _ROOT_PID_UID_ARGV, _PRINT_DISABLED_ARGV, _INSTALLER_BACKUP_PRINT_ARGV) + tuple(
     ("/bin/launchctl", "print", spec.service) for spec in _SPECS)
 
 
@@ -200,9 +208,12 @@ class _ReleaseObservation:
     freshness: _Freshness
 
 
-def _command(argv, budget):
+def _command(argv, budget, *, include_owned_inventory_pid=False):
     """Closed read-only commands, bounded pipes and owned-child cleanup."""
     if type(argv) is not tuple or argv not in _COMMANDS:
+        _refuse("RELEASE_OBSERVATION_COMMAND_REFUSED")
+    if (type(include_owned_inventory_pid) is not bool
+            or (include_owned_inventory_pid and argv != _ROOT_PID_UID_ARGV)):
         _refuse("RELEASE_OBSERVATION_COMMAND_REFUSED")
     budget.check(force=True)
     end = min(budget.endpoint, time.monotonic_ns() + 3_000_000_000)
@@ -263,7 +274,10 @@ def _command(argv, budget):
     if failure is not None:
         raise failure
     budget.check(force=True)
-    return result
+    # The PID belongs to this exact Popen child and is returned only after the
+    # same handle was waited/reaped and both pipes/selector closed. It may be
+    # removed from THIS ps output, never used as a standing PID exemption.
+    return (*result, process.pid) if include_owned_inventory_pid else result
 
 
 def _line(argv, budget):
@@ -327,7 +341,7 @@ def _config_join(spec, document, release):
     elif spec.role == "gateway":
         valid = (document.get("schema") == peer._GATEWAY_CONFIG_SCHEMA and document.get("release_sha") == release
                  and type(document.get("service_uid")) is int and document["service_uid"] == 458
-                 and document.get("executive_mcp_profile") in peer._GATEWAY_MCP_PROFILES)
+                 and document.get("executive_mcp_profile") in _OBSERVED_GATEWAY_MCP_PROFILES)
     else:
         valid = document.get("schema") == "mastermind.executive_privileged_broker_config.v1" and document.get("release_root") == _RELEASES + release
     if not valid:
@@ -397,12 +411,19 @@ def _recheck_content(snapshot, budget):
     budget.call(peer._recheck_network_closure, snapshot.network, budget)
 
 
-def _parse_service(spec, rc, raw, stderr, argv, release):
+def _exact_unloaded_reply(label, rc, raw, stderr):
+    """One canonical absence predicate shared with fixed installer probes."""
+    if type(label) is not str or label not in tuple(s.label for s in _SPECS) + ("com.mastermind.executive.backup",):
+        _refuse("RELEASE_OBSERVATION_SERVICE_REFUSED")
     if type(rc) is not int or type(raw) is not bytes or type(stderr) is not bytes or len(raw) + len(stderr) > 65536:
         _refuse("RELEASE_OBSERVATION_SERVICE_REFUSED")
-    absent = ('Could not find service "' + spec.label + '" in domain for system\n').encode("ascii")
+    absent = ('Could not find service "' + label + '" in domain for system\n').encode("ascii")
     absent_prefixed = b"Bad request.\n" + absent
-    if rc == 113 and not raw and stderr in (absent, absent_prefixed):
+    return rc == 113 and not raw and stderr in (absent, absent_prefixed)
+
+
+def _parse_service(spec, rc, raw, stderr, argv, release):
+    if _exact_unloaded_reply(spec.label, rc, raw, stderr):
         return "UNLOADED", None
     if rc != 0 or stderr:
         _refuse("RELEASE_OBSERVATION_SERVICE_UNAVAILABLE")
@@ -501,7 +522,8 @@ def _service(spec, content, argv, budget):
                            pid, unique, version)
 
 
-def _validate_roles(roles):
+def _validate_role_records(roles):
+    """Validate complete role records without assigning a release purpose."""
     if type(roles) is not tuple or tuple(x.role for x in roles) != _ROLES:
         _refuse("RELEASE_OBSERVATION_ROLE_SET_REFUSED")
     contexts = set()
@@ -537,7 +559,12 @@ def _validate_roles(roles):
         expected_evidence = "launchctl-exact-not-found-113" if record.state == "UNLOADED" else "launchctl-qualified-loaded-job"
         if record.evidence != expected_evidence:
             _refuse("RELEASE_OBSERVATION_SERVICE_STATE_REFUSED")
-    if len(contexts) != 1:
+    return contexts
+
+
+def _validate_roles(roles):
+    # Generic release convergence remains exactly one five-role cohort.
+    if len(_validate_role_records(roles)) != 1:
         _refuse("RELEASE_OBSERVATION_MIXED_CONTENT")
 
 

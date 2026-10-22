@@ -1,3 +1,4 @@
+import { ProductAcceptancePanel } from "./product-acceptance/ProductAcceptancePanel";
 import type { AuthState, MissionHost } from "./host";
 import type {
   ObservedMissionAssociation,
@@ -2811,6 +2812,18 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
         {heldKind === "launch" ? checkStatusControl : null}
       </section>
     );
+  const productAcceptancePanel = (
+    <ProductAcceptancePanel
+      host={window.MastermindMissionHost}
+      currentHost={() => window.MastermindMissionHost}
+      selection={selection}
+      selectionGeneration={selectionSeq.current}
+      currentSelectionGeneration={() => selectionSeq.current}
+      authRevision={authRevision}
+      enabled={!!d && !selectionRefused && missionSelectionState !== "PENDING" && missionSelectionState !== "UNAVAILABLE"}
+      locale={locale}
+    />
+  );
   const sessionUnavailableCard = (
     <section className="card">
       <div className="section-title">
@@ -3203,7 +3216,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
               <WorkQueue state={workState} rootJobId={selection.rootJobId} />
             </>
           ) : projectTab === "Evidence" ? (
-            <Evidence d={d} />
+            <><Evidence d={d} />{productAcceptancePanel}</>
           ) : (
             <ProjectMore d={d} sessionPanel={sessionPanel} onNavigate={navigateOperationalView} />
           )}
@@ -3441,7 +3454,7 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Activity") content = <Activity d={d} />;
   else if (active === "Connections") content = <Connections d={d} />;
-  else if (active === "Evidence") content = <Evidence d={d} />;
+  else if (active === "Evidence") content = <><Evidence d={d} />{productAcceptancePanel}</>;
   else content = <Conversation />;
   return (
     <div className="shell" data-theme={theme} lang={locale}>

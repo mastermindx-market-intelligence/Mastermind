@@ -21,12 +21,15 @@ from .contract import (
 
 
 class CeoIngressWorkspaceClient:
-    def __init__(self, socket_path, *, timeout_seconds=10):
+    def __init__(self, socket_path, *, timeout_seconds=10, acceptance_timeout_seconds=30):
         self.socket_path = Path(socket_path)
         if (not self.socket_path.is_absolute() or type(timeout_seconds) not in (int, float)
-                or not 0.1 <= timeout_seconds <= 30):
+                or not 0.1 <= timeout_seconds <= 30
+                or type(acceptance_timeout_seconds) not in (int, float)
+                or not 0.1 <= acceptance_timeout_seconds <= 30):
             raise ValueError("invalid_input")
         self.timeout_seconds = timeout_seconds
+        self.acceptance_timeout_seconds = acceptance_timeout_seconds
 
     async def request(self, frame):
         # Frozen v2 frames use the exact same wire envelope as v1; only the
@@ -34,9 +37,29 @@ class CeoIngressWorkspaceClient:
         # ceiling selection happens BEFORE the socket is opened so a misrouted
         # result frame can never widen into the larger Mission ceiling.
         from control_plane.coo_principal_host import FACT_SCHEMA, validate_facts_frame
-        if isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
+        from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA, validate_frame as validate_acceptance_frame
+        timeout = self.timeout_seconds
+        if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
+            from common.product_acceptance_acquisition_contract import (
+                OPERATION as ORIGINAL_OPERATION, validate_frame as validate_original_frame,
+            )
+            if frame.get("operation") == ORIGINAL_OPERATION:
+                validate_original_frame(frame)
+            else:
+                validate_acceptance_frame(frame)
+            ceiling = MAX_RESPONSE_BYTES
+            # This read includes the sealed source owner's existing 15-second
+            # observation, in addition to bounded Runtime proof reads. Keep it
+            # inside the existing 30-second client ceiling without changing
+            # any old operation or renewing the source owner's own deadline.
+            timeout = self.acceptance_timeout_seconds
+        elif isinstance(frame, dict) and frame.get("schema") == FACT_SCHEMA:
             validate_facts_frame(frame)
             ceiling = MAX_RESPONSE_BYTES
+        elif isinstance(frame, dict) and frame.get("schema") == "mastermind.executive_workspace_read.v5":
+            from common import executive_workspace_activity_contract as activity
+            activity.validate_frame(frame)
+            ceiling = activity.MAX_RESPONSE_BYTES
         elif isinstance(frame, dict) and frame.get("schema") == FRAME_SCHEMA_V3:
             validate_v3_frame(frame)
             ceiling = MAX_PLAN_RESPONSE_BYTES
@@ -73,7 +96,7 @@ class CeoIngressWorkspaceClient:
                 writer.close()
                 await writer.wait_closed()
         try:
-            return await asyncio.wait_for(exchange(), self.timeout_seconds)
+            return await asyncio.wait_for(exchange(), timeout)
         except Exception:
             raise ValueError("source_unavailable") from None
 

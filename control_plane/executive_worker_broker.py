@@ -2457,6 +2457,10 @@ class ExecutiveWorkerBroker:
             await self._operator_release_busy(state)
 
     async def _ohf_observer_lifecycle(self, operation, payload):
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
         if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
             raise BrokerStateError("OBSERVER_CONFLICT")
@@ -2494,6 +2498,9 @@ class ExecutiveWorkerBroker:
                         code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
                         else "GRANT_INVALIDATED"
                     ) from None
+            if (operation == "ohf-observer-enroll" and release_profile
+                    and getattr(active.adapter, "supports_progress_metadata", False) is not True):
+                raise BrokerStateError("CONTENT_UNAVAILABLE")
             state = active.adapter._generations.get(payload["generation"])
             native = state.turns.get(payload["turn"]) if state else None
             if not native:
@@ -2504,7 +2511,8 @@ class ExecutiveWorkerBroker:
             try:
                 if operation == "ohf-observer-enroll":
                     turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
-                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    result = active.adapter.mint_observer_grant(turn, binding=binding,
+                        **({"progress_metadata": True} if release_profile else {}))
                     return result
                 projection = getattr(active.adapter, "visible_turn_projection", None)
                 if projection is None:
@@ -2516,6 +2524,10 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
 
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         expected = {
             "attempt",
             "epoch",
@@ -4078,8 +4090,12 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
+        before_write=None,
     ) -> dict[str, Any]:
-        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal"}:
+        # Bridge-only read: this does not add the operation to the ordinary
+        # Worker Broker server or grant a generic request-supplied data source.
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {
@@ -4108,6 +4124,22 @@ class WorkerBrokerClient:
                     peer = writer.get_extra_info("socket")
                     if peer is None or get_peer_credentials(peer).uid != self.expected_peer_uid:
                         raise PeerAuthorizationError("broker peer UID differs from trusted binding")
+                from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+                try:
+                    require_start_transmission(operation, json.loads(encoded)["payload"],
+                                               foreground_start_receipt)
+                except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
+                if before_write is not None:
+                    try:
+                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                                or not callable(before_write)
+                                or before_write(operation, json.loads(encoded)["payload"]) is not None):
+                            raise ValueError("invalid local foreground guard")
+                    except Exception:
+                        from control_plane.remote_worker_transport import TransportError, TransportEffect
+                        raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()
@@ -4219,6 +4251,7 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        before_write=None,
     ) -> dict[str, Any]:
         """Synchronous startup/reconciliation seam; never call from a running loop."""
 
@@ -4226,7 +4259,8 @@ class WorkerBrokerClient:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(
-                self.request(operation, payload, timeout_seconds=timeout_seconds)
+                self.request(operation, payload, timeout_seconds=timeout_seconds,
+                             **({"before_write": before_write} if before_write is not None else {}))
             )
         raise WorkerBrokerError("request_sync cannot run inside an active event loop")
 

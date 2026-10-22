@@ -12,7 +12,7 @@ def test_r1_shadow_registers_logical_luna_terra_and_completes_four_cases(tmp_pat
     evidence = run_r1_shadow(tmp_path)
 
     assert evidence["schema"] == "mastermind.executive_os_r1_shadow_evidence/v1"
-    assert evidence["routing_policy_version"] == "2026-10-11.native-return-host-selection"
+    assert evidence["routing_policy_version"] == "2026-10-14.attended-qualification"
     assert evidence["acceptance"]["r1_shadow_pass"] is True
     assert {row["worker_id"] for row in evidence["jobs"]} == {
         "fixture-luna-r1",

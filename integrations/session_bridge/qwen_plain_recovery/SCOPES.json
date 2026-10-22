@@ -1,0 +1,32 @@
+{
+  "rf-archive-order-review-01a1333c-v1": {
+    "root": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+    "parent": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+    "host": "mb",
+    "mode": "qwen",
+    "requested_model": "qwen3.8-max",
+    "packet_path": "/Volumes/Mastermind/evidence/research-factory-codegen-20261012-01a1333c/runtime-release/physical-qualification/archive-order-repair-v1/ARCHIVE_ORDER_REVIEW_PACKET.txt",
+    "packet_sha256": "30fb451ed25f680d0dddebfeca1a38abb1b923a031af564758f6b820a456a854",
+    "support_digest": "8cf4ee40a6b81a2cae2b23e51affb55595292541b8f3e3fcf0627216b31d9ed5",
+    "source_pins": {
+      "log": "e765bb98af7a421ddf4c170e03672eef4363ef5d3bc32ab721e634c6734cd33c",
+      "support": "edc233071cb0d6a800dfba97e1a2a904a0a4ec54554ba473ac551611e8182fdd"
+    },
+    "destination": "/Volumes/Mastermind/evidence/research-factory-codegen-20261012-01a1333c/retained-returns/rf-archive-order-review-01a1333c-v1-collection-v1"
+  },
+  "rf-mountinfo-review-01a1333c-v1": {
+    "root": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+    "parent": "01a1333c-a475-7052-95a8-72a88eb8c17b",
+    "host": "ubuntu1",
+    "mode": "qwen",
+    "requested_model": "qwen3.8-max",
+    "packet_path": "/Volumes/Mastermind/evidence/research-factory-codegen-20261012-01a1333c/containment-acceptance/workloads/MOUNTINFO_INDEPENDENT_REVIEW_PACKET_V1.txt",
+    "packet_sha256": "d10873588448ba479ffca205e928239290f5d6e9348994d9d1acdd4897e63728",
+    "support_digest": "69e494d29888c63cfee97ce19f7ed6afb7cf24a145ee9dc019e737e853f81a9b",
+    "source_pins": {
+      "log": "a45d165e074694c10d59dbd4729759c607eb05d09d369e6a977d545c989f2193",
+      "support": "ff2d51c0a2b95a96ef2543b8e1d53d88e7706c6398f1b1fcbc09b44270f310fe"
+    },
+    "destination": "/Volumes/Mastermind/evidence/research-factory-codegen-20261012-01a1333c/retained-returns/rf-mountinfo-review-01a1333c-v1-collection-v1"
+  }
+}

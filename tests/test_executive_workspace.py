@@ -1313,3 +1313,47 @@ def test_linked_workspace_release_accepts_head_published_to_origin_branch(tmp_pa
     assert released.removed is True
     assert not workspace.exists()
     assert _git(source, "rev-parse", "refs/heads/sol/web-op-006") == head
+
+
+@pytest.mark.parametrize("kind", ["tracked", "untracked", "ignored", "mixed"])
+def test_linked_release_explains_hidden_untracked_without_removing_files(tmp_path: Path, kind: str):
+    source, _base = _repository(tmp_path)
+    (source / ".gitignore").write_text(".pytest_cache/\n", encoding="utf-8")
+    _git(source, "add", ".gitignore")
+    _git(source, "commit", "-qm", "ignore generated test cache")
+    base = _git(source, "rev-parse", "HEAD")
+    root = tmp_path / "workspaces"
+    receipt = executive_workspace.prepare_linked_worktree(
+        source, root, operation_id="dirty-explanation", lane="web", base_sha=base,
+        branch="sol/web-dirty-explanation",
+    )
+    workspace = Path(receipt.workspace_path)
+    payloads = {}
+    if kind in {"tracked", "mixed"}:
+        payloads["README.md"] = b"uncommitted source must survive\n"
+    if kind in {"untracked", "mixed"}:
+        payloads["private-filename-marker.txt"] = b"untracked evidence must survive\n"
+    if kind == "ignored":
+        payloads[".pytest_cache/private-filename-marker"] = b"ignored evidence is not automatically disposable\n"
+    for relative, payload in payloads.items():
+        target = workspace / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(payload)
+    if kind == "ignored":
+        assert _git(workspace, "status", "--porcelain=v1") == ""
+    observed = executive_workspace.release_linked_worktree(
+        source, root, workspace, expected_operation_id="dirty-explanation",
+    )
+    assert observed.state == "PRESERVED_DIRTY"
+    assert observed.dirty is True and observed.removed is False
+    assert "including ignored files" in observed.reason
+    assert f"tracked_changes={'present' if kind in {'tracked', 'mixed'} else 'absent'}" in observed.reason
+    assert f"all_untracked={'absent' if kind == 'tracked' else 'present'}" in observed.reason
+    assert "git ls-files --others -z" in observed.reason
+    assert "retain needed source and evidence" in observed.reason
+    assert "No files were removed" in observed.reason
+    assert "private-filename-marker" not in observed.reason
+    assert len(observed.reason.encode("utf-8")) < 600
+    assert _git(workspace, "rev-parse", "HEAD") == base
+    for relative, payload in payloads.items():
+        assert (workspace / relative).read_bytes() == payload

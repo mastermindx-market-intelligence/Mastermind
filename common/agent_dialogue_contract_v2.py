@@ -22,12 +22,34 @@ from common.agent_dialogue_contract import (
     validate_commission_ref,
     validate_evidence_ref,
 )
+from common.product_acceptance_contract import (
+    ProductAcceptanceContractError,
+    validate_product_acceptance_association,
+)
 
 MESSAGE_SCHEMA_V2 = "mastermind.agent_dialogue.v2"
 MESSAGE_DISCRIMINATOR_V2 = "MMX/AGENT_DIALOGUE_V2"
 PARENT_SCHEMA_V2 = "mastermind.agent_dialogue_parent.v2"
 PARENT_DISCRIMINATOR_V2 = "MMX/AGENT_DIALOGUE_PARENT_V2"
 TURN_WATCH_MODE_V1 = "turn_watch_v1"
+
+
+def validate_decision_request_body_v2(value: Any) -> dict[str, Any]:
+    """Keep generic V2 requests unchanged and validate an optional typed join.
+
+    A well-formed association is wire data, not retained issuance evidence.
+    Only the existing owner may construct and qualify its canonical join.
+    """
+    if not isinstance(value, dict) or "acceptance_request" not in value:
+        return validate_body("DECISION_REQUEST", value)
+    normalized = validate_body(
+        "DECISION_REQUEST", {key: item for key, item in value.items() if key != "acceptance_request"}
+    )
+    try:
+        normalized["acceptance_request"] = validate_product_acceptance_association(value["acceptance_request"])
+    except ProductAcceptanceContractError as exc:
+        raise DialogueContractError("MESSAGE_INVALID") from exc
+    return normalized
 
 _OPERATION_KEY_RE = re.compile(r"\A[a-z0-9][a-z0-9._-]{7,127}\Z")
 _WORK_REF_RE = re.compile(r"\AWS:[A-Z0-9][A-Z0-9-]{1,63}\Z")
@@ -507,7 +529,11 @@ def validate_message_v2(value: Any) -> dict[str, Any]:
     if not isinstance(fingerprint, str) or _SHA64_RE.fullmatch(fingerprint) is None:
         raise DialogueContractError("MESSAGE_INVALID")
 
-    body = validate_body(message_type, value["body"])
+    body = (
+        validate_decision_request_body_v2(value["body"])
+        if message_type == "DECISION_REQUEST"
+        else validate_body(message_type, value["body"])
+    )
     if (
         actor_ref["kind"] == "executive_principal"
         and message_type == "RULING"

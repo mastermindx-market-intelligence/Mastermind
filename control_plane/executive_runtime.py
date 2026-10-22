@@ -4353,8 +4353,13 @@ class RuntimeStore:
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared after write lock acquisition"
                 )
+            from control_plane.finite_initial_admission import (
+                _classification_before_transaction, _finish_transaction,
+            )
+            initial_classifications = _classification_before_transaction(connection)
             self._write_connections.add(connection)
             yield connection
+            _finish_transaction(connection, initial_classifications)
             if self._upgrade_barrier_present():
                 raise PersistenceError(
                     "Executive schema upgrade barrier appeared before write commit"
@@ -8122,6 +8127,15 @@ def _sealed_worker_result_payload(
     collection_receipt = evidence.get("collection_receipt")
     validation_receipt = evidence.get("validation_receipts")
     assignment = evidence.get("assignment_seal_receipt")
+    validation_fields = {"attempt_id", "job_id", "commands", cleanup_field,
+                         "effective_grant_digest"}
+    # Empty Fabric validation has no validation process to clean up. The
+    # pinned original request and actual grant are independently joined below;
+    # collection cleanup and final assignment revocation remain mandatory.
+    if (is_fabric and isinstance(validation_receipt, dict)
+            and validation_receipt.get("commands") == []
+            and cleanup_field not in validation_receipt):
+        validation_fields.remove(cleanup_field)
     if (
         (not is_fabric and evidence.get("schema_version") != "mastermind.sealed_worker_result_evidence/v1")
         or not isinstance(collection_receipt, dict)
@@ -8137,14 +8151,7 @@ def _sealed_worker_result_payload(
         or collection_receipt.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or not isinstance(validation_receipt, dict)
-        or set(validation_receipt)
-        != {
-            "attempt_id",
-            "job_id",
-            "commands",
-            cleanup_field,
-            "effective_grant_digest",
-        }
+        or set(validation_receipt) != validation_fields
         or validation_receipt.get("effective_grant_digest")
         != attempt_row["effective_grant_digest"]
         or not isinstance(assignment, dict)
@@ -14636,6 +14643,7 @@ class JobRegistry:
         _v2_root_capability: object | None = None,
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
+        _principal_commit_guard: Callable[[], None] | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -14849,8 +14857,31 @@ class JobRegistry:
             raise StateConflict(
                 "review orchestration Job grant requires READ plus optional RUN_TESTS and empty writes"
             )
+        def recheck_principal():
+            if _principal_commit_guard is None:
+                return
+            if (not callable(_principal_commit_guard)
+                    or inspect.iscoroutinefunction(_principal_commit_guard)
+                    or inspect.iscoroutinefunction(getattr(_principal_commit_guard, "__call__", None))):
+                raise StateConflict("principal commit guard must be synchronous")
+            result = _principal_commit_guard()
+            if inspect.isawaitable(result):
+                if inspect.iscoroutine(result):
+                    result.close()
+                raise StateConflict("principal commit guard refused")
+            if result is not None:
+                raise StateConflict("principal commit guard refused")
+
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
+            # A command accepted while this creator waited must reconcile before
+            # dynamic currentness. The existing sink checks its full fingerprint.
+            if (_principal_commit_guard is not None and command_id is not None
+                    and connection.execute(
+                        "SELECT 1 FROM events WHERE command_id=?", (command_id,)
+                    ).fetchone() is not None):
+                raise StateConflict("job creation command already exists")
+            recheck_principal()
             if (
                 orchestration_role == "plan"
                 and _coo_cycle_planner_capability
@@ -15112,6 +15143,8 @@ class JobRegistry:
                     timestamp_ms=timestamp,
                 ),
             )
+            # Refusal rolls back both the Job and its JOB_CREATED event.
+            recheck_principal()
         return job
 
     def get_job(self, job_id: str) -> Job | None:
@@ -15855,6 +15888,7 @@ class AttemptRegistry:
         carrier_claim: _CarrierClaimSpec | None = None,
         _c2_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | None = None,
+        _initial_capacity_evidence: Mapping[str, Any] | None = None,
     ) -> AttemptLease | None:
         """Own the existing quota/Attempt/Job/claim mutation sequence."""
 
@@ -16064,6 +16098,8 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        if _initial_capacity_evidence is not None:
+            claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
             claim_payload["exact_worker_target"] = exact_target.evidence()
         self.store.append_event(
@@ -16102,6 +16138,7 @@ class AttemptRegistry:
         command_id: str | None = None,
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
+        _initial_prepared: object | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -16194,6 +16231,9 @@ class AttemptRegistry:
                             str(replay_token) if replay_token is not None else None
                         ),
                     )
+            if _initial_prepared is not None:
+                from control_plane.finite_initial_admission import _activate
+                _activate(_initial_prepared, self.store, connection, job_id, command_id, worker_id, selected_quota)
             job_row = connection.execute(
                 "SELECT * FROM jobs WHERE job_id=?", (job_id,)
             ).fetchone()
@@ -16210,6 +16250,8 @@ class AttemptRegistry:
                     + ", ".join(str(row["job_id"]) for row in living_children)
                 )
             if timestamp < int(job_row["available_at_ms"]):
+                if _initial_prepared is not None:
+                    raise StateConflict("finite initial common claim deferred")
                 return None
             if int(job_row["attempt_count"]) >= int(job_row["attempt_limit"]):
                 raise StateConflict(f"job {job_id} exhausted its attempt limit")
@@ -16386,6 +16428,8 @@ class AttemptRegistry:
                     continue
                 candidates.append(row)
             if not candidates:
+                if _initial_prepared is not None:
+                    raise StateConflict("finite initial common claim refused")
                 return None
             candidates.sort(key=lambda row: _capacity_route_rank(row, constraints))
             capacity = candidates[0]
@@ -16428,7 +16472,10 @@ class AttemptRegistry:
                 placement_snapshot=placement_snapshot,
                 placement_snapshot_digest=placement_snapshot_digest,
                 exact_target=exact_target,
+                _initial_capacity_evidence=(_initial_prepared.evidence if _initial_prepared is not None else None),
             )
+            if _initial_prepared is not None and claimed is None:
+                raise StateConflict("finite initial common claim lost CAS")
         return claimed
 
     def _validate_exact_target_launch(
@@ -16573,6 +16620,7 @@ class AttemptRegistry:
         lease_seconds: int | None = None,
         lease_owner: str = "executive-coo-cycle",
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
+        _initial_prepared: object | None = None,
     ) -> OrchestrationDispatchOutcome | None:
         """Claim exactly one persisted orchestration Job under one command."""
 
@@ -16599,6 +16647,8 @@ class AttemptRegistry:
             lease_owner=lease_owner,
             command_id=command_id,
             _coo_cycle_dispatch_capability=_COO_CYCLE_DISPATCH_CAPABILITY,
+            # Sealed owner-issued finite preparation only; claim_job verifies it.
+            _initial_prepared=_initial_prepared,
             **({"exact_target": exact_target} if exact_target is not _NO_EXACT_WORKER_TARGET else {}),
         )
         if claimed is None:
@@ -22014,13 +22064,19 @@ class ResourceBroker:
     def _physical_admission(
         self, request: Any, caller_context: Any, *, connection=None, stage="entry"
     ) -> dict[str, Any]:
-        """Unresolved transport/caller/runtime/schema admission; no production bypass.
+        """Caller/runtime/schema admission; no production bypass.
 
-        Pytest may replace this boundary with synthetic context. Normal Runtime
-        composition, constructor parameters, policy files and environment cannot.
-        This refuses before this resource path opens or queries a database.
+        Only a process-local context sealed by the physical-admission composer
+        (fresh foreground principal, own process identity, kernel boot, armed
+        qualified policy file, probe observations) is accepted. Any other
+        context, including dicts, flags, constructor parameters, policy files or
+        environment, refuses before this resource path opens or queries a
+        database. Pytest may still replace this boundary with synthetic context.
         """
         from .executive_physical_resources import PhysicalResourceRefusal
+        from .executive_physical_admission import PhysicalCallerContext, admit
+        if type(caller_context) is PhysicalCallerContext:
+            return admit(self, request, caller_context, connection=connection, stage=stage)
         raise PhysicalResourceRefusal("CALLER_BINDING_UNAVAILABLE", "physical resource caller admission is unavailable")
 
     def reserve_physical(self, request, *, caller_context):
@@ -22345,6 +22401,9 @@ class ResourceBroker:
     def _physical_command(self, action, request, caller_context):
         import time
         from . import executive_physical_resources as physical
+        from .executive_physical_admission import PhysicalCallerContext
+        # Only the sealed composer's context selects QUALIFIED-only evaluation.
+        production = type(caller_context) is PhysicalCallerContext
         try:
             # Default production composition always exits here, before parsing,
             # file lookup, DB open, status read or transaction acquisition.
@@ -22427,6 +22486,7 @@ class ResourceBroker:
                             current_charges=charges,
                             observations=context["observations"],
                             decision_time_ms=timestamp,
+                            production=production,
                         )
                     except physical.PhysicalResourceRefusal as refusal:
                         # No headers or demands have been written. Preserve the
@@ -22505,7 +22565,8 @@ class ResourceBroker:
                             # Own-phase identity and pristine charge are proven
                             # above; global pool rows only supply additive capacity.
                             physical.evaluate_begin(reservation, policy=context["policy"], current_charges=charges,
-                                                    observations=context["observations"], decision_time_ms=timestamp)
+                                                    observations=context["observations"], decision_time_ms=timestamp,
+                                                    production=production)
                         planned = []
                         for row in headers:
                             demands = self._physical_demands(connection, row)
@@ -23836,6 +23897,26 @@ class BoundedAdmittedPlanSnapshot:
     observation_source_identity: str | None = None
 
 
+@dataclasses.dataclass(frozen=True)
+class BoundedProductAcceptanceSubject:
+    """Current live programme scope and two canonical terminal results.
+
+    This selection proves neither continuity completeness nor acceptance.
+    Its caller must separately acquire the existing Agent OS acceptance basis
+    and join the retained typed request to a canonical principal ruling.
+    """
+
+    root_job_id: str
+    issuer_job_id: str
+    issuer_attempt_id: str
+    issuer_worker_id: str
+    root_objective: str
+    subject: BoundedRoleResultSnapshot
+    reviewer: BoundedRoleResultSnapshot
+    dependency_manifest_digest: str
+    observation_source_identity: str | None = None
+
+
 class _BoundedRoleResultRows:
     """Row-accounted fetch surface over one guarded statement cursor."""
 
@@ -24185,6 +24266,108 @@ def _read_role_result_bounded(
         vm_guard.deactivate()
 
 
+def _read_product_acceptance_subject_bounded(
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    issuer_job_id: str,
+    issuer_attempt_id: str,
+    issuer_worker_id: str,
+    subject_job_id: str,
+    now_ms: int,
+) -> BoundedProductAcceptanceSubject:
+    """Select a live admitted dependent child and its exact accepted prerequisite.
+
+    The COO principal may rule for a child, never the programme root itself.
+    This method creates no child or acceptance stage: an existing V3/V4 plan
+    must already commission this consumer and name the reviewed prerequisite.
+    """
+    issuer = _bounded_acquisition_identifier(issuer_job_id, name="issuer Job")
+    attempt = _bounded_acquisition_identifier(issuer_attempt_id, name="issuer Attempt")
+    worker = _bounded_acquisition_identifier(issuer_worker_id, name="issuer Worker")
+    subject = _bounded_acquisition_identifier(subject_job_id, name="subject Job")
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        issuer_row = loader.execute("SELECT * FROM jobs WHERE job_id=?", (issuer,)).fetchone()
+        if (issuer_row is None or issuer_row["orchestration_role"] != "work"
+            or issuer_row["parent_job_id"] is None or issuer_row["parent_job_id"] != issuer_row["root_job_id"]
+            or issuer_row["status"] not in {JobStatus.RUNNING.value, JobStatus.CHECKPOINTED.value}
+            or issuer_row["current_attempt_id"] != attempt or issuer_row["assigned_worker_id"] != worker):
+            raise StateConflict("product acceptance requires its current live commissioned child issuer")
+        root_token = str(issuer_row["root_job_id"])
+        root = loader.execute("SELECT * FROM jobs WHERE job_id=?", (root_token,)).fetchone()
+        if root is None:
+            raise StateConflict("product acceptance programme root is unavailable")
+        _assert_cycle_root_open_for_child_mutation(loader, root)
+        lease = loader.execute(
+            "SELECT a.job_id,a.worker_id,a.quota_class,a.status,a.lease_expires_at_ms,"
+            "q.status AS quota_status,q.held_attempt_id FROM attempts a "
+            "JOIN worker_quota_classes q ON q.worker_id=a.worker_id AND q.quota_class=a.quota_class "
+            "WHERE a.attempt_id=?", (attempt,),
+        ).fetchone()
+        if (lease is None or lease["job_id"] != issuer or lease["worker_id"] != worker
+            or lease["quota_class"] != issuer_row["assigned_quota_class"]
+            or lease["status"] not in {AttemptStatus.CLAIMED.value, AttemptStatus.RUNNING.value, AttemptStatus.CHECKPOINTED.value}
+            or int(lease["lease_expires_at_ms"]) <= now_ms
+            or lease["quota_status"] != "BUSY" or lease["held_attempt_id"] != attempt):
+            raise StateConflict("product acceptance issuer lease is not exact/current")
+        # Reuse canonical admission, current lineage and accepted dependency
+        # validators. A same-root public Job ID is insufficient association.
+        admission, plan = _validated_plan_admission(loader, root)
+        current = _current_orchestration_tree_material_for_dispatch(loader, root, admission, plan)
+        if len([row for row in current if row["current_job_id"] == issuer]) != 1:
+            raise StateConflict("product acceptance issuer is not a current plan revision")
+        manifest = _validated_job_dependency_manifest(loader, job_row=issuer_row)
+        if manifest is None or manifest != _work_dependency_manifest(loader,
+            root_row=root, admission=admission, plan_body=plan, plan_step_id=issuer_row["plan_step_id"]):
+            raise StateConflict("product acceptance requires current admitted dependency evidence")
+        revisions = [item for item in manifest["revisions"] if item["current_job_id"] == subject]
+        if len(revisions) != 1:
+            raise StateConflict("product acceptance subject is not an accepted commissioned prerequisite")
+        revision = revisions[0]
+        if (revision["review_required"] is not True
+            or revision["qualifying_review_job_id"] is None
+            or revision["qualifying_review_attempt_id"] is None
+            or revision["qualifying_review_result_digest"] is None):
+            raise StateConflict("product acceptance requires a canonical independent review")
+        metadata = _bounded_strict_root_metadata(loader, root, root_token)
+        # JOB_CREATED retains the source fingerprint, not objective text.
+        # This is the canonical Runtime Job objective; the issuance owner must
+        # independently join it to the Agent OS original/current intent basis.
+        objective = root["objective"]
+        if not isinstance(objective, str) or not objective:
+            raise StateConflict("product acceptance root objective is unavailable")
+        selected = _validated_role_completion_snapshot(loader, job_token=subject,
+            attempt_token=revision["current_attempt_id"])
+        reviewed = _validated_role_completion_snapshot(loader,
+            job_token=revision["qualifying_review_job_id"],
+            attempt_token=revision["qualifying_review_attempt_id"])
+        if (selected.job.orchestration_role not in {"work", "repair"}
+            or selected.role_result_digest != revision["current_result_digest"]
+            or reviewed.role_result_digest != revision["qualifying_review_result_digest"]
+            or not _review_attempt_is_independent(loader,
+                review_attempt_id=reviewed.attempt.attempt_id,
+                reviewed_attempt_id=selected.attempt.attempt_id)):
+            raise StateConflict("product acceptance reviewed revision is not independently qualified")
+        return BoundedProductAcceptanceSubject(
+            root_job_id=root_token, issuer_job_id=issuer, issuer_attempt_id=attempt,
+            issuer_worker_id=worker, root_objective=objective,
+            subject=BoundedRoleResultSnapshot(root_token, subject, selected.attempt.attempt_id,
+                selected.result_digest, selected, metadata),
+            reviewer=BoundedRoleResultSnapshot(root_token, reviewed.job.job_id, reviewed.attempt.attempt_id,
+                reviewed.result_digest, reviewed, metadata),
+            dependency_manifest_digest=manifest["dependency_manifest_digest"],
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
 def _read_admitted_plan_bounded(
     acquisition: BoundedRuntimeAcquisition,
     vm_guard: _RuntimeReadProgressGuard,
@@ -24222,6 +24405,90 @@ def _read_admitted_plan_bounded(
             root_metadata=root_metadata,
             admission=json.loads(_json_dumps(admission)),
             plan=json.loads(_json_dumps(plan)),
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
+# Retained OHF candidate reads reuse the EXISTING one-selection Runtime owner,
+# VM/SQL budgets, original Event ledger and same-read receipt. This additional
+# tighter payload/row cap never opens a raw event enumeration to a caller.
+BOUNDED_OHF_ACTIVITY_MAX_CANDIDATES = 64
+BOUNDED_OHF_ACTIVITY_MAX_CANDIDATE_BYTES = 262_144
+BOUNDED_OHF_ACTIVITY_MAX_TOTAL_BYTES = 2_097_152
+
+
+def _read_retained_operator_activity_bounded(
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    root_job_id: str,
+    job_id: str,
+    attempt_id: str,
+) -> Any:
+    """One bounded original direct-child Attempt and retained candidate sample.
+
+    This is source material only, not a user entitlement or public service.
+    A real Workspace owner must still verify the current principal's original
+    root/workstream/Job/Attempt association before and after this read.
+    """
+
+    root_token = _bounded_acquisition_identifier(root_job_id, name="root")
+    job_token = _bounded_acquisition_identifier(job_id, name="job")
+    attempt_token = _bounded_acquisition_identifier(attempt_id, name="attempt")
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        root = loader.execute("SELECT * FROM jobs WHERE job_id=?", (root_token,)).fetchone()
+        metadata = _bounded_strict_root_metadata(loader, root, root_token)
+        if metadata.work_ref is None:
+            raise RuntimeReadUnavailable("retained activity root workstream unavailable")
+        job = loader.execute("SELECT * FROM jobs WHERE job_id=?", (job_token,)).fetchone()
+        if (job is None or job["root_job_id"] != root_token
+                or job["parent_job_id"] != root_token or int(job["depth"]) != 1
+                or job["orchestration_role"] not in {"plan", "work", "review", "repair"}
+                or job["current_attempt_id"] != attempt_token):
+            raise RuntimeReadUnavailable("retained activity original Job not qualified")
+        attempt = loader.execute("SELECT * FROM attempts WHERE attempt_id=?", (attempt_token,)).fetchone()
+        if (attempt is None or attempt["job_id"] != job_token
+                or job["assigned_worker_id"] != attempt["worker_id"]
+                or job["assigned_quota_class"] != attempt["quota_class"]
+                or attempt["execution_mode"] != "OPERATOR_HARNESS"):
+            raise RuntimeReadUnavailable("retained activity Attempt identity unavailable")
+
+        # SQL LIMIT bounds both metadata and payload acquisitions. The probe
+        # inspects 65 *size-only* rows so older missing evidence is marked
+        # partial rather than silently misclassified as a complete history.
+        sql_filter = (
+            " FROM events WHERE event_type='OHF_CANDIDATE_RESULT_RECORDED' "
+            "AND attempt_id=? ORDER BY event_id DESC LIMIT "
+        )
+        count_query = "SELECT event_id,COALESCE(length(CAST(payload_json AS BLOB)),0) AS bytes" + sql_filter + "65"
+        candidates = loader.execute(count_query, (attempt_token,)).fetchall()
+        truncated = len(candidates) > BOUNDED_OHF_ACTIVITY_MAX_CANDIDATES
+        selected = candidates[:BOUNDED_OHF_ACTIVITY_MAX_CANDIDATES]
+        sizes = [int(row["bytes"]) for row in selected]
+        if (any(size > BOUNDED_OHF_ACTIVITY_MAX_CANDIDATE_BYTES for size in sizes)
+                or sum(sizes) > BOUNDED_OHF_ACTIVITY_MAX_TOTAL_BYTES):
+            raise RuntimeRoleResultOverBudget()
+        rows = loader.execute(
+            "SELECT *" + sql_filter + str(BOUNDED_OHF_ACTIVITY_MAX_CANDIDATES),
+            (attempt_token,),
+        ).fetchall()
+        if [int(row["event_id"]) for row in rows] != [int(row["event_id"]) for row in selected]:
+            raise RuntimeReadUnavailable("retained activity bounded source moved")
+        # Do not output the original payload here. The separate pure
+        # projector validates every bound candidate identity and coarsens it.
+        from control_plane.operator_activity_projection import RetainedActivitySnapshot
+        return RetainedActivitySnapshot(
+            root_metadata=metadata, job=_job_from_row(job), attempt=_attempt_from_row(attempt),
+            events=tuple(_event_from_row(row) for row in reversed(rows)),
+            observation_source_identity="", source_truncated=truncated,
         )
     except sqlite3.OperationalError as exc:
         if vm_guard.tripped:
@@ -24471,6 +24738,28 @@ class BoundedRuntimeReadObservation:
             self._failed = True
             raise
 
+    def read_retained_operator_activity_bounded(
+        self, root_job_id: str, job_id: str, attempt_id: str,
+    ) -> Any:
+        """One original child Attempt's retained candidate events; read-only.
+
+        Same one-selection and finalized-receipt custody as the incumbent
+        admitted-plan/role-result readers. Returned source material is
+        internal; it is NOT an authorized browser entitlement or a live feed.
+        """
+        self._select()
+        try:
+            result = _read_retained_operator_activity_bounded(
+                self._acquisition, self._vm_progress,
+                root_job_id=root_job_id, job_id=job_id, attempt_id=attempt_id,
+            )
+            return dataclasses.replace(
+                result, observation_source_identity=self._identity
+            )
+        except BaseException:
+            self._failed = True
+            raise
+
     def read_role_result_bounded(
         self,
         root_job_id: str,
@@ -24504,6 +24793,31 @@ class BoundedRuntimeReadObservation:
             return dataclasses.replace(
                 result, observation_source_identity=self._identity
             )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_product_acceptance_subject_bounded(
+        self, *, issuer_job_id: str, issuer_attempt_id: str,
+        issuer_worker_id: str, subject_job_id: str,
+    ) -> BoundedProductAcceptanceSubject:
+        """One bounded current-scope read, not issuance or a verdict.
+
+        The active issuer is an already admitted dependent work child; completed
+        subject and reviewer identities come from its current dependency manifest.
+        All closure reads share the ordinary role-result budgets.
+        """
+        self._select()
+        try:
+            selected = _read_product_acceptance_subject_bounded(
+                self._acquisition, self._vm_progress,
+                issuer_job_id=issuer_job_id, issuer_attempt_id=issuer_attempt_id,
+                issuer_worker_id=issuer_worker_id, subject_job_id=subject_job_id,
+                now_ms=self._store.now_ms(),
+            )
+            return dataclasses.replace(selected, observation_source_identity=self._identity,
+                subject=dataclasses.replace(selected.subject, observation_source_identity=self._identity),
+                reviewer=dataclasses.replace(selected.reviewer, observation_source_identity=self._identity))
         except BaseException:
             self._failed = True
             raise

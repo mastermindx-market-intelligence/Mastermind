@@ -105,6 +105,7 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
   const execute = dependencies.execFile ?? execFileDefault;
   const publisherFactory = dependencies.publisherFactory ?? createGitPublisher;
   const legacy = publisherFactory(git);
+  const mastermind = git.repositories?.find((profile) => profile?.repository === 'mastermind') ?? git;
 
   async function owner(args) {
     const result = await execute(git.workspaceCli, args, {
@@ -124,8 +125,8 @@ export function createRepositoryWorkspaceAccess(config, gitConfig, dependencies 
     selectAlias(alias);
     const row = (await currentRows()).find((row) => row.alias === alias);
     if (row?.state !== 'READY') throw new Error('REPOSITORY_NOT_READY');
-    if (alias === 'mastermind' && (row.source_repository !== path.resolve(git.sourceRepository) ||
-        !git.allowedRemoteUrls.includes(row.remote_url))) throw new Error('WORKSPACE_OWNER_RESPONSE_INVALID');
+    if (alias === 'mastermind' && (row.source_repository !== path.resolve(mastermind.sourceRepository) ||
+        !mastermind.allowedRemoteUrls.includes(row.remote_url))) throw new Error('WORKSPACE_OWNER_RESPONSE_INVALID');
     return row;
   }
   async function repositories(args) {

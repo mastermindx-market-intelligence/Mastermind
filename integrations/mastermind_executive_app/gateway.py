@@ -404,6 +404,28 @@ class CeoIngressClient:
         request_ceiling = MAX_REQUEST_BYTES
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
+        principal_encoded = None
+        # This closed source-only frame has its own canonical byte bounds.
+        # Selecting transport limits grants no receiving-side admission.
+        from integrations.company_dialogue_principal_app_contract import (
+            APP_REQUEST_SCHEMA, decode_app_request,
+        )
+        if isinstance(frame, Mapping) and frame.get("schema") == APP_REQUEST_SCHEMA:
+            from integrations.company_dialogue_principal_host_contract import encode_json_frame
+            from common.company_dialogue_principal_app_protocol import (
+                MAX_REQUEST_BYTES as principal_request_limit,
+                MAX_APP_RESPONSE_BYTES as principal_response_limit,
+            )
+            try:
+                canonical_frame = encode_json_frame(dict(frame), limit=principal_request_limit)
+                decode_app_request(canonical_frame)
+            except Exception:
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="principal dialogue frame is invalid")
+            principal_encoded = canonical_frame[:-1]
+            request_ceiling = principal_request_limit
+            response_ceiling = principal_response_limit
+            stream_limit = response_ceiling + 4096
         # Only the separately versioned, closed release frame can use the
         # larger token envelope; every historical schema retains its limits.
         from control_plane import executive_release_ingress as release_ingress
@@ -418,9 +440,8 @@ class CeoIngressClient:
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
         try:
-            encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode(
-                "utf-8"
-            )
+            encoded = principal_encoded if principal_encoded is not None else json.dumps(
+                frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
         except (TypeError, ValueError) as exc:
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
@@ -3050,7 +3071,10 @@ class CeoIngressReadGateway:
         cls, upstream_code: str
     ) -> tuple[str, str]:
         code = "backend_unavailable"
-        if upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
+        if upstream_code in {"output_too_large", "response_too_large"}:
+            code = "output_too_large"
+            message = "Executive reader response exceeds the installed byte limit."
+        elif upstream_code in cls._UNAVAILABLE_UPSTREAM_CODES:
             message = "Executive reader is unavailable in the installed backend."
         else:
             code = "backend_refused"
