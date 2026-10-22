@@ -624,7 +624,7 @@ def _canonical_claude_fabric_skill() -> bytes:
     path = source_root / "skills" / CLAUDE_FABRIC_SKILL_PACKAGE / "SKILL.md"
     _preflight_destination(path, source_root)
     payload = _regular_bytes(path)
-    blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\\0" + payload).hexdigest()
+    blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\0" + payload).hexdigest()
     if not 0 < len(payload) <= 8192 or blob != CLAUDE_FABRIC_SKILL_BLOB_SHA:
         raise OrchestratorPolicyError("Claude Fabric Skill source digest mismatch")
     return payload
