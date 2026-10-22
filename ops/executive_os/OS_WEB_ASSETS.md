@@ -144,6 +144,12 @@ adds no new policy approval gate.
 
 ## Rich client artifact profile
 
+The previous protected 11-file profile (Noir nine plus the two exact third-party
+notices) remains fully supported. Exact admitted profiles are 3, 9, 11 and 13;
+only 13 adds the two SourceMarkdown lazy chunks, and publication index sizes
+include one additional manifest entry each. Neither notices nor chunks are
+optional within their respective profiles.
+
 The thirteen-file profile extends the complete nine-file Noir layout with exactly
 one `assets/SourceMarkdown-<hash>.js`, one matching-name-family CSS chunk, and the
 two fixed plain-text notices `third-party/deepseek-harness-LICENSE.txt` and
@@ -165,7 +171,7 @@ still use the existing accepted release owner and all of its custody gates.
 ### Staged public-edge publication compatibility
 
 The original publisher's staged file index contains the manifest *plus* each admitted
-asset, so the three closed asset profiles have 4, 10 and 14 index entries.
+asset, so the four closed asset profiles have 4, 10, 12 and 14 index entries.
 `ops/executive_os/os_public_edge_publication.py` obtains the allowed index
 cardinalities from `OS_ASSET_PROFILE_FILE_COUNTS`, the same deterministic
 closed-profile owner used by `os_asset_mimes`. Validate cardinality *before*
@@ -174,7 +180,8 @@ prove exact names, digest and source identity. Do not add wildcards or an
 independent hardcoded 14-file route policy.
 
 `tests/test_os_public_edge_publication.py` includes a full inert 9-to-13
-two-phase publication test, from qualified bundle and old seal through stage,
+two-phase publication test, parameterized to cover both valid 9-to-13 and
+11-to-13 transitions from a qualified bundle and old seal through stage,
 prepare, cutover readiness and finalization. The test-host release switch and
 HTTP stand-in are fixtures only. These checks **do not** prove root-sealed
 production publication, permission activation, provider SEND or authentic

@@ -383,8 +383,13 @@ def _from_shadow(asof: date, leaderboard: dict | None) -> list[dict]:
 
 def _from_benchmark(asof: date) -> list[dict]:
     """The benchmark ledger's leaderboard ranks every bogey + book by window return. If a Brain book
-    trails BOTH SPY and the defensive basket over the window, that's a benchmark gap the CIO already
-    watches — surfaced here as an item. Lazy-imports brain.benchmark_ledger; degrades absent."""
+    trails a bogey over ONE SHARED window, that's a benchmark gap the CIO already watches — surfaced
+    here as an item. The gap is recomputed at READ time over the cohort's actual common dates
+    (brain.benchmark_ledger.compare_book_to_ledger): the stored per-inception ``return_pct`` values
+    are each measured from a different inception, so the old subtract-across-windows comparison was
+    wrong whenever the curves started on different dates (#1433) — those stored returns are no
+    longer used at all. A book row with no readable curve produces no item. Lazy-imports
+    brain.benchmark_ledger; degrades absent."""
     out: list[dict] = []
     try:
         from brain import benchmark_ledger
@@ -394,48 +399,54 @@ def _from_benchmark(asof: date) -> list[dict]:
     rows = (led or {}).get("leaderboard") or []
     if not rows:
         return out
-    # bogey returns for the two named yardsticks
-    def _ret(kind_id: str) -> float | None:
-        for r in rows:
-            if r.get("id") == kind_id:
-                v = r.get("return_pct")
-                try:
-                    return float(v) if v is not None else None
-                except (TypeError, ValueError):
-                    return None
-        return None
-    spy = _ret("spy")
-    defensive = _ret("defensive")
-    if spy is None and defensive is None:
-        return out
-    bogey = max([x for x in (spy, defensive) if x is not None], default=None)
-    if bogey is None:
-        return out
     for r in rows:
         if r.get("kind") != "book":
             continue
-        v = r.get("return_pct")
+        bid = r.get("id")
         try:
-            v = float(v) if v is not None else None
-        except (TypeError, ValueError):
-            v = None
-        if v is None:
+            if bid == "self_directed":
+                from portfolio import self_directed
+                nav_path = self_directed._NAV_PATH
+            else:
+                from portfolio import registry
+                nav_path = registry.data_dir(bid) / "nav_history.jsonl"
+            hist = benchmark_ledger.read_nav_history(nav_path)
+        except Exception:  # noqa: BLE001
             continue
-        gap = bogey - v
+        if not hist.get("curve"):
+            continue
+        try:
+            cmp = benchmark_ledger.compare_book_to_ledger(bid, hist, led)
+        except Exception:  # noqa: BLE001
+            continue
+        if cmp.get("status") != "descriptive":            # unsupported window → no item (withheld)
+            continue
+        deltas = [d for d in (cmp.get("deltas_pp") or [])
+                  if isinstance(d.get("delta_pp"), (int, float))]
+        if not deltas:
+            continue
+        worst = max(deltas, key=lambda d: -d["delta_pp"])  # the bogey the book trails hardest
+        gap = -worst["delta_pp"]                           # best bogey minus the book, shared window
         if gap <= _SHADOW_LEAD_PCT:                       # trails the best bogey by a material margin
             continue
-        which = "the defensive basket" if defensive is not None and defensive >= (spy or -1e9) else "SPY"
+        which = worst["right_id"]
         out.append(_item(
-            f"benchmark:{r.get('id')}", CLASS_BENCHMARK,
-            f"Book '{r.get('label')}' trails {which} by {gap:.2f} pts (renormed)",
-            evidence=[f"{r.get('id')}: {v:+.2f}% vs SPY {spy}%, defensive {defensive}% "
-                      f"(common-inception renorm, n={r.get('n_points')})"],
-            suggested_fix=(f"'{r.get('label')}' is below the defensive floor — check whether its "
-                           f"posture is too offensive for the tape; consider a defensive-tilt review."),
+            f"benchmark:{bid}", CLASS_BENCHMARK,
+            f"Book '{r.get('label')}' trails {which} by {gap:.2f} pts (shared window)",
+            evidence=[f"{bid}: window {cmp.get('start')}..{cmp.get('end')}, "
+                      f"n={cmp.get('common_point_count')}, "
+                      f"endpoint_status={cmp.get('endpoint_status')} — "
+                      + ", ".join(f"{d['right_id']} leads by {-d['delta_pp']:+.2f} pts"
+                                  for d in deltas)],
+            suggested_fix=(f"'{r.get('label')}' trails its {which} bogey on the shared window — "
+                           f"check whether its posture is too offensive for the tape; consider a "
+                           f"defensive-tilt review."),
             fix_type=FIX_EXPERIMENT, owner=OWNER_FABLE,
             expected_impact="the book at least matches its regime-conditional bogey",
             severity=min(1.0, gap / 8.0),
-            extra={"book": r.get("id"), "gap_pct": round(gap, 3)}))
+            extra={"book": bid, "gap_pct": round(gap, 3),
+                   "window_start": cmp.get("start"), "window_end": cmp.get("end"),
+                   "endpoint_status": cmp.get("endpoint_status")}))
     return out
 
 

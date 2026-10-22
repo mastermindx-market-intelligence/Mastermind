@@ -27,7 +27,7 @@ _RICH_CLIENT = (
     (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.js", "text/javascript; charset=utf-8"),
     (r"assets/SourceMarkdown-[A-Za-z0-9_-]+\.css", "text/css; charset=utf-8"),
 )
-_CLIENT_LICENSES = (
+_THIRD_PARTY_NOTICES = (
     "third-party/deepseek-client-dependency-NOTICES.txt",
     "third-party/deepseek-harness-LICENSE.txt",
 )
@@ -37,12 +37,13 @@ _CLIENT_LICENSES = (
 OS_ASSET_PROFILE_FILE_COUNTS = (
     1 + len(_BASE),
     1 + len(_BASE) + len(_NOIR) + len(_LICENSES),
-    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_RICH_CLIENT) + len(_CLIENT_LICENSES),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES),
+    1 + len(_BASE) + len(_NOIR) + len(_LICENSES) + len(_THIRD_PARTY_NOTICES) + len(_RICH_CLIENT),
 )
 
 
 def os_asset_mimes(names) -> dict[str, str]:
-    """Exactly legacy3, Noir9, or Noir plus both rich chunks/notices13.
+    """Exactly legacy3, Noir9, licensed Noir11, or rich Noir13.
 
     There is no wildcard asset directory, arbitrary chunk name, optional partial
     profile or caller-supplied MIME. File custody and bytes stay with the launcher.
@@ -52,16 +53,16 @@ def os_asset_mimes(names) -> dict[str, str]:
             or len(names) not in OS_ASSET_PROFILE_FILE_COUNTS or len(set(names)) != len(names)):
         raise ValueError("fixed OS asset set required")
     expected = {"index.html": "text/html; charset=utf-8"}
-    patterns = _BASE + (_NOIR if len(names) in (9, 13) else ()) + (_RICH_CLIENT if len(names) == 13 else ())
+    patterns = _BASE + (_NOIR if len(names) in (9, 11, 13) else ()) + (_RICH_CLIENT if len(names) == 13 else ())
     for pattern, mime in patterns:
         matches = [name for name in names if re.fullmatch(pattern, name)]
         if len(matches) != 1:
             raise ValueError("fixed OS asset set required")
         expected[matches[0]] = mime
-    if len(names) in (9, 13):
+    if len(names) in (9, 11, 13):
         expected.update({name: "text/plain; charset=utf-8" for name in _LICENSES})
-    if len(names) == 13:
-        expected.update({name: "text/plain; charset=utf-8" for name in _CLIENT_LICENSES})
+    if len(names) in (11, 13):
+        expected.update({name: "text/plain; charset=utf-8" for name in _THIRD_PARTY_NOTICES})
     if set(names) != set(expected):
         raise ValueError("fixed OS asset set required")
     return expected

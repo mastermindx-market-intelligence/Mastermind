@@ -21,6 +21,7 @@ NOIR = BASE + ["assets/atelier-office-image.jpg", "assets/Manrope-Variable-font.
     "licenses/fonts/Manrope-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt"]
 CLIENT = NOIR + ["assets/SourceMarkdown-rich.js", "assets/SourceMarkdown-rich.css",
     "third-party/deepseek-client-dependency-NOTICES.txt", "third-party/deepseek-harness-LICENSE.txt"]
+LICENSED = NOIR + CLIENT[-2:]
 
 
 def make_dist(root: Path, names=CLIENT):
@@ -33,8 +34,8 @@ def make_dist(root: Path, names=CLIENT):
     return dist
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, CLIENT])
-def test_three_exact_supported_layouts_and_mime_sets(names):
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, CLIENT])
+def test_four_exact_supported_layouts_and_mime_sets(names):
     mimes = os_asset_mimes(names)
     assert set(mimes) == set(names)
     assert mimes["index.html"] == "text/html; charset=utf-8"
@@ -72,7 +73,7 @@ def test_unknown_or_injectable_member_never_becomes_a_route(name):
 
 @pytest.mark.parametrize("names", [
     CLIENT + ["assets/foreign.js"], CLIENT + [CLIENT[0]],
-    CLIENT[:9] + CLIENT[9:11], CLIENT[:9] + CLIENT[11:],
+    CLIENT[:9] + CLIENT[9:11], CLIENT[:9] + [CLIENT[9], CLIENT[-1]],
     BASE + CLIENT[9:], CLIENT[:9] + [CLIENT[9]] * 4,
     CLIENT[:9] + [None] * 4, CLIENT[:9] + [1] * 4,
 ])
@@ -81,7 +82,7 @@ def test_partial_extra_duplicate_or_malformed_layout_refuses(names):
         os_asset_mimes(names)
 
 
-@pytest.mark.parametrize("names", [BASE, NOIR, CLIENT])
+@pytest.mark.parametrize("names", [BASE, NOIR, LICENSED, CLIENT])
 def test_actual_manifest_and_public_edge_accept_exact_layouts(tmp_path, names):
     dist = make_dist(tmp_path, names)
     manifest = build_os_asset_manifest(tmp_path)

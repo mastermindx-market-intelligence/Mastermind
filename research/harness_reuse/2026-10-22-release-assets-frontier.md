@@ -112,3 +112,24 @@ remain unchanged. The preserved earlier verification receipts still
 describe their original head; the new head requires its own qualification
 and protected merge checks. Do not reinterpret this source correction
 as a production release or a completed authenticated conversation.
+
+## Protected eleven-file reconciliation — 2026-10-22 (current source)
+
+Recovered the original registered Web worktree on M2 using the currently
+Chairman-directed Desktop Commander path; no replacement workspace or branch.
+The immutable earlier release head is `2121bf0103cca5b21957d2a62af5c0f5dd5e3202`
+and protected integration parent is `05a9eb52a54e29fb7bbd0d40813ed12623b176c7`.
+Material protected PR #1738 introduced exact licensed Noir 11, causing three
+conflicts in asset names/MIME, source-manifest directory topology and public
+publication index. The original codebase now retains 3/9/11/13 exact layouts,
+4/10/12/14 stage indexes, a single notice set, and fail-closed paths/MIMEs;
+stale rejection of the valid 11-file subset was corrected. Full old9-to-rich13
+and old11-to-rich13 inert publication paths passed, with existing protected
+eleven-file transition cases preserved. The six affected release-owner modules
+collected **419 tests**, produced **419 passing marks, no skip/failure marks**,
+and the host process exited zero. Scoped diff check passed. Reusable exact
+evidence lives at `research/harness_reuse/evidence/2026-10-22-release-assets/four-profile-integration.json`.
+This is source-only qualification; commit/push, new-head hosted checks,
+necessary independent review, protected merge queue and root-sealed installed
+user journey remain distinct. The earlier r2 reviewer Qwen credential denial
+has no review verdict; no reviewer replay was attempted in this lane.
