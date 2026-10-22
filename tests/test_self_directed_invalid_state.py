@@ -377,19 +377,30 @@ def test_save_refuses_to_overwrite_an_existing_invalid_file(
 
 # ── 6. account_file_status — read-only probe ──────────────────────────────────
 
-def test_account_file_status_reads_without_writing(sd_paths: Path) -> None:
-    """MISSING / VALID / INVALID classification; the tmp listing is identical before and
-    after, proving the probe never writes."""
+def test_account_file_status_reads_without_writing(sd_paths: Path,
+                                                   run_events_recorder: list[dict]) -> None:
+    """MISSING / VALID / INVALID classification; every probe call leaves the tmp tree (paths
+    and bytes) exactly as it found it and emits no run event, proving the probe never writes."""
     from portfolio import self_directed as sd
     tmp_path = sd_paths
 
-    missing = sd.account_file_status()
+    def tree() -> dict[str, bytes | None]:
+        return {p.relative_to(tmp_path).as_posix(): (p.read_bytes() if p.is_file() else None)
+                for p in tmp_path.rglob("*")}
+
+    def probe(**kwargs) -> dict:
+        before = tree()
+        result = sd.account_file_status(**kwargs)
+        assert tree() == before, "account_file_status must never write anything"
+        return result
+
+    missing = probe()
     assert missing == {"status": "MISSING", "path": str(tmp_path / "account.json"),
                        "sha256": None, "size": None, "problems": []}
 
     payload = _valid_book_bytes()
     (tmp_path / "account.json").write_bytes(payload)
-    valid = sd.account_file_status()
+    valid = probe()
     assert valid["status"] == "VALID"
     assert valid["problems"] == []
     assert valid["sha256"] == hashlib.sha256(payload).hexdigest()
@@ -397,7 +408,7 @@ def test_account_file_status_reads_without_writing(sd_paths: Path) -> None:
 
     bad_payload = INVALID_CASES["cash_string"]
     (tmp_path / "account.json").write_bytes(bad_payload)
-    invalid = sd.account_file_status()
+    invalid = probe()
     assert invalid["status"] == "INVALID"
     assert invalid["problems"] == ["cash_invalid"]
     assert invalid["sha256"] == hashlib.sha256(bad_payload).hexdigest()
@@ -405,11 +416,12 @@ def test_account_file_status_reads_without_writing(sd_paths: Path) -> None:
     # the probe overrode path must work too, without touching the default one
     other = tmp_path / "elsewhere.json"
     other.write_bytes(bad_payload)
-    assert sd.account_file_status(path=other)["status"] == "INVALID"
-    assert sd.account_file_status()["status"] == "INVALID"
+    assert probe(path=other)["status"] == "INVALID"
+    assert probe()["status"] == "INVALID"
 
-    listing = lambda: sorted(p.relative_to(tmp_path).as_posix() for p in tmp_path.rglob("*"))
-    assert listing() == listing(), "account_file_status must never write anything"
+    assert _quarantine_copies(tmp_path) == []
+    assert _ledger_rows(tmp_path) == []
+    assert run_events_recorder == []
 
 
 # ── 7. a valid live-shaped file survives a mark/save round trip ───────────────
