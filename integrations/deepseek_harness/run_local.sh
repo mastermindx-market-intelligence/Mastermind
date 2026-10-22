@@ -12,4 +12,4 @@ mkdir -p "$DSH_HOME"
 chmod 700 "$DSH_HOME"
 export DSH_HOME
 cd "$DSH_SOURCE"
-exec ./node_modules/.bin/dsh web --no-open "$@"
+exec node apps/cli/lib/bin.js web --no-open "$@"
