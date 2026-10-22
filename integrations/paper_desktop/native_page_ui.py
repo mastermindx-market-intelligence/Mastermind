@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 import re
 import subprocess
@@ -233,8 +234,13 @@ class NativePeekaboo:
         return data
 
 
+def _finite_number(value) -> bool:
+    return type(value) in (int, float) and math.isfinite(value)
+
+
 def _menu_target(snapshot: dict, expected_file_name: str, label: str,
-                 window_id: int) -> tuple[int, int]:
+                 window_id: int, *, row_x: int | None = None,
+                 row_y: int | None = None) -> tuple[int, int]:
     if snapshot.get("window_title") != expected_file_name or snapshot.get("is_dialog") is True:
         raise bridge.Refusal("UI_FILE_CONTEXT_CHANGED")
     context = snapshot.get("coordinate_context") or {}
@@ -247,13 +253,15 @@ def _menu_target(snapshot: dict, expected_file_name: str, label: str,
         raise bridge.Refusal("UI_WINDOW_UNVERIFIED")
     origin_x, origin_y = limits[0]
     width, height = limits[1]
+    if not all(_finite_number(v) for v in (origin_x, origin_y, width, height)):
+        raise bridge.Refusal("UI_WINDOW_UNVERIFIED")
     matches = [
         z for z in snapshot.get("ui_elements", []) or []
         if isinstance(z, dict)
         and str(z.get("id", "")).startswith("ocr_")
         and str(z.get("label", "")).strip().casefold() == label.casefold()
-        and isinstance(z.get("confidence"), (int, float))
-        and z["confidence"] >= OCR_MIN_CONFIDENCE
+        and _finite_number(z.get("confidence"))
+        and OCR_MIN_CONFIDENCE <= z["confidence"] <= 1
     ]
     if len(matches) == 0 and label.casefold() == "copy link":
         # OCR may miss the first context-menu line. The non-destructive
@@ -264,12 +272,12 @@ def _menu_target(snapshot: dict, expected_file_name: str, label: str,
                  if isinstance(q, dict)
                  and str(q.get("id", "")).startswith("ocr_")
                  and str(q.get("label", "")).strip().casefold() == name
-                 and isinstance(q.get("confidence"), (int, float))
-                 and q["confidence"] >= OCR_MIN_CONFIDENCE]
+                 and _finite_number(q.get("confidence"))
+                 and OCR_MIN_CONFIDENCE <= q["confidence"] <= 1]
             if len(a) != 1:
                 raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
             b = a[0].get("bounds") or {}
-            if not all(isinstance(b.get(k), (int, float))
+            if not all(_finite_number(b.get(k))
                        for k in ("x", "y", "width", "height")):
                 raise bridge.Refusal("UI_MENU_BOUNDS_UNVERIFIED")
             return b
@@ -283,17 +291,33 @@ def _menu_target(snapshot: dict, expected_file_name: str, label: str,
                 or not 6 <= add["height"] <= 20
                 or not 6 <= delete["height"] <= 20):
             raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
+        # Only infer Copy link inside the context menu opened against the
+        # actual sidebar row. Two unrelated labels elsewhere in the document
+        # must not authorize any coordinate click before clipboard proof.
+        if type(row_x) is not int or type(row_y) is not int:
+            raise bridge.Refusal("UI_MENU_ROW_UNVERIFIED")
+        click_x, click_y = origin_x + row_x, origin_y + row_y
+        if (not -30 <= add_x - click_x <= 240
+                or not 15 <= add_y - click_y <= 150
+                or not -30 <= delete_x - click_x <= 240
+                or not 45 <= delete_y - click_y <= 220):
+            raise bridge.Refusal("UI_MENU_ROW_UNVERIFIED")
         rect = {"x": add_x, "y": add_y - step, "width": 0, "height": 0}
     elif len(matches) == 1:
         rect = matches[0].get("bounds") or {}
     else:
         raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
-    if not all(isinstance(rect.get(k), (int, float)) for k in ("x", "y", "width", "height")):
+    if not all(_finite_number(rect.get(k)) for k in ("x", "y", "width", "height")):
         raise bridge.Refusal("UI_MENU_BOUNDS_UNVERIFIED")
     x = round(rect["x"] + rect["width"] / 2 - origin_x)
     y = round(rect["y"] + rect["height"] / 2 - origin_y)
     if not (0 <= x < width and 0 <= y < height):
         raise bridge.Refusal("UI_MENU_BOUNDS_UNVERIFIED")
+    if row_x is not None or row_y is not None:
+        if (type(row_x) is not int or type(row_y) is not int
+                or not -30 <= x - row_x <= 250
+                or not -55 <= y - row_y <= 230):
+            raise bridge.Refusal("UI_MENU_ROW_UNVERIFIED")
     return x, y
 
 
@@ -309,9 +333,23 @@ def read_clipboard() -> str:
     return p.stdout.strip()
 
 
+def write_clipboard(value: str) -> None:
+    """Mark pasteboard before second Copy link; stale text is not proof."""
+    if type(value) is not str or not value or len(value) > MAX_CLIPBOARD:
+        raise bridge.Refusal("UI_CLIPBOARD_MARKER_INVALID")
+    try:
+        p = subprocess.run(["pbcopy"], input=value, stdout=subprocess.DEVNULL,
+                           stderr=subprocess.DEVNULL, text=True,
+                           timeout=2, check=False)
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise bridge.Refusal("UI_CLIPBOARD_UNAVAILABLE") from exc
+    if p.returncode != 0:
+        raise bridge.Refusal("UI_CLIPBOARD_UNAVAILABLE")
+
+
 def prune_one(plan: dict, page_id: str, operation_id: str,
               window_id: int, row_x: int, row_y: int, *,
-              client, ui, clipboard) -> dict:
+              client, ui, clipboard, clipboard_set) -> dict:
     if not isinstance(operation_id, str) or not guard.OPERATION_RE.fullmatch(operation_id):
         raise bridge.Refusal("OPERATION_ID_REQUIRED")
     if not isinstance(window_id, int) or window_id <= 0:
@@ -326,8 +364,10 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             private_dir = Path(tmp)
             ui.click(window_id, row_x, row_y, right=True)
             opened = ui.menu(window_id, private_dir)
-            copy_xy = _menu_target(opened, plan["clone_file_name"], "Copy link", window_id)
-            _menu_target(opened, plan["clone_file_name"], "Delete page", window_id)
+            copy_xy = _menu_target(opened, plan["clone_file_name"], "Copy link", window_id,
+                                   row_x=row_x, row_y=row_y)
+            _menu_target(opened, plan["clone_file_name"], "Delete page", window_id,
+                         row_x=row_x, row_y=row_y)
             ui.click(window_id, *copy_xy)
             copied = clipboard()
             if before_clip == copied:
@@ -336,10 +376,40 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             if link_file != plan["clone_file_id"] or link_page != page_id:
                 raise bridge.Refusal("UI_PAGE_ID_MISMATCH")
             _validate_plan_and_current(plan, client, page_id)
+            # First menu identity is not enough: sidebar scrolling or focus
+            # changes can make the next right-click target a different page.
+            # Copy the link from the *second* menu before re-arming delete.
             ui.click(window_id, row_x, row_y, right=True)
             reopened = ui.menu(window_id, private_dir)
-            _menu_target(reopened, plan["clone_file_name"], "Copy link", window_id)
-            delete_xy = _menu_target(reopened, plan["clone_file_name"], "Delete page", window_id)
+            second_copy_xy = _menu_target(reopened, plan["clone_file_name"], "Copy link", window_id,
+                                          row_x=row_x, row_y=row_y)
+            second_delete_xy = _menu_target(reopened, plan["clone_file_name"], "Delete page", window_id,
+                                            row_x=row_x, row_y=row_y)
+            marker = "paper-native-copy-check:" + operation_id
+            clipboard_set(marker)
+            if clipboard() != marker:
+                raise bridge.Refusal("UI_CLIPBOARD_MARKER_NOT_SET")
+            ui.click(window_id, *second_copy_xy)
+            second_link = clipboard()
+            if second_link == marker:
+                raise bridge.Refusal("STALE_CLIPBOARD")
+            second_file, second_page = native_page_identity(second_link)
+            if second_file != plan["clone_file_id"] or second_page != page_id:
+                raise bridge.Refusal("UI_PAGE_ID_MISMATCH")
+            _validate_plan_and_current(plan, client, page_id)
+
+            # Copy link closes the menu. Reopen once for Delete, rejecting
+            # menu movement since the freshly ID-verified second menu. This
+            # is a guarded visual actuation, not an atomic Paper page API.
+            ui.click(window_id, row_x, row_y, right=True)
+            final_menu = ui.menu(window_id, private_dir)
+            _menu_target(final_menu, plan["clone_file_name"], "Copy link", window_id,
+                         row_x=row_x, row_y=row_y)
+            delete_xy = _menu_target(final_menu, plan["clone_file_name"], "Delete page", window_id,
+                                     row_x=row_x, row_y=row_y)
+            if (abs(delete_xy[0] - second_delete_xy[0]) > 12
+                    or abs(delete_xy[1] - second_delete_xy[1]) > 12):
+                raise bridge.Refusal("UI_MENU_RELOCATED")
             _validate_plan_and_current(plan, client, page_id)
             delete_dispatched = True
             try:
@@ -357,6 +427,10 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
                     or clone_after["fileName"] != clone["fileName"]
                     or guard._tokens_hash(clone_after) != guard._tokens_hash(clone)):
                 raise bridge.Refusal("CLONE_PRUNE_EFFECT_UNKNOWN")
+            # Verify retained native structure on BOTH source and clone after
+            # the irreversible click. A stable page list/token digest is not
+            # evidence that native content stayed intact.
+            _retained_native_proof(plan, client, guard._pages(source))
             return {
                 "schema": SCHEMA,
                 "state": "CLONE_PAGE_UI_DELETE_VERIFIED",
@@ -365,7 +439,8 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
                 "clone_file_id": plan["clone_file_id"],
                 "removed_page_id": page_id,
                 "retained_page_ids": [p["id"] for p in expected],
-                "source_unchanged": True,
+                "source_page_list_unchanged": True,
+                "retained_native_structure_reverified": True,
                 "ui_copy_link_exact_target_verified": True,
                 "retry_allowed": False,
                 "production_migration_accepted": False,
@@ -408,7 +483,8 @@ def main() -> int:
             result = prune_one(
                 plan, args.page_id, args.operation_id,
                 args.window_id, args.row_x, args.row_y,
-                client=client, ui=NativePeekaboo(), clipboard=read_clipboard)
+                client=client, ui=NativePeekaboo(), clipboard=read_clipboard,
+                clipboard_set=write_clipboard)
         print(json.dumps(result, sort_keys=True))
         return 0 if result["state"] == "CLONE_PAGE_UI_DELETE_VERIFIED" else 2
     except (bridge.Refusal, OSError, ValueError) as exc:

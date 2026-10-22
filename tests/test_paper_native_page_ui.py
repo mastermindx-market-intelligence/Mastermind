@@ -16,6 +16,7 @@ class FakeClient:
     def __init__(self):
         self.active = CLONE
         self.fail_read_after_delete = False
+        self.source_native_drift = False
         self.clone_created_at = 1792672000000
         self.source_created_at = 1792671000000
         self.files = {
@@ -50,7 +51,10 @@ class FakeClient:
             })},
             {"type": "text", "text": json.dumps({
                 "fileName": d["fileName"], "pageName": page["name"],
-                "pageId": page["id"], "nodeCount": 1, "artboardCount": 0,
+                "pageId": page["id"],
+                "nodeCount": (99 if fid == SRC and self.source_native_drift
+                              and requested == "p-1-0" else 1),
+                "artboardCount": 0,
                 "fontFamilies": [], "artboards": [], "pages": pages,
                 "tokens": {"items": []},
             })},
@@ -66,7 +70,12 @@ class FakePeekaboo:
         self.missing_menu = False
         self.change_file_after_delete = False
         self.no_clipboard_change = False
+        self.no_second_copy_change = False
         self.wrong_title = False
+        self.right_clicks = 0
+        self.drift_second_menu_to_keep = False
+        self.move_final_menu = False
+        self.source_native_drift_after_delete = False
 
     def menu(self, window_id, private_dir):
         self.calls.append(("menu", window_id))
@@ -79,6 +88,9 @@ class FakePeekaboo:
         ]
         if self.missing_menu:
             elements = elements[:1]
+        if self.move_final_menu and self.right_clicks >= 3:
+            for item in elements:
+                item["bounds"]["y"] += 40
         return {
             "window_title": "Young harmony" if self.wrong_title else "Young harmony (copy)",
             "is_dialog": False,
@@ -90,15 +102,21 @@ class FakePeekaboo:
     def click(self, window_id, x, y, *, right=False):
         self.calls.append(("click", window_id, x, y, right))
         if right:
+            self.right_clicks += 1
+            if self.drift_second_menu_to_keep and self.right_clicks == 2:
+                self.link_page = "p-1-0"
             return {"success": True}
         if y == 161:  # Copy link OCR: 210+6-55
-            if not self.no_clipboard_change:
+            if not self.no_clipboard_change and not (
+                    self.no_second_copy_change and self.right_clicks == 2):
                 self.clipboard["value"] = (
                     "https://app.paper.design/file/" + self.link_file + "/" + self.link_page)
         elif y == 216:  # Delete page OCR: 265+6-55
             if self.fail_delete:
                 raise ui_module.bridge.Refusal("CLICK_RESULT_LOST")
             self.client.files[CLONE]["pages"] = [copy.deepcopy(PAGE1)]
+            if self.source_native_drift_after_delete:
+                self.client.source_native_drift = True
             if self.change_file_after_delete:
                 self.client.files[SRC]["pages"][0]["name"] = "MUTATED"
         return {"success": True}
@@ -142,7 +160,8 @@ def perform(plan=None, *, client=None, clipboard=None, ui=None, page_id="p-3-0")
     result = ui_module.prune_one(
         plan or fixture_plan(), page_id, "paper-scratch-ui-20261022",
         313, 87, 194, client=client, ui=ui,
-        clipboard=lambda: clipboard["value"])
+        clipboard=lambda: clipboard["value"],
+        clipboard_set=lambda value: clipboard.__setitem__("value", value))
     return result, client, clipboard, ui
 
 
@@ -160,10 +179,13 @@ class NativePageUITests(unittest.TestCase):
             {"id": "ocr_31", "label": "Delete page", "confidence": 0.5,
              "bounds": {"x": 621, "y": 347, "width": 67, "height": 12}},
         ]
-        x, y = ui_module._menu_target(snapshot, "Young harmony (copy)", "Copy link", 313)
+        x, y = ui_module._menu_target(
+            snapshot, "Young harmony (copy)", "Copy link", 313, row_x=100, row_y=165)
         self.assertTrue(120 <= x <= 180)
         self.assertTrue(150 <= y <= 190)
-        for change in ("missing", "duplicate", "faraway", "wrong_title"):
+        for change in ("missing", "duplicate", "faraway", "wrong_title",
+                       "spoofed_canvas_cluster", "spoofed_below_row",
+                       "bool_confidence", "bool_bounds"):
             broken = deepcopy(snapshot)
             if change == "missing":
                 broken["ui_elements"] = broken["ui_elements"][:1]
@@ -171,10 +193,22 @@ class NativePageUITests(unittest.TestCase):
                 broken["ui_elements"].append(deepcopy(broken["ui_elements"][1]))
             elif change == "faraway":
                 broken["ui_elements"][1]["bounds"]["y"] += 90
+            elif change == "spoofed_canvas_cluster":
+                for item in broken["ui_elements"]:
+                    item["bounds"]["x"] += 400
+            elif change == "spoofed_below_row":
+                for item in broken["ui_elements"]:
+                    item["bounds"]["y"] += 230
+            elif change == "bool_confidence":
+                broken["ui_elements"][0]["confidence"] = True
+            elif change == "bool_bounds":
+                broken["ui_elements"][0]["bounds"]["x"] = True
             else:
                 broken["window_title"] = "MASTERMIND PAGES"
             with self.subTest(case=change), self.assertRaises(ui_module.bridge.Refusal):
-                ui_module._menu_target(broken, "Young harmony (copy)", "Copy link", 313)
+                ui_module._menu_target(
+                    broken, "Young harmony (copy)", "Copy link", 313,
+                    row_x=100, row_y=165)
 
     def test_every_paper_rpc_is_checked_by_canonical_read_allowlist(self):
         client = FakeClient()
@@ -205,12 +239,59 @@ class NativePageUITests(unittest.TestCase):
         result, client, clipboard, ui = perform()
         self.assertEqual(result["state"], "CLONE_PAGE_UI_DELETE_VERIFIED")
         self.assertEqual(result["removed_page_id"], "p-3-0")
-        self.assertTrue(result["source_unchanged"])
+        self.assertTrue(result["source_page_list_unchanged"])
+        self.assertTrue(result["retained_native_structure_reverified"])
+        self.assertNotIn("source_unchanged", result)
         self.assertFalse(result["original_deletion_authorized"])
         self.assertFalse(result["retry_allowed"])
         self.assertEqual([p["id"] for p in client.files[SRC]["pages"]], ["p-1-0", "p-3-0"])
         self.assertEqual([p["id"] for p in client.files[CLONE]["pages"]], ["p-1-0"])
         self.assertEqual(sum(1 for x in ui.calls if x[0] == "click" and x[3] == 216), 1)
+
+    def test_second_copy_link_must_refresh_unique_clipboard_marker(self):
+        client, clipboard, ui = scenario()
+        ui.no_second_copy_change = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "STALE_CLIPBOARD")
+        self.assertEqual(ui.right_clicks, 2)
+        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
+                             and x[3] == 216), 0)
+        self.assertEqual(len(client.files[CLONE]["pages"]), 2)
+
+    def test_second_menu_page_drift_refuses_before_destructive_dispatch(self):
+        client, clipboard, ui = scenario()
+        ui.drift_second_menu_to_keep = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "UI_PAGE_ID_MISMATCH")
+        self.assertEqual(ui.right_clicks, 2)
+        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
+                             and x[3] == 216), 0)
+        self.assertEqual([p["id"] for p in client.files[CLONE]["pages"]],
+                         ["p-1-0", "p-3-0"])
+
+    def test_final_menu_relocation_refuses_before_destructive_dispatch(self):
+        client, clipboard, ui = scenario()
+        ui.move_final_menu = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "UI_MENU_RELOCATED")
+        self.assertEqual(ui.right_clicks, 3)
+        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
+                             and x[3] == 216), 0)
+        self.assertEqual(len(client.files[CLONE]["pages"]), 2)
+
+    def test_content_only_source_drift_after_dispatch_cannot_be_verified(self):
+        client, clipboard, ui = scenario()
+        ui.source_native_drift_after_delete = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "EFFECT_UNKNOWN")
+        self.assertEqual(result["reason"],
+                         "RETAINED_PAGE_NATIVE_STRUCTURE_MISMATCH")
+        self.assertNotIn("source_page_list_unchanged", result)
+        self.assertFalse(result["retry_allowed"])
+        self.assertEqual(len(client.files[SRC]["pages"]), 2)
+        self.assertEqual(len(client.files[CLONE]["pages"]), 1)
+        self.assertEqual(sum(1 for x in ui.calls if x[0] == "click"
+                             and x[3] == 216), 1)
 
     def test_wrong_file_link_refuses_before_delete(self):
         client, clipboard, ui = scenario()
