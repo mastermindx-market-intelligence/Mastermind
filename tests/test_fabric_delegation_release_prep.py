@@ -123,10 +123,12 @@ def test_staging_is_new_sibling_and_never_selects_live_generation(installed, tmp
     target = parent / "operator-delegation-release"
     before = (installed["store"] / "CURRENT.json").read_bytes()
     # Synthetic merged-provenance only for the TEST, not a release assertion.
-    monkeypatch.setattr(release, "_verify_merged_source", lambda repo, ref, raw: "fake-merged-source")
+    monkeypatch.setattr(release, "_verify_merged_source", lambda repo, ref, raw: "e"*40)
     record = _qualify(installed, stage_dir=target, stage_parent=parent,
                       merged_repo=ROOT, merged_ref="synthetic-test")
     assert record["review_stage"] == str(target)
+    assert record["protected_merged_source_sha"] == "e"*40
+    assert json.loads((target / "qualification.json").read_text())["protected_merged_source_sha"] == "e"*40
     manifest = json.loads((target / "manifest.json").read_text())
     assert len(manifest) == 85
     for name, digest in manifest.items():

@@ -183,10 +183,15 @@ def qualify(
     if sha(old) != verified["files"][OPERATOR]:
         raise QualificationRefused("selected operator differs from sealed manifest")
     patched = compose_instructions(old, candidate)
+    protected_merged_sha: str | None = None
     if stage_dir is not None:
         if not (stage_parent and merged_repo and merged_ref):
             raise QualificationRefused("staging requires workspace parent and protected merged source")
-        _verify_merged_source(merged_repo, merged_ref, candidate)
+        protected_merged_sha = _verify_merged_source(merged_repo, merged_ref, candidate)
+        if not (isinstance(protected_merged_sha, str)
+                and len(protected_merged_sha) == 40
+                and all(ch in "0123456789abcdef" for ch in protected_merged_sha)):
+            raise QualificationRefused("protected merged source identifier invalid")
         stage_parent = stage_parent.resolve(strict=True)
         stage_dir = stage_dir.absolute()
         if (stage_dir.parent != stage_parent or stage_dir.exists()
@@ -224,7 +229,9 @@ def qualify(
             "qualified_operator_sha256": sha(patched),
             "release_manifest_sha256": sha(generation.canonical(successor)),
             "native_file_count": len(successor), "changed_files": [OPERATOR],
-            "no_credentials_or_provider_access": True, **test,
+            "no_credentials_or_provider_access": True,
+            "protected_merged_source_sha": protected_merged_sha,
+            **test,
         }
         if stage_dir is not None:
             assert stage_parent is not None

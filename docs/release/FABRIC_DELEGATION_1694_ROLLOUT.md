@@ -67,7 +67,7 @@ python3 "$SCRIPT" \
   --stage-parent "$STAGE_PARENT" --release-stage "$STAGE"
 ```
 
-`--merged-ref` is accepted only when contained in protected `origin/master` and that exact git object contains the pinned operator candidate. The tool rejects an existing stage, creates only a reviewed 85-file `source/`, `manifest.json`, and `qualification.json` in the sibling directory, and never publishes to the live kit. An independent release reviewer compares `manifest.json` to every staged file and rechecks the current-generation pointer. **Stage output is not permission to select.**
+`--merged-ref` is accepted only when contained in protected `origin/master` and that exact git object contains the pinned operator candidate. The tool rejects an existing stage, creates only a reviewed 85-file `source/`, `manifest.json`, and `qualification.json` in the sibling directory, and never publishes to the live kit. The receipt records `protected_merged_source_sha` from the protected Git object alongside the code manifest and selected-generation digest; its identity must be independently read back. An independent release reviewer compares `manifest.json` to every staged file and rechecks the current-generation pointer. **Stage output is not permission to select.**
 
 After the release owner has verified original-source custody, collision/lease status, reviewed stage identity, live selection preimage and required approval, use the existing native owner; do **not** manually copy individual code files into `ext/`:
 
@@ -96,6 +96,16 @@ Preflight **after actual runtime selection**. Each canary has its **own verified
 **D2: Fresh Codex principal.** Start a distinct M2 Codex session; verify native skill-catalog discovery **and actual loading** of `mastermind-fabric-delegate` (mere presence on disk is insufficient). With Codex's separately verified native root and immediate parent, commission a separate C0 read-only Fabric task and consume it back through the same route. Require the same START/status/result/digest/principal-acceptance evidence as Claude. Do not change Codex's 32/33 native agent settings; native `spawn_agent` is not a Fabric worker.
 
 **D3: Admitted GLM/Grok domain operator.** The original principal verifies the root authorization, actual allowance, per-run capsule support, and a legitimate need for one bounded child. A positive grant of at least one child and enough lifetime for lease + task + return is required. Commission one `domain_orchestration` C3 operator with a bounded child request; the incumbent operator/lease owner binds support, root, operator ID, lease, account, model, packet and budget. When `mastermindStudio` tools are actually visible to that operator, it calls `fabric_operator_scope {}` and, if admitted, `fabric_child_request` exactly once (C0/C1), with the **original root** and **operator run as immediate parent**. Follow the **same ID** with child status/result, read its bytes, and `fabric_child_acknowledge` using the returned SHA256. The operator returns its findings and child digest to the original principal; the principal separately reviews/accepts the operator result. Ordinary Fabric-spawned leaves have no recursive delegation grant. A Grok 4.7 model binding alone is not a capsule grant.
+
+**Deterministic leaf payloads (exact UTF-8 bytes, no terminating newline):**
+
+| Worker | Literal task input | Required computed SHA-256 |
+| --- | --- | --- |
+| Claude leaf | `MMX_FABRIC_CLAUDE_CANARY_V1` | `1449a77892b116fbd47bd2b9abe7e4edebf17026420579a5cefa5e9f24496e52` |
+| Codex leaf | `MMX_FABRIC_CODEX_CANARY_V1` | `15fc52bc48590eb30bcbcf3505d86ed4d9d158e9b155d22695e51ff20d7f96c1` |
+| Operator child | `MMX_FABRIC_OPERATOR_CHILD_CANARY_V1` | `20d6c967652b58207515e1c78c052d9f2612bc175bfd581eca03d58279a41d34` |
+
+Each principal must independently compare the worker's *actual response content* with the expected digest before acknowledging or accepting. The operator must perform this check before `fabric_child_acknowledge`; incorrect computation or a missing return is a failed canary, even if the adapter reports `rc=0`. A success-shaped JSON fixture is not test evidence.
 
 **Minimum canary proof:**
 
