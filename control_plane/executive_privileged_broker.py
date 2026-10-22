@@ -45,10 +45,23 @@ RECONCILE_REQUEST_SCHEMA = (
     "mastermind.executive_privileged_action_reconcile_not_applied_request.v1"
 )
 RECONCILIATION_SCHEMA = "mastermind.executive_privileged_action_reconciliation.v1"
+# Closed dispatch literals for the dormant forward protocol.  They mirror the
+# forward module's wire schema constants so every ordinary v1 route (action
+# dispatch, refusal path, v1 commitment reading) never imports the optional
+# forward module; that module remains the only law for its own frames.
+FORWARD_STATUS_REQUEST_SCHEMA = (
+    "mastermind.executive_incident_forward_recovery_status_request.v1"
+)
+FORWARD_ACTION_REQUEST_SCHEMA = (
+    "mastermind.executive_incident_forward_recovery_request.v1"
+)
 STATUS_TERMINAL = "TERMINAL"
 STATUS_EFFECT_UNKNOWN = "EFFECT_UNKNOWN"
 STATUS_RECONCILED_NOT_APPLIED = "RECONCILED_NOT_APPLIED"
 STATUS_NOT_FOUND = "NOT_FOUND"
+# Internal, dormant incident issuer.  It never maps to a reviewed argv; the
+# broker derives and writes everything inside the authenticated root process.
+INCIDENT_ISSUER_ACTION = "executive.worker_auth.issue_due10_incident_grant"
 _RELEASE_PREFIX = Path("/Library/Application Support/MastermindExecutive/releases")
 _RECEIPT_ROOT = Path("/var/db/mastermind-executive/privileged-actions/receipts")
 _SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -174,6 +187,16 @@ class ReconciledNotAppliedError(PrivilegedBrokerError):
     """The original request is durably reconciled as not applied and must not replay."""
 
 
+class ForwardHostGuardUnavailableError(PrivilegedBrokerError):
+    """The forward host-guard producer is absent or failed before reservation.
+
+    Production deliberately never composes this producer: the dormant
+    forward transition categorically refuses with this typed result rather
+    than accepting JSON, CLI or environment booleans or a saved report as
+    qualified current host observations.
+    """
+
+
 @dataclasses.dataclass(frozen=True)
 class ReconcileNotAppliedRequest:
     target_request_id: str
@@ -187,6 +210,9 @@ class ReconcileNotAppliedRequest:
     # Derived from the target digest, never a new wire claim.
     requalify_terminal_adverse_sha256: str | None = None
     renew_device_revalidation_sha256: str | None = None
+    requalify_company_device_drift_sha256: str | None = None
+    recover_current_pin_grant_sha256: str | None = None
+    successor_request_id: str | None = None
 
     def to_dict(self) -> dict[str, str]:
         return {
@@ -221,6 +247,24 @@ def _reconciliation_target(raw: Mapping[str, Any]):
         variants.append({
             **args, "renew_device_revalidation_sha256": raw.get("readiness_receipt_sha256"),
         })
+        variants.append({
+            **args, "requalify_company_device_drift_sha256": raw.get("readiness_receipt_sha256"),
+        })
+        # The bounded current-pin recovery route carries the grant digest, not
+        # the predecessor digest, so its only reconstructable source is the
+        # custody-checked grant itself.  A grant that does not designate exactly
+        # this request contributes no variant at all.
+        try:
+            from ops.executive_os import provider_recovery
+            grants = provider_recovery.historical_recovery_grants()
+        except Exception:  # noqa: BLE001 - unreadable evidence supplies no variant
+            grants = []
+        for grant_digest, grant in grants:
+            if grant["successor_request_id"] == raw.get("target_request_id"):
+                variants.append({
+                    **args, "recover_current_pin_grant_sha256": grant_digest,
+                    "successor_request_id": raw.get("target_request_id"),
+                })
     matches = []
     for candidate in variants:
         try:
@@ -228,10 +272,10 @@ def _reconciliation_target(raw: Mapping[str, Any]):
                 "schema": REQUEST_SCHEMA, "request_id": raw.get("target_request_id"),
                 "action": "executive.worker_auth.verify_ready", "args": candidate,
             })
-        except ValueError as exc:
-            raise PrivilegedBrokerError(
-                "reconciliation target verify_ready arguments are invalid"
-            ) from exc
+        except ValueError:
+            # Optional incident-specific variants may be ineligible. Only one
+            # fully validated target matching the exact original hash is used.
+            continue
         if hashlib.sha256(canonical_request_bytes(target)).hexdigest() == raw.get("target_request_sha256"):
             matches.append(target)
     if len(matches) != 1:
@@ -278,6 +322,9 @@ def validate_reconcile_not_applied_request(
         credential_expires_at=args["credential_expires_at"],
         requalify_terminal_adverse_sha256=args.get("requalify_terminal_adverse_sha256"),
         renew_device_revalidation_sha256=args.get("renew_device_revalidation_sha256"),
+        requalify_company_device_drift_sha256=args.get("requalify_company_device_drift_sha256"),
+        recover_current_pin_grant_sha256=args.get("recover_current_pin_grant_sha256"),
+        successor_request_id=args.get("successor_request_id"),
     )
 
 
@@ -992,6 +1039,7 @@ class PrivilegedActionBroker:
         trust_validator: Callable[[PrivilegedBrokerConfig], None] = verify_production_trust,
         reconciliation_observer: Callable[[], Mapping[str, Any]] = _default_reconciliation_observer,
         release_owner: Any | None = None,
+        forward_host_guard: Any | None = None,
     ) -> None:
         self.config = config
         self.receipt_root = Path(config.receipt_root)
@@ -1000,6 +1048,13 @@ class PrivilegedActionBroker:
         self._executor = executor
         self._require_root = require_root
         self._reconciliation_observer = reconciliation_observer
+        # Production remains uncomposed while its code-bound policy is None.
+        # run_broker can select only the fixed reviewed private producer after
+        # that policy is activated in source. Expected values or a saved report
+        # are not a held context; no production interface can select a fixture.
+        if forward_host_guard is not None and not callable(forward_host_guard):
+            raise TypeError("forward host guard producer must be callable")
+        self._forward_host_guard = forward_host_guard
         if release_owner is not None:
             from control_plane.executive_release_owner import ReleaseBrokerOwner
             if type(release_owner) is not ReleaseBrokerOwner:
@@ -1021,6 +1076,11 @@ class PrivilegedActionBroker:
                 if info.st_uid != 0 or info.st_gid != 0 or not stat.S_ISDIR(info.st_mode):
                     raise BrokerTrustError(f"{label} ownership drifted")
                 os.chmod(path, 0o700)
+
+    @property
+    def require_root(self) -> bool:
+        """Whether strict root custody metadata is enforced on evidence."""
+        return self._require_root
 
     def receipt_path(self, request_id: str) -> Path:
         return self.receipt_root / f"{request_id}.json"
@@ -1143,7 +1203,7 @@ class PrivilegedActionBroker:
         _fsync_directory(self.inflight_root)
 
     def _handle_outcome(
-        self, raw_request: Mapping[str, Any], *, peer_uid: int
+        self, raw_request: Mapping[str, Any], *, peer_uid: int,
     ) -> tuple[dict[str, Any], bool]:
         if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
             raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
@@ -1162,6 +1222,8 @@ class PrivilegedActionBroker:
         if existing is not None:
             return existing, True
         self._check_inflight(request, digest)
+        if request.action == INCIDENT_ISSUER_ACTION:
+            return self._issue_incident_grant(request, digest)
 
         started_at = _utc_now()
         self._write_inflight(request, digest, started_at)
@@ -1225,6 +1287,203 @@ class PrivilegedActionBroker:
         except OSError as exc:
             # The terminal receipt wins replay, but cleanup drift must not be called clean success.
             raise EffectUnknownError("terminal receipt exists but in-flight cleanup failed") from exc
+        return receipt, False
+
+    def _issue_incident_grant(
+        self, request: PrivilegedActionRequest, digest: str
+    ) -> tuple[dict[str, Any], bool]:
+        """Dormant internal issuer for the bounded exact-incident recovery.
+
+        Reached only through the existing authenticated peer, replay and
+        in-flight admission.  There is no shell issuer and no handbuilt
+        credential.  With the production incident policy ``None`` this refuses
+        before any grant, commitment, successor designation, deadline or
+        allocation exists.  Under an authority-owned policy it derives the
+        current sealed Executive source separately from the historical
+        release, requires the unchanged pinned provider identity and the
+        current designated evidence, custody, marker, lock and process
+        prerequisites, then writes the fixed immutable grant and issuance
+        commitment under the existing recovery state root and closes the
+        existing broker terminal lifecycle with a SUCCESS receipt whose stdout
+        digest binds the exact commitment bytes.  Partial issuance or a lost
+        response stays the same operation: create-only custody can never be
+        replaced, and there is no cleanup, refund or NOT_APPLIED route.
+        """
+        from ops.executive_os import provider_recovery as recovery
+
+        started_at = _utc_now()
+        policy = recovery.PRODUCTION_INCIDENT_POLICY
+        if policy is None:
+            raise PrivilegedBrokerError(
+                "PRODUCTION INCIDENT POLICY is None; the incident issuer is dormant"
+            )
+        try:
+            designated = recovery.validate_incident_policy(policy)
+            if recovery.read_allocation() is not None:
+                raise PrivilegedBrokerError("recovery allocation already consumed; no regrant")
+            successor = request.args_dict()["successor_request_id"]
+            evidence = self._reconciliation_observer()
+            required_evidence = {
+                "readiness_receipt_sha256",
+                "readiness_document",
+                "readiness_transaction_lock_present",
+                "verify_ready_processes",
+                "current_auth_identity",
+                "current_binary_identity",
+            }
+            if not isinstance(evidence, Mapping) or set(evidence) != required_evidence:
+                raise BrokerTrustError("incident issuance observation is incomplete")
+            if evidence["readiness_receipt_sha256"] != designated["readiness_receipt_sha256"]:
+                raise BrokerTrustError(
+                    "incident readiness predecessor digest does not match the incident policy"
+                )
+            binary_identity = evidence["current_binary_identity"]
+            if (not isinstance(binary_identity, Mapping)
+                    or binary_identity.get("path") != recovery.os.fspath(recovery._readiness.CODEX_BINARY)
+                    or binary_identity.get("version") != recovery._readiness.CODEX_VERSION
+                    or binary_identity.get("sha256") != recovery._readiness.CODEX_SHA256
+                    or binary_identity.get("team_identifier") != recovery._readiness.CODEX_TEAM_ID):
+                raise BrokerTrustError("incident provider identity is not the pinned reviewed binary")
+            document = evidence["readiness_document"]
+            recovery.validate_incident_designated_readiness(
+                document,
+                designated,
+                auth_identity=evidence["current_auth_identity"],
+                binary_identity=binary_identity,
+            )
+            recovery.refuse_evidenced_incident_denial(document)
+            recovery.validate_incident_designated_terminal(designated)
+            if evidence["readiness_transaction_lock_present"] is not False:
+                raise BrokerTrustError("provider readiness transaction lock is still present")
+            processes = evidence["verify_ready_processes"]
+            if (
+                not isinstance(processes, (tuple, list))
+                or any(not isinstance(value, str) for value in processes)
+                or len(processes) != 0
+            ):
+                raise BrokerTrustError("a verify_ready process may still be active")
+            source = recovery.current_executive_source()
+            if source["release_sha"] != self.config.release_root.name:
+                raise BrokerTrustError(
+                    "current sealed Executive source does not match the running release"
+                )
+            grant = {
+                "schema_version": recovery.INCIDENT_GRANT_SCHEMA,
+                "authority_reference": recovery.INCIDENT_AUTHORITY_REFERENCE,
+                "incident_class": recovery.INCIDENT_RECOVERY_CLASS,
+                "historical_cause": recovery.INCIDENT_HISTORICAL_CAUSE,
+                "causal_link": recovery.INCIDENT_CAUSAL_LINK,
+                "raw_provider_messages_retained": False,
+                "authorization": policy.authorization_binding(),
+                "evidence": dict(designated),
+                "installed_source": {
+                    "path": recovery.os.fspath(recovery._readiness.CODEX_BINARY),
+                    "version": recovery._readiness.CODEX_VERSION,
+                    "sha256": recovery._readiness.CODEX_SHA256,
+                    "team_identifier": recovery._readiness.CODEX_TEAM_ID,
+                },
+                "executive_source": dict(source),
+                "worker": {
+                    "worker_user": recovery.get_slot("codex-01").worker_user,
+                    "worker_uid": recovery._readiness.WORKER_UID,
+                    "worker_gid": recovery._readiness.WORKER_GID,
+                    "provider_home": recovery.os.fspath(recovery._readiness.AUTH_PATH.parent),
+                    "workspace_binding_class":
+                        recovery._readiness.COMPANY_WORKSPACE_BINDING_CLASS,
+                    "expected_credential_kind": "device-auth",
+                },
+                "credential_lstat": dict(evidence["current_auth_identity"]),
+                "model": recovery._readiness.PRODUCTION_MODEL,
+                "issuer_request_id": request.request_id,
+                "issuer_request_sha256": digest,
+                "successor_request_id": successor,
+                "budget": recovery.RECOVERY_BUDGET,
+                "granted_at": started_at,
+                "expires_at": recovery._readiness._iso(
+                    recovery.datetime.now(recovery.UTC)
+                    + recovery.MIN_GRANT_LIFETIME
+                    + (recovery.MAX_GRANT_LIFETIME - recovery.MIN_GRANT_LIFETIME) / 2
+                ),
+            }
+            validated = recovery._validate_incident_grant_document(grant)
+            grant_bytes = (
+                json.dumps(validated, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            grant_sha256 = hashlib.sha256(grant_bytes).hexdigest()
+            commitment = {
+                "schema_version": recovery.INCIDENT_COMMITMENT_SCHEMA,
+                "authorization": policy.authorization_binding(),
+                "incident_class": recovery.INCIDENT_RECOVERY_CLASS,
+                "grant_sha256": grant_sha256,
+                "issuer_request_id": request.request_id,
+                "issuer_request_sha256": digest,
+                "successor_request_id": successor,
+                "created_at": started_at,
+            }
+            commitment_bytes = (
+                json.dumps(commitment, sort_keys=True, separators=(",", ":")) + "\n"
+            ).encode("utf-8")
+            recovery.preflight_recovery_custody()
+        except (recovery.RecoveryError, recovery._readiness.ReadinessError) as exc:
+            # Every derivation refusal leaves this exact bounded broker refusal;
+            # no readiness, custody or trust error escapes untyped.
+            raise PrivilegedBrokerError(getattr(exc, "code", str(exc))) from exc
+
+        # Derivation is complete and read-only so far; nothing has been written.
+        self._write_inflight(request, digest, started_at)
+        try:
+            recovery.write_custody_document(
+                recovery.RECOVERY_INCIDENT_GRANT_PATH, grant_bytes
+            )
+        except FileExistsError:
+            raise EffectUnknownError(
+                "incident grant already exists; the same operation cannot be replaced"
+            ) from None
+        except (OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "incident grant write failed; same operation retained"
+            ) from exc
+        try:
+            recovery.write_custody_document(
+                recovery.RECOVERY_INCIDENT_COMMITMENT_PATH, commitment_bytes
+            )
+        except (FileExistsError, OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "incident commitment failed after the grant; same operation retained"
+            ) from exc
+        receipt: dict[str, Any] = {
+            "schema": RECEIPT_SCHEMA,
+            "request_id": request.request_id,
+            "request_sha256": digest,
+            "action": request.action,
+            "effect_class": request.effect_class,
+            "started_at": started_at,
+            "finished_at": _utc_now(),
+            "exit_code": 0,
+            "outcome": "SUCCEEDED",
+            "release_sha": self.config.release_root.name,
+            "broker_version": self.config.broker_version,
+            "stdout_bytes": len(commitment_bytes),
+            "stdout_sha256": hashlib.sha256(commitment_bytes).hexdigest(),
+            "stdout_excerpt": _sanitize_terminal_excerpt(
+                commitment_bytes.decode("utf-8", "replace")
+            ),
+            "stderr_bytes": 0,
+            "stderr_sha256": hashlib.sha256(b"").hexdigest(),
+            "stderr_excerpt": "",
+        }
+        try:
+            self._write_terminal_receipt(request, receipt)
+        except (OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "incident issuance completed but terminal receipt failed"
+            ) from exc
+        try:
+            self._remove_inflight(request.request_id)
+        except (OSError, recovery.RecoveryError) as exc:
+            raise EffectUnknownError(
+                "terminal receipt exists but in-flight cleanup failed"
+            ) from exc
         return receipt, False
 
     def handle(self, raw_request: Mapping[str, Any], *, peer_uid: int) -> dict[str, Any]:
@@ -1299,28 +1558,112 @@ class PrivilegedActionBroker:
         if evidence["readiness_receipt_sha256"] != request.readiness_receipt_sha256:
             raise BrokerTrustError("provider readiness receipt changed after target request")
         document = evidence["readiness_document"]
-        if (request.requalify_terminal_adverse_sha256 is not None
-                or request.renew_device_revalidation_sha256 is not None):
+        if (request.requalify_company_device_drift_sha256 is not None
+                or request.requalify_terminal_adverse_sha256 is not None
+                or request.renew_device_revalidation_sha256 is not None
+                or request.recover_current_pin_grant_sha256 is not None):
+            from ops.executive_os import provider_recovery
             from ops.executive_os.provider_readiness import (
                 ReadinessError, validate_terminal_predecessor_document,
                 validate_revalidation_predecessor_document,
+                validate_company_device_drift_predecessor_document,
             )
-            predecessor_validator = (validate_revalidation_predecessor_document
-                                     if request.renew_device_revalidation_sha256 is not None
-                                     else validate_terminal_predecessor_document)
             if (not isinstance(document, Mapping)
                     or not isinstance(evidence["current_auth_identity"], Mapping)
                     or not isinstance(evidence["current_binary_identity"], Mapping)):
                 raise BrokerTrustError("terminal predecessor evidence is incomplete")
-            try:
-                predecessor_validator(
-                    document, auth_identity=evidence["current_auth_identity"],
-                    binary_identity=evidence["current_binary_identity"],
-                    expected_kind=request.expected_credential_kind,
-                    workspace_binding_class=request.workspace_binding_class,
+            if request.recover_current_pin_grant_sha256 is not None:
+                # Reconciliation never re-derives ordinary cause and never
+                # refunds.  It proves the request installed no reservation while
+                # the grant, its designated successor binding and the consumed
+                # allocation all still hold exactly.
+                try:
+                    grant = provider_recovery.read_historical_recovery_grant(
+                        expected_digest=request.recover_current_pin_grant_sha256,
+                    )
+                except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
+                    raise BrokerTrustError(
+                        "current-pin recovery grant custody failed"
+                    ) from exc
+                if grant["successor_request_id"] != request.target_request_id:
+                    raise BrokerTrustError(
+                        "current-pin recovery grant does not designate this request"
+                    )
+                try:
+                    current_source = provider_recovery.current_executive_source()
+                    predecessor_digest = provider_recovery.validate_recovery_history(
+                        grant, grant_sha256=request.recover_current_pin_grant_sha256,
+                    )
+                except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
+                    raise BrokerTrustError(
+                        "current-pin recovery source or original terminal is unverified"
+                    ) from exc
+                if (grant["executive_source"]["release_sha"] != self.config.release_root.name
+                        or grant["executive_source"] != current_source):
+                    raise BrokerTrustError("current-pin recovery Executive source changed")
+                if predecessor_digest != request.readiness_receipt_sha256:
+                    raise BrokerTrustError(
+                        "current-pin recovery grant does not bind the retained predecessor"
+                    )
+                try:
+                    provider_recovery.validate_current_pin_recovery_predecessor_document(
+                        document, grant=grant,
+                        auth_identity=evidence["current_auth_identity"],
+                        binary_identity=evidence["current_binary_identity"],
+                        expected_kind=request.expected_credential_kind,
+                        workspace_binding_class=request.workspace_binding_class,
+                    )
+                except (ReadinessError, provider_recovery.RecoveryError, OSError) as exc:
+                    raise BrokerTrustError(
+                        "current-pin recovery predecessor continuity is unproven"
+                    ) from exc
+                try:
+                    allocation = provider_recovery.read_allocation()
+                except (provider_recovery.RecoveryError, ReadinessError, OSError) as exc:
+                    raise BrokerTrustError(
+                        "current-pin recovery allocation is unreadable"
+                    ) from exc
+                if allocation is not None:
+                    expected_class = (
+                        provider_recovery.INCIDENT_RECOVERY_CLASS
+                        if grant["schema_version"] == provider_recovery.INCIDENT_GRANT_SCHEMA
+                        else "current_pin_recovery"
+                    )
+                    if (allocation.get("allocation_class") != expected_class
+                            or allocation["grant_sha256"] != request.recover_current_pin_grant_sha256):
+                        raise BrokerTrustError(
+                            "current-pin recovery allocation is held by a different incident class"
+                        )
+                    if allocation["executive_source"] != grant["executive_source"]:
+                        raise BrokerTrustError("current-pin recovery allocation source changed")
+                    if allocation["predecessor_receipt_sha256"] != request.readiness_receipt_sha256:
+                        raise BrokerTrustError(
+                            "current-pin recovery allocation is bound to a different predecessor"
+                        )
+                    if allocation["successor_request_id"] != request.target_request_id:
+                        raise BrokerTrustError(
+                            "current-pin recovery allocation is bound to a different successor"
+                        )
+                # A request that claimed its budget stays consumed whether or not
+                # it installed a reservation; same-id status and this read-only
+                # reconciliation are the only remaining operations.
+            else:
+                predecessor_validator = (
+                    validate_company_device_drift_predecessor_document
+                    if request.requalify_company_device_drift_sha256 is not None
+                    else validate_revalidation_predecessor_document
+                    if request.renew_device_revalidation_sha256 is not None
+                    else validate_terminal_predecessor_document
                 )
-            except (ReadinessError, OSError) as exc:
-                raise BrokerTrustError("terminal predecessor identity continuity is unproven") from exc
+                try:
+                    predecessor_validator(
+                        document, auth_identity=evidence["current_auth_identity"],
+                        binary_identity=evidence["current_binary_identity"],
+                        expected_kind=request.expected_credential_kind,
+                        workspace_binding_class=request.workspace_binding_class,
+                    )
+                except (ReadinessError, OSError) as exc:
+                    raise BrokerTrustError("terminal predecessor identity continuity is unproven") from exc
             # Exact unchanged pre-marker predecessor bytes prove this request never
             # installed its reservation, even if deadlines happen to coincide.
         else:
@@ -1517,6 +1860,70 @@ class PrivilegedActionBroker:
             "installed_release_sha": installed_release_sha,
         }
 
+    # ------------------------------------------------------------------
+    # Dormant forward-recovery dispatch (closed v2 protocol, separate from
+    # the ordinary v1 action route, which always refuses this action).
+    # ------------------------------------------------------------------
+
+    def _forward_module(self):
+        from ops.executive_os import provider_incident_forward as forward
+
+        return forward
+
+    def _handle_forward_outcome(
+        self, raw_request: Mapping[str, Any], *, peer_uid: int,
+        connection: socket.socket | None = None,
+    ) -> tuple[dict[str, Any], bool]:
+        if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        forward = self._forward_module()
+        return forward.handle_forward_recovery(
+            self, raw_request, peer_uid=peer_uid, connection=connection
+        )
+
+    def forward_status(
+        self, raw_request: Mapping[str, Any], *, peer_uid: int
+    ) -> dict[str, Any]:
+        """Read-only forward status: derives files, never repairs them."""
+        if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        forward = self._forward_module()
+        status_request = forward.validate_forward_status_request(raw_request)
+        request_id = status_request.request_id
+        installed_release_sha = self.config.release_root.name
+
+        # Original execution history stays UNKNOWN: derive it truthfully from
+        # the unchanged original files without ever reinterpreting it.
+        if self._read_terminal_for_status(request_id) is not None:
+            original_status = STATUS_TERMINAL
+        elif self._read_reconciliation_for_status(request_id) is not None:
+            original_status = STATUS_RECONCILED_NOT_APPLIED
+        elif self._read_inflight_for_status(request_id) is not None:
+            original_status = STATUS_EFFECT_UNKNOWN
+        else:
+            original_status = STATUS_NOT_FOUND
+
+        forward_state, join = forward.forward_state(self)
+        projection: dict[str, Any] = {
+            "status": original_status,
+            "request_id": request_id,
+            "installed_release_sha": installed_release_sha,
+            "forward_state": forward_state,
+        }
+        if forward_state == "SUCCEEDED":
+            projection["forward"] = join
+        return projection
+
+    def forward_recovered_result(self) -> dict[str, Any]:
+        """Read-only retrieval of the presently established forward result.
+
+        Allowed only after validating the ENTIRE closed join with the
+        forward-in-flight guard absent.  It never reruns any step, refreshes a
+        window, performs cleanup or retries.
+        """
+        forward = self._forward_module()
+        return forward.complete_join_from_custody(self)
+
 
 WIRE_RESPONSE_SCHEMA = "mastermind.executive_privileged_action_response.v1"
 _MAX_REQUEST_BYTES = 64 * 1024
@@ -1555,6 +1962,17 @@ def get_peer_uid(peer_socket: socket.socket) -> int:
     raise PeerAuthorizationError("Unix peer credentials are unavailable")
 
 
+def _validate_adopted_listener(listener: socket.socket) -> None:
+    """Validate this broker's own FD; not cross-process or origin proof."""
+    if (listener.family != socket.AF_UNIX
+            or listener.getsockopt(socket.SOL_SOCKET, socket.SO_TYPE) != socket.SOCK_STREAM
+            or listener.getsockname() not in (
+                "/var/run/mastermind-executive/privileged.sock",
+                "/private/var/run/mastermind-executive/privileged.sock",
+            )):
+        raise BrokerTrustError("privileged adopted listener does not match the fixed socket")
+
+
 def activate_launchd_socket(name: str = _LAUNCHD_SOCKET_NAME) -> socket.socket:
     """Claim exactly one launchd-activated listener by its fixed socket key."""
     if platform.system() != "Darwin":
@@ -1585,7 +2003,12 @@ def activate_launchd_socket(name: str = _LAUNCHD_SOCKET_NAME) -> socket.socket:
             os.close(descriptor)
         raise BrokerTrustError("privileged broker requires exactly one launchd socket")
     listener = socket.socket(fileno=values[0])
-    listener.setblocking(True)
+    try:
+        _validate_adopted_listener(listener)
+        listener.setblocking(True)
+    except BaseException:
+        listener.close()
+        raise
     return listener
 
 
@@ -1637,6 +2060,48 @@ def _wire_reconciliation(
     }
 
 
+def _forward_schemas() -> tuple[str, str]:
+    """Return the closed forward wire schema literals; no module import."""
+    return FORWARD_STATUS_REQUEST_SCHEMA, FORWARD_ACTION_REQUEST_SCHEMA
+
+
+_FORWARD_ERROR_TYPES: tuple[type, ...] | None = None
+
+
+def _forward_error() -> tuple[type, ...]:
+    """Resolve the forward refusal type once; never import it for v1 frames.
+
+    With the optional forward module unavailable this returns an empty tuple,
+    so the clause matches nothing and the forward-only branches answer their
+    own typed ImportError refusal instead.  It is evaluated only after every
+    ordinary refusal class has been excluded.
+    """
+    global _FORWARD_ERROR_TYPES
+    if _FORWARD_ERROR_TYPES is None:
+        try:
+            from ops.executive_os.provider_incident_forward import ForwardRecoveryError
+        except ImportError:
+            _FORWARD_ERROR_TYPES = ()
+        else:
+            _FORWARD_ERROR_TYPES = (ForwardRecoveryError,)
+    return _FORWARD_ERROR_TYPES
+
+
+def _wire_forward_status(projection: Mapping[str, Any]) -> dict[str, Any]:
+    value: dict[str, Any] = {
+        "schema": WIRE_RESPONSE_SCHEMA,
+        "ok": True,
+        "query": True,
+        "original_status": projection["status"],
+        "request_id": projection["request_id"],
+        "installed_release_sha": projection["installed_release_sha"],
+        "forward_state": projection["forward_state"],
+    }
+    if "forward" in projection:
+        value["forward"] = dict(projection["forward"])
+    return value
+
+
 def _send_wire(connection: socket.socket, value: Mapping[str, Any]) -> None:
     payload = (json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n").encode("utf-8")
     connection.sendall(payload)
@@ -1657,7 +2122,10 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
                 raise PrivilegedBrokerError("privileged protocol accepts exactly one JSON frame")
             break
     duplicates = []
+    root_pairs = ()
     def release_pairs(items):
+        nonlocal root_pairs
+        root_pairs = items
         result = {}
         for key, item in items:
             if key in result:
@@ -1673,6 +2141,11 @@ def _read_request_frame(connection: socket.socket) -> Mapping[str, Any]:
         raise PrivilegedBrokerError("privileged request frame must contain a mapping")
     if duplicates and value.get("schema") == "mastermind.executive_release_broker/v1":
         raise PrivilegedBrokerError("release frame has duplicate fields")
+    if duplicates and any(
+        key == "schema" and item in (FORWARD_STATUS_REQUEST_SCHEMA, FORWARD_ACTION_REQUEST_SCHEMA)
+        for key, item in root_pairs
+    ):
+        raise PrivilegedBrokerError("forward frame has duplicate fields")
     return value
 
 
@@ -1715,12 +2188,42 @@ def serve_connection(
                 connection,
                 _wire_reconciliation(reconciliation, replayed=replayed),
             )
+        elif raw.get("schema") == _forward_schemas()[0]:
+            try:
+                projection = broker.forward_status(raw, peer_uid=peer_uid)
+            except ImportError:
+                # Forward-only frame with the optional module unavailable:
+                # typed refusal, no effect, no v1 path import.
+                _send_wire(connection, _wire_error(
+                    "FORWARD_REFUSED", "forward protocol module is unavailable"
+                ))
+                return
+            except _forward_error() as exc:
+                _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
+                return
+            _send_wire(connection, _wire_forward_status(projection))
+        elif raw.get("schema") == _forward_schemas()[1]:
+            try:
+                receipt, replayed = broker._handle_forward_outcome(
+                    raw, peer_uid=peer_uid, connection=connection
+                )
+            except ImportError:
+                _send_wire(connection, _wire_error(
+                    "FORWARD_REFUSED", "forward protocol module is unavailable"
+                ))
+                return
+            except _forward_error() as exc:
+                _send_wire(connection, _wire_error("FORWARD_REFUSED", str(exc)))
+                return
+            _send_wire(connection, _wire_success(receipt, replayed=replayed))
         else:
             receipt, replayed = broker._handle_outcome(raw, peer_uid=peer_uid)
             _send_wire(connection, _wire_success(receipt, replayed=replayed))
     except PeerAuthorizationError:
         # Do not parse or reflect an unauthorized peer's body.
         _send_wire(connection, _wire_error("PEER_UNAUTHORIZED", "kernel peer uid is not authorized"))
+    except ForwardHostGuardUnavailableError as exc:
+        _send_wire(connection, _wire_error("FORWARD_HOST_GUARD_UNAVAILABLE", str(exc)))
     except EffectUnknownError as exc:
         _send_wire(connection, _wire_error("EFFECT_UNKNOWN", str(exc)))
     except ReconciledNotAppliedError as exc:
@@ -1737,8 +2240,14 @@ def run_broker(
     activated_socket: socket.socket | None = None,
     release_owner: Any | None = None,
 ) -> None:
-    broker = (PrivilegedActionBroker(config) if release_owner is None
-              else PrivilegedActionBroker(config, release_owner=release_owner))
+    from control_plane.executive_incident_composition import _resolve_production_forward_host_guard
+    guard = _resolve_production_forward_host_guard(config)
+    composition = {}
+    if release_owner is not None:
+        composition['release_owner'] = release_owner
+    if guard is not None:
+        composition['forward_host_guard'] = guard
+    broker = PrivilegedActionBroker(config, **composition)
     listener = activated_socket if activated_socket is not None else activate_launchd_socket()
     listener.settimeout(_BROKER_IDLE_TIMEOUT_SECONDS)
     while True:
@@ -1759,6 +2268,7 @@ __all__ = [
     "BROKER_CONFIG_SCHEMA",
     "BrokerTrustError",
     "EffectUnknownError",
+    "ForwardHostGuardUnavailableError",
     "PeerAuthorizationError",
     "PrivilegedActionBroker",
     "PrivilegedBrokerConfig",

@@ -611,7 +611,12 @@ class BrowserRelayServer:
                     try:
                         if _unix_peer_pid(connection) != self._owner_pid:
                             raise BrowserRelayError("relay peer process changed")
-                        value = self._read_request(connection)
+                        try:
+                            value = self._read_request(connection)
+                        except (ConnectionError, TimeoutError):
+                            # A disconnected caller has not reached dispatch.
+                            # Retire this connection, not the owner's relay.
+                            continue
                         if type(value) is dict and type(value.get("request_id")) is str:
                             request_id = value["request_id"]
                         response = self._handle(value)
@@ -623,7 +628,12 @@ class BrowserRelayServer:
                             ok=False,
                             error="REQUEST_REFUSED",
                         )
-                    self._write_response(connection, response)
+                    try:
+                        self._write_response(connection, response)
+                    except (ConnectionError, TimeoutError):
+                        # The caller may close before a refusal or reply lands.
+                        # Never replay a dispatched effect to recover delivery.
+                        continue
         except BaseException as error:
             self._serve_error = error
             self._ready.set()

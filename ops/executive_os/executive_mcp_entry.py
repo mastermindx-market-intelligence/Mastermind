@@ -43,7 +43,7 @@ def validate_additional_resources(raw):
 
 def validate_document(raw):
     if (type(raw) is not dict or not CONFIG_KEYS <= set(raw)
-            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port'}):
+            or not set(raw) <= CONFIG_KEYS | {'workspace', 'steward', 'coo', 'executive_mcp_profile', 'executive_additional_resources', 'os_executive_transport', 'os_executive_resource', 'os_commission_port', 'principal_ruling_target'}):
         raise ValueError('installed MCP configuration fields differ')
     from integrations.executive_mcp.personal_read import PERSONAL_READ_PROFILE
     from integrations.executive_mcp.web_ceo_v3 import validate_installed_mcp_profile_current
@@ -72,6 +72,7 @@ def validate_document(raw):
     validate_os_executive_resource(raw)
     build_os_commission_client(raw)
     validate_optional_mounts(raw)
+    build_installed_principal_ruling_target(raw)
     return raw
 
 
@@ -415,6 +416,30 @@ def build_installed_coo_settings(raw, source, config_path, executive):
         authority_provider=client.authority, mission_provider=client.mission)
 
 
+def build_installed_principal_ruling_target(raw):
+    """One immutable sealed target; absence preserves every installed route.
+
+    The existing current_projection_loader compares this entire block on each
+    principal binding read. A changed target requires new host qualification;
+    it cannot silently retarget an already-running App. Control independently
+    resolves and admits the original pending obligation at the effect boundary.
+    """
+    if 'principal_ruling_target' not in raw:
+        return None
+    target = raw['principal_ruling_target']
+    if (type(target) is not dict
+            or set(target) != {'work_ref', 'obligation_id', 'reasoning_surface'}
+            or raw.get('executive_mcp_profile') not in {'web_ceo_v2', 'web_ceo_v3'}):
+        raise ValueError('principal ruling requires an exact supported host target')
+    from control_plane.principal_ruling_target import PrincipalRulingTarget
+    selected = PrincipalRulingTarget(**target)
+    missions = raw.get('coo', {}).get('missions', [])
+    if (type(missions) is not list or len([row for row in missions
+            if type(row) is dict and row.get('work_ref') == selected.work_ref]) != 1):
+        raise ValueError('principal ruling requires the exact installed COO mission')
+    return selected
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--config', type=Path, required=True)
@@ -492,6 +517,10 @@ def main(argv=None):
             v3_kwargs = {}
             if coo_settings is not None:
                 v3_kwargs["coo_settings"] = coo_settings
+                v3_kwargs["principal_ruling_target"] = build_installed_principal_ruling_target(raw)
+            # One installed client instance; the opt-in OS session transport
+            # receives this same object only while the transport is enabled.
+            os_transport_enabled = raw.get('os_executive_transport', False)
             app = v3_builder(
                 settings,
                 audit_sink=sink,
@@ -503,6 +532,9 @@ def main(argv=None):
                 enable_os_executive_transport=raw.get('os_executive_transport', False),
                 os_executive_resource=validate_os_executive_resource(raw),
                 os_commission_preparer=build_os_commission_client(raw),
+                os_session_bridge_client=(
+                    session_client if os_transport_enabled else None
+                ),
                 **v3_kwargs,
                 **mounts,
             )
@@ -528,7 +560,8 @@ def main(argv=None):
                 app = build_web_ceo_v2_mcp_app(settings, audit_sink=sink, **mounts)
             else:
                 app = build_web_ceo_v2_with_coo_mcp_app(settings, coo_settings=coo_settings,
-                    audit_sink=sink, **mounts)
+                    audit_sink=sink,
+                    principal_ruling_target=build_installed_principal_ruling_target(raw), **mounts)
         else:
             app = build_executive_mcp_app(settings, audit_sink=sink, **mounts)
         uvicorn.run(app, host='127.0.0.1', port=raw['port'], access_log=False,

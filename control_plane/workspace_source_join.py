@@ -94,10 +94,16 @@ def _root_evidence(runtime: Any, root_job_id: str):
             per_job.setdefault(attempt.job_id, []).append(attempt)
         if any(len(rows) > ROOT_MAX_ATTEMPTS_PER_JOB for rows in per_job.values()):
             raise ValueError("bounded Runtime Attempt budget invalid")
+        origins = read.classify_root_origins_bounded()
+        if len(origins) != 1 or origins[0].job_id != root_job_id:
+            raise ValueError("bounded root origin membership invalid")
+        root_origin = origins[0]
         provenance_by_job: dict[str, Mapping[str, Any] | None] = {}
         for job in jobs:
             provenance, _warning = _bounded_provenance(
                 runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
+            if job.job_id == root_job_id and root_origin.kind == "LEGACY_CEO":
+                provenance = root_origin.provenance
             provenance_by_job[job.job_id] = provenance
     # The finalized receipt exists only after the observation context closed.
     receipt = read.receipt.to_dict()
@@ -113,8 +119,10 @@ def _bounded_runtime_inputs(runtime: Any) -> tuple[
 
     Discovery and each root have separate finalized observation receipts. The
     root details must agree with discovery's exact root/provenance postimages.
-    An unsupported or failed root invalidates the mapping; omitting it could
-    conceal a second root for the same workstream. No global SAME is minted.
+    Every root receives bounded creation-origin classification. Only a
+    positively proven non-CEO root is excluded; unsupported origins still
+    invalidate the complete mapping. Legacy CEO candidates preserve ambiguity.
+    No global SAME is minted.
     """
     from control_plane.fabric_job_view import _bounded_provenance
 
@@ -130,14 +138,33 @@ def _bounded_runtime_inputs(runtime: Any) -> tuple[
             commands = _eligible_commands(runtime, discovery.roots)
             if len(commands) > MAX_ELIGIBLE_COMMANDS:
                 raise ValueError("eligible creation Event point budget exceeded")
-            selected = set(commands.values())
-            if len(selected) > MAX_SELECTED_ROOTS or len(selected) != len(discovery.roots):
-                raise ValueError("unsupported or duplicate roots prevent complete mapping")
+            if len({job.job_id for job in discovery.roots}) != len(discovery.roots):
+                raise ValueError("duplicate roots prevent complete mapping")
+            origins = read.classify_root_origins_bounded()
+            if ({origin.job_id for origin in origins} != {job.job_id for job in discovery.roots}
+                    or len(origins) != len(discovery.roots)):
+                raise ValueError("root origin mapping is incomplete")
+            by_id = {origin.job_id: origin for origin in origins}
+            selected = [origin for origin in origins if origin.kind != "NON_CEO"]
+            if len(selected) > MAX_SELECTED_ROOTS:
+                raise ValueError("selected root detail budget exceeded")
             roots = {}
             for job in discovery.roots:
-                provenance, warning = _bounded_provenance(
-                    runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
-                if (warning is not None or not isinstance(provenance, Mapping)
+                origin = by_id[job.job_id]
+                if origin.kind == "NON_CEO":
+                    if origin.provenance is not None:
+                        raise ValueError("non-CEO root carries conflicting provenance")
+                    continue
+                if origin.kind == "STRICT_V2_CEO":
+                    provenance, warning = _bounded_provenance(
+                        runtime, job, creation_event_reader=read.get_creation_event_by_command_id)
+                    if warning is not None or provenance != origin.provenance:
+                        raise ValueError("strict root origin provenance changed")
+                elif origin.kind == "LEGACY_CEO":
+                    provenance = origin.provenance
+                else:
+                    raise ValueError("root origin unresolved")
+                if (not isinstance(provenance, Mapping)
                         or not isinstance(provenance.get("workstream"), str)
                         or not provenance["workstream"]):
                     raise ValueError("root creation provenance or workstream unavailable")

@@ -399,7 +399,11 @@ p=argparse.ArgumentParser()
 p.add_argument("--barrier-fd",type=int,required=True)
 p.add_argument("--pid-file",required=True)
 a=p.parse_args()
-open(a.pid_file,"w",encoding="utf-8").write(str(os.getpid()))
+# The published path is a readiness marker, so expose it only after close.
+pending_pid = a.pid_file + ".pending"
+with open(pending_pid,"w",encoding="utf-8") as stream:
+    stream.write(str(os.getpid()))
+os.replace(pending_pid,a.pid_file)
 os.read(a.barrier_fd,1)
 time.sleep(60)
 """,
@@ -592,3 +596,31 @@ def test_extension_resource_starts_and_reconciles_through_existing_artifact_owne
                 pass
         os.close(fd)
         shutil.rmtree(relay_root, ignore_errors=True)
+
+
+def test_prebarrier_pid_ready_marker_waits_for_complete_publication(tmp_path: Path, monkeypatch):
+    """A created-but-empty PID file must not trigger the simulated failure.
+
+    Pause the child immediately after opening its output, reproducing the
+    scheduler interleaving seen in hosted CI without changing production code.
+    The original test still proves NOT_APPLIED and that the owned child died.
+    """
+    write_text = Path.write_text
+
+    def delayed_child_source(path, data, *args, **kwargs):
+        if path.name == "prebarrier-relay.py":
+            marker = "import argparse,os,time\n"
+            assert marker in data
+            data = data.replace(marker, marker + """
+_original_open = open
+def _delayed_open(path, *args, **kwargs):
+    stream = _original_open(path, *args, **kwargs)
+    if args and "w" in args[0]:
+        time.sleep(0.2)
+    return stream
+open = _delayed_open
+""", 1)
+        return write_text(path, data, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "write_text", delayed_child_source)
+    test_pre_barrier_inspection_failure_terminates_owned_wrapper_and_is_not_applied(tmp_path)

@@ -687,3 +687,431 @@ test('selected publisher refuses a foreign or unversioned owner receipt before G
     }
   } finally { await f.cleanup(); }
 });
+
+test('read-only cleanliness probes preserve config semantics and confine optional locks', async () => {
+  const f = await fixture();
+  try {
+    const calls = [];
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        calls.push({file, args, env: options?.env ?? {}});
+        return execFile(file, args, options);
+      },
+    });
+    const status = await publisher.status({ operation_id: f.operationId });
+    assert.equal(status.clean, true);
+    const cleanliness = new Set(['diff-files', 'diff-index', 'ls-files']);
+    const observed = calls.filter(({file, args}) => file === GIT && cleanliness.has(gitCommand(args)));
+    assert.deepEqual(observed.map(({args}) => gitCommand(args)).sort(), ['diff-files', 'diff-index', 'ls-files']);
+    for (const {env} of observed) {
+      assert.equal(env.GIT_OPTIONAL_LOCKS, '0');
+      assert.equal('GIT_CONFIG_GLOBAL' in env, false);
+      assert.equal('GIT_CONFIG_NOSYSTEM' in env, false);
+    }
+    for (const {file, args, env} of calls.filter(({file, args}) =>
+      file === GIT && !cleanliness.has(gitCommand(args)))) {
+      assert.equal('GIT_OPTIONAL_LOCKS' in env, false, `${gitCommand(args)} inherited observation fence`);
+      assert.equal('GIT_CONFIG_GLOBAL' in env, false);
+      assert.equal('GIT_CONFIG_NOSYSTEM' in env, false);
+    }
+  } finally {
+    await f.cleanup();
+  }
+});
+
+test('global exclude semantics cannot create false-clean push readiness', async () => {
+  const f = await fixture();
+  const previousHome = process.env.HOME;
+  try {
+    const home = path.join(f.root, 'home');
+    const ignoreDir = path.join(home, '.config', 'git');
+    await run('/bin/mkdir', ['-p', ignoreDir]);
+    await writeFile(path.join(home, '.gitconfig'), '[core]\n\texcludesFile = /dev/null\n');
+    await writeFile(path.join(ignoreDir, 'ignore'), 'pending.txt\n');
+    await writeFile(path.join(f.workspace, 'pending.txt'), 'must remain visible to publication admission\n');
+    process.env.HOME = home;
+
+    const publisher = createGitPublisher(f.config);
+    const status = await publisher.status({operation_id: f.operationId});
+    assert.equal(status.clean, false);
+    assert.equal(status.ready_to_push, false);
+
+    const out = await publisher.push({operation_id: f.operationId, expected_head_sha: f.head});
+    assert.equal(out.effect_state, 'NOT_APPLIED');
+    assert.equal(out.code, 'WORKSPACE_DIRTY');
+    const {stdout: remoteOut} = await git(
+      f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(remoteOut.trim(), '');
+  } finally {
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    await f.cleanup();
+  }
+});
+
+test('tracked and staged changes both refuse push under split cleanliness probes', async () => {
+  for (const staged of [false, true]) {
+    const f = await fixture();
+    try {
+      await writeFile(path.join(f.workspace, 'proof.txt'), staged ? 'staged\n' : 'unstaged\n');
+      if (staged) await git(f.workspace, 'add', 'proof.txt');
+      const publisher = createGitPublisher(f.config);
+      const out = await publisher.push({operation_id: f.operationId, expected_head_sha: f.head});
+      assert.equal(out.effect_state, 'NOT_APPLIED');
+      assert.equal(out.code, 'WORKSPACE_DIRTY');
+      const {stdout: remoteOut} = await git(
+        f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+      assert.equal(remoteOut.trim(), '');
+    } finally {
+      await f.cleanup();
+    }
+  }
+});
+
+
+function closedProfileFor(f) {
+  return {
+    enabled: true, workspaceCli: f.cli, gitBinary: GIT,
+    commandTimeoutMs: 10_000, pushTimeoutMs: 10_000,
+    repositories: [
+      { repository: 'mastermind', sourceRepository: path.join(f.root, 'mastermind-source'),
+        allowedRemoteUrls: [path.join(f.root, 'mastermind-remote.git')] },
+      { repository: 'macro', sourceRepository: path.join(f.root, 'macro-source'),
+        allowedRemoteUrls: [path.join(f.root, 'macro-remote.git')] },
+      { repository: 'terminal', sourceRepository: f.sourceRepo, allowedRemoteUrls: [f.remote] },
+    ],
+  };
+}
+
+test('closed three-repository publication profile is explicit, immutable and rejects aliases/remotes', async () => {
+  const f = await fixture();
+  try {
+    const profile = closedProfileFor(f);
+    const frozen = resolveGitPublishConfig(profile);
+    assert.equal(resolveGitPublishConfig(frozen), frozen);
+    assert.deepEqual(frozen.repositories.map((p) => p.repository), ['mastermind', 'macro', 'terminal']);
+    assert.equal(frozen.repositories[2].sourceRepository, f.sourceRepo);
+    assert.throws(() => resolveGitPublishConfig({ ...profile, repository: 'terminal' }), /not supported/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile, repositories: profile.repositories.slice(0, 2) }), /exact closed/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1], profile.repositories[1]] }), /unique/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], sourceRepository: profile.repositories[0].sourceRepository }] }), /distinct/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], allowedRemoteUrls: profile.repositories[0].allowedRemoteUrls }] }), /distinct/);
+    assert.throws(() => resolveGitPublishConfig({ ...profile,
+      repositories: [profile.repositories[0], profile.repositories[1],
+        { ...profile.repositories[2], allowedRemoteUrls: [f.remote, 'another'] }] }), /distinct/);
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher routes only the uniquely registered Terminal operation and retains exact commit/push fencing', async () => {
+  const f = await fixture();
+  try {
+    const seen = [];
+    const exec = async (file, args, options) => {
+      if (file !== f.cli) return execFile(file, args, options);
+      const alias = args.at(-1);
+      assert.deepEqual(args, ['status', '--operation-id', f.operationId,
+        '--lane', 'web', '--repository', alias]);
+      seen.push(alias);
+      if (alias !== 'terminal') {
+        const error = new Error('workspace registration absent');
+        error.code = 2;
+        error.stdout = '';
+        error.stderr = JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2',
+          action: 'status', effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        });
+        throw error;
+      }
+      return { stdout: JSON.stringify({
+        schema_version: 'mastermind.workspace_cli/v2',
+        action: 'status', effect: 'NOT_APPLIED', repository: alias,
+        receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+          branch: f.branch, dirty: false, head_sha: f.head },
+      }), stderr: '' };
+    };
+    const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+    const before = await publisher.status({ operation_id: f.operationId });
+    assert.equal(before.local_head_sha, f.head);
+    assert.equal(before.remote_head_sha, null);
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'terminal repair\n');
+    const committed = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: f.head, message: 'fix: closed publisher routing',
+    });
+    assert.equal(committed.effect_state, 'APPLIED');
+    const pushed = await publisher.push({
+      operation_id: f.operationId, expected_head_sha: committed.commit_head_sha,
+    });
+    assert.equal(pushed.effect_state, 'APPLIED');
+    assert.equal(pushed.remote_head_sha, committed.commit_head_sha);
+    // The delegated publisher independently rereads its exact Terminal binding
+    // during commit/push, so its extra Terminal observations are intentional.
+    assert.equal(seen.filter((alias) => alias === 'mastermind').length, 3);
+    assert.equal(seen.filter((alias) => alias === 'macro').length, 3);
+    assert.ok(seen.filter((alias) => alias === 'terminal').length >= 3);
+    assert.ok(seen.every((alias) => ['mastermind', 'macro', 'terminal'].includes(alias)));
+    const {stdout} = await git(f.workspace, 'ls-remote', '--heads', 'origin', `refs/heads/${f.branch}`);
+    assert.equal(stdout.trim().split(/\s+/)[0], committed.commit_head_sha);
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher refuses duplicate operation ownership or bad registry receipts before Git', async () => {
+  const f = await fixture();
+  try {
+    for (const caseName of ['ambiguous', 'unversioned', 'foreign', 'unregistered']) {
+      let gitCalls = 0;
+      const exec = async (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        const alias = args.at(-1);
+        const registered = alias === 'terminal' || (caseName === 'ambiguous' && alias === 'macro');
+        const result = registered ? {
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, dirty: false, head_sha: f.head },
+        } : {
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        };
+        if (caseName === 'unregistered') {
+          // A stdout success can never claim registration absence; this is
+          // malformed evidence, not the canonical exit-code-2 refusal.
+          delete result.receipt;
+          result.error = 'workspace is not registered to the source repository';
+        }
+        if (caseName === 'unversioned' && alias === 'macro') result.schema_version = 'mastermind.workspace_cli/v1';
+        if (caseName === 'foreign' && alias === 'macro') result.repository = 'terminal';
+        return { stdout: JSON.stringify(result), stderr: '' };
+      };
+      const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+      await assert.rejects(publisher.commit({
+        operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
+      }), /more than one repository|invalid repository receipt|unexpected result/);
+      assert.equal(gitCalls, 0, caseName);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher fails closed on stdout absence even when another repository is registered', async () => {
+  const f = await fixture();
+  try {
+    for (const caseName of ['malformed stdout absence', 'stdout absence beside a clean registration']) {
+      let gitCalls = 0;
+      const exec = async (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        const alias = args.at(-1);
+        if (caseName === 'stdout absence beside a clean registration' && alias === 'macro') {
+          const error = new Error('workspace registration absent');
+          error.code = 2;
+          error.stdout = '';
+          error.stderr = JSON.stringify({
+            schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+            effect: 'NOT_APPLIED', repository: alias,
+            error: 'workspace is not registered to the source repository',
+          });
+          throw error;
+        }
+        if (caseName === 'stdout absence beside a clean registration' && alias === 'terminal') {
+          return { stdout: JSON.stringify({
+            schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+            effect: 'NOT_APPLIED', repository: alias,
+            receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+              branch: f.branch, dirty: false, head_sha: f.head },
+          }), stderr: '' };
+        }
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          error: 'workspace is not registered to the source repository',
+        }), stderr: '' };
+      };
+      const publisher = createGitPublisher(closedProfileFor(f), { execFile: exec });
+      await assert.rejects(publisher.commit({
+        operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
+      }), /unexpected result/, caseName);
+      assert.equal(gitCalls, 0, caseName);
+    }
+  } finally { await f.cleanup(); }
+});
+
+test('closed publisher keeps canonical exit-code-2 absence as the only non-registration evidence', async () => {
+  const f = await fixture();
+  try {
+    const canonicalAbsence = (alias) => {
+      const error = new Error('workspace registration absent');
+      error.code = 2;
+      error.stdout = '';
+      error.stderr = JSON.stringify({
+        schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+        effect: 'NOT_APPLIED', repository: alias,
+        error: 'workspace is not registered to the source repository',
+      });
+      return error;
+    };
+    let gitCalls = 0;
+    const exec = async (file, args, options) => {
+      if (file !== f.cli) return execFile(file, args, options);
+      const alias = args.at(-1);
+      if (alias === 'terminal') {
+        return { stdout: JSON.stringify({
+          schema_version: 'mastermind.workspace_cli/v2', action: 'status',
+          effect: 'NOT_APPLIED', repository: alias,
+          receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace,
+            branch: f.branch, dirty: false, head_sha: f.head },
+        }), stderr: '' };
+      }
+      throw canonicalAbsence(alias);
+    };
+
+    const absent = createGitPublisher(closedProfileFor(f), {
+      execFile: (file, args) => {
+        if (file !== f.cli) { gitCalls++; throw new Error('Git must remain untouched'); }
+        throw canonicalAbsence(args.at(-1));
+      },
+    });
+    await assert.rejects(absent.commit({
+      operation_id: f.operationId, expected_head_sha: f.head, message: 'test: no effects',
+    }), /not registered in the closed repository profile/);
+    assert.equal(gitCalls, 0);
+
+    const routed = createGitPublisher(closedProfileFor(f), { execFile: exec });
+    const refused = await routed.commit({
+      operation_id: f.operationId, expected_head_sha: 'b'.repeat(40), message: 'test: no effects',
+    });
+    assert.equal(refused.status, 'REFUSED');
+    assert.equal(refused.effect_state, 'NOT_APPLIED');
+    assert.equal(refused.code, 'EXPECTED_HEAD_MISMATCH');
+  } finally { await f.cleanup(); }
+});
+
+
+test('sparse typed commit seeds its private index from the linked worktree index', async () => {
+  const f = await fixture();
+  try {
+    await run('/bin/mkdir', ['-p', path.join(f.workspace, 'visible'), path.join(f.workspace, 'hidden')]);
+    await writeFile(path.join(f.workspace, 'visible', 'shown.txt'), 'original\n');
+    await writeFile(path.join(f.workspace, 'hidden', 'preserve.txt'), 'hidden tracked\n');
+    await git(f.workspace, 'add', '-A');
+    await git(f.workspace, 'commit', '-m', 'test: complete source before sparse checkout');
+    const { stdout: baseOut } = await git(f.workspace, 'rev-parse', 'HEAD');
+    const base = baseOut.trim();
+    const receipt = {
+      schema_version: 'mastermind.workspace_cli/v1', action: 'status', effect: 'NOT_APPLIED',
+      receipt: { source_repository: f.sourceRepo, workspace_path: f.workspace, branch: f.branch,
+        dirty: false, head_sha: base, state: 'RELEASABLE' },
+    };
+    const shell = '#!/bin/sh\n' + 'printf "%s\\n" ' + "'" + JSON.stringify(receipt) + "'" + '\n';
+    await writeFile(f.cli, shell);
+    await chmod(f.cli, 0o700);
+    await git(f.workspace, 'sparse-checkout', 'init', '--cone');
+    await git(f.workspace, 'sparse-checkout', 'set', 'visible');
+    await assert.rejects(readFile(path.join(f.workspace, 'hidden', 'preserve.txt')), /ENOENT/);
+    await writeFile(path.join(f.workspace, 'visible', 'shown.txt'), 'changed\n');
+    await writeFile(path.join(f.workspace, 'visible', 'new.txt'), 'new file\n');
+
+    const { stdout: indexOut } = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const realIndexPath = path.resolve(f.workspace, indexOut.trim());
+    const realIndex = await readFile(realIndexPath);
+    let privateIndexVerified = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        if (file === GIT && args[0] === 'add' && options?.env?.GIT_INDEX_FILE) {
+          assert.deepEqual(await readFile(options.env.GIT_INDEX_FILE), realIndex,
+            'private staging index must retain sparse skip-worktree flags');
+          privateIndexVerified = true;
+        }
+        return execFile(file, args, options);
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: base,
+      message: 'test: sparse typed commit',
+    });
+    assert.equal(privateIndexVerified, true);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.status, 'OK');
+    assert.equal(result.index_synced, true);
+    const { stdout: hiddenOut } = await git(f.workspace, 'show', 'HEAD:hidden/preserve.txt');
+    assert.equal(hiddenOut, 'hidden tracked\n');
+    const { stdout: shownOut } = await git(f.workspace, 'show', 'HEAD:visible/shown.txt');
+    assert.equal(shownOut, 'changed\n');
+    const { stdout: newOut } = await git(f.workspace, 'show', 'HEAD:visible/new.txt');
+    assert.equal(newOut, 'new file\n');
+    const { stdout: statusOut } = await git(f.workspace, 'status', '--porcelain=v1', '--untracked-files=all');
+    assert.equal(statusOut, '');
+    assert.equal((await publisher.status({operation_id:f.operationId})).clean, true);
+  } finally { await f.cleanup(); }
+});
+
+test('private-index preparation refuses concurrent real-index mutation before ref update', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'changed\n');
+    let injected = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        const out = await execFile(file, args, options);
+        if (!injected && file === GIT && args[0] === 'write-tree' && options?.env?.GIT_INDEX_FILE) {
+          await writeFile(path.join(f.workspace, 'competitor.txt'), 'concurrent\n');
+          await git(f.workspace, 'add', 'competitor.txt');
+          injected = true;
+        }
+        return out;
+      },
+    });
+    const result = await publisher.commit({
+      operation_id: f.operationId, expected_head_sha: f.head,
+      message: 'test: concurrent index refusal',
+    });
+    assert.equal(injected, true);
+    assert.equal(result.status, 'REFUSED');
+    assert.equal(result.effect_state, 'NOT_APPLIED');
+    assert.equal(result.code, 'REAL_INDEX_CHANGED_DURING_PREPARATION');
+    const { stdout: headOut } = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(headOut.trim(), f.head);
+    const { stdout: remoteOut } = await git(
+      f.workspace, 'ls-remote', '--heads', 'origin', 'refs/heads/' + f.branch);
+    assert.equal(remoteOut.trim(), '');
+  } finally { await f.cleanup(); }
+});
+
+
+test('foreign index lock is preserved after the fenced ref update', async () => {
+  const f = await fixture();
+  try {
+    await writeFile(path.join(f.workspace, 'proof.txt'), 'v2\n');
+    const {stdout: indexOut} = await git(f.workspace, 'rev-parse', '--git-path', 'index');
+    const lockPath = path.resolve(f.workspace, indexOut.trim()) + '.lock';
+    let injected = false;
+    const publisher = createGitPublisher(f.config, {
+      execFile: async (file, args, options) => {
+        const out = await execFile(file, args, options);
+        if (!injected && file === GIT && args[0] === 'commit-tree') {
+          // Disposable synthetic workspace only. Git index lock belongs to
+          // another writer and must never be deleted by the publisher.
+          await writeFile(lockPath, 'foreign index lock\n', {flag:'wx'});
+          injected = true;
+        }
+        return out;
+      },
+    });
+    const result = await publisher.commit({
+      operation_id:f.operationId, expected_head_sha:f.head,
+      message:'test: preserve foreign index lock',
+    });
+    assert.equal(injected, true);
+    assert.equal(result.effect_state, 'APPLIED');
+    assert.equal(result.index_synced, false);
+    assert.equal(result.status, 'PARTIAL');
+    assert.equal(result.code, 'APPLIED_INDEX_SYNC_FAILED');
+    assert.equal(await readFile(lockPath, 'utf8'), 'foreign index lock\n');
+    const {stdout: headOut} = await git(f.workspace, 'rev-parse', 'HEAD');
+    assert.equal(headOut.trim(), result.commit_head_sha);
+  } finally {await f.cleanup();}
+});

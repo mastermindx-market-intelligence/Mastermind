@@ -335,6 +335,7 @@ def seal_control_owned_paths(
     paths: dict[str, str | Path],
     *,
     control_uid: int | None = None,
+    expected_identities: Mapping[str, Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
     """Remove worker traversal at control-owned assignment boundaries.
 
@@ -343,6 +344,10 @@ def seal_control_owned_paths(
     control-owned assignment root makes every descendant unreachable to the
     worker principal.  Every requested boundary is attempted even if another
     fails; successful revocations are never rolled back.
+
+    A remote owner may bind this effect to its retained pre-seal snapshot.
+    That snapshot is an exact filesystem precondition, not caller authority
+    or proof that worker admission/process cleanup is held.
     """
 
     if not paths or any(
@@ -354,6 +359,21 @@ def seal_control_owned_paths(
     canonical_values = [Path(value).resolve(strict=False) for value in paths.values()]
     if len(canonical_values) != len(set(canonical_values)):
         raise AssignmentSealError("assignment seal paths must be distinct")
+
+    expected: dict[str, dict[str, object]] | None = None
+    if expected_identities is not None:
+        fields = {"path", "device", "inode", "mode", "uid", "gid", "mtime_ns"}
+        if not isinstance(expected_identities, Mapping) or set(expected_identities) != set(paths):
+            raise AssignmentSealError("assignment seal snapshot labels differ")
+        expected = {}
+        for label, value in expected_identities.items():
+            if (not isinstance(value, Mapping) or set(value) != fields
+                    or type(value["path"]) is not str
+                    or value["path"] != str(Path(paths[label]).resolve(strict=False))
+                    or any(type(value[key]) is not int or value[key] < 0
+                           for key in fields - {"path"})):
+                raise AssignmentSealError("assignment seal snapshot is malformed")
+            expected[label] = dict(value)
 
     sealed: dict[str, dict[str, object]] = {}
     errors: list[str] = []
@@ -374,6 +394,11 @@ def seal_control_owned_paths(
                     f"{label} boundary is not a control-owned protected directory"
                 )
             before_identity = _seal_identity(path.resolve(strict=True), before)
+            if expected is not None and before_identity != expected[label]:
+                raise AssignmentSealError(f"{label} boundary differs from original snapshot")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (before.st_dev, before.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while opening")
             os.fchmod(descriptor, 0o700)
             os.fsync(descriptor)
             after = os.fstat(descriptor)
@@ -384,6 +409,9 @@ def seal_control_owned_paths(
                 for field in stable_fields
             ) or after_identity["mode"] != 0o700:
                 raise AssignmentSealError(f"{label} boundary did not seal to mode 0700")
+            visible = path.stat(follow_symlinks=False)
+            if (visible.st_dev, visible.st_ino) != (after.st_dev, after.st_ino):
+                raise AssignmentSealError(f"{label} boundary changed while sealing")
             sealed[label] = {
                 "before": before_identity,
                 "after": after_identity,
@@ -2209,7 +2237,15 @@ def inspect_linked_worktree(
             dirty=True,
             recoverability="WORKSPACE_ONLY_CHANGES_PRESENT",
             removed=False,
-            reason="tracked or untracked workspace changes are present",
+            reason=(
+                "tracked or untracked workspace changes are present; "
+                f"tracked_changes={'present' if cleanliness.status else 'absent'}; "
+                f"all_untracked={'present' if cleanliness.all_untracked else 'absent'} "
+                "(including ignored files). Ordinary git status may hide ignored files. "
+                "Inspect git ls-files --others -z; retain needed source and evidence, "
+                "and remove only verified disposable outputs before requesting release. "
+                "No files were removed."
+            ),
         )
 
     if head.lower() == base.lower():

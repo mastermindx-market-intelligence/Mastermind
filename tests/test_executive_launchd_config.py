@@ -328,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|restart-gateway|start-readside|stop-readside|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -379,9 +379,16 @@ def test_control_canary_uses_post_drop_wrapper_not_launchd_environment() -> None
     )
     assert "os.execve" in wrapper
     assert "exact_mode=0o440" in wrapper
-    assert wrapper.index("attest_current_service_environment(") < wrapper.index(
-        "service_main("
-    )
+    # Check calls in the actual post-exec entry, not a former service alias
+    # or an earlier function definition. Behavioral order is also exercised
+    # by test_installed_finite_control.py.
+    import ast
+    tree = ast.parse(wrapper)
+    entry = next(node for node in tree.body
+                 if isinstance(node, ast.FunctionDef) and node.name == "_post_exec_main")
+    calls = {node.func.id: node.lineno for node in ast.walk(entry)
+             if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)}
+    assert calls["attest_current_service_environment"] < calls["serve_installed_control"]
     assert '"PYTHONDONTWRITEBYTECODE": "1"' in wrapper
     assert "KERN_PROCARGS2" in probe
     assert '"/bin/launchctl", "print"' in probe
@@ -762,6 +769,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     assert value["schema_version"] == CONTROL_CONFIG_SCHEMA_VERSION
     # Installed product groups, the optional read-profile selector, and the
     # attended subscription realm stay omitted in the unconfigured template.
+    # Fabric also requires explicitly installed bindings and remains unarmed
+    # when its three optional composition keys are omitted.
     # Null groups fail validation; an omitted executive_mcp_profile preserves
     # the legacy generation and an omitted realm preserves the v4 worker.
     installed_product_keys = {
@@ -775,6 +784,14 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "subscription_canary_realm",
         "privileged_readiness_armed",
         "privileged_broker_socket_path",
+        "fabric_bridge_armed",
+        "fabric_bindings_path",
+        "fabric_bindings_sha256",
+        "fabric_attended_probe",
+        "coo_foreground_only",
+        "coo_principal_dialogue_armed",
+        # Native V2 requires explicitly sealed source and remains absent by default.
+        "native_capacity_v2",
         # Provenance is injected only after the installer validates the live
         # receipt; the static template intentionally has no host digest.
         "python_runtime_provenance_digest",
@@ -1744,17 +1761,25 @@ def test_release_manifest_rejects_ownership_and_group_write_drift() -> None:
 
 def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -> None:
     source = (OPS / "install.sh").read_text(encoding="utf-8")
-    stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"')
+    mutation_start = source.index("trap leave_installed_services_stopped EXIT")
+    stop = source.index('/bin/launchctl disable "system/$CONTROL_LABEL"', mutation_start)
     control_absent = source.index(
         'wait_for_launchd_absent "$CONTROL_LABEL" control', stop
     )
     worker_absent = source.index(
         'wait_for_launchd_absent "$WORKER_LABEL" worker', control_absent
     )
-    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive')
-    config_write = source.index('temporary.write_text(', archive)
+    # Archive/seal/publication now live in one shared function. Its ordinary
+    # invocation, rather than its definition, must follow the daemon fences.
+    shared = source.split("# --- BEGIN shared sealed release staging ---", 1)[1].split(
+        "# --- END shared sealed release staging ---", 1
+    )[0]
+    archive_command = '/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive'
+    assert shared.count(archive_command) == source.count(archive_command) == 1
+    publication = source.index("\nstage_sealed_release || exit 65", mutation_start)
+    config_write = source.index('temporary.write_text(', publication)
     plist_install = source.index('/usr/bin/install -o root -g wheel -m 0644')
-    assert stop < control_absent < worker_absent < archive < config_write < plist_install
+    assert mutation_start < stop < control_absent < worker_absent < publication < config_write < plist_install
     assert "trap leave_installed_services_stopped EXIT" in source
     tail_after_plists = source[plist_install:]
     # Normal Executive daemons stay inert. The only bootstrap is the explicitly
@@ -1769,20 +1794,40 @@ def test_installer_stops_old_daemons_before_first_release_or_policy_mutation() -
     assert manifest_verify < arm < bootstrap
 
 
-def test_installer_waits_boundedly_for_asynchronous_launchd_bootout() -> None:
+def test_installer_waits_boundedly_for_asynchronous_launchd_bootout(tmp_path) -> None:
     source = (OPS / "install.sh").read_text(encoding="utf-8")
     helper_start = source.index("wait_for_launchd_absent() {")
     helper_end = source.index("\n}\nleave_installed_services_stopped()", helper_start)
     helper = source[helper_start:helper_end]
-    assert "for attempt in 1 2 3 4 5; do" in helper
-    assert 'launchctl print "system/$label"' in helper
-    assert 'if [ "$attempt" -lt 5 ]; then' in helper
-    assert "/bin/sleep 1" in helper
-    assert "return 1" in helper
+    # Exercise the actual shell wrapper with an inert helper process. The
+    # Python boundary's absolute budget and native absence decisions are
+    # covered by the native-acquisition behavioral tests.
+    import subprocess
+    fake_python = tmp_path / "python"
+    fake_python.write_text('''#!/bin/sh
+printf '%s\\n' "$@" > "$CALL_LOG"
+exit "$HELPER_RC"
+''')
+    fake_python.chmod(0o700)
+    call_log = tmp_path / "called"
+    for helper_rc in ("0", "65"):
+        result = subprocess.run(
+            ["/bin/bash", "-c", helper + '\n}\nwait_for_launchd_absent "com.mastermind.executive.privileged" privileged'],
+            env={"PYTHON_BINARY": str(fake_python), "SCRIPT_DIR": str(OPS),
+                 "CALL_LOG": str(call_log), "HELPER_RC": helper_rc},
+            capture_output=True, text=True, timeout=5,
+        )
+        assert result.returncode == (0 if helper_rc == "0" else 1)
+        assert call_log.read_text().splitlines() == [
+            "-I", "-S", "-B", str(OPS / "recovery_install_observation.py"),
+            "com.mastermind.executive.privileged",
+        ]
+        if helper_rc != "0":
+            assert "absence was not proven after bootout" in result.stderr
 
     mutation_start = source.index("trap leave_installed_services_stopped EXIT")
-    archive = source.index('/usr/bin/git --no-optional-locks -c "safe.directory=$SOURCE_REPO" -C "$SOURCE_REPO" archive', mutation_start)
-    mutation = source[mutation_start:archive]
+    publication = source.index("\nstage_sealed_release || exit 65", mutation_start)
+    mutation = source[mutation_start:publication]
     for label, description in (
         ("RELAY_LABEL", "relay"),
         ("CONTROL_LABEL", "control"),

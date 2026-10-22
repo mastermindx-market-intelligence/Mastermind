@@ -1,0 +1,34 @@
+--- a/pools.yaml
++++ b/pools.yaml
+@@ -423,7 +423,7 @@
+   # Chairman 2026-10-11: use expiring Grok for useful work on Ubuntu only.
+   # Self-expires with the dated paired window; no quota/capacity grant.
+   grok_expiring_priority:
+-    enabled: true
++    enabled: false
+   # R17 MiniMax-first for mechanical/build/fix/review/verify (execute classes)
+   execute_order: [minimax, glm-flash, bailian, go, grok, cursor]
+   bailian_routine_sampling:
+--- a/SKILL.md
++++ b/SKILL.md
+@@ -21,11 +21,11 @@
+ python3 "$FABRIC_ADAPTER" --help
+ ```
+ 
+-## Temporary Grok priority: expires 2026-10-12 05:54 UTC
++## Normal task-aware routing
+ 
+-The Chairman explicitly prioritizes useful work on the expiring Grok subscription. The installed router now uses the supplied 47%-used screenshot's dated reset (Oct 11 22:54 America/Vancouver), replacing the incorrect Sunday 00:00 UTC guess. New eligible ordinary requests prefer Grok during that window; the temporary named-class/economics exception expires automatically. It does not establish current quota or clear exhaustion, quality, broker, host, review or permission gates.
++The Chairman ended the temporary Grok quota-use priority after its October 11, 2026 reset. For new ordinary work, omit `--pool grok` and let the installed router select an admitted provider, account and host using task complexity, quality, cost, capacity and review independence. Routine bounded labor uses the normal economical pool order; Grok remains available for suitable complex work and independent review under normal admission. No quota-use deadline or aggressive Grok fan-out instruction remains active.
+ 
+-For an explicit Grok-only lane, use the same adapter request with `--pool grok`, truthful task class/complexity, verified original root/parent and stable ID. The installed adapter/picker restricts Grok to Ubuntu0..3. Do not use raw `remote_sub.sh`/SSH/provider commands or place Grok labor on M2. `--artifact-output result.md` is appropriate for a written deliverable. Bounded build/fix/extract classes are temporarily admitted under this instruction; outside the dated window, normal economics apply. No dummy work or refused-operation replay to consume quota. A pending/new subscription or installed skill is not a worker START.
++Keep using the direct shell Fabric adapter; optional Executive integration is not a prerequisite. Retain current host capacity and placement protections. Existing submitted workers keep their original run, provider, root, parent and owner through result review and acceptance; a routing change does not authorize cancellation, replay or replacement.
+ 
+ ## Dispatch an admitted, bounded work item
+ 
+@@ -72,4 +72,4 @@
+ 
+ For a new genuinely useful Grok coordinator, use the same adapter with `POOL_OPERATOR_CHILD_BUDGET=1`, `--class domain_orchestration`, `--task-complexity C3_FRONTIER_JUDGMENT`, a concrete `--escalation-reason`, `--pool grok`, and the verified root/immediate parent. Keep a stable new run ID and a bounded packet. The controller binds the private capability to the actual lease/account/host/model/support/packet and installs per-run instructions and active Stop integration. Never manually issue/copy capability tokens, reuse the operator lease for a child, or compose remote launch commands. This is direct shell Fabric and does not wait for Executive OS.
+ 
+-Inside the operator, discover `mastermindStudio` tools: `fabric_operator_scope`, `fabric_child_request`, `fabric_child_status`, `fabric_child_wait`, `fabric_child_result`, and `fabric_child_acknowledge`. Preserve the original root and use the operator run as the child's immediate parent. Child work is C0/C1, separately leased, and canonical routing selects its provider/account/Ubuntu host. Children cannot become operators or delegate recursively. The dated user Grok priority overrides normal cheap-provider preference until its expiry. Consume and review exact retained bytes, then acknowledge their SHA to close return attention. Acknowledgment is not ledger acceptance; the original principal separately adjudicates and accepts through the existing adapter. Do not manually invoke the hook or claim continuation from installed files alone.
++Inside the operator, discover `mastermindStudio` tools: `fabric_operator_scope`, `fabric_child_request`, `fabric_child_status`, `fabric_child_wait`, `fabric_child_result`, and `fabric_child_acknowledge`. Preserve the original root and use the operator run as the child's immediate parent. Child work is C0/C1, separately leased, and canonical routing selects its provider/account/Ubuntu host. Children cannot become operators or delegate recursively. Normal economical child routing applies; no Grok quota-use override is active. Consume and review exact retained bytes, then acknowledge their SHA to close return attention. Acknowledgment is not ledger acceptance; the original principal separately adjudicates and accepts through the existing adapter. Do not manually invoke the hook or claim continuation from installed files alone.

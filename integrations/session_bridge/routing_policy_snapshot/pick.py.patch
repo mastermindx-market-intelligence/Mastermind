@@ -1,0 +1,6 @@
+--- a/pick.py
++++ b/pick.py
+@@ -31,0 +32,3 @@
++if os.path.lexists(os.path.join(HERE, "pools.yaml")):
++    from fabric_policy_snapshot import verified_snapshot_path
++    POOLS_YAML = str(verified_snapshot_path(HERE))

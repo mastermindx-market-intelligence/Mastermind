@@ -1,0 +1,446 @@
+{
+  "mission": {
+    "acceptance": {
+      "artifact_revision": null,
+      "evidence": [],
+      "owner": null,
+      "reason_codes": [
+        "ACCEPTANCE_OWNER_NOT_PROJECTED"
+      ],
+      "ruling": null,
+      "state": "NOT_PROJECTED"
+    },
+    "budget": {},
+    "children": {
+      "coverage": "COMPLETE",
+      "items": [
+        {
+          "attempt_count": 1,
+          "attempt_limit": 2,
+          "current_attempt_id": "ATT-d071bc57ae7a49609c91f1edbba28796",
+          "depth": 1,
+          "job_id": "JOB-002",
+          "latest_attempt": {
+            "attempt_id": "ATT-d071bc57ae7a49609c91f1edbba28796",
+            "attempt_number": 1,
+            "error_class": null,
+            "error_present": false,
+            "exit_code": null,
+            "finished_at": "2026-10-14T15:54:10Z",
+            "has_result": true,
+            "started_at": "2026-10-14T15:54:10Z",
+            "status": "COMPLETED"
+          },
+          "orchestration_role": "plan",
+          "parent_job_id": "JOB-001",
+          "plan_step_id": null,
+          "status": "COMPLETED",
+          "worker_id": null
+        },
+        {
+          "attempt_count": 1,
+          "attempt_limit": 1,
+          "current_attempt_id": "ATT-72ede24f597142e7bb31c804aa5ae887",
+          "depth": 1,
+          "job_id": "JOB-003",
+          "latest_attempt": {
+            "attempt_id": "ATT-72ede24f597142e7bb31c804aa5ae887",
+            "attempt_number": 1,
+            "error_class": null,
+            "error_present": false,
+            "exit_code": null,
+            "finished_at": "2026-10-14T15:54:10Z",
+            "has_result": true,
+            "started_at": "2026-10-14T15:54:10Z",
+            "status": "COMPLETED"
+          },
+          "orchestration_role": "work",
+          "parent_job_id": "JOB-001",
+          "plan_step_id": "step-0",
+          "status": "COMPLETED",
+          "worker_id": null
+        },
+        {
+          "attempt_count": 1,
+          "attempt_limit": 1,
+          "current_attempt_id": "ATT-43e522e79ca242d9a6a37529b2248583",
+          "depth": 1,
+          "job_id": "JOB-004",
+          "latest_attempt": {
+            "attempt_id": "ATT-43e522e79ca242d9a6a37529b2248583",
+            "attempt_number": 1,
+            "error_class": null,
+            "error_present": false,
+            "exit_code": null,
+            "finished_at": "2026-10-14T15:54:11Z",
+            "has_result": true,
+            "started_at": "2026-10-14T15:54:11Z",
+            "status": "COMPLETED"
+          },
+          "orchestration_role": "work",
+          "parent_job_id": "JOB-001",
+          "plan_step_id": "step-1",
+          "status": "COMPLETED",
+          "worker_id": null
+        },
+        {
+          "attempt_count": 1,
+          "attempt_limit": 1,
+          "current_attempt_id": "ATT-53bb019b18124fcfad3650567591e3fb",
+          "depth": 1,
+          "job_id": "JOB-005",
+          "latest_attempt": {
+            "attempt_id": "ATT-53bb019b18124fcfad3650567591e3fb",
+            "attempt_number": 1,
+            "error_class": null,
+            "error_present": false,
+            "exit_code": null,
+            "finished_at": "2026-10-14T15:54:10Z",
+            "has_result": true,
+            "started_at": "2026-10-14T15:54:10Z",
+            "status": "COMPLETED"
+          },
+          "orchestration_role": "review",
+          "parent_job_id": "JOB-001",
+          "plan_step_id": "step-0",
+          "status": "COMPLETED",
+          "worker_id": null
+        },
+        {
+          "attempt_count": 1,
+          "attempt_limit": 1,
+          "current_attempt_id": "ATT-0859c07b8983414f9f19b8568586cb5f",
+          "depth": 1,
+          "job_id": "JOB-006",
+          "latest_attempt": {
+            "attempt_id": "ATT-0859c07b8983414f9f19b8568586cb5f",
+            "attempt_number": 1,
+            "error_class": null,
+            "error_present": false,
+            "exit_code": null,
+            "finished_at": "2026-10-14T15:54:11Z",
+            "has_result": true,
+            "started_at": "2026-10-14T15:54:10Z",
+            "status": "COMPLETED"
+          },
+          "orchestration_role": "work",
+          "parent_job_id": "JOB-001",
+          "plan_step_id": "step-2",
+          "status": "COMPLETED",
+          "worker_id": null
+        }
+      ],
+      "overflow_count": 0,
+      "reason_codes": [],
+      "state": "AVAILABLE",
+      "total_count": 5,
+      "unjoined_job_count": 0,
+      "unjoined_job_ids": []
+    },
+    "conversation": {
+      "coverage": "NOT_PROJECTED",
+      "items": [],
+      "overflow_count": null,
+      "reason_codes": [
+        "MISSION_TREE_SUBSLICE_EXCLUDES_CONTENT"
+      ],
+      "state": "UNAVAILABLE",
+      "total_count": null
+    },
+    "degraded": [],
+    "execution": {
+      "artifacts": [],
+      "errors_present": false,
+      "evidence": [],
+      "next_actions": [],
+      "state": "COMPLETED",
+      "summary_present": false
+    },
+    "feature_gates": {
+      "actions": "READ_ONLY",
+      "advanced": "AVAILABLE",
+      "conversation": "UNAVAILABLE"
+    },
+    "generated_at": "2026-09-21T00:00:00Z",
+    "missingness": [
+      {
+        "missingness_class": "EXCLUDED",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "conversation"
+      },
+      {
+        "missingness_class": "EXCLUDED",
+        "producer_owner": "wake",
+        "reason": "source detail withheld",
+        "target_field": "return_path"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": null,
+        "reason": "source detail withheld",
+        "target_field": "acceptance"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": null,
+        "reason": "source detail withheld",
+        "target_field": "acceptance.state"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "children.worker_id"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "mission.title"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "JOB-005",
+        "reason": "source detail withheld",
+        "target_field": "review.verdict"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "slack",
+        "reason": "source detail withheld",
+        "target_field": "transport.continued"
+      },
+      {
+        "missingness_class": "MISSING_PRODUCER",
+        "producer_owner": "slack",
+        "reason": "source detail withheld",
+        "target_field": "transport.stopped"
+      },
+      {
+        "missingness_class": "NULL_BY_DESIGN",
+        "producer_owner": "executive_os",
+        "reason": "source detail withheld",
+        "target_field": "runtime.identity"
+      }
+    ],
+    "mission": {
+      "armed": {
+        "ceo_ingress_app_armed": null,
+        "ceo_submit_armed": null,
+        "coo_autonomy_armed": null,
+        "dialogue_bridge_armed": null,
+        "source": "absent",
+        "terminal_return_armed": null
+      },
+      "capability": {
+        "detail": "the executive runtime database was read; the requested root job was found",
+        "installed": true,
+        "state": "PROVEN",
+        "version": null
+      },
+      "depth": 0,
+      "evidence": [],
+      "orchestration_role": "aggregation",
+      "plan_step_id": null,
+      "root_job_ambiguous": false,
+      "root_job_candidates": [
+        "JOB-001"
+      ],
+      "root_job_id": "JOB-001",
+      "runtime_root_state": "RESOLVED",
+      "status": "COMPLETED",
+      "submission_availability": "UNKNOWN",
+      "title": null
+    },
+    "posture": {
+      "evidence": [],
+      "rule": "F4",
+      "value": "RETURNED_UNREVIEWED"
+    },
+    "principal": {
+      "accountable_seat": "ceo",
+      "current_sol_target": null,
+      "current_worker": null,
+      "evidence": [],
+      "owed_turn": {
+        "reason": "attention_targets_seat",
+        "seat": "ceo",
+        "source_refs": []
+      }
+    },
+    "program": {
+      "attention_ids": [],
+      "disagreements": [],
+      "evidence": [],
+      "github_prs": [],
+      "next_action": "Read",
+      "state": "active",
+      "title": "One",
+      "work_ref": "WS:FIXTURE"
+    },
+    "read_state": {
+      "reason_codes": [],
+      "state": "CURRENT",
+      "usable_sections": [
+        "program",
+        "mission",
+        "review",
+        "execution",
+        "principal",
+        "transport",
+        "children"
+      ]
+    },
+    "result_refs": {
+      "absent_job_ids": [],
+      "availability": "AVAILABLE",
+      "generation": {
+        "after": 2,
+        "before": 2,
+        "schema": "mastermind.runtime_read_observation.v1",
+        "source_identity": "21f6889b27db5c986b83de5b999835fd",
+        "state": "SAME"
+      },
+      "omitted_job_ids": [],
+      "refs": [
+        {
+          "attempt_id": "ATT-9fab70ac9b944e48813a6fa94727e18f",
+          "job_id": "JOB-001",
+          "orchestration_role": "aggregation",
+          "result_envelope_digest": "9d0b7153d2f2c7acc9d2b4415fbe8d61f0c2a8fedacbea6577623c90240bbc39",
+          "root_job_id": "JOB-001",
+          "validation": "UNVALIDATED"
+        },
+        {
+          "attempt_id": "ATT-d071bc57ae7a49609c91f1edbba28796",
+          "job_id": "JOB-002",
+          "orchestration_role": "plan",
+          "result_envelope_digest": "838d16a0b0c52e5f755731fa295061bafa4a7f6ffce6540f84bdb78da27629a0",
+          "root_job_id": "JOB-001",
+          "validation": "UNVALIDATED"
+        },
+        {
+          "attempt_id": "ATT-72ede24f597142e7bb31c804aa5ae887",
+          "job_id": "JOB-003",
+          "orchestration_role": "work",
+          "result_envelope_digest": "994e77802cc3776d460160b60fb03ed9d0ff29211311d16da8d29ca016e0b963",
+          "root_job_id": "JOB-001",
+          "validation": "UNVALIDATED"
+        },
+        {
+          "attempt_id": "ATT-43e522e79ca242d9a6a37529b2248583",
+          "job_id": "JOB-004",
+          "orchestration_role": "work",
+          "result_envelope_digest": "0b77b4a8201bf311acb801f5f1f00e597460c73403492f5bd2ce62b99f967b52",
+          "root_job_id": "JOB-001",
+          "validation": "UNVALIDATED"
+        },
+        {
+          "attempt_id": "ATT-53bb019b18124fcfad3650567591e3fb",
+          "job_id": "JOB-005",
+          "orchestration_role": "review",
+          "result_envelope_digest": "ed7a5d40916e959495844e0eaa679c16fca2029693c85add208fed2206975c5b",
+          "root_job_id": "JOB-001",
+          "validation": "UNVALIDATED"
+        },
+        {
+          "attempt_id": "ATT-0859c07b8983414f9f19b8568586cb5f",
+          "job_id": "JOB-006",
+          "orchestration_role": "work",
+          "result_envelope_digest": "34ae94b6cfa6b31da0bd18e968da151636a37b77cc1ed0cec264192a37d8800a",
+          "root_job_id": "JOB-001",
+          "validation": "UNVALIDATED"
+        }
+      ],
+      "root_job_id": "JOB-001",
+      "schema": "mastermind.fabric_result_reference_index.v1",
+      "snapshot_digest": "b20f881837edc62cec1ee0443f4181d178dd3afc3e3400e599288cf5f8d76a72",
+      "truncated": false
+    },
+    "review": {
+      "evidence": [],
+      "required": false,
+      "reviews_job_id": null,
+      "verdict": "NOT_YET"
+    },
+    "schema": "mastermind.mission_workspace.v3",
+    "source": {
+      "control_room_generated_at": "2026-09-21T00:00:00Z",
+      "control_room_schema": "mastermind.chairman_control_room.v1",
+      "fabric_view_generated_at": "2026-10-14T15:54:11Z",
+      "fabric_view_schema": "mastermind.fabric_job_view.v2",
+      "owner_observation": {
+        "control_room": {
+          "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+          "document_digest": "0c5752e343a475a8b7edce78ef98b0fe1eecd6b6750751ccf486a983d80f2c82",
+          "instance_after": "6327f362bf0207dd3f5e02fa8e3473519e0696b54c3b8d3ceac9532aff698e36",
+          "instance_before": "6327f362bf0207dd3f5e02fa8e3473519e0696b54c3b8d3ceac9532aff698e36",
+          "publication_after": 1,
+          "publication_before": 1,
+          "source_validity_digest": "f5f26b01038abf5dc3639b46c0c2b35091b598516fb440f758f33ba0fae97894"
+        },
+        "runtime": {
+          "after": 2,
+          "before": 2,
+          "schema": "mastermind.runtime_read_observation.v1",
+          "snapshot_digest": "b20f881837edc62cec1ee0443f4181d178dd3afc3e3400e599288cf5f8d76a72",
+          "source_identity": "21f6889b27db5c986b83de5b999835fd",
+          "state": "SAME"
+        },
+        "schema": "mastermind.workspace_source_observation.v1",
+        "selection": {
+          "root_job_id": "JOB-001",
+          "work_ref": "WS:FIXTURE"
+        },
+        "state": "SAME"
+      },
+      "source_coverage": [
+        "control_room",
+        "fabric_view"
+      ],
+      "source_generation": {
+        "generation": null,
+        "state": "UNKNOWN",
+        "version": null
+      }
+    },
+    "transport": {
+      "actionable": true,
+      "carrier": null,
+      "dispatch_state": "RETURNED",
+      "evidence": [],
+      "historical": false,
+      "reason": "fixture",
+      "w3c": null,
+      "watch_proven": true
+    }
+  },
+  "product_acceptance": {
+    "reason_codes": [],
+    "receipt": {
+      "parent_attempt_id": "ATT-9fab70ac9b944e48813a6fa94727e18f",
+      "parent_job_id": "JOB-001",
+      "parent_result_envelope_digest": "9d0b7153d2f2c7acc9d2b4415fbe8d61f0c2a8fedacbea6577623c90240bbc39",
+      "qualified_ruling_digest": "c8ccda8b1f5907d6a96ea1903e5d5bd0671a71f8ee2d3cb6f58ff9fe34db72d1",
+      "ruling_message_key": "asd-principal-a7b2b0257fba868b7893722a37d582f9",
+      "source_continuity": {
+        "current_basis_digest": "a297d9dfe19d33beca3cce8c8080b56527f9793988a1448b13081c5170f7c79c",
+        "declaration_digest": "43de5f266130e694b9eaf5d02e0ae6e3561d2afcea477ceb82c4ba34f1ebfd41",
+        "disposition": "UNCHANGED_SOURCE",
+        "issued_basis_digest": "a297d9dfe19d33beca3cce8c8080b56527f9793988a1448b13081c5170f7c79c"
+      },
+      "state": "PRODUCT_ACCEPTED",
+      "subject_job_id": "JOB-003",
+      "subject_result_envelope_digest": "994e77802cc3776d460160b60fb03ed9d0ff29211311d16da8d29ca016e0b963"
+    },
+    "schema": "mastermind.product_acceptance_view.v1",
+    "selection": {
+      "request_message_key": "asd-mcp-e54be148b648170d9ca878baa0a037ff",
+      "root_job_id": "JOB-001",
+      "work_ref": "WS:FIXTURE"
+    },
+    "state": "ACCEPTED"
+  },
+  "schema": "mastermind.mission_workspace.v4"
+}

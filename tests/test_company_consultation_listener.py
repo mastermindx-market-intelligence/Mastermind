@@ -43,10 +43,11 @@ def test_company_plist_projection_is_optional_and_uses_existing_worker_identity(
     assert cli.company_consultation_launchd_entry({}) is None
 
 
+@pytest.mark.parametrize("native_armed", [False, True])
 @pytest.mark.parametrize("armed", [None, False, True])
 @pytest.mark.parametrize("dialogue_armed", [False, True])
 def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
-    tmp_path, monkeypatch, armed, dialogue_armed,
+    tmp_path, monkeypatch, armed, dialogue_armed, native_armed,
 ):
     from integrations import company_consultation_host
     from ops.executive_os.a2_agent_relay_enrollment import SLACK_WORKSPACE_ID, SLACK_CHANNEL_ID
@@ -64,6 +65,8 @@ def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
         )
     if armed is not None:
         raw["company_consultation"] = _settings(armed)
+        if native_armed:
+            raw["company_consultation"]["native_return_armed"] = True
     captured, hosts, activated, answer_owners = {}, [], [], []
     class Capture:
         def __init__(self, config, **kwargs):
@@ -103,7 +106,8 @@ def test_installed_company_factory_has_one_runtime_and_canonical_relay_scope(
             assert answer_owners[0] is not dialogue_owner
         assert hosts == [dict(runtime=runtime, repository_root=raw["proof_source_repository"],
                              worker_uid=451, relay_socket_path=cli._CANONICAL_AGENT_RELAY_SOCKET,
-                             workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID)]
+                             workspace_id=SLACK_WORKSPACE_ID, channel_id=SLACK_CHANNEL_ID,
+                             native_return_armed=native_armed, product_acceptance_host=None)]
         assert binding.worker_uid == binding.group_gid == 451
         assert activated.count("CompanyConsultation") == 1
 

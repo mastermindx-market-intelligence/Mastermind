@@ -12,6 +12,12 @@ from typing import Any
 COMPANY_WORKSPACE_BINDING_CLASS = "company-workspace-admin-attested"
 PERSONAL_PRO_WORKER_BINDING_CLASS = "personal-pro-dedicated-worker-attested"
 
+# One reviewed recovery preimage. This digest grants neither auth continuity
+# nor a retry; it closes the explicit current-credential qualification route.
+COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256 = (
+    "654abd66f6baef1b610a6c03fafe85f76fd81ed646266d3ff90db3c6e85e2a7d"
+)
+
 EXPECTED_AUTH_MODE = {
     "service-account": "agentIdentity",
     "personal-access-token": "personalAccessToken",
@@ -76,6 +82,7 @@ def evaluate_identity_policy(
 
 __all__ = [
     "COMPANY_PLAN_TYPES",
+    "COMPANY_DEVICE_DRIFT_PREDECESSOR_SHA256",
     "COMPANY_WORKSPACE_BINDING_CLASS",
     "EXPECTED_AUTH_MODE",
     "PERSONAL_PRO_PLAN_TYPES",

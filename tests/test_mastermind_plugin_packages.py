@@ -44,8 +44,8 @@ NAVIGATOR_SKILLS = ("navigate-mastermind-universe",)
 
 
 def _copy_package(destination: Path) -> None:
-    shutil.copytree(ROOT / ".agents", destination / ".agents")
-    shutil.copytree(ROOT / "plugins", destination / "plugins")
+    shutil.copytree(ROOT / ".agents", destination / ".agents", symlinks=True)
+    shutil.copytree(ROOT / "plugins", destination / "plugins", symlinks=True)
 
 
 def _write_json(path: Path, value: object) -> None:
@@ -151,8 +151,11 @@ def _operator(name: str) -> str:
     )
 
 
-def test_repository_plugin_package_is_valid() -> None:
-    result = validate_repository(ROOT)
+def test_repository_plugin_package_is_valid(tmp_path: Path) -> None:
+    assert not (ROOT / ".agents").is_symlink()
+    assert not (ROOT / "plugins").is_symlink()
+    _copy_package(tmp_path)
+    result = validate_repository(tmp_path)
     assert result == {
         "schema": VALIDATION_SCHEMA,
         "ok": True,
@@ -160,7 +163,7 @@ def test_repository_plugin_package_is_valid() -> None:
         "plugins": [
             {
                 "name": "mastermind-sol",
-                "version": "0.2.0",
+                "version": "0.2.1",
                 "manifest": "plugins/mastermind-sol/.codex-plugin/plugin.json",
                 "skills": list(SOL_SKILLS),
             },
@@ -185,6 +188,50 @@ def test_repository_plugin_package_is_valid() -> None:
         ],
         "errors": [],
     }
+
+
+def test_repository_package_validation_isolated_from_unrelated_source_root_churn(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Other CI jobs may change the source root while the copied package is read."""
+    source_root = tmp_path / "source"
+    validation_root = tmp_path / "validation"
+    source_root.mkdir()
+    validation_root.mkdir()
+    _copy_package(source_root)
+    monkeypatch.setitem(globals(), "ROOT", source_root)
+    original_scan = plugin_validator._scan_files
+    validated_roots: list[Path] = []
+
+    def churn_source_after_scan(root: Path, errors: list[dict[str, str]]) -> None:
+        original_scan(root, errors)
+        (source_root / "unrelated-ci-output").write_text("generated\n", encoding="utf-8")
+        validated_roots.append(root)
+
+    monkeypatch.setattr(plugin_validator, "_scan_files", churn_source_after_scan)
+    test_repository_plugin_package_is_valid(validation_root)
+
+    assert validated_roots == [validation_root]
+    assert (source_root / "unrelated-ci-output").is_file()
+
+
+@pytest.mark.parametrize(
+    "relative", (".agents", "plugins", "plugins/mastermind-sol/.codex-plugin/plugin.json")
+)
+def test_repository_package_validation_does_not_normalize_forbidden_source_links(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, relative: str
+) -> None:
+    """Isolation must preserve the source package's no-symlink boundary."""
+    source_root = tmp_path / "source"
+    validation_root = tmp_path / "validation"
+    source_root.mkdir()
+    validation_root.mkdir()
+    _copy_package(source_root)
+    _replace_with_owned_symlink(source_root / relative, "owned-source-node")
+    monkeypatch.setitem(globals(), "ROOT", source_root)
+
+    with pytest.raises(AssertionError):
+        test_repository_plugin_package_is_valid(validation_root)
 
 
 def test_symlinked_repository_root_is_refused_before_package_content_is_opened(
@@ -654,7 +701,7 @@ def test_repository_documents_match_the_closed_contract() -> None:
         ],
     }
     for plugin, display_name, version, template_version in (
-        ("mastermind-sol", "Mastermind CEO", "0.2.0", "0.1.0"),
+        ("mastermind-sol", "Mastermind CEO", "0.2.1", "0.1.0"),
         ("mastermind-operator", "Mastermind Operator", "0.1.0", "0.1.0"),
     ):
         manifest = json.loads(
@@ -775,7 +822,7 @@ def test_personal_ceo_release_preserves_frozen_business_u1_generation_one() -> N
     from integrations.business_sol_installation import bindings as business_u1
 
     assert manifest["name"] == "mastermind-sol"
-    assert manifest["version"] == "0.2.0"
+    assert manifest["version"] == "0.2.1"
     assert manifest["interface"]["displayName"] == "Mastermind CEO"
 
     assert template["plugin"] == "mastermind-sol"

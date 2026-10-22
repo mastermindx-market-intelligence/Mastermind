@@ -92,7 +92,7 @@ def _terminal_fixture(tmp_path, monkeypatch, *, marker=True):
                             to_dict=lambda: {"job_id": "JOB-proof", "base_sha": "b"*40})
     original = runtime.jobs.get_job
     monkeypatch.setattr(runtime.jobs, "get_job", lambda job: proof if job == "JOB-proof" else original(job))
-    monkeypatch.setattr(m, "prior_carry_material", lambda sha: (prior, {"success_job_id": "JOB-proof"}, material))
+    monkeypatch.setattr(m, "prior_carry_material", lambda sha, **kwargs: (prior, {"success_job_id": "JOB-proof"}, material))
     monkeypatch.setattr(m, "terminal_assignment", lambda *args: {"assignment_seal_sha256": "4"*64})
     config = {"worker_id": "worker-1", "quota_class": "default"}
     return runtime, root, before, config, prior, material, proof, job_id, attempt_id

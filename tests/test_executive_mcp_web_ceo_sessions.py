@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import json
 import sys
 from pathlib import Path
@@ -178,6 +179,47 @@ def test_submit_scope_can_send_only_to_trusted_projection(settings, rsa_key):
         assert len(owners.summon_calls) == 1
         assert owners.summon_calls[0][1]["operation_key"] == "bridge-auth-5"
         assert owners.summon_calls[0][0] == owners.reply_calls[0][0]
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("alternate_resource", [False, True])
+@pytest.mark.parametrize("auth", ["read", "combined", "extra", "submit-only"])
+def test_direct_read_accepts_exact_read_or_combined_policy(
+    settings, rsa_key, monkeypatch, alternate_resource, auth
+):
+    from integrations.mastermind_executive_app import gateway
+
+    resource = fixture.RESOURCE
+    if alternate_resource:
+        resource = "https://executive-secondary.example.test/mcp"
+        alternate = fixture.AppPolicies(
+            read=fixture._read_policy(resource=resource),
+            submit=fixture._submit_policy(resource=resource),
+        )
+        settings = dataclasses.replace(settings, additional_policies=(alternate,))
+        monkeypatch.setattr(gateway, "_default_jwks_cache", lambda _policy: fixture._FakeJwksCache(rsa_key))
+    scope = {
+        "read": fixture.READ_SCOPE,
+        "combined": f"{fixture.READ_SCOPE} {fixture.SUBMIT_SCOPE}",
+        "extra": f"{fixture.READ_SCOPE} {fixture.SUBMIT_SCOPE} unexpected",
+        "submit-only": fixture.SUBMIT_SCOPE,
+    }[auth]
+
+    async def run():
+        owners, projector = Owners(), Projector()
+        app = await app_client(settings, owners, projector)
+        token = fixture._token(rsa_key, scope=scope, aud=resource)
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1") as client:
+                response, payload = await call(client, token, "session_targets", {"kind": "codex"})
+                if auth in {"read", "combined"}:
+                    assert response.status_code == 200 and payload["ok"] is True, payload
+                    assert payload["data"][0]["target_ref"] == "codex:BIND-1"
+                else:
+                    assert response.status_code in {401, 403}
+        assert len(projector.calls) == (1 if auth in {"read", "combined"} else 0)
+        assert not owners.reply_calls and not owners.summon_calls
+
     asyncio.run(run())
 
 

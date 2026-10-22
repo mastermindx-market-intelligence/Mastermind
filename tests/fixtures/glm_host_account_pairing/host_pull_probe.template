@@ -1,0 +1,246 @@
+PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"   # R34: claude/codex are installed under ~/.local/bin on mb/m1; non-login ssh does not source .zprofile
+ts=$(date +%s)
+load1=""; load5=""; ncpu=""; mem=""; disk=""; on_ac="unknown"; active="0"; tools=""; thermals=""
+case "$(uname -s)" in
+  Darwin)
+    load1=$(sysctl -n vm.loadavg | awk '{print $2}')
+    load5=$(sysctl -n vm.loadavg | awk '{print $3}')
+    ncpu=$(sysctl -n hw.ncpu)
+    psz=$(vm_stat | awk '/page size/ {for (i=1;i<=NF;i++) if ($i ~ /^[0-9]/) {gsub(/[^0-9]/,"",$i); print $i; exit}}')
+    fp=$(vm_stat 2>/dev/null | awk '/^Pages free:/ {gsub(/[^0-9]/,"",$NF); print $NF}')
+    ip=$(vm_stat 2>/dev/null | awk '/^Pages inactive:/ {gsub(/[^0-9]/,"",$NF); print $NF}')
+    if [ -n "$psz" ] && [ -n "$fp" ] && [ -n "$ip" ]; then
+      mem=$(awk -v f="$fp" -v i="$ip" -v p="$psz" 'BEGIN{printf "%.1f", (f+i)*p/1073741824}')
+    fi
+    # Physical-host disk floor: a roomy external worktree volume must not hide
+    # pressure on the system Data volume where /private/tmp, app state, and many
+    # Git object stores live. Report the LOWER free-space value.
+    dk_wr=$(df -Pk "@@WR@@" 2>/dev/null | awk 'NR==2{print $4}')
+    dk_data=$(df -Pk /System/Volumes/Data 2>/dev/null | awk 'NR==2{print $4}')
+    case "$dk_data" in ''|0) dk_data=$(df -Pk / 2>/dev/null | awk 'NR==2{print $4}') ;; esac
+    case "$dk_wr" in ''|0) dk_wr="$dk_data" ;; esac
+    dk=$(awk -v a="$dk_wr" -v b="$dk_data" 'BEGIN{
+      if (a=="" || a==0) print b;
+      else if (b=="" || b==0) print a;
+      else print (a<b?a:b)
+    }')
+    [ -n "$dk" ] && disk=$(awk -v k="$dk" 'BEGIN{printf "%.1f", k/1048576}')
+    if command -v pmset >/dev/null 2>&1; then
+      if pmset -g batt 2>/dev/null | grep -q 'AC Power'; then on_ac="true"; else on_ac="false"; fi
+    fi
+    ;;
+  Linux)
+    # Additive Linux hwmon observation. No guest agent, listener or host mutation.
+    thermals=$(python3 -c '
+import pathlib
+r=pathlib.Path("/sys/class/hwmon")
+def value(d,n):
+    try:
+        return (d/n).read_text(encoding="ascii").strip()
+    except (OSError,UnicodeError):
+        return None
+def mc(d,n):
+    s=value(d,n)
+    try:
+        x=int(s)
+        return x if -50000 <= x <= 150000 else None
+    except (TypeError,ValueError):
+        return None
+cpu={}
+cpu_sensor="unknown"
+cpu_fan_rpm=None
+nvme=[]
+for d in sorted(r.glob("hwmon*")):
+    chip=value(d,"name")
+    if chip=="k10temp":
+        for label,name in (("cpu_tctl_mc","temp1_input"),("cpu_ccd1_mc","temp3_input"),("cpu_ccd2_mc","temp4_input")):
+            v=mc(d,name)
+            if v is not None:
+                cpu[label]=v
+        if "cpu_tctl_mc" in cpu:
+            cpu_sensor="amd_tctl"
+    elif chip=="coretemp":
+        # Intel Core/Ultra exposes package thermals as Package id 0.
+        # Use the hottest package, never a low, unrepresentative core sensor.
+        packages=[]
+        for f in d.glob("temp*_input"):
+            label=value(d,f.name.replace("_input","_label"))
+            if label is None or not label.startswith("Package id "):
+                continue
+            v=mc(d,f.name)
+            if v is not None:
+                packages.append(v)
+        if packages and "cpu_tctl_mc" not in cpu:
+            cpu["cpu_tctl_mc"]=max(packages)
+            cpu["cpu_package_mc"]=max(packages)
+            cpu_sensor="intel_package"
+    elif chip in ("dell_ddv","dell_smm"):
+        raw=value(d,"fan1_input")
+        if raw is not None and raw.isascii() and raw.isdigit():
+            rpm=int(raw)
+            if 0 < rpm <= 20000 and (chip=="dell_ddv" or cpu_fan_rpm is None):
+                cpu_fan_rpm=rpm
+    elif chip=="nvme":
+        t=mc(d,"temp1_input")
+        if t is None:
+            continue
+        max_c=mc(d,"temp1_max")
+        crit_c=mc(d,"temp1_crit")
+        nvme.append((t,max_c,crit_c))
+# Linux procfs counters: bounded 150ms sample, observational only.
+import time
+def ticks():
+    result={}
+    for line in (value(pathlib.Path("/proc"),"stat") or "").splitlines():
+        parts=line.split()
+        if not parts:
+            continue
+        name=parts[0]
+        if name!="cpu" and not (name.startswith("cpu") and name[3:].isdigit()):
+            continue
+        try:
+            nums=[int(v) for v in parts[1:9]]
+            if len(nums)==8:
+                result[name]=(sum(nums),nums[3]+nums[4])
+        except ValueError:
+            continue
+    return result
+first=ticks()
+time.sleep(0.15)
+last=ticks()
+usages={}
+for k,(total,idle) in last.items():
+    if k not in first: continue
+    bt,bi=first[k]
+    dt=total-bt
+    if dt>0:
+        usages[k]=round(max(0,min(100,100*(dt-(idle-bi))/dt)),1)
+if "cpu" in usages:
+    print("therm_cpu_total_busy_pct="+str(usages["cpu"]))
+print("therm_cpu_core_busy_csv="+",".join(f"{k}:{v:g}" for k,v in sorted(usages.items()) if k!="cpu"))
+freq={}
+for name in usages:
+    if name=="cpu":continue
+    raw=value(pathlib.Path("/sys/devices/system/cpu")/name/"cpufreq","scaling_cur_freq")
+    try:
+        x=int(raw)
+        if 100000 <= x <= 10000000:freq[name]=round(x/1000,1)
+    except (TypeError,ValueError):pass
+print("therm_cpu_core_freq_csv="+",".join(f"{k}:{v:g}" for k,v in sorted(freq.items())))
+for kind in ("cpu","memory","io"):
+    for line in (value(pathlib.Path("/proc/pressure"),kind) or "").splitlines():
+        fields=line.split()
+        if not fields or fields[0]!="some":continue
+        for item in fields[1:]:
+            if item.startswith("avg10="):
+                print(f"therm_psi_{kind}_some10={item[6:]}")
+                break
+mem={}
+for line in (value(pathlib.Path("/proc"),"meminfo") or "").splitlines():
+    if ":" not in line:continue
+    k,rest=line.split(":",1)
+    vals=rest.split()
+    if vals and vals[0].isdigit():
+        mem[k]=int(vals[0])*1024
+if "MemAvailable" in mem:
+    print("therm_mem_available_bytes="+str(mem["MemAvailable"]))
+if "SwapTotal" in mem and "SwapFree" in mem:
+    print("therm_swap_used_bytes="+str(max(0,mem["SwapTotal"]-mem["SwapFree"])))
+print("therm_reader=hwmon_v1")
+print("therm_cpu_sensor_kind="+cpu_sensor)
+if cpu_fan_rpm is not None:
+    print("therm_cpu_fan_rpm="+str(cpu_fan_rpm))
+for k,v in sorted(cpu.items()):
+    print(f"therm_{k}={v}")
+print(f"therm_nvme_drive_count={len(nvme)}")
+if nvme:
+    print(f"therm_nvme_hottest_mc={max(v[0] for v in nvme)}")
+    for label,idx in (("max",1),("crit",2)):
+        vals=[v[idx]-v[0] for v in nvme if v[idx] is not None]
+        if vals:
+            print(f"therm_nvme_margin_{label}_mc={min(vals)}")
+' 2>/dev/null) || thermals=""
+    load1=$(awk '{print $1}' /proc/loadavg 2>/dev/null)
+    load5=$(awk '{print $2}' /proc/loadavg 2>/dev/null)
+    ncpu=$(nproc 2>/dev/null || getconf _NPROCESSORS_ONLN 2>/dev/null || grep -c '^processor' /proc/cpuinfo 2>/dev/null)
+    mem=$(free -g 2>/dev/null | awk 'NR==2{a=$7; if (a=="") a=$4; print a}')
+    dk=$(df -Pk "@@WR@@" 2>/dev/null | awk 'NR==2{print $4}')
+    [ -n "$dk" ] && disk=$(awk -v k="$dk" 'BEGIN{printf "%.1f", k/1048576}')
+    ;;
+esac
+active=$(ps -axo pid=,ppid=,comm=,args= 2>/dev/null | python3 -c '
+import os, re, sys
+
+rows = []
+for line in sys.stdin:
+    fields = line.rstrip("\n").lstrip().split(None, 3)
+    if len(fields) != 4:
+        continue
+    pid, ppid, comm, args = fields
+    try:
+        pid_int, ppid_int = int(pid), int(ppid)
+    except ValueError:
+        continue
+    rows.append((pid_int, ppid_int, comm, args))
+
+def executable(row):
+    pid, _, comm, args = row
+    name = os.path.basename(comm)
+    if name.lower() in ("python3", "node"):
+        fields = args.split(None, 2)
+        return os.path.basename(fields[1]) if len(fields) > 1 and os.path.isabs(fields[1]) else name
+    return name
+
+def lane_argv(row):
+    _, _, comm, args = row
+    if os.path.basename(comm).lower() == "python3":
+        fields = args.split(None, 2)
+        return fields[2] if len(fields) > 2 else ""
+    return args
+
+def is_match(row):
+    exe = executable(row).lower()
+    argv = lane_argv(row)
+    if exe == "node":
+        fields = argv.split(None, 1)
+        return len(fields) > 1 and os.path.basename(fields[0]) == "codex"
+    return (
+        exe == "codex" and re.search(r"(^|\s)exec(\s|$)", argv) is not None
+    ) or (
+        exe == "claude" and re.search(r"(^|\s)-p(\s|$)", argv) is not None
+    )
+
+matches = {row[0]: row for row in rows if is_match(row)}
+by_pid = {row[0]: row for row in rows}
+def is_descendant(pid):
+    seen = set()
+    while pid in by_pid:
+        if pid in seen:
+            return False
+        seen.add(pid)
+        pid = by_pid[pid][1]
+        if pid in matches:
+            return True
+    return False
+
+print(sum(1 for pid in matches if not is_descendant(pid)))
+')
+# Authoritative lease census; the process counter above is only a conservative
+# floor for older unleased CLI work. Never fall back to that floor on census failure.
+occupancy=$(python3 -B @@LR@@ --occupancy 2>/dev/null) || occupancy=""
+tl=""
+for t in gh codex claude node python3 cursor-agent grok opencode; do
+  command -v "$t" >/dev/null 2>&1 && tl="$tl$t,"
+done
+tools=${tl%,}
+echo "ts=$ts"
+echo "load1=$load1"
+echo "load5=$load5"
+echo "ncpu=$ncpu"
+echo "mem_free_gb=$mem"
+echo "disk_free_gb=$disk"
+echo "on_ac=$on_ac"
+echo "process_active_lanes=$active"
+printf '%s\n' "$occupancy"
+printf "%s\n" "$thermals"
+echo "tools=$tools"

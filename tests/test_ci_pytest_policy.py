@@ -859,49 +859,79 @@ def test_all_discovered_tests_are_accounted_for():
     assert discovered
     assert included
     argv = cip.pytest_argv(gate["included"])
-    assert argv[:4] == [cip.sys.executable, "-m", "pytest", "-q"]
-    assert argv[4:] == list(gate["included"])
+    assert argv[:5] == [cip.sys.executable, "-m", "pytest", "--durations=25", "-q"]
+    assert argv[5:] == list(gate["included"])
+    # Duration reporting is bounded diagnostics, not filtering or a new test step.
+    assert argv.count("--durations=25") == 1
 
 
 def test_hosted_full_gate_has_a_bounded_completion_window():
-    """PR544 reached 98% when its old 25-minute job ceiling cancelled the gate."""
+    """Keep protected 45-minute headroom and a fail-closed bounded fan-in."""
     import yaml
 
-    workflow = yaml.safe_load(
-        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    job = workflow["jobs"]["test"]
-    assert job["timeout-minutes"] == 40
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=cip._WorkflowYAMLLoader,
+    )
+    jobs = workflow["jobs"]
+    shards = jobs["pytest_shards"]
+    gate = jobs["test"]
     assert workflow["permissions"] == {"contents": "read"}
-    assert job.get("continue-on-error", False) is False
-    gate_steps = [step for step in job["steps"]
-                  if step.get("name") == "Run repository test gate"]
-    assert len(gate_steps) == 1
-    # The gate is still one job producing the single required check `test`
-    # (branch protection on master requires exactly that context, with
-    # enforce_admins true). `--jobs` shards inside the job; it is the only
-    # argument the hosted gate may carry, and its value must be a positive
-    # integer the runner can actually run in parallel.
-    command = gate_steps[0]["run"].split()
-    assert command[:2] == ["python", "scripts/ci_pytest.py"]
-    assert command[2:3] == ["--jobs"], "the hosted gate takes no other argument"
-    assert command[3].isdigit() and int(command[3]) >= 1
-    assert len(command) == 4
-    assert all(step.get("continue-on-error", False) is False for step in job["steps"])
+    assert shards["timeout-minutes"] == 45
+    assert gate["timeout-minutes"] == 8
+    assert shards["strategy"]["fail-fast"] is False
+    assert shards["strategy"]["max-parallel"] == 3
+    assert shards["strategy"]["matrix"]["index"] == [0, 1, 2]
+    assert shards.get("continue-on-error", False) is False
+    assert gate.get("continue-on-error", False) is False
+
+    shard_steps = shards["steps"]
+    test_steps = [
+        step for step in shard_steps
+        if step.get("name") == "Run repository test shard"
+    ]
+    assert len(test_steps) == 1
+    assert test_steps[0]["run"] == (
+        "python -m scripts.ci_parallel_shard --jobs 3 --index "
+        "${{ matrix.index }}"
+    )
+    assert all(step.get("continue-on-error", False) is False for step in shard_steps)
+    for name in (
+        "Verify Paper direct pinned MCP SDK",
+        "Verify private Fabric HTTP compatibility and incumbent backend lifetime",
+        "Compile source",
+        "Validate shell scripts",
+    ):
+        steps = [step for step in shard_steps if step.get("name") == name]
+        assert len(steps) == 1 and steps[0]["if"] == "matrix.index == 0"
 
 
 def test_hosted_gate_stays_a_single_required_check_job():
-    """A matrix here would rename the check to `test (0)`..., which branch
-    protection on master (required context `test`, enforce_admins true) would
-    never see satisfied -- blocking every merge. Parallelism must stay inside
-    the job."""
+    """A fail-closed fan-in produces the sole stable required context test."""
     import yaml
 
-    workflow = yaml.safe_load(
-        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"))
-    assert list(workflow["jobs"]) == ["test"]
+    workflow = yaml.load(
+        (_ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8"),
+        Loader=cip._WorkflowYAMLLoader,
+    )
+    assert list(workflow["jobs"]) == ["pytest_shards", "test"]
     job = workflow["jobs"]["test"]
-    assert "strategy" not in job, "a matrix would rename the required check"
+    assert "strategy" not in job
+    assert job["name"] == "test"
     assert job["runs-on"] == "ubuntu-latest"
+    assert job["if"] == "${{ always() }}"
+    assert job["needs"] == ["pytest_shards"]
+    gate_steps = [
+        step for step in job["steps"]
+        if step.get("name") == "Run repository test gate"
+    ]
+    assert len(gate_steps) == 1
+    gate = gate_steps[0]
+    assert gate["env"]["SHARDS_STATUS"] == "${{ needs.pytest_shards.result }}"
+    assert 'if [ "$SHARDS_STATUS" != success ]; then' in gate["run"]
+    assert "exit 1" in gate["run"]
+    assert "python scripts/ci_pytest.py --plan-only --jobs 3" in gate["run"]
+    assert all(step.get("continue-on-error", False) is False for step in job["steps"])
 
 
 # --- `--jobs` sharding: placement only, never a coverage reduction -----------
@@ -930,6 +960,61 @@ def test_real_shard_plan_stays_reasonably_balanced():
     sizes = [len(shard) for shard in cip.partition_modules(gate["included"], jobs=4)]
     assert min(sizes) >= 0.75 * (len(gate["included"]) / 4)
     assert max(sizes) <= 1.25 * (len(gate["included"]) / 4)
+
+
+def test_measured_three_job_pins_preserve_exact_coverage_and_stability() -> None:
+    """Preserve every hash except the measured protected and runner pins."""
+    import hashlib
+
+    gate = cip.resolve_gate(_ROOT)
+    included = gate["included"]
+    pins = {
+        "tests/test_executive_runtime_bounded_acquisition.py": 1,
+        "tests/test_mastermind_window_reader_static_fences.py": 1,
+        "tests/test_capacity_host_artifacts.py": 1,
+        "tests/test_trend_persistence_walkforward.py": 0,
+        "tests/test_market_view.py": 1,
+        "tests/test_product_acceptance_original_selector.py": 1,
+        "tests/test_executive_os_phase1fc.py": 2,
+    }
+    assert set(pins).issubset(included)
+    shards = cip.partition_modules(included, jobs=3)
+    cip.verify_partition(included, shards)
+    observed = {
+        path: index
+        for index, shard in enumerate(shards)
+        for path in shard
+    }
+    assert len(observed) == len(included)
+    for path in included:
+        digest = hashlib.sha256(path.encode("utf-8")).digest()
+        hashed = int.from_bytes(digest[:8], "big") % 3
+        if path in pins:
+            assert hashed != pins[path]  # Every pin intentionally moves its module.
+            assert observed[path] == pins[path]
+        else:
+            assert observed[path] == hashed
+
+    augmented = tuple(sorted((*included, "tests/test_future_added_module.py")))
+    after = cip.partition_modules(augmented, jobs=3)
+    placement_after = {
+        path: index for index, shard in enumerate(after) for path in shard
+    }
+    assert all(placement_after[path] == observed[path] for path in included)
+
+
+def test_measured_three_job_pins_do_not_affect_other_job_counts() -> None:
+    import hashlib
+
+    gate = cip.resolve_gate(_ROOT)
+    included = gate["included"]
+    for jobs in (2, 4, 5, 8):
+        shards = cip.partition_modules(included, jobs=jobs)
+        cip.verify_partition(included, shards)
+        for index, shard in enumerate(shards):
+            for path in shard:
+                digest = hashlib.sha256(path.encode("utf-8")).digest()
+                assert int.from_bytes(digest[:8], "big") % jobs == index
 
 
 def test_shard_plan_is_deterministic_across_processes():
@@ -1039,11 +1124,11 @@ def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
     shards = cip.partition_modules(included, jobs=3)
     seen: list[str] = []
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         seen.extend(argv[argv.index("-q") + 1 :])
         return _Completed(0, "")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 0
     assert sorted(seen) == sorted(included)
 
@@ -1051,18 +1136,28 @@ def test_sharded_gate_runs_every_resolved_module_once(tmp_path, monkeypatch):
 class _Completed:
     def __init__(self, returncode: int, stdout: str) -> None:
         self.returncode = returncode
-        self.stdout = stdout
-        self.stderr = ""
+        import io
+
+        self.stdout = io.StringIO(stdout)
+
+    def wait(self):
+        return self.returncode
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.stdout.close()
 
 
 def test_one_failing_shard_fails_the_whole_gate(tmp_path, monkeypatch):
     shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         failing = "tests/test_b.py" in argv
         return _Completed(1 if failing else 0, "boom" if failing else "ok")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) != 0
 
 
@@ -1070,12 +1165,12 @@ def test_every_shard_runs_even_after_an_earlier_one_fails(tmp_path, monkeypatch)
     shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
     ran: list[str] = []
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         module = argv[-1]
         ran.append(module)
         return _Completed(1 if module == "tests/test_a.py" else 0, "")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     cip.run_shards(shards, root=tmp_path)
     assert sorted(ran) == ["tests/test_a.py", "tests/test_b.py", "tests/test_c.py"]
 
@@ -1083,13 +1178,14 @@ def test_every_shard_runs_even_after_an_earlier_one_fails(tmp_path, monkeypatch)
 def test_shard_output_is_reported_under_an_attributable_banner(tmp_path, monkeypatch, capsys):
     shards = (("tests/test_a.py",), ("tests/test_b.py",))
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         return _Completed(0, f"result for {argv[-1]}")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     cip.run_shards(shards, root=tmp_path)
     out = capsys.readouterr().out
     assert "shard 1/2" in out and "shard 2/2" in out
+    assert out.count("elapsed_s=") == 2
     assert "result for tests/test_a.py" in out
     assert "result for tests/test_b.py" in out
 
@@ -1112,7 +1208,7 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
 
     shards = (("tests/test_a.py",), ("tests/test_b.py",), ("tests/test_c.py",))
 
-    def fake_run(argv, cwd=None, check=False, capture_output=False, text=False):
+    def fake_popen(argv, **kwargs):
         module = argv[-1]
         if module == "tests/test_a.py":
             time.sleep(0.15)
@@ -1121,5 +1217,5 @@ def test_exit_code_is_the_lowest_failing_shard_not_the_first_to_finish(
             return _Completed(4, "fast failure")
         return _Completed(0, "")
 
-    monkeypatch.setattr(cip.subprocess, "run", fake_run)
+    monkeypatch.setattr(cip.subprocess, "Popen", fake_popen)
     assert cip.run_shards(shards, root=tmp_path) == 3

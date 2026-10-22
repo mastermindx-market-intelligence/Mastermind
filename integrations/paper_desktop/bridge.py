@@ -20,7 +20,7 @@ import sys
 import time
 from typing import Any
 
-VERSION = "0.1.4"
+VERSION = "0.1.5"
 ENDPOINT = "http://127.0.0.1:29979/mcp"
 MAX_BYTES = 16 * 1024 * 1024
 MAX_REQUEST = 1 << 19
@@ -28,7 +28,7 @@ PRIVATE_DIR_MODE = 0o700
 DESKTOP_LOCK_WAIT_SECONDS = 30.0
 DESKTOP_LOCK_POLL_SECONDS = 0.05
 SUPPORTED_SERVER = ("paper-desktop", None)
-SUPPORTED_CATALOG_SHA256 = "ac18857df0aa6323646333368e5798e7c28de7b4d5f5dc3cb320276e3535daa9"
+SUPPORTED_CATALOG_SHA256 = "1b9afff4c9bcf6f11f5ca2db301bf25ccdc442025344e2ec402459cedcd6a2db"
 READ_TOOLS = frozenset({
     "get_basic_info", "get_selection", "get_node_info", "get_children",
     "get_tree_summary", "get_screenshot", "get_jsx", "get_computed_styles",

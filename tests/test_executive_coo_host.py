@@ -7,9 +7,19 @@ from pathlib import Path
 import sys
 import pytest
 
-from control_plane.coo_principal_host import CooHostProvider, FACT_SCHEMA, validate_missions
+from control_plane.coo_principal_host import (
+    CooHostProvider,
+    FACT_SCHEMA,
+    MISSION_AUTHORITY_VERSION,
+    generation,
+    validate_missions,
+)
 from ops.executive_os.coo_principal_host import CooInstalledSource
-from control_plane.coo_principal_envelope import PrincipalAdmissionContext, derive_principal_envelope
+from control_plane.coo_principal_envelope import (
+    PrincipalAdmissionContext,
+    derive_principal_envelope,
+    derive_principal_orchestration_envelope,
+)
 from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry, observed_mcp_tool_schema_digest
 from control_plane.workspace_read_service import WorkspaceReadService
 from integrations.executive_mcp.coo import COO_SERVER_NAME, COO_SERVER_VERSION, COO_TOOL_SPECS
@@ -58,14 +68,82 @@ def setup(tmp_path):
     return host, coo, principal, path
 
 
+def test_v1_mission_is_bounded_intent_and_v2_actions_move_generation(tmp_path):
+    host, coo, principal, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    frame = dict(
+        schema=FACT_SCHEMA,
+        operation="authority",
+        work_ref=row["work_ref"],
+        principal=principal,
+    )
+
+    v1_generation = generation(row)
+    v1 = host.facts(frame)
+    assert v1["authority_generation_digest"] == v1_generation
+    assert v1["principal_actions"] == ("bounded_intent",)
+
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["bounded_intent", "governed_orchestration"],
+    )
+    v2_generation = generation(row)
+    v2 = host.facts(frame)
+    assert v2_generation != v1_generation
+    assert v2["authority_generation_digest"] == v2_generation
+    assert v2["principal_actions"] == (
+        "bounded_intent",
+        "governed_orchestration",
+    )
+
+    row["principal_actions"] = ["governed_orchestration"]
+    orchestration_only = host.facts(frame)
+    assert orchestration_only["authority_generation_digest"] != v2_generation
+    assert orchestration_only["principal_actions"] == ("governed_orchestration",)
+
+
 def test_real_registry_and_install_binding_produce_exact_authority(tmp_path):
     host, coo, principal, _ = setup(tmp_path)
     frame = dict(schema=FACT_SCHEMA, operation="authority", work_ref=coo["missions"][0]["work_ref"], principal=principal)
     first = host.facts(frame)
     assert first["release_class"] == "RESERVED_RELEASE"
     assert first["source_grant_digest"] is None and first["economic_envelope_digest"] is None
+    assert first["principal_actions"] == ("bounded_intent",)
     coo["missions"][0]["enabled"] = False
     assert host.facts(frame) == first  # disarming new effects cannot rewrite accepted identity
+
+
+def test_installed_fact_client_rehydrates_json_action_grant(tmp_path):
+    import asyncio
+    from integrations.mastermind_executive_app.coo_installed import CooFactsClient
+
+    host, coo, principal_frame, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["bounded_intent", "governed_orchestration"],
+    )
+    frame = dict(
+        schema=FACT_SCHEMA,
+        operation="authority",
+        work_ref=row["work_ref"],
+        principal=principal_frame,
+    )
+    wire_result = json.loads(json.dumps(host.facts(frame)))
+
+    class Client:
+        async def request(self, _frame):
+            return {"ok": True, "result": wire_result}
+
+    client = object.__new__(CooFactsClient)
+    client._client = Client()
+    authority = asyncio.run(client.authority(install.principal(), row["work_ref"]))
+
+    assert authority.principal_actions == (
+        "bounded_intent",
+        "governed_orchestration",
+    )
+    assert authority.authority_generation_digest == generation(row)
 
 
 def envelope_for(host, tmp_path):
@@ -79,6 +157,87 @@ def envelope_for(host, tmp_path):
     return value["envelope"]
 
 
+def orchestration_bundle_for(host):
+    row, fact, authority = host.source.snapshot("WS:EXECUTIVE-CAPACITY-FABRIC")
+    context = PrincipalAdmissionContext(
+        row["work_ref"],
+        fact.principal_binding_digest,
+        authority.mission_authority_ref,
+        authority.authority_generation_digest,
+    )
+    return derive_principal_orchestration_envelope(
+        dict(
+            operation_key="coo-host-orchestration",
+            objective="Coordinate one governed orchestration episode.",
+            department="executive-infrastructure",
+            priority=6,
+            workstream=row["work_ref"],
+            business_impact="routine",
+        ),
+        context=context,
+        grounding=dict(
+            mastermind_sha="a" * 40,
+            macro_sha="b" * 40,
+            boot_packet_schema="mastermind.ceo_boot_packet.v1",
+        ),
+    )
+
+
+def test_orchestration_guard_requires_current_explicit_action_and_mission(
+    tmp_path,
+    monkeypatch,
+):
+    host, coo, _, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["bounded_intent", "governed_orchestration"],
+    )
+    document = mandate.mission_doc()
+    monkeypatch.setattr(
+        host.workspace,
+        "read_mission_for_work_ref",
+        lambda work_ref: document,
+    )
+    bundle = orchestration_bundle_for(host)
+    assert host.guard_orchestration(bundle) is None
+
+    row["principal_actions"] = ["bounded_intent"]
+    with pytest.raises(ValueError):
+        host.guard_orchestration(bundle)
+
+
+def test_orchestration_guard_refuses_stale_mission_and_source_movement(
+    tmp_path,
+    monkeypatch,
+):
+    host, coo, _, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["bounded_intent", "governed_orchestration"],
+    )
+    bundle = orchestration_bundle_for(host)
+
+    stale = mandate.mission_doc()
+    stale["read_state"]["state"] = "HISTORICAL"
+    monkeypatch.setattr(
+        host.workspace,
+        "read_mission_for_work_ref",
+        lambda work_ref: stale,
+    )
+    with pytest.raises(ValueError):
+        host.guard_orchestration(bundle)
+
+    def moved(_work_ref):
+        row["enabled"] = False
+        return mandate.mission_doc()
+
+    monkeypatch.setattr(host.workspace, "read_mission_for_work_ref", moved)
+    with pytest.raises(ValueError):
+        host.guard_orchestration(bundle)
+
+
 def test_final_guard_uses_real_mandate_reducer_and_current_mission(tmp_path, monkeypatch):
     host, coo, _, _ = setup(tmp_path)
     monkeypatch.setattr(host.workspace, "read_mission_for_work_ref", lambda work_ref: mandate.mission_doc())
@@ -86,6 +245,26 @@ def test_final_guard_uses_real_mandate_reducer_and_current_mission(tmp_path, mon
     assert host.guard(envelope) is None
     coo["missions"][0]["enabled"] = False
     with pytest.raises(ValueError): host.guard(envelope)
+
+
+def test_orchestration_only_generation_refuses_today_bounded_intent_guard(
+    tmp_path,
+    monkeypatch,
+):
+    host, coo, _, _ = setup(tmp_path)
+    row = coo["missions"][0]
+    row.update(
+        authority_version=MISSION_AUTHORITY_VERSION,
+        principal_actions=["governed_orchestration"],
+    )
+    monkeypatch.setattr(
+        host.workspace,
+        "read_mission_for_work_ref",
+        lambda work_ref: mandate.mission_doc(),
+    )
+    envelope = envelope_for(host, tmp_path)
+    with pytest.raises(ValueError):
+        host.guard(envelope)
 
 
 @pytest.mark.parametrize("fault", ["binding", "mission", "profile", "schema", "revoked", "principal"])
@@ -117,7 +296,21 @@ def test_new_job_guard_refuses_outside_exact_current_grant(tmp_path, monkeypatch
     with pytest.raises(ValueError): host.guard(envelope)
 
 
-@pytest.mark.parametrize("fault", ["duplicate", "extra", "boolean", "wildcard", "profile", "empty"])
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "duplicate",
+        "extra",
+        "boolean",
+        "wildcard",
+        "profile",
+        "empty",
+        "action_unknown",
+        "action_duplicate",
+        "action_unsorted",
+        "action_version",
+    ],
+)
 def test_mission_rows_are_closed_and_non_widening(tmp_path, fault):
     _, coo, _, _ = setup(tmp_path); rows = coo["missions"]
     if fault == "duplicate": rows.append(copy.deepcopy(rows[0]))
@@ -126,6 +319,19 @@ def test_mission_rows_are_closed_and_non_widening(tmp_path, fault):
     if fault == "wildcard": rows[0].update(execution_profiles=["bounded_code_change"], allowed_write_paths=["tests/*"])
     if fault == "profile": rows[0]["execution_profiles"] = ["admin"]
     if fault == "empty": rows[0]["execution_profiles"] = []
+    if fault.startswith("action_"):
+        rows[0].update(
+            authority_version=MISSION_AUTHORITY_VERSION,
+            principal_actions=["bounded_intent", "governed_orchestration"],
+        )
+    if fault == "action_unknown":
+        rows[0]["principal_actions"] = ["unreviewed_action"]
+    if fault == "action_duplicate":
+        rows[0]["principal_actions"] = ["bounded_intent", "bounded_intent"]
+    if fault == "action_unsorted":
+        rows[0]["principal_actions"] = ["governed_orchestration", "bounded_intent"]
+    if fault == "action_version":
+        rows[0]["authority_version"] = True
     with pytest.raises(ValueError): validate_missions(rows)
 
 

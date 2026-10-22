@@ -56,6 +56,8 @@ export interface WebAuthConfig {
   readonly nativeClientId: string | null;
   /** Immutable operator-qualified Executive audience; absent means disabled. */
   readonly executiveResource: string | null;
+  /** Absent until the existing Research API and browser client are qualified. */
+  readonly researchResource: string | null;
 }
 
 // Public build inputs supply the client ID and optional qualified Executive resource.
@@ -75,6 +77,7 @@ export function readWebAuthConfig(): WebAuthConfig {
     webClientId: web && web.length > 0 ? web : null,
     nativeClientId: null,
     executiveResource: validateExecutiveResource(readStringEnv("VITE_MM_EXECUTIVE_RESOURCE")),
+    researchResource: validateResearchResource(readStringEnv("VITE_MM_RESEARCH_RESOURCE")),
   };
 }
 
@@ -84,6 +87,7 @@ declare global {
   interface ImportMetaEnv {
     readonly VITE_MM_WEB_CLIENT_ID?: string;
     readonly VITE_MM_EXECUTIVE_RESOURCE?: string;
+    readonly VITE_MM_RESEARCH_RESOURCE?: string;
   }
   interface ImportMeta {
     readonly env: ImportMetaEnv;
@@ -107,4 +111,11 @@ export function validateExecutiveResource(value: unknown): string | null {
     return url.protocol === "https:" && !!url.hostname && !url.username && !url.password &&
       !url.search && !url.hash && url.href === value ? value : null;
   } catch { return null; }
+}
+
+export const RESEARCH_SCOPE = "mastermind.research.read";
+export function validateResearchResource(value: unknown): string | null {
+  const valid = validateExecutiveResource(value);
+  return valid && ![ACQUISITION_AUDIENCE, CONTENT_AUDIENCE, `${ORIGIN}/os/executive`].includes(valid)
+    ? valid : null;
 }

@@ -1,0 +1,20 @@
+# SOURCE PROPOSAL ONLY: SAME-HOST CADDY/RESEARCH TOPOLOGY AND UID/GID UNQUALIFIED.
+# Root/systemd provisions the directory/listener; service gains no writable path.
+# Numeric UID/GID placeholders must be replaced only after actual host custody review.
+[Unit]
+Description=Restricted Research citation socket (uninstalled proposal)
+Before=mastermind-research-read.service
+
+[Socket]
+ListenStream=/run/mastermind-research/citation.sock
+Accept=no
+Service=mastermind-research-read.service
+FileDescriptorName=research-citation
+SocketUser=__QUALIFIED_CADDY_UID__
+SocketGroup=__QUALIFIED_CADDY_GID__
+SocketMode=0600
+DirectoryMode=0755
+RemoveOnStop=yes
+
+[Install]
+WantedBy=sockets.target

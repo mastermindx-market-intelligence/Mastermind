@@ -49,6 +49,13 @@ class AdapterDescriptor:
 
 
 ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
+    # The retained facade exists; its concrete qualified host backend is not
+    # installed. Catalogue source must not imply worker admission.
+    "attended-fabric": AdapterDescriptor(
+        adapter_id="attended-fabric",
+        implemented=False,
+        implementation="control_plane.executive_fabric_adapter.AttendedFabricWorkerAdapter",
+    ),
     "codex-cli": AdapterDescriptor(
         adapter_id="codex-cli",
         implemented=True,

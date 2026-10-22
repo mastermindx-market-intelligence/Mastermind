@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { execFile as execFileCallback } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { mkdtemp, realpath as realpathDefault, rm } from 'node:fs/promises';
+import { mkdtemp, open, readFile, realpath as realpathDefault, rename, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 
 const execFileDefault = promisify(execFileCallback);
@@ -15,6 +15,8 @@ const COMMISSION_COMMIT_MESSAGE = 'chore: prepare Executive commission';
 const MAX_COMMISSION_BYTES = 512 * 1024;
 const BRANCH_RE = /^sol\/web-[A-Za-z0-9._-]+$/;
 const ALLOWED_LANE = 'web';
+const CLOSED_REPOSITORY_ALIASES = Object.freeze(['mastermind', 'macro', 'terminal']);
+const NOT_REGISTERED = 'workspace is not registered to the source repository';
 const MAX_STDIO_BYTES = 1024 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
 const DEFAULT_PUSH_TIMEOUT_MS = 60_000;
@@ -165,6 +167,60 @@ export function resolveGitPublishConfig(value) {
   if (typeof value !== 'object' || Array.isArray(value)) {
     throw new TypeError('config.gitPublish must be an object, false, or absent');
   }
+  if (Object.hasOwn(value, 'repositories')) {
+    assertExactKeys(value, new Set([
+      'enabled', 'workspaceCli', 'gitBinary', 'repositories',
+      'commandTimeoutMs', 'pushTimeoutMs',
+    ]), 'config.gitPublish');
+    if (value.enabled !== true || !Array.isArray(value.repositories) ||
+        value.repositories.length !== CLOSED_REPOSITORY_ALIASES.length) {
+      throw new TypeError('config.gitPublish requires the exact closed repository profile');
+    }
+    const names = new Set();
+    const sources = new Set();
+    const remotes = new Set();
+    const profiles = value.repositories.map((profile) => {
+      if (!profile || typeof profile !== 'object' || Array.isArray(profile)) {
+        throw new TypeError('repository profile must be an object');
+      }
+      assertExactKeys(profile, new Set(['repository', 'sourceRepository', 'allowedRemoteUrls']),
+        'config.gitPublish.repositories[]');
+      if (!CLOSED_REPOSITORY_ALIASES.includes(profile.repository) || names.has(profile.repository)) {
+        throw new TypeError('repository profile alias must be unique and closed');
+      }
+      if (profile.allowedRemoteUrls?.length !== 1 ||
+          sources.has(profile.sourceRepository) || remotes.has(profile.allowedRemoteUrls[0])) {
+        throw new TypeError('closed repository profile requires distinct source and remote bindings');
+      }
+      names.add(profile.repository);
+      sources.add(profile.sourceRepository);
+      remotes.add(profile.allowedRemoteUrls[0]);
+      return resolveGitPublishConfig({
+        enabled: true,
+        workspaceCli: value.workspaceCli,
+        gitBinary: value.gitBinary,
+        repository: profile.repository,
+        sourceRepository: profile.sourceRepository,
+        allowedRemoteUrls: profile.allowedRemoteUrls,
+        commandTimeoutMs: value.commandTimeoutMs,
+        pushTimeoutMs: value.pushTimeoutMs,
+      });
+    });
+    if (!CLOSED_REPOSITORY_ALIASES.every((alias) => names.has(alias))) {
+      throw new TypeError('repository profile missing a closed alias');
+    }
+    const resolved = Object.freeze({
+      enabled: true,
+      workspaceCli: requireAbsoluteString(value.workspaceCli, 'config.gitPublish.workspaceCli'),
+      gitBinary: requireAbsoluteString(value.gitBinary, 'config.gitPublish.gitBinary'),
+      commandTimeoutMs: clampTimeout(value.commandTimeoutMs, DEFAULT_COMMAND_TIMEOUT_MS, 'config.gitPublish.commandTimeoutMs'),
+      pushTimeoutMs: clampTimeout(value.pushTimeoutMs, DEFAULT_PUSH_TIMEOUT_MS, 'config.gitPublish.pushTimeoutMs'),
+      repositories: Object.freeze(CLOSED_REPOSITORY_ALIASES.map((name) =>
+        profiles.find((profile) => profile.repository === name))),
+    });
+    RESOLVED_CONFIGS.add(resolved);
+    return resolved;
+  }
   assertExactKeys(
     value,
     new Set([
@@ -281,9 +337,78 @@ function publicStatus(state) {
   };
 }
 
+function createClosedRepositoryPublisher(cfg, dependencies) {
+  const execFile = dependencies.execFile ?? execFileDefault;
+  const publishers = new Map(cfg.repositories.map((profile) =>
+    [profile.repository, createGitPublisher(profile, dependencies)]));
+  async function select(operationId) {
+    const operation = validateOperationId(operationId);
+    let selected = null;
+    for (const profile of cfg.repositories) {
+      let stdout;
+      try {
+        ({stdout} = await execFile(cfg.workspaceCli,
+          ['status', '--operation-id', operation, '--lane', ALLOWED_LANE,
+            '--repository', profile.repository],
+          {
+            timeout: cfg.commandTimeoutMs, maxBuffer: MAX_STDIO_BYTES, encoding: 'utf8',
+            env: {
+              PATH: '/usr/bin:/bin:/usr/sbin:/sbin',
+              HOME: process.env.HOME ?? '',
+              USER: process.env.USER ?? '',
+              LOGNAME: process.env.LOGNAME ?? '',
+              LANG: 'C', LC_ALL: 'C', GIT_TERMINAL_PROMPT: '0',
+              GIT_ASKPASS: '/usr/bin/false', SSH_ASKPASS: '/usr/bin/false',
+            },
+          }));
+      } catch (error) {
+        // The installed mmx-workspace CLI emits its exact NOT_REGISTERED
+        // read-only refusal as JSON on stderr and exits 2. Only this one
+        // typed absence is a non-match; every other error remains a refusal.
+        if (error?.code !== 2 || String(error.stdout ?? '').trim() ||
+            typeof error.stderr !== 'string') throw error;
+        const result = parseJson(error.stderr, 'closed mmx-workspace refusal');
+        const exactKeys = ['action', 'effect', 'error', 'repository', 'schema_version'];
+        if (result?.action === 'status' && result.effect === 'NOT_APPLIED' &&
+            result.error === NOT_REGISTERED && result.repository === profile.repository &&
+            result.schema_version === 'mastermind.workspace_cli/v2' &&
+            Object.keys(result).length === exactKeys.length &&
+            exactKeys.every((key) => Object.hasOwn(result, key))) continue;
+        throw error;
+      }
+      const result = parseJson(stdout, 'closed mmx-workspace status');
+      if (result?.action !== 'status' ||
+          result.schema_version !== 'mastermind.workspace_cli/v2' ||
+          result.effect !== 'NOT_APPLIED' || result.repository !== profile.repository) {
+        throw new Error('closed workspace registry returned an invalid repository receipt');
+      }
+      // A successful stdout response can never report absence: only the exit
+      // code 2 typed stderr refusal above is canonical non-registration. Any
+      // error field here is malformed evidence and fails closed.
+      if (result.error !== undefined || !result.receipt || typeof result.receipt !== 'object') {
+        throw new Error('closed workspace registry returned an unexpected result');
+      }
+      if (selected !== null) throw new Error('operation ID is registered in more than one repository');
+      selected = publishers.get(profile.repository);
+    }
+    if (!selected) throw new Error('operation is not registered in the closed repository profile');
+    return selected;
+  }
+  const dispatch = (method) => async (args) => {
+    const publisher = await select(args?.operation_id);
+    return publisher[method](args);
+  };
+  return Object.freeze({
+    status: dispatch('status'),
+    commit: dispatch('commit'),
+    push: dispatch('push'),
+  });
+}
+
 export function createGitPublisher(config, dependencies = {}) {
   const cfg = resolveGitPublishConfig(config);
   if (!cfg) throw new TypeError('git publish is not configured');
+  if (cfg.repositories) return createClosedRepositoryPublisher(cfg, dependencies);
   const execFile = dependencies.execFile ?? execFileDefault;
   const realpath = dependencies.realpath ?? realpathDefault;
   const remove = dependencies.rm ?? rm;
@@ -315,6 +440,53 @@ export function createGitPublisher(config, dependencies = {}) {
 
   async function gitWithIndex(cwd, args, indexPath, options = {}) {
     return git(cwd, args, { ...options, envExtra: { GIT_INDEX_FILE: indexPath } });
+  }
+
+  async function gitQuiet(cwd, args, options = {}) {
+    try {
+      await git(cwd, args, options);
+      return true;
+    } catch (error) {
+      if (error?.code === 1) return false;
+      throw error;
+    }
+  }
+
+  async function seedPrivateIndex(workspacePath, indexPath) {
+    const {stdout} = await git(workspacePath, ['rev-parse', '--git-path', 'index']);
+    const realIndexPath = path.resolve(workspacePath, oneLine(stdout, 'real index path'));
+    const originalIndex = await readFile(realIndexPath);
+    await writeFile(indexPath, originalIndex);
+    return {realIndexPath, originalIndex};
+  }
+
+  async function syncRealIndex(realIndexPath, originalIndex, stagedIndexPath) {
+    // read-tree after a successful commit also destroys sparse skip-worktree
+    // metadata. The private staged index already encodes the exact committed
+    // tree; install those bytes with Git's normal exclusive index.lock protocol.
+    // Never clobber a concurrent index writer. A sync failure after update-ref
+    // is APPLIED/PARTIAL, never a denial or replay of the committed ref.
+    const lockPath = realIndexPath + '.lock';
+    let handle = null;
+    let ownsLock = false;
+    try {
+      handle = await open(lockPath, 'wx', 0o600);
+      ownsLock = true;
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        throw new Error('real index changed before post-commit synchronization');
+      }
+      const stagedIndex = await readFile(stagedIndexPath);
+      await handle.writeFile(stagedIndex);
+      await handle.sync();
+      await handle.close();
+      handle = null;
+      await rename(lockPath, realIndexPath);
+      ownsLock = false;
+    } finally {
+      if (handle !== null) await handle.close().catch(() => {});
+      // A failed exclusive open never grants ownership of someone else's lock.
+      if (ownsLock) await rm(lockPath, {force: true}).catch(() => {});
+    }
   }
 
   async function verifyDestinationBinding(binding) {
@@ -402,11 +574,21 @@ export function createGitPublisher(config, dependencies = {}) {
       throw new Error('workspace repository binding has a foreign operation branch');
     }
 
-    const [{ stdout: topOut }, { stdout: branchOut }, { stdout: headOut }, { stdout: statusOut }, { stdout: remoteOut }] = await Promise.all([
+    // Avoid the high-level status refresh on very large linked worktrees.
+    // These three read-only probes preserve the same repository/global ignore,
+    // attribute and filter semantics as commit while optional locks prevent
+    // observation from rewriting the shared index.
+    const observationOptions = Object.freeze({envExtra: {GIT_OPTIONAL_LOCKS: '0'}});
+    const [
+      { stdout: topOut }, { stdout: branchOut }, { stdout: headOut },
+      worktreeClean, indexClean, { stdout: untrackedOut }, { stdout: remoteOut },
+    ] = await Promise.all([
       git(workspacePath, ['rev-parse', '--show-toplevel']),
       git(workspacePath, ['symbolic-ref', '--quiet', '--short', 'HEAD']),
       git(workspacePath, ['rev-parse', 'HEAD']),
-      git(workspacePath, ['status', '--porcelain=v1', '--untracked-files=all']),
+      gitQuiet(workspacePath, ['diff-files', '--quiet', '--'], observationOptions),
+      gitQuiet(workspacePath, ['diff-index', '--cached', '--quiet', 'HEAD', '--'], observationOptions),
+      git(workspacePath, ['ls-files', '--others', '--exclude-standard', '-z'], observationOptions),
       remoteBinding ? Promise.resolve({stdout: remoteBinding.remoteUrl}) : git(workspacePath, ['remote', 'get-url', 'origin']),
     ]);
     const top = await realpath(oneLine(topOut, 'workspace top level'));
@@ -444,7 +626,7 @@ export function createGitPublisher(config, dependencies = {}) {
       branch,
       localHead,
       ...(observeRemote ? { remoteHead, remoteBinding: binding } : {}),
-      clean: String(statusOut ?? '') === '',
+      clean: worktreeClean && indexClean && String(untrackedOut ?? '') === '',
       remoteUrl,
       ref,
     };
@@ -523,11 +705,29 @@ export function createGitPublisher(config, dependencies = {}) {
     const indexPath = path.join(scratch, 'index');
     let refUpdateAttempted = false;
     try {
-      await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
+      // read-tree into a fresh GIT_INDEX_FILE loses linked-worktree sparse
+      // skip-worktree metadata. On a large sparse checkout that produces
+      // phantom deletions and makes git add -A exceed its bounded timeout.
+      // Snapshot the actual index into the private staging index instead.
+      // Neither the real index nor the source ref is modified at this step.
+      const {realIndexPath, originalIndex} = await seedPrivateIndex(before.workspacePath, indexPath);
       await gitWithIndex(before.workspacePath, ['add', '-A', '--', '.'], indexPath);
       const { stdout: treeOut } = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
       const tree = oneLine(treeOut, 'candidate tree');
       if (!SHA_RE.test(tree)) throw new Error('candidate tree is invalid');
+      // A competing index writer must not be silently overwritten. The
+      // original source ref is still untouched, so this refusal is NOT_APPLIED.
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED',
+          effect_state: 'NOT_APPLIED',
+          code: 'REAL_INDEX_CHANGED_DURING_PREPARATION',
+          operation_id: operationId,
+          branch: before.branch,
+          local_head_sha: expectedHead,
+        };
+      }
       const { stdout: baseTreeOut } = await git(before.workspacePath, ['rev-parse', `${expectedHead}^{tree}`]);
       const baseTree = oneLine(baseTreeOut, 'base tree');
       const ref = commitActionRef(operationId, before.branch, expectedHead, tree, message);
@@ -558,7 +758,7 @@ export function createGitPublisher(config, dependencies = {}) {
           // The private index protects the caller from pre-commit staging side
           // effects. Once the fenced ref update is known applied, align the
           // real index with that exact commit without touching the worktree.
-          await git(before.workspacePath, ['read-tree', commitHead]);
+          await syncRealIndex(realIndexPath, originalIndex, indexPath);
         } catch {
           indexSynced = false;
         }
@@ -609,7 +809,7 @@ export function createGitPublisher(config, dependencies = {}) {
         try {
           const observed = await workspace(operationId, { observeRemote: false });
           if (observed.localHead === commitHead) {
-            return finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
+            return await finishKnownApplied('APPLIED_AFTER_AMBIGUOUS_UPDATE_RETURN');
           }
         } catch {
           // Preserve uncertainty from a lost ref-update response.
@@ -627,7 +827,7 @@ export function createGitPublisher(config, dependencies = {}) {
         };
       }
 
-      return finishKnownApplied('APPLIED');
+      return await finishKnownApplied('APPLIED');
     } finally {
       try {
         await remove(scratch, { recursive: true, force: true });
@@ -681,7 +881,7 @@ export function createGitPublisher(config, dependencies = {}) {
     let commitHead = null;
     let ref = null;
     try {
-      await gitWithIndex(before.workspacePath, ['read-tree', expectedHead], indexPath);
+      const {realIndexPath, originalIndex} = await seedPrivateIndex(before.workspacePath, indexPath);
       await gitWithIndex(before.workspacePath, ['add', '--', COMMISSION_PATH], indexPath);
       const {stdout: treeOut} = await gitWithIndex(before.workspacePath, ['write-tree'], indexPath);
       const tree = oneLine(treeOut, 'commission candidate tree');
@@ -716,6 +916,14 @@ export function createGitPublisher(config, dependencies = {}) {
         };
       }
 
+      if (!(await readFile(realIndexPath)).equals(originalIndex)) {
+        return {
+          schema: 'mastermind.studio_git_commit_result.v1',
+          status: 'REFUSED', effect_state: 'NOT_APPLIED',
+          code: 'REAL_INDEX_CHANGED_DURING_PREPARATION',
+          operation_id: operationId, branch: before.branch, local_head_sha: expectedHead,
+        };
+      }
       const {stdout: commitOut} = await gitWithIndex(before.workspacePath,
         ['commit-tree', tree, '-p', expectedHead, '-m', message], indexPath);
       commitHead = oneLine(commitOut, 'commission commit HEAD');
@@ -741,7 +949,7 @@ export function createGitPublisher(config, dependencies = {}) {
 
       async function finishCommissionApplied(successCode) {
         let indexSynced = true;
-        try { await git(before.workspacePath, ['read-tree', commitHead]); } catch { indexSynced = false; }
+        try { await syncRealIndex(realIndexPath, originalIndex, indexPath); } catch { indexSynced = false; }
         let observed = null;
         try { observed = await workspace(operationId, {observeRemote: false}); } catch { /* known applied */ }
         if (!observed) {

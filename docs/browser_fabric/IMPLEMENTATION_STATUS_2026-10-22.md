@@ -28,7 +28,7 @@ The installed profiles observed during this task contain Web Sol 0.2.0 on CHATGP
 
 ## Verification
 
-Focused Python campaign: **601 passed**. It includes all `test_mastermind_browser_*.py`, Browser service/action tests, Workbench service tests, the combined Web Sol renderer, existing deployment/applier/CLI tests, and CI test-runner tests.
+Focused Python campaign before protected-source integration: **601 passed**. After merging protected source `c9cbee5569ba50e30e28715d930809061a169517`, the expanded campaign completed with **849 passed, 2 skipped**. It includes all `test_mastermind_browser_*.py`, `test_workbench_browser_*.py`, `test_worker_browser_*.py`, Browser service/action tests, Workbench service tests, the combined Web Sol renderer, existing deployment/applier/CLI tests, and CI test-runner tests. The merge preserves the protected worker fresh-resource claim checks and relay process-ownership fencing.
 
 Node campaign: **63 passed**. It includes scoped controller/actuator tests, native handshake/disconnect/reconnect behavior, no consent restoration, both ready/unready reconnect races, and execution of the actual classic bundle in a populated Web Sol-style global scope. The build succeeded using the committed package lock.
 

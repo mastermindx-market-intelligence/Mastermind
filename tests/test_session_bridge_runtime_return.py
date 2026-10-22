@@ -75,7 +75,9 @@ class Service:
     def __init__(self):
         self.items, self.calls = [], []
         self.on_read = None
-    async def __call__(self, path, payload):
+    async def __call__(self, path, payload, *, before_write=None):
+        if payload["operation"] == "send_message" and before_write is not None:
+            await before_write()
         self.calls.append(copy.deepcopy(payload))
         if payload["operation"] == "read_thread":
             if self.on_read:

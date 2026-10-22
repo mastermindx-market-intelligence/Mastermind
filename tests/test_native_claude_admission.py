@@ -22,6 +22,7 @@ def _service_with_alias(alias_name: str) -> ExecutiveControlService:
         operator_harness_binary_digest="b" * 64,
         operator_harness_version="fixture-v1",
         coo_operator_harness_armed=False,
+        coo_attended_work_placements=(),
     )
     return service
 
@@ -67,6 +68,10 @@ def test_service_accepts_reviewed_native_claude_sealed_alias(monkeypatch):
         "sealed.worker.claude.write.no-extensions.v1"
     )
     assert binding["operator_provider"] == "codex"
+    assert binding["work_placement_union"] == [
+        {"provider_realm": "anthropic", "quota_class": "claude-coo"},
+        {"provider_realm": "anthropic", "quota_class": "claude-coo-default"},
+    ]
     assert binding["operator_execution_profile_id"] == (
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
     )

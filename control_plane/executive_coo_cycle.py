@@ -28,12 +28,14 @@ from control_plane.executive_runtime import (
     FiniteControlContext,
     FiniteReservationDecision,
     INTERACTIVE_TX5_EXECUTION_PROFILE,
+    NATIVE_RETURN_TX5_EXECUTION_PROFILE,
     Job,
     JobStatus,
     OrchestrationDispatchOutcome,
     Runtime,
     StateConflict,
     WorkerStatus,
+    _accepted_orchestration_root_provenance,
     _current_orchestration_tree_material,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
@@ -50,6 +52,13 @@ _ROLE_PRECEDENCE = {"plan": 0, "work": 1, "repair": 2, "review": 3, "aggregation
 _RECOVERABLE = {JobStatus.RATE_LIMITED, JobStatus.FAILED, JobStatus.LOST}
 
 Dispatch = Callable[[str, str], OrchestrationDispatchOutcome | None]
+
+
+class _ReviewDrainReconcileActive:
+    """Private cycle disposition: skip fresh work and settle the incumbent."""
+
+
+_RECONCILE_ACTIVE_REVIEW = _ReviewDrainReconcileActive()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -146,10 +155,18 @@ def _classify_invalid(exc: Exception) -> str:
 class CooCycle:
     """Choose and commit the first eligible mutation for one explicit root."""
 
-    def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None) -> None:
+    def __init__(self, runtime: Runtime, *, dispatcher: Dispatch | None = None,
+                 before_admission: Callable[[str], None] | None = None) -> None:
         self.runtime = runtime
+        if before_admission is not None and not callable(before_admission):
+            raise TypeError("before_admission must be a trusted callable")
+        self._before_admission = before_admission
         self._uses_inert_dispatcher = dispatcher is None
         self.dispatcher = dispatcher or self._dispatch_unavailable
+
+    def _require_fresh_admission(self, root_id):
+        if self._before_admission is not None:
+            self._before_admission(root_id)
 
     @staticmethod
     def _dispatch_unavailable(
@@ -285,6 +302,149 @@ class CooCycle:
                 return False
         return True
 
+    def _read_review_frontier_open(
+        self,
+        root_id: str,
+        active: list[Job],
+        queued: list[Job],
+        targets: Mapping[str, Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+        plan_body: Mapping[str, Any] | None,
+    ) -> bool:
+        """Prove same-plan READ review overlap without widening active work."""
+        if not active or not targets or plan_body is None or plan_body.get("schema_version") not in {
+            "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+            "mastermind.execution_plan/v5",
+        }:
+            return False
+        scope = self.runtime.jobs.get_job(root_id)
+        if scope is None:
+            return False
+        plan_attempt, plan_digest = active[0].plan_attempt_id, active[0].plan_digest
+        for job in [*active, *queued, *targets.values()]:
+            if (
+                job.parent_job_id != root_id or job.root_job_id != scope.root_job_id
+                or job.requested_authorities != ["READ"]
+                or job.allowed_write_paths or job.validation_commands
+                or job.plan_attempt_id != plan_attempt or job.plan_digest != plan_digest
+            ):
+                return False
+        for target in targets.values():
+            if (
+                target.orchestration_role not in {"work", "repair"}
+                or target.status is not JobStatus.COMPLETED
+                or current_by_step.get(str(target.plan_step_id), {}).get("current_job_id") != target.job_id
+                or current_by_step.get(str(target.plan_step_id), {}).get("review_required") is not True
+            ):
+                return False
+        for job in active:
+            if (
+                not self._is_read_only_frontier_work(job)
+                or current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") != job.job_id
+                or not self._active_attempt_is_current_and_live(job)
+                or any(target.plan_step_id == job.plan_step_id for target in targets.values())
+            ):
+                return False
+        for job in queued:
+            if job.orchestration_role == "review":
+                target = targets.get(str(job.reviews_job_id))
+                if target is None or job.plan_step_id != target.plan_step_id or job.repair_round != target.repair_round:
+                    return False
+            elif (
+                not self._is_read_only_frontier_work(job)
+                or current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") != job.job_id
+            ):
+                return False
+        return True
+
+    def _drain_current_reviews(
+        self,
+        root_id: str,
+        children: list[Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+        ordinals: Mapping[str, int],
+        plan_body: Mapping[str, Any] | None,
+        policy_sha: str,
+    ) -> CooCycleOutcome | _ReviewDrainReconcileActive | None:
+        """Prefer existing repair/current review demand without a new queue.
+
+        Incumbent and uncertain settlement remains with the existing cycle.
+        A proven pre-claim review capacity miss permits only an already admitted
+        disjoint READ revision; Runtime still validates its claim/dependencies.
+        """
+        active = [job for job in children
+                  if job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}]
+        queued = sorted(
+            [job for job in children if job.status == JobStatus.QUEUED],
+            key=lambda job: _job_sort_key(job, ordinals),
+        )
+        repairs = [job for job in queued if job.orchestration_role == "repair"]
+        targets = {
+            job.job_id: job for job in children
+            if job.status == JobStatus.COMPLETED
+            and current_by_step.get(str(job.plan_step_id), {}).get("current_job_id") == job.job_id
+            and current_by_step.get(str(job.plan_step_id), {}).get("review_required") is True
+        }
+        reviews = [job for job in queued if job.orchestration_role == "review"
+                   and job.reviews_job_id in targets]
+        if active and not self._read_review_frontier_open(
+            root_id, active, queued, targets, current_by_step, plan_body,
+        ):
+            return None
+        # Recovery is never demoted by quality-loop priority.
+        if repairs:
+            selected = repairs[0]
+        elif reviews:
+            selected = reviews[0]
+        else:
+            missing = [target for target in targets.values()
+                       if not any(job.reviews_job_id == target.job_id for job in children)]
+            if not missing:
+                return None
+            target = min(missing, key=lambda job: _job_sort_key(job, ordinals))
+            command = f"coo-cycle:{root_id}:create-review:{target.job_id}:1"
+            try:
+                review = self.runtime.jobs.create_cycle_review(
+                    root_id, target.job_id, command_id=command
+                )
+            except StateConflict as exc:
+                return self._block(root_id, target.job_id, _classify_invalid(exc))
+            return self._outcome(root_id, "REVIEW_CREATED", review.job_id, command, review)
+
+        outcome = self._dispatch_queued(root_id, selected)
+        if outcome is not None:
+            return outcome
+        unavailable = [selected.job_id]
+        if not repairs and plan_body is not None and plan_body.get("schema_version") in {
+            "mastermind.execution_plan/v3", "mastermind.execution_plan/v4",
+            "mastermind.execution_plan/v5",
+        }:
+            target = targets[str(selected.reviews_job_id)]
+            for candidate in queued:
+                if not (
+                    self._is_read_only_frontier_work(candidate)
+                    and (not active or self._ready_frontier_candidate(candidate, active))
+                    and candidate.plan_attempt_id == target.plan_attempt_id
+                    and candidate.plan_digest == target.plan_digest
+                    and candidate.plan_step_id != target.plan_step_id
+                    and current_by_step.get(str(candidate.plan_step_id), {}).get("current_job_id") == candidate.job_id
+                ):
+                    continue
+                outcome = self._dispatch_queued(root_id, candidate)
+                if outcome is not None:
+                    return outcome
+                unavailable.append(candidate.job_id)
+        if active:
+            # Capacity pressure must not hide the incumbent's original return.
+            # The caller skips materialization before step 7's exact replay.
+            return _RECONCILE_ACTIVE_REVIEW
+        # Do not retry the unavailable review in the ordinary queued loop.
+        return self._outcome(root_id, "NO_ACTION", None, None, {
+            "reason": "exact_dispatch_unavailable",
+            "unavailable_job_ids": unavailable,
+            "policy_sha": policy_sha,
+        })
+
     def _dispatch_queued(
         self, root_id: str, selected: Job
     ) -> CooCycleOutcome | None:
@@ -292,9 +452,10 @@ class CooCycle:
             f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
             f"{selected.attempt_count + 1}"
         )
+        self._require_fresh_admission(root_id)
         try:
             receipt = self.dispatcher(selected.job_id, command)
-        except Exception:
+        except Exception as exc:
             # Preserve the existing Runtime-owned reconciliation barrier when
             # a dispatch raises after committing its exact claim.
             if not self._dispatch_none_was_preclaim(selected):
@@ -303,6 +464,10 @@ class CooCycle:
                     selected_job_id=selected.job_id,
                     dispatch_command_id=command,
                 )
+            else:
+                from control_plane.executive_supervisor import NoEligibleWorkerCapacity
+                if isinstance(exc, NoEligibleWorkerCapacity) and exc.job_id == selected.job_id:
+                    return None
             raise
         if receipt is None:
             if not self._dispatch_none_was_preclaim(selected):
@@ -790,7 +955,7 @@ class CooCycle:
             or not isinstance(provenance, dict)
             or provenance.get("schema_version")
             != "mastermind.executive_orchestration_provenance/v1"
-            or provenance.get("creator") != "ceo_intent"
+            or not _accepted_orchestration_root_provenance(provenance)
             or provenance.get("role") != "aggregation"
             or provenance.get("job_id") != root.job_id
             or provenance.get("root_job_id") != root.job_id
@@ -878,9 +1043,15 @@ class CooCycle:
             planner = children[0]
             planner_provenance = planner.orchestration_provenance
             interactive_profile_id = planner.constraints.get("execution_profile_id")
+            retained_native = (
+                interactive_profile_id == NATIVE_RETURN_TX5_EXECUTION_PROFILE
+                and isinstance(planner_provenance, dict)
+                and planner_provenance.get("command_id")
+                == f"coo-cycle:{root_id}:create-interactive:0"
+            )
             expected_create_command = (
                 f"coo-cycle:{root_id}:create-interactive:0"
-                if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE
+                if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE or retained_native
                 else f"coo-cycle:{root_id}:create-planner:0"
             )
             if (
@@ -906,7 +1077,7 @@ class CooCycle:
                 != root.orchestration_provenance_digest
             ):
                 return self._block(root_id, planner.job_id, "lineage_invalid")
-            if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE:
+            if interactive_profile_id == INTERACTIVE_TX5_EXECUTION_PROFILE or retained_native:
                 return self._outcome(
                     root_id,
                     "NO_ACTION",
@@ -932,6 +1103,7 @@ class CooCycle:
                 selected.job_id,
                 expected_attempt_id=str(selected.current_attempt_id),
             )
+            self._require_fresh_admission(root_id)
             try:
                 committed = self.runtime.jobs.commit_coo_retry_decision(
                     root_id,
@@ -1115,6 +1287,7 @@ class CooCycle:
             if kind == "replace_review":
                 target = str(data["target"])
                 command = f"coo-cycle:{root_id}:create-review:{target}:{int(data['ordinal'])}"
+                self._require_fresh_admission(root_id)
                 try:
                     receipt = self.runtime.jobs.create_cycle_review(
                         root_id, target, command_id=command
@@ -1131,6 +1304,7 @@ class CooCycle:
                     f"coo-cycle:{root_id}:create-repair:{target}:{selected.job_id}:"
                     f"{data['review_result_digest']}:{next_round}"
                 )
+                self._require_fresh_admission(root_id)
                 try:
                     receipt = self.runtime.jobs.create_cycle_repair(
                         root_id, target, selected.job_id, command_id=command
@@ -1139,9 +1313,22 @@ class CooCycle:
                     return self._block(root_id, selected.job_id, _classify_invalid(exc))
                 return self._outcome(root_id, "REPAIR_CREATED", receipt.job_id, command, receipt)
 
+        # Drain current quality obligations before fresh discretionary work.
+        review_pressure_reconciliation = False
+        if admission is not None:
+            review_outcome = self._drain_current_reviews(
+                root_id, children, current_by_step, ordinals, plan_body,
+                policy.policy_sha256,
+            )
+            if review_outcome is _RECONCILE_ACTIVE_REVIEW:
+                review_pressure_reconciliation = True
+            elif review_outcome is not None:
+                return review_outcome
+
         # 4. Materialize one lowest-ordinal missing dependency-ready V3/V4 work Job.
         if (
-            admission is not None
+            not review_pressure_reconciliation
+            and admission is not None
             and plan_body is not None
             and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
             and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
@@ -1171,6 +1358,7 @@ class CooCycle:
                     f"coo-cycle:{root_id}:create-work:{step_id}:"
                     f"{manifest['dependency_manifest_digest']}"
                 )
+                self._require_fresh_admission(root_id)
                 try:
                     job = self.runtime.jobs.create_cycle_work(
                         root_id,
@@ -1188,6 +1376,7 @@ class CooCycle:
 
         # 5. Create exactly the sole planner.
         if not children and not admission_events:
+            self._require_fresh_admission(root_id)
             try:
                 planner = self.runtime.jobs.create_cycle_planner(
                     root_id,
@@ -1293,6 +1482,7 @@ class CooCycle:
             planner = planners[0]
             if planner.status == JobStatus.COMPLETED and planner.current_attempt_id:
                 command = f"coo-cycle:{root_id}:admit-plan:{planner.current_attempt_id}"
+                self._require_fresh_admission(root_id)
                 try:
                     members = self.runtime.jobs.admit_cycle_plan(root_id, command_id=command)
                 except StateConflict as exc:
@@ -1320,6 +1510,7 @@ class CooCycle:
             if missing:
                 target = sorted(missing, key=lambda job: _job_sort_key(job, ordinals))[0]
                 command = f"coo-cycle:{root_id}:create-review:{target.job_id}:1"
+                self._require_fresh_admission(root_id)
                 review = self.runtime.jobs.create_cycle_review(
                     root_id, target.job_id, command_id=command
                 )
@@ -1345,6 +1536,10 @@ class CooCycle:
                         _current_orchestration_tree_material(
                             connection, root_row, admission, plan_body
                         )
+                except StateConflict as exc:
+                    return self._block(root_id, root_id, _classify_invalid(exc))
+                self._require_fresh_admission(root_id)
+                try:
                     command = f"coo-cycle:{root_id}:aggregation-handoff:1"
                     handoff = self.runtime.jobs.create_cycle_handoff(
                         root_id, command_id=command

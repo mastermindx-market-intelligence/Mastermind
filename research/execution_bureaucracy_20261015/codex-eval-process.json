@@ -1,0 +1,11 @@
+{
+  "provider": "codex",
+  "pid": 78712,
+  "started_unix": 1792041343.2755399,
+  "purpose": "Native instruction scenario evaluation only",
+  "default_model_used": true,
+  "sandbox": "read-only",
+  "no_tool_use_requested": true,
+  "exit_code": 0,
+  "elapsed_seconds": 46.62
+}

@@ -1,0 +1,59 @@
+{
+  "capabilities": [
+    {
+      "auth_status": "oAuth",
+      "config_name": "mastermindExecutiveCoo",
+      "enabled_tools": [
+        "executive_fabric",
+        "executive_inbox",
+        "executive_mandate",
+        "executive_state",
+        "principal_intent_status",
+        "submit_principal_intent"
+      ],
+      "grant_capability_id": "executive-coo-mcp-v1",
+      "grant_digest": "6e279edd1c0b4236c9b8679c706831df44e7da1881af64863a71884dc65e74d1",
+      "name": "executive_coo",
+      "server_identity": "mastermind-executive-coo",
+      "server_version": "1.0.0",
+      "tool_schema_digest": "8d4ff58a30c02b717788b80fdfd1c5b8b35493dc11dd76cac351cde7b4509d72",
+      "transport": "streamable-http",
+      "transport_owner": "Mastermind#955",
+      "transport_state": "SOURCE_MERGED_NATIVE_AUTH_PROOF_OPEN"
+    },
+    {
+      "auth_status": "unsupported",
+      "config_name": "mastermindCompanyDialoguePrincipal",
+      "enabled_tools": [
+        "continue",
+        "read_thread",
+        "ruling",
+        "stop"
+      ],
+      "grant_capability_id": "company-dialogue-principal-mcp-v1",
+      "grant_digest": "508e734ae94f0cd89f1fb545b7ca2ade089a1fcca0a54cdc9b755b8b9f948a3a",
+      "name": "principal_company_dialogue",
+      "server_identity": "mastermind-company-dialogue-principal-mcp",
+      "server_version": "0.1.0",
+      "tool_schema_digest": "d45c0f8fe2451c726757c42be729e0e49fc5b2637c33efc97dee00168fab7abd",
+      "transport": "stdio",
+      "transport_owner": "ExecutiveControlService + ops/executive_os/company_dialogue_principal_edge.py",
+      "transport_state": "EDGE_AND_LISTENER_SOURCE_BUILT_INSTALL_CONFIG_OPEN"
+    }
+  ],
+  "execution_surface": "claude-agent-sdk",
+  "policy_digest": "b240b6eee9566f6590c60d3b4b410df8cd74220088b735b375ee10558d690dfd",
+  "policy_version": "2026-10-06.claude-rich-principal-rg1",
+  "production_armed": false,
+  "profile_digest": "c7c104f39940a96f105be5e30954db2a14d9919e7366e2c38fbe36390d394930",
+  "profile_id": "principal.claude.coo.rich.v1",
+  "profile_state": "DISABLED_REGISTRY_CANDIDATE",
+  "schema": "mastermind.claude_rich_principal_capability_generations.v2",
+  "unresolved": [
+    "native sandbox qualification for exact Executive COO loopback and principal Company Unix transport",
+    "rich Claude supervisor and adapter admission for the exact disabled profile generation",
+    "same-session native MCP tool-schema attestation beyond server/tool-name readback",
+    "installed principal edge config/listener and real Claude/IdP authentication canary",
+    "production enablement remains a separate reviewed profile generation/effect gate"
+  ]
+}

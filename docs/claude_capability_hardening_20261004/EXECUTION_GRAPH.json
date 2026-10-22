@@ -1,0 +1,199 @@
+{
+  "format_version": 1,
+  "purpose": "documentation_dependency_graph_not_a_dispatch_queue",
+  "runtime_effects_authorized": false,
+  "nodes": [
+    {
+      "id": "W00",
+      "outcome": "Design review",
+      "depends_on": [],
+      "handoffs": [],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W01",
+      "outcome": "Current custody and grants",
+      "depends_on": [
+        "W00"
+      ],
+      "handoffs": [],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W02",
+      "outcome": "H2 parity qualification",
+      "depends_on": [
+        "W01"
+      ],
+      "handoffs": [
+        "H2"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W03",
+      "outcome": "Rich native observation/source",
+      "depends_on": [
+        "W01"
+      ],
+      "handoffs": [
+        "H1"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W04",
+      "outcome": "COO package source",
+      "depends_on": [
+        "W01"
+      ],
+      "handoffs": [
+        "H3"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W05",
+      "outcome": "First native generation",
+      "depends_on": [
+        "W02",
+        "W03",
+        "W04"
+      ],
+      "handoffs": [
+        "H1",
+        "H3"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W06",
+      "outcome": "Principal orchestration admission",
+      "depends_on": [
+        "W01"
+      ],
+      "handoffs": [
+        "H4"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W07",
+      "outcome": "Scoped dialogue/context source",
+      "depends_on": [
+        "W01"
+      ],
+      "handoffs": [
+        "H6"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W08",
+      "outcome": "Existing CI observer integration",
+      "depends_on": [
+        "W01"
+      ],
+      "handoffs": [
+        "H5"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W09",
+      "outcome": "Browser resource integration",
+      "depends_on": [
+        "W01",
+        "W03"
+      ],
+      "handoffs": [
+        "H7"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W10",
+      "outcome": "Bounded-action native acceptance",
+      "depends_on": [
+        "W05"
+      ],
+      "handoffs": [
+        "H1",
+        "H3"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W11",
+      "outcome": "Joint child-work and in-flight reciprocal-dialogue proof",
+      "depends_on": [
+        "W05",
+        "W06",
+        "W07"
+      ],
+      "handoffs": [
+        "H4",
+        "H6"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W12",
+      "outcome": "Adjudicate reciprocal evidence from the completed joint live proof",
+      "depends_on": [
+        "W07",
+        "W11"
+      ],
+      "handoffs": [
+        "H6"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W13",
+      "outcome": "CI continuation native proof",
+      "depends_on": [
+        "W05",
+        "W08"
+      ],
+      "handoffs": [
+        "H5"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W14",
+      "outcome": "Local browser native proof",
+      "depends_on": [
+        "W05",
+        "W09"
+      ],
+      "handoffs": [
+        "H7"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    },
+    {
+      "id": "W15",
+      "outcome": "Integrated seven-packet acceptance",
+      "depends_on": [
+        "W02",
+        "W10",
+        "W11",
+        "W12",
+        "W13",
+        "W14"
+      ],
+      "handoffs": [
+        "H1",
+        "H2",
+        "H3",
+        "H4",
+        "H5",
+        "H6",
+        "H7"
+      ],
+      "execution_state": "NOT_DISPATCHED_BY_THIS_PACKAGE"
+    }
+  ]
+}

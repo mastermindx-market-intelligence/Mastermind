@@ -307,6 +307,13 @@ def _observed_network_state(config: Mapping[str, Any]) -> str | None:
     ).strip()
     if sandbox == "read-only" and approval == "never":
         return "disabled"
+    if sandbox == "workspace-write" and approval == "never":
+        write_config = config.get("sandbox_workspace_write")
+        # A writable sandbox is not network-disabled by inference. Require
+        # the actual effective App Server config/read response to report
+        # explicit false; absent, invalid or true remains UNKNOWN and refuses.
+        if isinstance(write_config, Mapping) and write_config.get("network_access") is False:
+            return "disabled"
     return None
 
 
@@ -616,6 +623,7 @@ class CodexOperatorAdapter:
     """Real stdio Codex App Server path, importable but unregistered and off."""
 
     interface_version = OPERATOR_HARNESS_INTERFACE_VERSION
+    supports_progress_metadata = True
 
     def __init__(
         self,
@@ -1192,13 +1200,45 @@ class CodexOperatorAdapter:
             reasons.append("harness_version_mismatch")
         if requested.workspace != self.configured_workspace:
             reasons.append("workspace_identity_mismatch")
-        if requested.sandbox_policy != "read-only":
+        # This adapter defaults to its original read-only boundary. An exact,
+        # source-verified V4 Skill binding may additionally admit an explicitly
+        # reviewed workspace-write App Server profile. The binding is already
+        # constructor-attested; the requested OHF manifest and config must also
+        # match it exactly. No credential, helper, host path, browser resource or
+        # ambient capability can be inferred from the write bit alone.
+        bound_profile = (
+            self.skill_canary_binding.profile
+            if self.skill_canary_binding is not None else None
+        )
+        rich_workspace_write = bool(
+            requested.write_capable
+            and bound_profile is not None
+            and bound_profile.write_capable
+            and bound_profile.execution_surface == "codex-app-server"
+            and bound_profile.sandbox_policy == "workspace-write"
+            and bound_profile.native_helper_policy is NativeHelperPolicy.DISABLED
+            and self.native_helper_grant is None
+            and requested.sandbox_policy == bound_profile.sandbox_policy
+            and requested.approval_policy == bound_profile.approval_policy
+            and requested.network_policy == bound_profile.network_policy
+            and requested.expected_config_digest == bound_profile.expected_config_digest
+            and self.expected_config_digest == bound_profile.expected_config_digest
+            and requested.capabilities == bound_profile.capability_manifest(
+                harness_binary_digest=self.binary_digest
+            )
+            # A workspace-write sandbox covers the ENTIRE workspace root.
+            # Require an explicit full-root grant; empty or narrower Job path
+            # grants cannot silently become workspace-wide write authority.
+            # More granular writable Jobs need a separately qualified executor.
+            and requested.allowed_write_paths == (str(self.workspace_root),)
+        )
+        if requested.sandbox_policy != "read-only" and not rich_workspace_write:
             reasons.append("sandbox_not_read_only")
         if requested.approval_policy != "never":
             reasons.append("approval_not_never")
         if requested.network_policy != self.network_policy:
             reasons.append("network_policy_mismatch")
-        if requested.write_capable or requested.allowed_write_paths:
+        if (requested.write_capable or requested.allowed_write_paths) and not rich_workspace_write:
             reasons.append("write_capable_ohf_not_armed")
         expected_helper_policy = (
             NativeHelperPolicy.PARENT_READ_ONLY_CEILING
@@ -1254,6 +1294,29 @@ class CodexOperatorAdapter:
                 "launched process execution identity is not observable",
                 effect_unknown=True,
             ) from exc
+
+    @staticmethod
+    def _require_same_initialized_incarnation(
+        launched: tuple[int, int] | None,
+        initialized: tuple[int, int] | None,
+    ) -> None:
+        """Permit startup exec, not PID reuse or an unobservable identity.
+
+        On macOS, libproc's pidversion can change during a legitimate exec
+        (including the fake App Server's shebang interpreter transition).
+        The kernel uniqueid is the process incarnation and must remain equal.
+        After a successful initialize response, the full pair is sealed and
+        every further check requires its exact equality.
+        """
+        if launched is None and initialized is None:
+            return  # Historical non-Darwin environment has no libproc pair.
+        if (launched is None or initialized is None
+                or launched[0] != initialized[0]):
+            raise CodexAdapterError(
+                AdapterFailureClass.PROCESS_CRASH,
+                "launched process execution identity changed before admission (incarnation during initialize)",
+                effect_unknown=True,
+            )
 
     def _require_process_continuity(
         self, process: ProcessIdentityObservation,
@@ -1464,9 +1527,17 @@ class CodexOperatorAdapter:
                     "Codex App Server lacks its attested private process group",
                     effect_unknown=True,
                 )
-            process_instance = self._process_instance(client.pid)
+            launched_instance = self._process_instance(client.pid)
             attestation = self._initialize_and_attest(
                 client, requested, launch_binary_digest, resource_binding
+            )
+            # First pin the complete OS exec identity after the App Server has
+            # answered initialize. A shebang or reviewed launcher may exec
+            # between Popen and initialize; it cannot replace the kernel
+            # process incarnation. From here onward, pidversion drift refuses.
+            process_instance = self._process_instance(client.pid)
+            self._require_same_initialized_incarnation(
+                launched_instance, process_instance
             )
             self._require_process_continuity(process, process_instance)
             if _sha256_file(self.binary_path) != launch_binary_digest:
@@ -1721,6 +1792,24 @@ class CodexOperatorAdapter:
         wave-3 review finding B2).
         """
 
+        # Codex App Server 0.159.3 reports externally loaded Skills as
+        # `<verified-package-directory>:<runtime-name>` even though their
+        # immutable path still contains the unqualified runtime directory.
+        # Project that exact provider spelling onto the reviewed identity;
+        # never strip an arbitrary namespace or accept an unknown Skill.
+        granted_names = frozenset(
+            grant.runtime_name for grant in binding.profile.skill_grants
+        )
+        package_namespace = Path(binding.generation.package_root).name
+        qualified_prefix = f"{package_namespace}:"
+
+        def runtime_name(provider_name: str) -> str:
+            if provider_name.startswith(qualified_prefix):
+                candidate = provider_name[len(qualified_prefix):]
+                if candidate in granted_names:
+                    return candidate
+            return provider_name
+
         path_flags = {("path" in row) for row in rows}
         if len(path_flags) > 1:
             raise CodexAdapterError(
@@ -1732,7 +1821,7 @@ class CodexOperatorAdapter:
         schema_support_mode = "path_precise" if mode_a else "pathless"
         if mode_a:
             for row in rows:
-                name = str(row.get("name") or "")
+                name = runtime_name(str(row.get("name") or ""))
                 path = str(row.get("path") or "")
                 expected_md = f"{skills_root}/{name}/SKILL.md"
                 expected_dir = f"{skills_root}/{name}"
@@ -1742,14 +1831,21 @@ class CodexOperatorAdapter:
                         "skill_path_mismatch",
                         effect_unknown=True,
                     )
-        elif not binding.protocol_receipt.supports_skill_input_path:
+        elif (
+            not binding.protocol_receipt.supports_skill_input_path
+            or binding.profile.write_capable
+        ):
+            # Pathless catalog compatibility stays available to legacy
+            # read-only Skill observers only. A write-capable profile cannot
+            # prove which physical Skill supplied an observed name, even if
+            # the protocol advertises a structured Skill input path.
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
                 "skill_path_attestation_unavailable",
                 effect_unknown=True,
             )
         enabled_rows = [row for row in rows if row.get("enabled") is True]
-        names = [str(row.get("name") or "") for row in enabled_rows]
+        names = [runtime_name(str(row.get("name") or "")) for row in enabled_rows]
         if len(names) != len(set(names)):
             raise CodexAdapterError(
                 AdapterFailureClass.CAPABILITY_ATTESTATION_FAILURE,
@@ -2175,7 +2271,11 @@ class CodexOperatorAdapter:
             self.visible_turn_projection = projection
         return projection
 
-    def mint_observer_grant(self, turn: TurnRef, *, binding=None):
+    def mint_observer_grant(self, turn: TurnRef, *, binding=None, progress_metadata=False):
+        if progress_metadata and self.expected_harness_version != "codex-cli 0.159.2":
+            raise CodexAdapterError(
+                AdapterFailureClass.CONFIG_DRIFT, "progress metadata schema is unqualified"
+            )
         state = self._generations.get(turn.process_generation_id)
         if state is None:
             raise CodexAdapterError(
@@ -2198,7 +2298,7 @@ class CodexOperatorAdapter:
         )
         projection = self._visible_projection()
         if binding is not None:
-            return projection.enroll_observer(key, **binding)
+            return projection.enroll_observer(key, progress_thread_id=state.provider_session_id if progress_metadata else None, **binding)
         return projection.mint_grant(key)
 
     @staticmethod

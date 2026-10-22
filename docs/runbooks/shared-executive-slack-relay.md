@@ -37,16 +37,66 @@ or workspace-wide channel-management scope is introduced by this migration.
 
 ## Safe sequencing
 
-1. Install a Mastermind release containing the shared-relay source.
-2. Slack admin edits the **existing Mastermind Executive Relay app** only:
+1. Install the exact accepted Mastermind release containing both the shared-relay
+   source and the reviewed C1 release-rebind owner. The standard Executive
+   installer deliberately leaves C1/control services stopped; it does not
+   rewrite an already-enrolled C1 relay plist or config.
+
+   Let `RELEASE_ROOT` denote the installer-verified
+   `/Library/Application Support/MastermindExecutive/releases/<accepted-sha>`.
+   Every native command below must execute from that exact installed release
+   with the pinned Executive Python; never run the ceremony from an operator
+   source checkout.
+
+2. **Before changing Slack scopes or starting C1**, keep Executive control and
+   the C1 relay unloaded and keep the relay explicitly disabled. Rebind the
+   coherent existing C1 enrollment to the exact installed release:
+
+```text
+cd "$RELEASE_ROOT"
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/c1_relay_enrollment.py \
+  rebind-release \
+  --expected-bot-user-id U0BT71H4FQE
+```
+
+`rebind-release` validates the old plist/config as one coherent enrolled
+generation, stages the exact installed-release plist/config pair, preserves and
+attests the existing credential without outputting or rewriting it, and
+converges the two files transactionally.
+
+A mixed or uncertain outcome is a hard stop. Reconcile the same carrier and do
+not start either relay.
+
+3. Slack admin edits the **existing Mastermind Executive Relay app** only:
    add bot scope `channels:history`, preserve `chat:write` and
    `groups:history`, then reinstall/approve the app in the existing workspace.
    Do not create another app and do not remove a Dot app.
-3. Confirm the existing bot remains a member of both channels above.
-4. On the native Executive host, with A2 still disabled/unloaded, run:
+
+4. Confirm the existing bot remains a member of both channels above.
+
+5. While C1 remains disabled/unloaded, verify its rebound enrollment against the
+   post-migration Slack identity:
 
 ```text
-python3 ops/executive_os/a2_agent_relay_enrollment.py \
+cd "$RELEASE_ROOT"
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/c1_relay_enrollment.py \
+  verify \
+  --expected-bot-user-id U0BT71H4FQE
+```
+
+This verification must prove the same workspace/bot, the exact shared
+three-scope set, and `#sol-runtime` history access before the C1 lifecycle is
+resumed. The existing C1 read-side/control lifecycle remains its own owner; this
+runbook does not grant start authority.
+
+6. On the native Executive host, with A2 still disabled/unloaded, run:
+
+```text
+cd "$RELEASE_ROOT"
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/a2_agent_relay_enrollment.py \
   enroll-shared \
   --expected-bot-user-id U0BT71H4FQE \
   --enable-w3c
@@ -58,8 +108,11 @@ three-scope set, proves `#agent-dispatch` history access, and writes the normal
 A2 private token/config/plist files. No Slack token is copied into chat, argv,
 Slack, GitHub, logs, or a model-visible surface.
 
-5. Run the normal A2 `verify --enable-w3c`, then the existing reviewed
-   `start-agent-relay` lifecycle only after its normal release/admission gates.
+7. Run the normal A2 `verify --enable-w3c`. Resume the existing reviewed C1
+   read-side/control lifecycle and the separate `start-agent-relay` lifecycle
+   only after each owner's normal release/admission gates.
+
+Neither verification is permission to start the other service.
 
 ## Migration compatibility
 
@@ -71,3 +124,71 @@ exactly, so dialogue cannot activate before the Slack admin scope migration.
 The two services receive separate local copies of the same Slack bot credential
 under their existing owner/mode boundaries. This is credential reuse inside the
 native host, not a second Slack credential or a new credential authority.
+
+## Existing A2 enrollment after a release upgrade
+
+For an already-enrolled A2 relay, preserve the token and use the installed
+`a2_agent_relay_enrollment.py rebind-release` owner. Do not repeat either
+`enroll` ceremony, rewrite the pair by hand, or copy a credential. The core
+installer does not publish A2's generation.
+
+This paired C1/A2 upgrade requires the existing shared lock namespace
+`/Library/Application Support/MastermindExecutive/locks`: a real root:wheel
+directory with mode 0700 and no ACL. The canonical C1 host preparation owner
+(`prepare-c1-sol-state-relay.sh`) provisions and checks that namespace. Verify
+this prerequisite before stopping A2. A2's initial enrollment preparation does
+not provision it, and `rebind-release` refuses a missing or unsafe namespace
+without creating or repairing it. Do not rerun enrollment preparation on an
+already-enrolled relay or weaken the namespace checks.
+
+After the exact accepted successor is installed, stop/disable A2 through
+`service-control.sh stop-agent-relay` and verify its unloaded/disabled state.
+Keep production execution disarmed under its existing owner. From the exact
+installed `RELEASE_ROOT`, with the pinned Executive Python, run:
+
+```text
+/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  ops/executive_os/a2_agent_relay_enrollment.py \
+  rebind-release --expected-bot-user-id U0BT71H4FQE
+```
+
+The verb requires a coherent complete old generation. Under a private root
+flock it attests the existing token's metadata without reading its bytes,
+validates the old canonical config/plist, and replaces only their release
+binding. With no flag, the existing admitted scope set and stored `w3c_enabled`
+boolean are preserved; there is no policy override or provider call. An
+already-current pair is a no-write success. Missing, mixed, unsafe or concurrently changed
+artifacts fail closed. A failed publication restores only identities still
+owned by that operation. `A2_REBIND_EFFECT_UNCERTAIN` or
+`A2_REBIND_MIXED_GENERATION` requires same-carrier reconciliation; do not retry,
+reenroll or start the relay to force convergence.
+
+Each forward and rollback publication re-attests the staged name and held file
+descriptor against the metadata sealed after writing, after all ACL and
+destination checks. Lost staging identity stops further publication and
+rollback; cleanup unlinks only the staged inode still owned by the operation.
+
+If the relay becomes loaded during publication, rollback permission is lost.
+Read-only identity reconciliation still distinguishes an operation-owned pair
+that was not restored (`A2_REBIND_MIXED_GENERATION`) from changed or unprovable
+identities (`A2_REBIND_EFFECT_UNCERTAIN`); neither permits another write.
+
+For the separately admitted native-return phase, the existing rebind owner has
+an explicit `rebind-release --enable-w3c` selection. Keep the relay disabled and
+unloaded, and use the same expected bot and installed release. That opt-in
+changes only the release binding and the stored W3C boolean to true, retaining
+the exact bot, scope set and credential inode without reading or copying its
+bytes. A false enrollment at the same release must converge to true; only an
+already-current true pair is a no-write success. Omitting the flag preserves
+both false and true states. It never disables a true enrollment, starts a
+service, authorizes a Runtime writer or proves native delivery. The same file
+CAS, rollback and uncertain-effect rules apply. Do not reenroll or modify the
+pair manually to enable W3C.
+
+After a successful rebind, use the installed `verify` with the expected bot.
+Supply `--enable-w3c` when the rebound enrollment has W3C enabled; an ordinary
+no-flag rebind of a false enrollment remains false. The verification requalifies the existing
+Slack identity/history and exact release. Then use the separate installed
+`start-agent-relay` owner after its ordinary admission gates, including the
+existing logs/socket-parent prerequisites, and read back health. Rebinding
+neither starts services nor proves reboot persistence.

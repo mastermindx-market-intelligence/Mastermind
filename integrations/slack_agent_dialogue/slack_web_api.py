@@ -16,6 +16,8 @@ import urllib.request
 from dataclasses import dataclass
 from typing import Any, Mapping, Protocol
 
+from integrations.slack_executive.slack_web_api import _default_ssl_context
+
 from integrations.slack_agent_dialogue.engine import (
     HistoryPage,
     SlackEffectUnknown,
@@ -181,7 +183,7 @@ class UrllibSlackHttpTransport:
         ):
             raise ValueError("timeout_seconds must be positive")
         self._timeout_seconds = float(timeout_seconds)
-        self._ssl_context = ssl_context or ssl.create_default_context()
+        self._ssl_context = ssl_context if ssl_context is not None else _default_ssl_context()
 
     async def request(
         self,

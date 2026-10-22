@@ -74,6 +74,7 @@ from __future__ import annotations
 
 import copy
 import hashlib
+import inspect
 import json
 import re
 from collections.abc import Mapping, Sequence
@@ -328,6 +329,10 @@ class CeoIntentError(ValueError):
 
 class CeoIntentConflict(CeoIntentError):
     """An immutable accepted intent disagrees with the submitted identity."""
+
+
+class _FreshAdmissionObserverFailed(RuntimeError):
+    """The root is committed; its original operation needs reconciliation."""
 
 
 # ---------------------------------------------------------------------------
@@ -691,12 +696,19 @@ def _require_principal_context(intent, context, request_ref, guard) -> None:
 
 
 def _run_principal_guard(intent, guard) -> None:
-    # The future App-only ingress must supply a canonical host recheck, not a
-    # model-authored Boolean. A callback alone is NOT OAuth/peer authentication.
-    # Replays resolve first. Guard failures or non-None results have no Job effect.
+    """Recheck trusted synchronous owner facts without exposing private errors."""
+    # A host callback is not OAuth/peer authentication or model-authored authority.
     try:
-        if guard(copy.deepcopy(intent)) is not None:
-            raise ValueError()
+        if (not callable(guard) or inspect.iscoroutinefunction(guard)
+                or inspect.iscoroutinefunction(getattr(guard, "__call__", None))):
+            raise ValueError
+        result = guard(copy.deepcopy(intent))
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result):
+                result.close()
+            raise ValueError
+        if result is not None:
+            raise ValueError
     except Exception:
         raise CeoIntentError("trusted principal admission refused") from None
 
@@ -1227,6 +1239,7 @@ def submit_intent(
     principal_context: Any = None,
     principal_request_ref: str | None = None,
     principal_admission_guard: Any = None,
+    fresh_admission_observer: Any = None,
 ) -> dict[str, Any]:
     """Validate one intent and turn it into exactly one durable QUEUED Job.
 
@@ -1262,6 +1275,15 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    # Private host source seam, never a frame field or a launch capability.
+    # Only the actual new-root branch calls it. Public/replay receipts remain
+    # queued, and no observer may turn a duplicate into a fresh admission.
+    if fresh_admission_observer is not None and (
+        intent["schema"] != INTENT_SCHEMA_V2
+        or not callable(fresh_admission_observer)
+        or inspect.iscoroutinefunction(fresh_admission_observer)
+    ):
+        raise CeoIntentError("fresh admission observer requires synchronous v2 host source")
     if intent["schema"] == INTENT_SCHEMA_PRINCIPAL:
         _require_principal_context(intent, principal_context, principal_request_ref, principal_admission_guard)
         from control_plane.ceo_request import derive_worktree
@@ -1315,7 +1337,9 @@ def submit_intent(
                     _require_service_ceiling(contract)
                 else:
                     _require_principal_contract(intent)
+                def principal_commit_fence():
                     _run_principal_guard(intent, principal_admission_guard)
+
                 job = runtime.jobs.create_job(
                     intent["objective"],
                     department=intent["department"],
@@ -1332,6 +1356,8 @@ def submit_intent(
                     validation_commands=contract.get("validation_commands"),
                     command_id=command_id,
                     provenance=_provenance(intent, fingerprint, principal_request_ref=principal_request_ref),
+                    **({"_principal_commit_guard": principal_commit_fence}
+                       if intent["schema"] == INTENT_SCHEMA_PRINCIPAL else {}),
                     owner_seat="coo",
                     escalation_target="coo",
                 )
@@ -1371,6 +1397,21 @@ def submit_intent(
         raise CeoIntentError(str(exc)) from exc
 
     created = runtime.store.find_event_by_command_id(command_id)
+    if fresh_admission_observer is not None:
+        try:
+            if created is None or created.get("job_id") != job.job_id:
+                raise ValueError("canonical root creation source is unavailable")
+            observed = fresh_admission_observer(job.job_id, command_id)
+            if observed is not None:
+                if inspect.iscoroutine(observed):
+                    observed.close()
+                raise ValueError("fresh admission observer returned a value")
+        except Exception as exc:
+            # Do not classify a post-commit observation failure as a zero-Job
+            # refusal, swallow it as a concurrent duplicate, or run a worker.
+            raise _FreshAdmissionObserverFailed(
+                "fresh admission observation failed; reconcile the original operation"
+            ) from exc
     return build_receipt(
         job,
         intent=intent,

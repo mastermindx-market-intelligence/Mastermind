@@ -191,7 +191,8 @@ _OHF_OPERATIONS = frozenset(
 )
 _ALLOWED_OPERATIONS = frozenset(
     {"start", "status", "collect", "cancel", "validate", "autonomy-canary",
-     "interactive-canary"}
+     "interactive-canary", "assignment-seal-prepare", "assignment-seal-commit",
+     "assignment-seal-finalize"}
 ) | _OHF_OPERATIONS
 _MAX_REQUEST_BYTES = 1024 * 1024
 _MAX_OPERATOR_PROMPT_BYTES = 512 * 1024
@@ -882,8 +883,15 @@ class BrokerPolicy:
     allowed_supplementary_gids: frozenset[int] = frozenset()
     require_secret_canary: bool = True
     max_request_bytes: int = _MAX_REQUEST_BYTES
+    # Source-only opt-in. Existing installed entrypoints leave this disabled.
+    # It does not admit an attended provider or weaken ordinary start policy.
+    require_assignment_seal: bool = False
 
     def __post_init__(self) -> None:
+        if type(self.require_assignment_seal) is not bool:
+            raise WorkerBrokerError("assignment seal policy must be boolean")
+        if self.require_assignment_seal and self.allowed_supplementary_gids:
+            raise WorkerBrokerError("assignment sealing requires an isolated primary group")
         if int(self.control_uid) <= 0:
             raise WorkerBrokerError("control UID must be a non-root service principal")
         if int(self.worker_uid) <= 0 or int(self.worker_uid) == int(self.control_uid):
@@ -946,6 +954,13 @@ class _BrokerRun:
     terminal_error: str | None = None
     cancelling: bool = False
     terminal_sweep_task: asyncio.Task[UIDSweepReceipt] | None = None
+    assignment_snapshot: dict[str, Any] | None = None
+    assignment_commit_digest: str | None = None
+    assignment_commit_task: asyncio.Task[dict[str, Any]] | None = None
+    assignment_receipt: dict[str, Any] | None = None
+    assignment_cancel_task: asyncio.Task[dict[str, Any]] | None = None
+    assignment_cancel_reason: str | None = None
+    assignment_retention_digest: str | None = None
 
 
 @dataclasses.dataclass
@@ -1470,6 +1485,8 @@ class ExecutiveWorkerBroker:
             self.validation_adapter_id = validation_descriptor.adapter_id
         self.policy = policy
         self.sweeper = sweeper
+        if policy.require_assignment_seal and self._operator_only:
+            raise WorkerBrokerError("assignment sealing needs the original flat broker")
         self.peer_resolver = peer_resolver
         self.operator_adapter_factory = operator_adapter_factory
         self.operator_resource_factory = operator_resource_factory
@@ -1539,13 +1556,22 @@ class ExecutiveWorkerBroker:
 
         if self.startup_sweep is not None:
             return self.startup_sweep
+        if self._quarantined_reason is not None:
+            raise BrokerStateError("worker startup requires original-owner reconciliation")
         self._require_current_autonomy()
         if os.geteuid() != self.policy.worker_uid or os.getegid() != self.policy.worker_gid:
             raise DedicatedUIDError("broker process does not match the configured worker UID/GID")
         observed_groups = set(os.getgroups()) - {self.policy.worker_gid}
         if observed_groups != set(self.policy.allowed_supplementary_gids):
             raise DedicatedUIDError("worker broker supplementary groups differ from policy")
-        self.startup_sweep = self.sweeper.sweep("broker_startup")
+        if self.policy.require_assignment_seal:
+            # Neither an empty store nor a UID sweep reconciles an original
+            # Runtime/Fabric effect after restart. The authenticated recovery
+            # producer is not composed yet; do not enable this source branch.
+            self._quarantined_reason = "original assignment reconciliation producer unavailable"
+            raise BrokerStateError(self._quarantined_reason)
+        sweep = self.sweeper.sweep("broker_startup")
+        self.startup_sweep = sweep
         self.last_sweep = self.startup_sweep
         return self.startup_sweep
 
@@ -1618,6 +1644,12 @@ class ExecutiveWorkerBroker:
             return await self._cancel(payload)
         if operation == "validate":
             return await self._validate(payload)
+        if operation == "assignment-seal-prepare":
+            return await self._assignment_seal_prepare(payload)
+        if operation == "assignment-seal-commit":
+            return await self._assignment_seal_commit(payload)
+        if operation == "assignment-seal-finalize":
+            return await self._assignment_seal_finalize(payload)
         if operation == "autonomy-canary":
             return await self._autonomy_canary(payload)
         if operation == "interactive-canary":
@@ -2425,6 +2457,10 @@ class ExecutiveWorkerBroker:
             await self._operator_release_busy(state)
 
     async def _ohf_observer_lifecycle(self, operation, payload):
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         binding_fields = {"operation_id", "profile_digest", "permission_digest", "viewer_binding_digest"}
         if set(payload) != {"attempt", "epoch", "generation", "turn"} | binding_fields:
             raise BrokerStateError("OBSERVER_CONFLICT")
@@ -2462,6 +2498,9 @@ class ExecutiveWorkerBroker:
                         code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"}
                         else "GRANT_INVALIDATED"
                     ) from None
+            if (operation == "ohf-observer-enroll" and release_profile
+                    and getattr(active.adapter, "supports_progress_metadata", False) is not True):
+                raise BrokerStateError("CONTENT_UNAVAILABLE")
             state = active.adapter._generations.get(payload["generation"])
             native = state.turns.get(payload["turn"]) if state else None
             if not native:
@@ -2472,7 +2511,8 @@ class ExecutiveWorkerBroker:
             try:
                 if operation == "ohf-observer-enroll":
                     turn = TurnRef(payload["turn"], payload["epoch"], payload["generation"], payload["attempt"])
-                    result = active.adapter.mint_observer_grant(turn, binding=binding)
+                    result = active.adapter.mint_observer_grant(turn, binding=binding,
+                        **({"progress_metadata": True} if release_profile else {}))
                     return result
                 projection = getattr(active.adapter, "visible_turn_projection", None)
                 if projection is None:
@@ -2484,6 +2524,10 @@ class ExecutiveWorkerBroker:
                 raise BrokerStateError(code if code in {"OBSERVER_CONFLICT", "OVER_BUDGET"} else "GRANT_INVALIDATED") from None
 
     async def _ohf_observe_turn(self, payload: dict[str, Any]) -> dict[str, Any]:
+        payload = dict(payload)
+        release_profile = payload.pop("release_profile", None)
+        if release_profile not in (None, "visible_response_and_progress_metadata"):
+            raise BrokerStateError("OBSERVER_CONFLICT")
         expected = {
             "attempt",
             "epoch",
@@ -3230,6 +3274,11 @@ class ExecutiveWorkerBroker:
                 "only the interactive-canary operation may carry one"
             )
         commands = _validation_commands(payload["validation_commands"])
+        if self.policy.require_assignment_seal:
+            if commands:
+                raise BrokerProtocolError("finite assignment seal branch does not admit validation effects")
+            if self.startup_sweep is None:
+                raise BrokerStateError("assignment startup qualification has not completed")
         async with self._state_lock:
             if self._quarantined_reason is not None:
                 raise BrokerStateError(f"worker broker is quarantined: {self._quarantined_reason}")
@@ -3416,7 +3465,7 @@ class ExecutiveWorkerBroker:
             state.collected_receipt = receipt
         sweep = await self._terminal_sweep(state, reason="run_terminal")
         async with self._state_lock:
-            if self._active_run_id == state.spec.run_id:
+            if self._active_run_id == state.spec.run_id and not self.policy.require_assignment_seal:
                 self._active_run_id = None
         if sweep.found_residuals:
             async with self._state_lock:
@@ -3445,6 +3494,27 @@ class ExecutiveWorkerBroker:
         return {"collection": receipt, "uid_sweep": sweep}
 
     async def _cancel(self, payload: dict[str, Any]) -> dict[str, Any]:
+        if not self.policy.require_assignment_seal:
+            return await self._cancel_unshielded(payload)
+        if (set(payload) != {"run_id", "reason"} or type(payload["reason"]) is not str
+                or not payload["reason"].strip() or len(payload["reason"]) > 500):
+            raise BrokerProtocolError("cancel payload fields are invalid")
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            if state.assignment_snapshot is not None or self._active_run_id != state.spec.run_id:
+                raise BrokerStateError("original assignment seal owner holds terminal settlement")
+            if state.assignment_cancel_task is not None:
+                if state.assignment_cancel_reason != payload["reason"]:
+                    raise BrokerStateError("original cancellation request cannot be changed")
+                task = state.assignment_cancel_task
+            else:
+                task = asyncio.create_task(self._cancel_unshielded(dict(payload)),
+                                           name=f"assignment-cancel-{state.spec.run_id}")
+                state.assignment_cancel_task = task
+                state.assignment_cancel_reason = payload["reason"]
+        return await asyncio.shield(task)
+
+    async def _cancel_unshielded(self, payload: dict[str, Any]) -> dict[str, Any]:
         self._require_flat_adapter()
         if set(payload) != {"run_id", "reason"}:
             raise BrokerProtocolError("cancel payload fields are invalid")
@@ -3453,6 +3523,8 @@ class ExecutiveWorkerBroker:
             raise BrokerProtocolError("cancel reason is invalid")
         async with self._state_lock:
             state = self._run(payload["run_id"])
+            if self.policy.require_assignment_seal and state.assignment_snapshot is not None:
+                raise BrokerStateError("original assignment seal owner already holds terminal settlement")
             if self._active_run_id != state.spec.run_id:
                 raise BrokerStateError("only the active run can be cancelled")
             if state.cancelling:
@@ -3471,7 +3543,7 @@ class ExecutiveWorkerBroker:
                 state.cancelling = False
         sweep = await self._terminal_sweep(state, reason="run_terminal")
         async with self._state_lock:
-            if self._active_run_id == state.spec.run_id:
+            if self._active_run_id == state.spec.run_id and not self.policy.require_assignment_seal:
                 self._active_run_id = None
         if adapter_error is not None:
             async with self._state_lock:
@@ -3480,6 +3552,113 @@ class ExecutiveWorkerBroker:
                 )
             raise BrokerStateError(state.terminal_error) from adapter_error
         return {"cancellation": receipt, "uid_sweep": sweep}
+
+    async def _assignment_seal_prepare(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import canonical, digest, observe_roots
+
+        if not self.policy.require_assignment_seal or set(payload) != {"run_id"}:
+            raise BrokerProtocolError("assignment seal preparation is not admitted")
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            if state.assignment_snapshot is not None:
+                return {"snapshot": json.loads(canonical(state.assignment_snapshot)),
+                        "snapshot_sha256": digest(state.assignment_snapshot)}
+            if (self._active_run_id != state.spec.run_id or state.cancelling
+                    or (state.assignment_cancel_task is not None and (
+                        not state.assignment_cancel_task.done() or state.assignment_cancel_task.cancelled()
+                        or state.assignment_cancel_task.exception() is not None))
+                    or state.terminal_error is not None or state.collected_receipt is None
+                    or state.collection_task is None or not state.collection_task.done()
+                    or state.collection_task.cancelled() or state.collection_task.exception() is not None
+                    or state.terminal_sweep_task is None or not state.terminal_sweep_task.done()
+                    or state.terminal_sweep_task.cancelled() or state.terminal_sweep_task.exception() is not None
+                    or state.validation_commands or self._validation_busy):
+                raise BrokerStateError("original terminal collection and cleanup must settle before seal")
+            sweep = state.terminal_sweep_task.result()
+            if not uid_sweep_receipt_is_passing(_jsonable(sweep)):
+                raise BrokerStateError("original terminal cleanup does not prove dedicated UID quiescence")
+            # This read stays under the original state lock. Cancellation and
+            # another start cannot interleave before the phase is frozen.
+            paths = observe_roots({"workspace": state.spec.workspace_path,
+                                   "run": state.spec.run_dir}, self.policy,
+                                  state.spec.isolation_manifest)
+            state.assignment_snapshot = {
+                "schema_version": "mastermind.worker_assignment_seal_prepare/v1",
+                "run_id": state.spec.run_id, "job_id": state.spec.job_id,
+                "worker_id": state.spec.worker_id,
+                "effective_grant_digest": getattr(state.spec, "effective_grant_digest", None),
+                "process_ref": _jsonable(state.process_ref),
+                "paths": paths, "uid_sweep": _jsonable(sweep),
+            }
+            return {"snapshot": json.loads(canonical(state.assignment_snapshot)),
+                    "snapshot_sha256": digest(state.assignment_snapshot)}
+
+    async def _assignment_seal_transaction(self, state: _BrokerRun, seal: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import digest, verify_control_seal
+
+        snapshot = state.assignment_snapshot
+        assert snapshot is not None
+        denial = await asyncio.to_thread(verify_control_seal, snapshot, seal, self.policy)
+        receipt = {"schema_version": "mastermind.worker_assignment_seal_commit/v1",
+                   "snapshot": snapshot, "snapshot_sha256": digest(snapshot),
+                   "control_seal": seal, "worker_denial": denial}
+        # This is only the worker's observation. Keep exclusion until the
+        # authenticated Control owner acknowledges its own durable retention.
+        async with self._state_lock:
+            if self._active_run_id != state.spec.run_id:
+                raise BrokerStateError("original assignment no longer owns admission")
+            state.assignment_receipt = receipt
+        return receipt
+
+    async def _assignment_seal_commit(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import canonical, digest
+
+        if (not self.policy.require_assignment_seal
+                or set(payload) != {"run_id", "snapshot_sha256", "seal"}):
+            raise BrokerProtocolError("assignment seal commit is not admitted")
+        supplied = json.loads(canonical(payload))
+        async with self._state_lock:
+            state = self._run(supplied["run_id"])
+            if (state.assignment_snapshot is None
+                    or supplied["snapshot_sha256"] != digest(state.assignment_snapshot)):
+                raise BrokerStateError("original prepared assignment differs")
+            commit_digest = digest(supplied)
+            if state.assignment_commit_task is not None:
+                if state.assignment_commit_digest != commit_digest:
+                    raise BrokerStateError("original seal commit cannot be changed")
+                task = state.assignment_commit_task
+            else:
+                if self._active_run_id != state.spec.run_id:
+                    raise BrokerStateError("only the original active assignment may commit")
+                task = asyncio.create_task(self._assignment_seal_transaction(state, supplied["seal"]),
+                                           name=f"assignment-seal-{state.spec.run_id}")
+                state.assignment_commit_digest = commit_digest
+                state.assignment_commit_task = task
+        return json.loads(canonical(await asyncio.shield(task)))
+
+    async def _assignment_seal_finalize(self, payload: dict[str, Any]) -> dict[str, Any]:
+        from control_plane.broker_assignment_seal import control_retention_record, digest
+
+        if (not self.policy.require_assignment_seal or set(payload) != {
+                "run_id", "observation_sha256", "retention_sha256"}):
+            raise BrokerProtocolError("assignment retention acknowledgement is not admitted")
+        async with self._state_lock:
+            state = self._run(payload["run_id"])
+            task = state.assignment_commit_task
+            if (task is None or not task.done() or task.cancelled()
+                    or task.exception() is not None or state.assignment_receipt is None):
+                raise BrokerStateError("original worker denial observation is not complete")
+            observed = digest(state.assignment_receipt)
+            retained = digest(control_retention_record(state.assignment_receipt))
+            if payload["observation_sha256"] != observed or payload["retention_sha256"] != retained:
+                raise BrokerStateError("Control retention does not bind the original observation")
+            if state.assignment_retention_digest is None:
+                if self._active_run_id != state.spec.run_id:
+                    raise BrokerStateError("original assignment no longer owns admission")
+                state.assignment_retention_digest = retained
+                self._active_run_id = None
+            return {"run_id": state.spec.run_id, "observation_sha256": observed,
+                    "retention_sha256": retained}
 
     async def _validation_transaction(
         self,
@@ -3603,6 +3782,8 @@ class ExecutiveWorkerBroker:
         """Cancel an active run, then prove the dedicated UID is quiescent."""
 
         async with self._state_lock:
+            if self.policy.require_assignment_seal:
+                self._quarantined_reason = "broker shutdown"
             active_run_id = self._active_run_id
             operator = self._operator_run
         if active_run_id is not None:
@@ -3628,6 +3809,19 @@ class ExecutiveWorkerBroker:
                 )
             except WorkerBrokerError:
                 pass
+        if self.policy.require_assignment_seal:
+            # Shielded operations outlive disconnected callers. Drain their
+            # original owners before the final sweep; never cancel a to_thread
+            # observation and report its physical work stopped.
+            async with self._state_lock:
+                owned = [task for run in self._runs.values() for task in (
+                    run.assignment_cancel_task, run.collection_task,
+                    run.assignment_commit_task, run.terminal_sweep_task,
+                ) if task is not None]
+            outcomes = await asyncio.gather(*(asyncio.shield(task) for task in owned),
+                                            return_exceptions=True)
+            if any(isinstance(value, BaseException) for value in outcomes):
+                raise BrokerStateError("original assignment shutdown settlement failed")
         self.last_sweep = await asyncio.to_thread(self.sweeper.sweep, "broker_shutdown")
 
     async def _write_interrupted_envelope(
@@ -3873,12 +4067,18 @@ class WorkerBrokerClient:
         *,
         timeout_seconds: float = 30.0,
         max_response_bytes: int = 4 * 1024 * 1024,
+        expected_peer_uid: int | None = None,
     ) -> None:
         self.socket_path = Path(socket_path)
         if not self.socket_path.is_absolute():
             raise WorkerBrokerError("worker broker socket path must be absolute")
         self.timeout_seconds = float(timeout_seconds)
         self.max_response_bytes = int(max_response_bytes)
+        if expected_peer_uid is not None and (
+            type(expected_peer_uid) is not int or expected_peer_uid < 0
+        ):
+            raise ValueError("expected broker peer UID must be a nonnegative integer")
+        self.expected_peer_uid = expected_peer_uid
         if not 0.1 <= self.timeout_seconds <= 3600:
             raise WorkerBrokerError("worker broker client timeout is outside the safe range")
         if not 1024 <= self.max_response_bytes <= 16 * 1024 * 1024:
@@ -3890,8 +4090,12 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        foreground_start_receipt=None,
+        before_write=None,
     ) -> dict[str, Any]:
-        if operation not in _ALLOWED_OPERATIONS:
+        # Bridge-only read: this does not add the operation to the ordinary
+        # Worker Broker server or grant a generic request-supplied data source.
+        if operation not in _ALLOWED_OPERATIONS | {"assignment-seal", "native-capacity-observation"}:
             raise BrokerProtocolError("client operation is not allowed")
         request_id = f"req-{uuid.uuid4().hex}"
         document = {
@@ -3913,6 +4117,29 @@ class WorkerBrokerClient:
                 limit=self.max_response_bytes,
             )
             try:
+                # Authenticate the service before sending prompts or grant-bound
+                # requests. The optional check preserves existing clients while
+                # allowing a fixed cross-principal bridge to bind both peers.
+                if self.expected_peer_uid is not None:
+                    peer = writer.get_extra_info("socket")
+                    if peer is None or get_peer_credentials(peer).uid != self.expected_peer_uid:
+                        raise PeerAuthorizationError("broker peer UID differs from trusted binding")
+                from control_plane.foreground_operation import require_start_transmission, ForegroundOperationRefusal
+                try:
+                    require_start_transmission(operation, json.loads(encoded)["payload"],
+                                               foreground_start_receipt)
+                except (ForegroundOperationRefusal, KeyError, TypeError, ValueError):
+                    from control_plane.remote_worker_transport import TransportError, TransportEffect
+                    raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
+                if before_write is not None:
+                    try:
+                        if (operation not in {"ohf-start", "ohf-resume", "ohf-begin-turn"}
+                                or not callable(before_write)
+                                or before_write(operation, json.loads(encoded)["payload"]) is not None):
+                            raise ValueError("invalid local foreground guard")
+                    except Exception:
+                        from control_plane.remote_worker_transport import TransportError, TransportEffect
+                        raise TransportError("foreground_start_refused", TransportEffect.NO_EFFECT) from None
                 writer.write(encoded)
                 await writer.drain()
                 raw = await reader.readline()
@@ -4024,6 +4251,7 @@ class WorkerBrokerClient:
         payload: Mapping[str, Any],
         *,
         timeout_seconds: float | None = None,
+        before_write=None,
     ) -> dict[str, Any]:
         """Synchronous startup/reconciliation seam; never call from a running loop."""
 
@@ -4031,7 +4259,8 @@ class WorkerBrokerClient:
             asyncio.get_running_loop()
         except RuntimeError:
             return asyncio.run(
-                self.request(operation, payload, timeout_seconds=timeout_seconds)
+                self.request(operation, payload, timeout_seconds=timeout_seconds,
+                             **({"before_write": before_write} if before_write is not None else {}))
             )
         raise WorkerBrokerError("request_sync cannot run inside an active event loop")
 
@@ -4381,14 +4610,20 @@ class RemoteWorkerProcessController:
     """Synchronous restart-reconciliation facade over broker status/cancel."""
 
     def __init__(
-        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None
+        self, client: WorkerBrokerClient, *, expected_worker_uid: int | None = None,
+        expected_adapter_id: str = "codex-cli",
     ) -> None:
         if expected_worker_uid is not None and (
             type(expected_worker_uid) is not int or expected_worker_uid <= 0
         ):
             raise ValueError("expected worker UID must be a positive integer")
+        if type(expected_adapter_id) is not str or expected_adapter_id not in {
+            "codex-cli", "claude-code",
+        }:
+            raise ValueError("expected worker adapter must be a supported identity")
         self.client = client
         self.expected_worker_uid = expected_worker_uid
+        self.expected_adapter_id = expected_adapter_id
         self._uid_sweeps: dict[str, Mapping[str, Any]] = {}
 
     def uid_sweep_receipt(self, attempt_or_run_id: Any) -> Mapping[str, Any]:
@@ -4500,7 +4735,7 @@ class RemoteWorkerProcessController:
                 return False
             broker_pid = status.get("broker_pid")
             if (
-                status.get("adapter_id") != "codex-cli"
+                status.get("adapter_id") != self.expected_adapter_id
                 or not _positive_pid(broker_pid)
                 or type(status.get("worker_uid")) is not int
                 or status["worker_uid"] != self.expected_worker_uid

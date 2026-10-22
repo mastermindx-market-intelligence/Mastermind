@@ -40,7 +40,9 @@ _ACTIONS = (
     "executive.worker_auth.verify_only",
     "executive.worker_auth.verify_ready",
     "executive.worker_auth.recover_transaction",
+    "executive.worker_auth.issue_due10_incident_grant",
 )
+_INCIDENT_ACTION = "executive.worker_auth.issue_due10_incident_grant"
 _STATUS_ACTION = "status"
 _SLOT_IDS = ("codex-01", "codex-pro-01", "codex-pro-02", "codex-pro-03")
 _CREDENTIAL_KINDS = ("service-account", "personal-access-token", "device-auth")
@@ -51,6 +53,9 @@ _EFFECT_ONLY_FLAGS = (
     ("--credential-expires-at", "credential_expires_at"),
     ("--requalify-terminal-adverse-sha256", "requalify_terminal_adverse_sha256"),
     ("--renew-device-revalidation-sha256", "renew_device_revalidation_sha256"),
+    ("--requalify-company-device-drift-sha256", "requalify_company_device_drift_sha256"),
+    ("--recover-current-pin-grant-sha256", "recover_current_pin_grant_sha256"),
+    ("--successor-request-id", "successor_request_id"),
 )
 
 
@@ -64,11 +69,29 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--credential-expires-at")
     parser.add_argument("--requalify-terminal-adverse-sha256")
     parser.add_argument("--renew-device-revalidation-sha256")
+    parser.add_argument("--requalify-company-device-drift-sha256")
+    parser.add_argument("--recover-current-pin-grant-sha256")
+    parser.add_argument("--successor-request-id")
     return parser
 
 
 def build_request(argv: Sequence[str]) -> dict[str, object]:
     args = _parser().parse_args(list(argv))
+    if args.action == _INCIDENT_ACTION:
+        # The issuer request identity is explicit and never randomly replaced.
+        # Only the designated successor argument exists; caller evidence,
+        # authority, body, date, budget, path and source overrides are all
+        # rejected here before any request is built.
+        if args.request_id is None:
+            parser = _parser()
+            parser.error("incident issuance requires an explicit --request-id")
+        if args.successor_request_id is None:
+            parser = _parser()
+            parser.error("incident issuance requires --successor-request-id")
+        for flag, attribute in _EFFECT_ONLY_FLAGS:
+            if attribute != "successor_request_id" and getattr(args, attribute) is not None:
+                parser = _parser()
+                parser.error(f"incident issuance does not accept {flag}")
     values: dict[str, str] = {}
     if args.slot_id is not None:
         values["slot_id"] = args.slot_id
@@ -82,6 +105,12 @@ def build_request(argv: Sequence[str]) -> dict[str, object]:
         values["requalify_terminal_adverse_sha256"] = args.requalify_terminal_adverse_sha256
     if args.renew_device_revalidation_sha256 is not None:
         values["renew_device_revalidation_sha256"] = args.renew_device_revalidation_sha256
+    if args.requalify_company_device_drift_sha256 is not None:
+        values["requalify_company_device_drift_sha256"] = args.requalify_company_device_drift_sha256
+    if args.recover_current_pin_grant_sha256 is not None:
+        values["recover_current_pin_grant_sha256"] = args.recover_current_pin_grant_sha256
+    if args.successor_request_id is not None:
+        values["successor_request_id"] = args.successor_request_id
     raw = {
         "schema": REQUEST_SCHEMA,
         "request_id": args.request_id or f"req-{uuid.uuid4().hex}",
