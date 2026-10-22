@@ -105,6 +105,22 @@ class PaperMigrationPlanTests(unittest.TestCase):
             self.assertEqual(refused.returncode, 2)
             self.assertIn("MIGRATION_PREFLIGHT_REFUSED", refused.stderr)
 
+    def test_out_cannot_overwrite_original_inventory_or_existing_report(self):
+        script = ROOT / "scripts/paper_migration_planner.py"
+        base = [sys.executable, str(script), "--inventory", str(INVENTORY)]
+        original_bytes = INVENTORY.read_bytes()
+        denied = subprocess.run(base + ["--out", str(INVENTORY)],
+                                capture_output=True, text=True)
+        self.assertEqual(denied.returncode, 2)
+        self.assertEqual(INVENTORY.read_bytes(), original_bytes)
+        with tempfile.TemporaryDirectory() as folder:
+            existing = Path(folder) / "existing.json"
+            existing.write_text("preserve", encoding="utf-8")
+            denied = subprocess.run(base + ["--out", str(existing)],
+                                    capture_output=True, text=True)
+            self.assertEqual(denied.returncode, 2)
+            self.assertEqual(existing.read_text(encoding="utf-8"), "preserve")
+
     def test_node_and_board_targets_are_planning_only(self):
         with self.assertRaises(planner.InventoryError):
             planner.make_plan(self.original, node_target=0)
