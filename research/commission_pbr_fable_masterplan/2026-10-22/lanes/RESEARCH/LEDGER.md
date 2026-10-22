@@ -113,12 +113,40 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 | id | ruling | RESEARCH action |
 |---|---|---|
 | SR-1 | Option (b) in-repo: typed, numeric and case fields stay; every narrative field becomes sha256 + length. Option (c) off-repo: verbatim rows only under `/Volumes/Mastermind/evidence/pbr/` behind `PBR_DECISION_CASE_INPUT_DIR`; env-gated tests skip with a reason | #1703 amended (`a641e69a`, R-1703-r2 PASS) and merged as `f3435a69`. RESEARCH extended SR-1 to all of its artifacts in this public repo: #1701 spec, packets, reviews |
-| SR-2 | Adopt #1357's stricter clock set; `CALLER_SUPPLIED` is not a qualifying clock; add a `MACRO_VENDORED` rights class | not yet built: next bounded lane, stacked on #673 |
+| SR-2 | Adopt #1357's stricter clock set; `CALLER_SUPPLIED` is not a qualifying clock; add a `MACRO_VENDORED` rights class | wave 2: lane W2-R3 (below), stacked on #673 @ `2a830e60` |
 | SR-3 | `brain/decision_research*` goes to RESEARCH in a separate wave, after S0 seals the real book | deferred |
-| SR-4 | The seat merges the L-S4 repair into the #673 carrier after an independent PASS | #1735 at `0d8f0748`: `test` green, R-1735 PASS (6 MINOR). Returned to the seat for the merge |
+| SR-4 | The seat merges the L-S4 repair into the #673 carrier after an independent PASS | #1735 at `0d8f0748`: `test` green, R-1735 PASS (6 MINOR). The seat merged it 12:42:47Z into the #673 carrier as squash `2a830e60`; carrier tree == reviewed head tree, so R-1735 still binds |
 | CR-R4 | RESEARCH owns `bot/decision_rows.py` for additive, optional identity fields only (context digest, amendment link); existing readers' semantics never change | no change made in wave 1 |
 | CR-R1 | Met on the fill side by ECON (fills carry `decision_id` / `submission_sha256`); `settlement_fill_ids` on the decision row becomes a derived projection, not a second writer | closed |
 | Findings 7, 8 | Accepted as W5 facts: historical reconstruction is impossible, and #673 cannot seal the real book. Prospective retention (CR-R3) is the only path, reserved for wave 2 | CR-R3 deferred to wave 2 |
+
+## Seat rulings received (wave-1 acceptance, 12:5xZ)
+
+| id | ruling | RESEARCH action |
+|---|---|---|
+| CR-R7 | `config/contracts.yml` is the vendored-Macro artifact registry. `pbr.decision_case_fixture.v1`, `pbr.shadow_risk_budget_params.v1` and `pbr.trial_protocol.v1` are internal module schemas and stay spec-local: a version constant in the implementing module, pinned by tests, imported as a typed contract by cross-family consumers | W2-R1 adds the constants and `test_schema_constants_pinned`; no registry edit |
+| Public history | No rewrite of any shared branch. Master holds only squash commits, so the pre-SR-1 rows live only behind PR refs; a purge is a human-only GitHub Support step the seat names to the Chairman once | delete merged lane branch refs; every future head digest-only (see the section below) |
+| L-S5 Q1 | `AMENDMENT_WATCHED_FIELDS` = thesis statement, falsifier, check_by/time_stop, exit_plan, size_cap/target_weight, catalyst. Conviction is a per-cycle observation (versioned, with the cycle id), never an amendment | W2-R1 |
+| L-S5 Q2 | A caller-supplied `reference_mark` never qualifies for a fact or verdict; it is accepted only labeled `source=CALLER_SUPPLIED` and yields `BASIS_UNRECONCILED`. Qualifying marks come from ECON's union-mark store with provenance | W2-R1; supersedes spec #1701 §2.2(ii)'s fallback to the entry fill |
+| L-S5 Q3 | `freeze_owner` of `config/pbr_shadow_risk_budget.yml` = `pbr-seat` for the program's life; a change = version bump + a seat ruling row here; the module is shadow-only (negative import test); after closeout `config/authority_map.yml` governs | config revised by the parent before any test (below); W2-R1 adds the negative test |
+| L-S5 Q4 | Terminal amendment requires closed-enum `reason_code` {FALSIFIED, TIME_STOP, EXIT_PLAN_HIT, SUPERSEDED, MANUAL}; optional free-text `note` in the runtime record only; fixtures and tests carry sha256 + length | W2-R1 |
+| CR-R8 | Routed to ECON (`account.json` in the next capture) | none |
+| O-1 | Routed to RUNTIME as a C1 leaf (they own the fix) | none |
+
+## Wave 2 lanes (commissioned 12:5xZ; fabric labor, glm-5.3-flash, no qwen, no Grok)
+
+| lane | run-id | host | base | class | packet | state |
+|---|---|---|---|---|---|---|
+| W2-R1 L-S5 rebuild (P0) | `pbr-res-w2r1-ls5-r1` | ubuntu2 | master `f14fac19` | build C2 | `packets/W2-R1-ls5-rebuild.packet.md` | launched 13:00Z (ECONOMIC_POLICY allowed, LEASE_OK) |
+| W2-R4 step 1: one-row-per-asof reader census | `pbr-res-w2r4-census-r1` | ubuntu3 | master `f14fac19` + #673 `2a830e60` (read-only) | extract C0 | `packets/W2-R4-census.packet.md` | launched 13:00Z; the census returns to the seat before any supersedes build |
+| W2-R3 SR-2 vocabulary + R-1735 F1/F2/F4 (W2-R2 folded in) | `pbr-res-w2r3-sr2-r1` | ubuntu0 | #673 `2a830e60` | build C2 | `packets/W2-R3-sr2-vocab.packet.md` | launched 13:01Z |
+
+Parent preparation and reads at this boundary:
+- `config/pbr_shadow_risk_budget.yml` revised by the parent before the build lane exists: sha256 `355eba682718818246c419735b7ad5de8acaffd945deaa47f7ce6da181351806`. It changes only `freeze_owner` (Q3), a `freeze_record` block and the bridge description (Q2); every parameter value and justification is unchanged from the first freeze (file sha256 `57b2099f6c79daeff5a93ed27140707a881a0e1a5f66b55e9430a146b93a75ce`, evidence `/Volumes/Mastermind/evidence/pbr/research-ls5-modules-return-20261022T0911Z/`). The build lane receives it pre-placed and may not modify it.
+- W2-R3 rights relabel basis: all 11 `EXTERNAL_SOURCE_SPECS` entries at `2a830e60` resolve under `vendor/macro` through `_resolve_external_path` and name `config/contracts.yml` contracts owned by `macro_engine`, so each becomes `MACRO_VENDORED`; internal readers stay `FIRST_PARTY_INTERNAL`. No seat ruling needed: this applies SR-2 directly.
+- W2-R4 regression input is present: RUNTIME capture `runtime-capture-20261022T073127Z` holds `records/governance/run_events.since20261009.filtered.jsonl` (sha256 `6a423ef9…`, 329832 B). No gap to route.
+- #1701 (spec, head `a654035`): one read at this boundary, in the merge queue AWAITING_CHECKS, auto-merge pinned to `a654035`; no re-enqueue needed.
+- Branch refs: `pbr/research-w6-decision-case-fixtures` (#1703) is already deleted on origin; `pbr/research-w6-facts-thesis-budget-spec` is deleted when #1701 lands.
 
 ## Wave-2 P0 recorded from the seat (no wave-1 action)
 
