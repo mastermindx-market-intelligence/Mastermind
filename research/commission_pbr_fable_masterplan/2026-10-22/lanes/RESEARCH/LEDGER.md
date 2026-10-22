@@ -137,7 +137,7 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 
 | lane | run-id | host | base | class | packet | state |
 |---|---|---|---|---|---|---|
-| W2-R1 L-S5 rebuild (P0) | `pbr-res-w2r1-ls5-r1` | ubuntu2 | master `f14fac19` | build C2 | `packets/W2-R1-ls5-rebuild.packet.md` | launched 13:00Z (ECONOMIC_POLICY allowed, LEASE_OK) |
+| W2-R1 L-S5 rebuild (P0) | `pbr-res-w2r1-ls5-r1` | ubuntu2 | master `f14fac19` | build C2 | `packets/W2-R1-ls5-rebuild.packet.md` | DONE 13:40Z, rc 0. PR #1750 (7 new files; base master `fc4db8de`). Review R-1750 (glm-5.3) at `b36ed728`: **FAIL** — F1 BLOCKER rule (i) contradicted a forward claim from any dated primary record (no event identity; class-less records admitted), F2 MAJOR hard-coded fact factor, F3–F5 MINOR (`reviews/R-1750.REVIEW.md`, sha256 `c2077b48…`). Repair lane `pbr-res-w2r1-fix2` (glm-5.3-flash, `packets/W2-R1-fix-r1750.packet.md`) → `b572c2a4` + comment-only `eb22e902`; spec errata PR #1754 `9b9cc7eb` records Q1–Q4, CR-R7, E1, E2 in spec §8. Re-review R-1750-r2 (glm-5.3) at `eb22e902` + `9b9cc7eb`: **VERDICT: PASS**, 3 MINOR (`reviews/R-1750-r2.REVIEW.md`, sha256 `089ca626…`). See the repair-cycle section |
 | W2-R4 step 1: one-row-per-asof reader census | `pbr-res-w2r4-census-r1` | ubuntu3 | master `f14fac19` + #673 `2a830e60` (read-only) | extract C0 | `packets/W2-R4-census.packet.md` | DONE 13:3xZ, rc 0, STATUS COMPLETE. 129 sites (master 124, #673 5); by family RESEARCH 41 / ECON 7 / RUNTIME 27 / PRODUCT 31 / OTHER 23; 11 writers, 0 unsure. Parent spot-check: 5 rows re-read at `f14fac19`, all accurate. Repo copy `census/W2-R4-CENSUS.md` (one capture magnitude redacted); off-repo original `evidence/pbr/research-w2r4-census-20261022T1336Z/` (CENSUS.md sha256 `a408e727…`, SHA256SUMS). Returns to the seat; the supersedes build waits for its go |
 | W2-R3 SR-2 vocabulary + R-1735 F1/F2/F4 (W2-R2 folded in) | `pbr-res-w2r3-sr2-r1` | ubuntu0 | #673 `2a830e60` | build C2 | `packets/W2-R3-sr2-vocab.packet.md` | DONE, rc 0. PR #1746 head `a2d3a6c1` (base #673 `2a830e60`), 5 files +203/−29; lane tests 321 passed (baseline 314), discrimination 7 fail on revert. Review R-1746 (`pbr-res-r1746`, ubuntu0, glm-5.3): **VERDICT: PASS**, no findings (`reviews/R-1746.REVIEW.md`, sha256 `c5e34c50…`). Returns to the seat for the SR-4-style merge into #673 |
 
@@ -145,8 +145,27 @@ Parent preparation and reads at this boundary:
 - `config/pbr_shadow_risk_budget.yml` revised by the parent before the build lane exists: sha256 `355eba682718818246c419735b7ad5de8acaffd945deaa47f7ce6da181351806`. It changes only `freeze_owner` (Q3), a `freeze_record` block and the bridge description (Q2); every parameter value and justification is unchanged from the first freeze (file sha256 `57b2099f6c79daeff5a93ed27140707a881a0e1a5f66b55e9430a146b93a75ce`, evidence `/Volumes/Mastermind/evidence/pbr/research-ls5-modules-return-20261022T0911Z/`). The build lane receives it pre-placed and may not modify it.
 - W2-R3 rights relabel basis: all 11 `EXTERNAL_SOURCE_SPECS` entries at `2a830e60` resolve under `vendor/macro` through `_resolve_external_path` and name `config/contracts.yml` contracts owned by `macro_engine`, so each becomes `MACRO_VENDORED`; internal readers stay `FIRST_PARTY_INTERNAL`. No seat ruling needed: this applies SR-2 directly.
 - W2-R4 regression input is present: RUNTIME capture `runtime-capture-20261022T073127Z` holds `records/governance/run_events.since20261009.filtered.jsonl` (sha256 `6a423ef9…`, 329832 B). No gap to route.
-- #1701 (spec, head `a654035`): one read at this boundary, in the merge queue AWAITING_CHECKS, auto-merge pinned to `a654035`; no re-enqueue needed.
+- #1701 (spec, head `a654035`): one read at this boundary, in the merge queue AWAITING_CHECKS, auto-merge pinned to `a654035`; no re-enqueue needed. **Landed 13:49:33Z as master `fdc22f89`**; its branch is deleted.
 - Branch refs: `pbr/research-w6-decision-case-fixtures` (#1703) is already deleted on origin; `pbr/research-w6-facts-thesis-budget-spec` is deleted when #1701 lands.
+
+## W2-R1 repair cycle (R-1750 → fix → R-1750-r2)
+
+| step | run-id / PR | model | wall (Z) | result |
+|---|---|---|---|---|
+| build | `pbr-res-w2r1-ls5-r1` → #1750 `b36ed728` | glm-5.3-flash | 13:00–13:40 | 7 new files; 41 passed / 5 skipped (env unset), 46 passed (env set); 22 fail on old code |
+| review | `pbr-res-r1750` | glm-5.3 | 13:43–13:59 | FAIL: F1 BLOCKER, F2 MAJOR, F3–F5 MINOR, plus an A2 flag (one role budget lands on 0.12 by coincidence; no fitting found) |
+| repair | `pbr-res-w2r1-fix2` → #1750 `b572c2a4` | glm-5.3-flash | 14:05–14:20 | F1 items 1–7 + 3b, F2, F3 (docstrings only), F4, F5; 6 files +544/−79; 48 passed / 5 skipped, 53 passed with env; the 7 new tests fail on `b36ed728`. Config unchanged (`355eba68…`) |
+| parent | #1750 `eb22e902`, #1754 `9b9cc7eb` | — | 14:21 | comment-only commit and errata E1 item 6 wording: the why_now/exit_plan digests carry no period label; the falsifier digest records one in another form |
+| re-review | `pbr-res-r1750r2` | glm-5.3 | 14:24–14:41 | **PASS** at the exact heads: D1–D12 met; 15 rule-(i) probes all per the ruling; 7/7 new tests discriminating |
+
+- Parent finding beyond R-1750: the ≤asof branch ran before the claimed-vs-asof split, so a correct past claim was CONTRADICTED and `past_event_confirmed_by_primary` was unreachable. The repair puts the "already published" contradiction on the forward branch only (ruling 3b; spec §8 E1 item 4).
+- Spec gap closed: spec §2.2(i) as merged in #1701 compares any primary record; #1754 §8 E1 narrows it to the same event identity, so the master spec matches the code.
+- Open MINORs (follow-up for a later RESEARCH lane, not merge blockers; fixing them now would move the reviewed head):
+  1. `compared.classless_record_count` also counts non-primary classes; rename to `excluded_non_primary_record_count`.
+  2. The `assess` comment at `brain/shadow_risk_budget.py:401` still says the factor is zero; it is now configured.
+  3. #1754 E1 item 6 "both fixture `external_facts`" should read "both event-dated" (the fixture has three, one without `event_date`).
+- Cost: USAGE_RECEIPT_MISSING for every lane (`usage_saved=0`); only process receipts and the wall times above.
+- Seat hold (received 14:41Z): last PBR enqueue 02:30Z 10-23; no enqueue or owner-merge from 03:00Z until "s3 launched" or "window lost". The W2-R1 owner-merge falls well inside the open window.
 
 ## Wave-2 P0 recorded from the seat (no wave-1 action)
 
