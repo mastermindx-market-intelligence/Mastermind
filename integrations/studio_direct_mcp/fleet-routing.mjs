@@ -200,7 +200,7 @@ function validateModernArguments(name, args) {
   for (const [field, min] of Object.entries(MODERN_STRICT_INTEGERS[name] ?? {})) {
     if (!Object.hasOwn(args, field)) continue;
     const value = args[field];
-    if (!Number.isInteger(value) || (min !== null && value < min)) {
+    if (!Number.isSafeInteger(value) || (min !== null && value < min)) {
       throw new Error('FLEET_ROUTE_TOOL_ARGUMENTS_INCOMPATIBLE');
     }
   }
