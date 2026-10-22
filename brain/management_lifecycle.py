@@ -38,6 +38,7 @@ was not updated, that test fails.
 
     from brain import management_lifecycle as ML
     rows = ML.project_cycles(opportunities, run_events, decision_rows, now=now)
+    strip = ML.book_status(rows, book="china")      # PRODUCT contract R1, one per book
 
 Best-effort throughout: a malformed or missing record degrades the disposition toward
 ``incomplete_uncertain``; it never raises and never invents a success.
@@ -88,6 +89,20 @@ LEDGER_UNCERTAIN_REASONS = frozenset({
 })
 # Accepted-target statuses (mirrors brain.decision_submission.ACCEPTED_TARGET_STATUSES).
 ACCEPTED_TARGETS = frozenset({"queued", "executed"})
+
+# PRODUCT contract R1 (pbr-product CONTRACT_REQUESTS.md): one run-status summary per book, folded
+# from the per-cycle dispositions above. "unavailable" is the null state: no projection exists.
+BOOK_STATUS_SCHEMA = "mastermind.bot.book_run_status.v1"
+RUN_STATUSES = ("ok", "degraded", "failed", "halted", "not_scheduled", "unavailable")
+_RUN_STATUS_BY_STATE = {
+    "accepted_change": "ok",
+    "accepted_no_change": "ok",
+    "rejected": "degraded",
+    "incomplete_uncertain": "degraded",
+    "failed": "failed",
+    "disabled": "not_scheduled",
+}
+_DECIDED_STATES = frozenset({"accepted_change", "accepted_no_change"})
 
 DISPLAY_ONLY_FAILURE_KINDS = ("credential", "quota", "availability", "transport", "application",
                               "unclassified")
@@ -325,6 +340,7 @@ def _project(opportunity: dict, run_events: list[dict], decision_rows: list[dict
     scheduler_run_id = _text(_extra(started).get("run_id")) or None
     out["sources"] = out["sources"] + ["run_started"]
     out["scheduler_run_id"] = scheduler_run_id
+    out["started_at"] = _iso(started_ts)
 
     finishes = [
         triple for triple in _records(events, kind="run_finished", lo=started_ts)
@@ -334,6 +350,7 @@ def _project(opportunity: dict, run_events: list[dict], decision_rows: list[dict
     finish_ts = _clock(finish.get("ts")) if finish is not None else None
     if finish is not None:
         out["sources"] = out["sources"] + ["run_finished"]
+        out["finished_at"] = _iso(finish_ts)
     tail = (finish_ts or moment) + timedelta(seconds=EVIDENCE_TAIL_S)
 
     accepted = _records(events, kind="packet_accepted", book=book, lo=started_ts, hi=tail)
@@ -377,7 +394,9 @@ def _blank(job: str, book: str, due: datetime | None) -> dict:
 
     schema, job, book, due_at, state, reason, failure_kind, failure_evidence, label_misleading,
     settlement, scheduler_run_id, brain_run_id, packet_id, asof, decision_row_superseded, overdue,
-    sources — the key set tests/test_management_lifecycle.py pins.
+    started_at, finished_at, sources — the key set tests/test_management_lifecycle.py pins.
+    ``started_at`` / ``finished_at`` are the matched ledger stamps (ISO-8601 UTC), null when that
+    record was not found.
     """
     return {
         "schema": SCHEMA,
@@ -396,6 +415,8 @@ def _blank(job: str, book: str, due: datetime | None) -> dict:
         "asof": None,
         "decision_row_superseded": False,
         "overdue": False,
+        "started_at": None,
+        "finished_at": None,
         "sources": [],
     }
 
@@ -514,3 +535,89 @@ def _map_accepted(out: dict, *, target: str, row: dict | None) -> dict:
     if executed_n == 0:
         return _fill(out, state="accepted_no_change", settlement="settled")
     return _fill(out, state="accepted_change", settlement="settled")
+
+
+# ---------------------------------------------------------------------------
+# PRODUCT contract R1: one run-status summary per book (read-only fold of the dispositions)
+# ---------------------------------------------------------------------------
+
+def book_status(dispositions: list[dict], *, book: str, halted_by: str | None = None) -> dict:
+    """Fold ``project_cycles`` output into PRODUCT's R1 shape for ONE book. Pure; never raises.
+
+    Keys (always present): schema, book, run_status, last_decision_at, last_attempt_at,
+    next_scheduled_at, failure_reason_code, halted_by, basis_due_at. Every timestamp is ISO-8601
+    UTC or null.
+
+    * ``run_status`` is never null. It comes from the LATEST dated cycle that has an outcome
+      (accepted -> ok; rejected / incomplete_uncertain -> degraded; failed -> failed; disabled ->
+      not_scheduled). Cycles still in flight (``started``, ``awaiting_start``), legitimate ledger
+      skips (``not_due`` with a reason) and future cycles never decide it. ``unavailable`` means
+      no dispositions for this book, or none with an outcome yet.
+    * ``halted_by`` is the caller's halt evidence (e.g. the book's kill-switch source), clipped to
+      :data:`EVIDENCE_MAX_CHARS`; when given, ``run_status`` is ``halted``. This module reads no
+      halt state itself, so a null ``halted_by`` means "no halt evidence was supplied", which is
+      not proof the book is running.
+    * ``last_attempt_at`` = the newest matched ``run_started`` stamp; ``last_decision_at`` = the
+      newest ``run_finished`` stamp of an accepted cycle; ``next_scheduled_at`` = the earliest
+      supplied opportunity that is not yet due. Each is null when the dispositions hold no such
+      cycle (the caller's window bounds what can be known).
+    * ``failure_reason_code`` is the basis cycle's ledger reason (else its display failure kind)
+      when ``run_status`` is ``failed`` or ``degraded``; null otherwise.
+    * ``basis_due_at`` names the cycle that decided ``run_status``, so the claim is traceable.
+    """
+    wanted = _text(book)
+    out = {
+        "schema": BOOK_STATUS_SCHEMA,
+        "book": wanted or None,
+        "run_status": "unavailable",
+        "last_decision_at": None,
+        "last_attempt_at": None,
+        "next_scheduled_at": None,
+        "failure_reason_code": None,
+        "halted_by": None,
+        "basis_due_at": None,
+    }
+    if not wanted:
+        return out
+    cycles = [
+        (_clock(row.get("due_at")), index, row)
+        for index, row in enumerate(dispositions or [])
+        if isinstance(row, dict) and _text(row.get("book")) == wanted
+    ]
+    future = [due for due, _index, row in cycles
+              if due is not None and row.get("state") == "not_due" and row.get("reason") is None]
+    attempts = [_clock(row.get("started_at")) for _due, _index, row in cycles]
+    decisions = [_clock(row.get("finished_at")) for _due, _index, row in cycles
+                 if row.get("state") in _DECIDED_STATES]
+    out["next_scheduled_at"] = _latest_or_earliest(future, earliest=True)
+    out["last_attempt_at"] = _latest_or_earliest(attempts)
+    out["last_decision_at"] = _latest_or_earliest(decisions)
+
+    basis = [(due, index, row) for due, index, row in cycles
+             if due is not None and _decides_run_status(row)]
+    if basis:
+        due, _index, row = max(basis, key=lambda item: (item[0], item[1]))
+        status = _RUN_STATUS_BY_STATE[row["state"]]
+        out["run_status"], out["basis_due_at"] = status, _iso(due)
+        if status in ("failed", "degraded"):
+            out["failure_reason_code"] = (_text(row.get("reason"))
+                                          or _text(row.get("failure_kind")) or "unclassified")
+    halt = _clip(_text(halted_by))
+    if halt:
+        out["run_status"], out["halted_by"] = "halted", halt
+    return out
+
+
+def _decides_run_status(row: dict) -> bool:
+    """A cycle with an outcome. In-flight, skipped and future cycles never set the status."""
+    state = row.get("state")
+    if state not in _RUN_STATUS_BY_STATE:
+        return False
+    return not (state == "incomplete_uncertain" and row.get("reason") == "awaiting_start")
+
+
+def _latest_or_earliest(moments: list, *, earliest: bool = False) -> str | None:
+    usable = [moment for moment in moments if moment is not None]
+    if not usable:
+        return None
+    return _iso(min(usable) if earliest else max(usable))

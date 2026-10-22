@@ -20,7 +20,11 @@ from brain import management_lifecycle as ML
 KEYS = {
     "schema", "job", "book", "due_at", "state", "reason", "failure_kind", "failure_evidence",
     "label_misleading", "settlement", "scheduler_run_id", "brain_run_id", "packet_id", "asof",
-    "decision_row_superseded", "overdue", "sources",
+    "decision_row_superseded", "overdue", "started_at", "finished_at", "sources",
+}
+BOOK_KEYS = {
+    "schema", "book", "run_status", "last_decision_at", "last_attempt_at", "next_scheduled_at",
+    "failure_reason_code", "halted_by", "basis_due_at",
 }
 
 CN_ERROR_TEXT = "Exception('Claude Code returned an error result: success')"
@@ -827,3 +831,128 @@ def test_scheduler_ledger_reason_vocabulary_is_covered():
         row = ML.project_cycle(CN_OPP, events, [], now=_now("2026-10-20T12:00:00+00:00"))
         assert row["state"] in ML.STATES, reason
         assert row["reason"] == reason or row["reason"] is None, reason
+
+
+# ---------------------------------------------------------------------------
+# PRODUCT contract R1: the per-book run-status fold
+# ---------------------------------------------------------------------------
+
+def _book(rows, book, **kw):
+    return ML.book_status(rows, book=book, **kw)
+
+
+def test_cycle_stamps_are_the_matched_ledger_records():
+    row = ML.project_cycle(US_OPP, US_EVENTS, US_ROWS, now=_now("2026-10-21T23:30:00+00:00"))
+    assert row["started_at"] == "2026-10-21T23:10:00+00:00"
+    assert row["finished_at"] == "2026-10-21T23:17:08+00:00"
+    vanished = ML.project_cycle(_opp("china_daily", "china", "2026-10-16T08:00:00+00:00"),
+                                [], [], now=_now("2026-10-16T12:00:00+00:00"))
+    assert vanished["started_at"] is None and vanished["finished_at"] is None
+    in_flight = ML.project_cycle(CN_OPP, CN_EVENTS[:1], [], now=_now("2026-10-20T08:30:00+00:00"))
+    assert in_flight["started_at"] == "2026-10-20T08:00:00+00:00"
+    assert in_flight["finished_at"] is None
+
+
+def test_book_status_cn_missing_submission_is_failed_with_its_ledger_reason():
+    rows = ML.project_cycles([CN_OPP], CN_EVENTS, CN_ROWS, now=_now("2026-10-20T12:00:00+00:00"))
+    status = _book(rows, "china")
+    assert status["run_status"] == "failed"
+    assert status["failure_reason_code"] == "missing_submission"
+    assert status["last_attempt_at"] == "2026-10-20T08:00:00+00:00"
+    assert status["last_decision_at"] is None          # nothing was ever accepted
+    assert status["basis_due_at"] == "2026-10-20T08:00:00+00:00"
+    assert status["halted_by"] is None
+
+
+def test_book_status_us_queued_cycle_is_ok_with_its_decision_stamp():
+    rows = ML.project_cycles([US_OPP], US_EVENTS, US_ROWS, now=_now("2026-10-21T23:30:00+00:00"))
+    status = _book(rows, "autonomous")
+    assert status["run_status"] == "ok"
+    assert status["last_decision_at"] == "2026-10-21T23:17:08+00:00"
+    assert status["failure_reason_code"] is None
+
+
+def test_book_status_latest_outcome_wins_and_keeps_the_older_decision_stamp():
+    ok_day = _opp("china_daily", "china", "2026-10-19T08:00:00+00:00")
+    ok_run = "2026-10-19_08-00-00_aaaaaaaa"
+    ok_events = _cycle("china_daily", "china", ok_run, "2026-10-19T08:00:00+00:00", "ok",
+                       {"target_status": "queued"})
+    rows = ML.project_cycles([ok_day, CN_OPP], ok_events + CN_EVENTS, CN_ROWS,
+                             now=_now("2026-10-20T12:00:00+00:00"))
+    status = _book(rows, "china")
+    assert [row["state"] for row in rows] == ["accepted_change", "failed"]
+    assert status["run_status"] == "failed"
+    assert status["last_decision_at"] == "2026-10-19T08:00:00+00:00"
+    assert status["last_attempt_at"] == "2026-10-20T08:00:00+00:00"
+    # Caller order does not matter: the latest DUE cycle decides.
+    assert _book(list(reversed(rows)), "china") == status
+
+
+def test_book_status_vanished_cycle_is_degraded_not_ok():
+    rows = ML.project_cycles([_opp("china_daily", "china", "2026-10-16T08:00:00+00:00")], [], [],
+                             now=_now("2026-10-16T12:00:00+00:00"))
+    status = _book(rows, "china")
+    assert status["run_status"] == "degraded"
+    assert status["failure_reason_code"] == "no_start_record"
+    assert status["last_attempt_at"] is None
+
+
+def test_book_status_in_flight_skipped_and_future_cycles_never_decide_the_status():
+    future = _opp("china_daily", "china", "2026-10-21T08:00:00+00:00")
+    skipped = _opp("china_daily", "china", "2026-10-18T08:00:00+00:00")
+    skip_run = "2026-10-18_08-00-00_bbbbbbbb"
+    skip_events = _cycle("china_daily", "china", skip_run, "2026-10-18T08:00:00+00:00", "skip",
+                         {"reason": "market_closed", "target_status": None})
+    rows = ML.project_cycles([skipped, CN_OPP, future], skip_events + CN_EVENTS[:1], [],
+                             now=_now("2026-10-20T08:30:00+00:00"))
+    assert [row["state"] for row in rows] == ["not_due", "started", "not_due"]
+    status = _book(rows, "china")
+    assert status["run_status"] == "unavailable"       # no cycle has an outcome yet
+    assert status["basis_due_at"] is None
+    assert status["next_scheduled_at"] == "2026-10-21T08:00:00+00:00"
+    assert status["last_attempt_at"] == "2026-10-20T08:00:00+00:00"
+    awaiting = ML.project_cycles([CN_OPP], [], [], now=_now("2026-10-20T08:30:00+00:00"))
+    assert awaiting[0]["reason"] == "awaiting_start"
+    assert _book(awaiting, "china")["run_status"] == "unavailable"
+
+
+def test_book_status_disabled_book_is_not_scheduled():
+    rows = ML.project_cycles(
+        [_opp("china_daily", "china", "2026-10-20T08:00:00+00:00", enabled=False)], [], [],
+        now=_now("2026-10-20T12:00:00+00:00"))
+    assert _book(rows, "china")["run_status"] == "not_scheduled"
+    assert _book(rows, "china")["failure_reason_code"] is None
+
+
+def test_book_status_without_a_projection_is_unavailable_and_all_null():
+    rows = ML.project_cycles([CN_OPP], CN_EVENTS, CN_ROWS, now=_now("2026-10-20T12:00:00+00:00"))
+    for status in (_book([], "china"), _book(None, "china"), _book(rows, "hk"),
+                   _book(rows, ""), _book(["junk", 3, None], "china")):
+        assert set(status) == BOOK_KEYS
+        assert status["run_status"] == "unavailable"
+        assert all(status[key] is None for key in BOOK_KEYS
+                   - {"schema", "book", "run_status"})
+
+
+def test_book_status_halt_evidence_is_the_callers_and_says_halted():
+    rows = ML.project_cycles([US_OPP], US_EVENTS, US_ROWS, now=_now("2026-10-21T23:30:00+00:00"))
+    status = _book(rows, "autonomous", halted_by="safety.json:kill_switch")
+    assert status["run_status"] == "halted"
+    assert status["halted_by"] == "safety.json:kill_switch"
+    assert status["last_decision_at"] == "2026-10-21T23:17:08+00:00"
+    assert _book(rows, "autonomous", halted_by="x" * 500)["halted_by"] == "x" * ML.EVIDENCE_MAX_CHARS
+    assert _book(rows, "autonomous", halted_by="  ")["run_status"] == "ok"
+
+
+def test_book_status_shape_vocabulary_and_inputs_are_stable():
+    rows = ML.project_cycles([CN_OPP, US_OPP], CN_EVENTS + US_EVENTS, CN_ROWS + US_ROWS,
+                             now=_now("2026-10-22T12:00:00+00:00"))
+    snapshot = copy.deepcopy(rows)
+    for book in ("china", "autonomous", "hk"):
+        status = _book(rows, book)
+        assert set(status) == BOOK_KEYS
+        assert status["schema"] == ML.BOOK_STATUS_SCHEMA == "mastermind.bot.book_run_status.v1"
+        assert status["run_status"] in ML.RUN_STATUSES
+    assert rows == snapshot
+    assert ML.RUN_STATUSES == ("ok", "degraded", "failed", "halted", "not_scheduled",
+                               "unavailable")
