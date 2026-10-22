@@ -13,16 +13,70 @@
         "entry": {
           "action": "exit",
           "evidence": [
-            "overnight_tape: NQ -1.52%, KOSPI -3.56%, 10Y yield +0.57% to 5.146 (semi/long-duration headwind)",
-            "market_packet.regime.sector_rs_top: SMH 20d momentum -8.07%",
-            "prophet: MU held_without_active_plan (no active management plan)",
-            "book: MU -14.58% unrealized, 16 days held, rationale null"
+            {
+              "iso_dates": [],
+              "length": 96,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 59,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 64,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+              "terms": [
+                "held_without_active_plan"
+              ]
+            },
+            {
+              "iso_dates": [],
+              "length": 57,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+              "terms": []
+            }
           ],
-          "falsifier": "Semis reclaim leadership (SMH 20d momentum turns positive and NQ stabilizes) with a fresh confirmed MU thesis — none present tonight.",
-          "reason": "Full exit as the proportionate overnight de-risk. MU is the single holding most exposed to exactly what the live tape is selling off — a memory/semiconductor name hit by NQ -1.52%, KOSPI -3.56% (semi-heavy) and the 10Y rising to 5.15% (direct long-duration headwind). It carries no live thesis (rationale was null; Prophet lists it held_without_active_plan), is -14.6% unrealized after only 16 days, and SMH 20d momentum is -8.07%. No confirmation plane supports it. Cutting it is the cleanest way to honor the de-risk directive and the ROTATE_DEFENSIVE posture without touching confirmed leaders.",
+          "falsifier": {
+            "iso_dates": [],
+            "length": 133,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+            "terms": []
+          },
+          "reason": {
+            "iso_dates": [],
+            "length": 597,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+            "terms": [
+              "held_without_active_plan",
+              "no live thesis"
+            ]
+          },
           "reason_code": "risk_limit",
           "ticker": "MU",
-          "why_now": "The overnight tape is actively selling off tech/semis with risk_state elevated; MU is the most exposed and least-supported name and the right one to remove before the open."
+          "why_now": {
+            "iso_dates": [],
+            "length": 172,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+            "terms": []
+          }
         },
         "line_index_0based": 89
       }
@@ -32,16 +86,70 @@
         "entry": {
           "action": "exit",
           "evidence": [
-            "overnight_tape: NQ -1.52%, KOSPI -3.56%, 10Y yield +0.57% to 5.146 (semi/long-duration headwind)",
-            "market_packet.regime.sector_rs_top: SMH 20d momentum -8.07%",
-            "prophet: MU held_without_active_plan (no active management plan)",
-            "book: MU -14.58% unrealized, 16 days held, rationale null"
+            {
+              "iso_dates": [],
+              "length": 96,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 59,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 64,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+              "terms": [
+                "held_without_active_plan"
+              ]
+            },
+            {
+              "iso_dates": [],
+              "length": 57,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+              "terms": []
+            }
           ],
-          "falsifier": "Semis reclaim leadership (SMH 20d momentum turns positive and NQ stabilizes) with a fresh confirmed MU thesis — none present tonight.",
-          "reason": "Full exit as the proportionate overnight de-risk. MU is the single holding most exposed to exactly what the live tape is selling off — a memory/semiconductor name hit by NQ -1.52%, KOSPI -3.56% (semi-heavy) and the 10Y rising to 5.15% (direct long-duration headwind). It carries no live thesis (rationale was null; Prophet lists it held_without_active_plan), is -14.6% unrealized after only 16 days, and SMH 20d momentum is -8.07%. No confirmation plane supports it. Cutting it is the cleanest way to honor the de-risk directive and the ROTATE_DEFENSIVE posture without touching confirmed leaders.",
+          "falsifier": {
+            "iso_dates": [],
+            "length": 133,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+            "terms": []
+          },
+          "reason": {
+            "iso_dates": [],
+            "length": 597,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+            "terms": [
+              "held_without_active_plan",
+              "no live thesis"
+            ]
+          },
           "reason_code": "risk_limit",
           "ticker": "MU",
-          "why_now": "The overnight tape is actively selling off tech/semis with risk_state elevated; MU is the most exposed and least-supported name and the right one to remove before the open."
+          "why_now": {
+            "iso_dates": [],
+            "length": 172,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+            "terms": []
+          }
         },
         "line_index_0based": 89
       }
@@ -49,14 +157,48 @@
     "prior_thesis_refs": [
       {
         "decision_id": "decision.v1.8d700b90434853b846f2ef2e",
-        "exit_plan": "Exit on GM% miss <35.5% on 10/22, crowding >0.82, or confirmed Samsung HBM yield recovery closing the gap. Trail stop near 107.5 (50d MA / first support) once sized. Sub-full until the earnings catalyst clears.",
-        "falsifier": "Q4 FY2026 gross margin (reported 2026-10-22) prints below 35.5%, confirming the Q3 revenue-beat/margin-miss pattern is structural not transitional; or crowding crosses ~0.82 into the DELL/EME crowded-top band.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 210,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bda8a5c4fd805838d714a5cdf7174719e0fc66290f408018434c71f41c1df12f",
+          "terms": [
+            "earnings"
+          ]
+        },
+        "falsifier": {
+          "iso_dates": [
+            "2026-10-22"
+          ],
+          "length": 209,
+          "period_labels": [
+            "Q4 FY2026"
+          ],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bb74d2e837e7dbdba398c3fdd64fd18d4239edbca8da0fc30b961a20ffc2c6da",
+          "terms": []
+        },
         "line_index_0based": 75
       },
       {
         "decision_id": "decision.v1.978d5a72e61fdefbaad6c902",
-        "exit_plan": "Exit on the 60d rel-return falsifier breach, a radar flip to CONFIRMED_DOWN/distribution on MU itself, or a break of the 200d uptrend; trim into parabolic extension if a blow-off top forms.",
-        "falsifier": "MU underperforms SPY by >5% over 60d, OR government support stops accelerating and subsequent operating evidence shows no memory-market improvement (intake falsifier).",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 189,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "f4e984a3a404701fd1bbd427168177b620211de76d2e19eabc052f5e432198fa",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 167,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "72c5a841697d9342932d87953846d41d54b5c9ef7bce83790ee139e7bff38f21",
+          "terms": []
+        },
         "line_index_0based": 76
       }
     ],
@@ -64,52 +206,127 @@
       {
         "field": "summary",
         "line_index_0based": 89,
-        "sentence": "The one proportionate change tonight: full exit of MU — a memory/semiconductor name that is the single holding most exposed to exactly what is selling off (NQ, KOSPI, rising yields), carries no live thesis (null rationale, Prophet held_without_active_plan), is -14.6% with SMH 20d momentum -8.07%"
+        "sentence": {
+          "iso_dates": [],
+          "length": 296,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "8daac7d25c42c869b56e06c4a5df4ef3269700c80660a94a539bcb2102a4d509",
+          "terms": [
+            "held_without_active_plan",
+            "no live thesis"
+          ]
+        }
       },
       {
         "field": "decision_memo.alternatives",
         "line_index_0based": 89,
-        "sentence": "(a) Hold MU and ride out an orderly dip — rejected: no thesis, worst-exposed name, down 14.6%"
+        "sentence": {
+          "iso_dates": [],
+          "length": 93,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "8582eb0cbd7c535f931527a8907403cf617dc7f1409013b8cb05a7483e07b6b4",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.changes",
         "line_index_0based": 89,
-        "sentence": "Exit MU (full)"
+        "sentence": {
+          "iso_dates": [],
+          "length": 14,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "1376a88de4836cd07cc0e6ec2a1590f44e06a2ab5a235c61ab2951d33025eccd",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.rejected",
         "line_index_0based": 89,
-        "sentence": "MU — exited: most exposed to the tech/semis/yield selloff, no live thesis, -14.6%, SMH momentum -8.07%."
+        "sentence": {
+          "iso_dates": [],
+          "length": 103,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fad52d2f8af4b706c696f540910ef646b9c33541a2392647aea9f1ad30509581",
+          "terms": [
+            "no live thesis"
+          ]
+        }
       },
       {
         "field": "summary",
         "line_index_0based": 78,
-        "sentence": "MU is held on the tightest leash under a hard cycle_blocked veto"
+        "sentence": {
+          "iso_dates": [],
+          "length": 64,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fb1c6f8f86713962614e511ea1263c37eefa4e93be8d9c582390f0da88f28792",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.alternatives",
         "line_index_0based": 78,
-        "sentence": "Considered trimming XOM for concentration (rejected — real gate confluence +1.0, strongest lenses in book) and exiting MU today (rejected — 1-day position, anti-churn discipline; held on hard stop instead)"
+        "sentence": {
+          "iso_dates": [],
+          "length": 205,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "75144bc070fd7701f3c34a1d5daff55b144bab46e3b2ea42a40891cf1d1edec4",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.changes",
         "line_index_0based": 78,
-        "sentence": "vs carried book (rejected_no_submission prior): add MSFT, trim AAPL; XOM and MU held"
+        "sentence": {
+          "iso_dates": [],
+          "length": 84,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "1e62aae0c2ced95d24b913eed7c62bbe02acccc5c65ac64aa6be22a53579116b",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.delegation_summary",
         "line_index_0based": 78,
-        "sentence": "I did not trust them — I re-ran evaluate_gate directly on GEV/VRT/CEG/XOM/MSFT/AAPL/MU and the real engine showed the opposite (downtrends, gate failures)"
+        "sentence": {
+          "iso_dates": [],
+          "length": 154,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "bfaceeb1b8d735d2b4df32473635e32ce3bf5617ddd15d9a9ab30e3a4c5c9337",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.selected",
         "line_index_0based": 78,
-        "sentence": "HOLD MU on tight leash (hard cycle_blocked veto, 1-day position, anti-churn)."
+        "sentence": {
+          "iso_dates": [],
+          "length": 77,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "82547989e62d3b8d698ff03cddd5120d206ad15e55e1875fefd8b636db034e82",
+          "terms": []
+        }
       },
       {
         "field": "decision_memo.timing",
         "line_index_0based": 78,
-        "sentence": "Acting now on MSFT add and AAPL trim; MU decision revisited on its leash within days."
+        "sentence": {
+          "iso_dates": [],
+          "length": 85,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9445083022746329bc87375005a181a1c5a7b29b7b2b93b2293fe75ee75cd0ac",
+          "terms": []
+        }
       }
     ],
     "ticker_in_holdings": {
@@ -153,70 +370,318 @@
           "cash": 0.7299,
           "cash_rationale_present": true,
           "cash_rationale_required": true,
-          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
         },
         "asof": "2026-10-22",
-        "brain_text": "Book revised and submitted. Here's the overnight review summary:\n\n## Decision: REVISE (de-risk) — exit MU, hold the rest\n\n**What the live overnight tape is actually doing:** Selling off, risk_state **elevated**, but *orderly, not a crash* — US futures avg −0.84% (**NQ −1.52%** leads), Asia heavy (KOSPI −3.56%, Hang Seng −2.92%, Nikkei −2.55%), yet **VIX is −3.64% to 16.68** (no panic bid for protection) and **Europe is green** (DAX +1.35%). The driver is **rising yields — 10Y +0.57% to 5.15%** — a direct long-duration headwind, which is why semi-heavy tapes (KOSPI) and tech futures (NQ) led the decline. **Crude +2.15%** made energy the overnight winner.\n\n**The one proportionate move: full exit of MU.** It is the single holding most exposed to exactly what's selling off — a memory/semiconductor name hit by NQ/KOSPI weakness and the yield spike — and it carried **no live thesis** (null rationale, Prophet `held_without_active_plan`), was **−14.6%** after 16 days, with SMH 20d momentum −8.07%. No confirmation plane supported it.\n\n**What stays, and why I did *not* lean back in:**\n- **XOM (hold)** — the overnight winner: crude +2.15%, XLE RS #1, the book's one fully-confirmed leader.\n- **MSFT (hold)** — defensive quality anchor, far above invalidation; trimming it on a one-session, VIX-falling dip would be an over-reaction.\n- **AAPL (hold)** — 0.74% toehold, immaterial, not worth the spread.\n- No adds: Prophet discovery names (HII/SGI/CAVA/ENSG) are all `wait`/pre-trigger, and adding risk into a selling-off tape with regime-label confidence at 0.112 and degraded data (treasury_auctions circuit-breaker dead, inflation confidence 56%→18%) is unjustified.\n\n**Result:** 3 holdings, **27% invested / 73% cash**, risk_posture `caution`. Cash above 50% is explicitly justified by the elevated tape + degraded regime data, with rejected candidates recorded and the `cash_opportunity_cost` lesson cited. It settles at the **open**, not now. The book's main risk is the mirror image: if the dip proves a one-session wobble and the US rips at the open, 73% cash is under-invested — the plan is to redeploy into confirmed leaders once breadth confirms stabilization.",
-        "cash_rationale": "Cash rises to ~73% after exiting MU, above the 50% lesson threshold. Justification is explicit and documented: (1) the live overnight tape is selling off with risk_state ELEVATED (US futures -0.84%, NQ -1.52%, Asia -1% to -3.6%); (2) the in-house regime read is degraded — label confidence 0.112 (LOW/suspect), TRANSITIONING, treasury_auctions circuit-breaker marked dead, inflation-axis confidence collapsed 56%->18%; (3) three legs contradict the Reflation label. This is the degraded-data + elevated-tape justification the lesson requires. Rejected candidates after review (recorded): Prophet discovery HII/SGI/CAVA/ENSG are all 'wait'/pre_trigger (not triggered); INTU/NOC are hold-candidates not yet owned, and adding new long-duration/consumer risk into a selling-off, low-confidence tape is unjustified tonight. Cash is a deliberate defensive posture, not neglect; I lean back into confirmed leaders once the tape stabilizes and breadth confirms.",
+        "brain_text": {
+          "iso_dates": [],
+          "length": 2176,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "04ed1fed51bca6de58b547deb00d8797b9f69d35765e5a527c4cb301ca3912e1",
+          "terms": [
+            "held_without_active_plan",
+            "no live thesis"
+          ]
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 953,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "166f1786e0154f61f2824e31c6d260b86e0f71b216433ff04cdd88b4f5e6d2c7",
+          "terms": []
+        },
         "cost_usd": 1.0257219999999998,
         "decision_effective": true,
         "decision_id": "decision.v1.cbf98cc5bfd573cec5ba33e0",
         "decision_memo": {
-          "alternatives": "(a) Hold MU and ride out an orderly dip — rejected: no thesis, worst-exposed name, down 14.6%. (b) Also trim MSFT into the NQ selloff — rejected: over-reaction to a one-session, VIX-falling wobble; MSFT is the defensive anchor far above invalidation. (c) Lean back in to leaders now — rejected: tape not stabilized.",
+          "alternatives": {
+            "iso_dates": [],
+            "length": 315,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "da5a6ed49b679c5e197f574ddb5bf0b4e18b6c89bd788b09be9d7744936b2f90",
+            "terms": []
+          },
           "candidate_funnel": {
             "admitted": [],
-            "reason_none_added": "Tape is actively selling off with low-confidence/degraded regime data; no Prophet discovery name is triggered (all 'wait'), and adding risk into the selloff violates the de-risk directive and ROTATE_DEFENSIVE posture.",
+            "reason_none_added": {
+              "iso_dates": [],
+              "length": 217,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "307c90b8bf30563a2be0934e2af27b44b3a315c5bbd07aa951623513ab48e5d6",
+              "terms": []
+            },
             "reviewed_for_add": [
-              "HII (wait/pre_trigger)",
-              "SGI (wait/pre_trigger)",
-              "CAVA (wait/pre_trigger)",
-              "ENSG (wait/pre_trigger)",
-              "INTU (hold-candidate, not owned)",
-              "NOC (hold-candidate, not owned)"
+              {
+                "iso_dates": [],
+                "length": 22,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2b85c97dd3d0ab5a1255d7a1bb648c769e125737c104332b0cc4549c351a50c3",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 22,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "c5718cafea95cede99fe20df6ee3418abe5782246965c7b190e366fd7c090ff1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 23,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "8f4ae5707149206c9a83637362569d1fd825678bf54425b4b7f01e1b204ec5d6",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 23,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "3af56dca93bebcff57e4ebce27acfa2a55e790b345bee00cdacef04be670e02b",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 32,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e6705f026adea5e1aa75fef7f410ab9a65f1186f2c3936567dd300222185c87f",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 31,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ff1afeccda710f025f808767aebd2c3fddd6e770172ad510820a2b7e9d5c367f",
+                "terms": []
+              }
             ]
           },
-          "changes": "Exit MU (full). Hold XOM, MSFT, AAPL unchanged. No adds.",
-          "context_gaps": "Regime label confidence 0.112 and degraded collectors (treasury_auctions dead, inflation-axis confidence collapsed) make the in-house label unreliable; neural_web stale. Relied on the live overnight tape for current risk, per instructions.",
-          "delegation_summary": "No delegation — this is a de-risk of existing holdings decided from the typed packets (overnight_tape, market_packet, my_book); no new independent finalist research was required.",
+          "changes": {
+            "iso_dates": [],
+            "length": 56,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "15d9be2667a0c59ea1c02d0a0bcf3b69be2af21f7dcd2c296209e1cf43616e12",
+            "terms": []
+          },
+          "context_gaps": {
+            "iso_dates": [],
+            "length": 239,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "94e17f0a4439287148a54447524a0b077ee2e1be0fff076963e87dd088a88f36",
+            "terms": []
+          },
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 178,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9b11930849efe6d4b4e0c42de5ff1b31ef45e573f1208bc2ba338d29f821b5ee",
+            "terms": []
+          },
           "lessons_applied": [
             "lesson.v1.US_ONLY.cash_opportunity_cost"
           ],
-          "market_frame": "Live overnight tape selling off, risk_state ELEVATED but ORDERLY (VIX -3.64% to 16.68, no panic protection bid). Tech/semis and Asia lead lower (NQ -1.52%, KOSPI -3.56%, Hang Seng -2.92%); driver is rising yields (10Y to 5.15%). Europe green (DAX +1.35%); energy the winner (crude +2.15%). In-house regime Q2 Reflation but label confidence only 0.112, TRANSITIONING, with degraded data (treasury_auctions dead, inflation conf 56->18%).",
-          "rejected": "MU — exited: most exposed to the tech/semis/yield selloff, no live thesis, -14.6%, SMH momentum -8.07%.",
-          "risk_deliberation": "Elevated overnight tape + degraded in-house data argue for de-risk, not re-risk. The move removes the single name whose exposure matches the selloff while preserving the confirmed energy leader (which the tape favors) and the quality anchor. Raising cash to ~73% is acknowledged against the cash-opportunity-cost lesson and justified by elevated tape + degraded regime confidence; the plan is to redeploy into confirmed leaders once breadth confirms stabilization.",
-          "selected": "XOM (hold, high) — overnight winner, confirmed leader; MSFT (hold, medium) — defensive quality anchor; AAPL (hold, low) — immaterial toehold.",
-          "timing": "Overnight review of a queued (unfilled) target; settles at the next open, not now. Acting before the open to remove the most-exposed name ahead of a lower-opening US tape."
+          "market_frame": {
+            "iso_dates": [],
+            "length": 435,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "17c1b5af628a6ee063331aab9435bb184305136a69dec83f7ea75896c75f4e8f",
+            "terms": []
+          },
+          "rejected": {
+            "iso_dates": [],
+            "length": 103,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "fad52d2f8af4b706c696f540910ef646b9c33541a2392647aea9f1ad30509581",
+            "terms": [
+              "no live thesis"
+            ]
+          },
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 464,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2462a5dd23118dce654fd211dc54ac3d7a999782bcd7cc81ee71bfbaad89ff0c",
+            "terms": []
+          },
+          "selected": {
+            "iso_dates": [],
+            "length": 141,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "4e1874c21dea264c3b0e02265fa67ea2ba04b31d76ffc82064e8182f89a7230b",
+            "terms": []
+          },
+          "timing": {
+            "iso_dates": [],
+            "length": 171,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "712c085021720e63b331abcc15b51f58cd0446c25c548b46cd7721b9563a10c6",
+            "terms": []
+          }
         },
         "effective_holdings": [],
         "error": null,
         "evidence_planes": [
-          "overnight_tape (live cross-asset): US futures, intl indices, VIX, 10Y, crude",
-          "market_packet: regime (Q2 Reflation, conf 0.112, TRANSITIONING), sector_rotation (elevated drawdown risk), prophet management/discovery",
-          "get_my_book: current queued positions, P&L, held_days",
-          "get_quote: live marks MU/XOM/MSFT/AAPL"
+          {
+            "iso_dates": [],
+            "length": 76,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "077735a676cd432156bf16c956a638d9380785a1f39d16e9424d0e29e6fa174d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 135,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "de8cc0329634d79ae1e8980ffc77856334ece25439d8114fb4c4e7965d811321",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 53,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "355dd5f606ff1cb0437f2aaf481988334ee21d7f8c5e0c0b885642b277c45a67",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 38,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ca78ced7454bf4126d2e43b72e25ba993f05fe8c79f19538bdb4bbd70a41f76c",
+            "terms": []
+          }
         ],
         "executed": [],
         "exit_decisions": [
           {
             "action": "exit",
             "evidence": [
-              "overnight_tape: NQ -1.52%, KOSPI -3.56%, 10Y yield +0.57% to 5.146 (semi/long-duration headwind)",
-              "market_packet.regime.sector_rs_top: SMH 20d momentum -8.07%",
-              "prophet: MU held_without_active_plan (no active management plan)",
-              "book: MU -14.58% unrealized, 16 days held, rationale null"
+              {
+                "iso_dates": [],
+                "length": 96,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 59,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 64,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+                "terms": [
+                  "held_without_active_plan"
+                ]
+              },
+              {
+                "iso_dates": [],
+                "length": 57,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+                "terms": []
+              }
             ],
-            "falsifier": "Semis reclaim leadership (SMH 20d momentum turns positive and NQ stabilizes) with a fresh confirmed MU thesis — none present tonight.",
-            "reason": "Full exit as the proportionate overnight de-risk. MU is the single holding most exposed to exactly what the live tape is selling off — a memory/semiconductor name hit by NQ -1.52%, KOSPI -3.56% (semi-heavy) and the 10Y rising to 5.15% (direct long-duration headwind). It carries no live thesis (rationale was null; Prophet lists it held_without_active_plan), is -14.6% unrealized after only 16 days, and SMH 20d momentum is -8.07%. No confirmation plane supports it. Cutting it is the cleanest way to honor the de-risk directive and the ROTATE_DEFENSIVE posture without touching confirmed leaders.",
+            "falsifier": {
+              "iso_dates": [],
+              "length": 133,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+              "terms": []
+            },
+            "reason": {
+              "iso_dates": [],
+              "length": 597,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+              "terms": [
+                "held_without_active_plan",
+                "no live thesis"
+              ]
+            },
             "reason_code": "risk_limit",
             "ticker": "MU",
-            "why_now": "The overnight tape is actively selling off tech/semis with risk_state elevated; MU is the most exposed and least-supported name and the right one to remove before the open."
+            "why_now": {
+              "iso_dates": [],
+              "length": 172,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+              "terms": []
+            }
           }
         ],
-        "expected_failure_mode": "The overnight dip proves to be a one-session, yield-driven wobble (VIX already falling) and the US market rips higher at the open, leaving the book at ~73% cash and under-invested — the exact cash-opportunity-cost risk the meta-memory lesson flags. Secondary: crude reverses intraday and the XOM/energy leadership — now the book's largest and highest-conviction position — rolls over.",
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 384,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "4cad2a555686e94d5dcb108f28a4bbfae1ac97d75c142db0d9155c8b66dc4b77",
+          "terms": []
+        },
         "falsifiers": [
-          "The overnight selloff reverses by the open and breadth confirms risk_on — then 73% cash is under-invested and we lean back into confirmed leaders (opportunity cost realized).",
-          "VIX spikes above 25, signaling the orderly de-risk has become genuine stress — then cut further toward cash/defensive, do not hold MSFT's full 10%.",
-          "Crude reverses and XLE loses RS rank #1 — the XOM leadership thesis breaks and the energy overweight must be reduced."
+          {
+            "iso_dates": [],
+            "length": 174,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c42726e89f4f39c0d7688c7a09bb056606a85590ee7a0b1d45c942e22ba83810",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 147,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c6813006d5091cd98f4d131413e8d7cf98068f3e7a44086074e4337aa7f968c4",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 117,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "013109f828964d9853c83b692d673dfa6a5922cdae620d3bc17e109e28fe1d0a",
+            "terms": []
+          }
         ],
         "holdings": [],
         "lesson_application_ids": [
@@ -228,30 +693,100 @@
         "lesson_presentation_id": "presentation.v1.1576b926b3a1672288b49eeb",
         "lesson_trace_cohort": "portfolio_v2_lesson_trace",
         "lesson_trace_status": "accepted_queued",
-        "liquidity_notes": "All names large-cap, highly liquid; MU exit and the held marks are immaterial to market impact. Exit settles at the open, not now.",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 130,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9086095d792ca89dc1e7292addde6f691f2330cc6eb3574ede1574c5984b09eb",
+          "terms": []
+        },
         "model": "opus",
         "packet_id": "abcb5e46432cc23a",
         "requested_exit_decisions": [
           {
             "action": "exit",
             "evidence": [
-              "overnight_tape: NQ -1.52%, KOSPI -3.56%, 10Y yield +0.57% to 5.146 (semi/long-duration headwind)",
-              "market_packet.regime.sector_rs_top: SMH 20d momentum -8.07%",
-              "prophet: MU held_without_active_plan (no active management plan)",
-              "book: MU -14.58% unrealized, 16 days held, rationale null"
+              {
+                "iso_dates": [],
+                "length": 96,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "a236a7c84580d2365357299ddc818b51e04e8d84943346ba5ab78f28ab93cab1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 59,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b7c1c6ae253d747185daf95b96654a8f0da79dd7252c25829a5e5310dde82b57",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 64,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ce3f021a9a3178aa58155a20788aaeb1ff166d0d21f051c3b3aaf2454bd19241",
+                "terms": [
+                  "held_without_active_plan"
+                ]
+              },
+              {
+                "iso_dates": [],
+                "length": 57,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "daf38df2b4c4bd6eae187f312c3eaa7ed57798392408f492fbafb10abb6b1d90",
+                "terms": []
+              }
             ],
-            "falsifier": "Semis reclaim leadership (SMH 20d momentum turns positive and NQ stabilizes) with a fresh confirmed MU thesis — none present tonight.",
-            "reason": "Full exit as the proportionate overnight de-risk. MU is the single holding most exposed to exactly what the live tape is selling off — a memory/semiconductor name hit by NQ -1.52%, KOSPI -3.56% (semi-heavy) and the 10Y rising to 5.15% (direct long-duration headwind). It carries no live thesis (rationale was null; Prophet lists it held_without_active_plan), is -14.6% unrealized after only 16 days, and SMH 20d momentum is -8.07%. No confirmation plane supports it. Cutting it is the cleanest way to honor the de-risk directive and the ROTATE_DEFENSIVE posture without touching confirmed leaders.",
+            "falsifier": {
+              "iso_dates": [],
+              "length": 133,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "92b0b506c16c6881c31a0a0b047f0eb05051e82997601456ae56ef593dad7454",
+              "terms": []
+            },
+            "reason": {
+              "iso_dates": [],
+              "length": 597,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b5346150d5f697f226f059b6817eb006fc96bb5abfb3b21117a51ca6c350b590",
+              "terms": [
+                "held_without_active_plan",
+                "no live thesis"
+              ]
+            },
             "reason_code": "risk_limit",
             "ticker": "MU",
-            "why_now": "The overnight tape is actively selling off tech/semis with risk_state elevated; MU is the most exposed and least-supported name and the right one to remove before the open."
+            "why_now": {
+              "iso_dates": [],
+              "length": 172,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6d6411914f959dc58b7e9305584d4b9c2bbd54bbaf35522c47bdce99ae5b52d2",
+              "terms": []
+            }
           }
         ],
         "risk_posture": "caution",
         "run_id": "2026-10-22T06-20-17-535Z00-00",
         "schema": "mastermind.target_book.v2",
         "skipped_unpriceable": [],
-        "sold_note": "Full exit of MU (~3.0% / ~$29.8k) — the overnight de-risk. It is the holding most exposed to the tech/semis/rising-yield selloff, has no live thesis, and is -14.6%. Proceeds to cash pending stabilization.",
+        "sold_note": {
+          "iso_dates": [],
+          "length": 204,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "02bd13a13ecd500e12f1e813a028ca6fdbe0dc9f7ee6f30b7234d1ae2d90940d",
+          "terms": [
+            "no live thesis"
+          ]
+        },
         "source_provenance": [
           "mcp__bot__get_overnight_tape",
           "mcp__desk__get_market_packet",
@@ -311,7 +846,17 @@
           "unallocated_adds": []
         },
         "submission_sha256": "b6a0e21374e1ef245fd2cf0d6a2a076cfff6848fad52d81b017b50548d9721a4",
-        "summary": "Overnight de-risk of a queued book that was already defensive (70% cash, 30% gross). The live overnight tape is selling off — risk_state ELEVATED — but orderly, not a crash: US futures avg -0.84% with NQ -1.52% leading, Asia heavy (KOSPI -3.56%, Hang Seng -2.92%, Nikkei -2.55%), while VIX is actually DOWN 3.64% to 16.68 and Europe is green (DAX +1.35%). The driver is rising yields (10Y +0.57% to 5.15%), a direct headwind to long-duration tech/semis. The one proportionate change tonight: full exit of MU — a memory/semiconductor name that is the single holding most exposed to exactly what is selling off (NQ, KOSPI, rising yields), carries no live thesis (null rationale, Prophet held_without_active_plan), is -14.6% with SMH 20d momentum -8.07%. XOM is the overnight WINNER (crude +2.15%, XLE RS #1) and stays; MSFT is the defensive quality anchor far above invalidation and stays; AAPL is a trivial toehold not worth the spread. No new risk added into a selling-off, low-confidence-regime tape.",
+        "summary": {
+          "iso_dates": [],
+          "length": 1001,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6b01ad7f6074efc664fd196d193e033d804043e10f43a9e6c20dcd80ee7122c3",
+          "terms": [
+            "held_without_active_plan",
+            "no live thesis"
+          ]
+        },
         "target_sha256": "ab7284a5cc720413cf7480d429612f9002ac6f2f25fb4ca9d482d412030c8cee",
         "target_status": "queued",
         "tools_used": [
@@ -331,18 +876,74 @@
         "action_requested": "hold",
         "conviction": "low",
         "evidence": [
-          "evaluate_gate MU: passed=false, size_authority='blocked', veto=['cycle_blocked'], divergence 'political_crowd_trap' (extended/late)",
-          "bull lenses: valuation, growth, trend, sector rs, options, altdata flow",
-          "sector_rotation: SMH baskets rank 1-3, FRESH BUY, RS leading",
-          "book: held 1 day, -2.25%"
+          {
+            "iso_dates": [],
+            "length": 131,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 71,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 24,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+            "terms": []
+          }
         ],
-        "exit_plan": "Hold with a hard stop; exit on persistence of the cycle veto plus a further break, or on loss of SMH leadership; no add while blocked.",
-        "expected_horizon": "short — days to a few weeks, leash-dependent",
-        "falsifier": "Cycle_blocked veto persists AND MU breaks the Prophet invalidation / loses another ~3-4% from here, OR SMH loses FRESH-BUY leadership — then exit promptly; conversely the veto lifting restores it to a normal hold.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 134,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 44,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 213,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+          "terms": []
+        },
         "holding_mark_source": "live_quote",
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.08,
-        "rationale": "MU is held on the tightest leash. The engine gate is BLOCKED by a hard veto (cycle_blocked) with a 'political_crowd_trap' divergence (political/insider money piling into an already-EXTENDED name — late; the crowd may be exit liquidity). Offsetting that, its name lenses are bullish on trend, sector-rs, growth, valuation, options and alt-data flow, and SMH (semis) is the #1 FRESH-BUY basket. It is a 1-day-old position down 2.25% — too fresh to churn out of against demonstrated anti-churn discipline (median hold 22d) — but the hard veto bars any add and keeps conviction low.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 578,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__bot__evaluate_gate(MU)",
           "mcp__desk__get_sector_rotation",
@@ -351,25 +952,88 @@
         "ticker": "MU",
         "weight": 0.100413,
         "weight_source": "deterministic_existing_hold.v1",
-        "why_now": "No add (gate blocked); holding briefly to avoid churning a 1-day position while the semis-leadership bull case and the cycle veto resolve, with a hard stop."
+        "why_now": {
+          "iso_dates": [],
+          "length": 156,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+          "terms": []
+        }
       },
       "case_holding": {
         "action_effective": "hold",
         "action_requested": "hold",
         "conviction": "low",
         "evidence": [
-          "evaluate_gate MU: passed=false, size_authority='blocked', veto=['cycle_blocked'], divergence 'political_crowd_trap' (extended/late)",
-          "bull lenses: valuation, growth, trend, sector rs, options, altdata flow",
-          "sector_rotation: SMH baskets rank 1-3, FRESH BUY, RS leading",
-          "book: held 1 day, -2.25%"
+          {
+            "iso_dates": [],
+            "length": 131,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 71,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 24,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+            "terms": []
+          }
         ],
-        "exit_plan": "Hold with a hard stop; exit on persistence of the cycle veto plus a further break, or on loss of SMH leadership; no add while blocked.",
-        "expected_horizon": "short — days to a few weeks, leash-dependent",
-        "falsifier": "Cycle_blocked veto persists AND MU breaks the Prophet invalidation / loses another ~3-4% from here, OR SMH loses FRESH-BUY leadership — then exit promptly; conversely the veto lifting restores it to a normal hold.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 134,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 44,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 213,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+          "terms": []
+        },
         "holding_mark_source": "live_quote",
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.08,
-        "rationale": "MU is held on the tightest leash. The engine gate is BLOCKED by a hard veto (cycle_blocked) with a 'political_crowd_trap' divergence (political/insider money piling into an already-EXTENDED name — late; the crowd may be exit liquidity). Offsetting that, its name lenses are bullish on trend, sector-rs, growth, valuation, options and alt-data flow, and SMH (semis) is the #1 FRESH-BUY basket. It is a 1-day-old position down 2.25% — too fresh to churn out of against demonstrated anti-churn discipline (median hold 22d) — but the hard veto bars any add and keeps conviction low.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 578,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__bot__evaluate_gate(MU)",
           "mcp__desk__get_sector_rotation",
@@ -378,10 +1042,24 @@
         "ticker": "MU",
         "weight": 0.100413,
         "weight_source": "deterministic_existing_hold.v1",
-        "why_now": "No add (gate blocked); holding briefly to avoid churning a 1-day position while the semis-leadership bull case and the cycle veto resolve, with a hard stop."
+        "why_now": {
+          "iso_dates": [],
+          "length": 156,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+          "terms": []
+        }
       },
       "case_row_falsifiers": [
-        "Risk radar escalates from CAUTION (71) to a confirmed blow-off unwind / risk-off flip, which would argue for cutting XOM and MU and raising cash further"
+        {
+          "iso_dates": [],
+          "length": 152,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "af5c402e475ca6d2b2b0a269882c9110667474a879ac26a8f0038a7c8202e200",
+          "terms": []
+        }
       ],
       "decision_id": "decision.v1.9b919e509e3e2d663fa6ae1a",
       "line_index_0based": 78,
@@ -391,53 +1069,188 @@
           "cash": 0.5736,
           "cash_rationale_present": true,
           "cash_rationale_required": true,
-          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
         },
         "asof": "2026-10-07",
-        "brain_text": "Book submitted and accepted — 4 holdings, gross up from 0.34 → **0.43** (57% cash, down from 66%). The allocator will rebalance the paper account to these targets.\n\n## What I did and why\n\n**The decisive catch:** Two of my three research subagents returned **fabricated packet data** (usage showed `tool_uses: 0`) — they painted VRT/GEV/CEG as near-52w-highs in strong uptrends. I did not trust them. I re-ran `evaluate_gate` directly on every finalist and held name, and the real engine said the opposite. Grounding the decision on my own direct gate calls is the only reason this book isn't built on hallucinated longs.\n\n**Final book:**\n| Name | Action | Real engine read |\n|---|---|---|\n| **MSFT** | **ADD** (high) | Only name with `size_authority: up`, gate PASS, confluence +0.75; XLK FRESH-BUY leadership + cycles risk_on → 3-plane confirmation (Charter P1 satisfied, not the 0.02 label) |\n| **XOM** | HOLD (high) | Confluence **+1.00**, strongest lenses in book; XLE #1 RS. Rejected the fabricated \"trim for concentration\" |\n| **AAPL** | TRIM standard (low) | Gate passes but explicit **distribution divergence** (late-stage, 13F-selling); +9.9%/67d, no active plan |\n| **MU** | HOLD on tight leash (low) | Gate **BLOCKED** — hard `cycle_blocked` veto + `political_crowd_trap`/extended. No add; 1-day position held to avoid churn, hard stop set |\n\n**Why cash stays >50% (deliberate, and justified per `lesson.v1.US_ONLY.cash_opportunity_cost`):** data is DEGRADED (label confidence 0.02, neural-web stale), risk radar flags blow-off-unwind CAUTION (71/100) with contracting liquidity and ROTATE_DEFENSIVE, and **every candidate from deeper search failed the real add gate** — GEV/VRT/CEG (gate FAIL, downtrends −33% off highs), LRCX/ACMR (Prophet pre-trigger), AMD/PFE/GOOGL/TSM (all negative lean / distribution). MSFT was the only gate-cleared long, and I deployed into it. Deploying into gate-failing downtrends to hit a cash target would have been the larger error.\n\n**Biggest risk I'm carrying:** a risk-off resolution of this transitioning regime takes MSFT and XOM down together while cash under-earns — balanced against the opposite melt-up risk. Posture set to `caution`.",
-        "cash_rationale": "Cash remains above 50% by deliberate, evidence-backed choice, which I am required to justify. (1) Degraded-data justification: the regime read is explicitly data_quality=DEGRADED with label confidence 0.02, neural-web stale, and a TRANSITIONING/WEAKENING trajectory — the Charter forbids sizing off a label this weak. (2) Risk justification: risk radar shows bubble/blow-off-unwind CAUTION (71/100), liquidity contracting, advisory ROTATE_DEFENSIVE. (3) Documented rejection after deeper search (per lesson.v1.US_ONLY.cash_opportunity_cost): I researched concrete US candidates and every one failed the engine's real add gate — GEV (gate FAIL, confluence 0.00, Industrials RS 2nd pctile, power_grid theme rank 25/49), VRT (FAIL, downtrend below 50/200dma, -33% off highs), CEG (FAIL, confluence -0.25, MACD negative, -33% off highs), LRCX/ACMR (Prophet pre_trigger, not triggered), and the intake ACT tier AMD/PFE/GOOGL/TSM (all lean -1, crowded-top/distribution). The only add-authority long, MSFT, is being added to. Deploying into gate-failing downtrends to chase a cash target would be the larger error.",
+        "brain_text": {
+          "iso_dates": [],
+          "length": 2186,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "1ddaea5c0140367c4331d64b9503eec257a667688f2bab601789df620ef9b328",
+          "terms": []
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 1107,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "12c278e095b6ecea1b68a19130f104cedf7821512155f12f272b0fcb6e034ab1",
+          "terms": []
+        },
         "cost_usd": 2.854124,
         "decision_effective": true,
         "decision_id": "decision.v1.9b919e509e3e2d663fa6ae1a",
         "decision_memo": {
-          "alternatives": "Considered trimming XOM for concentration (rejected — real gate confluence +1.0, strongest lenses in book) and exiting MU today (rejected — 1-day position, anti-churn discipline; held on hard stop instead). Considered forcing cash below 50% by deploying into power/semis finalists (rejected — all fail the gate).",
-          "candidate_funnel": "Universe 320 -> intake ACT tier AMD/PFE/GOOGL/TSM (all negative lean, rejected) -> theme-led finalists in data-center power (GEV/VRT/CEG) + semicap (LRCX/ACMR) researched -> all failed the real add gate or pre-trigger -> only gate/add-authority long found was existing holding MSFT.",
-          "changes": "vs carried book (rejected_no_submission prior): add MSFT, trim AAPL; XOM and MU held. No full exits.",
-          "context_gaps": "Standouts buy-board payload was transport-truncated; neural-web lobes stale; 13F data is lagged to 2026-06-30. decision_context market_asof is 2026-08-07 (older than sector/regime 2026-10-06) — a freshness inconsistency noted but not resolvable here.",
-          "delegation_summary": "Spawned 3 Sonnet narrative-analyst subagents (data-center power VRT/GEV/ETN; merchant power CEG/VST/NRG; semicap + held-name review). CRITICAL: the first two returned FABRICATED packet data (tool_uses=0) depicting these names as near-highs in uptrends. I did not trust them — I re-ran evaluate_gate directly on GEV/VRT/CEG/XOM/MSFT/AAPL/MU and the real engine showed the opposite (downtrends, gate failures). Decision is grounded on my own direct gate calls, not the subagent narratives.",
+          "alternatives": {
+            "iso_dates": [],
+            "length": 312,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c8da723a39a058723a36ed4cc2a85a50c954a28ff2aa4b1e549fd9f5614d083a",
+            "terms": []
+          },
+          "candidate_funnel": {
+            "iso_dates": [],
+            "length": 282,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2afc6dd3a79e7192b7497b39adc2bb2f17102e5a59da74dac9c152fd59341877",
+            "terms": []
+          },
+          "changes": {
+            "iso_dates": [],
+            "length": 100,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "a3ac01b0bde1f46394c346bb2f852440f16e5832a7807954dc5178523346a2ec",
+            "terms": []
+          },
+          "context_gaps": {
+            "iso_dates": [
+              "2026-06-30",
+              "2026-08-07",
+              "2026-10-06"
+            ],
+            "length": 250,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1235d43f54365a6146b8f6fc9be0bcb07f60c44bdd2e8b6ce646801ec43aed50",
+            "terms": []
+          },
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 487,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "8ede7e5aad547eb42cd3be36f563f78cdf6be3b8bc75a2f47cd3b1ff78787314",
+            "terms": []
+          },
           "lessons_applied": [
             "lesson.v1.US_ONLY.cash_opportunity_cost"
           ],
-          "market_frame": "Reflation label but confidence 0.02 and data DEGRADED; TRANSITIONING. Validated planes: cycles risk_on, mtf risk_on, risk_radar risk_off. Risk view: bubble/blow-off-unwind CAUTION 71/100, liquidity contracting, ROTATE_DEFENSIVE advisory. Leadership: XLK/SMH FRESH BUY, XLE #1 RS. Net: thin, late, defensive tape with narrow AI/semis leadership.",
+          "market_frame": {
+            "iso_dates": [],
+            "length": 344,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c8c1318236c4913d2dfb43e7ad00562afb87b5ac93a28476b13c1f131789ee7f",
+            "terms": []
+          },
           "rejected": [
             {
-              "reason": "evaluate_gate FAIL, confluence 0.00, size_authority 'hold'; Industrials RS rank 17 (2nd pctile, below 200d); power_grid theme rank 25/49 score -0.32",
+              "reason": {
+                "iso_dates": [],
+                "length": 148,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2fd5383241bd1a2690eaf01d8fc210fb962ed583a55c768014397135051045b7",
+                "terms": []
+              },
               "ticker": "GEV"
             },
             {
-              "reason": "evaluate_gate FAIL, 'hold'; downtrend — below 200dma and 50dma, -33% off 52w high",
+              "reason": {
+                "iso_dates": [],
+                "length": 81,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "dac61dd89c7cdf26405ca295e5acd128b31522fd9eaa4588308c6305cd8e19df",
+                "terms": []
+              },
               "ticker": "VRT"
             },
             {
-              "reason": "evaluate_gate FAIL, confluence -0.25; downtrend, MACD negative, -33% off 52w high; Utilities RS 5th pctile",
+              "reason": {
+                "iso_dates": [],
+                "length": 106,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "d28a6be83d4db8d20ee1251bef7a328e97088334fd92a93e49fa1bbf882cf51a",
+                "terms": []
+              },
               "ticker": "CEG"
             },
             {
-              "reason": "Prophet discovery pre_trigger (not triggered); conv 64; wait",
+              "reason": {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "a1b646ca8dd56b7187687386b059e7d3d66db28d662a8335eab6dad3627aa5fe",
+                "terms": []
+              },
               "ticker": "LRCX"
             },
             {
-              "reason": "Prophet discovery pre_trigger; conv 59; China-exposed semicap, political_crowd_trap category risk",
+              "reason": {
+                "iso_dates": [],
+                "length": 97,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2cb78fd4b540d03d40620e17dcb5946601a2d3cd4bea54523a5a25078030f653",
+                "terms": []
+              },
               "ticker": "ACMR"
             },
             {
-              "reason": "intake ACT tier all lean -1 — crowded-top / negative divergence / CONFIRMED_DOWN; distribution risk, not adds",
+              "reason": {
+                "iso_dates": [],
+                "length": 109,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "5b91d3324cd550701c7588bc415b221d47fefc5b62ecac16d75268e6f40c4d74",
+                "terms": []
+              },
               "ticker": "AMD/PFE/GOOGL/TSM"
             }
           ],
-          "risk_deliberation": "ROTATE_DEFENSIVE + blow-off-unwind caution + degraded data argue for restraint and risk_posture=caution. P1 respected: the only add (MSFT) is backed by cycles risk_on + XLK leadership + name gate, not the 0.02 label. Accepted the under-earning risk of high cash as smaller than deploying into gate-failing downtrends.",
-          "selected": "ADD MSFT (only gate PASS + size_authority 'up', multi-plane confirmed). HOLD XOM (confluence +1.0). TRIM AAPL (distribution divergence). HOLD MU on tight leash (hard cycle_blocked veto, 1-day position, anti-churn).",
-          "timing": "Near-term catalysts: jobless claims 2026-10-08, CPI 2026-10-14, mega-cap earnings late Oct. Acting now on MSFT add and AAPL trim; MU decision revisited on its leash within days."
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 317,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "dc8991dc14cb730e8f002405845e7114d86dfa259953b2e09b0b7f90c2ff2614",
+            "terms": []
+          },
+          "selected": {
+            "iso_dates": [],
+            "length": 214,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "42b9ffca5c1a035ab660b407415759de02a207dfb6400aaa361df69699637472",
+            "terms": []
+          },
+          "timing": {
+            "iso_dates": [
+              "2026-10-08",
+              "2026-10-14"
+            ],
+            "length": 177,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c6550682956e1f698a51afbc2a53a1a442d493495df89829b5104d9c6d229941",
+            "terms": [
+              "earnings"
+            ]
+          }
         },
         "effective_holdings": [
           {
@@ -445,18 +1258,74 @@
             "action_requested": "hold",
             "conviction": "low",
             "evidence": [
-              "evaluate_gate MU: passed=false, size_authority='blocked', veto=['cycle_blocked'], divergence 'political_crowd_trap' (extended/late)",
-              "bull lenses: valuation, growth, trend, sector rs, options, altdata flow",
-              "sector_rotation: SMH baskets rank 1-3, FRESH BUY, RS leading",
-              "book: held 1 day, -2.25%"
+              {
+                "iso_dates": [],
+                "length": 131,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 71,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 24,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+                "terms": []
+              }
             ],
-            "exit_plan": "Hold with a hard stop; exit on persistence of the cycle veto plus a further break, or on loss of SMH leadership; no add while blocked.",
-            "expected_horizon": "short — days to a few weeks, leash-dependent",
-            "falsifier": "Cycle_blocked veto persists AND MU breaks the Prophet invalidation / loses another ~3-4% from here, OR SMH loses FRESH-BUY leadership — then exit promptly; conversely the veto lifting restores it to a normal hold.",
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 134,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 44,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 213,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+              "terms": []
+            },
             "holding_mark_source": "live_quote",
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.08,
-            "rationale": "MU is held on the tightest leash. The engine gate is BLOCKED by a hard veto (cycle_blocked) with a 'political_crowd_trap' divergence (political/insider money piling into an already-EXTENDED name — late; the crowd may be exit liquidity). Offsetting that, its name lenses are bullish on trend, sector-rs, growth, valuation, options and alt-data flow, and SMH (semis) is the #1 FRESH-BUY basket. It is a 1-day-old position down 2.25% — too fresh to churn out of against demonstrated anti-churn discipline (median hold 22d) — but the hard veto bars any add and keeps conviction low.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 578,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+              "terms": []
+            },
             "source_provenance": [
               "mcp__bot__evaluate_gate(MU)",
               "mcp__desk__get_sector_rotation",
@@ -465,26 +1334,110 @@
             "ticker": "MU",
             "weight": 0.100413,
             "weight_source": "deterministic_existing_hold.v1",
-            "why_now": "No add (gate blocked); holding briefly to avoid churning a 1-day position while the semis-leadership bull case and the cycle veto resolve, with a hard stop."
+            "why_now": {
+              "iso_dates": [],
+              "length": 156,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+              "terms": []
+            }
           }
         ],
         "error": null,
         "evidence_planes": [
-          "engine add-gate (evaluate_gate) per name — ground truth used to override fabricated subagent data",
-          "in-house regime/decision_context (quad, confidence, transition, liquidity, risk)",
-          "sector rotation / Sector Central (RS leadership, FRESH BUY states)",
-          "unified intake candidate queue (lean/confidence/divergence)",
-          "Prophet management/discovery board (held-name plans, pre-trigger setups)",
-          "portfolio book + meta-memory (weights, held-days, cash lesson)"
+          {
+            "iso_dates": [],
+            "length": 97,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "3999172e5f637297c71937382533279d366682bfb130d9cdad409b2ec2d6bc35",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 80,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "cb9c6d2cdf58e43672e2edc243f4541f97b390654febf8b1ab9d98aefc1b4ebc",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 66,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "39bb37ef7bf7df89d6ae3186e0954c7ebef9e1c6bf93f01e7877f9af7107a6c2",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 59,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e0fa5e27a087ffb85a39f9ec7bbc0a02f6b0575de592dae479294179ac5a1edb",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 72,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "272fe11a87291ac8946861852acfdfc57695cc51638e5031f53037e0565a680a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 62,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "cd6a4ecae55899f5e1b55ce5e4adb738f9d95a6e089a38d294d96073f4770734",
+            "terms": []
+          }
         ],
         "executed": [],
         "exit_decisions": [],
-        "expected_failure_mode": "The most likely way this book loses money: the degraded/transitioning regime resolves risk-off (the blow-off-unwind caution at 71/100 confirms), dragging MSFT and the semis/energy complex down together — so my one add (MSFT) and my anchor (XOM) fall in tandem while I under-earn on 50%+ idle cash if, conversely, the tape simply melts up. A secondary failure: holding MU through its hard cycle veto proves to be riding a political-crowd-trap down.",
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 447,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "82fc258c36c77fa6e5c0f0dc80f446b3b6503851d504fc4eb0d74f431a095400",
+          "terms": []
+        },
         "falsifiers": [
-          "MSFT loses XLK RS leadership or its gate flips to a hard veto — removes the book's only confirmed long",
-          "Risk radar escalates from CAUTION (71) to a confirmed blow-off unwind / risk-off flip, which would argue for cutting XOM and MU and raising cash further",
-          "XOM confluence collapses below +0.30 or XLE loses #1 RS — the book's anchor weakens",
-          "A gate-clearing, add-authority long with multi-plane confirmation appears, which would make today's high-cash restraint wrong and warrant deploying"
+          {
+            "iso_dates": [],
+            "length": 102,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "42091582e817c4e910f99597e4bf92fbc0eff30746809f79298e4b2a49044bfc",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 152,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "af5c402e475ca6d2b2b0a269882c9110667474a879ac26a8f0038a7c8202e200",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "fafad8fcdd21c47af945cbbbf183847de943a87fad70f5ad5cf7bc1c957b4fee",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 147,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9e20fcc028a5585d6d900bd0d67787e92de8aa87d634fb57960ba623eab931df",
+            "terms": []
+          }
         ],
         "holdings": [
           {
@@ -492,18 +1445,74 @@
             "action_requested": "hold",
             "conviction": "low",
             "evidence": [
-              "evaluate_gate MU: passed=false, size_authority='blocked', veto=['cycle_blocked'], divergence 'political_crowd_trap' (extended/late)",
-              "bull lenses: valuation, growth, trend, sector rs, options, altdata flow",
-              "sector_rotation: SMH baskets rank 1-3, FRESH BUY, RS leading",
-              "book: held 1 day, -2.25%"
+              {
+                "iso_dates": [],
+                "length": 131,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "460eee9869be2a97ae241f4c99c60f06d5bea67953892a5f1ef6b8f9a1df66ea",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 71,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "55fbbf1a4c584aad51410c9a714f3803237b7615368f7dfa927d792fcf9db62d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "f0d003579d1426830eea240d27472a6ee66deda77e49479833239ded564ab418",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 24,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "efa6da74ae76f03ec2d6f7f7aa214d5519e941f1cd1c1d946214a87e43c5cac9",
+                "terms": []
+              }
             ],
-            "exit_plan": "Hold with a hard stop; exit on persistence of the cycle veto plus a further break, or on loss of SMH leadership; no add while blocked.",
-            "expected_horizon": "short — days to a few weeks, leash-dependent",
-            "falsifier": "Cycle_blocked veto persists AND MU breaks the Prophet invalidation / loses another ~3-4% from here, OR SMH loses FRESH-BUY leadership — then exit promptly; conversely the veto lifting restores it to a normal hold.",
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 134,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "37567260dafc16deddaca946ea570455ef1777bb436d1a6e65c6167fd0ab1df0",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 44,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "7224841cc34e8d4ceeabcec0ffaf48d5110cf70e547be1dd8b87f7c4c806429f",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 213,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5cbe339eafab52a648e1210c54ac548305ddcfbd6ae824d1d1f05077876d2b4f",
+              "terms": []
+            },
             "holding_mark_source": "live_quote",
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.08,
-            "rationale": "MU is held on the tightest leash. The engine gate is BLOCKED by a hard veto (cycle_blocked) with a 'political_crowd_trap' divergence (political/insider money piling into an already-EXTENDED name — late; the crowd may be exit liquidity). Offsetting that, its name lenses are bullish on trend, sector-rs, growth, valuation, options and alt-data flow, and SMH (semis) is the #1 FRESH-BUY basket. It is a 1-day-old position down 2.25% — too fresh to churn out of against demonstrated anti-churn discipline (median hold 22d) — but the hard veto bars any add and keeps conviction low.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 578,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c85032af1e511f6a118654f5663844a13aed511e0922c4033350e98707ddb3ba",
+              "terms": []
+            },
             "source_provenance": [
               "mcp__bot__evaluate_gate(MU)",
               "mcp__desk__get_sector_rotation",
@@ -512,7 +1521,14 @@
             "ticker": "MU",
             "weight": 0.100413,
             "weight_source": "deterministic_existing_hold.v1",
-            "why_now": "No add (gate blocked); holding briefly to avoid churning a 1-day position while the semis-leadership bull case and the cycle veto resolve, with a hard stop."
+            "why_now": {
+              "iso_dates": [],
+              "length": 156,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5dcf4dd1627b8edec853f7f0622b6d8fddab02337fe4ed5a3e659fe7b32d2aba",
+              "terms": []
+            }
           }
         ],
         "lesson_application_ids": [
@@ -524,7 +1540,14 @@
         "lesson_presentation_id": "presentation.v1.3c30ef6129ff9f036dfd95b9",
         "lesson_trace_cohort": "portfolio_v2_lesson_trace",
         "lesson_trace_status": "accepted_queued",
-        "liquidity_notes": "All names are large, highly liquid US single stocks; no liquidity constraint on the MSFT add or the AAPL trim. No ETFs (prohibited).",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 132,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "77f2480425f119f61e81f46408a44994025494f78a4355da87c4dd59a798b0f7",
+          "terms": []
+        },
         "model": "opus",
         "packet_id": "00ebedf2760a80b3",
         "requested_exit_decisions": [],
@@ -532,14 +1555,28 @@
         "run_id": "2026-10-07T23-10-08-610Z00-00",
         "schema": "mastermind.target_book.v2",
         "skipped_unpriceable": [],
-        "sold_note": "Trimming AAPL (standard intensity) on an explicit distribution divergence + lagged 13F net-selling after a +9.9%/67-day run. No full exits this cycle.",
+        "sold_note": {
+          "iso_dates": [],
+          "length": 150,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "e39b0a7db751e6a502130628ce51f3ef185cc277ff0d2aebdeec24df05ef83ab",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__desk__get_my_book",
           "mcp__desk__get_market_packet",
           "mcp__desk__get_sector_rotation",
           "mcp__bot__get_regime",
           "mcp__bot__get_intake_candidates",
-          "mcp__bot__evaluate_gate (MU, GEV, VRT, CEG, XOM, MSFT, AAPL)"
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ed2ce88c603ff7a44a351a0c3b0adbce2f184af05e4c938815c5b57e45f9a414",
+            "terms": []
+          }
         ],
         "submission_audit": {
           "blocked_actions": [],
@@ -600,7 +1637,14 @@
           "unallocated_adds": []
         },
         "submission_sha256": "832389f6b593833b355518a40d89b7c5348557ec1d077edff2779cd32a9f5d27",
-        "summary": "Defensive, high-cash book held largely intact with one evidence-backed deployment. Macro is degraded (Reflation label confidence 0.02, data_quality DEGRADED, neural-web stale) and the risk view flags bubble/blow-off-unwind CAUTION (71/100), contracting liquidity, and an advisory ROTATE_DEFENSIVE posture. Against that backdrop the engine offers almost no clean long: every data-center-power finalist I researched (GEV, VRT, CEG) FAILS the real add gate and is in a downtrend; the intake ACT tier (AMD/PFE/GOOGL/TSM) all lean negative (crowded-top/distribution); semicap setups (LRCX/ACMR) are pre-trigger. The single name with genuine add authority is MSFT (gate PASS, size_authority 'up', confluence +0.75, bull lenses quality/growth/trend/sector-rs), corroborated by cycles-risk_on + XLK FRESH-BUY leadership — so I add there and nowhere else. XOM is a strong hold (confluence +1.0). AAPL is trimmed on an explicit distribution divergence. MU is held on the tightest leash under a hard cycle_blocked veto. Cash stays >50% by deliberate choice, justified by degraded data and a documented rejection of every searched candidate.",
+        "summary": {
+          "iso_dates": [],
+          "length": 1129,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "48f8f12cfe172515dca80225b790ac58d4afdc0d8a76d771d8875381a2de59cf",
+          "terms": []
+        },
         "target_sha256": "80f63ee1bb70fcd0fd247e7b7a531d81dd64c5e51b649b635bcf098d69091d7e",
         "target_status": "queued",
         "tools_used": [
@@ -630,7 +1674,7 @@
       }
     }
   ],
-  "records_sha256": "25b1eadb38abec6f88ae985beb0e118a66ab7a1b68bd8f67d5493252514039dc",
+  "records_sha256": "d8964068d3773b9301067abf068ffbcdb9b68642c89a05cd211ea2a10490fe20",
   "redaction": {
     "dropped_row_fields": [
       {
@@ -682,7 +1726,28 @@
         "weight": 0.025109
       }
     ],
-    "policy": "retain all row-level fields verbatim except: drop perception_input; filter holdings and effective_holdings to the case ticker"
+    "policy": "drop perception_input; filter holdings and effective_holdings to the case ticker; in records, fills and derived, replace every whitespace-bearing string (narrative / PM prose) with a pbr.prose_digest.v1 object; keep whitespace-free strings and all numbers verbatim",
+    "prose_digest": {
+      "applies_to": [
+        "records",
+        "fills",
+        "derived"
+      ],
+      "declared_terms": [
+        "earnings",
+        "held_without_active_plan",
+        "no live thesis",
+        "single-source",
+        "starter"
+      ],
+      "iso_date_pattern": "(?<![0-9])([0-9]{4}-[0-9]{2}-[0-9]{2})(?![0-9])",
+      "length_unit": "unicode code points",
+      "originals": "outside the repository; set PBR_DECISION_CASE_INPUT_DIR to verify",
+      "period_label_pattern": "\\b(Q[1-4] ?FY ?[0-9]{2,4}|FY ?[0-9]{4})\\b",
+      "prose_rule": "a string value is prose when it contains any whitespace character",
+      "schema": "pbr.prose_digest.v1",
+      "sha256_over": "utf-8 bytes of the original string"
+    }
   },
   "schema": "pbr.decision_case_fixture.v1",
   "ticker": "MU"

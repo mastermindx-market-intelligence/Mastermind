@@ -8,28 +8,49 @@ python tests/fixtures/pbr/decision_cases/_build_decision_cases.py \
     <case_rows.jsonl> <case_fills.jsonl> <MANIFEST.json> <out_dir>
 ```
 
-The byte-regeneration test runs only when `PBR_DECISION_CASE_INPUT_DIR` points at a
-directory holding `case_rows.jsonl`, `case_fills.jsonl` and the capture `MANIFEST.json`
-(evidence, not repository content); otherwise it skips and the integrity tests still run.
-
 Source: read-only research capture `research-capture-20261022T073549Z`
 (`captured_utc` 2026-10-22T07:35:49Z, manifest sha256
-`4c55f3f8df454ecfcb2742b0b7bec5043ac35d4919a66026888541fa4bf976aa`). Each
-fixture embeds the verbatim redacted rows, per-line sha256 provenance, the
-verbatim fills, and the MANIFEST's own linkage statements. These cases are
-decision-process evidence only. **Nothing here claims investment value, and no
-statement below adjudicates whether any price, size, or position was good or
+`4c55f3f8df454ecfcb2742b0b7bec5043ac35d4919a66026888541fa4bf976aa`). These cases
+are decision-process evidence only. **Nothing here claims investment value, and
+no statement below adjudicates whether any price, size, or position was good or
 bad.**
 
-Redaction policy (identical in every fixture, recorded in
-`redaction.policy`): retain all row-level fields verbatim except drop
-`perception_input`; filter `holdings` and `effective_holdings` to the case
-ticker. The dropped holdings rows are enumerated in
-`redaction.other_holdings` (ticker, weight, conviction only).
+## Data rights and redaction (seat ruling SR-1)
+
+The repository is public and the paper-book narrative is a paid product surface,
+so no production narrative is committed here.
+
+- **In the repository (SR-1 option b):** typed, numeric and case fields are kept
+  verbatim — tickers, dates, ids, row indices, sizes, prices, weights,
+  probabilities, conviction labels, enums. Every string that contains whitespace
+  (narrative / PM prose) inside `records`, `fills` and `derived` is replaced by a
+  `pbr.prose_digest.v1` object: `sha256` of the UTF-8 original, `length` in
+  characters, the `iso_dates` and fiscal `period_labels` it mentions, and which
+  `terms` of a declared closed vocabulary it contains (`earnings`,
+  `held_without_active_plan`, `no live thesis`, `single-source`, `starter`).
+  The rule, patterns and vocabulary are recorded in `redaction.prose_digest` of
+  every fixture.
+- **Also dropped:** `perception_input`; `holdings` and `effective_holdings` are
+  filtered to the case ticker (the dropped rows are enumerated in
+  `redaction.other_holdings` as ticker, weight and conviction only).
+- **Kept verbatim because they are builder-authored, not production prose:**
+  `capture`, `redaction`, `linkage_note` (the capture MANIFEST's own linkage
+  statement), `external_facts` (public facts cited by the program audit, marked
+  `cited_by_audit_not_refetched`) and `derived.cap_reference` (a quote of this
+  repository's own source).
+- **Outside the repository (SR-1 option c):** the verbatim rows live under
+  `/Volumes/Mastermind/evidence/pbr/research-decision-case-inputs-20261022T073549Z/`
+  (`case_rows.jsonl`, `case_fills.jsonl`, `MANIFEST.json`, `SHA256SUMS`). Point
+  `PBR_DECISION_CASE_INPUT_DIR` at that directory to run the env-gated tests:
+  byte-for-byte regeneration, every digest matching an original string, and no
+  original prose of 24 or more characters appearing in any committed file under
+  `tests/fixtures/pbr/`. Without it those tests skip with a reason and the
+  integrity tests still run.
 
 Defect references `A14`/`A15`/`A16` are the program's case labels
 (Mastermind#1693 / PR #1695); the fixtures record them, they do not interpret
-them.
+them. Each case below cites the decisive fields by fixture path and digest; the
+digest tables are checked by the test suite against the fixtures.
 
 ---
 
@@ -47,23 +68,27 @@ fill id `2501e62b…` is **not present in the capture** (recorded in
 (`a547c584…`) belongs to no retained settlement link and is deliberately
 excluded from this fixture.
 
-Decisive quotes (verbatim):
+Decisive fields (digests):
 
-> "Q4 FY2026 gross margin (reported 2026-10-22) prints below 35.5%, confirming the Q3 revenue-beat/margin-miss pattern is structural not transitional; or crowding crosses ~0.82 into the DELL/EME crowded-top band." (row 75, MU holding `falsifier`)
+| field (fixture path) | sha256 (first 12) | length | iso_dates | period_labels | terms |
+|---|---|---|---|---|---|
+| `records@75.case_holding.falsifier` | `bb74d2e837e7` | 209 | `2026-10-22` | `Q4 FY2026` | — |
+| `records@75.case_holding.why_now` | `abd5e36612e0` | 177 | — | — | `earnings` |
 
-> "DRAM ASP inflection and preserved HBM share are showing up in flows and news now, with a 10/22 earnings catalyst that can gate full size if gross-margin actuals finally confirm." (row 75, MU holding `why_now`)
+External fact (public, builder-authored, `verification_status:
+cited_by_audit_not_refetched`): "Micron reported fiscal Q4 and full-year 2026
+results on 2026-09-30".
 
-> "Micron reported fiscal Q4 and full-year 2026 results on 2026-09-30" (external fact, `verification_status: cited_by_audit_not_refetched`)
-
-**Observed:** the entry was decided `asof` 2026-10-02 with its sizing gate and
-falsifier pinned to a report dated 2026-10-22; the audit-cited external facts
-(not re-fetched here) state Micron's fiscal Q4 2026 results were published
-2026-09-30 — before the entry's `asof`.
+**Observed:** the entry was decided `asof` 2026-10-02; its MU falsifier names
+the period label `Q4 FY2026` and the date 2026-10-22, and its `why_now` names an
+earnings catalyst; the audit-cited external facts (not re-fetched here) state
+Micron's fiscal Q4 2026 results were published 2026-09-30 — before the entry's
+`asof`.
 
 **NOT established:** the fill price itself is not shown wrong; nothing here
-says MU was a bad position; the mismatch between the row's "Q4 FY2026
-(reported 2026-10-22)" label and the audit-cited 2026-09-30 fiscal-Q4
-publication is recorded as text, not adjudicated.
+says MU was a bad position; the mismatch between the row's `Q4 FY2026` /
+2026-10-22 pairing and the audit-cited 2026-09-30 fiscal-Q4 publication is
+recorded, not adjudicated.
 
 **A future contract must do:** treat a dated catalyst whose publication date
 already lies before `asof` as unable to support new risk; an entry may not lean
@@ -85,21 +110,24 @@ Fills: none.
 differs between lines 75 and 76 (14 keys, including `falsifier`, `exit_plan`,
 `conviction`, `weight_source`, `expected_horizon`, `why_now`);
 `derived.case_row_falsifier_changes` does the same for the row-level
-`falsifiers` strings that mention MU.
+`falsifiers` strings that mention MU. Prose values appear as digests, so a
+change is visible as a differing `sha256`.
 
-Decisive quotes (verbatim):
+Decisive fields (digests):
 
-> "MU gross-margin actuals miss below 35.5% on 2026-10-22, breaking the central re-rating thesis for the one offensive add" (line 75, row-level falsifier mentioning MU)
+| field (fixture path) | sha256 (first 12) | length | iso_dates | period_labels | terms |
+|---|---|---|---|---|---|
+| `derived.case_holding_changes.falsifier.old` | `bb74d2e837e7` | 209 | `2026-10-22` | `Q4 FY2026` | — |
+| `derived.case_holding_changes.falsifier.new` | `72c5a841697d` | 167 | — | — | — |
+| `derived.case_holding_changes.exit_plan.old` | `bda8a5c4fd80` | 210 | — | — | `earnings` |
+| `derived.case_holding_changes.exit_plan.new` | `f4e984a3a404` | 189 | — | — | — |
+| `derived.case_row_falsifier_changes.old[0]` | `613f7238e46d` | 119 | `2026-10-22` | — | — |
 
-> "MU underperforms SPY by >5% over 60d, OR government support stops accelerating and subsequent operating evidence shows no memory-market improvement (intake falsifier)." (line 76, MU holding `falsifier`)
-
-> "Exit on the 60d rel-return falsifier breach, a radar flip to CONFIRMED_DOWN/distribution on MU itself, or a break of the 200d uptrend; trim into parabolic extension if a blow-off top forms." (line 76, MU holding `exit_plan`)
-
-**Observed:** between 2026-10-02 and 2026-10-05 the held MU position's dated,
-quarter-specific falsifier (GM% print on 2026-10-22) and its exit plan were
-silently replaced by a relative-performance falsifier and a different exit
-plan; both rows are ordinary decision rows — no retained field marks a thesis
-amendment or references the prior decision.
+**Observed:** between 2026-10-02 and 2026-10-05 the held MU position's
+falsifier and exit plan were replaced: the line-75 falsifier names `Q4 FY2026`
+and 2026-10-22, the line-76 falsifier names no date and no fiscal period, and
+the exit plan's digest changed as well; both rows are ordinary decision rows —
+no retained field marks a thesis amendment or references the prior decision.
 
 **NOT established:** whether an amendment mechanism exists outside the
 retained fields (the `decision_context` snapshots these rows consumed were not
@@ -114,7 +142,7 @@ mutates without one.
 
 ---
 
-## mu_2026-10-22_planless_summary.json — regression A15 (exit justified by "no live thesis")
+## mu_2026-10-22_planless_summary.json — regression A15 (exit justified by the `no live thesis` term)
 
 | book | host path | in-service path | line | line_sha256 | decision_id |
 |---|---|---|---|---|---|
@@ -123,31 +151,32 @@ mutates without one.
 
 Fills: none. Line 89 is the latest queued US summary (2026-10-22) in which MU
 is absent from `holdings`/`effective_holdings` and exited via
-`requested_exit_decisions`/`exit_decisions` (verbatim MU entries in
-`derived`); line 78 (2026-10-07) is the earlier leash-hold record. `derived.summary_and_memo_sentences`
-keeps every `summary`/`decision_memo` sentence (split on `". "`) containing
-`MU` or `held_without_active_plan`. Line 89's `perception_input` is the one
-dropped field in these fixtures.
+`requested_exit_decisions`/`exit_decisions` (the MU entries, digested, are in
+`derived`); line 78 (2026-10-07) is the earlier leash-hold record.
+`derived.summary_and_memo_sentences` keeps a digest of every
+`summary`/`decision_memo` sentence (split on `". "`) that mentions `MU` or
+`held_without_active_plan`. Line 89's `perception_input` is the one dropped
+field in these fixtures.
 
-Decisive quotes (verbatim):
+Decisive fields (digests):
 
-> "It carries no live thesis (rationale was null; Prophet lists it held_without_active_plan), is -14.6% unrealized after only 16 days, and SMH 20d momentum is -8.07%." (line 89, `exit_decisions[0].reason` sentence)
+| field (fixture path) | sha256 (first 12) | length | iso_dates | period_labels | terms |
+|---|---|---|---|---|---|
+| `derived.mu_exit_decisions[0].entry.reason` | `b5346150d5f6` | 597 | — | — | `held_without_active_plan`, `no live thesis` |
+| `derived.mu_exit_decisions[0].entry.evidence[2]` | `ce3f021a9a31` | 64 | — | — | `held_without_active_plan` |
+| `derived.mu_exit_decisions[0].entry.evidence[3]` | `daf38df2b4c4` | 57 | — | — | — |
+| `records@78.case_holding.falsifier` | `5cbe339eafab` | 213 | — | — | — |
 
-> "book: MU -14.58% unrealized, 16 days held, rationale null" (line 89, exit evidence item)
+**Observed:** at line 89 the MU exit reason carries the terms `no live thesis`
+and `held_without_active_plan`, and MU has no case holding on that line;
+MANIFEST `not_found_or_not_retained` states `brain/theses.jsonl` has no MU
+thesis; the retained local records (lines 75/76, referenced in
+`derived.prior_thesis_refs`) did carry falsifiers and exit plans, replaced
+without an amendment record (see the amendment case above).
 
-> "Cycle_blocked veto persists AND MU breaks the Prophet invalidation / loses another ~3-4% from here, OR SMH loses FRESH-BUY leadership — then exit promptly; conversely the veto lifting restores it to a normal hold." (line 78, MU holding `falsifier`)
-
-**Observed:** at line 89 the exit's "no live thesis" evidence is a null local
-rationale plus the absence of a Prophet plan; MANIFEST
-`not_found_or_not_retained` states `brain/theses.jsonl` has no MU thesis; the
-retained local records (lines 75/76, echoed in `derived.prior_thesis_refs`)
-did carry falsifiers and exit plans, replaced without an amendment record (see
-the amendment case above).
-
-**NOT established:** missing provider plan is **not** evidence there was never
-a local thesis — the 75/76 rows prove one existed; the -14.6%/-14.58% figure
-is the row's own unrealized mark at that time, not an audited return; nothing
-here says the exit itself was wrong or right.
+**NOT established:** a missing provider plan is **not** evidence there was
+never a local thesis — the 75/76 rows prove one existed; nothing here says the
+exit itself was wrong or right.
 
 **A future contract must do:** treat "missing provider plan ≠ missing local
 thesis" — the local decision record (thesis, falsifier, exit plan) is the
@@ -179,18 +208,19 @@ imports nor executes it): `brain/decision_submission.py` line 450,
 `"conviction_caps": {"high": 0.18, "medium": 0.12, "low": 0.06},` — the
 regional `deterministic_incremental_regional_allocator.v1` policy.
 
-Decisive quotes (verbatim):
+Decisive fields (digests):
 
-> "Its healthcare exposure fits the locally confirmed defensive rotation, but single-source evidence, degraded technical coverage, and an advisory Neural Web kernel that is not FDR-cleared require a measured starter rather than a high-concentration assertion." (line 35, 688062.SS holding `rationale`)
+| field (fixture path) | sha256 (first 12) | length | iso_dates | period_labels | terms |
+|---|---|---|---|---|---|
+| `records@35.case_holding.rationale` | `04a8eff527d7` | 531 | `2026-08-19` | — | `single-source`, `starter` |
+| `records@35.case_holding.evidence[4]` | `3ebd89009c38` | 63 | — | — | `single-source` |
+| `records@35.case_holding.exit_plan` | `84011340c9dd` | 199 | — | — | `starter` |
 
-> "Technical coverage is degraded and the signal is single-source." (line 35, holding evidence item)
-
-> "Treat 迈威生物 (688062.SS) as a measured starter; review trim-and-trail first, but exit if the buy-zone gate disappears with weakening healthcare momentum or if trusted eligibility or priceability fails." (line 35, holding `exit_plan`)
-
-**Observed:** the line-35 688062.SS `weight` is exactly 0.12 — the medium
-conviction cap of the regional allocator — while the same text calls the
-position a "measured starter" justified by single-source evidence; the entry
-fill printed 32.65 and every later fill (a partial exit) printed below it.
+**Observed:** the line-35 688062.SS `weight` is exactly 0.12 with conviction
+`medium` — the medium conviction cap of the regional allocator — while the same
+holding's rationale and exit plan carry the terms `starter` and
+`single-source`; the entry fill printed 32.65 and every later fill (a partial
+exit) printed below it.
 
 **NOT established:** a 12% weight is not universally wrong — no statement here
 says any cap value is correct or incorrect; the below-entry exit prices are
@@ -219,18 +249,21 @@ decisions row, positions ledger, or captured brain run, per the MANIFEST
 statement copied verbatim into `linkage_note`) and 2026-08-17 buy 299 @ 160.10
 (`8d9c94d7…`, linked to line 40's `settlement_fill_ids[0]`).
 
-Decisive quotes (verbatim):
+Decisive fields (digests):
 
-> "Close below $153; structural failure below approximately $137.50; or Energy loses its 200-day leadership." (line 38, XOM holding `falsifier`)
+| field (fixture path) | sha256 (first 12) | length | iso_dates | period_labels | terms |
+|---|---|---|---|---|---|
+| `records@38.case_holding.falsifier` | `b3278894a5b4` | 105 | — | — | — |
+| `records@40.case_holding.rationale` | `47414b02e5bc` | 767 | — | — | — |
 
-> "XOM is a genuinely confirmed stock-specific energy leader, not an ETF proxy." (line 40, XOM holding `rationale`, first sentence)
-
-> "the August entry fill is UNLINKED to its decision (settlement link fields only populated from later rows)" (MANIFEST `related_links["XOM entry"]`, also in `linkage_note`)
+Capture linkage statement (builder-authored MANIFEST text, verbatim in
+`linkage_note`): "the August entry fill is UNLINKED to its decision (settlement
+link fields only populated from later rows)".
 
 **Observed:** XOM was targeted 2026-08-12 (queued, `run_id` null), re-affirmed
 and executed 2026-08-13/14 with stated falsifiers and exit plans, filled
-2026-08-13/17, and was still held (and the row's stated overnight winner) at
-line 89 on 2026-10-22; the entry fill has no recorded settlement link.
+2026-08-13/17, and was still held at line 89 on 2026-10-22; the entry fill has
+no recorded settlement link.
 
 **NOT established:** one winner does not validate its reasoning — the held
 outcome does not confirm the energy thesis, the gate, or that the process

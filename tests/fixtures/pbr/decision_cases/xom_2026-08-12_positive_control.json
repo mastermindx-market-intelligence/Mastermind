@@ -80,63 +80,298 @@
         "action_requested": "add",
         "conviction": "medium",
         "evidence": [
-          "XLE cycle engine is ENTRY",
-          "Energy is above trend with 76% breadth and leading relative strength",
-          "XOM matrix confluence is 1.0 with intact uptrend and Golden Cross",
-          "Daily and weekly MACD are positive; OBV and CMF are rising",
-          "Accounting checks are clean"
+          {
+            "iso_dates": [],
+            "length": 25,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f559bfa29c94c577813d4c66ea561fe363d7b541985e0d697f6f22c329a48877",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 68,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ab3e3130b46fa13ce5d9ea1e154b64e9e275bcc214bb72a097f24a1a65967aee",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 65,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "25798184a6cc63f4a95b50a9cfa6429b878dff364b1732a13badb7061b95415b",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 58,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e8639cc78e1d11054e6056a2a7fe6156d904119f52be9bf7932c371e0d643093",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 27,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "bd618139d1a72d3f7a9e403675eadff9d400fb31f90e5b104036bc7886762422",
+            "terms": []
+          }
         ],
-        "exit_plan": "Trail while Energy leadership, trend, and thesis remain intact; prefer a trim-and-trail response to weakening confirmation, with full exit reserved for the stated technical or structural failure.",
-        "expected_horizon": "Medium/long term; first formal review 2026-08-26.",
-        "falsifier": "Close below $153; structural failure below approximately $137.50; or Energy loses its 200-day leadership.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 195,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "2a49134e54280a20e590c92f622293cca30ef0c382f260325cb0453b53d5d737",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [
+            "2026-08-26"
+          ],
+          "length": 49,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6fffc1dc8f0efcf1e5e4577e3ef99571831023b427ca2cc25704ce01c88ea8ba",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 105,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "b3278894a5b4355c81d41259120ea4260416094607ddf7b22dec772420257c28",
+          "terms": []
+        },
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.18,
-        "rationale": "Own XOM as a liquid, high-quality expression of confirmed Energy leadership. The thesis has an estimated 59% probability through the first review: XLE is above trend with 76% breadth and cycle ENTRY support, while XOM has full matrix confluence, an intact uptrend, Golden Cross, positive daily/weekly MACD, rising OBV/CMF, and clean accounting.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 344,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5560d4e067613d54c93f98ad78a9e558c11695d86e316df0252b0df75e292ca3",
+          "terms": []
+        },
         "source_provenance": [
-          "Sector Central",
-          "cycle engine",
-          "ticker matrix",
-          "Golden Oracle",
-          "daily/weekly technical packet",
-          "fundamentals/accounting packet"
+          {
+            "iso_dates": [],
+            "length": 14,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "00ef668f4cbffb4e21052bcb325c022e19cc514fa3b4b8ff1020bd5ba48bdb0d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 12,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "518ad4f4360d60750a5996657174a916531f9d0560425c6222ec87e912cae3ce",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 13,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "71b258b176fd045a9e1d1dbc2111724501710df63a55ab25ec977e74aadeac61",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 13,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e6a129168c91e89778659aa8fb99f27dcfde65e7157f196a8451583a9cacfd4a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 29,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1689a57f6e01ec5d4a065ce4dda811a9c016f777654c0b436903a617afbc3337",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 30,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "65b7200d737ce8dd3f3784afb06ce000d199080f60d2a13d9931de32217c7c38",
+            "terms": []
+          }
         ],
         "ticker": "XOM",
         "weight": 0.1,
         "weight_source": "deterministic_conviction_allocator.v2",
-        "why_now": "Sector cycle, breadth, relative strength, and ticker trend agree independently of the suspect low-confidence regime label; enter only without chasing the event-driven opening reaction."
+        "why_now": {
+          "iso_dates": [],
+          "length": 184,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "96af8884f53ca93bd150629d8c780566eadf2deb1b705785a232244a9fe02471",
+          "terms": []
+        }
       },
       "case_holding": {
         "action_effective": "add",
         "action_requested": "add",
         "conviction": "medium",
         "evidence": [
-          "XLE cycle engine is ENTRY",
-          "Energy is above trend with 76% breadth and leading relative strength",
-          "XOM matrix confluence is 1.0 with intact uptrend and Golden Cross",
-          "Daily and weekly MACD are positive; OBV and CMF are rising",
-          "Accounting checks are clean"
+          {
+            "iso_dates": [],
+            "length": 25,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f559bfa29c94c577813d4c66ea561fe363d7b541985e0d697f6f22c329a48877",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 68,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ab3e3130b46fa13ce5d9ea1e154b64e9e275bcc214bb72a097f24a1a65967aee",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 65,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "25798184a6cc63f4a95b50a9cfa6429b878dff364b1732a13badb7061b95415b",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 58,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e8639cc78e1d11054e6056a2a7fe6156d904119f52be9bf7932c371e0d643093",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 27,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "bd618139d1a72d3f7a9e403675eadff9d400fb31f90e5b104036bc7886762422",
+            "terms": []
+          }
         ],
-        "exit_plan": "Trail while Energy leadership, trend, and thesis remain intact; prefer a trim-and-trail response to weakening confirmation, with full exit reserved for the stated technical or structural failure.",
-        "expected_horizon": "Medium/long term; first formal review 2026-08-26.",
-        "falsifier": "Close below $153; structural failure below approximately $137.50; or Energy loses its 200-day leadership.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 195,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "2a49134e54280a20e590c92f622293cca30ef0c382f260325cb0453b53d5d737",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [
+            "2026-08-26"
+          ],
+          "length": 49,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6fffc1dc8f0efcf1e5e4577e3ef99571831023b427ca2cc25704ce01c88ea8ba",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 105,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "b3278894a5b4355c81d41259120ea4260416094607ddf7b22dec772420257c28",
+          "terms": []
+        },
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.18,
-        "rationale": "Own XOM as a liquid, high-quality expression of confirmed Energy leadership. The thesis has an estimated 59% probability through the first review: XLE is above trend with 76% breadth and cycle ENTRY support, while XOM has full matrix confluence, an intact uptrend, Golden Cross, positive daily/weekly MACD, rising OBV/CMF, and clean accounting.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 344,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5560d4e067613d54c93f98ad78a9e558c11695d86e316df0252b0df75e292ca3",
+          "terms": []
+        },
         "source_provenance": [
-          "Sector Central",
-          "cycle engine",
-          "ticker matrix",
-          "Golden Oracle",
-          "daily/weekly technical packet",
-          "fundamentals/accounting packet"
+          {
+            "iso_dates": [],
+            "length": 14,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "00ef668f4cbffb4e21052bcb325c022e19cc514fa3b4b8ff1020bd5ba48bdb0d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 12,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "518ad4f4360d60750a5996657174a916531f9d0560425c6222ec87e912cae3ce",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 13,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "71b258b176fd045a9e1d1dbc2111724501710df63a55ab25ec977e74aadeac61",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 13,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e6a129168c91e89778659aa8fb99f27dcfde65e7157f196a8451583a9cacfd4a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 29,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1689a57f6e01ec5d4a065ce4dda811a9c016f777654c0b436903a617afbc3337",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 30,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "65b7200d737ce8dd3f3784afb06ce000d199080f60d2a13d9931de32217c7c38",
+            "terms": []
+          }
         ],
         "ticker": "XOM",
         "weight": 0.1,
         "weight_source": "deterministic_conviction_allocator.v2",
-        "why_now": "Sector cycle, breadth, relative strength, and ticker trend agree independently of the suspect low-confidence regime label; enter only without chasing the event-driven opening reaction."
+        "why_now": {
+          "iso_dates": [],
+          "length": 184,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "96af8884f53ca93bd150629d8c780566eadf2deb1b705785a232244a9fe02471",
+          "terms": []
+        }
       },
       "case_row_falsifiers": [
-        "XOM closes below $153, COP closes below $117.40, or CVX closes below $188.50."
+        {
+          "iso_dates": [],
+          "length": 77,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "e767929566df0687356b4dc2b0fe4b8d29caea1928331af03be9e88a1ef73f1f",
+          "terms": []
+        }
       ],
       "decision_id": "decision.v1.3050203fdc5b109680b6c74e",
       "line_index_0based": 38,
@@ -145,19 +380,61 @@
           "cash": 0.7115,
           "cash_rationale_present": true,
           "cash_rationale_required": true,
-          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
         },
         "asof": "2026-08-12",
-        "brain_text": "Book submitted successfully exactly once.\n\n- Holdings: XOM ADD, COP ADD, CVX ADD, AAPL HOLD\n- Full exits: none\n- Allocator result: 28.85% invested, 71.15% cash\n- Posture: caution\n- ETFs: none\n\nThe deterministic allocator reduced exposure from the 51.85% advisory gross; it retains final sizing and execution authority.",
-        "cash_rationale": "The evidence plane is healthy and no verified crash supports remaining near 96% cash; doing so would incur the opportunity cost of ignoring confirmed Energy leadership. Advisory cash remains 48.15% because liquidity is contracting, bubble/blow-off unwind risk is 71/100, the three selected additions share oil-factor exposure, and the next session includes PPI, claims, and a bond auction. Broader candidates were searched: MSFT, NEM, AEM, PAAS, LMT, RTX, REGN, KTOS, APPF, CRM, JPM, and BAC were rejected as extended or late; META, SOFI, UEC, CELH, and SOUN lacked confirmation; GOOGL, ABBV, C, and GS lacked sufficient sector/timing asymmetry. Cash therefore funds entry discipline rather than serving as a default reward.",
+        "brain_text": {
+          "iso_dates": [],
+          "length": 318,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "7f0a16e82e5e9d06b52202dd127c0f2cf82fe9aa979d2dae7902b49fd11474b6",
+          "terms": []
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 724,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9b55e81c78c140074e1cf372564f9dd6595d11b3cab035b84b321788b5f578e3",
+          "terms": []
+        },
         "cost_usd": null,
         "decision_effective": true,
         "decision_id": "decision.v1.3050203fdc5b109680b6c74e",
         "decision_memo": {
           "alternatives": {
-            "broader_sector_mix": "Rejected for now because no independent fourth stock cleared both confirmation and entry-timing gates.",
-            "higher_cash": "Rejected because there is no verified crash or degraded evidence plane and it would forgo confirmed Energy leadership.",
-            "immediate_full_deployment": "Rejected because correlated oil exposure, contracting liquidity, bubble risk, and the event cluster argue for staged entries."
+            "broader_sector_mix": {
+              "iso_dates": [],
+              "length": 102,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "8003c270e825ef0a9547e50ee1710e65b9aec8815a0986266d2ff84b83be41db",
+              "terms": []
+            },
+            "higher_cash": {
+              "iso_dates": [],
+              "length": 118,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a8ac7bd518f728f529caf0164c86b141351f16c5a9c52b31a86a9785d710d1ae",
+              "terms": []
+            },
+            "immediate_full_deployment": {
+              "iso_dates": [],
+              "length": 125,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5c91b791da832675a530422274a5005780825cbbc9ade42dd2f3556abbbea058",
+              "terms": []
+            }
           },
           "candidate_funnel": {
             "finalists": [
@@ -166,49 +443,241 @@
               "CVX",
               "AAPL"
             ],
-            "outcome": "Three Energy adds and one explicit AAPL hold; no ETF and no exit.",
-            "process": "Started with the typed current book, compact market packet, Prophet board, and Sector Central; corroborated finalists with fundamentals/narrative, Golden Oracle, and multi-timeframe technicals; searched outside Prophet across Energy, miners, defense, industrials, healthcare, financials, and communications."
+            "outcome": {
+              "iso_dates": [],
+              "length": 65,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "f53880e5c7db81a66c572f596f541dd1ba6723f0f6820b21b5e61e08485af851",
+              "terms": []
+            },
+            "process": {
+              "iso_dates": [],
+              "length": 307,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "985067c7c5f63a20a8b6459e56dbf6af05fd48b1e61e28fa8f6833ce07af9568",
+              "terms": []
+            }
           },
           "changes": {
-            "additions": "Add XOM, COP, and CVX at advisory weights of 18%, 17%, and 13%.",
-            "existing_book": "AAPL remains HOLD at an advisory 3.85%; no trim or exit.",
-            "gross_cash": "Advisory gross moves from 3.85% to 51.85%, leaving 48.15% cash, subject entirely to allocator sizing."
+            "additions": {
+              "iso_dates": [],
+              "length": 63,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "17e23b7ac5d6b810bcdbbb1b86e6df1a44a3840e04e771d70e0b55d730d2077b",
+              "terms": []
+            },
+            "existing_book": {
+              "iso_dates": [],
+              "length": 56,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "e78068fff18b653e63e7bb8b5f6813aa46a75be866b1984c7181f83b3316428e",
+              "terms": []
+            },
+            "gross_cash": {
+              "iso_dates": [],
+              "length": 101,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "f35c17b292ae23869cff13478376e50203f021ce0eb3f3f6fae69d9e78fa254d",
+              "terms": []
+            }
           },
           "context_gaps": [
-            "Golden Oracle broad state is stale and ticker vectors are unavailable.",
-            "Current issuer-news packets for the Energy names are absent.",
-            "These are limitations but do not constitute a degraded evidence plane."
+            {
+              "iso_dates": [],
+              "length": 70,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "307495a6103ab89daed3439fdde0edefa2205ceea1543bca6d19ae79a92cc53b",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 60,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "07102bde24d8f00832b09ea6743594e665ba9a5bafd63033d478fc22760d6859",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 70,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "46420a9c853fa923f8e11d1b54cf478c60761cbca2b84cddba8160880c78b726",
+              "terms": []
+            }
           ],
-          "delegation_summary": "Used the supplied read-only delegated research artifact as untrusted evidence, checked its holdings and no-exit implications against the authoritative typed book, and independently governed the final submission. No subagent had sizing or submission authority.",
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 259,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "0a678e9f8c5ae17d9d1cfa5c134e86cbdbc1eac9ee1fd5697365e1a78cab88cf",
+            "terms": []
+          },
           "lessons_applied": [
             "lesson.v1.US_ONLY.cash_opportunity_cost"
           ],
           "market_frame": {
-            "governing_inference": "Adds rely on cycles, Energy leadership/breadth, and ticker confirmation—not the regime label alone.",
-            "regime": "Low-confidence Reflation label, transitioning; label confidence 0.264 and several macro legs contradict it.",
-            "risk": "Bubble/blow-off unwind risk 71/100 and liquidity contraction require caution and entry discipline.",
-            "validated_view": "Validated price/perception planes are risk-on, so no defensive shrink is implied."
+            "governing_inference": {
+              "iso_dates": [],
+              "length": 99,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a65e6dbcd650bca19aa156cb0d6b9bbc8572f1179fba7b526b6286a6e64b642f",
+              "terms": []
+            },
+            "regime": {
+              "iso_dates": [],
+              "length": 107,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "e8b7a47a066b252720fdb33e01775098845b95d24ba54eb0ca4bfc7963c0c124",
+              "terms": []
+            },
+            "risk": {
+              "iso_dates": [],
+              "length": 98,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c10012928f2f7af8192e71db9685512095cdaacb50af855ea4422cecd2871b05",
+              "terms": []
+            },
+            "validated_view": {
+              "iso_dates": [],
+              "length": 81,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b00651c394d8a0faa64c10dd43d5ed60534e36c8d1acb3e5596095a2777f3538",
+              "terms": []
+            }
           },
           "rejected": [
-            "MSFT, NEM, AEM, PAAS, LMT, RTX, REGN, KTOS, APPF, CRM, JPM, and BAC: extended, late-leg, or chase entries.",
-            "META: Prophet pre-trigger, below its 200-day average, with a lagging sector.",
-            "GOOGL: cleaner technically, but adverse sector/narrative leadership and HOLD matrix authority.",
-            "ABBV: negative divergence and cooling activity.",
-            "SOFI, UEC, CELH, and SOUN: pre-trigger ideas without enough independent confirmation; CELH remains in a downtrend.",
-            "C lacked asymmetry/sector confirmation; GS was rolling over; broader healthcare and industrial candidates failed timing or selection gates."
+            {
+              "iso_dates": [],
+              "length": 106,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "74ba108092adeafdc42137feac53d2173c8ef7113966a3a300892ff2b0ceee43",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 76,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6197f2a0207faacb0ca8642f91cbf5360580f0b056ca476c53712d51e1236e23",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 94,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "33fe830cadc8738d14efcb6007280ca5b901810892c17402bdfc573ad00f601b",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 47,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c8097208ade78998e3f40a8b897f3133b9cb0cdc167662476feea50cff171f3f",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 114,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "58982af1ea2dd2e974d1a982fba110fdd633b8a1d00ee55102d805af9470e2a8",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 139,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a476b2523fa47efbbf9ee92af16aab1e286a1529df1564f4a60b21db7403a6b9",
+              "terms": []
+            }
           ],
           "risk_deliberation": {
-            "primary": "The additions are one correlated Energy/oil factor despite three tickers.",
-            "response": "Use caution posture, staged entries, explicit chase limits, and named price/sector falsifiers.",
-            "secondary": "COP and CVX lack current issuer-specific intelligence coverage; CVX daily momentum/accounting evidence is mixed; AAPL can deteriorate further."
+            "primary": {
+              "iso_dates": [],
+              "length": 73,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5adcd9268735c6d7c6ec21db8b828cf517c51d5d074891b3a6529faf968b1276",
+              "terms": []
+            },
+            "response": {
+              "iso_dates": [],
+              "length": 94,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ee73cf51a7dc7562b5091bfa46b3b08df2d6e1dea45b6b8646ce52c4c6a6d26a",
+              "terms": []
+            },
+            "secondary": {
+              "iso_dates": [],
+              "length": 142,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "7eb270eb741f26bc525e41e9350a227699f89077a31239c28475c49fff437ebe",
+              "terms": []
+            }
           },
           "selected": [
-            "XOM: confirmed sector/ticker trend, breadth, flow, and clean accounting.",
-            "COP: strongest fundamental finalist with unanimous bullish matrix.",
-            "CVX: smaller, lower-conviction add supported by sector and higher timeframes despite mixed daily/accounting evidence.",
-            "AAPL: hold the existing small quality position; no add during short-term deterioration."
+            {
+              "iso_dates": [],
+              "length": 72,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "95d16d5e0b2b380e8cfa917c9ed391ae9c7519890c09c0503eb376ffb40e4419",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 66,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b18b526002286ef6b4aa581f5c38efe7dd8da129b3f237e5cca822f66eff02c5",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 117,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "89a43ec9a1297434b1cc8484275d997c37deb907cd0130b5cf0b06f77a17c958",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 87,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "322a54119dd1c30ed4a42e7b78bb0d72254d348e1e621e08ae24d363f88df87a",
+              "terms": []
+            }
           ],
-          "timing": "Stage after the initial PPI/claims/bond-auction reaction. Do not chase XOM above about $161, COP above $128, or CVX above $199. Review AAPL on 2026-08-19 and the Energy names on 2026-08-26."
+          "timing": {
+            "iso_dates": [
+              "2026-08-19",
+              "2026-08-26"
+            ],
+            "length": 189,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "bb0fc164776e41c39337c6b2e8b85ef4436f4a26ec00d6a69d052a571bfb7fc6",
+            "terms": []
+          }
         },
         "effective_holdings": [
           {
@@ -216,52 +685,264 @@
             "action_requested": "add",
             "conviction": "medium",
             "evidence": [
-              "XLE cycle engine is ENTRY",
-              "Energy is above trend with 76% breadth and leading relative strength",
-              "XOM matrix confluence is 1.0 with intact uptrend and Golden Cross",
-              "Daily and weekly MACD are positive; OBV and CMF are rising",
-              "Accounting checks are clean"
+              {
+                "iso_dates": [],
+                "length": 25,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "f559bfa29c94c577813d4c66ea561fe363d7b541985e0d697f6f22c329a48877",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 68,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ab3e3130b46fa13ce5d9ea1e154b64e9e275bcc214bb72a097f24a1a65967aee",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 65,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "25798184a6cc63f4a95b50a9cfa6429b878dff364b1732a13badb7061b95415b",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 58,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e8639cc78e1d11054e6056a2a7fe6156d904119f52be9bf7932c371e0d643093",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 27,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "bd618139d1a72d3f7a9e403675eadff9d400fb31f90e5b104036bc7886762422",
+                "terms": []
+              }
             ],
-            "exit_plan": "Trail while Energy leadership, trend, and thesis remain intact; prefer a trim-and-trail response to weakening confirmation, with full exit reserved for the stated technical or structural failure.",
-            "expected_horizon": "Medium/long term; first formal review 2026-08-26.",
-            "falsifier": "Close below $153; structural failure below approximately $137.50; or Energy loses its 200-day leadership.",
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 195,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "2a49134e54280a20e590c92f622293cca30ef0c382f260325cb0453b53d5d737",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [
+                "2026-08-26"
+              ],
+              "length": 49,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6fffc1dc8f0efcf1e5e4577e3ef99571831023b427ca2cc25704ce01c88ea8ba",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 105,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b3278894a5b4355c81d41259120ea4260416094607ddf7b22dec772420257c28",
+              "terms": []
+            },
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.18,
-            "rationale": "Own XOM as a liquid, high-quality expression of confirmed Energy leadership. The thesis has an estimated 59% probability through the first review: XLE is above trend with 76% breadth and cycle ENTRY support, while XOM has full matrix confluence, an intact uptrend, Golden Cross, positive daily/weekly MACD, rising OBV/CMF, and clean accounting.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 344,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5560d4e067613d54c93f98ad78a9e558c11695d86e316df0252b0df75e292ca3",
+              "terms": []
+            },
             "source_provenance": [
-              "Sector Central",
-              "cycle engine",
-              "ticker matrix",
-              "Golden Oracle",
-              "daily/weekly technical packet",
-              "fundamentals/accounting packet"
+              {
+                "iso_dates": [],
+                "length": 14,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "00ef668f4cbffb4e21052bcb325c022e19cc514fa3b4b8ff1020bd5ba48bdb0d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 12,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "518ad4f4360d60750a5996657174a916531f9d0560425c6222ec87e912cae3ce",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 13,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "71b258b176fd045a9e1d1dbc2111724501710df63a55ab25ec977e74aadeac61",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 13,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e6a129168c91e89778659aa8fb99f27dcfde65e7157f196a8451583a9cacfd4a",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 29,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "1689a57f6e01ec5d4a065ce4dda811a9c016f777654c0b436903a617afbc3337",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 30,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "65b7200d737ce8dd3f3784afb06ce000d199080f60d2a13d9931de32217c7c38",
+                "terms": []
+              }
             ],
             "ticker": "XOM",
             "weight": 0.1,
             "weight_source": "deterministic_conviction_allocator.v2",
-            "why_now": "Sector cycle, breadth, relative strength, and ticker trend agree independently of the suspect low-confidence regime label; enter only without chasing the event-driven opening reaction."
+            "why_now": {
+              "iso_dates": [],
+              "length": 184,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "96af8884f53ca93bd150629d8c780566eadf2deb1b705785a232244a9fe02471",
+              "terms": []
+            }
           }
         ],
         "error": null,
         "evidence_planes": [
-          "authoritative typed current book",
-          "compact macro and perception packet",
-          "cycle engine",
-          "risk radar and liquidity quality",
-          "Prophet discovery board",
-          "Sector Central leadership and breadth",
-          "fundamentals and accounting quality",
-          "Golden Oracle",
-          "daily, 3-day, and weekly MACD-RSI/Stoch-RSI timing"
+          {
+            "iso_dates": [],
+            "length": 32,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "58646de77dba74c3ce84652730254aef3581818de67fe786d0f7c1d4e6717e94",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 35,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "aa2ef0f7ad681a50a984ee5f9821e8337c05acc51bc3742a5dbd757b3fec9faf",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 12,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "518ad4f4360d60750a5996657174a916531f9d0560425c6222ec87e912cae3ce",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 32,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1eb439c87711e2838cddb9aacd42d30484a5a76025f7d44ea3f5e058f53fc5ff",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 23,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ee08b50130d048cdeee7e60cafe0a6a827839fbc51ffdfe4908c5dcc74d9a235",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 37,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "d21a2564fd77a006e077dc97a8c914edcf1a65ea4454247d9477205f3877d77a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 35,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "21f90f14f0c654a17ea8cb02e0c1417f2b41d3bfc91312b2685c37a3e12625c0",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 13,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e6a129168c91e89778659aa8fb99f27dcfde65e7157f196a8451583a9cacfd4a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 50,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "244f7b72bd8f9a52678facc06b7861ee29364a00fa333a854ed01597c949af9c",
+            "terms": []
+          }
         ],
         "executed": [],
         "exit_decisions": [],
-        "expected_failure_mode": "A crude-oil reversal or loss of Energy leadership hits XOM, COP, and CVX together, turning nominal issuer diversification into one correlated factor loss while contracting liquidity amplifies the drawdown.",
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 205,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "15c55ab00dbbe64b52b617177548fdeebbf27cca5c6a69e951e8d3e5b67f2d86",
+          "terms": []
+        },
         "falsifiers": [
-          "Within five days, reverse an Energy addition only on a hard technical break at its stated stop, a loss of XLE 200-day leadership/breadth, or a material oil/thesis change—not on ordinary volatility.",
-          "XOM closes below $153, COP closes below $117.40, or CVX closes below $188.50.",
-          "AAPL closes below $300 on daily and 3-day confirmation; evidence near $290 would strengthen a full-exit case.",
-          "A post-PPI, claims, or auction shock produces a verified risk-state break together with deteriorating sector price confirmation."
+          {
+            "iso_dates": [],
+            "length": 197,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "65ef2e603ebba086e11f093e019b784c67b1a7799ee5995a4c94c81e23baffb0",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 77,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e767929566df0687356b4dc2b0fe4b8d29caea1928331af03be9e88a1ef73f1f",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 109,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "a4579de81379ea33f6bf2f2e7bf65b91aff0b504618656ff40e4e94586f25fd4",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 128,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "4d9126cce60f0353aca0426f70a9985f468a9b73add1b818ebc90886d1e5e7d2",
+            "terms": []
+          }
         ],
         "holdings": [
           {
@@ -269,30 +950,144 @@
             "action_requested": "add",
             "conviction": "medium",
             "evidence": [
-              "XLE cycle engine is ENTRY",
-              "Energy is above trend with 76% breadth and leading relative strength",
-              "XOM matrix confluence is 1.0 with intact uptrend and Golden Cross",
-              "Daily and weekly MACD are positive; OBV and CMF are rising",
-              "Accounting checks are clean"
+              {
+                "iso_dates": [],
+                "length": 25,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "f559bfa29c94c577813d4c66ea561fe363d7b541985e0d697f6f22c329a48877",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 68,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "ab3e3130b46fa13ce5d9ea1e154b64e9e275bcc214bb72a097f24a1a65967aee",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 65,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "25798184a6cc63f4a95b50a9cfa6429b878dff364b1732a13badb7061b95415b",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 58,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e8639cc78e1d11054e6056a2a7fe6156d904119f52be9bf7932c371e0d643093",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 27,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "bd618139d1a72d3f7a9e403675eadff9d400fb31f90e5b104036bc7886762422",
+                "terms": []
+              }
             ],
-            "exit_plan": "Trail while Energy leadership, trend, and thesis remain intact; prefer a trim-and-trail response to weakening confirmation, with full exit reserved for the stated technical or structural failure.",
-            "expected_horizon": "Medium/long term; first formal review 2026-08-26.",
-            "falsifier": "Close below $153; structural failure below approximately $137.50; or Energy loses its 200-day leadership.",
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 195,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "2a49134e54280a20e590c92f622293cca30ef0c382f260325cb0453b53d5d737",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [
+                "2026-08-26"
+              ],
+              "length": 49,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6fffc1dc8f0efcf1e5e4577e3ef99571831023b427ca2cc25704ce01c88ea8ba",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 105,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b3278894a5b4355c81d41259120ea4260416094607ddf7b22dec772420257c28",
+              "terms": []
+            },
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.18,
-            "rationale": "Own XOM as a liquid, high-quality expression of confirmed Energy leadership. The thesis has an estimated 59% probability through the first review: XLE is above trend with 76% breadth and cycle ENTRY support, while XOM has full matrix confluence, an intact uptrend, Golden Cross, positive daily/weekly MACD, rising OBV/CMF, and clean accounting.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 344,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "5560d4e067613d54c93f98ad78a9e558c11695d86e316df0252b0df75e292ca3",
+              "terms": []
+            },
             "source_provenance": [
-              "Sector Central",
-              "cycle engine",
-              "ticker matrix",
-              "Golden Oracle",
-              "daily/weekly technical packet",
-              "fundamentals/accounting packet"
+              {
+                "iso_dates": [],
+                "length": 14,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "00ef668f4cbffb4e21052bcb325c022e19cc514fa3b4b8ff1020bd5ba48bdb0d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 12,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "518ad4f4360d60750a5996657174a916531f9d0560425c6222ec87e912cae3ce",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 13,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "71b258b176fd045a9e1d1dbc2111724501710df63a55ab25ec977e74aadeac61",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 13,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e6a129168c91e89778659aa8fb99f27dcfde65e7157f196a8451583a9cacfd4a",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 29,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "1689a57f6e01ec5d4a065ce4dda811a9c016f777654c0b436903a617afbc3337",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 30,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "65b7200d737ce8dd3f3784afb06ce000d199080f60d2a13d9931de32217c7c38",
+                "terms": []
+              }
             ],
             "ticker": "XOM",
             "weight": 0.1,
             "weight_source": "deterministic_conviction_allocator.v2",
-            "why_now": "Sector cycle, breadth, relative strength, and ticker trend agree independently of the suspect low-confidence regime label; enter only without chasing the event-driven opening reaction."
+            "why_now": {
+              "iso_dates": [],
+              "length": 184,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "96af8884f53ca93bd150629d8c780566eadf2deb1b705785a232244a9fe02471",
+              "terms": []
+            }
           }
         ],
         "lesson_application_ids": [
@@ -304,7 +1099,14 @@
         "lesson_presentation_id": "presentation.v1.398298dfeedbf2d7f4489ce7",
         "lesson_trace_cohort": "portfolio_v2_lesson_trace",
         "lesson_trace_status": "accepted_queued",
-        "liquidity_notes": "Do not buy an opening gap into the macro-event cluster. Stage entries after the initial reaction and avoid chasing XOM above roughly $161, COP above $128, or CVX above $199. Preserve cash if price moves beyond those entry zones; the allocator retains execution authority.",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 271,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6c0791e117d59f1761fc4011d9f913742cdf9bba0977437aad9f94defe6f9a47",
+          "terms": []
+        },
         "model": "gpt-5.6-sol",
         "packet_id": "c18f3aa39025ac92",
         "requested_exit_decisions": [],
@@ -312,16 +1114,81 @@
         "run_id": null,
         "schema": "mastermind.target_book.v2",
         "skipped_unpriceable": [],
-        "sold_note": "No trims or full exits. AAPL remains an explicit HOLD after its recent partial trim; exit_decisions is intentionally empty.",
+        "sold_note": {
+          "iso_dates": [],
+          "length": 123,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "09d56fdc3e87475672be3a409657b55c773bf80e1e58bec23b6842f79d3a042b",
+          "terms": []
+        },
         "source_provenance": [
-          "mcp__desk__get_my_book typed state",
-          "2026-08-12 in-house market packet",
-          "in-house Prophet board",
-          "in-house Sector Central",
-          "in-house fundamentals/accounting packets",
-          "in-house Golden Oracle",
-          "in-house multi-timeframe technical packets",
-          "read-only delegated research artifact, independently checked against typed book state"
+          {
+            "iso_dates": [],
+            "length": 34,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b78f0f71796e5f3329e18ddf21c6de77b84552a6fe97e1e38353ac3c4b7fb994",
+            "terms": []
+          },
+          {
+            "iso_dates": [
+              "2026-08-12"
+            ],
+            "length": 33,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2af851576607a11f810055251652bfea087089e240c6a8578884b2b159921997",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 22,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9334d09c2fbbf76771db92c176f873ec542114b739d1d8e864f523e9a55c9f32",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 23,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ced644101d6f364726a83c02a127340a8680eec6659c150a7debe3a2aed9f6ef",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 40,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "6fd4ccd9a27408bd071734ef1c37287ea417102cde0a008bfb2c5c00cedb526e",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 22,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7ad19b627062738fb6fe22e0e1d5aa84865d630a679635abec027722846c49b4",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 42,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7ae07a0ae78ecb1d85e312047f708a1371e19a28122ac1149169e3b20614065d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 85,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "00723b95828c60a83f6e6f2c5c6fcc308b8de4cd3932f05a1977da3ffa11a567",
+            "terms": []
+          }
         ],
         "submission_audit": {
           "blocked_actions": [],
@@ -381,7 +1248,14 @@
           },
           "unallocated_adds": []
         },
-        "summary": "Retain the small AAPL position and rotate selectively into confirmed Energy leadership through XOM, COP, and CVX. This is a caution—not crash—book: the low-confidence, transitioning macro label is not sizing authority, while XLE cycle ENTRY, sector breadth/relative strength, and validated risk-on price evidence independently support the additions. Advisory gross is 51.85% and cash 48.15%; the deterministic allocator owns final sizing and execution.",
+        "summary": {
+          "iso_dates": [],
+          "length": 452,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "7aebf78e5995427f5bf86f8e0d94a25705596df9402b4f8893d512b076a98f2e",
+          "terms": []
+        },
         "target_status": "queued",
         "tools_used": [
           "get_my_book",
@@ -396,58 +1270,220 @@
         "action_requested": "add",
         "conviction": "medium",
         "evidence": [
-          "technical_lab: entry verdict clean/buyable, entry_score 60, MACD+ on D/3D/W/M, golden cross, OBV up, CMF +0.224, ADX 20.3 rising",
-          "ladder FRESH BUY / BUY ZONE, buy_zone 156.4-159.8, chase_above 161.1, cycle low 137.46 ~22d ago",
-          "regime cycle engine favors XLE entry; market packet: energy strongest sector 21d RS",
-          "options GEX: gamma DRIFT, gravity up, call wall 160, put wall 145, stability 94%"
+          {
+            "iso_dates": [],
+            "length": 128,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7e6b02fbcade0157a698843fe404944943037f38f415ba3fd4ea3bcff4c02a7c",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 95,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e85bda8d89ead76b96aa4653cef56d8ba3e2fdda0c1e18a848db240ac67d86e5",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2083763786c46c031777e4bf372b0af626687ac55ef7fe54825470382a877101",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 80,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "68b589440a83412f22ad05967f8c54ab19a42860b24eaf10a95717c168855e84",
+            "terms": []
+          }
         ],
-        "exit_plan": "Trim/exit on a weekly MACD roll-negative or a close below the 153 trailing level; hard invalidation on a close below 137.5. Reassess RS-leadership by 2026-09-15.",
-        "expected_horizon": "3-6 months",
-        "falsifier": "A daily close below the 137.5 cycle invalidation, OR XOM's 21-day relative return vs SPY falls below -5% by 2026-09-15 (energy loses RS leadership), OR weekly MACD rolls negative.",
+        "exit_plan": {
+          "iso_dates": [
+            "2026-09-15"
+          ],
+          "length": 161,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "a841ccdc69425a861c16575defd4e84b4490eb2c555041b3f196c8d69c57315a",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 10,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "d4d2b0c82d44e90ae9dc8f787a6950469e1d227a5c4a123ed3a0db035a9f4ebb",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [
+            "2026-09-15"
+          ],
+          "length": 179,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6c88701f8ebf158ff98bdd72073ff06d70982fdcf3e6aad3f331ba0ce7cb122b",
+          "terms": []
+        },
         "holding_mark_source": "live_quote",
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.14,
-        "rationale": "Own XOM as a confirmed stock-specific energy leader, not an ETF substitute. Multi-timeframe MACD is positive (daily/3-day/weekly/monthly), it holds a golden cross above rising 50d and 200d averages, OBV slope is up and CMF is +0.22, ADX is rising with DI+ over DI-, and the entry ladder reads FRESH BUY / BUY ZONE off a fresh cycle low (137.46, ~22 days ago). Energy is one of the cycle-engine's favored entry sectors, so a second plane agrees with the label per Charter P1. Contracting liquidity and a bubble-unwind caution keep the add measured rather than aggressive.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 570,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fa435b9d69f103d1d85b96901f2588fa8f21ae495bb2c3e01bb5d5e96cd369bf",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__desk__get_technical_lab:XOM",
           "mcp__desk__get_market_packet",
-          "regime cycle-favored sectors"
+          {
+            "iso_dates": [],
+            "length": 28,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "77b1cd9c1d770918ce7ff14b67612faa7f8f5323a797d9f9a36cdac2f8b30fc8",
+            "terms": []
+          }
         ],
         "ticker": "XOM",
         "weight": 0.100178,
         "weight_source": "deterministic_conviction_allocator.v2",
-        "why_now": "Ladder is in the active BUY ZONE (spot ~159.8, below the 161.1 chase line) with a confirmed cycle-low base and clean multi-timeframe momentum; it is the single confirmed leader among today's candidates while the rest are pre-trigger or gate-blocked."
+        "why_now": {
+          "iso_dates": [],
+          "length": 249,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "ed08a83383d7c17aaa00df5561caa0606b768d330329c7b4cd0710a6331fb4b3",
+          "terms": []
+        }
       },
       "case_holding": {
         "action_effective": "add",
         "action_requested": "add",
         "conviction": "medium",
         "evidence": [
-          "technical_lab: entry verdict clean/buyable, entry_score 60, MACD+ on D/3D/W/M, golden cross, OBV up, CMF +0.224, ADX 20.3 rising",
-          "ladder FRESH BUY / BUY ZONE, buy_zone 156.4-159.8, chase_above 161.1, cycle low 137.46 ~22d ago",
-          "regime cycle engine favors XLE entry; market packet: energy strongest sector 21d RS",
-          "options GEX: gamma DRIFT, gravity up, call wall 160, put wall 145, stability 94%"
+          {
+            "iso_dates": [],
+            "length": 128,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7e6b02fbcade0157a698843fe404944943037f38f415ba3fd4ea3bcff4c02a7c",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 95,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e85bda8d89ead76b96aa4653cef56d8ba3e2fdda0c1e18a848db240ac67d86e5",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 83,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2083763786c46c031777e4bf372b0af626687ac55ef7fe54825470382a877101",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 80,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "68b589440a83412f22ad05967f8c54ab19a42860b24eaf10a95717c168855e84",
+            "terms": []
+          }
         ],
-        "exit_plan": "Trim/exit on a weekly MACD roll-negative or a close below the 153 trailing level; hard invalidation on a close below 137.5. Reassess RS-leadership by 2026-09-15.",
-        "expected_horizon": "3-6 months",
-        "falsifier": "A daily close below the 137.5 cycle invalidation, OR XOM's 21-day relative return vs SPY falls below -5% by 2026-09-15 (energy loses RS leadership), OR weekly MACD rolls negative.",
+        "exit_plan": {
+          "iso_dates": [
+            "2026-09-15"
+          ],
+          "length": 161,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "a841ccdc69425a861c16575defd4e84b4490eb2c555041b3f196c8d69c57315a",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 10,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "d4d2b0c82d44e90ae9dc8f787a6950469e1d227a5c4a123ed3a0db035a9f4ebb",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [
+            "2026-09-15"
+          ],
+          "length": 179,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6c88701f8ebf158ff98bdd72073ff06d70982fdcf3e6aad3f331ba0ce7cb122b",
+          "terms": []
+        },
         "holding_mark_source": "live_quote",
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.14,
-        "rationale": "Own XOM as a confirmed stock-specific energy leader, not an ETF substitute. Multi-timeframe MACD is positive (daily/3-day/weekly/monthly), it holds a golden cross above rising 50d and 200d averages, OBV slope is up and CMF is +0.22, ADX is rising with DI+ over DI-, and the entry ladder reads FRESH BUY / BUY ZONE off a fresh cycle low (137.46, ~22 days ago). Energy is one of the cycle-engine's favored entry sectors, so a second plane agrees with the label per Charter P1. Contracting liquidity and a bubble-unwind caution keep the add measured rather than aggressive.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 570,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fa435b9d69f103d1d85b96901f2588fa8f21ae495bb2c3e01bb5d5e96cd369bf",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__desk__get_technical_lab:XOM",
           "mcp__desk__get_market_packet",
-          "regime cycle-favored sectors"
+          {
+            "iso_dates": [],
+            "length": 28,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "77b1cd9c1d770918ce7ff14b67612faa7f8f5323a797d9f9a36cdac2f8b30fc8",
+            "terms": []
+          }
         ],
         "ticker": "XOM",
         "weight": 0.100178,
         "weight_source": "deterministic_conviction_allocator.v2",
-        "why_now": "Ladder is in the active BUY ZONE (spot ~159.8, below the 161.1 chase line) with a confirmed cycle-low base and clean multi-timeframe momentum; it is the single confirmed leader among today's candidates while the rest are pre-trigger or gate-blocked."
+        "why_now": {
+          "iso_dates": [],
+          "length": 249,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "ed08a83383d7c17aaa00df5561caa0606b768d330329c7b4cd0710a6331fb4b3",
+          "terms": []
+        }
       },
       "case_row_falsifiers": [
-        "XOM closes below 137.5 (cycle invalidation) or weekly MACD rolls negative — reverse the core add.",
-        "Energy loses relative-strength leadership: XOM 21d rel return vs SPY < -5% — thesis for the add is broken."
+        {
+          "iso_dates": [],
+          "length": 97,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "a8425fe48b5abfc9e699c09920a377a8f49338d547d9d6f0b9f5ac4ed044b973",
+          "terms": []
+        },
+        {
+          "iso_dates": [],
+          "length": 106,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "eb5c937099cd5ff7997d7edb220eacafeda90b74cd6b4749315c677664c5eeac",
+          "terms": []
+        }
       ],
       "decision_id": "decision.v1.c48571d8801d522e51120c37",
       "line_index_0based": 39,
@@ -457,16 +1493,49 @@
           "cash": 0.861,
           "cash_rationale_present": true,
           "cash_rationale_required": true,
-          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
         },
         "asof": "2026-08-13",
-        "brain_text": "Book submitted for 2026-08-13.\n\n## Decision summary\n\n**Posture: caution.** Low-confidence (0.107) transitioning Q2-Reflation regime, contracting liquidity, late/mid cycle, hawkish Fed, and an active bubble/blow-off-unwind caution (71/100). Deploy only into confirmed leadership; keep dry powder.\n\n**Actions:**\n- **XOM — ADD** (core). The one name that clears as a confirmed rotation leader: FRESH BUY zone, MACD+ on daily/3-day/weekly/monthly, golden cross above rising 50/200d, OBV↑, CMF +0.22, fresh cycle-low base. Energy is a cycle-engine-favored sector → satisfies Charter P1's second-plane requirement. Added measuredly (not aggressively) since RSI2 is hot at 85.\n- **AAPL — HOLD** (small, 3.9%). Above 200d with weekly/monthly MACD+ and a forming bottom; near-term weak (below 50d, trail breached) so no add, but no hard thesis break to force a sell.\n- **No exits, no trims.**\n\n**Cash ~86% — justified, not reflexive.** Not a crash/degraded-data day, so per the `cash_opportunity_cost` lesson (cited) the bar is a documented rejection record after deeper search, which I built:\n- **MU** — engine hard veto `cycle_blocked`, confluence 0.40, `political_crowd_trap` (−29% off highs, below 50d). REJECT.\n- **GOOG** — insufficient confluence (0.00), lags its own basket at 5th pctile, antitrust/AI-search overhang. REJECT.\n- **META** BROKEN_LAGGARD; **IRDM/RKLB** early-edge but lagging their baskets; **SOFI/SOUN/QUBT** Prophet pre-trigger waits — all pre-confirmation.\n\n**Top falsifiers to watch:** XOM close < 137.5 or weekly MACD roll / energy losing RS (21d rel vs SPY < −5% by 2026-09-15); regime confidence rising into a confirmed contraction; a broad risk-off break. Next catalysts: 20Y auction 8/19, jobless claims 8/20.\n\nThe trusted allocator owns final weights/execution; these are my intent-tagged targets.",
-        "cash_rationale": "Cash is elevated (~80%+ of NAV) by deliberate selection, not reflex, and I am citing the cash_opportunity_cost lesson: this is not a crash or a degraded-data day (tape stable-positive, 15/16 sources fresh), so the bar is a documented record of candidates rejected after deeper search — which I have. Today's corroborated intake names were each run down: MU hit a hard cycle_blocked veto (political_crowd_trap, -29% off highs, below 50dma); GOOG showed insufficient confluence (0.00) and lags its own Comm-Services basket at the 5th percentile with an antitrust/AI-search overhang; META reads BROKEN_LAGGARD; IRDM/RKLB are early-edge divergences still lagging their baskets; SOFI/SOUN/QUBT are Prophet pre-trigger waits. Only XOM cleared as a confirmed leader, and I am deploying incrementally into it. With a low-confidence transitioning regime, contracting liquidity, and an active bubble-unwind caution, holding dry powder for confirmed setups is the correct risk-adjusted stance rather than forcing capital into pre-confirmation names.",
+        "brain_text": {
+          "iso_dates": [
+            "2026-08-13",
+            "2026-09-15"
+          ],
+          "length": 1820,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "a12642417d0618d208c86edbe288fad54aed18097883f0ac8a4099c273a42803",
+          "terms": []
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 1038,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "b767fe7ae67a472612b2e6680419bce761e866980eec6424e119bf015cc83758",
+          "terms": []
+        },
         "cost_usd": 2.149849,
         "decision_effective": true,
         "decision_id": "decision.v1.c48571d8801d522e51120c37",
         "decision_memo": {
-          "alternatives": "Considered a starter unit in MU (Stage-2 accumulation, alt-data 89) — rejected because the engine hard-blocks it (cycle_blocked) and the divergence is a political_crowd_trap into an extended/downtrending name. Considered GOOG on the positive divergence — rejected on zero confluence and basket-laggard/value-trap profile. Considered raising energy exposure via a broader add vs a single-name add — chose the measured single-name XOM add given contracting liquidity.",
+          "alternatives": {
+            "iso_dates": [],
+            "length": 465,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "8ee9df5d1f5ec4914ffb8feb3c36bfff79862f9f3901f5a6649a72ef090ebc89",
+            "terms": [
+              "starter"
+            ]
+          },
           "candidate_funnel": {
             "deep_dived": [
               "MU",
@@ -492,29 +1561,146 @@
             ],
             "universe": 396
           },
-          "changes": "XOM HOLD->ADD (deploy into confirmed leader). AAPL unchanged (HOLD). No new names added; no exits.",
-          "context_gaps": "GOOG narrative-analyst subagent could not reach live per-ticker packets and worked partly from inference; however my own evaluate_gate:GOOG call independently confirmed insufficient confluence / hold, so the reject stands on engine evidence. 13F flow data is a lagged snapshot (as of 2026-03-31) — positioning context only.",
-          "delegation_summary": "Two narrative-analyst (Sonnet) subagents ran independent MU and GOOG finalist deep-dives; I ran the engine gates and technical-lab reads myself and synthesized. MU verdict WAIT/PASS (macro-hostile, pre-confirmation); GOOG verdict WAIT (contested divergence). Both corroborate the engine hard-blocks.",
+          "changes": {
+            "iso_dates": [],
+            "length": 98,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "af0ce5fa346079023de9435368beeb7c5c4d005905e4833aae7214cc5f0fb7c8",
+            "terms": []
+          },
+          "context_gaps": {
+            "iso_dates": [
+              "2026-03-31"
+            ],
+            "length": 323,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "3b11020ca3ce4fa327205c2c79b5fde988a317e08b796092895835ef09e27d53",
+            "terms": []
+          },
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 299,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "2f2f5027a7ffb31e7e6062c7f055330adef9f4a1a643aa8ce5e29a6de1d63a5a",
+            "terms": []
+          },
           "lessons_applied": [
             "lesson.v1.US_ONLY.cash_opportunity_cost"
           ],
-          "market_frame": "Q2 Reflation label but confidence only 0.107 and TRANSITIONING; liquidity contracting; cycle late/mid; Fed hawkish. Validated planes read risk-on (drawdown risk low 16/100) yet the risk radar flags a bubble/blow-off-unwind caution (71/100) and hidden-fragility/complacency alerts. Cycle engine favors entry in XLB/XLC/XLE/XLF/XLI/XLP/XLU/XLV/XLY. Net: deploy only into confirmed leadership with a second plane agreeing (Charter P1); keep dry powder.",
+          "market_frame": {
+            "iso_dates": [],
+            "length": 449,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "3b9b89bd19eca712e82e1b4f6e3a6881ae7d626278da5218b6ff515cae4d7aac",
+            "terms": []
+          },
           "rejected": {
-            "GOOG": "evaluate_gate insufficient confluence 0.00 (need >0.30 w/ leadership+trend), size_authority hold; XLC RS 5th pctile below 200d; lags own basket; antitrust + AI-search overhang = contested divergence / value-trap risk.",
-            "IRDM": "early-edge divergence but lags Space Economy basket (7th pct of members); unproven; pre-trigger.",
-            "META": "radar BROKEN_LAGGARD (edge 8); failing structure despite news surge; pass.",
-            "MU": "evaluate_gate hard veto cycle_blocked, size_authority blocked, confluence 0.40; political_crowd_trap divergence; -29% off 52w high, below 50dma; pre-confirmation.",
-            "QUBT": "Prophet pre_trigger wait (invalidation 6.44); speculative, not triggered.",
-            "RKLB": "early-edge divergence but lags Space basket (14th pct); pre-trigger.",
-            "SOFI": "Prophet pre_trigger wait (entry 18.03, invalidation 14.7); not triggered.",
-            "SOUN": "Prophet pre_trigger wait; not triggered."
+            "GOOG": {
+              "iso_dates": [],
+              "length": 217,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "12fba0cc423992c39ccbbdb6c9d988ebd095471019c8af1a628b9bc9bc32e213",
+              "terms": []
+            },
+            "IRDM": {
+              "iso_dates": [],
+              "length": 96,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "e102e730c8ca8104be101d4be9a986fd26629aabf8e287c55b5ab6ce4bc9c961",
+              "terms": []
+            },
+            "META": {
+              "iso_dates": [],
+              "length": 74,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "07905c1ebd1d59999e70434f01795adfdb45762b941ccf9be14f6c83279ae3d8",
+              "terms": []
+            },
+            "MU": {
+              "iso_dates": [],
+              "length": 162,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "1bc24fedb51ee8adb00a69e6c1cc79d69165d6c91343345dfe6778c7a0d1feb1",
+              "terms": []
+            },
+            "QUBT": {
+              "iso_dates": [],
+              "length": 73,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "7f9910c29bcc816d21b5637318c840159e58a599beaf33e3f57e7f412d1c9ff4",
+              "terms": []
+            },
+            "RKLB": {
+              "iso_dates": [],
+              "length": 68,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c563a1e31947b517c9b1a037c4c85350b0546a219c565da38837a0be0a93b932",
+              "terms": []
+            },
+            "SOFI": {
+              "iso_dates": [],
+              "length": 73,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "cc1d1ebc7589e74d299a2cff87797c062751043f849995f4cf32b8e7f9b24849",
+              "terms": []
+            },
+            "SOUN": {
+              "iso_dates": [],
+              "length": 40,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "219e4f36c41ebdb8a6a55598a5840ad60333ceee7cbb6afa23b824a0324d11dc",
+              "terms": []
+            }
           },
-          "risk_deliberation": "Posture set to caution. Bubble-unwind caution + contracting liquidity + low regime confidence cap gross and argue against chasing. XOM added near top of buy zone with RSI2 85 (short-term extended) — hence a measured, not aggressive, add and a light trim_intensity flag. Elevated cash is intentional carry for confirmed setups, justified per the cash_opportunity_cost lesson with a full rejection record above.",
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 409,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "91bd2c8ff736893bae2e0e04de1be2580d68adaa2ebe7711fe00580f4c85d92a",
+            "terms": []
+          },
           "selected": {
-            "AAPL": "HOLD — small residual, above 200d with weekly/monthly MACD+, no hard thesis break.",
-            "XOM": "ADD — confirmed energy leader, FRESH BUY zone, multi-TF MACD+, cycle-favored sector (P1 second plane)."
+            "AAPL": {
+              "iso_dates": [],
+              "length": 82,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "87f75db676f283cf1c6b56ac1e1fe64a16f74a64ff98c97f987275d7be34f8ea",
+              "terms": []
+            },
+            "XOM": {
+              "iso_dates": [],
+              "length": 102,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "08a032edbd82f5e1bf893fbbaad07ddda8373dda125220afed12c003ae33c53e",
+              "terms": []
+            }
           },
-          "timing": "Deploying now into XOM because its ladder is in the active BUY ZONE (spot ~159.8 < 161.1 chase line) with a confirmed cycle-low base; waiting on MU/GOOG until the engine gate clears (confluence + leadership/trend confirmation). AAPL add-trigger = daily close reclaiming the 10-day average with the average turning up. Next macro catalysts: 20Y auction 2026-08-19, jobless claims 2026-08-20."
+          "timing": {
+            "iso_dates": [
+              "2026-08-19",
+              "2026-08-20"
+            ],
+            "length": 390,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ae3e9a7643f9e3db112f88eeb7ef564e7e7520633876935c7f2708e7294015e2",
+            "terms": []
+          }
         },
         "effective_holdings": [
           {
@@ -522,49 +1708,221 @@
             "action_requested": "add",
             "conviction": "medium",
             "evidence": [
-              "technical_lab: entry verdict clean/buyable, entry_score 60, MACD+ on D/3D/W/M, golden cross, OBV up, CMF +0.224, ADX 20.3 rising",
-              "ladder FRESH BUY / BUY ZONE, buy_zone 156.4-159.8, chase_above 161.1, cycle low 137.46 ~22d ago",
-              "regime cycle engine favors XLE entry; market packet: energy strongest sector 21d RS",
-              "options GEX: gamma DRIFT, gravity up, call wall 160, put wall 145, stability 94%"
+              {
+                "iso_dates": [],
+                "length": 128,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "7e6b02fbcade0157a698843fe404944943037f38f415ba3fd4ea3bcff4c02a7c",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 95,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e85bda8d89ead76b96aa4653cef56d8ba3e2fdda0c1e18a848db240ac67d86e5",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 83,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2083763786c46c031777e4bf372b0af626687ac55ef7fe54825470382a877101",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 80,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "68b589440a83412f22ad05967f8c54ab19a42860b24eaf10a95717c168855e84",
+                "terms": []
+              }
             ],
-            "exit_plan": "Trim/exit on a weekly MACD roll-negative or a close below the 153 trailing level; hard invalidation on a close below 137.5. Reassess RS-leadership by 2026-09-15.",
-            "expected_horizon": "3-6 months",
-            "falsifier": "A daily close below the 137.5 cycle invalidation, OR XOM's 21-day relative return vs SPY falls below -5% by 2026-09-15 (energy loses RS leadership), OR weekly MACD rolls negative.",
+            "exit_plan": {
+              "iso_dates": [
+                "2026-09-15"
+              ],
+              "length": 161,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a841ccdc69425a861c16575defd4e84b4490eb2c555041b3f196c8d69c57315a",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 10,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "d4d2b0c82d44e90ae9dc8f787a6950469e1d227a5c4a123ed3a0db035a9f4ebb",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [
+                "2026-09-15"
+              ],
+              "length": 179,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6c88701f8ebf158ff98bdd72073ff06d70982fdcf3e6aad3f331ba0ce7cb122b",
+              "terms": []
+            },
             "holding_mark_source": "live_quote",
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.14,
-            "rationale": "Own XOM as a confirmed stock-specific energy leader, not an ETF substitute. Multi-timeframe MACD is positive (daily/3-day/weekly/monthly), it holds a golden cross above rising 50d and 200d averages, OBV slope is up and CMF is +0.22, ADX is rising with DI+ over DI-, and the entry ladder reads FRESH BUY / BUY ZONE off a fresh cycle low (137.46, ~22 days ago). Energy is one of the cycle-engine's favored entry sectors, so a second plane agrees with the label per Charter P1. Contracting liquidity and a bubble-unwind caution keep the add measured rather than aggressive.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 570,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "fa435b9d69f103d1d85b96901f2588fa8f21ae495bb2c3e01bb5d5e96cd369bf",
+              "terms": []
+            },
             "source_provenance": [
               "mcp__desk__get_technical_lab:XOM",
               "mcp__desk__get_market_packet",
-              "regime cycle-favored sectors"
+              {
+                "iso_dates": [],
+                "length": 28,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "77b1cd9c1d770918ce7ff14b67612faa7f8f5323a797d9f9a36cdac2f8b30fc8",
+                "terms": []
+              }
             ],
             "ticker": "XOM",
             "weight": 0.100178,
             "weight_source": "deterministic_conviction_allocator.v2",
-            "why_now": "Ladder is in the active BUY ZONE (spot ~159.8, below the 161.1 chase line) with a confirmed cycle-low base and clean multi-timeframe momentum; it is the single confirmed leader among today's candidates while the rest are pre-trigger or gate-blocked."
+            "why_now": {
+              "iso_dates": [],
+              "length": 249,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ed08a83383d7c17aaa00df5561caa0606b768d330329c7b4cd0710a6331fb4b3",
+              "terms": []
+            }
           }
         ],
         "error": null,
         "evidence_planes": [
-          "macro regime read (data/regime/latest.json): Q2 Reflation, confidence 0.107, transitioning, liquidity contracting, cycle late/mid",
-          "cycle engine favored-entry sectors (XLE among them)",
-          "sector rotation / Sector Central: energy RS leadership, XLV #1 RS",
-          "intake candidate queue with cross-engine provenance (radar / alt-data / briefing / prophet)",
-          "engine size-gate (evaluate_gate) hard vetoes and confluence for MU and GOOG",
-          "technical_lab multi-timeframe MACD / ladder / entry discipline for XOM and AAPL",
-          "options GEX / flow structure (display-tier context)",
-          "risk radar: bubble/blow-off-unwind caution 71/100; liquidity_quality contracting"
+          {
+            "iso_dates": [],
+            "length": 129,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "3207518b2856bf5a40ce39f374f3654cef02e40790b964a1c0ae89a497986352",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 51,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1d3f7d1417b56975a0e52dbbcef766e0f786f860e0c2bb60149e72054e2d71a3",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 65,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "1c60cdaea49b1d9cad84909eae0fab60b839fec7fa2b9fa592fadedd3330f626",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 91,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "c50864512597eddbccb888591ca39585dc470dcdbd5b333afb55d2a7ec653c1e",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 75,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "e01f18bd690cc722a56c2bb74b1b08ca6056fbe410933dcd6fe9177a7f53e1c9",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 79,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "674613949e76d002caba76912be30f519adf2fac3eb0bacbee02a1717f80ba0d",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 51,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "65f270c641c4f9c3be842ff1e26935f344c2c3b17440cba3ed2c3a622cea3b32",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 80,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "ef33d50143eca0c5ced10b260b5144ed08114b2684e4842fb8eecc27d89a629d",
+            "terms": []
+          }
         ],
         "executed": [],
         "exit_decisions": [],
-        "expected_failure_mode": "The most likely way this book loses money: a low-confidence, transitioning regime with contracting liquidity resolves risk-off (the bubble-unwind caution flag escalates), and energy — a late-cycle cyclical — rolls over with the tape, so the XOM add gives back gains and the residual AAPL position breaks its bottoming attempt. Secondary: XOM was added near the top of its buy zone with RSI2 at 85, so a short-term mean-reversion pullback could pressure the entry before the medium-term thesis plays out.",
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 503,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "a07f1e3adc314e89277c797e29184c1b52fbdc2205beaee08d0c9c9291dfe085",
+          "terms": []
+        },
         "falsifiers": [
-          "XOM closes below 137.5 (cycle invalidation) or weekly MACD rolls negative — reverse the core add.",
-          "Energy loses relative-strength leadership: XOM 21d rel return vs SPY < -5% — thesis for the add is broken.",
-          "Regime label confidence rises above ~0.4 into a confirmed Contraction/late-cycle read with liquidity still contracting — shift to defensive and cut cyclicals.",
-          "AAPL weekly close below the 200-day (~279) or weekly MACD negative — exit the residual hold.",
-          "A confirmed risk-off break (SPX out of the volatility hole, VIX regime shift, bubble-unwind flag escalates from caution to active) — raise cash further and stand down on adds."
+          {
+            "iso_dates": [],
+            "length": 97,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "a8425fe48b5abfc9e699c09920a377a8f49338d547d9d6f0b9f5ac4ed044b973",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 106,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "eb5c937099cd5ff7997d7edb220eacafeda90b74cd6b4749315c677664c5eeac",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 158,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "5e63a838eb58063da4d1bd6f6cd88afeb13d081b284b903fea6a8fc4c1ce797a",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 92,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "64b5fdd4f5376b27e79d9d3fd6d4817522fb76d1f5f6f097b7b49ddefaf1c0a2",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 175,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7b0126e5515964e5611b4128168b4b049cdf8fa41841be957c4ce506b2014f56",
+            "terms": []
+          }
         ],
         "holdings": [
           {
@@ -572,27 +1930,101 @@
             "action_requested": "add",
             "conviction": "medium",
             "evidence": [
-              "technical_lab: entry verdict clean/buyable, entry_score 60, MACD+ on D/3D/W/M, golden cross, OBV up, CMF +0.224, ADX 20.3 rising",
-              "ladder FRESH BUY / BUY ZONE, buy_zone 156.4-159.8, chase_above 161.1, cycle low 137.46 ~22d ago",
-              "regime cycle engine favors XLE entry; market packet: energy strongest sector 21d RS",
-              "options GEX: gamma DRIFT, gravity up, call wall 160, put wall 145, stability 94%"
+              {
+                "iso_dates": [],
+                "length": 128,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "7e6b02fbcade0157a698843fe404944943037f38f415ba3fd4ea3bcff4c02a7c",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 95,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "e85bda8d89ead76b96aa4653cef56d8ba3e2fdda0c1e18a848db240ac67d86e5",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 83,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2083763786c46c031777e4bf372b0af626687ac55ef7fe54825470382a877101",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 80,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "68b589440a83412f22ad05967f8c54ab19a42860b24eaf10a95717c168855e84",
+                "terms": []
+              }
             ],
-            "exit_plan": "Trim/exit on a weekly MACD roll-negative or a close below the 153 trailing level; hard invalidation on a close below 137.5. Reassess RS-leadership by 2026-09-15.",
-            "expected_horizon": "3-6 months",
-            "falsifier": "A daily close below the 137.5 cycle invalidation, OR XOM's 21-day relative return vs SPY falls below -5% by 2026-09-15 (energy loses RS leadership), OR weekly MACD rolls negative.",
+            "exit_plan": {
+              "iso_dates": [
+                "2026-09-15"
+              ],
+              "length": 161,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a841ccdc69425a861c16575defd4e84b4490eb2c555041b3f196c8d69c57315a",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 10,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "d4d2b0c82d44e90ae9dc8f787a6950469e1d227a5c4a123ed3a0db035a9f4ebb",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [
+                "2026-09-15"
+              ],
+              "length": 179,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6c88701f8ebf158ff98bdd72073ff06d70982fdcf3e6aad3f331ba0ce7cb122b",
+              "terms": []
+            },
             "holding_mark_source": "live_quote",
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.14,
-            "rationale": "Own XOM as a confirmed stock-specific energy leader, not an ETF substitute. Multi-timeframe MACD is positive (daily/3-day/weekly/monthly), it holds a golden cross above rising 50d and 200d averages, OBV slope is up and CMF is +0.22, ADX is rising with DI+ over DI-, and the entry ladder reads FRESH BUY / BUY ZONE off a fresh cycle low (137.46, ~22 days ago). Energy is one of the cycle-engine's favored entry sectors, so a second plane agrees with the label per Charter P1. Contracting liquidity and a bubble-unwind caution keep the add measured rather than aggressive.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 570,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "fa435b9d69f103d1d85b96901f2588fa8f21ae495bb2c3e01bb5d5e96cd369bf",
+              "terms": []
+            },
             "source_provenance": [
               "mcp__desk__get_technical_lab:XOM",
               "mcp__desk__get_market_packet",
-              "regime cycle-favored sectors"
+              {
+                "iso_dates": [],
+                "length": 28,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "77b1cd9c1d770918ce7ff14b67612faa7f8f5323a797d9f9a36cdac2f8b30fc8",
+                "terms": []
+              }
             ],
             "ticker": "XOM",
             "weight": 0.100178,
             "weight_source": "deterministic_conviction_allocator.v2",
-            "why_now": "Ladder is in the active BUY ZONE (spot ~159.8, below the 161.1 chase line) with a confirmed cycle-low base and clean multi-timeframe momentum; it is the single confirmed leader among today's candidates while the rest are pre-trigger or gate-blocked."
+            "why_now": {
+              "iso_dates": [],
+              "length": 249,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "ed08a83383d7c17aaa00df5561caa0606b768d330329c7b4cd0710a6331fb4b3",
+              "terms": []
+            }
           }
         ],
         "lesson_application_ids": [
@@ -604,7 +2036,14 @@
         "lesson_presentation_id": "presentation.v1.d2ef9f2a960eb4278afffc2a",
         "lesson_trace_cohort": "portfolio_v2_lesson_trace",
         "lesson_trace_status": "accepted_executed",
-        "liquidity_notes": "All names are large, highly liquid US common stocks (XOM mega-cap energy, AAPL mega-cap tech). No liquidity constraint on entry or exit. XOM options structure shows a call wall at 160 and put wall at 145 with high gamma stability (94%). No ETFs held (no legacy-migration exposure).",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 281,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "fe964b5a063c5ea05ab996e1aba246f812f579fadeaa481b46f9d9ee37ca7476",
+          "terms": []
+        },
         "model": "opus",
         "packet_id": "486abed70ded7deb",
         "requested_exit_decisions": [],
@@ -616,7 +2055,14 @@
         "settlement_receipt_sha256": "4a1091efe04a71fa70c1b1e94927da81c5252501bb1e31720df2070fd4f2de68",
         "settlement_transaction_id": "74cab53e5650d928f0b1485a018c4211311939825f581783a6a5cf7e8f2585f3",
         "skipped_unpriceable": [],
-        "sold_note": "No exits or trims this session. AAPL held (small, structurally intact); XOM added into. No positions sold.",
+        "sold_note": {
+          "iso_dates": [],
+          "length": 106,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "04a951929bca7e4c7657ad30cce90fd0f6e25188c482285eadb5ece66c4dd0d1",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__desk__get_my_book",
           "mcp__desk__get_market_packet",
@@ -626,7 +2072,14 @@
           "mcp__bot__evaluate_gate:GOOG",
           "mcp__desk__get_technical_lab:XOM",
           "mcp__desk__get_technical_lab:AAPL",
-          "narrative-analyst subagents: MU, GOOG"
+          {
+            "iso_dates": [],
+            "length": 37,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7753974f99c7df1706ca25d47c026f46fa9b6d0ac03b1260df58a719ac52d5aa",
+            "terms": []
+          }
         ],
         "submission_audit": {
           "blocked_actions": [],
@@ -675,7 +2128,14 @@
           "unallocated_adds": []
         },
         "submission_sha256": "923e2e7255e4b196040317f3c3d7744f45908b0f0e42429ee50f068476be09ce",
-        "summary": "Cautious, confirmation-driven book. Two common-stock holds. Core: ADD to XOM — the only intake/held name that clears as a confirmed rotation leader (FRESH BUY zone, multi-timeframe MACD+, golden cross, rising OBV/CMF, energy is a cycle-favored sector so Charter P1's second plane agrees). HOLD a small AAPL position (above 200d, weekly/monthly MACD+; short-term weak but no hard thesis break). Cash stays elevated by choice, not reflex: every corroborated candidate from today's intake queue (MU, GOOG, META, IRDM/RKLB, SOFI/SOUN/QUBT) either failed the engine gate on a hard veto / insufficient confluence, or is a Prophet pre-trigger wait. Regime is low-confidence Q2 Reflation, transitioning, liquidity contracting, late/mid cycle, Fed hawkish, with a bubble/blow-off-unwind caution flag — so I deploy only into confirmed leadership and keep dry powder.",
+        "summary": {
+          "iso_dates": [],
+          "length": 856,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "cdac620a5de65b583a2665e833d8b6bb219e24da2807ddc635addf77fd81884b",
+          "terms": []
+        },
         "target_sha256": "df2dd23ade11107c75d005cce4cb313978e772929c69fb57a8970de00ced2093",
         "target_status": "executed",
         "tools_used": [
@@ -702,21 +2162,98 @@
         "action_requested": "add",
         "conviction": "high",
         "evidence": [
-          "evaluate_gate: passed, confluence +1.00, size_authority up, vetoes none",
-          "decision_matrix: bull 7 / bear 0, leadership_ok true, confirmed_uptrend true",
-          "trend lens: above50 & above200, RSI 65, +14.2% vs 200dma, off 52w high -6.2%",
-          "sector_rs: Energy/XLE rank 15, 71st pctile, above 200d trend",
-          "narrative: energy_complex rank 14/49 leader, 5d rel +3.6%",
-          "options: long gamma, call_wall 170; options_flow +$12M net premium, 13 fresh contracts",
-          "cycle engine favors XLE entry (second plane per Charter P1)"
+          {
+            "iso_dates": [],
+            "length": 71,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "eb0b76a47a73a621ba19aa3897311f6fc30cb306e336369d7422f14e8287ace1",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 76,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "dfab30914bb9230f6cdd8fe0c6b94e484a3b0c02768f99ea5002e8583fffbaf9",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 76,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "94f122138f7b602ae15477ee9c1705dc6229c8e2d9532b0f897ee11e870c495b",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "0c18427cf933868e94e16c78e1d5e1cf6e7e93ebcb657f1287ad5466de462b90",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 57,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7f16d4ebb21ea9dcb42c2385b25df492e6c9067f9b0e0c7234558a8726887ff0",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 86,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "629927a693c70d7bc689749625734038af7b3f51c21ced11f87485bdfe482df8",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 59,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "48602839f60224d6823a664e9e19cee7dc55b7ef634178ec30903bd40fa190cd",
+            "terms": []
+          }
         ],
-        "exit_plan": "Trail beneath the rising 50dma; 21-day time-stop review if no follow-through; exit on a 50dma close-break or loss of theme leadership; consider a partial trim into the $170 call wall on an extension.",
-        "expected_horizon": "Medium — weeks to a few months, riding the energy rotation leg",
-        "falsifier": "XOM closes below its rising 50dma (~$147) with weekly MACD rolling negative, OR energy_complex drops out of theme leadership (rank worse than ~25/49), OR rel-return vs SPY < -5% over 60d — any of these breaks the confirmed-leader thesis.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 199,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "b599c7bd5fce8f2f108540104694c45555362a455d8fd6348bd8df4f3b3534a9",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 62,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "e432da40718459009915a231fde3818ef0c33ca88c70e298eb82ed8f40bf64ab",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 237,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "4df0f740b99b923f92e90970cdc5fa5ad9ab66197845798736de5ec4b336ebf5",
+          "terms": []
+        },
         "holding_mark_source": "live_quote",
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.16,
-        "rationale": "XOM is a genuinely confirmed stock-specific energy leader, not an ETF proxy. The preliminary gate clears at confluence +1.00 with size_authority 'up' and zero hard vetoes, and the full decision matrix reads 7 bull / 0 bear scored lenses: confirmed uptrend (above rising 50d and 200d, RSI 65, +14.2% vs 200dma, not parabolic), Energy (XLE) sector RS rank 15 / 71st pctile above its 200d trend, energy_complex theme a leader (+3.6% 5d rel, +2.4% 20d rel), long-gamma options with a $170 call wall, and a rate/inflation tailwind. The cycle engine independently favors XLE for entry, so a second plane agrees with the risk-on label per Charter P1. Contracting liquidity and the bubble-unwind caution argue for a measured add sized by the allocator, not an aggressive one.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 767,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "47414b02e5bc3055979bfe0b69e1a8e4486b87164bbc1f64a86554cb12a8b5a3",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__bot__evaluate_gate",
           "mcp__bot__get_decision_matrix",
@@ -726,28 +2263,112 @@
         "ticker": "XOM",
         "weight": 0.15,
         "weight_source": "deterministic_conviction_allocator.v2",
-        "why_now": "Fresh today: gate re-cleared at +1.00 size-up, price confirmed off a cycle low with multi-timeframe MACD positive and a golden cross, and the energy_complex theme is leading rather than rolling over — a confirmed leg, not a forecast."
+        "why_now": {
+          "iso_dates": [],
+          "length": 233,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c2306c982aa3505bebba3ce1370586c6065e16b6f17b66a20e67ccd8b60f3d99",
+          "terms": []
+        }
       },
       "case_holding": {
         "action_effective": "add",
         "action_requested": "add",
         "conviction": "high",
         "evidence": [
-          "evaluate_gate: passed, confluence +1.00, size_authority up, vetoes none",
-          "decision_matrix: bull 7 / bear 0, leadership_ok true, confirmed_uptrend true",
-          "trend lens: above50 & above200, RSI 65, +14.2% vs 200dma, off 52w high -6.2%",
-          "sector_rs: Energy/XLE rank 15, 71st pctile, above 200d trend",
-          "narrative: energy_complex rank 14/49 leader, 5d rel +3.6%",
-          "options: long gamma, call_wall 170; options_flow +$12M net premium, 13 fresh contracts",
-          "cycle engine favors XLE entry (second plane per Charter P1)"
+          {
+            "iso_dates": [],
+            "length": 71,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "eb0b76a47a73a621ba19aa3897311f6fc30cb306e336369d7422f14e8287ace1",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 76,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "dfab30914bb9230f6cdd8fe0c6b94e484a3b0c02768f99ea5002e8583fffbaf9",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 76,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "94f122138f7b602ae15477ee9c1705dc6229c8e2d9532b0f897ee11e870c495b",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 60,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "0c18427cf933868e94e16c78e1d5e1cf6e7e93ebcb657f1287ad5466de462b90",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 57,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "7f16d4ebb21ea9dcb42c2385b25df492e6c9067f9b0e0c7234558a8726887ff0",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 86,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "629927a693c70d7bc689749625734038af7b3f51c21ced11f87485bdfe482df8",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 59,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "48602839f60224d6823a664e9e19cee7dc55b7ef634178ec30903bd40fa190cd",
+            "terms": []
+          }
         ],
-        "exit_plan": "Trail beneath the rising 50dma; 21-day time-stop review if no follow-through; exit on a 50dma close-break or loss of theme leadership; consider a partial trim into the $170 call wall on an extension.",
-        "expected_horizon": "Medium — weeks to a few months, riding the energy rotation leg",
-        "falsifier": "XOM closes below its rising 50dma (~$147) with weekly MACD rolling negative, OR energy_complex drops out of theme leadership (rank worse than ~25/49), OR rel-return vs SPY < -5% over 60d — any of these breaks the confirmed-leader thesis.",
+        "exit_plan": {
+          "iso_dates": [],
+          "length": 199,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "b599c7bd5fce8f2f108540104694c45555362a455d8fd6348bd8df4f3b3534a9",
+          "terms": []
+        },
+        "expected_horizon": {
+          "iso_dates": [],
+          "length": 62,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "e432da40718459009915a231fde3818ef0c33ca88c70e298eb82ed8f40bf64ab",
+          "terms": []
+        },
+        "falsifier": {
+          "iso_dates": [],
+          "length": 237,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "4df0f740b99b923f92e90970cdc5fa5ad9ab66197845798736de5ec4b336ebf5",
+          "terms": []
+        },
         "holding_mark_source": "live_quote",
         "identity_status": "trusted_company_profile.v1",
         "proposed_weight": 0.16,
-        "rationale": "XOM is a genuinely confirmed stock-specific energy leader, not an ETF proxy. The preliminary gate clears at confluence +1.00 with size_authority 'up' and zero hard vetoes, and the full decision matrix reads 7 bull / 0 bear scored lenses: confirmed uptrend (above rising 50d and 200d, RSI 65, +14.2% vs 200dma, not parabolic), Energy (XLE) sector RS rank 15 / 71st pctile above its 200d trend, energy_complex theme a leader (+3.6% 5d rel, +2.4% 20d rel), long-gamma options with a $170 call wall, and a rate/inflation tailwind. The cycle engine independently favors XLE for entry, so a second plane agrees with the risk-on label per Charter P1. Contracting liquidity and the bubble-unwind caution argue for a measured add sized by the allocator, not an aggressive one.",
+        "rationale": {
+          "iso_dates": [],
+          "length": 767,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "47414b02e5bc3055979bfe0b69e1a8e4486b87164bbc1f64a86554cb12a8b5a3",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__bot__evaluate_gate",
           "mcp__bot__get_decision_matrix",
@@ -757,10 +2378,24 @@
         "ticker": "XOM",
         "weight": 0.15,
         "weight_source": "deterministic_conviction_allocator.v2",
-        "why_now": "Fresh today: gate re-cleared at +1.00 size-up, price confirmed off a cycle low with multi-timeframe MACD positive and a golden cross, and the energy_complex theme is leading rather than rolling over — a confirmed leg, not a forecast."
+        "why_now": {
+          "iso_dates": [],
+          "length": 233,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c2306c982aa3505bebba3ce1370586c6065e16b6f17b66a20e67ccd8b60f3d99",
+          "terms": []
+        }
       },
       "case_row_falsifiers": [
-        "XOM loses confirmed-leader status — closes below its 50dma or energy_complex drops out of theme leadership — removing the book's only size-authorized add"
+        {
+          "iso_dates": [],
+          "length": 153,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "9b135b78a511fe8ab112d0e67fa8eb43a65a360537908ab870f4962d9beb03db",
+          "terms": []
+        }
       ],
       "decision_id": "decision.v1.7d572dc4a0fe98f9fa16a92d",
       "line_index_0based": 40,
@@ -770,16 +2405,46 @@
           "cash": 0.8111,
           "cash_rationale_present": true,
           "cash_rationale_required": true,
-          "note": "Low gross is permitted only as deliberate judgment; the allocator never invents marginal names merely to fill a target."
+          "note": {
+            "iso_dates": [],
+            "length": 119,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "349254947ae66a759e0b616cd68b1f45d82c4682b1c1b3b3246d21c4016872f7",
+            "terms": []
+          }
         },
         "asof": "2026-08-14",
-        "brain_text": "Book submitted — 2 holdings, ~19% invested / 81% cash. Summary of tonight's decision:\n\n## Decision for 2026-08-14\n\n**ADD XOM** (high conviction, allocator sized ~gross to 19%) — the *only* name in the entire intake/held/board universe that clears confirmation:\n- Gate **passed**: confluence **+1.00**, size_authority **up**, zero hard vetoes\n- Decision matrix **7 bull / 0 bear** scored lenses — confirmed uptrend (above rising 50d/200d, RSI 65, not parabolic), Energy RS 71st pctile above trend, energy_complex theme *leader* (+3.6% 5d rel), long-gamma options, rate/inflation tailwind\n- Charter P1 satisfied: Energy is a cycle-engine-favored entry, so a second plane agrees with the risk-on read rather than sizing off the low-confidence (0.06) label\n\n**HOLD AAPL** (~3.9%, low conviction) — structurally above the 200d but gate denies add authority (confluence +0.20, mag7 theme rank 45/49). Too small and too intact to churn; no thesis break.\n\n**No sells** — no falsifiers hit. No ETFs held, so no legacy migration.\n\n## Why cash stays high (citing `lesson.v1.US_ONLY.cash_opportunity_cost`)\nI worked the full funnel and rejected every other candidate on real evidence, not neglect:\n- **MSFT, IRDM** — hard `cycle_blocked` vetoes (blow-off-extended)\n- **HOOD** — downtrend below 200d (-38% off highs), confluence +0.11\n- **GOOGL** — confluence +0.14, lagging XLC (RS 5th pctile)\n- **NNE / DKNG / SOUN / QUBT** — pre-trigger Prophet \"waits,\" not confirmations; buy board `gate_go=false`\n\nI was explicit in the memo that this is **not** the strict crash/degraded-data justification the lesson names — data is fresh, tape is risk-on-calm — but the confirmed opportunity set is genuinely one name, and forcing capital into vetoed/downtrending names to cosmetically lower cash would violate confirmation-over-prediction. If more names confirm next session (catalysts: 20Y auction 8/19, jobless claims 8/20), cash comes down then.\n\n**Risk posture: caution.** Biggest risk: the bubble-unwind/contracting-liquidity caution resolves into a broad risk-off that drags XOM on beta despite its clean confirmation.",
-        "cash_rationale": "Cash is high (~84%) and I explicitly cite lesson.v1.US_ONLY.cash_opportunity_cost, which requires a justification plus a record of candidates rejected after deeper search. The deeper-search record: I worked the full intake funnel (ACT: MSFT, HOOD, NNE; WATCH: DKNG, SOUN, QUBT; DIVERGENT: IRDM, GOOGL, AAPL) plus the Prophet board and the single-name buy board. Rejections after gating: MSFT and IRDM carry hard cycle_blocked vetoes (blow-off-extended, 'wait'); HOOD fails confluence (+0.11) and is in an outright downtrend below its 200dma (-38% off highs); GOOGL fails confluence (+0.14) in a lagging XLC (RS 5th pctile); NNE has a negative divergence and only a pre-trigger Prophet wait plan; DKNG/SOUN/QUBT are pre-trigger Prophet waits, not confirmations; the buy board is gate_go=false. I am honest that this is NOT the strict crash/degraded-data justification the lesson names — data is fresh and the tape is risk-on-calm — but the confirmed opportunity set is genuinely one name (XOM, the only gate-clear at size-up), and forcing capital into hard-vetoed or downtrending names to cosmetically lower cash would violate confirmation-over-prediction. I am adding my one confirmed leader at size-up authority (which raises gross); the allocator owns the final weight. If more names confirm on subsequent sessions, cash comes down then.",
+        "brain_text": {
+          "iso_dates": [
+            "2026-08-14"
+          ],
+          "length": 2103,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "5fa9a54e276d5e9cca0f7d759feb13a8fb659c72f77b949688ebf9751ebb246b",
+          "terms": []
+        },
+        "cash_rationale": {
+          "iso_dates": [],
+          "length": 1339,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "ecc78be5ba6f94256d2a8db55b294f2c53fc270c565e175906734329733116d9",
+          "terms": []
+        },
         "cost_usd": 1.2416254999999998,
         "decision_effective": true,
         "decision_id": "decision.v1.7d572dc4a0fe98f9fa16a92d",
         "decision_memo": {
-          "alternatives": "Considered rotating cash into cycle-favored sector leaders via baskets (GDX gold miners rank 1, ARKX space rank 2, ITA defense 'accumulate') but ETFs are prohibited and none surfaced a gate-clearing common-stock proxy today.",
+          "alternatives": {
+            "iso_dates": [],
+            "length": 224,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "4e5f26075e85ddd7ed5beb5e70200ebf2ed4b73f036e278a64c0fd89b4598995",
+            "terms": []
+          },
           "candidate_funnel": {
             "cleared_gate": [
               "XOM"
@@ -794,65 +2459,215 @@
               "NNE"
             ],
             "engines": [
-              "intake queue",
-              "daily briefing",
-              "sector rotation",
-              "prophet board",
-              "single-name buy board"
+              {
+                "iso_dates": [],
+                "length": 12,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "93d43249ff2681c3d060da1a748f9341f55b28037a2d71857693f4ad79304f46",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 14,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "5c7d72ede9f9dff7a07208a6f14eecdb158ca9f6b9678c41042bb8f8d906e7c2",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 15,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2e806ccb72c3d540a1623196a54fff802aba4f4b83a2f75760e966f90129677d",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 13,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "d19ba8e861800c89310815efaee16e29f38cc51ed220352c3672882615a30161",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 21,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "aaed96c15c6692cc9dda6031c449f17739dbd8475138d2bc7761ee5755bec923",
+                "terms": []
+              }
             ],
             "universe_scanned": 362
           },
-          "changes": "Net change vs prior book: XOM HOLD->ADD (confirmation re-cleared at size-up); AAPL unchanged (HOLD).",
+          "changes": {
+            "iso_dates": [],
+            "length": 100,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "778347319d22a1bf0111dcc961da285ad8ccaf48e65a662c6311f0567d8dfe5c",
+            "terms": []
+          },
           "context_gaps": [
-            "XOM 13F flows lens missing (context only)",
-            "AAPL momentum weak (below 50d, daily MACD negative) but position too small to act on",
-            "regime label confidence very low (0.06) — leaned on cycles + sector_rs planes rather than the label"
+            {
+              "iso_dates": [],
+              "length": 41,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "30fe4ef5f23553db083a273f9bb2e9e0c667c0c0e842de8975516155aa57d0f3",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 84,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "6ae473cb36cf41db4fcfc2946b683a51cf0ed97436ce0f6d408fb88ceb353761",
+              "terms": []
+            },
+            {
+              "iso_dates": [],
+              "length": 99,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "a6328d20e94eae8bf35888d3d2b851b22781c8d81d668d63ce784218cae716b2",
+              "terms": []
+            }
           ],
-          "delegation_summary": "Handled inline via typed in-house packets and per-name gates/decision-matrix rather than delegating; every intake finalist was gate-checked before rejection, and no name warranted deeper narrative subagent work once hard vetoes / sub-threshold confluence were established.",
+          "delegation_summary": {
+            "iso_dates": [],
+            "length": 272,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "99b7968411c1baafba5f28d935850c1dd70fdc58c0aec6fd52ba3ad563594f70",
+            "terms": []
+          },
           "lessons_applied": [
             "lesson.v1.US_ONLY.cash_opportunity_cost"
           ],
-          "market_frame": "Q2 Reflation but low-confidence (label 0.06) and TRANSITIONING, growth deteriorating (-0.13), inflation +0.08, liquidity contracting, Fed hawkish. Sector_central reads risk-on-calm (drawdown risk 12/100) yet risk_radar flags a bubble/blow-off-unwind caution (71/100). Net: constructive-but-fragile tape that rewards confirmed single-name leaders over broad risk-taking.",
+          "market_frame": {
+            "iso_dates": [],
+            "length": 369,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "42517aa566356715413a373f8a319494710c4fa1631933709d6d4af52f21bfa5",
+            "terms": []
+          },
           "rejected": [
             {
-              "reason": "hard veto cycle_blocked (blow-off-extended); size_authority blocked despite altdata ACCUMULATE",
+              "reason": {
+                "iso_dates": [],
+                "length": 94,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "8b7e8f1aceb754308a07d6d025c5ee5d47cd938863651c4e4898a9c049bd229d",
+                "terms": []
+              },
               "ticker": "MSFT"
             },
             {
-              "reason": "hard veto cycle_blocked, extended; confluence -0.14; XLC lagging",
+              "reason": {
+                "iso_dates": [],
+                "length": 64,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "bba47dee4a504b1e7d59c20c95f21e46d889f53167e3b401abc970632c703579",
+                "terms": []
+              },
               "ticker": "IRDM"
             },
             {
-              "reason": "confluence +0.11; downtrend below 200dma, -38% off highs; XLF below trend",
+              "reason": {
+                "iso_dates": [],
+                "length": 73,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "35d05f7838210538c9294c87f9cfec0c1684e035dfa83d397a8fa1cc594be886",
+                "terms": []
+              },
               "ticker": "HOOD"
             },
             {
-              "reason": "confluence +0.14 (below +0.30 bar); XLC RS 5th pctile below trend; mag7 theme weak",
+              "reason": {
+                "iso_dates": [],
+                "length": 82,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "7de1470149451c2ee9aa7421f6f7bcc3b75045f287e8aa6e70005b00b5520bd9",
+                "terms": []
+              },
               "ticker": "GOOGL"
             },
             {
-              "reason": "negative divergence; only a pre-trigger Prophet wait plan, not a confirmation",
+              "reason": {
+                "iso_dates": [],
+                "length": 77,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "8fcbbc56ffa83434bc78224fb71133c3d2373b17b9a6e8ad000378c6e5de3e83",
+                "terms": []
+              },
               "ticker": "NNE"
             },
             {
-              "reason": "pre-trigger Prophet wait plans; buy board gate_go=false",
+              "reason": {
+                "iso_dates": [],
+                "length": 55,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "b14982047fe9d63ff6bed3f0f386146b321a3cca7cd4ac5e962331150959782a",
+                "terms": []
+              },
               "ticker": "DKNG/SOUN/QUBT"
             }
           ],
-          "risk_deliberation": "Posture set to caution (not crash): contracting liquidity + bubble-unwind radar + low-confidence transitioning regime argue against gross expansion, but risk-on-calm breadth and XOM's clean confirmation justify one measured add. Concentration risk in a single energy name is acknowledged and bounded by the allocator's sizing plus a 50dma trailing exit.",
+          "risk_deliberation": {
+            "iso_dates": [],
+            "length": 353,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9777c24ef8640ffca745a7b20f01dfc41528d9b1217047239156b17761705d52",
+            "terms": []
+          },
           "selected": [
             {
               "action": "add",
               "ticker": "XOM",
-              "why": "only name clearing gate at confluence +1.00, size_authority up; confirmed energy rotation leader with cycle-engine second plane"
+              "why": {
+                "iso_dates": [],
+                "length": 127,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "17d98ee836c9254900ca74ff3e8dfe57dea2b50708caf1c67ffb55bae62d8392",
+                "terms": []
+              }
             },
             {
               "action": "hold",
               "ticker": "AAPL",
-              "why": "tiny, structurally intact, no add authority, no thesis break"
+              "why": {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "2679fe4be16e60bce8e5d103866dfef3a11bf0d78f066dd3f585482682f2fd9e",
+                "terms": []
+              }
             }
           ],
-          "timing": "No urgency to force adds; next macro catalysts are the 20Y bond auction (2026-08-19) and jobless claims (2026-08-20). Re-scan for fresh confirmations then."
+          "timing": {
+            "iso_dates": [
+              "2026-08-19",
+              "2026-08-20"
+            ],
+            "length": 155,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "a7e0cb4fb797504e2efa1fe5fdde747cf2fbc7bc08d5f257df03119b5d3cabcf",
+            "terms": []
+          }
         },
         "effective_holdings": [
           {
@@ -860,21 +2675,98 @@
             "action_requested": "add",
             "conviction": "high",
             "evidence": [
-              "evaluate_gate: passed, confluence +1.00, size_authority up, vetoes none",
-              "decision_matrix: bull 7 / bear 0, leadership_ok true, confirmed_uptrend true",
-              "trend lens: above50 & above200, RSI 65, +14.2% vs 200dma, off 52w high -6.2%",
-              "sector_rs: Energy/XLE rank 15, 71st pctile, above 200d trend",
-              "narrative: energy_complex rank 14/49 leader, 5d rel +3.6%",
-              "options: long gamma, call_wall 170; options_flow +$12M net premium, 13 fresh contracts",
-              "cycle engine favors XLE entry (second plane per Charter P1)"
+              {
+                "iso_dates": [],
+                "length": 71,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "eb0b76a47a73a621ba19aa3897311f6fc30cb306e336369d7422f14e8287ace1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 76,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "dfab30914bb9230f6cdd8fe0c6b94e484a3b0c02768f99ea5002e8583fffbaf9",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 76,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "94f122138f7b602ae15477ee9c1705dc6229c8e2d9532b0f897ee11e870c495b",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "0c18427cf933868e94e16c78e1d5e1cf6e7e93ebcb657f1287ad5466de462b90",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 57,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "7f16d4ebb21ea9dcb42c2385b25df492e6c9067f9b0e0c7234558a8726887ff0",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 86,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "629927a693c70d7bc689749625734038af7b3f51c21ced11f87485bdfe482df8",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 59,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "48602839f60224d6823a664e9e19cee7dc55b7ef634178ec30903bd40fa190cd",
+                "terms": []
+              }
             ],
-            "exit_plan": "Trail beneath the rising 50dma; 21-day time-stop review if no follow-through; exit on a 50dma close-break or loss of theme leadership; consider a partial trim into the $170 call wall on an extension.",
-            "expected_horizon": "Medium — weeks to a few months, riding the energy rotation leg",
-            "falsifier": "XOM closes below its rising 50dma (~$147) with weekly MACD rolling negative, OR energy_complex drops out of theme leadership (rank worse than ~25/49), OR rel-return vs SPY < -5% over 60d — any of these breaks the confirmed-leader thesis.",
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 199,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b599c7bd5fce8f2f108540104694c45555362a455d8fd6348bd8df4f3b3534a9",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 62,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "e432da40718459009915a231fde3818ef0c33ca88c70e298eb82ed8f40bf64ab",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 237,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "4df0f740b99b923f92e90970cdc5fa5ad9ab66197845798736de5ec4b336ebf5",
+              "terms": []
+            },
             "holding_mark_source": "live_quote",
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.16,
-            "rationale": "XOM is a genuinely confirmed stock-specific energy leader, not an ETF proxy. The preliminary gate clears at confluence +1.00 with size_authority 'up' and zero hard vetoes, and the full decision matrix reads 7 bull / 0 bear scored lenses: confirmed uptrend (above rising 50d and 200d, RSI 65, +14.2% vs 200dma, not parabolic), Energy (XLE) sector RS rank 15 / 71st pctile above its 200d trend, energy_complex theme a leader (+3.6% 5d rel, +2.4% 20d rel), long-gamma options with a $170 call wall, and a rate/inflation tailwind. The cycle engine independently favors XLE for entry, so a second plane agrees with the risk-on label per Charter P1. Contracting liquidity and the bubble-unwind caution argue for a measured add sized by the allocator, not an aggressive one.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 767,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "47414b02e5bc3055979bfe0b69e1a8e4486b87164bbc1f64a86554cb12a8b5a3",
+              "terms": []
+            },
             "source_provenance": [
               "mcp__bot__evaluate_gate",
               "mcp__bot__get_decision_matrix",
@@ -884,18 +2776,74 @@
             "ticker": "XOM",
             "weight": 0.15,
             "weight_source": "deterministic_conviction_allocator.v2",
-            "why_now": "Fresh today: gate re-cleared at +1.00 size-up, price confirmed off a cycle low with multi-timeframe MACD positive and a golden cross, and the energy_complex theme is leading rather than rolling over — a confirmed leg, not a forecast."
+            "why_now": {
+              "iso_dates": [],
+              "length": 233,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c2306c982aa3505bebba3ce1370586c6065e16b6f17b66a20e67ccd8b60f3d99",
+              "terms": []
+            }
           }
         ],
         "error": null,
         "evidence_planes": [
-          "macro regime / macro_context (Q2 Reflation, growth -0.13, liquidity contracting, label conf 0.06)",
-          "sector_central rotation (risk-on calm, XLE cycle-favored)",
-          "per-name decision_matrix lenses",
-          "preliminary size gate (evaluate_gate)",
-          "unified intake candidate queue (ACT/WATCH/DIVERGENT)",
-          "Prophet discovery/management board",
-          "risk_radar / perception layer (bubble-unwind caution)"
+          {
+            "iso_dates": [],
+            "length": 97,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "6b94fba6f65407f19db7648e6b94b6944eb7e0b76d75221e198a9cf2373b3ccf",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 57,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "142e9b4e0f4f4e0dd7a1f143a7036a2c41412368558380e727074ad742840913",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 31,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "cdee75ed6b6a386583927a7fb057f06ad1050e4eba5b113ab4695592b05a6393",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 37,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "f3a3abd1c4f0b499b341878e67ce6e2213b02ee8fcfe9cc9acb7d4685ded65f3",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 52,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "79b48ab594359a3d1e03918ce9ecf3e42ac6e3f20e46a39be3a7d781f4175b45",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 34,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "b28fceefc2854000b73d374292428d36bd2a47b03f39e030711ff396fb2fd9f3",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 53,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "60a9e5b4125f2a5379ec6e6953139f0ae968675eef3c4814e948f7700af59e75",
+            "terms": []
+          }
         ],
         "executed": [
           {
@@ -910,12 +2858,49 @@
           }
         ],
         "exit_decisions": [],
-        "expected_failure_mode": "The contracting-liquidity / bubble-unwind caution resolves into a broad risk-off that drags XOM down on beta despite its clean single-name confirmation, so the one add whipsaws while the ~84% cash earns nothing — a concentrated energy add plus opportunity cost if the tape instead grinds higher without me.",
+        "expected_failure_mode": {
+          "iso_dates": [],
+          "length": 306,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "c52bd95c572b70a9f6193d8db8202c7cc734291ac1c81b2753fbecdca6830f64",
+          "terms": []
+        },
         "falsifiers": [
-          "XOM loses confirmed-leader status — closes below its 50dma or energy_complex drops out of theme leadership — removing the book's only size-authorized add",
-          "Regime flips risk-off: sector_central risk_on drops below ~0.30 or drawdown-risk spikes from the current low (12/100)",
-          "The bubble/blow-off-unwind radar caution (71/100) escalates to high-odds de-risk, forcing a defensive posture",
-          "AAPL breaks its 200dma / 2026-08-03 low, triggering its full-exit falsifier"
+          {
+            "iso_dates": [],
+            "length": 153,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9b135b78a511fe8ab112d0e67fa8eb43a65a360537908ab870f4962d9beb03db",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 117,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "730a288802f2d28c0d347a082cbee9200ffc449e9d78dfc1e674307b70fd039b",
+            "terms": []
+          },
+          {
+            "iso_dates": [],
+            "length": 109,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "9aa11e04d003d031ff55ebbd3c64fada686adbf152667d685d00be54e6452870",
+            "terms": []
+          },
+          {
+            "iso_dates": [
+              "2026-08-03"
+            ],
+            "length": 75,
+            "period_labels": [],
+            "redacted": "pbr.prose_digest.v1",
+            "sha256": "5c1ef39cdbe13058646c2e4bab7e396f50535fd152c80bb6efc17e6c541d93f6",
+            "terms": []
+          }
         ],
         "holdings": [
           {
@@ -923,21 +2908,98 @@
             "action_requested": "add",
             "conviction": "high",
             "evidence": [
-              "evaluate_gate: passed, confluence +1.00, size_authority up, vetoes none",
-              "decision_matrix: bull 7 / bear 0, leadership_ok true, confirmed_uptrend true",
-              "trend lens: above50 & above200, RSI 65, +14.2% vs 200dma, off 52w high -6.2%",
-              "sector_rs: Energy/XLE rank 15, 71st pctile, above 200d trend",
-              "narrative: energy_complex rank 14/49 leader, 5d rel +3.6%",
-              "options: long gamma, call_wall 170; options_flow +$12M net premium, 13 fresh contracts",
-              "cycle engine favors XLE entry (second plane per Charter P1)"
+              {
+                "iso_dates": [],
+                "length": 71,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "eb0b76a47a73a621ba19aa3897311f6fc30cb306e336369d7422f14e8287ace1",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 76,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "dfab30914bb9230f6cdd8fe0c6b94e484a3b0c02768f99ea5002e8583fffbaf9",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 76,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "94f122138f7b602ae15477ee9c1705dc6229c8e2d9532b0f897ee11e870c495b",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 60,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "0c18427cf933868e94e16c78e1d5e1cf6e7e93ebcb657f1287ad5466de462b90",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 57,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "7f16d4ebb21ea9dcb42c2385b25df492e6c9067f9b0e0c7234558a8726887ff0",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 86,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "629927a693c70d7bc689749625734038af7b3f51c21ced11f87485bdfe482df8",
+                "terms": []
+              },
+              {
+                "iso_dates": [],
+                "length": 59,
+                "period_labels": [],
+                "redacted": "pbr.prose_digest.v1",
+                "sha256": "48602839f60224d6823a664e9e19cee7dc55b7ef634178ec30903bd40fa190cd",
+                "terms": []
+              }
             ],
-            "exit_plan": "Trail beneath the rising 50dma; 21-day time-stop review if no follow-through; exit on a 50dma close-break or loss of theme leadership; consider a partial trim into the $170 call wall on an extension.",
-            "expected_horizon": "Medium — weeks to a few months, riding the energy rotation leg",
-            "falsifier": "XOM closes below its rising 50dma (~$147) with weekly MACD rolling negative, OR energy_complex drops out of theme leadership (rank worse than ~25/49), OR rel-return vs SPY < -5% over 60d — any of these breaks the confirmed-leader thesis.",
+            "exit_plan": {
+              "iso_dates": [],
+              "length": 199,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "b599c7bd5fce8f2f108540104694c45555362a455d8fd6348bd8df4f3b3534a9",
+              "terms": []
+            },
+            "expected_horizon": {
+              "iso_dates": [],
+              "length": 62,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "e432da40718459009915a231fde3818ef0c33ca88c70e298eb82ed8f40bf64ab",
+              "terms": []
+            },
+            "falsifier": {
+              "iso_dates": [],
+              "length": 237,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "4df0f740b99b923f92e90970cdc5fa5ad9ab66197845798736de5ec4b336ebf5",
+              "terms": []
+            },
             "holding_mark_source": "live_quote",
             "identity_status": "trusted_company_profile.v1",
             "proposed_weight": 0.16,
-            "rationale": "XOM is a genuinely confirmed stock-specific energy leader, not an ETF proxy. The preliminary gate clears at confluence +1.00 with size_authority 'up' and zero hard vetoes, and the full decision matrix reads 7 bull / 0 bear scored lenses: confirmed uptrend (above rising 50d and 200d, RSI 65, +14.2% vs 200dma, not parabolic), Energy (XLE) sector RS rank 15 / 71st pctile above its 200d trend, energy_complex theme a leader (+3.6% 5d rel, +2.4% 20d rel), long-gamma options with a $170 call wall, and a rate/inflation tailwind. The cycle engine independently favors XLE for entry, so a second plane agrees with the risk-on label per Charter P1. Contracting liquidity and the bubble-unwind caution argue for a measured add sized by the allocator, not an aggressive one.",
+            "rationale": {
+              "iso_dates": [],
+              "length": 767,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "47414b02e5bc3055979bfe0b69e1a8e4486b87164bbc1f64a86554cb12a8b5a3",
+              "terms": []
+            },
             "source_provenance": [
               "mcp__bot__evaluate_gate",
               "mcp__bot__get_decision_matrix",
@@ -947,7 +3009,14 @@
             "ticker": "XOM",
             "weight": 0.15,
             "weight_source": "deterministic_conviction_allocator.v2",
-            "why_now": "Fresh today: gate re-cleared at +1.00 size-up, price confirmed off a cycle low with multi-timeframe MACD positive and a golden cross, and the energy_complex theme is leading rather than rolling over — a confirmed leg, not a forecast."
+            "why_now": {
+              "iso_dates": [],
+              "length": 233,
+              "period_labels": [],
+              "redacted": "pbr.prose_digest.v1",
+              "sha256": "c2306c982aa3505bebba3ce1370586c6065e16b6f17b66a20e67ccd8b60f3d99",
+              "terms": []
+            }
           }
         ],
         "lesson_application_ids": [
@@ -959,7 +3028,14 @@
         "lesson_presentation_id": "presentation.v1.6d2d3ec182c5c6013301aa64",
         "lesson_trace_cohort": "portfolio_v2_lesson_trace",
         "lesson_trace_status": "accepted_executed",
-        "liquidity_notes": "Both holdings are large, liquid US common stocks (XOM mega-cap energy, AAPL mega-cap tech) — no liquidity constraint on sizing or exit. No ETFs held, so no legacy_instrument_migration exit applies this session.",
+        "liquidity_notes": {
+          "iso_dates": [],
+          "length": 210,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "e2482854432f2a94dbf0da9ea1a27d222ef899111ff20878e2965edd6581472d",
+          "terms": []
+        },
         "model": "opus",
         "packet_id": "73a22f2c184108cb",
         "requested_exit_decisions": [],
@@ -973,7 +3049,16 @@
         "settlement_receipt_sha256": "48df7791a186ab87bf38dbb378403cd2d9fce460bfc4670067aaf2204efe7fe4",
         "settlement_transaction_id": "b4685527cd127fcb050afb8f6325dabef03aed144396f2b7ec86d9bfa33d6672",
         "skipped_unpriceable": [],
-        "sold_note": "No sells this session. AAPL and XOM both retained; no thesis breaks or falsifier triggers hit. Prior ETF/defensive exits (XLP, USMV, XLV on 2026-08-12) already cleared the book, leaving only common stock.",
+        "sold_note": {
+          "iso_dates": [
+            "2026-08-12"
+          ],
+          "length": 204,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "389e5ae63f4fd77e4457d295eae92f812861c8145232738e60c64a5d58025090",
+          "terms": []
+        },
         "source_provenance": [
           "mcp__desk__get_my_book",
           "mcp__desk__get_market_packet",
@@ -1031,7 +3116,14 @@
           "unallocated_adds": []
         },
         "submission_sha256": "49f18552c9da82a779441504acda7d55d83b94a608c270b66cec8ba10f5776fa",
-        "summary": "Cautious, confirmation-driven book in a low-confidence (label conf 0.06), TRANSITIONING Reflation/Q2 regime with contracting liquidity, a hawkish Fed, and an active bubble/blow-off-unwind radar caution. Confirmation-over-prediction leaves exactly one name that clears the size gate: ADD XOM — gate passed at confluence +1.00, size_authority \"up\", 7 bull / 0 bear lenses, confirmed uptrend, Energy RS 71st pctile above 200d, energy_complex theme leader (+3.6% 5d rel), rate/inflation tailwind; Energy is a cycle-engine-favored entry so Charter P1's second plane agrees with the risk-on read. HOLD a small (~3.9%) AAPL for optionality — structurally above the 200d but no add authority (gate confluence +0.20, mag7 theme rank 45/49). Everything else the engines surfaced was rejected on hard vetoes or thin confluence, so residual cash is high by necessity, not by neglect.",
+        "summary": {
+          "iso_dates": [],
+          "length": 871,
+          "period_labels": [],
+          "redacted": "pbr.prose_digest.v1",
+          "sha256": "6f4d4c0e60d06c07db640fa489cdbdece8b120299996a5980c97ee87bc5d23bf",
+          "terms": []
+        },
         "target_sha256": "167dbc4bc9dc0def5d27c5b1f1d4b387ed3617c4df3d808d8455c5c3931d6875",
         "target_status": "executed",
         "tools_used": [
@@ -1057,7 +3149,7 @@
       }
     }
   ],
-  "records_sha256": "ebac2a609a851e560bb940ba63821e4721528ae0189f36b490d2ae462e86308a",
+  "records_sha256": "52b680b00f100be2429549d17a6e3a36f3db3a69e3f04d59b09a0e9a62a4c0f1",
   "redaction": {
     "dropped_row_fields": [
       {
@@ -1105,7 +3197,28 @@
         "weight": 0.03889
       }
     ],
-    "policy": "retain all row-level fields verbatim except: drop perception_input; filter holdings and effective_holdings to the case ticker"
+    "policy": "drop perception_input; filter holdings and effective_holdings to the case ticker; in records, fills and derived, replace every whitespace-bearing string (narrative / PM prose) with a pbr.prose_digest.v1 object; keep whitespace-free strings and all numbers verbatim",
+    "prose_digest": {
+      "applies_to": [
+        "records",
+        "fills",
+        "derived"
+      ],
+      "declared_terms": [
+        "earnings",
+        "held_without_active_plan",
+        "no live thesis",
+        "single-source",
+        "starter"
+      ],
+      "iso_date_pattern": "(?<![0-9])([0-9]{4}-[0-9]{2}-[0-9]{2})(?![0-9])",
+      "length_unit": "unicode code points",
+      "originals": "outside the repository; set PBR_DECISION_CASE_INPUT_DIR to verify",
+      "period_label_pattern": "\\b(Q[1-4] ?FY ?[0-9]{2,4}|FY ?[0-9]{4})\\b",
+      "prose_rule": "a string value is prose when it contains any whitespace character",
+      "schema": "pbr.prose_digest.v1",
+      "sha256_over": "utf-8 bytes of the original string"
+    }
   },
   "schema": "pbr.decision_case_fixture.v1",
   "ticker": "XOM"
