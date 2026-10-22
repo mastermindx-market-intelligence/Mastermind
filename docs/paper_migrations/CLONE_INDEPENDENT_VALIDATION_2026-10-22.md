@@ -51,3 +51,9 @@ The adapter owner previously performed a separately authorized first-party nativ
 | `get_jsx(fileId,nodeId=1-1,format=inline-styles,includeNodeIds=true)` | Both returned **1,017-character JSX bodies with exact byte equality** after pruning. |
 
 This is a real, editable **five-node** contentful scratch clone-prune readback with preserved source; it does **not** prove full-file mixed assets/comments/fonts/components, permission to prune a 57-page clone, exact unattended UI page-ID targeting, or removal of the source's oversize warning. The candidate PR #1742 remains subject to its own review, CI, publication and higher-stakes live canary gates. Never rerun its existing deletion operation.
+
+### Quantified OKLab-to-hex gradient conversion
+
+A subsequent read-only calculation compared the **162 OKLab color stops** in the 40 converted Website Front Cover JSX gradient lines with the clone's corresponding six-/eight-digit hexadecimal colors. Using standard OKLab-to-linear-sRGB conversion followed by sRGB transfer/8-bit scaling, all 162 stops paired in their original order. The maximum per-stop **RGB channel difference** was **2.499 out of 255**, with mean per-stop largest-channel difference **0.383/255**; maximum alpha error was **0.500/255**. No stop exceeded 2.5 channel units. The remaining two modified JSX lines were file-ID-scoped image asset URL rebinding, for which exact image-fill bytes were independently verified equal.
+
+**Interpretation:** This supports *near-equivalent rendered color values*, not an exact preservation of the original editable OKLab stop syntax, dynamic effects, source CSS precision, or full file-wide appearance. The first-party clone appears to normalize color stops to 8-bit sRGB. No style rewrite was applied to either Paper document by this inspection.
