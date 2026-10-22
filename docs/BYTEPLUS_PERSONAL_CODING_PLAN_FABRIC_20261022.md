@@ -333,6 +333,34 @@ models such as GLM-5.2 / DeepSeek V4 Flash remain recognized by the
 published BytePlus allowlist but are not promoted into default worker
 roles. Deprecated models are rejected.
 
+### Existing subscription-catalog reader: provider percent telemetry without false slots
+
+`control_plane.subscription_catalog.project_byteplus_plan_readback`
+accepts **caller-provided** official `plans get` / `usage plan` objects,
+validates the unique Personal Pro Running + subscribed plan, validates all
+three percentage/reset fields and returns a strictly whitelisted read-only
+projection. The only allowed unit is **whole reported used_percent**;
+it does not convert the vendor's 0% into 100% free, 9,500 remaining calls
+or a positive worker capacity. The output explicitly sets:
+
+- `provider_origin_attested = false`, `account_identity_attested = false`,
+  `measurement_freshness_attested = false` — a JSON document alone does
+  not authenticate the source/account/counter.
+- `estimated_startable_jobs = null`, `suggested_parallelism = null`,
+  `live_admission = false`, `autonomous_allowed = false`.
+- No `viewer`, user, account, project, key, token or other sensitive source
+  fields are copied. The caller retains the original private observation.
+
+The only lawful producer is the **existing authorized provider/control
+owner**, not a new monitor or daemon. Its owner-attested fresh identity,
+separate supported-tool use proof and actual completed-account quota
+measurement are prerequisites before any later activation. A caller
+must not treat the readback parser as a cryptographic attestation or an
+Executive capacity fact. Unit tests cover wrong tier, wrong product,
+partial/malformed timestamps, percentages, duplicates and non-mutating
+sanitized output. This is the provider observation interface available
+to future qualification, not a parallel quota accounting service.
+
 ### Required load-balancing invariants
 
 1. Model Router fixes the first lawful capability/quality tier. Capacity

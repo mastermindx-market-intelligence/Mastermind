@@ -92,8 +92,102 @@ def get_binding(
     )
 
 
+def project_byteplus_plan_readback(
+    holdings: Mapping[str, Any],
+    usage: Mapping[str, Any],
+) -> dict[str, Any]:
+    """Reduce official BytePlus management readbacks to a NON-authoritative fact.
+
+    Caller must obtain vendor records through its *existing* authenticated
+    credential owner and separately attest freshness/account binding. This
+    function accesses no credentials, files, clocks, providers or leases.
+    Whole-number percentages never imply a free-request count, worker slots
+    or permission for an unattended Coding Plan inference backend.
+    """
+    from datetime import datetime
+
+    def refuse(message: str) -> None:
+        raise HarnessBindingError("BytePlus readback invalid: " + message)
+
+    if not isinstance(holdings, Mapping) or not isinstance(usage, Mapping):
+        refuse("plan and usage documents must be mappings")
+    plans = holdings.get("plans")
+    items = usage.get("items")
+    if not isinstance(plans, list) or not isinstance(items, list):
+        refuse("plan and usage arrays required")
+    candidates = [
+        row for row in plans if isinstance(row, Mapping)
+        and row.get("key") == "coding-plan" and row.get("scope") == "personal"
+    ]
+    measurements = [
+        row for row in items if isinstance(row, Mapping)
+        and row.get("product") == "coding-plan" and row.get("edition") == "personal"
+    ]
+    if len(candidates) != 1 or len(measurements) != 1:
+        refuse("exactly one personal Coding Plan required")
+    plan, measurement = candidates[0], measurements[0]
+    if plan.get("name") != "Coding Plan" or plan.get("tier") != "pro" or plan.get("status") != "Running":
+        refuse("personal Pro subscription not reported Running")
+    if measurement.get("subscribed") is not True:
+        refuse("measurement must report active subscription")
+    timestamp = usage.get("updated_at")
+    if type(timestamp) is not int or timestamp <= 0:
+        refuse("provider measurement timestamp required")
+    periods = measurement.get("periods")
+    if not isinstance(periods, list) or len(periods) != 3:
+        refuse("exactly three quota windows required")
+    seen = {}
+    for row in periods:
+        if not isinstance(row, Mapping):
+            refuse("quota window must be a mapping")
+        label = row.get("label")
+        percent = row.get("percent")
+        if label not in ("session", "weekly", "monthly") or label in seen:
+            refuse("unexpected or duplicated quota window")
+        if type(percent) is not int or not 0 <= percent <= 100:
+            refuse("quota percent must be a bounded whole number")
+        reset_at = row.get("reset_at")
+        if label == "session":
+            if reset_at is not None:
+                refuse("unreviewed session reset")
+        else:
+            if not isinstance(reset_at, str) or len(reset_at) > 64:
+                refuse("weekly/monthly offset timestamp required")
+            try:
+                dt = datetime.fromisoformat(reset_at)
+                if dt.tzinfo is None or dt.utcoffset() is None:
+                    raise ValueError("timezone required")
+            except (ValueError, TypeError, OverflowError):
+                refuse("invalid reset timestamp")
+        seen[label] = {"used_percent_rounded": percent, "reset_at": reset_at}
+    if set(seen) != {"session", "weekly", "monthly"}:
+        refuse("missing quota window")
+    # Whitelist only non-identifying control-plane fields. Never copy the
+    # viewer/user/account/project profile returned by the authenticated CLI.
+    return {
+        "schema": "mastermind.byteplus_personal_plan_readback_projection/v1",
+        "provider": "byteplus",
+        "product": "coding_plan_personal",
+        "tier_reported": "pro",
+        "status_reported": "Running",
+        "usage_observed_at_unix": timestamp,
+        "windows": {key: seen[key] for key in ("session", "weekly", "monthly")},
+        "account_identity_attested": False,
+        "provider_origin_attested": False,
+        "measurement_freshness_attested": False,
+        "actual_request_counts_available": False,
+        "actual_concurrency_limit_available": False,
+        "estimated_startable_jobs": None,
+        "suggested_parallelism": None,
+        "live_admission": False,
+        "autonomous_allowed": False,
+        "usage_scope": "APPROVED_INDIVIDUAL_CODING_TOOL_ONLY",
+    }
+
+
 __all__ = [
     "HarnessBindingError",
     "compose_catalog_digest",
     "get_binding",
+    "project_byteplus_plan_readback",
 ]
