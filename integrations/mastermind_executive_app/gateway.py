@@ -1868,7 +1868,18 @@ class CeoIngressReadGateway:
             and latest.get("attempt_id") == attempts[-1].get("attempt_id")
             and latest.get("job_id") == requested
             and latest.get("attempt_number") == attempts[-1].get("attempt_number")
-            and job.get("current_attempt_id") == attempts[-1].get("attempt_id")
+            and (
+                job.get("current_attempt_id") == attempts[-1].get("attempt_id")
+                or (
+                    # Runtime legitimately requeues after a LOST Attempt and
+                    # clears the current pointer. Preserve the last historical
+                    # Attempt for READ without presenting it as still active.
+                    job.get("current_attempt_id") is None
+                    and job.get("status") == "QUEUED"
+                    and attempts[-1].get("status") == "LOST"
+                    and all(row.get("status") != "RUNNING" for row in attempts)
+                )
+            )
             and CeoIngressReadGateway._valid_attempt_row(
                 latest,
                 prefix="latest_attempt",

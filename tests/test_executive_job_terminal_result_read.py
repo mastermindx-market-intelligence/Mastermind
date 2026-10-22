@@ -65,6 +65,35 @@ def test_canonical_operator_terminal_result_survives_job_reader(operator_job):
     assert _accepted(operator_job)
 
 
+def test_requeued_lost_attempt_is_history_not_an_active_claim(operator_job):
+    """The canonical LOST -> QUEUED read keeps history without a fake current Attempt."""
+    data = copy.deepcopy(operator_job)
+    job = data["data"]["job"]
+    job["status"] = "QUEUED"
+    job["result"] = None
+    job["current_attempt_id"] = None
+    for attempt in data["data"]["attempts"]:
+        attempt["status"] = "LOST"
+        attempt["result"] = None
+    data["data"]["latest_attempt"] = copy.deepcopy(data["data"]["attempts"][-1])
+    assert _accepted(data)
+    # A cleared current reference is only lawful for the narrow requeued LOST
+    # state. Never accept a foreign current pointer, a live attempt, or a
+    # completed job whose last worker is being hidden from the consumer.
+    for variant in ("foreign_current", "running", "completed", "failed"):
+        foreign = copy.deepcopy(data)
+        if variant == "foreign_current":
+            foreign["data"]["job"]["current_attempt_id"] = "ATT-foreign"
+        elif variant == "running":
+            foreign["data"]["latest_attempt"]["status"] = "RUNNING"
+            foreign["data"]["attempts"][-1]["status"] = "RUNNING"
+        elif variant == "completed":
+            foreign["data"]["job"]["status"] = "COMPLETED"
+        else:
+            foreign["data"]["job"]["status"] = "FAILED"
+        assert not _accepted(foreign), variant
+
+
 def test_canonical_sealed_worker_result_and_launch_survive_job_reader(
     bound_sealed_worker_planner, tmp_path,
 ):
