@@ -21,6 +21,10 @@ parser.add_argument('--by')
 parser.add_argument('--max-bytes', type=int, default=8192)
 parser.add_argument('--timeout')
 parser.add_argument('--interval')
+# Advertise the installed adapter's continuity contract without running any fallback.
+# This fixture never contacts a provider or creates a second attempt.
+parser.add_argument('--quota-fallback', action='store_true')
+parser.add_argument('--follow', action='store_true')
 args = parser.parse_args()
 rid = args.id or args.run_id
 path = root / (rid + '.json')

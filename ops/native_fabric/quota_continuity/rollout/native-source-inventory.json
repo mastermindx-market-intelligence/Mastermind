@@ -108,10 +108,10 @@
       "source": "source/fabric_cpu_scope.py"
     },
     "ext/fabric_host_qualification.py": {
-      "bytes": 1991,
+      "bytes": 2268,
       "installed_preimage_sha256": "d2a1c8f589a9758f94e36f947a91a0a4b731c5aa69694ac7258691a85873166a",
-      "sha256": "d2a1c8f589a9758f94e36f947a91a0a4b731c5aa69694ac7258691a85873166a",
-      "source": "source/fabric_host_qualification.py"
+      "sha256": "1b1b64342c61e90887a6f023dca3e0c75707b57fecaf05227b1a960cb7922899",
+      "source": "candidate/fabric_host_qualification.py"
     },
     "ext/fabric_operator_client.py": {
       "bytes": 7565,
@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 78205,
+      "bytes": 78233,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "2294bbcf537ebc7fb91ab03a71f7de85b4c1c8f697932c9e3c8865983dc2633d",
+      "sha256": "16381979e05a35027093d2ca069dfeb005bfd99ce94b80748e851924e1468885",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
