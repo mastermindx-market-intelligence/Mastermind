@@ -57,3 +57,19 @@ This is a real, editable **five-node** contentful scratch clone-prune readback w
 A subsequent read-only calculation compared the **162 OKLab color stops** in the 40 converted Website Front Cover JSX gradient lines with the clone's corresponding six-/eight-digit hexadecimal colors. Using standard OKLab-to-linear-sRGB conversion followed by sRGB transfer/8-bit scaling, all 162 stops paired in their original order. The maximum per-stop **RGB channel difference** was **2.499 out of 255**, with mean per-stop largest-channel difference **0.383/255**; maximum alpha error was **0.500/255**. No stop exceeded 2.5 channel units. The remaining two modified JSX lines were file-ID-scoped image asset URL rebinding, for which exact image-fill bytes were independently verified equal.
 
 **Interpretation:** This supports *near-equivalent rendered color values*, not an exact preservation of the original editable OKLab stop syntax, dynamic effects, source CSS precision, or full file-wide appearance. The first-party clone appears to normalize color stops to 8-bit sRGB. No style rewrite was applied to either Paper document by this inspection.
+
+## Five low-complexity candidate pages — independent current-source comparison
+
+Later October 22, 2026, the same guarded direct Paper read carrier independently compared **five exact source pages against the existing full-size clone**, not a new duplicate. Every selected page returned equal page names, native node counts, artboard totals, entire returned artboard ID/name/direct-child lists, and available font-family lists. No listed page had a truncated artboard response. These are sequential, non-atomic observations; they require fresh pre-prune checks if used later.
+
+| Exact source page | Current source nodes | Clone nodes | Boards | Selected artboard | Selected native JSX readback |
+|---|---:|---:|---:|---|---|
+| Market Memory `p-22-0` | 574 | 574 | 8 | `6LEM-0` | 22,757 characters each; **exact equality** |
+| Commodities legacy archive `p-1I-0` | 405 | 405 | 5 | `1A6C-0` | 48,267 vs 48,245 characters; **one style-serialization difference** |
+| Macro Dark Flow `p-1W-1` | 111 | 111 | 2 | `63EB-1` | 14,219 characters each; **exact equality** |
+| Catalyst Decision Desk `p-20-0` | 776 | 776 | 10 | `6HNW-0` | 31,918 characters each; **exact equality** |
+| Forex duplicate archive `p-16-0` | 138 | 138 | 1 | `1N0G-0` | 30,107 characters each; **exact equality** |
+
+The single selected Commodities legacy JSX mismatch is at node `1AIX-0` in `linear-gradient(in oklab 120deg,...)`: original `oklab(68.5% -0.034 -0.138 / 8%)`, clone `#5B9BF014`. It is a color-space/precision transformation, **not an image URL rebinding or missing layer**. The selected screenshot rendered from each exact file was visually alike on inspection but **not byte-identical** (JPEG base64 lengths 258,340 versus 258,520). Hence this page **does not have strict style-preservation proof**, despite matching native counts; hold it from any full-fidelity assertion until the vendor semantics are qualified. This aligns with the earlier front-cover OKLab normalization finding.
+
+**Migration-use distinction:** `p-22-0`, `p-1W-1`, `p-20-0` and `p-16-0` now have one independently checked native artboard with exact JSX equality and page-level structural parity; this does **not** certify all their artboards, image assets, components, comments, interaction states, or currentness after the observation. The proposed 32-family allocation remains purely read-only. Do not prune either existing file without authorized first-party page targeting, an individually admitted effect, complete relevant content checks, an independently restored native backup and post-prune verification. Source and clone were **not modified** by any check in this section.
