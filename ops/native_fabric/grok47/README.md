@@ -8,7 +8,7 @@ Source basis: installed native generation `0e566251edc32dffbab800d2742bf0c2c45f3
 * Do not change live leases, service, authentication, active generations, workers, or host placement.
 * The four online Ubuntu hosts advertise 4.7 in `grok models`, but this command also said `You are not authenticated`; a successful paid authenticated Grok 4.7 worker return has **not** been established.
 
-`overlay/` is intentionally assembled from the installed exact generation, because `ops/native_fabric/quota_continuity/source` contains earlier baseline preimages, not the complete current installed release. Test scripts `test_model_selection.py` and `test_runtime_compat.py` validate 12 offline selector, execution, private-output, identity, usage and authorization contracts; `tests/test_native_fabric_grok47.py` runs them in repository CI. Run `python3 ops/native_fabric/grok47/qualify_installed_generation.py --installed-store /path/to/native-code-releases` to verify the 85 installed source file hashes and create/verify/select a published generation in a disposable isolated owner without touching the live pointer. The current nine-overlay code-only manifest digest is `9cd6b58fe7b03fef400d780de3992a516f434b456fc9175efb431bce7fbb4106`. The exact source closure, manifest hashes, actual controlled native publish/select via incumbent generation owner, host bootstrap and authenticated end-to-end return remain mandatory to finish rollout.
+`overlay/` is intentionally assembled from the installed exact generation, because `ops/native_fabric/quota_continuity/source` contains earlier baseline preimages, not the complete current installed release. Test scripts `test_model_selection.py` and `test_runtime_compat.py` validate 12 offline selector, execution, private-output, identity, usage and authorization contracts; `tests/test_native_fabric_grok47.py` runs them in repository CI. Run `python3 ops/native_fabric/grok47/qualify_installed_generation.py --installed-store /path/to/native-code-releases` to verify the 85 installed source file hashes and create/verify/select a published generation in a disposable isolated owner without touching the live pointer. The current nine-overlay code-only manifest digest is `9c8e3fd927fe3c9979db937613fa3fab3625c510007847be1f5af6f997ce31cf`. The exact source closure, manifest hashes, actual controlled native publish/select via incumbent generation owner, host bootstrap and authenticated end-to-end return remain mandatory to finish rollout.
 
 
 ## Prepared release input (not installed)
@@ -38,11 +38,30 @@ Stages `-001` and `-002` are superseded by `-003` (which adds the separate legac
 
 See [NATIVE_HARNESS_TRANSITION_20261022.md](NATIVE_HARNESS_TRANSITION_20261022.md) for the current observations, proposed capability/expiry policy, existing-owner integration map and production acceptance scenarios. The Cursor default edit is held by an action-scoped platform safety denial; this audit does not deploy or bypass it.
 
-`analyze_pool_stats.py <canonical-stats-export>` reads an existing `pool stats --class ...` export and highlights missing outcomes, inadequate evaluated samples and separate admission failures. It contacts no provider, writes no registry and changes no routing. Its 10 tests supplement the original 12 model-compatibility tests and five legacy local-Cursor forwarding tests, yielding 27 focused tests; the existing repository CI entrypoint discovers both. A report is not a causal cross-model benchmark or a quota/spend authorisation.
+`analyze_pool_stats.py <canonical-stats-export>` reads an existing `pool stats --class ...` export and highlights missing outcomes, inadequate evaluated samples and separate admission failures. It contacts no provider, writes no registry and changes no routing. Its 10 tests supplement the original 12 model-compatibility tests and five legacy local-Cursor forwarding tests, yielding 32 focused tests; the existing repository CI entrypoint discovers both. A report is not a causal cross-model benchmark or a quota/spend authorisation.
 
 
 ## Separate legacy Cursor model-forwarding repair (source only)
 
-The local `sub.sh cursor` entry previously accepted an explicit model and then omitted the `--model` CLI argument, silently letting the CLI select its own default. This source-only correction preserves the original default when no model is specified and forwards only the already-reviewed `composer-2.5` and `cursor-grok-4.6-high` aliases. Unsupported and new 4.7 aliases are refused. Five isolated subprocess tests exercise the actual shell branch with fake `cursor-agent` and fake slot/ledger helpers: no account, provider, lease, host or production change is made. **This is not the earlier platform-denied Cursor 4.7 default change**, and it does not arm the new 4.7 aliases. The previous staged -002 source is superseded. The newly isolated-published, verified and selected candidate is `fabric-grok47-stage-20261022-sol-003` with all 85 pinned release-file hashes verified and nine reviewed overlays. This is a candidate only; installed `CURRENT.json` remains sequence 14 on the original generation.
+The local `sub.sh cursor` entry previously accepted an explicit model and then omitted the `--model` CLI argument, silently letting the CLI select its own default. This source-only correction preserves the original default when no model is specified and forwards only the already-reviewed `composer-2.5` and `cursor-grok-4.6-high` aliases. Unsupported and new 4.7 aliases are refused. Five isolated subprocess tests exercise the actual shell branch with fake `cursor-agent` and fake slot/ledger helpers: no account, provider, lease, host or production change is made. **This is not the earlier platform-denied Cursor 4.7 default change**, and it does not arm the new 4.7 aliases. The previous staged -002 source is superseded. The newly isolated-published, verified and selected candidate is `fabric-grok47-stage-20261022-sol-004` with all 85 pinned release-file hashes verified and nine reviewed overlays. This is a candidate only; installed `CURRENT.json` remains sequence 14 on the original generation.
 
 The isolated original publisher now exercises a **two-generation compare-and-swap**: original release selected first, patched release selected against the exact predecessor, then an intentionally stale original expectation refused without changing the selected pointer. It does not select the live M2 generation.
+
+
+## Local Grok Build default consistency
+
+The same source overlay now sets an **un-pinned local Grok Build call** to
+`grok-4.7` *before* the existing economic/policy gate and provider CLI call.
+Explicit `grok-4.6` historical pins remain unchanged; unknown models fail with
+`LOCAL_GROK_MODEL_REFUSED` (78) without attempting any provider call. The native
+Grok adapter's existing `-m` argument receives the normalized model. Five
+additional isolated Bash-contract tests cover model default, both pins, and
+unsupported identifiers. Total focused test count: **32**, with repository CI
+entrypoint and shell checks passing locally. This does not alter any Cursor 4.7
+default, weekly exhaustion marker, account permission or live service.
+
+Stage `-003` is superseded by exact pinned stage `-004` at
+`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-004`,
+manifest `9c8e3fd927fe3c9979db937613fa3fab3625c510007847be1f5af6f997ce31cf`.
+Earlier stages `-001`, `-002`, and `-003` MUST NOT be published. The installed
+native pointer remained unchanged at sequence 14 after qualification.

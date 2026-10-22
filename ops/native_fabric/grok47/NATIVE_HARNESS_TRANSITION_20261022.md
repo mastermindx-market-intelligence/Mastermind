@@ -226,3 +226,17 @@ Its original publisher completed isolated publish/verify/select and the native
 executor import probe. Installed M2 `CURRENT.json` remains original sequence 14.
 Older stage `-002` is superseded for this combined release; earlier 4.7 API / Cursor-default
 authorization restrictions and native OS product-path gates remain unchanged.
+
+
+### Follow-up source-only Grok Build launch normalization
+
+At the original nine-overlay source `-004`, a direct local unpinned Grok Build
+worker now passes exact `grok-4.7` through the already-existing economic gate
+and native CLI `-m`, instead of relying on a provider default. Historical 4.6
+pins are preserved; unknown pins are refused. Five isolated Bash-contract tests
+bring the focused model/audit/launcher total to 32, passing. The immutable
+release input includes 85 files; code manifest
+`9c8e3fd927fe3c9979db937613fa3fab3625c510007847be1f5af6f997ce31cf`.
+This replaces stage `-003` *for release input only*. No production pointer,
+quota, account, Cursor-4.7 default or OS/Executive runtime was changed. The
+platform-held Cursor default action is still not attempted or activated.

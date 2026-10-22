@@ -455,6 +455,17 @@ if [ "$DENIED" = "1" ]; then
   exit 78
 fi
 
+# Normalise the already-qualified Grok Build default before the economic
+# filter and before invoking the native CLI. Explicit historical 4.6 pins remain
+# valid; unknown models cannot silently inherit a provider-side default.
+if [ "$POOL" = grok ]; then
+  case "$MODEL" in
+    '') MODEL=grok-4.7 ;;
+    grok-4.6|grok-4.7) ;;
+    *) echo "LOCAL_GROK_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+  esac
+fi
+
 # Additive economic filter; all physical/project/provider gates still apply.
 # Recheck leased children too: a broker lease is not a cost-policy exemption.
 case "$POOL" in
