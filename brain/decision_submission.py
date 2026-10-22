@@ -223,16 +223,13 @@ def _latest_holdings(book: str) -> dict[str, dict]:
     except (FileNotFoundError, json.JSONDecodeError, OSError, TypeError):
         pass
     try:
-        lines = (
-            (registry.data_dir(book) / "decisions.jsonl")
-            .read_text(encoding="utf-8")
-            .splitlines()
-        )
         # Append-only ledger: the prior-target scan runs over the effective view, so a
-        # superseded history row can never win. A malformed line raises into the same handler.
+        # superseded history row can never win. Lenient parsing (read_effective_rows' default)
+        # skips a malformed or non-object line instead of letting one bad line anywhere in the
+        # file blind the whole scan; a missing file simply yields no records.
         from bot import decision_rows as _decision_rows
-        records = _decision_rows.effective_rows(
-            [json.loads(line) for line in lines]
+        records = _decision_rows.read_effective_rows(
+            registry.data_dir(book) / "decisions.jsonl"
         )
         for record in reversed(records):
             if (

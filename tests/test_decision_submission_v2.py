@@ -164,6 +164,46 @@ def test_rejected_target_never_becomes_next_trim_anchor(tmp_path, monkeypatch):
     assert payload["holdings"][0]["weight"] == pytest.approx(0.06)
 
 
+def test_prior_target_scan_survives_an_old_malformed_line(tmp_path, monkeypatch):
+    """One malformed line ANYWHERE in the decisions ledger must not blind the prior-target
+    enrichment scan: the lenient read skips it and the newer accepted record still wins.
+    The accepted record's weight (0.25) deliberately differs from the account's actual weight
+    (1.0 share @ 100 / 1000 nav = 0.10) so the assertion cannot pass on the fallback."""
+    from portfolio import paper_account, registry
+
+    (tmp_path / "latest.json").write_text(
+        json.dumps({"positions": [{"ticker": "AAPL", "rationale": "live holding"}]}),
+        encoding="utf-8",
+    )
+    malformed = '{"asof": "2026-08-06", "broken'
+    accepted = {
+        "asof": "2026-08-07",
+        "target_status": "executed",
+        "decision_effective": True,
+        "effective_holdings": [{"ticker": "AAPL", "weight": 0.25}],
+        "holdings": [{"ticker": "AAPL", "weight": 0.25}],
+    }
+    (tmp_path / "decisions.jsonl").write_text(
+        malformed + "\n" + json.dumps(accepted) + "\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(registry, "data_dir", lambda book: tmp_path)
+    monkeypatch.setattr(registry, "currency", lambda book: "USD")
+    monkeypatch.setattr(
+        paper_account,
+        "_load_account",
+        lambda book: {
+            "cash": 900.0,
+            "positions": {"AAPL": {"shares": 1.0, "avg_cost": 100.0}},
+        },
+    )
+    monkeypatch.setattr(paper_account, "_current_price", lambda ticker: 100.0)
+
+    latest = ds._latest_holdings("autonomous")
+    assert latest["AAPL"]["prior_target_weight"] == pytest.approx(0.25)
+    assert latest["AAPL"]["weight"] == pytest.approx(0.10)
+
+
 def test_trim_without_evidence_fails_closed_to_hold(monkeypatch):
     monkeypatch.setattr(
         ds,

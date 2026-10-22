@@ -157,7 +157,9 @@ def strip_supersession(row: Any) -> Any:
 
 def row_identity(row: Any) -> str:
     """Stable identity of one ledger row: its stored ``row_id``, else a legacy row's canonical
-    hash. Identical payloads share one identity, so a pointer supersedes every byte-equal copy."""
+    hash. Identical payloads share one identity, so a pointer supersedes every byte-equal copy.
+    A stored well-formed ``row_id`` is trusted as the identity and is not re-verified against
+    the row's content — it is an identity, not tamper evidence."""
     if isinstance(row, dict):
         stored = row.get("row_id")
         if isinstance(stored, str) and _ROW_ID_RE.fullmatch(stored):
@@ -196,7 +198,8 @@ def effective_rows(rows: list) -> list:
 
     Fast path: with no row carrying a non-empty ``supersedes`` this returns ``list(rows)``
     without hashing anything; otherwise only legacy rows whose ``asof`` occurs among superseding
-    rows are hashed.
+    rows are hashed. Slots are memoized within the call, so a long revise chain is walked once
+    instead of once per surviving row.
     """
     pointers: list[tuple[int, list[str], dict]] = []
     for index, row in enumerate(rows):
@@ -238,16 +241,41 @@ def effective_rows(rows: list) -> list:
         if nearest is not None:
             revise_target[index] = nearest
 
+    # Memoized per call: a long revise chain used to be re-walked for every surviving index
+    # (degenerate O(n^2 log n) inside the sort key). A cached slot carries whether its walk was
+    # cycle-free: only a cycle-free resolution may be reused as a chain continuation, because a
+    # cycle-guarded stop point depends on where the walk started.
+    slot_memo: dict[int, tuple[int, bool]] = {}
+
     def _slot(index: int) -> int:
+        cached = slot_memo.get(index)
+        if cached is not None:
+            return cached[0]
         seen: set[int] = set()
+        walked: list[int] = []
         current = index
-        while (
-            current not in seen
-            and current in revise_target
-            and rows[current].get("supersede_mode") == "revise"
-        ):
+        cycled = False
+        while True:
+            if current in seen:
+                cycled = True
+                break
+            if (
+                current not in revise_target
+                or rows[current].get("supersede_mode") != "revise"
+            ):
+                break
+            cached = slot_memo.get(current)
+            if cached is not None and cached[1]:
+                current = cached[0]
+                break
             seen.add(current)
+            walked.append(current)
             current = revise_target[current]
+        slot_memo[index] = (current, not cycled)
+        if not cycled:
+            # cycle-free: every node on this walk resolves to the same slot
+            for node in walked:
+                slot_memo[node] = (current, True)
         return current
 
     surviving = [index for index in range(len(rows)) if index not in superseded]

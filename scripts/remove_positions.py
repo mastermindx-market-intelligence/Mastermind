@@ -1,4 +1,6 @@
-"""Erase named positions from a paper book AS IF THEY WERE NEVER BOUGHT.
+"""Erase named positions from a paper book AS IF THEY WERE NEVER BOUGHT — on every surface a
+reader sees. For decisions.jsonl that is the EFFECTIVE view only: the append-only ledger keeps
+every superseded row's original bytes, so the ticker remains in the raw history (see below).
 
 For each target ticker held: returns its full purchase COST (shares × avg_cost) to cash — so the
 position's unrealized P&L is handed back to the book's value, not realized as a loss — deletes the
@@ -9,7 +11,13 @@ position, and removes every trace of it from the trade history and holdings surf
   latest.json           positions[] / executed_today[] entries dropped; cash_usd / nav / cash /
                         gross recomputed from the survivors  (Brain books only)
   positions_ledger.json the ticker's lifecycle entry dropped  (Brain books — open list + activity)
-  decisions.jsonl       holdings[] / executed[] entries dropped from each record  (Brain books)
+  decisions.jsonl       holdings[] / executed[] entries dropped from each EFFECTIVE record —
+                        one revise-mode row is appended per changed effective row  (Brain books)
+
+The append-only decisions.jsonl never rewrites an existing line: superseded rows keep their
+original bytes, so the scrubbed ticker stays readable in the ledger's raw history. Byte-level
+removal from decisions.jsonl is outside this tool — only an out-of-band restore of the book's
+data directory can expunge the raw bytes.
 
 The Brain's free-text prose (summary / brain_text / decision thesis) is left untouched — excising
 two names from generated prose can't be done cleanly. PAPER ONLY; reversible from the backup.
@@ -103,23 +111,45 @@ def _scrub_decisions(dec_path: Path, targets: set[str]) -> int:
     Each changed row gets a revise-mode row appended naming the row it corrects; superseded
     history keeps its original bytes by design. Returns the number of dropped
     holdings/executed entries, exactly as before.
+
+    Degenerate rows are tolerated: a byte-identical twin of an already-revised row shares its
+    identity, so the one appended revise already scrubbed it in the effective view (its drops
+    are still counted, nothing is appended again); a row without ``asof`` cannot be revised,
+    so it is skipped uncounted and reported on stderr.
     """
     from bot import decision_rows
     if not dec_path.exists():
         return 0
     touched = 0
+    revised_identities: set[str] = set()
+    skipped_no_asof = 0
     for row in decision_rows.read_effective_rows(dec_path):
+        asof = row.get("asof")
+        if not asof:
+            skipped_no_asof += 1
+            continue
         rec = dict(row)
-        changed = False
+        dropped_here = 0
         for arr in ("holdings", "executed"):
             if isinstance(rec.get(arr), list):
                 before = len(rec[arr])
                 rec[arr] = [h for h in rec[arr] if (h.get("ticker") or "").upper() not in targets]
-                dropped = before - len(rec[arr])
-                touched += dropped
-                changed = changed or dropped > 0
-        if changed:
-            decision_rows.append_decision_row(dec_path, rec, row["asof"], revises=row)
+                dropped_here += before - len(rec[arr])
+        if not dropped_here:
+            continue
+        touched += dropped_here
+        identity = decision_rows.row_identity(row)
+        if identity in revised_identities:
+            # The revise already appended for this identity superseded every byte-equal copy;
+            # the effective view is already scrubbed here.
+            continue
+        decision_rows.append_decision_row(dec_path, rec, asof, revises=row)
+        revised_identities.add(identity)
+    if skipped_no_asof:
+        print(
+            f"decisions.jsonl: {skipped_no_asof} effective row(s) left unscrubbed (no asof)",
+            file=sys.stderr,
+        )
     return touched
 
 

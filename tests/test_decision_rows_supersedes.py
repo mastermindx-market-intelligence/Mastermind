@@ -145,6 +145,34 @@ def test_effective_rows_revise_chain_resolves_to_the_original_slot():
     assert [r["summary"] for r in dr.effective_rows(rows)] == ["v3", "next"]
 
 
+def test_effective_rows_single_long_revise_chain_keeps_exact_order():
+    """One 400-row revise chain on one asof, interleaved with other-asof rows: the chain head
+    takes the original row's slot, every link is superseded, and the interleaved rows keep
+    their exact file order after it."""
+    chain_length = 400
+    chain = [dr._build_row({"asof": "2026-08-01", "summary": "v0"}, [], "asof")]
+    for index in range(1, chain_length):
+        chain.append(dr._build_row(
+            {"asof": "2026-08-01", "summary": f"v{index}"},
+            [chain[-1]["row_id"]], "revise",
+        ))
+    rows: list = []
+    interleaved: list[dict] = []
+    for index, row in enumerate(chain):
+        rows.append(row)
+        if index % 37 == 0:
+            other = {"asof": "2026-08-02", "summary": f"other-{index}", "holdings": []}
+            interleaved.append(other)
+            rows.append(other)
+
+    effective = dr.effective_rows(rows)
+    assert effective[0] == chain[-1]
+    assert [r["summary"] for r in effective] == \
+        ["v399"] + [other["summary"] for other in interleaved]
+    assert all(other in effective for other in interleaved)
+    assert len(effective) == 1 + len(interleaved)
+
+
 def test_effective_rows_fast_path_hashes_nothing_and_copies(monkeypatch):
     rows = [{"asof": "2026-08-01", "summary": "a"}, {"asof": "2026-08-02", "summary": "b"}]
 
@@ -592,25 +620,162 @@ def test_refresh_then_validate_finds_exactly_one_effective_row(tmp_path, monkeyp
 # ---------------------------------------------------------------------------
 
 _WRITER_CALL = re.compile(r"\bwrite_rows\(|\b_atomic_write_rows\(")
-_GUARD_DIRS = ("bot", "brain", "portfolio", "app", "scripts", "control_plane", "loop",
-               "data_layer", "bridge")
+# an alias import renames the writer at the import boundary: `import ... as ...`
+_WRITER_ALIAS_IMPORT = re.compile(
+    r"\b(?:write_rows|_atomic_write_rows|replace_for_asof)\s+as\b"
+)
+_WRITE_PRIMITIVE = re.compile(
+    r"\.write_text\(|\.write_bytes\(|os\.replace\(|shutil\.move\(|shutil\.copy"
+)
+_QUOTED_LITERAL = re.compile(r"([\"'])([^\"'\n]*)\1")
+_EXCLUDED_TOP_DIRS = {"vendor", "tests", "research", "docs", "node_modules"}
 # bot/decision_rows.py OWNS the whole-file writers (tests seed fixtures through them).
 # portfolio/advisor_trade.py defines its own unrelated local ``_atomic_write_rows`` for the
 # advisor-proposal queue — a name collision, never the decision ledger.
 _ALLOWED = {"bot/decision_rows.py", "portfolio/advisor_trade.py"}
 
 
+def _names_writer_through_getattr(line: str) -> bool:
+    """``getattr(<module>, "write_rows")`` — the writer reached under a dynamic name."""
+    if "getattr(" not in line:
+        return False
+    return any(
+        match.group(2) in ("write_rows", "_atomic_write_rows")
+        for match in _QUOTED_LITERAL.finditer(line)
+    )
+
+
+def _opens_for_writing(line: str) -> bool:
+    """``open(`` whose line carries a quoted ``w``/``a``/``x`` mode literal."""
+    if "open(" not in line:
+        return False
+    for match in _QUOTED_LITERAL.finditer(line):
+        mode = match.group(2)
+        if re.fullmatch(r"[rwaxbt+]{1,4}", mode) and any(c in mode for c in "wax"):
+            return True
+    return False
+
+
+def _ledger_write_guard_hits(line: str) -> list[str]:
+    """Evasion-class labels one source line trips for the decision-ledger rewrite guard."""
+    hits: list[str] = []
+    if _WRITER_CALL.search(line):
+        hits.append("direct_writer_call")
+    if _WRITER_ALIAS_IMPORT.search(line):
+        hits.append("writer_alias_import")
+    if _names_writer_through_getattr(line):
+        hits.append("getattr_writer_name")
+    if "decisions.jsonl" in line and (
+        _WRITE_PRIMITIVE.search(line) or _opens_for_writing(line)
+    ):
+        hits.append("inline_ledger_write")
+    return hits
+
+
+def test_ledger_write_guard_discriminates_evasion_classes_from_benign_lines():
+    offenders = {
+        "out = dr.write_rows(path, rows)": ["direct_writer_call"],
+        "_atomic_write_rows(tmp_path, seeded)": ["direct_writer_call"],
+        "from bot.decision_rows import write_rows as overwrite_ledger":
+            ["writer_alias_import"],
+        "from bot.decision_rows import replace_for_asof as rewrite_for_asof":
+            ["writer_alias_import"],
+        "writer = getattr(dr, \"write_rows\")": ["getattr_writer_name"],
+        "writer = getattr(dr, '_atomic_write_rows')": ["getattr_writer_name"],
+        '(root / "decisions.jsonl").write_text(payload)': ["inline_ledger_write"],
+        'path.write_bytes(b"")  # decisions.jsonl': ["inline_ledger_write"],
+        "os.replace(tmp, ledger_path)  # ledger_path is decisions.jsonl":
+            ["inline_ledger_write"],
+        'shutil.move(src, dst)  # dst is the decisions.jsonl path': ["inline_ledger_write"],
+        'shutil.copy2(p, backup / p.name)  # decisions.jsonl backup': ["inline_ledger_write"],
+        'handle = open("data/portfolios/hk/decisions.jsonl", "w")': ["inline_ledger_write"],
+        # benign: a read-only open, and a plain mention
+        'rows = dr.read_effective_rows(root / "decisions.jsonl")': [],
+        'handle = open("data/portfolios/hk/decisions.jsonl", "r")': [],
+    }
+    for line, expected in offenders.items():
+        assert _ledger_write_guard_hits(line) == expected, line
+
+
 def test_no_production_module_rewrites_the_decision_ledger():
     root = Path(__file__).resolve().parent.parent
     offenders = []
-    for directory in _GUARD_DIRS:
-        for py in sorted((root / directory).rglob("*.py")):
-            rel = py.relative_to(root).as_posix()
-            if rel in _ALLOWED:
-                continue
-            for lineno, line in enumerate(
-                py.read_text(encoding="utf-8").splitlines(), start=1
-            ):
-                if _WRITER_CALL.search(line):
-                    offenders.append(f"{rel}:{lineno}: {line.strip()}")
+    for py in sorted(root.rglob("*.py")):
+        rel = py.relative_to(root)
+        parts = rel.parts
+        if parts[0] in _EXCLUDED_TOP_DIRS or any(part.startswith(".") for part in parts):
+            continue
+        rel_posix = rel.as_posix()
+        if rel_posix in _ALLOWED:
+            continue
+        for lineno, line in enumerate(
+            py.read_text(encoding="utf-8").splitlines(), start=1
+        ):
+            if _ledger_write_guard_hits(line):
+                offenders.append(f"{rel_posix}:{lineno}: {line.strip()}")
     assert offenders == []
+
+
+# ---------------------------------------------------------------------------
+# 8. operator scrub scripts tolerate degenerate effective rows
+# ---------------------------------------------------------------------------
+
+def _load_remove_positions_module():
+    """Import scripts/remove_positions.py by file path (scripts is not a package)."""
+    import importlib.util
+
+    module_path = Path(__file__).resolve().parent.parent / "scripts" / "remove_positions.py"
+    spec = importlib.util.spec_from_file_location("remove_positions_under_test", module_path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_scrub_decisions_duplicate_identical_rows(tmp_path):
+    """Two byte-identical effective rows: ONE revise supersedes both — no crash, the effective
+    view holds the scrubbed row, the raw file keeps its byte prefix, and the count includes
+    both copies' dropped entries."""
+    rp = _load_remove_positions_module()
+    path = tmp_path / "decisions.jsonl"
+    row = {
+        "asof": "2026-08-01",
+        "summary": "book with the scrubbed name",
+        "holdings": [{"ticker": "BAD", "weight": 0.5}],
+        "executed": [{"ticker": "BAD", "side": "sell", "shares": 1.0}],
+    }
+    line = json.dumps(row)
+    path.write_text(line + "\n" + line + "\n", encoding="utf-8")
+    before = path.read_bytes()
+
+    count = rp._scrub_decisions(path, {"BAD"})
+
+    assert count == 4                       # 2 entries dropped per copy × 2 copies
+    raw = path.read_bytes()
+    assert raw.startswith(before)           # append-only: seeded bytes intact
+    lines = raw.splitlines()
+    assert len(lines) == 3                  # two seeded copies + exactly one appended revise
+    effective = dr.read_effective_rows(path)
+    assert len(effective) == 1
+    assert effective[0]["holdings"] == []
+    assert effective[0]["executed"] == []
+
+
+def test_scrub_decisions_row_without_asof_is_skipped_uncounted(tmp_path, capsys):
+    """A row without ``asof`` cannot name a revise target: no exception, row untouched, its
+    drops are NOT counted, and one stderr line reports how many rows were left unscrubbed."""
+    rp = _load_remove_positions_module()
+    path = tmp_path / "decisions.jsonl"
+    missing = {"summary": "legacy line", "holdings": [{"ticker": "BAD", "weight": 0.5}]}
+    none_asof = {"asof": None, "summary": "undated line",
+                 "executed": [{"ticker": "BAD", "side": "sell", "shares": 2.0}]}
+    path.write_text(
+        json.dumps(missing) + "\n" + json.dumps(none_asof) + "\n", encoding="utf-8"
+    )
+    before = path.read_bytes()
+
+    count = rp._scrub_decisions(path, {"BAD"})
+
+    assert count == 0
+    assert path.read_bytes() == before      # nothing appended
+    err = capsys.readouterr().err
+    assert "2" in err and "asof" in err
