@@ -213,7 +213,53 @@ def _key_value(name: str) -> str:
 
 
 def _ensure_slots() -> None:
+    """Original-owner write preflight; never invoked by read-only admission.
+
+    Legacy installations created this directory under the caller's umask.
+    Safely tighten only an owned, stable physical final directory; changing
+    existing cooldown file bytes or clearing a provider restriction is forbidden.
+    """
     os.makedirs(SLOTS_ROOT, mode=0o700, exist_ok=True)
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, flag) for flag in required):
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_CUSTODY_UNAVAILABLE")
+    try:
+        fd = os.open(
+            SLOTS_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError as exc:
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_UNSAFE_OR_UNREADABLE") from exc
+    try:
+        def qualified_current():
+            opened = os.fstat(fd)
+            try:
+                current = os.stat(SLOTS_ROOT, follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_CHANGED_DURING_PREFLIGHT") from exc
+            if (not stat.S_ISDIR(opened.st_mode)
+                    or not stat.S_ISDIR(current.st_mode)
+                    or opened.st_uid != os.geteuid()
+                    or (opened.st_dev, opened.st_ino, opened.st_uid, opened.st_mode)
+                       != (current.st_dev, current.st_ino, current.st_uid, current.st_mode)):
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_OWNERSHIP_OR_IDENTITY_REFUSED")
+            return opened
+
+        original = qualified_current()
+        if original.st_mode & 0o022:
+            # This is an explicit write-path migration, never a broker read.
+            # Preserve existing world/group read or traverse bits while
+            # removing only the unsafe group/world WRITE bits.
+            requested = stat.S_IMODE(original.st_mode) & ~0o022
+            try:
+                os.fchmod(fd, requested)
+            except OSError as exc:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_MODE_REPAIR_REFUSED") from exc
+            final = qualified_current()
+            if final.st_mode & 0o022:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_MODE_REPAIR_UNVERIFIED")
+            print("BAILIAN_SLOTS_ROOT_LEGACY_MODE_TIGHTENED", file=sys.stderr)
+    finally:
+        os.close(fd)
 
 
 def _with_lock() -> IO[str]:
@@ -940,6 +986,15 @@ def cmd_cooldown(argv: List[str]) -> int:
     return 0
 
 
+def cmd_preflight_slots(argv: List[str]) -> int:
+    """Explicit original-owner release preflight; no provider or key access."""
+    if argv:
+        _die("usage: preflight-slots", 2)
+    _ensure_slots()
+    print("BAILIAN_SLOTS_ROOT_VERIFIED")
+    return 0
+
+
 def cmd_status(argv: List[str]) -> int:
     for line in status_lines():
         print(line)
@@ -984,6 +1039,7 @@ COMMANDS = {
     "release": cmd_release,
     "cooldown": cmd_cooldown,
     "status": cmd_status,
+    "preflight-slots": cmd_preflight_slots,
     "total_cap": cmd_total_cap,
     "next_usable_in": cmd_next_usable_in,
     "model": cmd_model,
