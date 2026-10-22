@@ -949,7 +949,7 @@ def test_single_workstream_does_not_claim_an_unbound_operation_carrier():
     assert any(
         fact["target_field"] == "cards.github.pull_requests"
         and f"{MASTER}#{identity_number}" in fact["reason"]
-        and "no exact source-authored workstream binding" in fact["reason"]
+        and "no verified Agent OS owner registry entry" in fact["reason"]
         for fact in document["unknowns"]
     )
 
@@ -983,7 +983,100 @@ def test_single_workstream_does_not_claim_an_unbound_seeded_linear_issue():
     assert any(
         fact["target_field"] == "cards.linear.issues"
         and "MAS-7:" in fact["reason"]
-        and "no exact source-authored workstream binding" in fact["reason"]
+        and "no verified Agent OS owner registry entry" in fact["reason"]
+        for fact in document["unknowns"]
+    )
+
+
+def test_exact_relation_selected_orphan_pr_cannot_mint_a_workstream_card():
+    """A self-declared WS key in closure is context, not Agent OS ownership."""
+    receipt = _receipt(
+        _inputs(
+            github={
+                "available": True, "observed_at": NOW,
+                "pull_requests": [
+                    _pr(170, workstream="WS:TARGET", linear="MAS-6"),
+                    _pr(999, workstream="WS:BOGUS", linear="MAS-6",
+                        operation_key="op-orphan-999"),
+                ],
+            },
+            linear={"available": True, "observed_at": NOW,
+                    "issues": [_issue("MAS-6", workstream="WS:TARGET")]},
+        )
+    )
+    assert "ORPHAN_GITHUB_CARRIER" in {row["code"] for row in receipt["findings"]}
+    document = view.build_cross_plane_view(receipt)
+
+    assert [card["workstream"] for card in document["cards"]] == ["WS:TARGET"]
+    assert [row["number"] for row in _card(document)["github"]["pull_requests"]] == [170]
+    assert document["state"] == "DEGRADED"
+    assert "ORPHAN_GITHUB_CARRIER" in _unattributed_codes(document)
+    assert any(
+        fact["target_field"] == "cards.github.pull_requests"
+        and f"{MASTER}#999" in fact["reason"]
+        and "no verified Agent OS owner registry entry" in fact["reason"]
+        for fact in document["unknowns"]
+    )
+
+
+def test_exact_seeded_orphan_linear_issue_cannot_mint_a_workstream_card():
+    receipt = _receipt(
+        _inputs(
+            scope={
+                "workstreams": ["WS:TARGET"], "linear": ["MAS-7"],
+                "repositories": [MASTER], "operation_key": None,
+                "requires_executive": False,
+            },
+            github={"available": True, "observed_at": NOW, "pull_requests": []},
+            linear={"available": True, "observed_at": NOW,
+                    "issues": [_issue("MAS-7", workstream="WS:BOGUS", number=999)]},
+        )
+    )
+    assert "ORPHAN_LINEAR_ISSUE" in {row["code"] for row in receipt["findings"]}
+    document = view.build_cross_plane_view(receipt)
+
+    assert [card["workstream"] for card in document["cards"]] == ["WS:TARGET"]
+    assert _card(document)["linear"]["issues"] == []
+    assert document["state"] == "DEGRADED"
+    assert "ORPHAN_LINEAR_ISSUE" in _unattributed_codes(document)
+    assert any(
+        fact["target_field"] == "cards.linear.issues"
+        and "MAS-7:" in fact["reason"]
+        and "no verified Agent OS owner registry entry" in fact["reason"]
+        for fact in document["unknowns"]
+    )
+
+
+def test_known_carrier_workstream_cannot_override_a_conflicting_agentos_pr_owner():
+    """GitHub metadata cannot reassign a PR when Agent OS authors another owner."""
+    agentos = _agentos()
+    agentos["state"]["workstreams"].append(
+        {"key": "OTHER", "updated": "2026-08-27", "prs": []}
+    )
+    receipt = _receipt(
+        _inputs(
+            scope={
+                "workstreams": ["WS:TARGET"], "linear": ["MAS-6"],
+                "repositories": [MASTER], "operation_key": None,
+                "requires_executive": False,
+            },
+            agentos=agentos,
+            github={"available": True, "observed_at": NOW,
+                    "pull_requests": [_pr(170, workstream="WS:OTHER", linear="MAS-6")]},
+            linear={"available": True, "observed_at": NOW,
+                    "issues": [_issue("MAS-6", workstream="WS:TARGET")]},
+        )
+    )
+    document = view.build_cross_plane_view(receipt)
+
+    assert document["state"] == "DEGRADED"
+    assert all(
+        not row["github"]["pull_requests"] for row in document["cards"]
+    )
+    assert any(
+        fact["target_field"] == "cards.github.pull_requests"
+        and f"{MASTER}#170" in fact["reason"]
+        and "conflicts with the exact Agent OS PR ownership record" in fact["reason"]
         for fact in document["unknowns"]
     )
 
