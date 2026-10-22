@@ -11,7 +11,7 @@ def _catalog() -> dict:
     return copy.deepcopy(load_profiles())
 
 
-def test_all_three_subscription_providers_are_reviewed_and_inert_by_default():
+def test_all_four_subscription_providers_are_reviewed_and_inert_by_default():
     catalog = load_profiles()
     assert set(catalog["profiles"]) == {"glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan", "byteplus-coding-plan-personal"}
     for profile_id in catalog["profiles"]:
@@ -50,7 +50,7 @@ def test_subagent_topology_cannot_silently_upgrade_model():
 
 
 def test_purchased_subscription_profiles_are_not_eligible_for_unattended_production():
-    for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan"):
+    for profile_id in ("glm-coding-plan", "alibaba-token-plan-personal", "minimax-token-plan", "byteplus-coding-plan-personal"):
         profile = get_profile(profile_id)
         assert profile.usage_policy["supported_harness_required"] is True
         assert profile.usage_policy["interactive_only"] is True
@@ -410,3 +410,58 @@ def test_byteplus_rejects_payg_endpoint_and_preserves_attended_policy():
         altered["profiles"]["byteplus-coding-plan-personal"]["base_url"] = wrong_url
         with pytest.raises(ProviderProfileError, match="reviewed BytePlus Coding Plan endpoint"):
             validate_profiles(altered)
+
+
+
+def test_byteplus_rejects_unreviewed_model_entitlement_and_tool_use():
+    name = "byteplus-coding-plan-personal"
+    for field, illegal, message in (
+        ("models", {"routine": "glm-5.3"}, "unsupported BytePlus Coding Plan model"),
+        ("product", "payg_inference", "reviewed BytePlus Coding Plan identity"),
+        ("protocol", "openai-chat", "reviewed BytePlus Coding Plan identity"),
+        ("supported_tool_only", False, "requires supported coding tools"),
+    ):
+        changed = _catalog()
+        if field == "models":
+            changed["profiles"][name]["models"].update(illegal)
+        else:
+            changed["profiles"][name][field] = illegal
+        with pytest.raises(ProviderProfileError, match=message):
+            validate_profiles(changed)
+    changed = _catalog()
+    changed["profiles"][name]["usage_policy"]["single_user_only"] = False
+    with pytest.raises(ProviderProfileError, match="single-user"):
+        validate_profiles(changed)
+    changed = _catalog()
+    changed["profiles"][name]["quota_profile"]["tier"] = "pro"
+    with pytest.raises(ProviderProfileError, match="requires observed entitlement"):
+        validate_profiles(changed)
+    changed = _catalog()
+    changed["profiles"]["different-byteplus-plan"] = changed["profiles"].pop(name)
+    with pytest.raises(ProviderProfileError, match="reviewed BytePlus Coding Plan identity"):
+        validate_profiles(changed)
+
+
+
+def test_byteplus_published_model_upper_bound_is_reviewed():
+    # A schema allowlist is not evidence that the subscription's region
+    # currently entitles the account to each model.
+    allowed = (
+        "ark-code-latest",
+        "dola-seed-2.0-pro",
+        "dola-seed-2.0-lite",
+        "dola-seed-2.0-code",
+        "bytedance-seed-code",
+        "glm-5.3-flash",
+        "glm-5.2",
+        "glm-5.1",
+        "kimi-k2.5",
+        "gpt-oss-120b",
+        "deepseek-v4.1-flash",
+        "deepseek-v4-flash",
+        "deepseek-v4-pro",
+    )
+    for model in allowed:
+        changed = _catalog()
+        changed["profiles"]["byteplus-coding-plan-personal"]["models"]["hard"] = model
+        validate_profiles(changed)
