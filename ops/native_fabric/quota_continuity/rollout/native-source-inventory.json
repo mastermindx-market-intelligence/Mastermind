@@ -48,9 +48,9 @@
       "source": "source/artifact_reader.py"
     },
     "ext/bailian_keys.py": {
-      "bytes": 37014,
+      "bytes": 37495,
       "installed_preimage_sha256": "435dad2bcde27384c4c47edaea5afdf7f248d10229558193414b105664a9759c",
-      "sha256": "5f40907a16c712815056097aa1c3171f8f5f21af988bd9dcb2c5060d7c3e61b6",
+      "sha256": "9ff0b2e3d130429677e7f5d70bd3900d60dbc9cc90ae1c79e5b85822397985fc",
       "source": "candidate/bailian_keys.py"
     },
     "ext/bootstrap_clis.py": {

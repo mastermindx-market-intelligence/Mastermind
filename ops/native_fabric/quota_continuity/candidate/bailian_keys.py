@@ -13,6 +13,7 @@ Usage:
   bailian_keys.py release <name> <pid>
   bailian_keys.py cooldown <name> <seconds> <reason>
   bailian_keys.py status
+  bailian_keys.py preflight-slots
   bailian_keys.py total_cap
   bailian_keys.py next_usable_in
   bailian_keys.py model <requested>
@@ -219,7 +220,12 @@ def _ensure_slots() -> None:
     Safely tighten only an owned, stable physical final directory; changing
     existing cooldown file bytes or clearing a provider restriction is forbidden.
     """
-    os.makedirs(SLOTS_ROOT, mode=0o700, exist_ok=True)
+    try:
+        os.makedirs(SLOTS_ROOT, mode=0o700, exist_ok=True)
+    except OSError:
+        # Bounded diagnosis without disclosing physical owner path.
+        # No credentials or providers read; admission remains fail-closed.
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_CREATE_REFUSED") from None
     required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
     if not all(hasattr(os, flag) for flag in required):
         raise RuntimeError("BAILIAN_SLOTS_ROOT_CUSTODY_UNAVAILABLE")
@@ -990,7 +996,12 @@ def cmd_preflight_slots(argv: List[str]) -> int:
     """Explicit original-owner release preflight; no provider or key access."""
     if argv:
         _die("usage: preflight-slots", 2)
-    _ensure_slots()
+    try:
+        _ensure_slots()
+    except RuntimeError as exc:
+        # Explicit operator preflight has a bounded diagnostic, not a
+        # full absolute-path-bearing Python traceback.
+        _die(str(exc), 78)
     print("BAILIAN_SLOTS_ROOT_VERIFIED")
     return 0
 

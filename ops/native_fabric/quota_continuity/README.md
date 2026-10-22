@@ -116,6 +116,43 @@ a deployable fallback. The stage builder requires the secure candidate and
 verifies the original preimage hash before overlaying it. Existing flat and
 historical source retains its prior contract while its old controllers finish.
 
+### Original-owner Qwen slot-root preflight (native release)
+
+Before selecting a newly verified immutable Qwen generation for new-work
+broker admission, the existing native release owner must qualify the actual
+host-owned ext/slots/bailian directory that the generation binds to. This
+is a release step, not broker automation, permission escalation, or approval
+to run an Alibaba provider request.
+
+1. Confirm protected merge, exact 85-file source closure, original-owner
+   publication/custody and the generation's declared ext/slots state binding.
+   Do not run a build-tree helper with a guessed SLOTS_ROOT or create a new
+   runtime directory to manufacture readiness.
+2. Read the actual final directory's owner, physical identity and mode on each
+   admitted Qwen host. If a legacy root is group/world-writable, invoke the
+   new generation's bailian_keys.py preflight-slots once as that existing
+   state owner before allowing new broker grants. The explicitly invoked
+   write-path preflight binds the final directory with no-follow, verifies
+   owner and inode, removes only unsafe group/world WRITE bits, and preserves
+   all cooldown files, quota evidence, leases and account identities.
+3. Require BAILIAN_SLOTS_ROOT_VERIFIED and independently verify the owned,
+   non-symlink final directory no longer has group/world write permission.
+   BAILIAN_SLOTS_ROOT_* and nonzero exit are release holds; investigate
+   original filesystem custody instead of relaxing broker rank-1 denial,
+   bypassing the tool, or selecting a different account.
+4. New-work account eligibility remains read-only/fail-closed; a missing root
+   on an unqualified host is not authority to enroll that host. Retain the
+   exact old generation for already-running controllers. No Qwen provider
+   canary or unattended use is authorized until the account owner verifies
+   the specific Alibaba Token Plan edition, remaining Credits/reset and
+   applicable usage terms.
+
+This command touches no provider credentials. Run it through the original
+native release owner's verified generation and state mapping, not by copying
+unreviewed source into installed ext or changing the immutable selection
+pointer. Publication, preflight, source review, protected queue, selection
+and observed worker results are separate evidence.
+
 ## Retention and reclamation
 
 An interrupted or incomplete Codex home remains private on its original host.
