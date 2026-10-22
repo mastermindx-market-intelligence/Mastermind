@@ -65,7 +65,7 @@ class FileManagementTests(unittest.TestCase):
         for name in ("list_resources",):
             self.assertEqual(indexed[name], "read")
         for name in ("create_file", "rename_resource"):
-            self.assertEqual(indexed[name], "file_manage")
+            self.assertEqual(indexed[name], "edit")
         for name in ("arrange_pages", "update_pages"):
             self.assertEqual(indexed[name], "edit")
         for name in ("delete_nodes", "export", "open_file"):
@@ -76,6 +76,20 @@ class FileManagementTests(unittest.TestCase):
         self.assertEqual(result["state"], "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION")
         self.assertIn(("create_file", {"name": "Crypto"}), self.client.calls)
         self.assertEqual(result["before"]["identity"]["id"], FILE_ID)
+
+    def test_existing_paper_edit_action_handles_file_admin_for_published_clients(self):
+        result = self.run_action("create_file", {"cloneFileId": FILE_ID, "name": "Ready"}, action="edit")
+        self.assertEqual(result["state"], "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION")
+        self.assertIn(("create_file", {"cloneFileId": FILE_ID, "name": "Ready"}), self.client.calls)
+        renamed = self.run_action("rename_resource", {"resourceId": FILE_ID, "name": "Renamed"}, action="edit")
+        self.assertEqual(renamed["state"], "APPLIED_RESPONSE_OBSERVED")
+        self.assertIn(("rename_resource", {"resourceId": FILE_ID, "name": "Renamed"}), self.client.calls)
+
+    def test_blank_names_are_rejected_without_file_creation(self):
+        for invalid in ("", "  ", "x" * 501, 6):
+            with self.subTest(name=invalid), self.assertRaisesRegex(b.Refusal, "FILE_NAME_REQUIRED"):
+                self.run_action("create_file", {"sourceFileId": FILE_ID, "name": invalid}, action="edit")
+        self.assertFalse(any(name == "create_file" for name, _ in self.client.calls))
 
     def test_clone_full_file_retains_original(self):
         result = self.run_action("create_file", {"cloneFileId": FILE_ID, "name": "Crypto Archive"})

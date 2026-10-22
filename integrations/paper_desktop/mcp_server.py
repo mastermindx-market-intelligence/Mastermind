@@ -16,7 +16,7 @@ from pathlib import Path
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS, FILE_MANAGE_TOOLS, validate_execution_binding
+from bridge import execute, Refusal, READ_TOOLS, EDIT_TOOLS, validate_execution_binding
 
 
 def build_server(allow_write=False, allow_prepare=False, *, execution_binding=None):
@@ -158,28 +158,12 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
             Other admitted sessions may modify disjoint targets in the same Paper file or page.
             Known same-board overlap should use disjoint node targets plus fresh re-read/re-plan;
             this operation/carrier fence is not a file-wide or page-wide lease.
-            File creation is only exposed via separate paper_file_manage, with a known exact source-file snapshot. Raw open transitions, native exports, node deletion and token deletion remain blocked.
+            Use this existing paper_edit action for guarded file management too: create_file accepts a known cloneFileId or sourceFileId plus name; rename_resource accepts a known exact file resourceId plus name. All require the source-file snapshot and operation ID. A new-file reply requires destination readback. Raw open transitions, native exports, node deletion and token deletion remain blocked.
             """
             return await asyncio.to_thread(run, "edit", tool=tool, arguments=arguments,
                                            expected_snapshot=expected_snapshot,
                                            operation_id=operation_id, allow_write=True)
 
-        @server.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=True,
-                                                idempotentHint=False, openWorldHint=False))
-        async def paper_file_manage(tool: str, arguments: dict, expected_snapshot: str,
-                                    operation_id: str) -> CallToolResult:
-            """Clone a known exact Paper file or rename that same exact file.
-
-            Requires fresh source-file snapshot and operation identity. No empty file
-            creation, folder mutations, page deletion, exports or migration implied.
-            A clone is a copy, not an atomic cross-file transfer; original remains.
-            Unknown effects cannot be retried or routed elsewhere.
-            """
-            if tool not in FILE_MANAGE_TOOLS:
-                return CallToolResult(content=[TextContent(type="text", text="TOOL_NOT_ALLOWED")], isError=True)
-            return await asyncio.to_thread(run, "file_manage", tool=tool, arguments=arguments,
-                                           expected_snapshot=expected_snapshot,
-                                           operation_id=operation_id, allow_write=True)
     return server
 
 

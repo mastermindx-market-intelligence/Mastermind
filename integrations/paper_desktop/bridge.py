@@ -442,6 +442,10 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         arguments = {}
     if not isinstance(arguments, dict) or len(encode(arguments)) > MAX_REQUEST - 1024:
         raise Refusal("INVALID_ARGUMENTS")
+    # Keep the already-published paper_edit surface usable for new, strictly
+    # guarded file operations; an additional native MCP tool is optional.
+    if action == "edit" and tool in FILE_MANAGE_TOOLS:
+        action = "file_manage"
     editing = action in {"edit", "file_manage"}
     if editing:
         if not allow_write:
@@ -464,7 +468,7 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
         catalog = client.catalog()
         schema = schema_receipt(client, catalog, server_pin=_server_pin, catalog_pin=_catalog_pin)
         if action == "catalog":
-            return {"server": client.server, "tools": [dict(catalog[n], bridge_access=("read" if n in READ_TOOLS else "file_manage" if n in FILE_MANAGE_TOOLS else "edit"))
+            return {"server": client.server, "tools": [dict(catalog[n], bridge_access=("read" if n in READ_TOOLS else "edit"))
                     for n in sorted(catalog) if n in READ_TOOLS | EDIT_TOOLS | FILE_MANAGE_TOOLS],
                     "blocked_tools": sorted(set(catalog) - READ_TOOLS - EDIT_TOOLS - FILE_MANAGE_TOOLS),
                     "catalog_sha256": schema["catalog_sha256"], "write_schema": schema}
@@ -501,9 +505,8 @@ def execute(action: str, *, tool: str | None = None, arguments: dict | None = No
             raise Refusal(before["binding_error"] or "DOCUMENT_BINDING_REQUIRED")
         if editing and supplied_file != before["identity"]["id"]:
             raise Refusal("FILE_ID_MISMATCH", "Edit target does not match the inspected Paper file.")
-        if action == "file_manage" and tool == "create_file" and not isinstance(arguments.get("name"), str):
-            raise Refusal("FILE_NAME_REQUIRED")
-        if action == "file_manage" and tool == "rename_resource" and not isinstance(arguments.get("name"), str):
+        if action == "file_manage" and (not isinstance(arguments.get("name"), str)
+                                       or not 1 <= len(arguments["name"].strip()) <= 500):
             raise Refusal("FILE_NAME_REQUIRED")
         if editing and tool == "set_tokens":
             updates = arguments.get("tokens")
