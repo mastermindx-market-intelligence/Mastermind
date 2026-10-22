@@ -15,6 +15,7 @@ from typing import Any
 
 from integrations.chairman_surfaces import web_sol_deployment as deployment
 from integrations.chairman_surfaces import web_sol_browser_link_overlay as browser_overlay
+from integrations.chairman_surfaces import browser_link_native_deployment as browser_native
 from integrations.chairman_surfaces import web_sol_deployment_apply as applier
 from integrations.chairman_surfaces import web_sol_instance as instance
 from integrations.chairman_surfaces import web_sol_protocol as protocol
@@ -218,7 +219,39 @@ def _decode_overlay_bundle(raw: object) -> browser_overlay.BrowserLinkOverlayBun
         raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from error
 
 
+def _decode_native_bundle(raw: object) -> browser_native.BrowserLinkNativeBundle:
+    from integrations.mastermind_browser_link.native_channel import LinkEnrollment
+    row = _exact_dict(raw, frozenset({
+        "schema", "instance_id", "native_host_name", "source_commit", "wrapper_argv",
+        "bundle_digest", "artifacts", "native_hosts_root", "release_root",
+        "python_executable", "enrollment",
+    }))
+    raw_artifacts = _exact_list(row["artifacts"])
+    raw_argv = _exact_list(row["wrapper_argv"])
+    if row["schema"] != browser_native.NATIVE_BUNDLE_SCHEMA or len(raw_artifacts) != 3 or len(raw_argv) != 7:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    artifacts = tuple(_decode_artifact(item) for item in raw_artifacts)
+    paths = {key: _absolute_path(row[key])
+             for key in ("native_hosts_root", "release_root", "python_executable")}
+    if (any(str(value) != row[key] for key, value in paths.items())
+            or any(str(item.destination) != raw_item["destination"]
+                   for item, raw_item in zip(artifacts, raw_artifacts))):
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    try:
+        return browser_native.BrowserLinkNativeBundle(
+            instance_id=_digest(row["instance_id"]),
+            native_host_name=_string(row["native_host_name"], maximum=255),
+            source_commit=_digest(row["source_commit"], width=40),
+            wrapper_argv=tuple(_string(item, maximum=4096) for item in raw_argv),
+            artifacts=artifacts, bundle_digest=_digest(row["bundle_digest"]),
+            enrollment=LinkEnrollment.from_document(row["enrollment"]), **paths)
+    except ValueError as error:
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT") from error
+
+
 def _decode_bundle(raw: object) -> deployment.DeploymentBundle:
+    if type(raw) is dict and raw.get("schema") == browser_native.NATIVE_BUNDLE_SCHEMA:
+        return _decode_native_bundle(raw)
     if type(raw) is dict and raw.get("schema") == browser_overlay.OVERLAY_SCHEMA:
         return _decode_overlay_bundle(raw)
     row = _exact_dict(
@@ -381,6 +414,9 @@ def _decode_request(
     }
     if (isinstance(bundle, browser_overlay.BrowserLinkOverlayBundle)
             and metadata["install_root"] != bundle.extension_root):
+        raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
+    if (isinstance(bundle, browser_native.BrowserLinkNativeBundle)
+            and metadata["install_root"] != bundle.native_hosts_root):
         raise applier.WebSolDeploymentApplyError("INVALID_INPUT")
     return bundle, plan, metadata
 
