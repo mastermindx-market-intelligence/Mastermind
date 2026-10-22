@@ -40,9 +40,12 @@ injected input (fixture-driven in tests, the daily regime frame in prod)."""
 from __future__ import annotations
 
 import json
+import math
 from datetime import date
 from pathlib import Path
 from typing import Optional
+
+from brain.benchmark_comparison import compare_curves
 
 _ROOT = Path(__file__).resolve().parent.parent
 _BENCH_DIR = _ROOT / "data" / "benchmark"
@@ -330,3 +333,134 @@ def latest() -> dict:
         return json.loads(files[-1].read_text()) if files else {}
     except Exception:  # noqa: BLE001
         return {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# window-aligned read-time comparison (A12 / #1433)
+# ─────────────────────────────────────────────────────────────────────────────
+# The persisted per-inception `return_pct` values are each measured from a DIFFERENT inception
+# (the book's, each bogey's), so subtracting them compares different windows. Consumers compare
+# at READ time through brain.benchmark_comparison over ONE explicit shared window instead; the
+# stored ledger (and its return_pct) is never rewritten here.
+
+def _is_canonical_date(value) -> bool:
+    """True when `value` is a canonical YYYY-MM-DD calendar-date string."""
+    try:
+        return date.fromisoformat(value).isoformat() == value
+    except (TypeError, ValueError):
+        return False
+
+
+def read_nav_history(path) -> dict:
+    """Read a book's ``nav_history.jsonl`` into window-comparable curve inputs.
+
+    Returns ``{"curve": {date: nav}, "status_by_date": {date: label}, "skipped": int}``. A row is
+    a curve point only when ALL of these hold: `date` is a canonical YYYY-MM-DD string; `nav` is a
+    finite int/float (not bool) > 0; `nav_status` is not "WITHHELD" — a withheld NAV is never a
+    curve point, so it can never be an endpoint. `label` is the row's `nav_status` when it is a
+    non-empty string, else "UNLABELLED" (legacy and Self-Directed rows carry no nav_status).
+    Duplicate dates: the last row wins (a later WITHHELD/invalid row retracts that date's point).
+    Skipped rows are counted, never silently dropped. A missing or unreadable file degrades to an
+    empty curve. Never raises."""
+    out: dict = {"curve": {}, "status_by_date": {}, "skipped": 0}
+    try:
+        text = Path(path).read_text()
+    except Exception:  # noqa: BLE001
+        return out
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:  # noqa: BLE001
+            out["skipped"] += 1
+            continue
+        if not isinstance(row, dict):
+            out["skipped"] += 1
+            continue
+        d = row.get("date")
+        nav = row.get("nav")
+        status = row.get("nav_status")
+        label = status if isinstance(status, str) and status else "UNLABELLED"
+        try:
+            nav_f = float(nav)
+        except (TypeError, ValueError, OverflowError):
+            nav_f = None
+        usable = (_is_canonical_date(d)
+                  and isinstance(nav, (int, float)) and not isinstance(nav, bool)
+                  and nav_f is not None and math.isfinite(nav_f) and nav_f > 0
+                  and label != "WITHHELD")
+        if usable:
+            out["curve"][d] = nav_f
+            out["status_by_date"][d] = label
+        else:
+            if _is_canonical_date(d):
+                out["curve"].pop(d, None)          # last row for a date wins
+                out["status_by_date"].pop(d, None)
+            out["skipped"] += 1
+    return out
+
+
+def compare_book_to_ledger(book_id: str, book_history: dict, ledger: dict, *,
+                           bogey_ids: tuple[str, ...] = ("spy", "defensive")) -> dict:
+    """Compare one book's NAV curve to the ledger's bogeys over ONE shared window.
+
+    Every leg is recomputed by ``brain.benchmark_comparison.compare_curves`` over the cohort's
+    actual common dates (``C(end)/C(start)-1``) — the stored per-inception ``return_pct`` values
+    are NEVER used, so a book and a bogey that started on different dates are no longer compared
+    across windows (#1433). Returns the compare_curves result plus ``endpoint_status``:
+    "PROVISIONAL" when either endpoint NAV row is provisional, else "QUALIFIED" only when BOTH
+    endpoint rows are labelled QUALIFIED, else "UNLABELLED" (an absent or unknown label never
+    reads as QUALIFIED); None when the comparison is unavailable.
+
+    An unsupported comparison comes back as ``status: "unavailable"`` with a `reason` and no
+    numbers — callers WITHHOLD the delta (the key is absent, never 0, never the old number).
+    A missing/empty bogey curve is passed as None (reported as ``missing_curve``); a ledger
+    whose ``as_of`` is not canonical returns ``reason: "ledger_asof_invalid"``; a bad config
+    (e.g. `book_id` colliding with a bogey id) returns ``reason: "invalid_config:<msg>"``.
+    Never raises; does no rounding; the persisted ledger is not touched."""
+    cohort = (book_id, *bogey_ids)
+    unavailable: dict = {"status": "unavailable", "reason": None, "asof": None, "cohort": cohort,
+                         "start": None, "end": None, "common_dates": (), "common_point_count": 0,
+                         "returns_pct": None, "deltas_pp": None, "endpoint_status": None}
+    try:
+        led = ledger if isinstance(ledger, dict) else {}
+        hist = book_history if isinstance(book_history, dict) else {}
+        asof = led.get("as_of")
+        if not _is_canonical_date(asof):
+            unavailable["reason"] = "ledger_asof_invalid"
+            return unavailable
+        unavailable["asof"] = asof
+        curves: dict = {book_id: hist.get("curve")}
+        bogeys = led.get("bogeys") if isinstance(led.get("bogeys"), dict) else {}
+        for bid in bogey_ids:
+            entry = bogeys.get(bid)
+            curve = entry.get("curve") if isinstance(entry, dict) else None
+            # missing/empty bogey curve → None, which compare_curves reports as missing_curve
+            curves[bid] = curve if isinstance(curve, dict) and curve else None
+        try:
+            out = dict(compare_curves(curves, cohort=cohort, asof=asof,
+                                      delta_pairs=[(book_id, b) for b in bogey_ids]))
+        except ValueError as exc:  # a bad config, e.g. book_id colliding with a bogey id
+            unavailable["reason"] = f"invalid_config:{exc}"
+            return unavailable
+        endpoint_status = None
+        if out.get("status") == "descriptive":
+            status_by_date = hist.get("status_by_date")
+            status_by_date = status_by_date if isinstance(status_by_date, dict) else {}
+            # an endpoint with no label (hand-built curve) or an unknown label is UNLABELLED:
+            # QUALIFIED is never inferred from the absence of a label
+            labels = {status_by_date.get(out.get("start")) or "UNLABELLED",
+                      status_by_date.get(out.get("end")) or "UNLABELLED"}
+            if "PROVISIONAL" in labels:
+                endpoint_status = "PROVISIONAL"
+            elif labels == {"QUALIFIED"}:
+                endpoint_status = "QUALIFIED"
+            else:
+                endpoint_status = "UNLABELLED"
+        out["endpoint_status"] = endpoint_status
+        return out
+    except Exception as exc:  # noqa: BLE001 — the comparison never breaks a consumer
+        unavailable["reason"] = f"invalid_config:{exc}"
+        return unavailable

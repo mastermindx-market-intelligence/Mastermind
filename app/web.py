@@ -1562,21 +1562,36 @@ def _portfolio_status(meta: dict) -> dict:
             })
         except Exception:
             pass
-        # vs_spy and vs_defensive: benchmark_ledger already computes these bogey returns; wire the
-        # read here so the leaderboard row for self_directed carries the same performance columns
-        # as the other books. Best-effort: skip cleanly if the ledger hasn't been built yet.
+        # vs_spy and vs_defensive: the ledger's stored bogey returns are each renormalized on that
+        # BOGEY's own inception, so subtracting them from the book's since-inception return compared
+        # different windows (#1433). Recompute every leg over ONE shared window at READ time via
+        # compare_book_to_ledger, so the Self-Directed row carries the same performance columns as
+        # the other books without the cross-window error. When the window is unsupported the deltas
+        # are WITHHELD: the keys are absent — never 0, never the stale cross-window number.
+        # total_return_pct stays the book's own since-inception return. Best-effort.
         try:
             from brain import benchmark_ledger
+            from portfolio import self_directed
             ledger = benchmark_ledger.latest()
-            bogeys = ledger.get("bogeys") or {}
-            spy_ret = (bogeys.get("spy") or {}).get("return_pct")
-            def_ret = (bogeys.get("defensive") or {}).get("return_pct")
-            own_ret = status.get("total_return_pct")
-            if own_ret is not None and spy_ret is not None:
-                status["vs_spy_pct"] = round(own_ret - spy_ret, 4)
+            cmp = benchmark_ledger.compare_book_to_ledger(
+                "self_directed",
+                benchmark_ledger.read_nav_history(self_directed._NAV_PATH),
+                ledger)
+            status["benchmark_window"] = {
+                "status": cmp.get("status"), "reason": cmp.get("reason"),
+                "start": cmp.get("start"), "end": cmp.get("end"),
+                "common_point_count": cmp.get("common_point_count"),
+                "endpoint_status": cmp.get("endpoint_status")}
+            if cmp.get("status") == "descriptive":
+                for d in cmp.get("deltas_pp") or []:
+                    if d.get("right_id") == "spy":
+                        status["vs_spy_pct"] = round(d.get("delta_pp"), 4)
+                    elif d.get("right_id") == "defensive":
+                        status["vs_defensive_pct"] = round(d.get("delta_pp"), 4)
                 status["vs_benchmark_pct"] = status["vs_spy_pct"]
-            if own_ret is not None and def_ret is not None:
-                status["vs_defensive_pct"] = round(own_ret - def_ret, 4)
+            else:
+                for k in ("vs_spy_pct", "vs_defensive_pct", "vs_benchmark_pct"):
+                    status.pop(k, None)
         except Exception:  # noqa: BLE001
             pass
         return {**{k: meta.get(k) for k in (
