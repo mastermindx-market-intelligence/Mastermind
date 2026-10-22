@@ -1325,5 +1325,5 @@ def test_two_independent_app_instances_behave_identically(rsa_key, tmp_path):
     )
     assert response_one.status_code == response_two.status_code == 200
     # Neither instance's success depends on having seen the other's request.
-    assert response_one.json()["ok"] is True
-    assert response_two.json()["ok"] is True
+    assert response_one.json()["ok"] is True, response_one.json()
+    assert response_two.json()["ok"] is True, response_two.json()

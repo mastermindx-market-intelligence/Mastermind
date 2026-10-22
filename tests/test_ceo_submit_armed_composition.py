@@ -1544,16 +1544,15 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # PR #1743 requalification: scripts/executive_os_phase1c.py changed
-    # exactly one static A2 socket-path literal. Its installed event-loop AST
-    # remains byte-for-byte the reviewed 060525... anchor below. Retain a
-    # *full-source* SHA pin; never dynamically derive its allowed digest.
-    # Exact source review of the canonical installed wrapper. This does not
-    # exempt other run calls or imports, even inside the same function.
+    # Protected PR #1743 updated the A2 socket literal; this integration
+    # also retains the requested-CEO selection binding elsewhere in the file.
+    # The installed event-loop AST remains the reviewed 060525... anchor.
+    # Its full-source SHA binds this exact integrated candidate: never derive
+    # that approved digest dynamically or exempt unrelated calls/imports.
     from tests.executive_identity_review import _reviewed_ast_dump
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            'cee3760f6b9a8fadee05e7944ba42194eb4a9a5a2adb2920a54da4560dab131b'):
+            '7236e8a7e64b807ceadc01b3615e1dbafc29da36148fa73cfa7f7421f9e3b72f'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

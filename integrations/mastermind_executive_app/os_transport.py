@@ -582,7 +582,8 @@ class OsExecutiveTransportApp:
                 headers=_OS_HTTP_HEADERS,
             )
         try:
-            validated = validate_tool_arguments("submit_ceo_intent", arguments)
+            from integrations.executive_mcp.schemas import validate_app_submit_arguments
+            validated = validate_app_submit_arguments(arguments)
         except GatewayError as exc:
             if exc.code not in ERROR_CODES:
                 return JSONResponse(

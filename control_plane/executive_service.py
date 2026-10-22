@@ -2795,6 +2795,11 @@ class ExecutiveControlService:
             raise ServiceError("installed COO routing/capability policy drifted")
         return dict(current)
 
+    def _resolve_ceo_frontier_selection(self, alias: str) -> dict[str, Any]:
+        """Host catalog identity only; this does not start a CEO session."""
+        from control_plane.frontier_selection import resolve_selection
+        return resolve_selection(ModelRouter.load(), alias)
+
     def _require_coo_admission_binding(self) -> dict[str, Any]:
         """Fresh admission cannot export a qualification to an unrelated root."""
         qualification = self._require_attended_qualification()
@@ -5664,6 +5669,7 @@ class ExecutiveControlService:
                         or self._ceo_ingress_dialogue_source_provider is not None
                     ),
                     execution_binding_provider=self._require_coo_admission_binding,
+                    frontier_selection_provider=self._resolve_ceo_frontier_selection,
                     dialogue_source_provider=(
                         self._ceo_ingress_dialogue_source_provider
                     ),
