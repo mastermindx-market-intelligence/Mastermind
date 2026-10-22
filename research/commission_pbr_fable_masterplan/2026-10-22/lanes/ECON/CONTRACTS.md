@@ -318,6 +318,7 @@ managed-book loss**. No claim is made that it caused any account's result.
      ECON's family (`portfolio/benchmark*` → `brain/benchmark_ledger.py`).
    - **Merge path:** ECON may merge after green checks plus an independent `VERDICT: PASS`
      review lane.
+     *Amended 2026-10-22 from new evidence (F1 in `A12_BENCHMARK.md`): see Sequencing below.*
    - Live relevance: the capture's `benchmark/` holds `_series_meta.json` next to the
      dated files, so the sidecar collision exists in the live layout.
 2. **#1434 helper** (`brain/benchmark_comparison.py`: `compare_curves`,
@@ -349,10 +350,40 @@ managed-book loss**. No claim is made that it caused any account's result.
    that label through. A `WITHHELD` date is not an endpoint.
 
 Sequencing:
-- #1432: review lane → ECON merge.
+- #1432: review lane → merge on the **amended trigger** in `A12_BENCHMARK.md` (#1712): the web
+  Self-Directed consumer goes through the helper or withholds, or a seat ruling accepts
+  re-activating the three consumers that have been blind since about 2026-07-26.
 - #1434: review lane → ECON merge.
 - Consumer PRs: owners of web/agenda, with ECON review. Wave 1 builds A12 only if a slot
   is free.
+
+---
+
+## (e) Cross-family contract requests addressed to ECON (wave-1 answers)
+
+Sources: PRODUCT `CONTRACT_REQUESTS.md` E1–E11 and RESEARCH `LEDGER.md` CR-R1 / CR-R8, as
+forwarded by the seat. **Accepted** means an A02 / A03 / A12 contract above already covers the
+field and its exact name and nullability are stated here. **Wave 2** means it is scheduled, with the
+reason. Nothing is refused. Field names are those of the #1708 head (8ed3fe1b) and the #1434 head
+(d5fec1eb); both PRs are unmerged, and #1708 is reserved for the seat.
+
+| # | request | disposition | exact field / helper, nullability, units |
+|---|---|---|---|
+| E1 | `nav_history[].nav_status` | **Accepted** (§a) | Enum `QUALIFIED` or `PROVISIONAL`. A `nav_history` row is never `WITHHELD`, because a withheld date writes no row. The key is absent on rows written before #1708; render those `unverified`. |
+| E2 | `nav_history[].nav_qualified` | **Accepted** (§a) | Present on every A02 row. Equals `nav` (2 dp) when `QUALIFIED`, `null` when `PROVISIONAL`. Units are the book's account currency (registry `currency`: USD, `CNY` for china, `HKD` for hk). |
+| E3 | `nav_history[].carried[]` | **Accepted** (§a) | Each entry is `{ticker, price, price_asof, age_days, source, value, weight_of_invested}`. The array is always present on A02 rows, empty when nothing is carried. `price` / `value` are in the line's quote currency, which equals the book currency for every current book. `age_days` is an integer count of calendar days, ≥ 0. **0 is possible** when the source labels the line a carry but supplies no age; once A03 (#1709) supplies `observed_asof`, the age is the true one. Rows also carry `carried_value` and `carried_fraction`. |
+| E4 | `nav_history[].unattested[]` | **Accepted** (§a) | Sorted ticker strings. Always present on A02 rows, possibly empty. |
+| E5 | `nav_withheld.jsonl` | **Accepted, with one correction** (§a) | One file per book, next to `nav_history.jsonl`. Rows are `{date, mark_source, unpriced:[{ticker, shares, last_observed_price, last_observed_asof}], carried:[…], reason}`. `last_observed_price` may be `null`. `reason` is currently the single code `unpriced_held_position`. The file is idempotent per `(date, mark_source)` and sorted by date; an absent file means no withheld dates. **Correction:** the same date can have both an older `nav_history` row and a `nav_withheld` row, since WITHHELD leaves an existing row untouched. Neither record carries a write time, so render both facts and do not infer which came later. A `written_at` key is a wave-2 item. |
+| E6 | current-valuation projection | **Accepted as the existing helper** (§a) | `paper_account.valuation(prices, asof, portfolio_id=None, *, price_evidence=None, state=None) -> dict` is pure: it performs no writes. It returns `{asof, nav_status: QUALIFIED\|PROVISIONAL\|WITHHELD, nav, nav_qualified, cash, invested, lines, carried, carried_value, carried_fraction, unattested, unpriced}`. `nav` and `invested` are `null` when `WITHHELD`. PRODUCT's `status` is `nav_status`. PRODUCT's `unavailable` means the helper is absent (pre-#1708) or raised. Without `price_evidence`, every priced line is `UNATTESTED`, so the web's cached `_book_marks` path yields `PROVISIONAL` at best; that is the honest label. Passing `marks.mark_symbols(...)["sources"]` as `price_evidence` is what earns `QUALIFIED`. `nav(prices, …, strict=True, asof=…, price_evidence=…)` raises `NavWithheld` instead of substituting cost. **Caveat:** see E7 / D-ACCT-1. |
+| E7 | a missing `account.cash` is a contract error | **Accepted as the contract. The current reader does not honour it, so the fix is wave 2 and first in the queue.** | A present `account.json` whose `cash` is missing or non-numeric is a contract error, and PRODUCT should drop its `or 0.0` coercion. That alone cannot catch the case, because **D-ACCT-1** comes first. `_load_account_file` (master `paper_account.py:206-232`; `:207-233` on #1708, unchanged) treats such a file as schema-invalid and returns `_fresh_account()`. `mark()` then persists that fresh book **over the file**: `spy_shares` is `None`, so it saves. With #1708 applied, it also writes a `QUALIFIED` row at the starting NAV. The repro is a scratch test that fails on both `origin/master` and 8ed3fe1b: an account with `cash:"12345.67"` and 100 AAA becomes a fresh 1,000,000 book with no positions. Incidence is **LATENT**: all four captured live `account.json` files have numeric `cash`, and heavyweight has no live `account.json`, only `_backup_clobber_repair_20260727/account.json.clobbered`. Wave-2 fix: a present-but-invalid file raises a typed `AccountUnreadable` to read callers, and `mark()` withholds with reason `account_unreadable` and never saves over the file. An absent file stays the legitimate fresh-book path. The change is reserved because it alters NAV behaviour. |
+| E8 | benchmark comparison shape | **Accepted with the helper's real names; no rename** (§d) | `benchmark_comparison.compare_curves(curves, *, cohort, asof, delta_pairs=())` returns `{status: "descriptive"\|"unavailable", reason: null\|"missing_curve"\|"insufficient_common_dates"\|"numeric_range", asof, cohort, start, end, common_dates, common_point_count, returns_pct: {id: pct}\|null, deltas_pp: [{left_id, right_id, delta_pp}]\|null}`. **Units are percent and percentage points, unrounded, not fractions.** Mapping: `supported` = `descriptive`; `book_return` = `returns_pct[<book>]`; `bench_return` = `returns_pct["spy"]`; `delta` = `deltas_pp[0].delta_pp`. The book curve is `nav_history` `nav` by date. Per §d4, a `PROVISIONAL` endpoint carries its label, a withheld date cannot be an endpoint because it has no row, and a pre-A02 endpoint is `unverified`. The bench curve is `bogeys.spy.curve` from the dated ledger (`benchmark_ledger.load(asof)`), not `latest()`, until #1432 lands. |
+| E9 | pending-target lifecycle fields | **Wave 2** | Settlement semantics (`bot/settle.py`, reserved). Needs an expiry/supersession clock that does not exist today and that the RUNTIME scheduler owns. Not additive. |
+| E10 | per-fill `realized_pnl`, `cost_basis_method` | **Wave 2** | Live fills carry `{date, ticker, side, shares, price, value}`, plus `from_pending` on the legacy book and `transaction_id` / `fill_id` on recent fills (32 CN, 15 HK, 12 autonomous). None carries a realized basis. Writing it needs the average cost at fill time in the settlement fill writer (reserved). The cost method is average cost (`positions[t].avg_cost`). History is a separately classified derived replay, never written back. |
+| E11 | per-holding attribution | **Wave 2** | Derived analytics. Needs qualified marks (#1708), observed dates (#1709) and E10, all unmerged; the first two are reserved. |
+| CR-R1 | fills carry `decision_id` / `submission_sha256` | **Wave 2** (seat ruling recorded: the fill side is ECON's, and `settlement_fill_ids` on the decision row becomes a derived projection) | The id must travel queue → `pending_orders` → `bot/settle.py` (reserved) → fill, so the change is not additive. Historical unlinked fills (August XOM, 688062.SS) can only be joined by derived `(date, ticker, side)` matching. That join is labelled derived and never written back. |
+| CR-R8 | `account.json` in the capture | **Accepted, already delivered** (#1698) | The capture holds `account.json` for `portfolio/` (the default autonomous book), `portfolios/autonomous`, `portfolios/china` and `portfolios/hk`. Each sha256 is in `MANIFEST.json` on #1698, e.g. `portfolios/hk/account.json` 19658998…, `portfolios/china/account.json` 7fb54986…, `portfolio/account.json` 500a2ea8…, `portfolios/autonomous/account.json` c8fc39d3…. "account MISSING" is the #673 source reader's result, not the capture's. |
+
+PRODUCT R5 (scheduler `price_evidence` wiring) is the RUNTIME request already recorded in §a.
 
 ---
 
