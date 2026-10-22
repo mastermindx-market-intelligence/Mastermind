@@ -36,25 +36,28 @@ def billing(pct="MISSING", start=START, end=END, ptype="USAGE_PERIOD_TYPE_WEEKLY
 
 
 class QuotaBillingTests(unittest.TestCase):
-    def test_selected_source_and_candidate_are_byte_identical(self):
-        self.assertEqual(
-            (ROOT / "source" / "quota_remote.py").read_bytes(),
-            (ROOT / "candidate" / "quota_remote.py").read_bytes(),
-        )
+    def test_frozen_installed_preimage_and_reviewed_candidate_are_separate(self):
+        import hashlib
+        inventory = json.loads((ROOT / "rollout" / "native-preimages.json").read_text())
+        original = (ROOT / "source" / "quota_remote.py").read_bytes()
+        candidate = (ROOT / "candidate" / "quota_remote.py").read_bytes()
+        self.assertEqual(hashlib.sha256(original).hexdigest(),
+                         inventory["files"]["quota_remote.py"])
+        self.assertNotEqual(original, candidate)
+        self.assertIn(b"CACHE_PATH = os.path.realpath(", candidate)
+        self.assertIn(b"def parse_grok_billing_payload(", candidate)
 
     def test_explicit_percent_is_valid_and_observation_is_weekly(self):
-        for which in ("source", "candidate"):
-            with self.subTest(copy=which):
-                module = load(which)
-                rows = module.parse_grok_billing_payload(billing(27.5), NOW)
-                self.assertEqual(len(rows), 1)
-                row = rows[0]
-                self.assertEqual(row.provider, "grok")
-                self.assertEqual(row.window, "weekly")
-                self.assertAlmostEqual(row.remaining_pct, 72.5)
-                self.assertEqual(row.cap, 100.0)
-                self.assertEqual(row.reset_at, "2026-10-26T05:54:40Z")
-                self.assertEqual(row.source, "GROK_BUILD_ACP_BILLING")
+        module = load("candidate")
+        rows = module.parse_grok_billing_payload(billing(27.5), NOW)
+        self.assertEqual(len(rows), 1)
+        row = rows[0]
+        self.assertEqual(row.provider, "grok")
+        self.assertEqual(row.window, "weekly")
+        self.assertAlmostEqual(row.remaining_pct, 72.5)
+        self.assertEqual(row.cap, 100.0)
+        self.assertEqual(row.reset_at, "2026-10-26T05:54:40Z")
+        self.assertEqual(row.source, "GROK_BUILD_ACP_BILLING")
 
     def test_missing_percent_is_unknown_not_zero(self):
         module = load("candidate")
@@ -72,7 +75,7 @@ class QuotaBillingTests(unittest.TestCase):
         self.assertEqual(exhausted.remaining_pct, 0.0)
 
     def test_bad_period_missing_config_and_future_timestamp_refuse(self):
-        module = load("source")
+        module = load("candidate")
         variants = [
             {}, {"config": {}}, billing(1, ptype="USAGE_PERIOD_TYPE_MONTHLY"),
             billing(1, start="2026-10-25T00:00:00Z"),
