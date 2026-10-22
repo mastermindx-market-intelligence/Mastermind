@@ -68,7 +68,7 @@ def suite(name: str, source: str, expected: set[str], upstream: bool = False, st
     (CACHE / f'{name}.log').write_text(output)
     data = json.loads(destination.read_text())
     assertions = [a for s in data['testResults'] for a in s.get('assertionResults', [])]
-    count = 19 if profile else 12 if stdio else 121 if upstream else 32
+    count = 19 if profile else 14 if stdio else 121 if upstream else 32
     failed = {a['title'] for a in assertions if a['status'] == 'failed'}
     assert len(assertions) == data['numTotalTests'] == count, f'{name}: missing cases'
     assert all(a['status'] in {'passed', 'failed'} for a in assertions), f'{name}: skipped cases'
@@ -156,7 +156,7 @@ def stdio_checks() -> dict:
         result = suite(name, source, expected, stdio=True)
         raw = (CACHE / 'stdio-observations.json').read_bytes()
         rows = json.loads(raw)
-        assert len(rows) == 12, 'Missing stdio cleanup evidence'
+        assert len(rows) == 14, 'Missing stdio cleanup evidence'
         assert all(row['childCount'] == 2 and row['childAbsentAfterDispose']
                    and row['inputsUnchanged'] for row in rows)
         (CACHE / f'{name}-observations.json').write_bytes(raw)
@@ -362,8 +362,8 @@ def grant_checks() -> dict:
         env=ENV, capture_output=True, text=True, timeout=30)
     output = result.stdout + result.stderr
     (CACHE / 'grant-projection-final.log').write_text(output)
-    assert result.returncode == 0 and 'Ran 11 tests' in output and '\nOK\n' in output
-    report = {'python_projection': {'tests': 11, 'passed': 11, 'exit_code': 0,
+    assert result.returncode == 0 and 'Ran 12 tests' in output and '\nOK\n' in output
+    report = {'python_projection': {'tests': 12, 'passed': 12, 'exit_code': 0,
                                    'log_sha256': digest(output.encode())},
               'runtime_projection': grant_unit('grant-admission-final', set())}
     owner = ROOT.parents[2] / 'integrations/acp_worker/dsh_mcp_grant.mjs'

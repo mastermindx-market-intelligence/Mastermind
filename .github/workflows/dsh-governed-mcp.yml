@@ -1,0 +1,116 @@
+name: DSH Governed MCP
+
+# Qualify the actual pinned DSH ToolRuntime + MCP transport on PR source,
+# not a mocked approval or the uninstalled Executive ACP worker route.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dsh-governed-mcp.yml
+      - experiments/harness_convergence/dispatch_binding/**
+      - integrations/acp_worker/dsh_*.mjs
+      - control_plane/dsh_mcp_client_projection.py
+      - tests/test_dsh_mcp_client_projection.py
+      - tests/fixtures/dsh_mcp_grant_projection.py
+  push:
+    branches: [master]
+    paths:
+      - .github/workflows/dsh-governed-mcp.yml
+      - experiments/harness_convergence/dispatch_binding/**
+      - integrations/acp_worker/dsh_*.mjs
+      - control_plane/dsh_mcp_client_projection.py
+      - tests/test_dsh_mcp_client_projection.py
+      - tests/fixtures/dsh_mcp_grant_projection.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsh-governed-mcp-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-mcp-lifecycle:
+    name: real MCP discovery, governed dispatch, cancellation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Set up supported Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Recover immutable public DSH source and exact reviewed patches
+        working-directory: experiments/harness_convergence/dispatch_binding
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python prepare.py --download
+          python prepare_mcp.py --download
+
+      - name: Install frozen dependencies with scripts and ambient npm config disabled
+        working-directory: experiments/harness_convergence/dispatch_binding
+        run: |
+          env -i \
+            PATH="$PATH" \
+            HOME="$PWD/.cache/home" \
+            NPM_CONFIG_USERCONFIG="$PWD/.cache/empty-user.npmrc" \
+            NPM_CONFIG_GLOBALCONFIG="$PWD/.cache/empty-global.npmrc" \
+            NPM_CONFIG_CACHE="$PWD/.cache/npm-cache" \
+            NPM_CONFIG_REGISTRY="https://registry.npmjs.org/" \
+            npm ci --ignore-scripts --legacy-peer-deps --no-audit --no-fund
+
+      - name: Verify actual DSH and MCP lifecycle, grants and negative controls
+        working-directory: experiments/harness_convergence/dispatch_binding
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+        run: |
+          python verify_mcp.py
+
+      - name: Refuse missing positive native stdio/cancellation proof
+        working-directory: experiments/harness_convergence/dispatch_binding
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path(".cache")
+          report = json.loads((root / "mcp-verification-report.json").read_text())
+          stdio = report["stdio"]["patched"]
+          assert report["success"] is True
+          assert report["installed"] is False and report["model_requests"] == 0
+          assert (stdio["passed"], stdio["tests"], stdio["failed_cases"]) == (14, 14, [])
+          assert stdio["all_observed_children_settled"] is True
+          assert all(row["childCount"] == 2 and row["childAbsentAfterDispose"]
+                     and row["inputsUnchanged"] for row in stdio["observations"])
+          cases = dict(zip(stdio["cases"], stdio["observations"]))
+          events = lambda title: [item["event"] for item in cases[title]["events"]]
+          assert events("real stdio subprocess reads and searches two synthetic files through admitted tools") == [
+              "start", "start", "read", "search"]
+          assert events("an already-aborted granted dispatch never sends a real MCP request") == [
+              "start", "start"]
+          assert events("revocation racing with an in-flight abort never replays its original MCP read") == [
+              "start", "start", "read", "cancelled"]
+          print("14/14 real MCP stdio cases: discovery, dispatch, cancellation, no replay; children reaped")
+          PY
+
+      - name: Retain reproducible synthetic observations
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dsh-governed-mcp-proof
+          path: |
+            experiments/harness_convergence/dispatch_binding/.cache/mcp-verification-report.json
+            experiments/harness_convergence/dispatch_binding/.cache/mcp-stdio-patched-observations.json
+          if-no-files-found: error
+          retention-days: 14
