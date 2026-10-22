@@ -41,13 +41,27 @@ class Copy:
 
 
 class ClonePruneGuardTests(unittest.TestCase):
-    def test_bridge_import_is_private_and_does_not_shadow_package(self):
-        self.assertEqual(g.bridge.__name__, "_mastermind_paper_clone_prune_bridge")
+    def test_bridge_import_reuses_canonical_module_and_does_not_shadow_package(self):
+        from integrations.paper_desktop import bridge as canonical_bridge
+        self.assertIs(g.bridge, canonical_bridge)
+        self.assertEqual(g.bridge.__name__, "integrations.paper_desktop.bridge")
+        self.assertIs(sys.modules["integrations.paper_desktop.bridge"], canonical_bridge)
         self.assertNotIn(str(PAPER), sys.path)
         ambient = sys.modules.get("bridge")
         if ambient is not None:
             self.assertNotEqual(Path(getattr(ambient, "__file__", "/")).resolve(),
                                 (PAPER / "bridge.py").resolve())
+
+    def test_canonical_bridge_import_passes_protected_identity_scanner(self):
+        from tests.test_ceo_submit_armed_composition import (
+            _d8_frozen_source_diff, _scan_added_identity_diff,
+        )
+        path = "integrations/paper_desktop/clone_prune_guard.py"
+        source = "from integrations.paper_desktop import bridge\\n".replace("\\n", "\n")
+        diff = _d8_frozen_source_diff(path, source)
+        self.assertEqual(_scan_added_identity_diff(
+            diff, source_postimages={path: source},
+        ), [])
 
     def test_exact_two_file_scratch_clone_prune_readback(self):
         fixture = Copy()
