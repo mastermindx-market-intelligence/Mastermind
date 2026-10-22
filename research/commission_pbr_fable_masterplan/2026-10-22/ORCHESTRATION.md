@@ -34,3 +34,4 @@ Columns: `when (UTC)` · `unit` (orchestrator or lane id) · `host/model` · `cl
 5. A worker "fixes" by resetting a book or inventing a balancing fill → forbidden in every packet; seat greps diffs for `reset`, `seed`, balancing writes before any merge.
 6. deploy_lag.json is trusted as installed identity → forbidden; blob comparison only.
 | 07:35 | seat | m2 / Fable | fact | — | RECORDED | FABLE_START_HERE.md §1 correction | live data root is /opt/mastermind-live-data (BindPaths); all captures redirected; .deployed_git_sha ff16c192 10-21 15:32Z |
+| 08:20 | seat | m2 / Fable | ruling | — | RECORDED | CR-RT-1..4 | RT-1 granted narrow (cli_bridge + sdk_diagnostics error-literal surfacing only); RT-2 granted (thinking_log provider label); RT-3 SDK pin = release-row item (reserved PR allowed); RT-4 failover semantics reserved, typing only in wave 1 |
