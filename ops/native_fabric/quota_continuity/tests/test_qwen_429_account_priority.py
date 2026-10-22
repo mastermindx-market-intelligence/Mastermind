@@ -155,7 +155,8 @@ class Qwen429AccountPriorityTests(unittest.TestCase):
 
     def test_other_provider_unchanged(self):
         self.statuses["Ryan"] = "http_429"
-        self.assertEqual(self.pick(pool="glm"), "Ryan")
+        # Non-Bailian ties use alphabetical order, not Qwen grant history.
+        self.assertEqual(self.pick(pool="glm"), "Chris")
 
     def test_disabled_external_gate_keeps_original_ranking(self):
         self.statuses["Ryan"] = "http_429"
