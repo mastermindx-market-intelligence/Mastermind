@@ -613,15 +613,18 @@ def test_partial_apply_reports_modified_files_and_requires_same_home_verify(
 
     exc = captured.value
     assert exc.modified_files == (
-        str(home / ".codex" / "hooks" / "mastermind_fabric_routing_guard.py"),
+        str(home / ".codex" / "hooks" / "cursor_native_child_policy.py"),
     )
     assert exc.verify_issues
     assert "do not switch carriers or blindly replay" in str(exc)
     assert (
-        home / ".codex" / "hooks" / "mastermind_fabric_routing_guard.py"
+        home / ".codex" / "hooks" / "cursor_native_child_policy.py"
     ).exists()
     assert not (
-        home / ".claude" / "hooks" / "mastermind_fabric_routing_guard.py"
+        home / ".claude" / "hooks" / "cursor_native_child_policy.py"
+    ).exists()
+    assert not (
+        home / ".codex" / "hooks" / "mastermind_fabric_routing_guard.py"
     ).exists()
 
 
