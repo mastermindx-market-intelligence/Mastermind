@@ -43,7 +43,7 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  const identity={run_id:'http-fixture-001',root_id:'http-qualification-001'};
  const request=await call(first.client,'fabric_request',{...identity,parent_id:identity.root_id,
    task_class:'mechanical',task_complexity:'C0_MECHANICAL',work_packet:'OBJECTIVE: fixture transport qualification. No provider calls.'});
- assert.ok(request.controller_pid);assert.equal(request.worker_started,null);
+ assert.ok(request.controller_pid,JSON.stringify(request));assert.equal(request.worker_started,null);
  await first.transport.terminateSession();
  const second=await connect();
  const observed=await call(second.client,'fabric_status',identity);
@@ -53,7 +53,7 @@ test('real HTTP + SDK + maintained process owner: cross-session retained result 
  const result=await call(second.client,'fabric_result',identity);
  assert.equal(result.adapter_response,'RETURN: VERIFIED\n\n');
  const accepted=await call(second.client,'fabric_accept',{...identity,by:'deterministic',
-  expected_response_sha256:result.response_sha256,verification_summary:'Compared exact isolated fixture bytes across HTTP session replacement.'});
+  expected_response_sha256:result.response_sha256,verification_summary:'artifact_digest_comparison'});
  assert.equal(accepted.accepted,true);
  assert.equal(gateway.stats().backend.spawns,1);
  assert.match(await readFile(join(directory,identity.run_id+'.packet'),'utf8'),/No provider calls/);

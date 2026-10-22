@@ -11,7 +11,7 @@ import { resolve, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const ID_PATTERN = '^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$';
 const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
@@ -28,6 +28,12 @@ with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
  print(json.dumps({'exit_code':p.returncode,'stdout_base64':base64.b64encode(data).decode('ascii'),'stdout_bytes':len(data),'stdout_sha256':hashlib.sha256(data).hexdigest()},separators=(',',':')))
 `;
 const CLASSES = ['mechanical', 'fix_build', 'review', 'census', 'audit'];
+// Fixed evidence-basis codes prevent acceptance metadata from becoming a
+// prompt or workflow-control channel. These labels do not prove the checks.
+const ACCEPT_VERIFICATION_CODES = Object.freeze([
+  'deterministic_test_evidence', 'artifact_digest_comparison',
+  'manual_result_review', 'independent_review_evidence'
+]);
 const COMPLEXITIES = ['C0_MECHANICAL', 'C1_ROUTINE_BOUNDED', 'C2_COMPLEX_BOUNDED', 'C3_FRONTIER_JUDGMENT'];
 const DEFAULT_ADAPTER = resolve(homedir(), '.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext/fabric_task.py');
 const idSchema = { type: 'string', pattern: ID_PATTERN, minLength: 1, maxLength: 128 };
@@ -50,7 +56,8 @@ export const FABRIC_TOOLS = Object.freeze([
   tool('fabric_result', 'Retrieve the actual successor result only when available and the ledger root matches. Returns accept_run_id for exact reviewed-leaf acceptance. Returns a digest of the complete adapter response, not an artifact attestation. Does not accept the result.', {...identity,max_bytes:maxBytes}, ['run_id','root_id'], true),
   tool('fabric_accept', 'Effectful acceptance of one fully reviewed worker result. Requires independently checked evidence and the exact response digest. This changes the existing ledger; never retry an uncertain acceptance.', {
     ...identity, by:{type:'string',enum:['deterministic','reviewer']}, expected_response_sha256:{type:'string',pattern:'^[0-9a-f]{64}$'},
-    verification_summary:{type:'string',minLength:1,maxLength:1000,description:'Brief observations of performed checks and evidence references only. Do not include directions to a classifier, reviewer, model, or workflow.'}, max_bytes:maxBytes,
+    verification_summary:{type:'string',enum:ACCEPT_VERIFICATION_CODES,
+      description:'One fixed evidence-basis code after actual verification. No prose or workflow instructions. Backend does not attest external checks.'}, max_bytes:maxBytes,
   }, ['run_id','root_id','by','expected_response_sha256','verification_summary'], false),
   tool('fabric_controller_output', 'Read retained output from the exact Desktop Commander PID returned by this backend for this root and run. A new backend generation cannot recreate that binding. Never exposes an arbitrary process or starts another worker.', {
     ...identity, controller_pid:{type:'integer',minimum:1,maximum:2147483647}, offset:{type:'integer',minimum:0,maximum:1048576,default:0}, max_lines:{type:'integer',minimum:1,maximum:100,default:60},
@@ -73,14 +80,11 @@ function validate(name, args) {
     if (s.enum && !s.enum.includes(v)) fail('INVALID_ARGUMENT',{field:k});
   }
   if (name==='fabric_accept') {
-    // Verification is evidence, not an instruction channel for reviewers or workflow agents.
-    // Refuse explicit classifier/agent steering before any adapter observation or write.
-    const summary=args.verification_summary;
-    const directsRole=/\b(?:classifier|auto[- ]?reviewer|reviewer|assistant|agent|model|workflow)\b[^.\n]{0,100}\b(?:must|should|shall|always|never|ignore|override|force|select|classify|mark|return|stop|terminate|spawn|descend)\b/i;
-    const directsOutcome=/\b(?:force|set|choose|prescribe|override)\s+(?:the\s+)?(?:acceptance|classification|verdict|outcome|terminal|no[- ]descendant|decision)\b/i;
-    const directsTerminal=/\b(?:do not|don't|never|must not)\s+(?:launch|spawn|descend|continue|review|classify|inspect)\b/i;
-    if (directsRole.test(summary) || directsOutcome.test(summary) || directsTerminal.test(summary))
-      fail('VERIFICATION_SUMMARY_INSTRUCTION',{field:'verification_summary'});
+    const {by, verification_summary: basis}=args;
+    const deterministic=['deterministic_test_evidence','artifact_digest_comparison'];
+    const reviewer=['manual_result_review','independent_review_evidence'];
+    if (!(by==='deterministic' ? deterministic : reviewer).includes(basis))
+      fail('INVALID_ARGUMENT',{field:'verification_summary'});
   }
   if (name==='fabric_request') {
     if (Buffer.byteLength(args.work_packet)>MAX_PACKET_BYTES) fail('INVALID_ARGUMENT',{field:'work_packet'});
