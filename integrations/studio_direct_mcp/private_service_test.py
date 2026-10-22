@@ -4499,3 +4499,58 @@ class TestFabricPoolPinMigration(unittest.TestCase):
             with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
                 svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True))
         self.assert_original()
+
+
+class TestFabricPoolLifecycleMutexCoverage(unittest.TestCase):
+    """Exact original lifecycle inode serializes pin writer and start/stop."""
+
+    def test_all_ten_pinned_accounts_use_one_existing_lock_for_lifecycle(self):
+        observed = []
+        @contextmanager
+        def fake_mutex(account):
+            observed.append(("lock-enter", account))
+            try:
+                yield
+            finally:
+                observed.append(("lock-exit", account))
+        def operation(args):
+            observed.append(("operation", args.account))
+        wrapper = svc._c2_lifecycle_serialized()(operation)
+        with mock.patch.object(svc, "_c2_lifecycle_mutex", side_effect=fake_mutex):
+            for account in svc.FABRIC_POOL_PIN_MIGRATION:
+                before = len(observed)
+                wrapper(type("Args", (), {"account": account})())
+                self.assertEqual(observed[before:], [
+                    ("lock-enter", account),
+                    ("operation", account),
+                    ("lock-exit", account),
+                ])
+        self.assertEqual(len(svc.FABRIC_POOL_PIN_MIGRATION), 10)
+
+    def test_competing_lifecycle_mutation_refuses_before_operation(self):
+        observed = []
+        @contextmanager
+        def occupied(_):
+            raise SystemExit("existing lifecycle mutation busy")
+            yield
+        wrapper = svc._c2_lifecycle_serialized()(
+            lambda args: observed.append(args.account)
+        )
+        with mock.patch.object(svc, "_c2_lifecycle_mutex", side_effect=occupied):
+            with self.assertRaisesRegex(SystemExit, "busy"):
+                wrapper(type("Args", (), {"account": "chatgpt1"})())
+        self.assertEqual(observed, [])
+
+    def test_unrelated_fabric_backend_uses_its_original_outer_mutex_only(self):
+        original_backend = next(iter(svc.FABRIC_BACKEND_ACCOUNTS))
+        self.assertNotIn(original_backend, svc.FABRIC_POOL_PIN_MIGRATION)
+        observed = []
+        wrapper = svc._c2_lifecycle_serialized()(
+            lambda args: observed.append(args.account)
+        )
+        with mock.patch.object(
+            svc, "_c2_lifecycle_mutex",
+            side_effect=AssertionError("inner mutex must not double-lock Fabric owner"),
+        ):
+            wrapper(type("Args", (), {"account": original_backend})())
+        self.assertEqual(observed, [original_backend])
