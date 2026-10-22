@@ -1,8 +1,9 @@
 """Prepare a supplied Control configuration for the existing installer.
 
 This is an offline input transform, not an installed-config reader or publisher.
-Only proof_base_sha and ceo_ingress_app_macro_root change. Host policy, arming,
-identities and all other supplied values remain the installer's responsibility.
+Only proof_base_sha, its installer-owned proof_source_repository checkout, and
+ceo_ingress_app_macro_root change. Host policy, arming, identities and all other
+supplied values remain the installer's responsibility.
 The caller supplies the already-approved Macro root; this tool does not inspect
 that root, attest its seal, load referenced runtime files, or authorize activation.
 
@@ -31,7 +32,8 @@ from typing import Any
 
 _MAX_INPUT_BYTES = 1024 * 1024
 _LIVE_CONFIG_ROOT = Path("/Library/Application Support/MastermindExecutive/config")
-_CHANGED_FIELDS = frozenset({"proof_base_sha", "ceo_ingress_app_macro_root"})
+_ADMIN_CHECKOUT_ROOT = Path("/var/db/mastermind-executive/control/admin-checkout")
+_CHANGED_FIELDS = frozenset({"proof_base_sha", "proof_source_repository", "ceo_ingress_app_macro_root"})
 
 
 class PreparationError(ValueError):
@@ -126,6 +128,9 @@ def _validate_document(document: dict[str, Any]) -> None:
     if type(value["proof_base_sha"]) is not str or not re.fullmatch(r"[0-9a-f]{40}", value["proof_base_sha"]):
         raise PreparationError("proof_base_sha must be a full lowercase commit SHA")
     try:
+        if type(value["proof_source_repository"]) is not str or "\x00" in value["proof_source_repository"]:
+            raise PreparationError("proof_source_repository must be an absolute path")
+        control._absolute_path(value["proof_source_repository"])
         control._absolute_path(value["ceo_ingress_app_macro_root"])
         control._validate_fabric_bridge_config(value)
         control.company_consultation_launchd_entry(value)
@@ -170,6 +175,7 @@ def build_successor(document: dict[str, Any], *, source_sha: str,
     _validate_document(document)
     successor = copy.deepcopy(document)
     successor["proof_base_sha"] = source_sha
+    successor["proof_source_repository"] = str(_ADMIN_CHECKOUT_ROOT / source_sha)
     successor["ceo_ingress_app_macro_root"] = macro_root
     _validate_document(successor)
     return successor

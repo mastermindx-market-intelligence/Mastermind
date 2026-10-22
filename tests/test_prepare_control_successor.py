@@ -12,7 +12,7 @@ import pytest
 from ops.executive_os import prepare_control_successor as prepare
 
 
-OLD_SHA = "1" * 40
+OLD_SHA = "80f384b8f58b7ca46422d9783aa5c0613c7bf4b2"
 NEW_SHA = "2" * 40
 OLD_MACRO = "/approved/retained/Macro"
 NEW_MACRO = "/approved/successor/Macro"
@@ -29,7 +29,7 @@ def control_input():
         "worker_provider_home": "/var/db/mastermind-executive/provider",
         "worker_runs_root": "/var/db/mastermind-executive/runs",
         "receipts_root": "/var/db/mastermind-executive/receipts",
-        "proof_source_repository": "/var/db/mastermind-executive/admin/mastermind.git",
+        "proof_source_repository": "/var/db/mastermind-executive/control/admin-checkout/80f384b8f58b7ca46422d9783aa5c0613c7bf4b2",
         "proof_workspace_root": "/Volumes/Mastermind/agent-workspaces",
         "proof_base_sha": OLD_SHA,
         "backup_root": "/var/db/mastermind-executive/backups",
@@ -68,14 +68,17 @@ def control_input():
     }
 
 
-def test_changes_only_source_and_macro_and_does_not_mutate_input(control_input):
+def test_retargets_historical_checkout_to_installer_expected_source_and_preserves_policy(control_input):
     before = copy.deepcopy(control_input)
     result = prepare.build_successor(control_input, source_sha=NEW_SHA, macro_root=NEW_MACRO)
     assert control_input == before
     assert set(result) == set(before)
     assert {key for key in result if result[key] != before[key]} == {
-        "proof_base_sha", "ceo_ingress_app_macro_root"}
-    assert result["proof_source_repository"] == before["proof_source_repository"]
+        "proof_base_sha", "proof_source_repository", "ceo_ingress_app_macro_root"}
+    # install.sh derives ADMIN_CHECKOUT from its fixed runtime root and the
+    # selected release, then requires this exact field in --control-config.
+    assert result["proof_source_repository"] == (
+        f"/var/db/mastermind-executive/control/admin-checkout/{NEW_SHA}")
     assert result["ceo_ingress_app_armed"] is True
     assert result["privileged_readiness_armed"] is True
     result["company_consultation"]["armed"] = True
@@ -111,6 +114,9 @@ def test_no_runtime_reference_or_macro_reads(control_input, monkeypatch):
     lambda value: value.pop("ceo_ingress_app_peer_uid"),
     lambda value: value.update(unreviewed_setting=True),
     lambda value: value.update(schema_version="unsupported"),
+    lambda value: value.update(proof_source_repository="relative/source"),
+    lambda value: value.update(proof_source_repository=None),
+    lambda value: value.update(proof_source_repository="/invalid/\x00/source"),
     lambda value: value.update(ceo_ingress_app_peer_uid=value["control_uid"]),
     lambda value: value.update(ceo_ingress_app_armed="true"),
     lambda value: value.update(worker_uid=value["control_uid"]),
@@ -154,12 +160,17 @@ def test_output_is_new_private_file_and_input_is_untouched(tmp_path, control_inp
     assert source.read_bytes() == raw
     successor = json.loads(output.read_bytes())
     assert successor["proof_base_sha"] == NEW_SHA
+    assert successor["proof_source_repository"] == (
+        f"/var/db/mastermind-executive/control/admin-checkout/{NEW_SHA}")
     assert successor["ceo_ingress_app_macro_root"] == NEW_MACRO
     assert stat.S_IMODE(output.stat().st_mode) == 0o600
     assert result["input_sha256"] == hashlib.sha256(raw).hexdigest()
     assert result["output_sha256"] == hashlib.sha256(output.read_bytes()).hexdigest()
     assert result["macro_seal_verified"] is False
     assert result["installed_configuration_changed"] is False
+    assert result["changed_fields"] == [
+        "ceo_ingress_app_macro_root", "proof_base_sha", "proof_source_repository"]
+    assert result["unchanged_fields"] == len(control_input) - 3
     before = output.read_bytes()
     with pytest.raises(FileExistsError):
         prepare.prepare(input_path=str(source), output_path=str(output),
