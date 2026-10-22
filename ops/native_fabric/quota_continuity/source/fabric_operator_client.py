@@ -72,9 +72,11 @@ IF AND ONLY IF a child is needed:
    capability tokens, config files or environment variables.
 2. Submit fabric_child_request ONCE with this exact argument shape:
    {"schema":"mastermind.fabric_operator_child_request.v1",
-    "root":<scope.root>,"parent":<scope.operator_run>,
-    "run_id":<new stable unique ID>,"task_class":"mechanical",
-    "task_complexity":"C0_MECHANICAL","packet":<bounded instructions>}.
+    "root":"<scope.root>","parent":"<scope.operator_run>",
+    "run_id":"<new-stable-child-id>","task_class":"mechanical",
+    "task_complexity":"C0_MECHANICAL","packet":"<bounded task>"}.
+   Replace every bracketed placeholder with the actual admitted binding/task;
+   placeholders are NOT valid real identities, and this object is not a grant.
    Allowed task classes: mechanical, extract, fix_build, census, audit, build;
    allowed complexities: C0_MECHANICAL or C1_ROUTINE_BOUNDED only.
    The packet names precise inputs, workspace/source custody, acceptance checks,
