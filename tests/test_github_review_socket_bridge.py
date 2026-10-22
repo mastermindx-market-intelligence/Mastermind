@@ -130,3 +130,62 @@ def test_socket_client_refuses_broad_status_enumeration_without_socket_io(tmp_pa
     client = ExecutiveReviewSocketClient(socket_path=str(tmp_path / "missing.sock"))
     with pytest.raises(ReviewAdmissionUnavailable, match="EXACT_STATUS"):
         client.admitted_command_ids()
+
+
+def test_source_authority_rechecked_at_runtime_commit(tmp_path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    checks = []
+    def changing_source(subject):
+        checks.append(subject.command_id)
+        if len(checks) >= 3:
+            raise PermissionError("head or actor authority changed at commit")
+    owner = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=changing_source, repositories=frozenset({"example/repo"}),
+    )
+    with pytest.raises(GitHubReviewSocketRefused, match="ADMISSION_REFUSED"):
+        owner.handle_frame(admit_frame(decision()))
+    assert len(checks) >= 3
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_socket_sendall_partial_failure_is_unknown_not_safe_to_retry(tmp_path, monkeypatch):
+    from integrations import github_review_socket_client as socket_module
+    client = ExecutiveReviewSocketClient(socket_path=str(tmp_path / "existing.sock"))
+    history = []
+    class PartialSend:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            pass
+        def settimeout(self, value):
+            pass
+        def connect(self, path):
+            history.append(("connected", path))
+        def sendall(self, payload):
+            history.append(("sent_some_bytes", payload[:32]))
+            raise BrokenPipeError("partial transmission no ACK")
+    monkeypatch.setattr(socket_module.socket, "socket", lambda *args: PartialSend())
+    with pytest.raises(ReviewAdmissionUnavailable, match="EFFECT_UNKNOWN"):
+        client.admit_review_intent(
+            decision=decision(), objective="Read-only independent review"
+        )
+    assert any(item[0] == "sent_some_bytes" for item in history)
+
+
+def test_oversized_socket_frame_refuses_before_guard_or_ledger(tmp_path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    checked = []
+    def auth_guard():
+        checked.append("checked")
+    owner = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=auth_guard,
+        source_guard=lambda _: None,
+        repositories=frozenset({"example/repo"}),
+    )
+    frame = status_frame(decision().command_id)
+    frame["padding"] = "x" * 9000
+    with pytest.raises(GitHubReviewSocketRefused, match="OVER_BOUND"):
+        owner.handle_frame(frame)
+    assert checked == []
+    assert runtime.jobs.list_jobs() == []

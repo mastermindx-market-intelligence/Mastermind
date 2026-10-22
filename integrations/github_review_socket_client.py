@@ -14,17 +14,16 @@ import socket
 from pathlib import Path
 
 from control_plane.github_review_intent import COMMAND_ID_RE, ReviewIntentDecision
-from control_plane.github_review_intent_ingress import FabricJobAdmissionPort
 from control_plane.github_review_intent_ingress import ReviewIngressUnavailable
 from control_plane.github_review_socket_contract import (
-    FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES,
+    FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES, MAX_RESPONSE_BYTES,
 )
 
 class ReviewAdmissionUnavailable(ReviewIngressUnavailable):
     """Opaque socket failure; unknown effects cannot be retried blindly."""
 
 DEFAULT_SOCKET = "/var/run/mastermind-executive/ceo-ingress.sock"
-MAX_RESPONSE = 8192
+MAX_RESPONSE = MAX_RESPONSE_BYTES
 
 
 class ExecutiveReviewSocketClient:
@@ -56,8 +55,10 @@ class ExecutiveReviewSocketClient:
             with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as conn:
                 conn.settimeout(self._timeout)
                 conn.connect(self._socket_path)
-                conn.sendall(raw)
+                # sendall may transmit a complete command and still raise
+                # before an ACK. Once send is ATTEMPTED, effect is unknown.
                 sent = True
+                conn.sendall(raw)
                 line = bytearray()
                 while True:
                     block = conn.recv(min(1024, MAX_RESPONSE + 1 - len(line)))

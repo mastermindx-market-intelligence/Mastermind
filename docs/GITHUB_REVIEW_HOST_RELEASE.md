@@ -172,3 +172,29 @@ re-submits an uncertain effect. Qualify with the real existing Executive socket
 service test fixture, not a substitute server; only then compose and enroll the
 production App listener, secret custodian, Caddy route and runtime worker
 consumer under normal protected release custody.
+
+
+## Leaf bridge hardening — 2026-10-22
+
+The socket-owner adapter now binds both the original authenticated Executive
+admission guard and the exact immutable request's source guard into the existing
+JobRegistry **commit-time** authorization callback. Authority revoked between
+webhook preflight and the SQLite commit refuses admission. The owner also
+refuses over-bound serialized frames before any host guard or ledger read.
+These checks do not enroll or override the real socket listener.
+
+The socket client treats even a partially sent Unix-socket command as
+`REVIEW_SOCKET_EFFECT_UNKNOWN`; it never mistakes a failed `sendall`
+response for proof that a submit did not execute. Any reconciliation must
+read the original exact command from the existing canonical Executive ledger.
+The real host must supply a trusted, bounded source guard and keep slow GitHub
+network reads outside long-held database locks when integrating its endpoint.
+
+`tests/test_github_review_socket_http_integration.py` covers one signed
+GitHub webhook through the public socket-backed composition into an actual
+test Runtime/JobRegistry across a local Unix-socket transport, with signed
+redelivery dedupe, worker-START absence, sanitized Slack visibility and invalid
+signature refusal. This is **hermetic source-path proof only**, not evidence
+that the installed `ExecutiveControlService` accepts the new review frame.
+The legacy 21-line dormant Executive binding worktree diff remains excluded
+from this PR because the production handler modification was platform-denied.

@@ -7,6 +7,7 @@ source admission. GitHub never supplies the socket target or trust callbacks.
 """
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable
 
@@ -105,13 +106,21 @@ class ExecutiveGitHubReviewSocketOwner:
         self._admission_guard = admission_guard
         self._source_guard = source_guard
         self._repositories = repositories
-        self._adapter = ExecutiveReviewJobAdmission(
-            runtime=runtime, admission_guard=admission_guard,
-        )
+        # Admission is bound to an individual immutable request when handled;
+        # never retain mutable per-request authority on this shared owner.
 
     def handle_frame(self, frame: object) -> dict[str, object]:
         if not isinstance(frame, dict) or frame.get("schema") != FRAME_SCHEMA:
             raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID")
+        try:
+            raw = json.dumps(
+                frame, separators=(",", ":"), sort_keys=True,
+                ensure_ascii=True, allow_nan=False,
+            ).encode("ascii") + b"\n"
+        except (TypeError, ValueError, OverflowError):
+            raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID") from None
+        if len(raw) > MAX_FRAME_BYTES:
+            raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_OVER_BOUND")
         action = frame.get("action")
         if action not in _SUPPORTED_ACTIONS:
             raise GitHubReviewSocketRefused("REVIEW_SOCKET_ACTION_REFUSED")
@@ -150,10 +159,20 @@ class ExecutiveGitHubReviewSocketOwner:
                 raise ValueError("source guard refused")
         except Exception:
             raise GitHubReviewSocketRefused("REVIEW_SOURCE_NOT_VERIFIED") from None
+        # Bind the ORIGINAL immutable source identity into the canonical
+        # JobRegistry's own commit-time guard. A source revocation between
+        # preflight and SQLite commit must not admit a new review Job.
+        def current_request_authority() -> None:
+            if self._admission_guard() is not None:
+                raise ValueError("review admission guard refused")
+            if self._source_guard(chosen) is not None:
+                raise ValueError("review source guard refused")
+
         try:
-            job = self._adapter.admit_review_intent(
-                decision=chosen, objective=objective
-            )
+            job = ExecutiveReviewJobAdmission(
+                runtime=self._runtime,
+                admission_guard=current_request_authority,
+            ).admit_review_intent(decision=chosen, objective=objective)
         except ReviewAdmissionUnavailable:
             raise GitHubReviewSocketRefused("REVIEW_RUNTIME_ADMISSION_REFUSED") from None
         return {"schema": RESPONSE_SCHEMA, "state": "ADMITTED", "job_id": job}
