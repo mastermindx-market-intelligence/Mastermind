@@ -409,3 +409,79 @@ representative coding tasks with frozen source revisions, tests,
 independent reviewer and paired success metrics before assigning new
 default weight. Until then BytePlus is a qualified seat candidate,
 **not** a measured low-cost general-purpose Fabric worker.
+
+
+## October 22 Singapore-specific policy and quota-classifier reconciliation
+
+**Highest priority release constraint:** Alibaba's official international
+Singapore Token Plan Personal FAQ, updated October 21, 2026, expressly
+restricts that plan to the subscriber's **interactive** use inside
+designated AI coding and agent tools. It prohibits production automated
+services, batch scripts, scheduled background calls, or non-interactive
+application backends, and prohibits sharing an account/key across people.
+Its allowed devices and agents are not blanket authorization to pool
+Personal keys behind a generic multi-user inference or Fabric dispatcher.
+The BytePlus Personal plan is likewise limited to supported coding tools
+and one shared personal subscription quota. A separately eligible
+team/enterprise/Pay-as-you-go grant and applicable use terms are required
+for an unattended worker carrier; **do not** infer permission from the
+presence of three purchased individual subscriptions or a successful
+Codex/Claude interface handshake.
+
+Provider sources (international Singapore rather than cn-beijing):
+- https://www.alibabacloud.com/help/en/model-studio/token-plan-personal-faq
+- https://www.alibabacloud.com/help/en/model-studio/token-plan-personal-overview
+
+The **October 21 Singapore** Token Plan FAQ confirms there is **no weekly
+quota** for Personal plans, and 429 has TWO different meanings:
+`429 Requests rate limit exceeded` means temporary request-frequency
+pressure; `429 insufficient_quota` means the **monthly Credits**
+subscription is exhausted. The latter does not renew at nighttime
+discount start, nor on a generic five-hour or weekly clock.
+Without vendor-current quota reset / usage-bundle evidence, keep
+exhausted account admission blocked/unknown; never count it as free.
+
+Live installed Ubuntu1 `lanes/ext/qwen_exec.sh` source examination shows
+`classify_limit` checks generic HTTP 429 before typed
+`"code":"insufficient_quota"`; a response containing both can be falsely
+classified as a short soft-429 throttle. Its `402` / quota branch maps to
+`bailian_keys.py seconds_until_offpeak`, which is a **pricing** window,
+not a Token Plan monthly allowance reset. This is a source/contract
+mismatch, not proof that the two preceding review errors contained
+`insufficient_quota` (their full provider error body is unverified).
+Source PR #1731 already owns Qwen healthy-account-first 429 admission
+and immutable native rollout; exact follow-on findings were sent under
+that PR. Do not duplicate or overlap its lease-broker writer.
+
+An official Alibaba Token Plan management API exists with API-key and
+subscription usage operations but the currently documented
+`modelstudio.cn-beijing.aliyuncs.com/tokenplan` control endpoint is
+**China (Beijing) only**, requires signed Alibaba AccessKey (not the
+Token Plan inference key), and cannot be assumed valid for the
+international Singapore pool. The installed `quota_remote.py` says
+there is no documented supported Singapore subscription-balance API
+and its `bailian_usage.json` 7-day percentage is only
+`LOCAL_RECONSTRUCTION`, not monthly provider-authoritative Credits.
+Do not silently swap that reader to the CN endpoint or advertise
+cost-aware live quota steering before an exact region/account/owner
+qualified Singapore feed exists.
+
+Finally, Alibaba's Singapore updated October 21 model documentation
+lists limited-time 22:00–08:00 UTC+8 discounts: **60% off** Credits
+for both `qwen3.8-max` and `qwen3.8-flash`, and **50% off** for
+`deepseek-v4-pro-0813`, `deepseek-v4-flash-0731`,
+`deepseek-v4.1-flash`, and `deepseek-v4.1-flash-1017`.
+Actual runtime `bailian_keys.py` policy's discounted_models list
+currently has `qwen3.8-max` but not `qwen3.8-flash`, and only two
+older DeepSeek models; there is a policy/catalog drift. Fix it through
+the existing policy source and accepted immutable release generation,
+with model-version proof and promotion validity checks; not by
+hand-editing a live runtime YAML or broadening use-policy eligibility.
+
+Operational priority order: **(1)** provider/account usage rights and
+correct 429/quota class, **(2)** exact host/account lease admission and
+cooldown health, **(3)** first-lawful model quality tier and
+independent-review separation, **(4)** observed per-account quota/reset
+freshness, **(5)** off-peak Credits preference, **(6)** load spreading.
+Rankings must never invert those first four gates, even if a promotional
+credit multiplier appears financially attractive.
