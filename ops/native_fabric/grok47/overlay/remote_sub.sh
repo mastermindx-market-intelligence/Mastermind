@@ -1853,7 +1853,7 @@ else
     fi
   fi
   if [ "$USAGE_SAVED" -eq 1 ]; then
-    if "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" validate-usage "$LOCAL_USAGE_RECEIPT" "$ID" > "$VALIDATED_USAGE_FILE"
+    if "$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" validate-usage "$LOCAL_USAGE_RECEIPT" "$ID" "$MODE" "$MODEL" > "$VALIDATED_USAGE_FILE"
     then
       {
         read -r usage_input

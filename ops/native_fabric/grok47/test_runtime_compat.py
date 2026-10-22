@@ -162,6 +162,49 @@ class Grok47WorkerContracts(unittest.TestCase):
                     self.assertEqual(call.returncode==0,valid,(call.stdout,call.stderr))
                     if valid:self.assertIn('grok_native_headless',call.stdout)
 
+    def test_controller_launch_model_must_match_attested_usage_request(self):
+        controller=(OVERLAY/'remote_sub.sh').read_text()
+        self.assertIn('validate-usage "$LOCAL_USAGE_RECEIPT" "$ID" "$MODE" "$MODEL"',controller)
+        usage={'schema':'mastermind.grok_usage.v2','status':'observed',
+               'reason':'native_headless_final','session_ids':['s1'],
+               'input_tokens':11,'cached_tokens':3,'output_tokens':4,'total_tokens':15,
+               'source':'grok_native_headless','served_model':None,
+               'requested_model':'grok-4.7','model_identity_source':'requested_cli_only',
+               'run_id':'run123'}
+        with tempfile.TemporaryDirectory() as td:
+            file=Path(td)/'usage.json'
+            file.write_text(json.dumps(usage))
+            base=[sys.executable,str(OVERLAY/'remote_sub_helpers.py'),
+                  'validate-usage',str(file),'run123']
+            for mode,model,expected in [('grok','grok-4.7',True),
+                                        ('grok','grok-4.6',False),
+                                        ('cursor','grok-4.7',False),
+                                        ('codex-native','gpt-6-sol',False)]:
+                with self.subTest(mode=mode,model=model):
+                    proc=subprocess.run(base+[mode,model],capture_output=True,text=True,timeout=5)
+                    self.assertEqual(proc.returncode==0,expected,(proc.stdout,proc.stderr))
+            usage['schema']='mastermind.grok_usage.v1'
+            del usage['requested_model']
+            del usage['model_identity_source']
+            usage['served_model']='grok-4.6'
+            file.write_text(json.dumps(usage))
+            historical=subprocess.run(base+['grok','grok-4.6'],capture_output=True,text=True,timeout=5)
+            self.assertEqual(historical.returncode,0,historical.stderr)
+            wrong=subprocess.run(base+['grok','grok-4.7'],capture_output=True,text=True,timeout=5)
+            self.assertNotEqual(wrong.returncode,0)
+            codex={"schema":"mastermind.codex_usage.v1", "status":"observed",
+                   "reason":"native_final", "session_ids":["s1"],
+                   "input_tokens":11, "cached_tokens":3,"output_tokens":4,"total_tokens":15,
+                   "source":"codex_native_session", "served_model":None,"run_id":"run123"}
+            file.write_text(json.dumps(codex))
+            for mode,expected in [("codex-native",True),("go-codex",True),
+                                  ("glm-codex",True),("minimax-codex",True),
+                                  ("cursor",False),("grok",False)]:
+                with self.subTest(codex_mode=mode):
+                    proc=subprocess.run(base+[mode,"specific-cli-model"],
+                        capture_output=True,text=True,timeout=5)
+                    self.assertEqual(proc.returncode==0,expected,(proc.stdout,proc.stderr))
+
     def test_cursor_grok_46_alias_does_not_inherit_47_quality_floor(self):
         picker = load('pick')
         seen = []

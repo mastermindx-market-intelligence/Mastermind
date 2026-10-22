@@ -101,3 +101,25 @@ been superseded; **none** may be published. The prior stage sections above are
 historical test observations, not current release instructions. Live M2
 `CURRENT.json` has not been selected or altered. All required production
 acceptance and held Cursor-default constraints remain in force.
+
+
+## Controller-bound usage release target — stage -006
+
+New remote usage is now checked against the **controller's actual launch mode and
+model**, not merely the usage JSON's self-contained fields. For Grok v2, the
+selected model must exactly match `requested_model`; Grok v1 historical reads
+remain supported. The same check accepts the actual Codex-native, Go-Codex,
+GLM-Codex and MiniMax-Codex usage families rather than breaking their legacy
+metering. A wrong-model usage file fails validation; unknown spend is reported
+rather than credited to the wrong pool. Local focused suite: **36/36**; source
+and shell checks passing. The owner still needs independent review and live
+consumer proof for production release.
+
+Current (superseding ALL previous stages) immutable input:
+`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-006`;
+85 verified release source files, 9 overlays, code-only manifest SHA256
+`caf916a76a8e4489bf49b95d3484d86bce76083636948f7882477f062ef244fd`;
+original owner's *predicted, unpublished* native generation ID
+`f17209d31c3c268337e403ac97a0412a8e5e195e5c75b8c343699b774015d43e`.
+Stages -001 through -005 must NOT be published. The earlier release-stage
+entries in this history record older qualification, not current targets.

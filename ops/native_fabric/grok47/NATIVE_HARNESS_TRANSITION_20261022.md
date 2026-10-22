@@ -267,3 +267,18 @@ verified with the original publish/verify/select semantics in isolation, not
 published or selected live. The 35 new-candidate regression tests pass locally.
 A new protected head CI run and genuinely independent consequential review
 are still required; pre-existing review or an earlier green run is not acceptance.
+
+
+### Final source-only controller model binding
+
+The old remote controller accepted native usage on schema/source/run ID alone;
+for new attempts it passes its own selected mode/model to the incumbent usage
+validator. A Grok usage record must match the launch model or token accounting
+is unknown/refused; compatible older Codex routes still validate. This is a
+source-only bug fix, no bypass of the held Cursor Grok 4.7 default. Exact
+accepted source stage `-006`, 85/85 files and manifest
+`caf916a76a8e4489bf49b95d3484d86bce76083636948f7882477f062ef244fd`,
+predicted unpublished native generation
+`f17209d31c3c268337e403ac97a0412a8e5e195e5c75b8c343699b774015d43e`.
+Local focused suite 36/36, with exact controller legacy-mode regressions.
+No live publisher/select, provider usage, Executive admittance or OS root START.
