@@ -190,3 +190,18 @@ It uses local git ls-files (tracked files only) and bounded UTF-8 text reads, re
 Both offline CLIs now create report files **exclusively** (refuse existing outputs rather than overwriting). The partition planner explicitly refuses to overwrite its input inventory; the link scanner refuses any report output path **inside one of the scanned Git roots**. These guards and synthetic temporary-Git fixtures have **16 locally passing tests** (the added 2 tests verify no source-inventory or tracked worktree corruption). This is *not* a hosted CI or production acceptance claim.
 
 Known source archive refs are not automatically authorized destination mappings. After adapter/native copy qualification, re-run the live exact-file source read, generate a fresh mapping, then run this scanner against actual current worktrees. Resolve skipped files and references in historical branches as needed before marking link cutover complete.
+
+
+## 10. Live source-drift and capped-artboard API finding (later October 22 read)
+
+A later independent **read-only** exact source inspection found only **57 currently visible pages**, down from the 63-page baseline. The exact six baseline pages absent from the current source list are **all Terminal**: p-21-0 (Chart Context), p-1V-0 (Portfolio Builder References), p-1O-0 (Portfolio Desk), p-1G-0 (R3 Refraction), p-1D-0 (Settings Original), and p-1C-0 (Account/Settings). See [source visibility delta](MASTERMIND_PAGES_DRIFT_2026-10-22.json). These pages contributed 3,105 nodes / 18 boards **in the original inventory**; this is not a direct before/after source byte measurement.
+
+**Do not re-copy or recreate the six as though still present.** Their disappearance may reflect concurrent legitimate reorganization, but neither a target Paper file ID nor native source-to-destination fidelity/cleanup receipt has been verified by this workstream. A separate recent observation saw a Paper file named Terminal, but its exact ID and the destination of these particular six pages are unbound here. Unresolved p-19-0 remains distinct. Keep original-file destructive cleanup frozen while reconciling the existing operation/owner and actual target. The Paper oversize warning remains visible even with the 57-page list.
+
+The five other original-heavy page snapshots remained consistent. A sixth, **Forex R1 p-N-1**, reports 101 artboards, but Paper get_basic_info and get_children each **truncate their result to 100 artboards** (with a truncation flag). A separate read-only get_tree_summary at root depth 1 exposed all 101 top-level Frame IDs; get_node_info independently resolved the missing final board:
+
+- Missing board: 6NKK-0 — R26 Watch lifecycle / Six state contracts / Future owner reference.
+- [Heavy-page artboard identity index](HEAVY_PAGES_ARTBOARD_INDEX_2026-10-22.json) now records all **310 exact artboard identities across six heavy pages**, with method provenance and source warning.
+- This is a recovered **ID/name census only**, NOT per-artboard subtree-node size, asset/token/component fidelity, layout acceptance or a viable partition. Tree readback is not a modification or a safe delete procedure.
+
+The direct Paper tool catalog still showed **Paper v0.5.14 / 28 exposed tools** at this later read, with **no list_resources/create_file tool**. Thus draft PR #1722 is not production-proven or callable on this exact client action snapshot. Do not bypass its missing capabilities. The initial 63-page partition proposal is now **historical preflight**; future actual transfers require a refreshed exact-source plan that explicitly excludes/reconciles the six externally absent Terminal pages.
