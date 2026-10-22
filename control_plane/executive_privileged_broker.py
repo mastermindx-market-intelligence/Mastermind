@@ -1405,13 +1405,22 @@ class PrivilegedActionBroker:
                          'control_plane/executive_privileged_broker.py',
                          'control_plane/executive_privileged_action.py'):
                 _verify_release_entry(self.config.release_root,raw,name)
-            from ops.executive_os.canonical_paid_lifecycle import run_paid_lifecycle
+            from ops.executive_os.canonical_paid_lifecycle import run_paid_lifecycle, PaidLifecycleError
             if Path(run_paid_lifecycle.__code__.co_filename).resolve()!=self.config.release_root/'ops/executive_os/canonical_paid_lifecycle.py':
                 raise BrokerTrustError("paid lifecycle source owner changed")
             # Production provenance is checked by the actual lifecycle owner;
             # a test constructor or Root CLI never upgrades itself by type.
-            result=run_paid_lifecycle(PAID_SERVICE_ACTION_VERBS[request.action].removesuffix('-paid'),
-                self.config.release_root.name,request.args_dict()['expected_definition_sha256'])
+            try:
+                result=run_paid_lifecycle(PAID_SERVICE_ACTION_VERBS[request.action].removesuffix('-paid'),
+                    self.config.release_root.name,request.args_dict()['expected_definition_sha256'])
+            except PaidLifecycleError as exc:
+                # Only this source-qualified owner's exact known pre-effect
+                # outcome can settle FAILED in the original receipt lifecycle.
+                # Never promote an ambiguous/subclass/arbitrary exception into
+                # absence or expose its message as a diagnostic.
+                if type(exc) is PaidLifecycleError and exc.effect_unknown is False:
+                    return subprocess.CompletedProcess((),78,b'',b'PAID_LIFECYCLE_PRE_EFFECT_REFUSED\n')
+                raise
             raw=json.dumps(result,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
             return subprocess.CompletedProcess((),0,raw,b'')
         except Exception as exc:

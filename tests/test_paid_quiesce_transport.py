@@ -127,3 +127,41 @@ def test_http_and_metadata_entries_remain_closed_under_held_fence(tmp_path,monke
     # repeat the status read if a future caller removes the temporary fence.
     owner._stop_fence=None
     with pytest.raises(module.PaidOwnerRefused):owner._quota_bootstrap_owned('status-original',scope,allow_start=True)
+
+
+@pytest.mark.parametrize('kind',['known-pre-effect','ambiguous','falsey-nonboolean','subclass','arbitrary'])
+def test_broker_maps_only_exact_known_lifecycle_refusal_to_terminal_failure(monkeypatch,kind):
+    """Exception mapping fixture only; all production trust gates are synthetic here."""
+    from control_plane import executive_privileged_broker as privileged
+    from ops.executive_os import canonical_paid_lifecycle as lifecycle
+    root=Path(__file__).resolve().parents[1]
+    marker='fake credential-shaped text must never enter receipt output'
+    if kind=='known-pre-effect':error=lifecycle.PaidLifecycleError(marker,effect_unknown=False)
+    elif kind=='ambiguous':error=lifecycle.PaidLifecycleError(marker,effect_unknown=True)
+    elif kind=='falsey-nonboolean':error=lifecycle.PaidLifecycleError(marker,effect_unknown=0)
+    elif kind=='subclass':
+        class ForeignLifecycleError(lifecycle.PaidLifecycleError):pass
+        error=ForeignLifecycleError(marker,effect_unknown=False)
+    else:error=RuntimeError(marker)
+    scope={'error':error}
+    exec(compile('def original_owner(*args):\n    raise error\n',
+                 str(root/'ops/executive_os/canonical_paid_lifecycle.py'),'exec'),scope)
+    monkeypatch.setattr(lifecycle,'run_paid_lifecycle',scope['original_owner'])
+    monkeypatch.setattr(privileged,'verify_production_trust',lambda config:None)
+    monkeypatch.setattr(privileged,'_read_bounded_json',lambda path:{})
+    monkeypatch.setattr(privileged,'_verify_release_entry',lambda *args:None)
+    broker=object.__new__(privileged.PrivilegedActionBroker)
+    broker.config=SimpleNamespace(release_root=root)
+    request=SimpleNamespace(action='executive.services.start_paid',
+        args_dict=lambda:{'expected_definition_sha256':'a'*64})
+    if kind=='known-pre-effect':
+        result=broker._execute_paid_lifecycle(request,'b'*64)
+        assert result.returncode==78 and result.stdout==b''
+        assert result.stderr==b'PAID_LIFECYCLE_PRE_EFFECT_REFUSED\n'
+        assert marker.encode() not in result.stderr
+    else:
+        with pytest.raises(privileged.EffectUnknownError) as caught:
+            broker._execute_paid_lifecycle(request,'b'*64)
+        assert str(caught.value)=='original paid lifecycle unconfirmed'
+        assert marker not in str(caught.value)
+    assert privileged._PAID_ACTIVE.get() is None
