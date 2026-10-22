@@ -207,3 +207,22 @@ The next implementation sequence, once the respective actual gates permit it, is
 - Cursor model/plan primary sources: https://prod.cursor.com/help/models-and-usage/usage-limits ; https://prod.cursor.com/docs/account/pricing/legacy-cursor-plans ; https://cursor.com/grok ; https://cursor.com/docs/cli/overview . Retrieved 2026-10-22. Account-specific entitlement remains separately observed.
 - OpenAI primary sources: https://developers.openai.com/codex/app-server (redirects to https://learn.chatgpt.com/docs/app-server) and https://developers.openai.com/codex/noninteractive . Retrieved 2026-10-22. Version-pin protocol and preserve experimental transport qualifications.
 - Anthropic primary sources: https://code.claude.com/docs/en/headless and https://code.claude.com/docs/en/agent-sdk/sessions . Retrieved 2026-10-22. Native subscription and API authentication must not be conflated.
+
+
+## 2026-10-22 source repair after routing audit (no production selection)
+
+The distinct legacy local launcher defect has now been repaired **in source only**:
+`overlay/sub.sh` forwards an explicitly pinned `composer-2.5` or
+`cursor-grok-4.6-high` through `--model`, with no-pin behavior unchanged.
+Unknown aliases, including both catalog 4.7 choices, remain refused by this
+legacy direct launcher; the platform-held 4.7 default/routing change was not
+retried or indirectly activated. Five isolated-process tests execute the real
+shell branch with fake client, slot and ledger helpers, alongside the previous
+22 focused tests (27/27 passing). Isolated stage
+`/Volumes/Mastermind/agent-workspaces/fabric-grok47-stage-20261022-sol-003`
+contains the complete 85-file pinned closure with nine reviewed overlay files,
+manifest SHA256 `9cd6b58fe7b03fef400d780de3992a516f434b456fc9175efb431bce7fbb4106`.
+Its original publisher completed isolated publish/verify/select and the native
+executor import probe. Installed M2 `CURRENT.json` remains original sequence 14.
+Older stage `-002` is superseded for this combined release; earlier 4.7 API / Cursor-default
+authorization restrictions and native OS product-path gates remain unchanged.

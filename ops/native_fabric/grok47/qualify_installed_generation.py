@@ -20,7 +20,7 @@ BASE = '0e566251edc32dffbab800d2742bf0c2c45f3ea649254a08da3839a06981cd4f'
 OVERLAYS = frozenset({
     'ext/artifact_delivery.py', 'ext/fabric_operator_client.py',
     'ext/fabric_operator_contract.py', 'ext/native_remote.py',
-    'ext/pick.py', 'ext/remote_sub.sh',
+    'ext/pick.py', 'ext/remote_sub.sh', 'ext/sub.sh',
     'ext/remote_sub_exec.py', 'ext/remote_sub_helpers.py',
 })
 HERE = Path(__file__).resolve().parent
