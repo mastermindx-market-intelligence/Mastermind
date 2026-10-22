@@ -914,6 +914,80 @@ def test_multiple_workstreams_render_in_sorted_order_with_distinct_identities():
     assert [row["number"] for row in _card(document, "WS:TARGET")["github"]["pull_requests"]] == [170]
 
 
+def test_single_workstream_does_not_claim_an_unbound_operation_carrier():
+    """Cardinality one is not an owner edge, even for an exact selected operation."""
+
+    identity_number = 181
+    receipt = _receipt(
+        _inputs(
+            scope={
+                "workstreams": ["WS:TARGET"],
+                "linear": [],
+                "repositories": [MASTER],
+                "operation_key": "op-unbound-001",
+                "requires_executive": False,
+            },
+            github={
+                "available": True,
+                "observed_at": NOW,
+                "pull_requests": [
+                    _pr(
+                        identity_number, workstream=None, linear=None,
+                        operation_key="op-unbound-001",
+                    )
+                ],
+            },
+            linear={"available": True, "observed_at": NOW, "issues": []},
+        )
+    )
+    document = view.build_cross_plane_view(receipt)
+    card = _card(document)
+
+    assert card["github"]["pull_requests"] == []
+    assert card["identities"]["pull_requests"] == []
+    assert document["state"] == "DEGRADED"
+    assert any(
+        fact["target_field"] == "cards.github.pull_requests"
+        and f"{MASTER}#{identity_number}" in fact["reason"]
+        and "no exact source-authored workstream binding" in fact["reason"]
+        for fact in document["unknowns"]
+    )
+
+
+def test_single_workstream_does_not_claim_an_unbound_seeded_linear_issue():
+    """A seeded MAS issue ID may be in scope yet own no WS without an authored link."""
+
+    receipt = _receipt(
+        _inputs(
+            scope={
+                "workstreams": ["WS:TARGET"],
+                "linear": ["MAS-7"],
+                "repositories": [MASTER],
+                "operation_key": None,
+                "requires_executive": False,
+            },
+            github={"available": True, "observed_at": NOW, "pull_requests": []},
+            linear={
+                "available": True,
+                "observed_at": NOW,
+                "issues": [_issue("MAS-7", workstream=None, number=181)],
+            },
+        )
+    )
+    document = view.build_cross_plane_view(receipt)
+    card = _card(document)
+
+    assert card["linear"]["issues"] == []
+    assert card["identities"]["linear_issue_ids"] == []
+    assert document["state"] == "DEGRADED"
+    assert any(
+        fact["target_field"] == "cards.linear.issues"
+        and "MAS-7:" in fact["reason"]
+        and "no exact source-authored workstream binding" in fact["reason"]
+        for fact in document["unknowns"]
+    )
+
+
 def test_findings_are_ordered_by_severity_then_code_then_subject():
     receipt = _receipt(
         _inputs(
