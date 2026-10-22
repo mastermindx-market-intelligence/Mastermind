@@ -4,7 +4,7 @@
      ...identity, parent_id:idSchema, task_class:{type:'string',enum:CLASSES}, task_complexity:{type:'string',enum:COMPLEXITIES},
      work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
      subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
-+    pool:{type:'string',enum:['grok','glm','minimax','bailian','cursor','ocfree','go','codex-native','claude-native']},
++    pool:{type:'string',enum:['grok','glm','minimax','bailian','cursor','ocfree','go']},
 +    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
    }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
    tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
@@ -75,7 +75,7 @@
 +const manualPreview={state:'PREVIEW_ONLY',reserved:false,run_id:id.run_id,pool:'grok',model:'grok-4.7',host:'ubuntu1',mode:'grok'};
 +test('manual pool and model remain typed and never expose a shell, host or account',async()=>{
 + const e=engine(),f=facade(e);
-+ for(const change of [{pool:'grok;echo'},{model:'grok-4.7 $(id)'},{host:'ubuntu1'},{cwd:'~'}])
++ for(const change of [{pool:'grok;echo'},{pool:'codex-native'},{model:'grok-4.7 $(id)'},{host:'ubuntu1'},{cwd:'~'}])
 +  assert.equal(unwrap(await f.call('fabric_request',{...manualPinned,...change})).error,'INVALID_ARGUMENT');
 + const noPool={...manualPinned};delete noPool.pool;
 + assert.equal(unwrap(await f.call('fabric_request',noPool)).error,'INVALID_ARGUMENT');
