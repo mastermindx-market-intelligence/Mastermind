@@ -199,7 +199,10 @@ def main(argv: list[str] | None = None) -> int:
         else:
             serialized = json.dumps(plan, indent=2, ensure_ascii=False) + "\n"
             if args.out:
-                args.out.write_text(serialized, encoding="utf-8")
+                if args.out.resolve() == args.inventory.resolve():
+                    raise InventoryError("Refusing to overwrite original source inventory")
+                with args.out.open("x", encoding="utf-8") as handle:
+                    handle.write(serialized)
                 print(f"Wrote read-only proposal: {args.out}")
             else:
                 print(serialized, end="")
