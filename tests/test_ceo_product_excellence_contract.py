@@ -64,3 +64,15 @@ def test_no_unbounded_authority_or_forced_fixed_hierarchy() -> None:
     assert "Omit a layer that adds only relay overhead" in core
     assert "Skills cannot grant spawning rights" in core
     assert "current Chairman retains final authority" in core
+
+
+def test_independent_review_routes_through_admitted_fabric_not_dot_attention() -> None:
+    meta = _read("references/meta-ceo.md")
+    operator = _read("references/operator.md")
+    reviewer = _read("references/reviewer.md")
+    assert "Fabric-first independent review" in operator
+    assert "ChatGPT Dot is a coordination/attention surface" in operator
+    assert "review request is not a submitted review" in meta
+    assert "qualified and distinct from the builder" in operator
+    assert "thermal or admission refusal" in operator
+    assert "Source review never grants merge" in reviewer
