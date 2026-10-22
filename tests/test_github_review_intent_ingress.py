@@ -986,3 +986,11 @@ class TestPublication:
         assert "Verdict: PASS" in body
         assert "worker-reviewer" in body
         assert "worker-builder" in body
+
+
+def test_external_github_source_contracts_are_publicly_exported():
+    """The host can import the authenticated external-origin port by name."""
+    from control_plane import github_review_intent_ingress as ingress
+    assert "ExternalGitHubSourceFacts" in ingress.__all__
+    assert "ExternalGitHubSourcePort" in ingress.__all__
+    assert ingress.ExternalGitHubSourceFacts.__name__ == "ExternalGitHubSourceFacts"

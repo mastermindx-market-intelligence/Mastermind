@@ -99,3 +99,75 @@ def test_same_repository_wrong_builder_head_is_not_independence(tmp_path):
         runtime=runtime, builder_job_id_for_review=lambda _: builder
     )
     assert reader.load_verified_result(job_id=review) is None
+
+# Direct source-reader contract coverage complements the publication workflow
+# tests. A GitHub submitter is NEVER an attested native builder worker.
+from dataclasses import replace
+
+import pytest
+
+from control_plane.github_review_intent_ingress import ExternalGitHubSourceFacts
+
+
+class _AuthenticatedExternalSource:
+    def __init__(self, facts=None, *, unavailable=False):
+        self.facts = facts or ExternalGitHubSourceFacts(
+            repository="example/repo", pull_number=42,
+            head_sha="a" * 40, submitter_login="alice",
+            submitter_id=314,
+        )
+        self.unavailable = unavailable
+        self.lookups = []
+
+    def read_external_source(self, *, repository, pull_number):
+        self.lookups.append((repository, pull_number))
+        if self.unavailable:
+            raise OSError("authenticated GitHub lookup unavailable")
+        return self.facts
+
+
+def test_external_reader_uses_actual_terminal_job_and_distinct_submitter(tmp_path):
+    runtime, builder, reviewer = completed_pair(tmp_path)
+    source = _AuthenticatedExternalSource()
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=source,
+        publisher_login="reviewer-bot[bot]",
+    )
+    result = reader.load_verified_result(job_id=reviewer)
+    assert result is not None
+    assert result.source_basis == "EXTERNAL_GITHUB_SUBMITTER"
+    assert result.builder_worker_id == ""
+    assert result.reviewer_worker_id == "reviewer-01"
+    assert result.source_github_submitter_login == "alice"
+    assert result.source_github_submitter_id == 314
+    assert source.lookups == [("example/repo", 42)]
+
+
+@pytest.mark.parametrize("delta", [
+    {"submitter_login": "reviewer-bot[bot]"},
+    {"submitter_login": ""},
+    {"submitter_id": 0},
+    {"submitter_id": True},
+    {"head_sha": "b" * 40},
+    {"repository": "unrelated/repo"},
+    {"pull_number": 43},
+])
+def test_external_reader_refuses_unverified_or_self_source(tmp_path, delta):
+    runtime, builder, reviewer = completed_pair(tmp_path)
+    canonical = _AuthenticatedExternalSource().facts
+    source = _AuthenticatedExternalSource(replace(canonical, **delta))
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=source,
+        publisher_login="reviewer-bot[bot]",
+    )
+    assert reader.load_verified_result(job_id=reviewer) is None
+
+
+def test_external_reader_refuses_when_authenticated_source_is_unavailable(tmp_path):
+    runtime, builder, reviewer = completed_pair(tmp_path)
+    source = _AuthenticatedExternalSource(unavailable=True)
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, external_source=source,
+        publisher_login="reviewer-bot[bot]",
+    )
+    assert reader.load_verified_result(job_id=reviewer) is None

@@ -234,3 +234,28 @@ constructed with `external_source` and `publisher_login`; the current
 installed Executive service has no delivery/return binding for it.
 Hermetic tests do not prove the GitHub App, source owner, or production
 authentication is installed.
+
+## Independent review security07 reconciliation (exact 0ad2ca189)
+
+The independent reviewer returned PASS FOR SOURCE SLICE ONLY, independently
+running 267 review tests and 14 adversarial publication/source checks.
+Post-review fixes export both external-source contract names in
+`github_review_intent_ingress.__all__` and add direct reader tests for
+self-publisher identity, incorrect PR/head, malformed identity and GitHub
+source read failure. These are source/coverage fixes, not live deployment.
+
+The reviewer also flagged possible concurrent duplicate GitHub advisory
+comments. That concern was checked against the *existing*
+`ExecutiveReviewPublicationRecord._reserve`: its EventStore transaction and
+unique `events.command_id` reservation ensure at most one caller owns the
+right to POST. A concurrent caller observing the same reservation can only
+reconcile using GitHub readback, never POST a second comment. The new
+concurrent-publisher regression deliberately holds the first POST after
+reservation and proves the competing caller returns `EFFECT_UNKNOWN`
+without submitting. The original first publisher later confirms exactly one
+review; a subsequent retry reads the confirmation without POST.
+
+Production remains default-off: source/security test evidence is not a
+substitute for authorized incumbent Executive socket dispatch, a real
+worker's terminal receipt, external source binding, or actual GitHub App
+review/Slack thread return.

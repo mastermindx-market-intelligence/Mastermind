@@ -1144,6 +1144,8 @@ __all__ = [
     "ALLOWED_REVIEW_EVENTS",
     "AdmissionState",
     "ActorPermissionPort",
+    "ExternalGitHubSourceFacts",
+    "ExternalGitHubSourcePort",
     "FabricJobAdmissionPort",
     "MAX_REVIEW_BODY_CHARS",
     "MAX_REVIEW_SUMMARY_CHARS",

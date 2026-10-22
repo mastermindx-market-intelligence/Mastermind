@@ -177,3 +177,53 @@ def test_preexisting_reservation_unavailable_readback_stays_unknown(tmp_path):
     with pytest.raises(PublicationEffectUnknown, match="EFFECT_UNKNOWN"):
         call(app)
     assert gh.submits == 1
+
+def test_concurrent_publication_reservation_allows_only_one_github_post(tmp_path):
+    """The existing SQLite UNIQUE event command arbitrates concurrent callers.
+
+    The reviewer flagged potential parallel duplicate advisory comments. Hold
+    the first POST *after* reservation; another caller must see the reservation
+    and may only attempt readback, never a second POST.
+    """
+    import threading
+
+    entered = threading.Event()
+    release = threading.Event()
+
+    class HeldTransport(Transport):
+        def submit_review(self, *, repository, pull_number, commit_id, event, body):
+            entered.set()
+            if not release.wait(timeout=5):
+                raise RuntimeError("test publication barrier timed out")
+            return super().submit_review(
+                repository=repository, pull_number=pull_number,
+                commit_id=commit_id, event=event, body=body,
+            )
+
+    app, runtime, gh = publisher(tmp_path, HeldTransport())
+    success = []
+    errors = []
+
+    def first_publisher():
+        try:
+            success.append(call(app))
+        except Exception as exc:
+            errors.append(exc)
+
+    thread = threading.Thread(target=first_publisher, daemon=True)
+    thread.start()
+    try:
+        assert entered.wait(timeout=5), "first publisher never reserved"
+        with pytest.raises(PublicationEffectUnknown, match="EFFECT_UNKNOWN"):
+            call(app)
+        assert gh.submits == 0, "second caller must not POST"
+    finally:
+        release.set()
+        thread.join(timeout=5)
+    assert not thread.is_alive()
+    assert errors == []
+    assert success == ["789"]
+    assert gh.submits == 1
+    assert call(app) == "789"
+    assert gh.submits == 1
+    assert runtime.store.get_event_by_command_id(COMMAND + ":confirmed") is not None
