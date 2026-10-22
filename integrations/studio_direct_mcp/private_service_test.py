@@ -4301,12 +4301,15 @@ class TestFabricPoolPinMigration(unittest.TestCase):
         self.assertTrue(require_runtime_seal)
         return value
 
-    def args(self, *, preflight=False, target=True, account=None):
+    def args(self, *, preflight=False, target=True, account=None, rollback=False):
         return type("Args", (), dict(
             account=self.account if account is None else account,
-            expected_manifest_sha256=self.pins[0],
-            expected_target_manifest_sha256=self.pins[2] if target else None,
+            expected_manifest_sha256=self.pins[2] if rollback else self.pins[0],
+            expected_target_manifest_sha256=(
+                self.pins[0] if rollback else self.pins[2]
+            ) if target else None,
             preflight_only=preflight,
+            rollback=rollback,
         ))()
 
     def assert_original(self):
@@ -4437,4 +4440,62 @@ class TestFabricPoolPinMigration(unittest.TestCase):
         ):
             with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
                 svc.cmd_fabric_pool_pin_migrate(self.args())
+        self.assert_original()
+
+    def test_stopped_reverse_restores_exact_original_bytes(self):
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as preview:
+            self.assertEqual(
+                svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True, preflight=True)),
+                0,
+            )
+        self.assertEqual(json.loads(preview.getvalue())["effect"], "NOT_APPLIED")
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as output:
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True)), 0)
+        receipt = json.loads(output.getvalue())
+        self.assertEqual(receipt["effect"], "ROLLED_BACK")
+        self.assertEqual(receipt["direction"], "restore-original")
+        self.assertFalse(receipt["serviceStarted"])
+        self.assert_original()
+
+    def test_reverse_requires_exact_successor_preimage_and_stopped_service(self):
+        with self.assertRaisesRegex(SystemExit, "original sealed generation no longer matches"):
+            svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True, preflight=True))
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        with mock.patch.object(svc, "_lifecycle_inspect", return_value={"state": "running"}):
+            with self.assertRaisesRegex(SystemExit, "stop exact seat first"):
+                svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True))
+        self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+
+    def test_reverse_precommit_failure_restores_successor(self):
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        original_write = svc._atomic_write_bytes
+        def refuse_manifest(path, value, *args, **kwargs):
+            if Path(path) == self.roots["manifest"]:
+                raise OSError("fixture refuses rollback manifest commit")
+            return original_write(path, value, *args, **kwargs)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=refuse_manifest):
+            with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
+                svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True))
+        self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+
+    def test_reverse_postcommit_uncertainty_preserves_target_and_refuses_replay(self):
+        with mock.patch("sys.stdout", new_callable=io.StringIO):
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        original_verify = self.verify_fixture
+        def refuse_original_after_commit(account, label, roots, *, require_runtime_seal=True):
+            value = original_verify(account,label,roots,require_runtime_seal=require_runtime_seal)
+            if value["configHash"] == self.pins[1]:
+                raise RuntimeError("fixture postrollback verification unavailable")
+            return value
+        with mock.patch.object(
+            svc, "_verify_staged_install", side_effect=refuse_original_after_commit,
+        ):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                svc.cmd_fabric_pool_pin_migrate(self.args(rollback=True))
         self.assert_original()
