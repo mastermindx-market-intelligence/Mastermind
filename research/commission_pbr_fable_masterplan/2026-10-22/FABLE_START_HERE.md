@@ -3,7 +3,7 @@
 **Commissioned:** 2026-10-22 ~07:30Z by the Chairman (Chris) to the Fable Meta-CEO session
 (worktree `mastermind-fable-ceo-rebuild-421ce3`, session `ed665c78-1bca-45e2-ba40-bc78b8444002`).
 **Program issue + risk register:** mastermindx-market-intelligence/Mastermind#1693.
-**Program carrier PR (docs/ledger only):** recorded in `ORCHESTRATION.md` row `W0 seat` once opened.
+**Program carrier PR (docs/ledger only):** mastermindx-market-intelligence/Mastermind#1695.
 **Masterplan:** `./MASTERPLAN.md` — verbatim copy of
 `~/Downloads/Mastermind_Portfolio_Audit_and_Fable_CEO_Rebuild_Masterplan_2026-10-21.md`,
 sha256 `4c7a0d449f02de080e4d8d310af5db09515af86683ac6a3bca1298f2e034d970`, 804 lines.

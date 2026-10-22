@@ -12,7 +12,11 @@ Columns: `when (UTC)` · `unit` (orchestrator or lane id) · `host/model` · `cl
 
 | when | unit | host/model | class | run-id | state | artifact | note |
 |---|---|---|---|---|---|---|---|
-| 07:30 | W0 seat | m2 / Fable | commission | — | COMMISSIONED | this directory | frontier recovered; four domain owners briefed; see FABLE_START_HERE.md |
+| 07:30 | W0 seat | m2 / Fable | commission | — | COMMISSIONED | this directory; issue #1693; PR #1695 | frontier recovered; four domain owners briefed; see FABLE_START_HERE.md |
+| 07:45 | pbr-econ | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-econ | W1 + W2 (ledger truth, prices/replay); sole writer of paper_account/marks/price_evidence/settle |
+| 07:45 | pbr-runtime | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-runtime | W4 (manager lifecycle, provider terminal, installed-identity proof) |
+| 07:45 | pbr-research | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-research | W5 + W6-contract (+ W7/W8 protocol freeze) |
+| 07:45 | pbr-product | m2 / Opus native | domain_orchestration | agent | COMMISSIONED | worktree pbr-product | W9 design + truthful partial views; Agent OS WS record |
 
 ### Exit gate for wave 1 (written before launch)
 - W1: a per-book bridge document + any ledger-owner PR with tests; HK discrepancy either explained with evidence or bounded with an explicit unsupported interval. No balancing trades. ACCEPTED only with an independent review disposition.
