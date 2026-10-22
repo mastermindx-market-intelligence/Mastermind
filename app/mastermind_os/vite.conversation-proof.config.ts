@@ -7,6 +7,6 @@ export default defineConfig({
   build: {
     outDir: "dist-conversation-proof/os",
     emptyOutDir: true,
-    rollupOptions: { input: "conversation-reading-proof.html" },
+    rollupOptions: { input: ["conversation-reading-proof.html", "conversation-app-proof.html"] },
   },
 });

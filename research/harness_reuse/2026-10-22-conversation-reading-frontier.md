@@ -84,3 +84,25 @@ reader is not the complete designed conversation directory, authenticated sender
 experience. No Paper content or focus mutation occurred, and prior KD01/UX09 unknown edits were
 not replayed or declared reconciled. Full recipient/session and source-origin actions still need
 the original runtime qualifications before the complete CH1/CH6 journey can be claimed.
+
+## Actual App-shell browser qualification
+
+The compiled fixture now also mounts the real App, createNativeClient and bindMissionHost
+through a closed synthetic read-only invoke implementation. All unknown native commands refuse;
+Executive availability is false. Synthetic authenticated display is conspicuously marked and
+is not a real login. Source response text is SHA256-bound before the real decoder sees it.
+
+Desktop and mobile browser journeys prove Today -> Conversations -> evidence -> Knowledge ->
+Conversations -> Today: office/conversation drafts remain separate, exact evidence-close focus
+returns, window search/formatting do not modify notes or send, and authentication-projection
+withdrawal removes the private reader/draft. Current network requests are loopback artifact
+loads only. Neither document nor transcript horizontal overflow occurred. Command telemetry
+contains only fixed synthetic reads; no submission or session_send is exposed. Screenshots and
+app-browser-proof.json record this stronger consumer integration proof; the production network,
+session and original-parent acceptance obligations are still unproven.
+
+Agent OS macroPR10068 actually merged as6a6d3cb07ec2902e9eaf1b0de6eff7beda9402ec at
+2026-10-22T10:41:34Z. Its exact merged handoff bytes were read back and match the original
+published SHA256 e9493d96c8d6e8a651cc6ea1d779040732e659f45d50e3a22deb3eb0350c644c.
+The earlier record remains a dated pointer; current PR1727 source/evidence supersede only
+its older implementation head/test counts, not its runtime/custody restrictions.
