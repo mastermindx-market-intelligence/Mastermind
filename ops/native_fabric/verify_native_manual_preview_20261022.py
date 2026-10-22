@@ -2,7 +2,7 @@
 """Exact-source, no-install verification for the current native Fabric manual preview.
 
 Never calls request, launch, lease, publisher, CURRENT selection, provider or service.
-The sealed input generation and two source hashes must agree before patch replay.
+The sealed generation, three source hashes, patch and fixture must agree before replay.
 """
 from __future__ import annotations
 
@@ -24,11 +24,12 @@ INPUT = {
     "ext/pick.py": "a776ed140a051e7ac899a5f4b7c641d3d6e46456db287e914a154b3b93e57423",
 }
 OUTPUT = {
-    "ext/fabric_task.py": "b5ca574e05245637eb008a7c248fbdd77e808ee458472f621e935f7fc0c6e892",
+    "ext/fabric_task.py": "b49bd2f92a0394fd3779d132708f00ace89b22669e2264417d089da36dd2579f",
     "pool": "12602edd2f0bf3a5a789eb2b77043a1973bbed533ff35d307357e00be1531679",
     "ext/pick.py": "34cc6c128b52fdc76d8ebf5d652008cc69381fb4eb042768f5fce50d4df322ea",
 }
-PATCH_SHA256 = "917d7a437a0ebfc7d0108879e0b680cac0b16e00262d8edc13809ae4356c86f2"
+PATCH_SHA256 = "1c30952c04e6d130eeae0121cb17e9fb25683cc5eea61c45157967c2ab0f1cdd"
+FIXTURE_SHA256 = "dd2bf01f597b6749d08ebc30092aa59ef9318a8de837c2eaec8504d9e1204f30"
 REPO = Path(__file__).resolve().parents[2]
 PATCH = REPO / "ops/native_fabric/patches/native_generation_manual_preview_20261022.patch"
 FIXTURE = REPO / "ops/native_fabric/qualification/native_manual_preview_fixture.py"
@@ -70,14 +71,15 @@ def qualify(generation: Path) -> dict[str, object]:
         raise ValueError("invalid generation source")
     source = {name: file_bytes(generation / name, sha, sealed=True) for name, sha in INPUT.items()}
     file_bytes(PATCH, PATCH_SHA256)
-    if not FIXTURE.is_file() or FIXTURE.is_symlink():
-        raise ValueError("missing pinned fixture")
+    fixture_source = file_bytes(FIXTURE, FIXTURE_SHA256)
     with tempfile.TemporaryDirectory(prefix="mmx-native-manual-preview-source-only-") as location:
         stage = Path(location)
         for name, content in source.items():
             destination = stage / name
             destination.parent.mkdir(parents=True, exist_ok=True)
             destination.write_bytes(content)
+        staged_fixture = stage / "native_manual_preview_fixture.py"
+        staged_fixture.write_bytes(fixture_source)
         run(["git", "apply", "--check", str(PATCH)], stage)
         run(["git", "apply", str(PATCH)], stage)
         for name, sha in OUTPUT.items():
@@ -85,10 +87,10 @@ def qualify(generation: Path) -> dict[str, object]:
         env = dict(os.environ)
         env["PYTHONPATH"] = str(stage / "ext") + os.pathsep + str(generation / "ext")
         env["MMX_NATIVE_PREVIEW_CANDIDATE"] = str(stage)
-        result = run([sys.executable, str(FIXTURE)], stage, env)
+        result = run([sys.executable, str(staged_fixture)], stage, env)
         test_summary = re.search(r"Ran (\d+) tests", result.stderr)
-        if not test_summary or int(test_summary.group(1)) != 11 or "\nOK\n" not in result.stderr:
-            raise ValueError("native test receipt does not prove the expected eleven cases")
+        if not test_summary or int(test_summary.group(1)) != 12 or "\nOK\n" not in result.stderr:
+            raise ValueError("native test receipt does not prove the expected twelve cases")
         for name, sha in INPUT.items():
             file_bytes(generation / name, sha, sealed=True)
     selected = False
@@ -102,7 +104,8 @@ def qualify(generation: Path) -> dict[str, object]:
         "schema": "mastermind.native_manual_preview_source_qualification.v1",
         "state": "SOURCE_ONLY_TESTED", "generation": GENERATION,
         "current_selected_at_end": selected, "source_count": len(INPUT),
-        "patch_sha256": PATCH_SHA256, "tests_passed": 11,
+        "patch_sha256": PATCH_SHA256, "fixture_sha256": FIXTURE_SHA256,
+        "tests_passed": 12,
         "sealed_generation_unchanged": True,
         "live_install_performed": False, "provider_call_performed": False,
         "worker_start_proven": False, "review_required": True,

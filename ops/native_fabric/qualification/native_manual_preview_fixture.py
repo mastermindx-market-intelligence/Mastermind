@@ -116,9 +116,21 @@ class NativeManualPreviewTest(unittest.TestCase):
                 self.assertTrue(allowed.startswith("POOL=grok"),allowed)
 
     def test_no_manual_continuity_and_direct_strict_route_helper(self):
-        task._enforce_manual_route({"POOL":"grok","MODEL":"grok-4.7"},"grok","grok-4.7")
+        task._enforce_manual_route({"POOL":"grok","MODE":"grok","MODEL":"grok-4.7"},"grok","grok-4.7")
         with self.assertRaisesRegex(task.FabricTaskError,"MANUAL_MODEL_ROUTE_MISMATCH"):
-            task._enforce_manual_route({"POOL":"grok","MODEL":"grok-4.6"},"grok","grok-4.7")
+            task._enforce_manual_route({"POOL":"grok","MODE":"grok","MODEL":"grok-4.6"},"grok","grok-4.7")
+
+    def test_strict_pool_pin_rejects_cross_provider_execution_mode(self):
+        for pool,mode in [("grok","grok"),("glm","glm"),("glm","glm-codex"),
+                          ("bailian","qwen"),("minimax","minimax"),("cursor","cursor"),
+                          ("ocfree","oc-free"),("go","go-codex")]:
+            task._enforce_manual_route({"POOL":pool,"MODE":mode,"MODEL":"synthetic"},pool,None)
+        for pool,wrong_mode in [("grok","cursor"),("grok","unknown"),
+                                ("glm","qwen"),("bailian","glm"),("ocfree","go-codex")]:
+            with self.assertRaisesRegex(task.FabricTaskError,"MANUAL_POOL_MODE_MISMATCH"):
+                task._enforce_manual_route({"POOL":pool,"MODE":wrong_mode,"MODEL":"synthetic"},pool,None)
+        with self.assertRaisesRegex(task.FabricTaskError,"MANUAL_POOL_MODE_MISMATCH"):
+            task._enforce_manual_route({"POOL":"grok","MODEL":"synthetic"},"grok",None)
 
 if __name__=="__main__":
     unittest.main()
