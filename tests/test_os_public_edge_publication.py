@@ -27,13 +27,33 @@ def git(repo, *args):
     return subprocess.check_output(["git", "-C", str(repo), *args], text=True).strip()
 
 
-def make_dist(app, tag):
+NOTICE_BYTES = {
+    "third-party/deepseek-client-dependency-NOTICES.txt": b"Dependency copyright notices\n",
+    "third-party/deepseek-harness-LICENSE.txt": b"Harness license and copyright\n",
+}
+
+
+def make_dist(app, tag, *, noir_notices=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text(f'<script src="/os/assets/index-{tag}.js"></script>'
                                    f'<link href="/os/assets/index-{tag}.css">')
     (dist / f"assets/index-{tag}.js").write_text(f'console.log("{tag}");')
     (dist / f"assets/index-{tag}.css").write_text(f'body{{color:{tag}}}')
+    if noir_notices:
+        extra = {
+            f"assets/atelier-office-{tag}.jpg": b"office image",
+            f"assets/Manrope-Variable-{tag}.ttf": b"Manrope font",
+            f"assets/Inter-Variable-{tag}.woff2": b"Inter font",
+            "licenses/fonts/Inter-OFL.txt": b"Inter license",
+            "licenses/fonts/Manrope-OFL.txt": b"Manrope license",
+            "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
+            **NOTICE_BYTES,
+        }
+        for name, raw in extra.items():
+            path = dist / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(raw)
     return {"operator_uid": 501, "tools": {"/fixture/node": "a" * 64, "/fixture/npm": "b" * 64}}
 
 
@@ -54,7 +74,7 @@ def fullconfig(manifest):
 
 
 @pytest.fixture
-def inputs(tmp_path, monkeypatch):
+def inputs(tmp_path, monkeypatch, request):
     monkeypatch.setattr(assets, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(assets, "_no_acl", lambda *a, **k: None)
@@ -75,13 +95,15 @@ def inputs(tmp_path, monkeypatch):
     git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "source")
     sha, tree = git(repo, "rev-parse", "HEAD"), git(repo, "rev-parse", "HEAD^{tree}")
     git(repo, "update-ref", "refs/remotes/origin/master", sha)
-    monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(app, "new"))
+    old_notices, new_notices = getattr(request, "param", (False, False))
+    monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(
+        app, "new", noir_notices=new_notices))
     bundle = tmp_path / "bundle"
     assets.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client",
                    output=bundle, build_user="fixture", node=Path("/fixture/node"), npm_cli=Path("/fixture/npm"))
     qualified = assets.qualify(bundle, expected_sha=sha, tree_sha=tree, source_repo=repo)
     old = tmp_path / "old"
-    make_dist(old / "app/mastermind_os", "old")
+    make_dist(old / "app/mastermind_os", "old", noir_notices=old_notices)
     manifest = entry.build_os_asset_manifest(old)
     (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(manifest))
     seals.create(old, "a" * 40, "b" * 40)
@@ -190,6 +212,59 @@ def test_real_consumer_two_phase_order_and_single_selected_release(staged):
         publish(staged, "finalize")
     with pytest.raises(ValueError):
         publish(staged)
+
+
+@pytest.mark.parametrize("inputs,expected_counts", [
+    ((False, True), (4, 12)), ((True, False), (12, 4)), ((True, True), (12, 12)),
+], indirect=["inputs"])
+def test_eleven_asset_release_stage_load_and_cutover(staged, expected_counts):
+    i, r, relay = staged
+    with m.private(i["out"]) as stage:
+        descriptor, manifests, _, _, _ = m._load_stage(stage, r["stage_digest"])
+        for kind, count in zip(("old", "new"), expected_counts):
+            index = descriptor["indexes"][kind]
+            has_notices = count == 12
+            assert len(index) == count
+            assert (set(NOTICE_BYTES) <= set(index)) == has_notices
+            assert len(manifests[kind]["files"]) == len(index) - 1
+            if has_notices:
+                for name, raw in NOTICE_BYTES.items():
+                    assert stage.read(index[name]) == raw
+    assert publish(staged)["state"] == "PREPARED"
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    paths = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][0]["match"][0]["path"]
+    for name in NOTICE_BYTES:
+        assert ("/os/" + name in paths) == (name in descriptor["indexes"]["new"])
+
+
+@pytest.mark.parametrize("inputs", [(True, True)], indirect=True)
+@pytest.mark.parametrize("damage", ["partial", "extra", "renamed", "bytes"])
+def test_eleven_asset_capture_keeps_exact_notice_set_and_digests(staged, damage):
+    i, _, _ = staged
+    with m.private(i["out"]) as stage:
+        descriptor = m.decode(stage.read(m.DESCRIPTOR))
+        files = {name: stage.read(label) for name, label in descriptor["indexes"]["new"].items()}
+    manifest = m.decode(files["asset-manifest.json"])
+    assert len(files) == 12 and len(manifest["files"]) == 11
+    name = "third-party/deepseek-harness-LICENSE.txt"
+    row = next(row for row in manifest["files"] if row["path"] == name)
+    if damage == "partial":
+        del files[name]
+        manifest["files"].remove(row)
+    elif damage == "extra":
+        extra = {**row, "path": "third-party/extra-LICENSE.txt"}
+        files[extra["path"]] = files[name]
+        manifest["files"].append(extra)
+    elif damage == "renamed":
+        row["path"] = "third-party/other-LICENSE.txt"
+        files[row["path"]] = files.pop(name)
+    else:
+        files[name] = b"changed notice bytes"
+    files["asset-manifest.json"] = m.canonical(manifest)
+    with pytest.raises(ValueError):
+        m._manifest(files)
 
 
 @pytest.mark.parametrize("field,value", [("new_digest", "c" * 64), ("new_sha", "d" * 40),
