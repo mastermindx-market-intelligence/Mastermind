@@ -63,6 +63,20 @@ retrieval in the current chat. When fresh context is needed, use a genuinely new
 continuation reference, not an assumed-empty transcript branch. Project history may still be supplied
 by the host and remains advisory. A new chat does not transfer a lease, STARTed operation or source writer.
 
+### Multi-phase project plan recovery
+
+For a substantial newly assigned or recovered project, also follow the same-pinned
+`docs/CEO_PROJECT_PLAN_CONTINUITY.md`. From the verified Agent OS workstream/frontier,
+resolve the **exact** source-controlled master-plan path and committed revision before
+choosing a new task. Compare its hierarchy/dependencies/accepted proof to relevant
+GitHub, Executive and active dialogue owners, not to remembered chat narrative.
+If no plan exists, locate the rightful owner/source scope and establish a source-bound
+plan with readback **before substantial execution or worker delegation**, allowing
+only the minimum permitted investigation needed to scope it. Never create a second plan,
+guess current task status, displace a STARTed worker or call a GitHub draft an accepted
+Agent OS checkpoint. If the writer is genuinely unavailable, report the precise
+persistence gap and continue independent safe scope.
+
 ## Step 3 — Read canonical sources in a bounded ladder
 
 Use the smallest ladder sufficient for the task:
