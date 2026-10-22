@@ -70,7 +70,7 @@ def qualify(generation: Path) -> dict[str, object]:
     if generation.is_symlink() or not generation.is_dir():
         raise ValueError("invalid generation source")
     source = {name: file_bytes(generation / name, sha, sealed=True) for name, sha in INPUT.items()}
-    file_bytes(PATCH, PATCH_SHA256)
+    patch_source = file_bytes(PATCH, PATCH_SHA256)
     fixture_source = file_bytes(FIXTURE, FIXTURE_SHA256)
     with tempfile.TemporaryDirectory(prefix="mmx-native-manual-preview-source-only-") as location:
         stage = Path(location)
@@ -80,8 +80,14 @@ def qualify(generation: Path) -> dict[str, object]:
             destination.write_bytes(content)
         staged_fixture = stage / "native_manual_preview_fixture.py"
         staged_fixture.write_bytes(fixture_source)
-        run(["git", "apply", "--check", str(PATCH)], stage)
-        run(["git", "apply", str(PATCH)], stage)
+        staged_patch = stage / "native_manual_preview.patch"
+        staged_patch.write_bytes(patch_source)
+        numstat = run(["git", "apply", "--numstat", str(staged_patch)], stage).stdout.splitlines()
+        changed = [line.split("\t", 2) for line in numstat]
+        if len(changed) != len(INPUT) or any(len(fields) != 3 for fields in changed) or {fields[2] for fields in changed} != set(INPUT):
+            raise ValueError("native patch changed-path scope drift")
+        run(["git", "apply", "--check", str(staged_patch)], stage)
+        run(["git", "apply", str(staged_patch)], stage)
         for name, sha in OUTPUT.items():
             file_bytes(stage / name, sha)
         env = dict(os.environ)
