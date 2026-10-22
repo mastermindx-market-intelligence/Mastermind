@@ -1,0 +1,13 @@
+--- a/lease_broker.py
++++ b/lease_broker.py
+@@ -368,6 +368,10 @@
+             return None
+         if pname == "bailian":
+             return self._bailian_effective_cap(name, base)
++        if pname == "glm" and self.external_gates:
++            from quota_remote import cached_glm_account_parked
++            if cached_glm_account_parked(name, now_ts=now):
++                return None
+         return base
+ 
+     def account_model_cap(
