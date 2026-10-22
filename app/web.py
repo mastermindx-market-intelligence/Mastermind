@@ -2421,13 +2421,18 @@ def api_self_directed() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001 — never 500 the dashboard
-        return JSONResponse({"nav": 1_000_000.0, "cash": 1_000_000.0, "invested": 0.0,
-                             "positions": [], "pending": [],
-                             "allocation": {"cash_pct": 1.0, "gross": 0.0, "n_positions": 0,
-                                            "largest_weight": 0.0, "total_unrealized_pnl": 0.0,
-                                            "total_return_pct": 0.0},
-                             "market": {"is_open": False, "session": "closed"},
-                             "error": str(exc)})
+        # A read we could not perform renders `unavailable` — never a fabricated funded book
+        # (a $1M all-cash, 0%-return book would be indistinguishable from a real one).
+        try:
+            from portfolio import self_directed as _sd
+            market = _sd._market_status()
+        except Exception:  # noqa: BLE001 — the clock is independent of the failed account read
+            market = None
+        return JSONResponse({"status": "unavailable",
+                             "reason_code": "self_directed_book_unreadable",
+                             "nav": None, "cash": None, "invested": None,
+                             "starting_nav": None, "positions": [], "pending": [],
+                             "allocation": None, "market": market, "error": str(exc)})
 
 
 @router.get("/api/self_directed/history")
@@ -2442,8 +2447,12 @@ def api_self_directed_history() -> JSONResponse:
         _attach_security_names(payload.get("pending"))
         return JSONResponse(payload)
     except Exception as exc:  # noqa: BLE001
-        return JSONResponse({"history": [], "pending": [], "realized_total": 0.0,
-                             "n_closed": 0, "n_buys": 0, "win_rate": None, "error": str(exc)})
+        # Unreadable is not empty: a fabricated 0-fill blotter reads as "no trades yet".
+        return JSONResponse({"status": "unavailable",
+                             "reason_code": "self_directed_history_unreadable",
+                             "history": [], "pending": [], "realized_total": None,
+                             "n_closed": None, "n_buys": None, "win_rate": None,
+                             "error": str(exc)})
 
 
 @router.get("/api/self_directed/search")
