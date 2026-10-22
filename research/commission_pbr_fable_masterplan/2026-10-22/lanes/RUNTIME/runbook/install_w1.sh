@@ -138,7 +138,7 @@ g12_events() {
     printf 'G1 waived by seat ruling: %s; runs=%s\n' "$PBR_WAIVE_G1" "$runs" > "$EV/gates/G1.WAIVER"
   fi
   if [ "$g2" != true ]; then
-    [ -n "${PBR_WAIVE_G2E:-}" ] || stop "G2: open run_started since process start: $(jget "$EV/gates/G1_G2.json" G2_open). Hold and re-run s2; a row older than its job's normal duration is a ledger anomaly - only the seat may waive it (PBR_WAIVE_G2E='<ruling ref>'); the cgroup liveness check still applies"
+    [ -n "${PBR_WAIVE_G2E:-}" ] || stop "G2: open run_started since process start: $(jget "$EV/gates/G1_G2.json" G2_open). Hold and re-run s2 (an open prewarm_marks, every 2 min, clears in ~2 min); a row older than its job's normal duration is a ledger anomaly - only the seat may waive it (PBR_WAIVE_G2E='<ruling ref>'); the cgroup liveness check still applies"
     printf 'G2 (run_events) waived by seat ruling: %s; open=%s\n' "$PBR_WAIVE_G2E" "$(jget "$EV/gates/G1_G2.json" G2_open)" > "$EV/gates/G2E.WAIVER"
   fi
   pass G1; pass G2E
@@ -168,16 +168,24 @@ if command -v fuser >/dev/null 2>&1; then
 else
   echo "lock_holders=unknown"
 fi
-echo "upgrade_timer_next=$(systemctl show apt-daily-upgrade.timer --timestamp=unix -p NextElapseUSecRealtime --value)"
-echo "apt_timer_next=$(systemctl show apt-daily.timer --timestamp=unix -p NextElapseUSecRealtime --value)"
-echo "restart_timer_next=$(systemctl show mastermind-restart.timer --timestamp=unix -p NextElapseUSecRealtime --value)"
+# systemd 255 prints NextElapseUSecRealtime as a pretty date even with --timestamp=unix, so the
+# gated value is the raw D-Bus property (busctl "t <usec>"); the pretty lines are informational.
+nx() { busctl get-property org.freedesktop.systemd1 "/org/freedesktop/systemd1/unit/$1" \
+  org.freedesktop.systemd1.Timer NextElapseUSecRealtime 2>/dev/null | sed -n 's/^t \([0-9][0-9]*\)$/\1/p'; }
+echo "upgrade_timer_next_usec=$(nx apt_2ddaily_2dupgrade_2etimer)"
+echo "apt_timer_next_usec=$(nx apt_2ddaily_2etimer)"
+echo "restart_timer_next_usec=$(nx mastermind_2drestart_2etimer)"
+echo "upgrade_timer_next_pretty=$(systemctl show apt-daily-upgrade.timer -p NextElapseUSecRealtime --value)"
+echo "apt_timer_next_pretty=$(systemctl show apt-daily.timer -p NextElapseUSecRealtime --value)"
+echo "restart_timer_next_pretty=$(systemctl show mastermind-restart.timer -p NextElapseUSecRealtime --value)"
 exit 0
 EOF
   grep -Eqx 'apt_daily=(inactive|failed)' "$f" && grep -Eqx 'apt_daily_upgrade=(inactive|failed)' "$f" \
     && grep -qx 'unattended_upgrade_procs=0' "$f" && grep -qx 'needrestart_procs=0' "$f" \
     && grep -qx 'apt_dpkg_procs=0' "$f" && grep -qx 'lock_holders=no' "$f" \
     || stop "G3: apt/unattended-upgrade/needrestart/dpkg not idle (or lock state unknown) - hold and re-check; see $f"
-  local nxt; nxt=$(sed -n 's/^upgrade_timer_next=@\([0-9][0-9]*\).*/\1/p' "$f")
+  local nxt; nxt=$(sed -n 's/^upgrade_timer_next_usec=\([1-9][0-9]\{9,\}\)$/\1/p' "$f")  # 0/empty/garbled = unknown
+  [ -n "$nxt" ] && nxt=$((nxt / 1000000))
   [ -n "$nxt" ] && [ "$nxt" -ge "$APT_MIN_NEXT" ] \
     || stop "G3: apt-daily-upgrade next elapse '${nxt:-unknown}' is before ${DAY}T05:55Z or unknown - seat ruling"
   pass G3
@@ -689,7 +697,7 @@ rollback_b() {  # manual mirror of deploy_code_to_vps.sh rollback_release (seat-
     || stop "R-b precondition: settlement state not clean (new code may have written v2 WAL/receipts) - seat ruling"
   events_tail "$R/rb_events.jsonl" || stop "run_events"
   rb gates --events "$R/rb_events.jsonl" --date "$DAY" --since-process "@${DEPLOY_T0:?}" > "$R/rb_open_runs.json"
-  [ "$(jget "$R/rb_open_runs.json" G2_no_open_run_since_process_start)" = true ] || stop "R-b precondition: an open run since the deploy - seat"
+  [ "$(jget "$R/rb_open_runs.json" G2_no_open_run_since_process_start)" = true ] || stop "R-b precondition: an open run since the deploy: $(jget "$R/rb_open_runs.json" G2_open). Nothing on the host changed yet; an open prewarm_marks clears in ~2 min - re-run rollback-b; anything else - seat"
   local EXC=(); eval "$(sed -n '/^EXC=(/,/^)/p' "$WT/scripts/deploy_code_to_vps.sh")"
   [ "${#EXC[@]}" -eq 29 ] && [[ " ${EXC[*]} " == *" --exclude=data "* ]] && [[ " ${EXC[*]} " == *" --exclude=.deploy_prev "* ]] \
     || stop "could not parse the deploy script's EXC list (${#EXC[@]} entries)"

@@ -14,8 +14,8 @@ PBR #1693, RUNTIME lane. **Commands only.** RUNTIME executed nothing on the host
 | Item | Value |
 |---|---|
 | OLD (installed now) | `ff16c192cc7b932e59c28c4fe30aeaf27bcb7595`. s1 proves it with T1(pre). |
-| SHA (to install) | `origin/master` at window open. s0 fixes it, and G8 re-proves it at s2 and s3. On 2026-10-22 13:10Z master was `3a6d165fe398507bac179ab76b4ee01aa13116db`: 181 changed paths vs OLD, no deletions. That is the wave-1 merges (#1711 #1715 #1716 #1718 #1734 and ECON/RESEARCH merges) plus, since `fc4db8de`, non-bot `ops/native_fabric/grok47`, Executive OS edge/assets and docs. The SHA keeps moving until the hold; only G7a/G7b decide eligibility. |
-| G7a (deploy/runtime mechanics drift OLD→SHA) | Empty: `scripts/deploy_code_to_vps.sh`, `deploy_from_git.sh`, `refresh_datadog_release_tag.sh`, `app/main.py`, `portfolio/forward_evaluation.py`, `app/scheduler.py`. |
+| SHA (to install) | `origin/master` at window open. s0 fixes it, and G8 re-proves it at s2 and s3. On 2026-10-22 13:10Z master was `3a6d165fe398507bac179ab76b4ee01aa13116db`: 181 changed paths vs OLD, no deletions. That is the wave-1 merges (#1711 #1715 #1716 #1718 #1734 and ECON/RESEARCH merges) plus, since `fc4db8de`, non-bot `ops/native_fabric/grok47`, Executive OS edge/assets and docs. At 14:27Z master was `3d1cd77dfe84fee87922eb970e1a84cfdd9a0555` (+4 paths: #1719, the Self-Directed `unavailable` rendering in `app/web.py` and `app/static/index.html`, plus its test and evidence): 184 paths vs OLD, no deletions, G7a/G7b still empty. The SHA keeps moving until the hold; only G7a/G7b decide eligibility. |
+| G7a (deploy/runtime mechanics drift OLD→SHA) | Empty (re-checked at `3d1cd77d`): `scripts/deploy_code_to_vps.sh`, `deploy_from_git.sh`, `refresh_datadog_release_tag.sh`, `app/main.py`, `portfolio/forward_evaluation.py`, `app/scheduler.py`. |
 | G7b (dependency drift) | Empty, so `T2_MODE=equal`. If #1714 lands first: `T2_MODE=floor_pending`. The venv is still not upgraded in this window (separate T2 step), and T2 must show an unchanged venv. |
 | Forward-evaluation marker | Active: `start.json`, `deployment_sha=3c4ef7f8…`, `evaluation_start=2026-08-11`. G6 passes. The deploy takes the FORWARD_START_ACTIVE path (no init/finalize), and the marker must stay byte-identical (checked in s4). |
 | Merge-queue hold | **No merge to `master` from 03:30Z until s3 has launched (to be safe, until 05:40Z).** Master is shared with non-PBR work (fabric and Executive OS merged at ~13:00Z on 10-22). If master moves after s0, G8 fails at s2/s3, and the wrapper would refuse anyway (rc 2). Recovery before 05:20Z: a new `s0` (new evidence dir), `s1`, then `s2`. |
@@ -29,7 +29,7 @@ These are sha256 values. s0 re-verifies the three helpers; a mismatch aborts.
 
 | File | sha256 |
 |---|---|
-| `runbook/install_w1.sh` | `3d3f8f8f50b79b2118c9c8737b427662697e34982f319f006dfe7fbe883d3568` |
+| `runbook/install_w1.sh` | `37d67e70b6500d2a617b360af84fff0f24ecff2e93f011a3b907bd4e177b998a` |
 | `runbook/pbr_rb.py` | `536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac` |
 | `runbook/remote_blob_manifest.py` | `49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf` |
 | `runbook/remote_dists.py` | `b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0` |
@@ -44,7 +44,7 @@ RB=research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook
 B=$(mktemp -d)
 git -C "$SEAT_WT" fetch -q origin claude/ssd-pbr-runtime-85f3de87bc7b8894
 git -C "$SEAT_WT" show "FETCH_HEAD:$RB/install_w1.sh" > "$B/install_w1.sh"
-echo "3d3f8f8f50b79b2118c9c8737b427662697e34982f319f006dfe7fbe883d3568  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
+echo "37d67e70b6500d2a617b360af84fff0f24ecff2e93f011a3b907bd4e177b998a  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
 env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 # s0's last line prints:  export PBR_EV=/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>
 ```
@@ -199,9 +199,9 @@ PBR_EV=… /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.s
 | G5 | Host clock in `[04:10, 05:30)` | Wait (before 04:10) or abandon the window (after 05:30). |
 | G8 | `ls-remote origin master == SHA` | Seat. Hold, or start over from s0 with a new evidence dir. |
 | G1 | `watch_us_overnight` 02:20 has `run_finished`. The run_events tail must cover the window, and every row must parse. | Hold and re-run s2 every 10 min. **Seat-only waiver:** `PBR_WAIVE_G1='<ruling ref>'` (written to `gates/G1.WAIVER`). |
-| G2E | No `run_started` without `run_finished` since the service's `ActiveEnterTimestamp` | Hold and re-run. A row older than its job's normal duration is a ledger anomaly. **Seat-only waiver:** `PBR_WAIVE_G2E='<ruling ref>'` (`gates/G2E.WAIVER`). The cgroup check below still applies. |
+| G2E | No `run_started` without `run_finished` since the service's `ActiveEnterTimestamp` | Hold and re-run. `prewarm_marks` is ledgered and fires every 2 min (`*/2`, hours 1–9 and 13–21 UTC, mon–fri), so an open `prewarm_marks` run is the expected cause of a G2E hold in the window: re-run s2 after ~2 min instead of 10. A row older than its job's normal duration is a ledger anomaly. **Seat-only waiver:** `PBR_WAIVE_G2E='<ruling ref>'` (`gates/G2E.WAIVER`). The cgroup check below still applies. |
 | G2 | No `claude`/`node`/`codex` process in the service cgroup (no LLM run in flight) | Hold and re-check. Not waivable. |
-| G3 | `apt-daily`/`apt-daily-upgrade` inactive or failed; 0 unattended-upgrade/needrestart/apt/dpkg processes; `fuser` lock holders = no; `apt-daily-upgrade.timer` next elapse ≥ 05:55Z | Hold and re-check. If the next elapse is < 05:55 or unknown: seat ruling. |
+| G3 | `apt-daily`/`apt-daily-upgrade` inactive or failed; 0 unattended-upgrade/needrestart/apt/dpkg processes; `fuser` lock holders = no; `apt-daily-upgrade.timer` next elapse ≥ 05:55Z, read as the raw D-Bus property `NextElapseUSecRealtime` (`busctl get-property … Timer NextElapseUSecRealtime` → `t <µs>`), because systemd 255 prints `systemctl show` timer values as dates even with `--timestamp=unix` | Hold and re-check. If the next elapse is < 05:55, 0 or unknown: seat ruling. |
 | G4 | Settlement state `clean` (a read-only mirror of the deploy's rc 21/22/23 checks: no `paper_transaction.json`, no `settlement_receipts/*.json`) | Seat ruling. **Never "repair" live data.** |
 | G6 | `python3 -B -m portfolio.forward_evaluation status` rc 0 against the live root, and the `start.json` marker present | Seat. The deploy would init/finalize a marker. |
 
@@ -414,7 +414,7 @@ This follows the seat's rule: rollback = the deploy script's `rollback_release` 
 R-b runs only when all of the following hold:
 - exactly one new snapshot, `complete=1`, `sha=OLD`;
 - G4 `clean` (new code wrote no v2 WAL/receipts; otherwise a seat ruling is required);
-- no open run since `DEPLOY_T0`;
+- no open run since `DEPLOY_T0`. `prewarm_marks` (every 2 min, ledgered) can be the open run at the instant of the check. That stop happens before any host change, so re-run `rollback-b` after ~2 min;
 - `EXC` parsed from `$WT/scripts/deploy_code_to_vps.sh` has 29 entries, including `data` and `.deploy_prev`.
 
 ### R-b host commands, as sent
@@ -474,11 +474,13 @@ manifest.json                sha256 of every file (s6)
 ## 6. Uncertainties and residual risks (read before 03:30Z)
 
 1. **needrestart host semantics are unverified.** The perl verify proves the config parses and the key matches. It does not prove that the installed needrestart version honours `override_rc` in its configured restart mode. The first real proof is the next unattended-upgrade library event: look for "mastermind.service" absent from needrestart's restart list in the journal.
-2. **The `apt-daily-upgrade.timer` NextElapse** may exclude `RandomizedDelaySec`. G3 reads the unit's NextElapseUSecRealtime only. Bounding the timers is deferred.
+2. **Timer next-elapse values are redrawn every 3 minutes.** NextElapseUSecRealtime includes the `RandomizedDelaySec` draw (observed: `apt-daily-upgrade.timer` `t 1792737190710641` = Fri 06:33:10Z at 14:21Z for `OnCalendar=6:00`, `RandomizedDelaySec=60m`). The host's `macro-update` cron job runs `systemctl daemon-reload` 10 times every 3 minutes (2857 reloads 00:00–14:25Z on 10-22), and each reload redraws the delay (`FixedRandomDelay` unset): the same timer read 06:53:33Z at 14:24Z. Two consequences:
+   - G3's ≥ 05:55Z test stays sound: every draw for apt-daily-upgrade lies in `[06:00, 07:00]` Fri.
+   - The delay collapses toward the calendar time. Once a draw lands in the past, the timer fires, so apt-daily-upgrade (unattended-upgrade, then needrestart) is expected at ~06:00–06:10Z, about 20 min after the window closes; on 10-22 it started at 06:01:02Z. `apt-daily` (`6,18:00`, 12 h delay; update/download only, no install) is expected to fire soon after 18:00Z Thu, so it is unlikely to land in W1. If it does run at s2, the G3 idle check holds; re-check.
 3. **#1714 pre-landing.** If #1714 lands before s0, `T2_MODE=floor_pending`. The installed venv still holds the old SDK, and the pyproject floor is pending until the separate T2 step. Its linux gate lock was generated on Darwin with pip-tools for linux/x86_64 py3.12; it is unexercised on the host.
 4. **Master moving** between s0 and s3 makes G8, or the wrapper (rc 2), refuse. Hence the merge-queue hold.
 5. **Preflight quarantine** at startup is possible (`pending_target_cutover_preflight` = `quarantined`). It is reported as an incident and is not a proof failure.
-6. **Authority-bytes hazard.** The deploy re-hashes the live authority files under its flock. A startup-time write to an autonomous account/fills between the baseline and the re-hash fails safe into the automatic rollback (R-a). `prewarm_marks` is read-only on accounts.
+6. **Authority-bytes hazard.** The deploy re-hashes the live authority files under its flock. A startup-time write to an autonomous account/fills between the baseline and the re-hash fails safe into the automatic rollback (R-a). `prewarm_marks` never writes `account.json` (with G4 clean there is no transaction to recover). With #1747 in SHA, an INVALID account makes its load write the quarantine copy, one `account_quarantine.jsonl` row and one run_events entry beside it, once; s4a reports that as a HOLD.
 7. **R-b after a v2 settle** (WAL/receipts written by the new code) is refused by the precondition. It needs a seat ruling.
 8. **Schedule hours are env-overridable.** The timeline assumes defaults (`US_WATCH_UTC_HOURS=2,6,11`, `CHINA_DAILY_UTC_HOUR=8`, …). s1's `timers.txt` and the run_events tail are the check.
 9. **Snapshots accumulate.** Each deploy adds a full code snapshot under `.deploy_prev`. s1 requires ≥ 1 GiB free.
@@ -488,7 +490,7 @@ manifest.json                sha256 of every file (s6)
 13. **Forward marker** is active (deployment_sha `3c4ef7f8…`). G6 re-proves it at the gate time; a different status means STOP, not init.
 14. **Host import loads `.env`.** s4's `forward_evaluation status` (and G6) runs `python -m portfolio.forward_evaluation` on the host. `portfolio/__init__.py` imports `bot`, and `bot/__init__.py` loads `.env`/`.env.local` into that process's environment. Nothing is printed or captured, but the process does hold them. s4a deliberately classifies on the Mac to avoid a second host import.
 15. **D-ACCT-1 timing.** s4a's classification needs #1747 in SHA. If #1747 lands after s0, the window installs the old load path; s4a then only runs the census/event/journal checks, and the fail-closed behaviour arrives with the next release.
-16. **self_directed is not covered by D-ACCT-1.** It keeps its own lenient loader (`portfolio/self_directed.py`), which falls back to a default state on a bad file. A corrupt self_directed account would not fail closed and is not detected by s4a. This is a D-ACCT-1 scope question for the seat, not a W1 proof item.
+16. **self_directed is not covered by D-ACCT-1.** It keeps its own lenient loader (`portfolio/self_directed.py` `_load_account`), which falls back to a fresh $1M book on a bad file. A corrupt self_directed account would not fail closed and is not detected by s4a. #1719 (in master since `3d1cd77d`) already makes `/api/self_directed` render `unavailable` on a read failure. The engine's fallback is tracked as ECON E13. It is not a W1 proof item.
 
 ## 7. Verification of this runbook (offline, by RUNTIME)
 
@@ -501,6 +503,12 @@ manifest.json                sha256 of every file (s6)
 - needrestart verify: a fake conf gives rc 3 before, rc 0 after, rc 4 on a parse error. The regex matches `mastermind(.service)`, not `mastermind-restart.service`.
 - `pbr_rb` gates/app-started/t1/t4/health/cycle/close against dated fixtures.
 - G1/G2E waiver paths.
+- G3 against a fake host with systemd-255-shaped stubs (`systemctl show` prints a date whatever the flags; `busctl` prints `t <µs>`), 9/9 cases plus 4 assertions:
+  - the observed 14:21Z value (06:33:10Z) → PASS; the redrawn 14:24Z value (06:53:33Z) → PASS; exactly 05:55:00Z → PASS;
+  - 05:54:59.999Z → stop; 04:40Z (inside W1) → stop; `t 0` → stop; a `busctl` error → stop; a non-`t` reply → stop;
+  - `apt-daily.service` activating → stop on the idle check;
+  - the evidence file carries both the µs and the date lines; `G3.PASS` is written only on a pass; the stop message names the 05:55Z floor.
+  - Teeth: the reviewed driver (`ec8b5db9`) fails the three PASS cases (always `unknown`), reproducing review MAJOR-1 offline.
 - s4a against a fake host (`VPS=(fakessh)` rewriting the live-data root, fake `journalctl`), 16/16 cases:
   - clean (3 VALID, self_directed n/a) → 0, with no account bytes retained;
   - a quarantine file in an archived book's dir → 5, and in the legacy `portfolio/` → 5;
@@ -515,6 +523,6 @@ manifest.json                sha256 of every file (s6)
   - a bad label → 1;
   - the `after-china_daily` label → 0.
 
-**Read-only host observation (2026-10-22 13:41Z):** the forward marker is active.
+**Read-only host observations (2026-10-22):** 13:41Z, the forward marker is active. 14:21–14:27Z, systemd 255.4-1ubuntu8.18, TZ `Etc/UTC`; the new G3 timer probe returns `upgrade_timer_next_usec=1792738413683088` (Fri 06:53:33Z, a PASS); the reload churn in §6 #2 is from `journalctl _PID=1` and the cron journal.
 
-**Not tested:** anything on the real host beyond that one read. The first live run is the seat's s0/s1.
+**Not tested:** anything on the real host beyond those reads. The first live run is the seat's s0/s1.
