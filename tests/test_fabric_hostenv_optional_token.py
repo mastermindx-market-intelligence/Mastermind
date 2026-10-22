@@ -39,6 +39,10 @@ def _run(hostenv: Path, env: dict, command: str = '. "$HOME/lanes/ext/HOST_ENV.s
 
 
 def test_generated_host_environment_is_valid_shell(tmp_path):
+    # Verify the outer SSH bootstrap quoting as well as the emitted script.
+    outer = subprocess.run(["bash", "-n", str(BOOTSTRAP)],
+                           capture_output=True, text=True, timeout=5, check=False)
+    assert outer.returncode == 0, outer.stderr
     hostenv, env = _hostenv(tmp_path)
     result = subprocess.run(["bash", "-n", str(hostenv)], env=env,
                             capture_output=True, text=True, timeout=5, check=False)
