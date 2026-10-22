@@ -93,12 +93,12 @@ def validate_visibility_delta(inventory: dict, delta: dict | None) -> set[str]:
             or not isinstance(added, list) or added):
         raise InventoryError("Missing full visible-page list or unexpected additions; recensus required")
     observed_ids = [row.get("source_page_id") for row in missing if isinstance(row, dict)]
-    if len(observed_ids) != len(missing) or len(observed_ids) != len(set(observed_ids)):
-        raise InventoryError("Duplicate or malformed absent source page")
-    if (len(present) != len(set(present)) or
-            any(not isinstance(page_id, str) for page_id in present) or
-            any(not isinstance(page_id, str) for page_id in observed_ids)):
-        raise InventoryError("Duplicate or invalid visible source page ID")
+    if (len(observed_ids) != len(missing) or
+            any(not isinstance(page_id, str) for page_id in observed_ids) or
+            any(not isinstance(page_id, str) for page_id in present)):
+        raise InventoryError("Malformed visible or absent source page ID")
+    if len(observed_ids) != len(set(observed_ids)) or len(present) != len(set(present)):
+        raise InventoryError("Duplicate source page in observed visibility delta")
     originals = {row["source_page_id"]: row for row in inventory["pages"]}
     absent_ids, visible_ids = set(observed_ids), set(present)
     if (absent_ids & visible_ids or absent_ids | visible_ids != set(originals)):
