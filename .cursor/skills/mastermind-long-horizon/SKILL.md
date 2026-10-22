@@ -7,7 +7,7 @@ description: Sustain a complex Mastermind engineering mission across Cursor plan
 ## Establish the authorized outcome
 - Recover the Chairman's live instruction and the exact Mastermind Job/commission/workstream/PR/branch already assigned. Read `AGENTS.md` and the protected `docs/sol_skills/INDEX.md` and appropriate companions from one verified repository SHA. Do not derive source law from a chat.
 - Write down a compact *working frontier*: original outcome and DONE_WHEN; principal/root/parent/receiver; current Git source and worktree; admitted capabilities and effect state; one critical dependency; two or fewer path-disjoint ready verticals; accepted evidence; next exact action.
-- Cursor's Plan mode may be used to draft or edit the plan; it is not the organizational Job store. Existing Executive OS owns runtime state, Agent OS owns durable continuity, and GitHub owns source and tests. Do not create an extra `tasks.json`, backlog authority, notes database or global memory plane.
+- Cursor's Plan mode may be used to draft or edit the plan; it is not the organizational Job store. **Headless Plan-mode exit 0 may still include interactive questions without a completed plan**; use interactive Plan or read-only Ask as appropriate, and verify the actual plan artifact before implementation. Existing Executive OS owns runtime state, Agent OS owns durable continuity, and GitHub owns source and tests. Do not create an extra `tasks.json`, backlog authority, notes database or global memory plane.
 
 ## Execute in independent verticals
 1. Recover accepted work and effect uncertainty before allocating a new author. Use the existing Mastermind workspace manager and protect registered worktrees; never self-create duplicate Cursor worktrees for an in-flight lane.

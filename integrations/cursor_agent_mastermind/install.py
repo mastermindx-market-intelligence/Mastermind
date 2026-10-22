@@ -22,10 +22,10 @@ FILES = {
     "agents/mmx-fabric-operator.md": "cae9255f0e8de8d439b50c547cb3efaebe1d61644e4926f3364bf0dd58f5ecd2",
     "skills/mastermind-fabric/SKILL.md": "00f3a12833c9fad654215f5af5819f3d1306e7f8b775b9bf4c7cce1fe23c6949",
     "rules/00-mastermind-core.mdc": "e119f4f071ca76a72df1dec1b67dcfb02eace65652e62e42a4ca5e428e7b8b43",
-    "rules/10-long-horizon.mdc": "5257acd028fe2db2541906c459e3283dbf0643204a4339608cc842158db7e64b",
+    "rules/10-long-horizon.mdc": "3a3d9174fefbf4df9328adff38c073501ff0269def24cab0866f7d48382f26ff",
     "rules/20-model-and-delegation.mdc": "8aaa63625d19006dfad3353261b77403576309ad788942c4d77c21cd1a9cda14",
     "rules/30-proof-and-review.mdc": "b80d30df880e57e1a35c55cd3476ae82083cfc34276951f5257fa45c3d04cb43",
-    "skills/mastermind-long-horizon/SKILL.md": "166b0e664f8f8a5f4fc1c452c097d1e2031683bf6dbc00c4264d14e6ea0cddc9",
+    "skills/mastermind-long-horizon/SKILL.md": "83ededdd4a7f60489639ebb283f07555967f42dc6bab1989fdde156691f43f68",
     "skills/mastermind-model-routing/SKILL.md": "dbbf3b43d4321c81ae08cfd8749b165c635cc9bdc32ca8206ab8d123d6f126dd",
     "skills/mastermind-verify-and-close/SKILL.md": "15007d0e1c27db211674c6972a21ac9880b5c161b41c7bb11db6f3445610368c",
 }
