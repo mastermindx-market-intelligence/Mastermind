@@ -282,9 +282,9 @@
       "source": "source/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 69174,
+      "bytes": 70061,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "58916ce301ad588238ef0c848321114f4ecdc52d7bb59b612285822f8ae211d0",
+      "sha256": "9f4b9d81b1952c5644f6f6b2a436621218934036807a38d8a233de27d6db0b73",
       "source": "candidate/lease_broker.py"
     },
     "ext/mac_policy_return.py": {
