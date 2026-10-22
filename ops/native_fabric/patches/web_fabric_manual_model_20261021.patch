@@ -27,8 +27,12 @@
            worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
            tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
        }
-@@ -251,8 +257,35 @@
-         if(cfg.quotaFallback && !await continuityAvailable()) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
+@@ -248,11 +254,38 @@
+         const requestKey=args.run_id;
+         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
+         if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
+-        if(cfg.quotaFallback && !await continuityAvailable()) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
++        if(cfg.quotaFallback && !args.pool && !await continuityAvailable()) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
          const s=await status(args,false);
          if(s.state!=='NOT_FOUND') fail(s.state==='EFFECT_UNKNOWN'?'EFFECT_UNKNOWN':'RUN_EXISTS');
 +        // Manual constraints must first pass the incumbent no-reservation
@@ -51,22 +55,22 @@
 +          if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
 +            || route.run_id!==args.run_id || route.pool!==args.pool
 +            || typeof route.model!=='string'
-+            || (args.model && route.model.toLowerCase()!==args.model.toLowerCase()))
++            || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
 +            fail('MANUAL_ROUTE_UNAVAILABLE');
 +        }
          const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
+-        if(cfg.quotaFallback) argv.push('--quota-fallback');
 +        // The originating request may not substitute a different pool/model
 +        // on typed pre-task quota rejection.
 +        if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
 +        if(args.pool) argv.push('--pool',args.pool);
-+        if(args.model) argv.push('--model',args.model);
--        if(cfg.quotaFallback) argv.push('--quota-fallback');
++        if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
          if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
          if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
          if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
 --- a/integrations/studio_direct_mcp/fabric-backend.test.mjs
 +++ b/integrations/studio_direct_mcp/fabric-backend.test.mjs
-@@ -444,3 +444,42 @@
+@@ -444,3 +444,52 @@
    assert.equal(out.error,expected);assert.equal(out.retry_allowed,false);
   }
  });
@@ -92,14 +96,14 @@
 + }
 +});
 +test('approved manual pin forwards exact pool/model without quota model-change',async()=>{
-+ const e=engine([captured('--quota-fallback'),captured('--follow'),capturedJSON(absent),capturedJSON(manualPreview),pending()]);
++ const e=engine([capturedJSON(absent),capturedJSON(manualPreview),pending()]);
 + const out=unwrap(await continuingFacade(e).call('fabric_request',manualPinned));
 + assert.equal(out.delivery,'CONTROLLER_CREATED');
-+ assert.equal(e.calls.length,5);
-+ assert.match(e.calls[3].arguments.command,/'preview' '--id' 'web-fabric-001'/);
-+ assert.match(e.calls[3].arguments.command,/'--pool' 'grok' '--model' 'grok-4.7'/);
-+ assert.match(e.calls[4].arguments.command,/'--pool' 'grok' '--model' 'grok-4.7'/);
-+ assert.doesNotMatch(e.calls[4].arguments.command,/'--quota-fallback'/);
++ assert.equal(e.calls.length,3);
++ assert.match(e.calls[1].arguments.command,/'preview' '--id' 'web-fabric-001'/);
++ assert.match(e.calls[1].arguments.command,/'--pool' 'grok' '--model' 'grok-4.7'/);
++ assert.match(e.calls[2].arguments.command,/'--pool' 'grok' '--model' 'grok-4.7'/);
++ assert.doesNotMatch(e.calls[2].arguments.command,/'--quota-fallback'/);
 +});
 +test('provider-only choice pins pool but not model',async()=>{
 + const e=engine([capturedJSON(absent),capturedJSON({...manualPreview,model:'grok-4.6'}),pending()]);
@@ -108,4 +112,14 @@
 + assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(e.calls.length,3);
 + assert.match(e.calls[2].arguments.command,/'--pool' 'grok'/);
 + assert.doesNotMatch(e.calls[2].arguments.command,/'--model'/);
++});
++
++test('explicit auto model keeps provider pin without requiring an exact model',async()=>{
++ const e=engine([capturedJSON(absent),capturedJSON({...manualPreview,model:'grok-4.6'}),pending()]);
++ const out=unwrap(await continuingFacade(e).call('fabric_request',{...manualPinned,model:'auto'}));
++ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(e.calls.length,3);
++ assert.match(e.calls[1].arguments.command,/'--model' 'auto'/);
++ assert.match(e.calls[2].arguments.command,/'--pool' 'grok'/);
++ assert.doesNotMatch(e.calls[2].arguments.command,/'--model'/);
++ assert.doesNotMatch(e.calls[2].arguments.command,/'--quota-fallback'/);
 +});
