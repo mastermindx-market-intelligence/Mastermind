@@ -82,7 +82,14 @@ def _read_native_page(file_id: str, page: dict, *,
         })
         if result.get("state") != "OBSERVED":
             raise bridge.Refusal("NATIVE_PAGE_READ_UNAVAILABLE")
-        info = (result.get("document") or {}).get("basic_info")
+        # The document snapshot intentionally describes the active page,
+        # even when the read result is for an explicitly requested page.
+        # Census MUST use the actual tool result or it will silently check
+        # the wrong page (and miss incomplete clones).
+        raw = result.get("result")
+        if not isinstance(raw, dict) or raw.get("isError") is True:
+            raise bridge.Refusal("NATIVE_PAGE_READ_UNAVAILABLE")
+        info = bridge.basic_object(raw)
     else:
         info = page_reader(file_id, page_id)
     if (not isinstance(info, dict) or info.get("fileId") != file_id

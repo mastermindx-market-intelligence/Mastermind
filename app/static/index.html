@@ -1972,6 +1972,11 @@ body.page-mm .mm-perf-nav-value {
   font-weight: 800;
   letter-spacing: -.035em;
 }
+/* PBR-SELF-UNAVAILABLE: an unread account is a state, not a value; it never takes the numeral's emphasis */
+.mm-perf-nav-value[data-availability="unavailable"],
+body.page-mm .mm-perf-nav-value[data-availability="unavailable"] { color: var(--muted); }
+/* PBR-SELF-UNAVAILABLE: the heartbeat is a health cue, so it stops (static, muted) while the book is unreadable */
+.mm-hb[data-availability="unavailable"] { background: var(--muted); animation: none; }
 body.page-mm .mm-perf-stat {
   justify-content: center;
   min-width: 0;
@@ -3109,8 +3114,9 @@ html[data-theme="light"] body.page-mm {
     <div class="panel span12" id="sd-header">
       <div style="display:flex;align-items:flex-start;gap:18px;flex-wrap:wrap">
         <div>
-          <div class="mm-hero-eyebrow"><span class="mm-hb"></span>&nbsp;<span class="l-en">SELF-DIRECTED &mdash; YOUR PAPER BOOK</span><span class="l-zh">自主交易 &mdash; 你的模拟组合</span></div>
-          <div class="mm-perf-nav-value" id="sd-nav" style="font-size:32px;margin-top:4px">$1,000,000</div>
+          <div class="mm-hero-eyebrow"><span class="mm-hb" id="sd-hb"></span>&nbsp;<span class="l-en">SELF-DIRECTED &mdash; YOUR PAPER BOOK</span><span class="l-zh">自主交易 &mdash; 你的模拟组合</span></div>
+          <div class="mm-perf-nav-value" id="sd-nav" style="font-size:32px;margin-top:4px">—</div>
+          <div class="mm-perf-stat-sub" id="sd-nav-status" hidden></div>
           <div style="margin-top:7px;display:flex;gap:9px;align-items:center;flex-wrap:wrap">
             <span class="mm-paper">PAPER</span>
             <span class="mm-sd-mkt closed" id="sd-mkt"><span class="dot"></span><span id="sd-mkt-txt">—</span></span>
@@ -3526,6 +3532,10 @@ var I18N = {
   'sd.cancel':            { en: 'cancel', zh: '取消' },
   'sd.hist_empty':        { en: 'No trades yet — your buys and sells appear here.', zh: '暂无交易 —— 你的买卖记录将显示在此。' },
   'sd.pending_note':      { en: 'queued — fills at next open', zh: '排队中 —— 下次开盘成交' },
+  'sd.unavailable':       { en: 'unavailable', zh: '不可用' },
+  'sd.unavailable_reason': { en: 'Book unavailable — the account could not be read, so no balances are shown.', zh: '组合数据不可用 —— 无法读取账户，因此不显示任何余额。' },
+  'sd.hist_unavailable':  { en: 'Trade history unavailable — the fill log could not be read.', zh: '交易记录不可用 —— 无法读取成交记录。' },
+  'sd.mkt.unknown':       { en: 'Market status unavailable', zh: '市场状态不可用' },
 
   // ── Desk observability page ──
   'desk.asof':            { en: 'As of', zh: '截至' },
@@ -6024,6 +6034,9 @@ window.openThesisFromPositions = function(id) { showView('research'); openThesis
 // ══ SELF-DIRECTED BOOK (third portfolio) ══════════════════════════════════════
 var _self = null;          // /api/self_directed   (book: positions, allocation, market, pending)
 var _selfHist = null;      // /api/self_directed/history (blotter + pending + summary)
+// A load that has not finished yet is 'pending' (keep the neutral placeholders) — distinct from a
+// load that finished and could not read the account (render `unavailable`).
+var _selfSettled = false, _selfHistSettled = false;
 var _selfSel = null;       // selected order-ticket name {ticker, price, name}
 var _selfSearchTimer = null, _selfActiveIdx = -1, _selfResults = [];
 var _selfExpanded = null;  // ticker whose thesis / quick-trade row is open
@@ -6043,6 +6056,7 @@ function refreshSelf() {
   ]).then(function(res) {
     if (res[0].status === 'fulfilled' && res[0].value) _self = res[0].value;
     if (res[1].status === 'fulfilled' && res[1].value) _selfHist = res[1].value;
+    _selfSettled = true; _selfHistSettled = true;
     renderSelf();
   });
 }
@@ -6063,9 +6077,49 @@ function renderSelf() {
   selfUpdateEst();
 }
 
+// PBR-SELF-UNAVAILABLE:BEGIN
+// Pure read-state for the Self-Directed book / blotter. 'pending' = no load has settled yet
+// (keep the neutral placeholders); 'unavailable' = a load settled and the account could not be
+// read, so nothing may be inferred; 'ok' = render the book exactly as delivered.
+function _selfBookState(book, settled) {
+  if (!settled) return 'pending';
+  if (!book || typeof book !== 'object') return 'unavailable';
+  if (book.status === 'unavailable') return 'unavailable';
+  if (typeof book.nav !== 'number' || !isFinite(book.nav)) return 'unavailable';
+  return 'ok';
+}
+
+function _selfHistState(hist, settled) {
+  if (!settled) return 'pending';
+  if (!hist || typeof hist !== 'object') return 'unavailable';
+  if (hist.status === 'unavailable') return 'unavailable';
+  if (!Array.isArray(hist.history)) return 'unavailable';
+  return 'ok';
+}
+// PBR-SELF-UNAVAILABLE:END
+
 function renderSelfHeader() {
   var b = _self || {}, a = b.allocation || {};
-  if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav != null ? b.nav : 1000000);
+  var st = _selfBookState(_self, _selfSettled);
+  var stEl = E('sd-nav-status');
+  if (stEl) { stEl.textContent = ''; stEl.hidden = true; }
+  if (E('sd-nav')) E('sd-nav').removeAttribute('data-availability');
+  if (E('sd-hb'))  E('sd-hb').removeAttribute('data-availability');
+  if (st === 'pending') return;             // pre-load placeholders stay exactly as shipped
+  if (st === 'unavailable') {
+    var un = t('sd.unavailable');
+    if (E('sd-nav'))       { E('sd-nav').textContent = un; E('sd-nav').setAttribute('data-availability', 'unavailable'); }
+    if (E('sd-hb'))        E('sd-hb').setAttribute('data-availability', 'unavailable');
+    if (E('sd-cash'))      { E('sd-cash').textContent = un; E('sd-cash').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-invested'))  { E('sd-invested').textContent = un; E('sd-invested').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-unreal'))    { E('sd-unreal').textContent = un; E('sd-unreal').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-return'))    { E('sd-return').textContent = un; E('sd-return').className = 'mm-perf-stat-value neu'; }
+    if (E('sd-cash-pct'))  E('sd-cash-pct').textContent = '';
+    if (E('sd-gross'))     E('sd-gross').textContent = '';
+    if (stEl) { stEl.textContent = t('sd.unavailable_reason'); stEl.hidden = false; }
+    return;
+  }
+  if (E('sd-nav'))   E('sd-nav').textContent = fmtNav(b.nav);
   if (E('sd-cash'))  E('sd-cash').textContent = b.cash != null ? fmtNav(b.cash) : '—';
   if (E('sd-cash-pct')) E('sd-cash-pct').textContent = a.cash_pct != null ? pctInt(a.cash_pct) : '';
   if (E('sd-invested')) E('sd-invested').textContent = b.invested != null ? fmtNav(b.invested) : '—';
@@ -6085,7 +6139,7 @@ function renderSelfHeader() {
 }
 
 function _mktLabel(m) {
-  if (!m) return { cls: 'closed', txt: t('sd.mkt.closed') };
+  if (!m || !m.session) return { cls: 'closed', txt: t('sd.mkt.unknown') };
   if (m.session === 'open') return { cls: 'open', txt: t('sd.mkt.open') };
   var no = m.next_open ? (' ' + String(m.next_open).replace('T', ' ') + ' ET') : '';
   var key = m.session === 'pre' ? 'sd.mkt.pre' : m.session === 'post' ? 'sd.mkt.post' : 'sd.mkt.closed';
@@ -6113,6 +6167,10 @@ function renderSelfMarket() {
 
 function renderSelfAlloc() {
   var host = E('sd-alloc-host'); if (!host) return;
+  if (_selfBookState(_self, _selfSettled) === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.unavailable_reason') + '</div>';
+    return;
+  }
   var b = _self || {}, a = b.allocation || {};
   var pos = ((b.positions) || []).filter(function(p){ return p.weight != null && p.weight > 0; });
   if (!pos.length) {
@@ -6141,6 +6199,10 @@ function renderSelfAlloc() {
 
 function renderSelfPositions() {
   var host = E('sd-positions-host'); if (!host) return;
+  if (_selfBookState(_self, _selfSettled) === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.unavailable_reason') + '</div>';
+    return;
+  }
   var pos = ((_self || {}).positions) || [];
   if (!pos.length) {
     host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span><span class="l-en">No positions yet — place your first order above.</span><span class="l-zh">暂无持仓 — 请在上方下单。</span></div>';
@@ -6235,6 +6297,10 @@ function renderSelfPending() {
 
 function renderSelfHistory() {
   var host = E('sd-history-host'); if (!host) return;
+  if (_selfHistState(_selfHist, _selfHistSettled) === 'unavailable') {
+    host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_unavailable') + '</div>';
+    return;
+  }
   var d = _selfHist || {}, hist = d.history || [];
   if (!hist.length) { host.innerHTML = '<div class="mm-empty"><span class="mm-empty-icon">○</span>' + t('sd.hist_empty') + '</div>'; return; }
   var realCls = d.n_closed ? (d.realized_total > 0 ? 'mm-pnl-pos' : d.realized_total < 0 ? 'mm-pnl-neg' : '') : '';
@@ -6242,8 +6308,8 @@ function renderSelfHistory() {
   var winTxt = (d.win_rate != null) ? Math.round(d.win_rate * 100) + '%' : '—';
   var summary = '<div class="mm-th-summary">' +
     '<div class="mm-th-stat"><div class="mm-th-stat-val ' + realCls + '">' + realTxt + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_realized') + '</div></div>' +
-    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_closed || 0) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_closed') + '</div></div>' +
-    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_buys || 0) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_buys') + '</div></div>' +
+    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_closed != null ? d.n_closed : t('sd.unavailable')) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_closed') + '</div></div>' +
+    '<div class="mm-th-stat"><div class="mm-th-stat-val">' + (d.n_buys != null ? d.n_buys : t('sd.unavailable')) + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_buys') + '</div></div>' +
     '<div class="mm-th-stat"><div class="mm-th-stat-val">' + winTxt + '</div><div class="mm-th-stat-lbl">' + t('trades.sum_win') + '</div></div>' +
   '</div>';
   var rows = '';
@@ -6339,7 +6405,9 @@ function renderSelfSelected(loading) {
   el.innerHTML = '<div class="mm-sd-sel-top"><span class="mm-sd-sel-tk">' + esc(s.ticker) + '</span>' +
     (s.name ? '<span class="mm-sd-sel-nm">' + esc(s.name) + '</span>' : '') +
     '<span class="mm-sd-sel-px">' + px + '</span></div>' +
-    '<div class="mm-sd-sel-sub">' + t('sd.buying_power') + ' ' + fmtNav((_self || {}).cash || 0) + '</div>';
+    '<div class="mm-sd-sel-sub">' + t('sd.buying_power') + ' ' +
+      (typeof (_self || {}).cash === 'number' && isFinite((_self || {}).cash)
+        ? fmtNav((_self || {}).cash) : t('sd.unavailable')) + '</div>';
 }
 
 var _selfUnit = 'shares';   // 'shares' | 'dollars' — order-ticket sizing unit
@@ -6360,7 +6428,9 @@ window.selfUpdateEst = function() {
   if (!est) return;
   var s = _selfSel, amt = parseFloat((E('sd-shares') || {}).value);
   if (!s) { est.textContent = ''; if (buy) buy.disabled = true; if (sell) sell.disabled = true; return; }
-  var px = s.price, held = _heldShares(s.ticker), cash = (_self || {}).cash || 0;
+  var px = s.price, held = _heldShares(s.ticker), rawCash = (_self || {}).cash;
+  var bookUnknown = _selfBookState(_self, _selfSettled) === 'unavailable';
+  var cashKnown = typeof rawCash === 'number' && isFinite(rawCash);
   var dollars = _selfUnit === 'dollars';
   var shares = (px != null && amt > 0) ? (dollars ? amt / px : amt) : 0;
   var parts = [];
@@ -6368,12 +6438,13 @@ window.selfUpdateEst = function() {
     parts.push(dollars ? ('≈ ' + fmtShares(shares) + ' ' + t('sd.shares_unit'))
                        : ('≈ ' + fmtNav(amt * px)));
   }
-  parts.push(t('sd.buying_power') + ' ' + fmtNav(cash));
+  parts.push(t('sd.buying_power') + ' ' + (cashKnown ? fmtNav(rawCash) : t('sd.unavailable')));
   if (held > 0) parts.push(t('sd.you_hold') + ' ' + fmtShares(held) + ' ' + t('sd.shares_unit'));
   est.textContent = parts.join(' · ');
   var canBuy = px != null && amt > 0, canSell = px != null && amt > 0 && held > 0;
-  if (buy) buy.disabled = !canBuy || _selfBusy;
-  if (sell) sell.disabled = !canSell || _selfBusy;
+  // An account we cannot read must not trade blind: the ticket stays inert until it settles readable.
+  if (buy) buy.disabled = bookUnknown || !canBuy || _selfBusy;
+  if (sell) sell.disabled = bookUnknown || !canSell || _selfBusy;
 };
 
 function _selfMsg(cls, txt) { var el = E('sd-msg'); if (el) { el.className = 'mm-sd-msg ' + cls; el.innerHTML = txt; } }
@@ -8773,7 +8844,7 @@ function _mergeLiveMarks(data) {
   if (!data || data.portfolio !== _portfolio) return;
   _liveMarks = data;
   if (_portfolio === 'self_directed') {
-    if (data.book) _self = data.book;
+    if (data.book) { _self = data.book; _selfSettled = true; }
     renderSelf();
   } else {
     var byTicker = {};
@@ -8942,8 +9013,8 @@ function _applyPortfolioSnapshot(snapshot) {
   if (Object.prototype.hasOwnProperty.call(snapshot, 'trades')) _trades = snapshot.trades;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'performance')) _perf = snapshot.performance;
   if (Object.prototype.hasOwnProperty.call(snapshot, 'risk')) _risk = snapshot.risk;
-  if (snapshot.self) _self = snapshot.self;
-  if (snapshot.selfHistory) _selfHist = snapshot.selfHistory;
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'self')) { _self = snapshot.self; _selfSettled = true; }
+  if (Object.prototype.hasOwnProperty.call(snapshot, 'selfHistory')) { _selfHist = snapshot.selfHistory; _selfHistSettled = true; }
   _rejected = (_book && _book.rejected) ? _book.rejected : [];
   _updateScopedPanelAvailability(!snapshot.complete);
 }
