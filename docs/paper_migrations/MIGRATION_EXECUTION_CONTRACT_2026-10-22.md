@@ -205,3 +205,35 @@ The five other original-heavy page snapshots remained consistent. A sixth, **For
 - This is a recovered **ID/name census only**, NOT per-artboard subtree-node size, asset/token/component fidelity, layout acceptance or a viable partition. Tree readback is not a modification or a safe delete procedure.
 
 The direct Paper tool catalog still showed **Paper v0.5.14 / 28 exposed tools** at this later read, with **no list_resources/create_file tool**. Thus draft PR #1722 is not production-proven or callable on this exact client action snapshot. Do not bypass its missing capabilities. The initial 63-page partition proposal is now **historical preflight**; future actual transfers require a refreshed exact-source plan that explicitly excludes/reconciles the six externally absent Terminal pages.
+
+
+## 11. Visibility-aware offline plan and structural transfer-evidence preflight
+
+The initial 63-page inventory is preserved as historical observation, and the [six-page visibility delta](MASTERMIND_PAGES_DRIFT_2026-10-22.json) is a read-only qualifier. scripts/paper_migration_planner.py now accepts the --visibility-delta option and refuses to plan newly copying any of the six externally absent Terminal pages while their destination/effect remains unreconciled.
+
+Current *provisional* aggregate (63-page baseline + later source-visibility delta): **57 currently visible pages; 51 whole-page planning candidates across 26 proposed volumes; six heavyweight pages held for per-artboard splitting; six Terminal pages held as externally absent and not proven migrated.** The previous 57 candidates / 27 proposed volumes describe historical unqualified baseline. Neither number is a Paper vendor limit or copy permission.
+
+Visibility-aware read-only CLI example:
+
+    python3 scripts/paper_migration_planner.py --inventory docs/paper_migrations/MASTERMIND_PAGES_INVENTORY_2026-10-22.json --visibility-delta docs/paper_migrations/MASTERMIND_PAGES_DRIFT_2026-10-22.json --out /tmp/mastermind-paper-visibility-aware-plan.json
+
+A separate structural preflight for future claimed native-copy receipts exists at scripts/paper_transfer_evidence_preflight.py. It consumes a *real* source/target claim, not a fabricated one. Example invocation:
+
+    python3 scripts/paper_transfer_evidence_preflight.py --inventory docs/paper_migrations/MASTERMIND_PAGES_INVENTORY_2026-10-22.json --visibility-delta docs/paper_migrations/MASTERMIND_PAGES_DRIFT_2026-10-22.json --heavy-artboards docs/paper_migrations/HEAVY_PAGES_ARTBOARD_INDEX_2026-10-22.json --claim /PATH/TO/ACTUAL-SOURCE-TARGET-CLAIM.json
+
+The validator insists on distinct source/destination file IDs, page/artboard IDs, source baseline and visibility fingerprints, unique operation IDs, source-page presence, observed heavy-page artboard identity, native editable-copy mechanism and non-unknown effect state. It demands source and target evidence references and identifies missing independent visual/native editability, token, image/asset, component, comment and interaction evidence. **It cannot authenticate cited evidence, does not perform Paper edits, never proves a live migration and ALWAYS withholds source deletion authorization.**
+
+The entire offline suite has **27 locally passing tests** as of this revision, including source drift, duplicates, false migration/transfer states, unknown effects, truncated heavy-board identity, output overwrite refusal and history holds. These local receipts do NOT prove hosted GitHub CI or live Paper functionality.
+
+Before a small-page canary, capture its actual artboard identity: the test fixture's synthetic IDs are not a real destination. p-16-0 is absent from the index of the six heaviest pages and requires its own exact source artboard read/census. No artifact in this PR is an Execute/Migrate command, runtime registry, second retry plane or source-deletion gate.
+
+## 12. Release and collision gate
+
+1. Adapter PR #1722 owner separately qualifies real installed immutable runtime, catalog and published client action before use. Code or CI success alone does not prove a callable Paper tool.
+2. Reconcile the six externally absent Terminal pages plus p-19-0 through actual incumbent owner/native history, without blind replay, reconstruction or original cleanup.
+3. Refresh current exact-source inventory if the source changes again. Preserve historical base data and append read-only observations.
+4. Prove native recovery/backup on disposable files, native copy fidelity and source-target readback before a single real transfer.
+5. Verify editable content, visual equivalence, assets/tokens/comments/components/interaction state and downstream active links. Synthetic receipts never close these gates.
+6. Admit a separately reviewed page cleanup action only after all evidence resolves; verify original source warning removal, content recovery and actual new-file usability.
+
+State remains **PREPARED, NOT MIGRATED BY THIS LANE**. Original Paper still reports its oversized warning. PR #1721 owns planning/verification; PR #1722 owns adapter evolution, source releases and its own canary.
