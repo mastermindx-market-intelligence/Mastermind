@@ -7,6 +7,7 @@ composition layer that walks one delivery through the existing owners:
 
     verify delivery  ->  :mod:`control_plane.github_review_intent` (pure)
     re-read the PR   ->  ``PullRequestReadPort``      (authenticated read)
+    read the actor   ->  ``ActorPermissionPort``      (authenticated read)
     decide intent    ->  :mod:`control_plane.github_review_intent` (pure)
     admit one run    ->  ``FabricJobAdmissionPort``   (existing ledger)
     make visible     ->  ``VisibilityPort``           (existing Slack/GitHub)
@@ -20,23 +21,39 @@ typed refusal, never a fallback to an unauthenticated client.
 
 Fencing laws
 ------------
+* **The pull request is the signed payload's.**  This module accepts no
+  pull-request number from its caller.  The number comes from the verified
+  delivery body, the authoritative re-read must agree with it, and a delivery
+  that identifies no pull request earns no read, no ledger write, and no
+  visibility line.  A correct HMAC proves who signed the bytes; it never
+  proves which pull request a wrong route selected.
 * **Idempotency is the existing ledger's.**  The admission identity is the
-  existing ``events.command_id`` UNIQUE index.  This module keeps no run
-  registry, no cache, and no lock.
-* **Head freeze.**  A run is admitted against one exact head SHA and every
-  publication re-reads the PR and fails closed if that head moved.
+  existing ``events.command_id`` UNIQUE index, bound to one exact head and *not*
+  to the intent channel, so one head earns one run however many channels fire.
+  This module keeps no run registry, no cache, and no lock.
+* **Freshness at the effect boundary.**  Publication performs its own
+  installation-scoped read of the pull request immediately before the review
+  POST and fails closed if that head moved.  No caller-supplied snapshot can
+  stand in for that read.
+* **An uncertain POST is reconciled, never retried blind.**  When an adapter
+  cannot observe its own review POST, the effect is read back at the exact
+  commit and body; only a positive match avoids a duplicate formal review, and
+  an unmatched effect is reported as an unknown effect for a human.
 * **No unfenced auto-approval.**  A ``PASS`` verdict publishes a *comment*;
-  this module mints no ``APPROVE`` and no merge path at all.
+  this module mints no ``APPROVE`` and no merge path at all, and the concrete
+  publication adapter refuses any verb outside the mapped set.
 * **Formal review by a genuinely separate worker.**  Publication refuses a
   result whose reviewer is the builder, or whose reviewer identity is unknown.
-* **A publish retry is not a second review.**  Publication carries its own
-  deterministic command id so a retry reconciles instead of double-posting.
+* **Visibility is non-gating and opaque.**  A visibility failure is recorded as
+  one fixed code.  Transport exception text can carry hostnames, tokens,
+  channel ids, and message ids, so none of it crosses to an external consumer.
 """
 from __future__ import annotations
 
 import dataclasses
 import hashlib
 import json
+import re
 from collections.abc import Mapping
 from enum import Enum
 from typing import Protocol, runtime_checkable
@@ -44,6 +61,7 @@ from typing import Protocol, runtime_checkable
 from control_plane.github_review_intent import (
     REVIEW_VERDICTS,
     SUPPORTED_EVENTS,
+    CurrentPermission,
     IntentSignal,
     PullRequestFacts,
     ReviewIntentDecision,
@@ -52,6 +70,7 @@ from control_plane.github_review_intent import (
     ReviewIntentRefusal,
     ReviewIntentSignatureError,
     build_review_objective,
+    current_permission_is_valid,
     decide_review_intent,
     delivery_command_id,
     extract_intent_signal,
@@ -72,8 +91,19 @@ REVIEW_VERDICT_EVENTS = {
     "BLOCKED_BY_CURRENT_SOURCE": "COMMENT",
 }
 
+#: The closed set of verbs any bound publication transport may submit.  An
+#: adapter that is handed anything else refuses before it can reach a socket.
+ALLOWED_REVIEW_EVENTS = frozenset(REVIEW_VERDICT_EVENTS.values())
+
+#: The single opaque code a visibility failure may ever surface as.  Nothing
+#: about the failing transport — exception type, message, host, channel, or
+#: token — crosses an external boundary.
+VISIBILITY_ERROR_CODE = "VISIBILITY_TRANSPORT_UNAVAILABLE"
+
 MAX_VISIBILITY_SUMMARY_CHARS = 400
 MAX_REVIEW_SUMMARY_CHARS = 16_000
+MAX_REVIEW_BODY_CHARS = 24_000
+_REVIEW_ID_RE = r"^[0-9A-Za-z:._-]{1,128}$"
 
 
 class ReviewIngressError(RuntimeError):
@@ -86,6 +116,15 @@ class ReviewIngressUnavailable(ReviewIngressError):
 
 class ReviewVerificationRefused(ReviewIngressError):
     """A review result is not publishable as a formal GitHub review."""
+
+
+class PublicationEffectUnknown(ReviewIngressError):
+    """A review POST was submitted but its effect could not be observed.
+
+    The honest outcome of a timeout, a dropped connection, or an ambiguous 5xx
+    after a POST.  It is never treated as a refusal (which would invite a blind
+    retry) and never treated as success; the caller must reconcile by readback.
+    """
 
 
 class AdmissionState(str, Enum):
@@ -112,10 +151,29 @@ class PullRequestReadPort(Protocol):
     Implementations mint a short-lived installation token from the configured
     GitHub App and call ``GET /repos/{repo}/pulls/{number}``.  This module never
     chooses the app, the installation, the host, or the credential.
+
+    Publication calls this port itself, immediately before the review POST.  A
+    caller-supplied snapshot is not a substitute: only a read taken at the
+    effect boundary can say what the head is *now*.
     """
 
     def read_pull_request(self, *, repository: str, pull_number: int) -> PullRequestFacts:
         """Return the exact current PR facts, or raise."""
+
+
+@runtime_checkable
+class ActorPermissionPort(Protocol):
+    """An account's *current* collaborator permission, freshly read.
+
+    Implementations call the authenticated collaborator/permission read for the
+    repository and return GitHub's own permission vocabulary (see
+    ``github_review_intent.PERMISSION_VALUES``), or ``None`` when the read
+    cannot be made.  This module never invents a permission, and never falls
+    back to the association claimed in the delivery payload.
+    """
+
+    def read_current_permission(self, *, repository: str, login: str) -> str | None:
+        """Return the account's current permission, or ``None`` when unavailable."""
 
 
 @runtime_checkable
@@ -213,8 +271,159 @@ class ReviewPublicationPort(Protocol):
         """Submit one formal review; return its review id.
 
         An identical retry returns the existing review id rather than posting a
-        second review.
+        second review.  Raise :class:`PublicationEffectUnknown` when the POST
+        was submitted but its effect could not be observed.
         """
+
+
+@dataclasses.dataclass(frozen=True)
+class PublishedReviewFacts:
+    """One review already present on a pull request, as read back."""
+
+    review_id: str
+    commit_id: str
+    event: str
+    body: str
+
+
+def published_review_is_valid(review: object) -> bool:
+    """Whether a readback fact is exact and in vocabulary."""
+
+    return (
+        isinstance(review, PublishedReviewFacts)
+        and isinstance(review.review_id, str)
+        and re.fullmatch(_REVIEW_ID_RE, review.review_id) is not None
+        and isinstance(review.commit_id, str)
+        and isinstance(review.event, str)
+        and review.event in ALLOWED_REVIEW_EVENTS
+        and isinstance(review.body, str)
+        and len(review.body) <= MAX_REVIEW_BODY_CHARS
+    )
+
+
+def reconcile_publication(
+    *,
+    reviews: tuple[PublishedReviewFacts, ...],
+    commit_id: str,
+    event: str,
+    body: str,
+) -> str | None:
+    """Find the review id this exact POST already produced, or ``None``.
+
+    The reconciliation key is the triple GitHub itself fixes: the commit the
+    review was pinned to, the verb it was submitted with, and the exact body.
+    Two independent reviews of one commit with byte-identical bodies cannot be
+    distinguished — and that is precisely the case reconciliation exists to
+    prevent from happening a second time.
+    """
+
+    for review in reviews:
+        if not published_review_is_valid(review):
+            continue
+        if review.commit_id == commit_id and review.event == event and review.body == body:
+            return review.review_id
+    return None
+
+
+@runtime_checkable
+class ReviewTransportPort(Protocol):
+    """The GitHub review POST and its authenticated readback.
+
+    Implementations bind to ``POST /repos/{repo}/pulls/{n}/reviews`` and
+    ``GET /repos/{repo}/pulls/{n}/reviews``, both installation-scoped.  This
+    module supplies no HTTP client and binds no credential.
+    """
+
+    def submit_review(
+        self, *, repository: str, pull_number: int, commit_id: str, event: str, body: str
+    ) -> str:
+        """Post one review and return its review id.
+
+        Raise :class:`PublicationEffectUnknown` — never return a fabricated id —
+        when the request was submitted but its effect cannot be observed.
+        """
+
+    def read_reviews(
+        self, *, repository: str, pull_number: int, commit_id: str
+    ) -> tuple[PublishedReviewFacts, ...]:
+        """Read the reviews already present at one exact commit."""
+
+
+@runtime_checkable
+class PublishedCommandIndex(Protocol):
+    """The host's existing record of already-published command ids.
+
+    Injected, never created here: this module owns no publication registry.
+    """
+
+    def published_command_ids(self) -> frozenset[str]:
+        ...
+
+
+class ReconcilingReviewPublication:
+    """The concrete publication adapter: one POST, reconciled when uncertain.
+
+    It owns three things and nothing else — the verb fence, the exact-commit
+    conditioning, and the uncertain-effect reconciliation.  It creates no
+    registry, no queue, no retry engine, and no approval path: the durable
+    record of what has already been published is the injected
+    ``PublishedCommandIndex``, and an unknown effect is reconciled against
+    GitHub itself rather than against local state.
+    """
+
+    def __init__(
+        self, *, transport: ReviewTransportPort, published: PublishedCommandIndex
+    ) -> None:
+        if not isinstance(transport, ReviewTransportPort):
+            raise ReviewIngressError("ReviewTransportPort is not bound on this host")
+        if not isinstance(published, PublishedCommandIndex):
+            raise ReviewIngressError("PublishedCommandIndex is not bound on this host")
+        self._transport = transport
+        self._published = published
+
+    def published_command_ids(self) -> frozenset[str]:
+        return self._published.published_command_ids()
+
+    def publish_review(
+        self,
+        *,
+        publication_command_id: str,
+        repository: str,
+        pull_number: int,
+        head_sha: str,
+        event: str,
+        body: str,
+    ) -> str:
+        if event not in ALLOWED_REVIEW_EVENTS:
+            # The approval verb is unreachable from any caller, not merely
+            # absent from the default mapping.
+            raise ReviewVerificationRefused("review event is outside the closed verb set")
+        if len(body) > MAX_REVIEW_BODY_CHARS:
+            raise ReviewVerificationRefused("review body exceeds its bound")
+        try:
+            return self._transport.submit_review(
+                repository=repository,
+                pull_number=pull_number,
+                commit_id=head_sha,
+                event=event,
+                body=body,
+            )
+        except PublicationEffectUnknown:
+            # The POST may or may not have landed.  Reconcile it by reading the
+            # reviews at the exact commit and body this call submitted before
+            # anything is retried; an unmatched effect is re-raised, so no
+            # caller can turn an unknown into a duplicate formal review.
+            recovered = reconcile_publication(
+                reviews=self._transport.read_reviews(
+                    repository=repository, pull_number=pull_number, commit_id=head_sha
+                ),
+                commit_id=head_sha,
+                event=event,
+                body=body,
+            )
+            if recovered is not None:
+                return recovered
+            raise
 
 
 # ---------------------------------------------------------------------------
@@ -228,6 +437,15 @@ class ReviewIngressOutcome:
     decision: ReviewIntentDecision
     job_id: str | None = None
     visibility_error: str | None = None
+
+    def __post_init__(self) -> None:
+        # Structural, not documentary: an outcome physically cannot carry
+        # transport exception text, so a leak is unrepresentable rather than
+        # merely discouraged.
+        if self.visibility_error is not None and self.visibility_error != VISIBILITY_ERROR_CODE:
+            raise ReviewIngressError(
+                "visibility_error must be the closed opaque code or absent"
+            )
 
     def to_dict(self) -> dict[str, object]:
         return {
@@ -280,7 +498,13 @@ def _visibility_summary(decision: ReviewIntentDecision) -> str:
 def _notify(
     visibility: VisibilityPort | None, decision: ReviewIntentDecision, *, job_id: str | None
 ) -> str | None:
-    """Visibility never gates an admission and never re-raises."""
+    """Visibility never gates an admission, never re-raises, and never leaks.
+
+    A transport failure collapses to one fixed code.  The exception type and
+    text are discarded on the way out: a Slack or webhook client error routinely
+    embeds the workspace id, channel id, message id, API URL, and occasionally a
+    token fragment, and none of that belongs in a caller-visible outcome.
+    """
 
     if visibility is None:
         return None
@@ -292,8 +516,8 @@ def _notify(
             )
         else:
             visibility.notify_review_refused(summary=summary, decision=decision)
-    except Exception as exc:  # noqa: BLE001 - visibility is explicitly non-gating
-        return f"{type(exc).__name__}: {exc}"
+    except Exception:  # noqa: BLE001 - visibility is explicitly non-gating
+        return VISIBILITY_ERROR_CODE
     return None
 
 
@@ -302,7 +526,7 @@ def _simple_refusal(
     refusal: ReviewIntentRefusal,
     delivery_id: str,
     repository: str,
-    pull_number: int,
+    pull_number: int | None,
 ) -> ReviewIntentDecision:
     """A refusal decided before any PR read, ledger write, or objective build."""
 
@@ -348,6 +572,32 @@ def _parse_delivery(
     return envelope, signal
 
 
+def _current_permission(
+    actors: ActorPermissionPort | None,
+    *,
+    repository: str,
+    login: str,
+) -> CurrentPermission | None:
+    """Read the actor's current permission, or ``None`` when it is unavailable.
+
+    ``None`` is an honest "not reverified", not a fallback to the association
+    claimed in the payload.  The decision core refuses on it.
+    """
+
+    if actors is None:
+        return None
+    if not isinstance(actors, ActorPermissionPort):
+        raise ReviewIngressUnavailable("ActorPermissionPort is not an exact port shape")
+    permission = actors.read_current_permission(repository=repository, login=login)
+    if permission is None:
+        return None
+    candidate = CurrentPermission(repository=repository, login=login, permission=permission)
+    if not current_permission_is_valid(candidate):
+        # An out-of-vocabulary permission is not a permission.
+        return None
+    return candidate
+
+
 def admit_review_intent(
     *,
     secret: str,
@@ -355,13 +605,20 @@ def admit_review_intent(
     delivery_id: str,
     event: str,
     signature_header: str,
-    pull_number: int,
     policy: ReviewIntentPolicy,
     pull_requests: PullRequestReadPort,
     fabric: FabricJobAdmissionPort,
+    actors: ActorPermissionPort | None = None,
     visibility: VisibilityPort | None = None,
 ) -> ReviewIngressOutcome:
-    """Walk one signed delivery to at most one admitted review run."""
+    """Walk one signed delivery to at most one admitted review run.
+
+    There is deliberately no ``pull_number`` parameter.  The pull request is
+    whatever the signature-verified payload says it is, so there is no
+    caller-supplied value left to cross-bind against the signed one, and no
+    route, tenant id, or operator input that can aim a genuine delivery at the
+    wrong pull request.
+    """
 
     pull_read = _require(pull_requests, name="PullRequestReadPort")
     fabric_port = _require(fabric, name="FabricJobAdmissionPort")
@@ -382,7 +639,9 @@ def admit_review_intent(
         # report, and reporting it would leak a probe oracle.
         raise
     except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise ReviewIngressError(f"delivery body is not decodable JSON: {exc}") from exc
+        # The decoder's own message quotes the offending payload; it is
+        # chained for a local traceback and never put in the raised text.
+        raise ReviewIngressError("delivery body is not decodable JSON") from exc
 
     if signal is None:
         # An unrelated delivery never earns a GitHub read, a ledger write, or a
@@ -395,7 +654,7 @@ def admit_review_intent(
             ),
             delivery_id=delivery_id,
             repository=envelope.repository,
-            pull_number=pull_number,
+            pull_number=envelope.pull_number,
         )
         return ReviewIngressOutcome(
             state=AdmissionState.REFUSED,
@@ -408,7 +667,7 @@ def admit_review_intent(
             refusal=ReviewIntentRefusal.REPOSITORY_NOT_ALLOWLISTED,
             delivery_id=delivery_id,
             repository=envelope.repository,
-            pull_number=pull_number,
+            pull_number=envelope.pull_number,
         )
         return ReviewIngressOutcome(
             state=AdmissionState.REFUSED,
@@ -416,8 +675,46 @@ def admit_review_intent(
             visibility_error=_notify(visibility, decision, job_id=None),
         )
 
+    if envelope.pull_number is None:
+        # A supported channel whose signed payload identifies no pull request —
+        # a slash command on a plain issue.  Refused before any read, ledger
+        # write, or reviewer-visible line.
+        decision = _simple_refusal(
+            refusal=ReviewIntentRefusal.PULL_REQUEST_IDENTITY_UNBOUND,
+            delivery_id=delivery_id,
+            repository=envelope.repository,
+            pull_number=None,
+        )
+        return ReviewIngressOutcome(
+            state=AdmissionState.REFUSED,
+            decision=decision,
+            visibility_error=_notify(visibility, decision, job_id=None),
+        )
+
+    # A login that is not on the allowlist can never be authorized, and that
+    # check is static — so it is made before the pull request, and an
+    # unauthorized actor earns no authenticated PR read at all.
+    if not policy.actor_is_listed(login=signal.actor_login):
+        decision = _simple_refusal(
+            refusal=ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED,
+            delivery_id=delivery_id,
+            repository=envelope.repository,
+            pull_number=envelope.pull_number,
+        )
+        return ReviewIngressOutcome(
+            state=AdmissionState.REFUSED,
+            decision=decision,
+            visibility_error=_notify(visibility, decision, job_id=None),
+        )
+
+    # The actor's current permission is read before the pull request, so a
+    # stale or under-privileged actor costs no authenticated PR read either.
+    current_permission = _current_permission(
+        actors, repository=envelope.repository, login=signal.actor_login
+    )
+
     pull_request = pull_read.read_pull_request(
-        repository=envelope.repository, pull_number=pull_number
+        repository=envelope.repository, pull_number=envelope.pull_number
     )
     if not isinstance(pull_request, PullRequestFacts):
         raise ReviewIngressError("PullRequestReadPort returned a non-exact fact shape")
@@ -428,6 +725,7 @@ def admit_review_intent(
         pull_request=pull_request,
         signal=signal,
         admitted_command_ids=fabric_port.admitted_command_ids(),
+        current_permission=current_permission,
     )
 
     if decision.refusal is ReviewIntentRefusal.ALREADY_ADMITTED:
@@ -507,21 +805,30 @@ def publish_verified_review(
     *,
     decision: ReviewIntentDecision,
     job_id: str,
-    pull_request: PullRequestFacts,
     results: ReviewResultPort,
     publications: ReviewPublicationPort,
+    pull_requests: PullRequestReadPort,
+    readback: ReviewTransportPort | None = None,
 ) -> ReviewPublishOutcome:
     """Publish one formal GitHub review, only after verified independent work.
 
     Refuses — rather than approximates — when the result is missing, unverified,
     outside the incumbent verdict vocabulary, produced by the builder, or when
     the PR head has moved away from the frozen admission SHA.
+
+    The pull-request read is performed *here*, at the effect boundary, against
+    the current installation-scoped port.  Nothing the caller observed at
+    admission time is trusted for that check, because the whole question is
+    what the head is *now*; a snapshot cannot answer it and a snapshot that
+    happens to be current is a coincidence.
     """
 
     result_port = _require(results, name="ReviewResultPort")
     publication_port = _require(publications, name="ReviewPublicationPort")
+    pull_read = _require(pull_requests, name="PullRequestReadPort")
     assert isinstance(result_port, ReviewResultPort)
     assert isinstance(publication_port, ReviewPublicationPort)
+    assert isinstance(pull_read, PullRequestReadPort)
 
     if not decision.admitted or decision.frozen_head_sha is None:
         raise ReviewVerificationRefused("only an admitted decision may publish a review")
@@ -538,20 +845,13 @@ def publish_verified_review(
     )
 
     if command in publication_port.published_command_ids():
+        # Nothing is posted, so there is nothing that a moved head could stale.
         return ReviewPublishOutcome(
             state=PublishState.ALREADY_PUBLISHED, publication_command_id=command
         )
 
-    # Head freeze, re-checked against a fresh read immediately before effect.
-    try:
-        verify_frozen_head(decision=decision, pull_request=pull_request)
-    except ReviewIntentError:
-        return ReviewPublishOutcome(
-            state=PublishState.REFUSED,
-            publication_command_id=command,
-            refusal=ReviewIntentRefusal.HEAD_MOVED.value,
-        )
-
+    # Result verification happens before the read so a failed publication
+    # attempt costs no authenticated API call; it has no external effect.
     result = result_port.load_verified_result(job_id=job_id)
     if result is None:
         return ReviewPublishOutcome(
@@ -593,18 +893,77 @@ def publish_verified_review(
         )
 
     event = REVIEW_VERDICT_EVENTS[result.verdict]
-    review_id = publication_port.publish_review(
-        publication_command_id=command,
+    body = render_review_body(
+        result=result,
         repository=decision.repository,
         pull_number=decision.pull_number,
-        head_sha=decision.frozen_head_sha,
-        event=event,
-        body=render_review_body(
-            result=result,
+    )
+
+    # --- the current head, read here, immediately before the effect ---------
+    current = pull_read.read_pull_request(
+        repository=decision.repository, pull_number=decision.pull_number
+    )
+    if not isinstance(current, PullRequestFacts):
+        raise ReviewVerificationRefused("PullRequestReadPort returned a non-exact fact shape")
+    if current.repository != decision.repository or current.number != decision.pull_number:
+        # The read answered about a different pull request than the admitted
+        # decision froze; publishing here would aim the review at the wrong one.
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED,
+            publication_command_id=command,
+            refusal=ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value,
+        )
+    try:
+        verify_frozen_head(decision=decision, pull_request=current)
+    except ReviewIntentError:
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED,
+            publication_command_id=command,
+            refusal=ReviewIntentRefusal.HEAD_MOVED.value,
+        )
+
+    try:
+        review_id = publication_port.publish_review(
+            publication_command_id=command,
             repository=decision.repository,
             pull_number=decision.pull_number,
-        ),
-    )
+            head_sha=decision.frozen_head_sha,
+            event=event,
+            body=body,
+        )
+    except PublicationEffectUnknown:
+        # The POST may or may not have landed.  Reconcile it by readback at the
+        # exact commit and body before anything is retried; a positive match
+        # settles it as already published, and an unmatched effect is reported
+        # as unknown rather than resolved by posting again.
+        if readback is None:
+            return ReviewPublishOutcome(
+                state=PublishState.REFUSED,
+                publication_command_id=command,
+                refusal="PUBLICATION_EFFECT_UNKNOWN",
+            )
+        recovered = reconcile_publication(
+            reviews=readback.read_reviews(
+                repository=decision.repository,
+                pull_number=decision.pull_number,
+                commit_id=decision.frozen_head_sha,
+            ),
+            commit_id=decision.frozen_head_sha,
+            event=event,
+            body=body,
+        )
+        if recovered is None:
+            return ReviewPublishOutcome(
+                state=PublishState.REFUSED,
+                publication_command_id=command,
+                refusal="PUBLICATION_EFFECT_UNKNOWN",
+            )
+        return ReviewPublishOutcome(
+            state=PublishState.ALREADY_PUBLISHED,
+            publication_command_id=command,
+            review_id=recovered,
+        )
+
     return ReviewPublishOutcome(
         state=PublishState.PUBLISHED,
         publication_command_id=command,
@@ -613,24 +972,36 @@ def publish_verified_review(
 
 
 __all__ = [
+    "ALLOWED_REVIEW_EVENTS",
     "AdmissionState",
+    "ActorPermissionPort",
     "FabricJobAdmissionPort",
+    "MAX_REVIEW_BODY_CHARS",
     "MAX_REVIEW_SUMMARY_CHARS",
+    "MAX_VISIBILITY_SUMMARY_CHARS",
+    "PublicationEffectUnknown",
     "PublishState",
+    "PublishedCommandIndex",
+    "PublishedReviewFacts",
     "REVIEW_VERDICT_EVENTS",
+    "ReconcilingReviewPublication",
     "ReviewIngressError",
     "ReviewIngressOutcome",
     "ReviewIngressUnavailable",
     "ReviewPublicationPort",
-    "ReviewResultPort",
-    "ReviewVerificationRefused",
     "ReviewPublishOutcome",
+    "ReviewResultPort",
+    "ReviewTransportPort",
+    "ReviewVerificationRefused",
     "SCHEMA",
+    "VISIBILITY_ERROR_CODE",
     "VerifiedReviewResult",
     "VisibilityPort",
     "PullRequestReadPort",
     "admit_review_intent",
     "publication_command_id",
     "publish_verified_review",
+    "published_review_is_valid",
+    "reconcile_publication",
     "render_review_body",
 ]

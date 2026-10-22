@@ -13,18 +13,23 @@ so-what for each row:
   is exactly the cross-tenant confusion a shared App creates.
 * D3 intent must be explicit and human-expressed on one of exactly three
   channels.  Opening a PR, pushing to it, or editing its body is never intent.
-* D4 the acting account must clear both a login allowlist and, on the open
-  comment channel, the association ceiling.  ``issue_comment`` is writable by
-  anyone, so a login-only check would let any stranger start a review run.
-* D5 the PR identity used is the re-read one, and a fork is refused outright.
-  A fork is the canonical prompt-injection carrier: its author is not a
-  collaborator and its text is doubly untrusted.
+* D4 **the pull request is the signed payload's.**  The number comes from the
+  verified body, never from a caller; the authoritative re-read must match both
+  repository *and* number; and an ``issue_comment`` must prove it is on a pull
+  request inside the same repository.  A correct HMAC proves who signed the
+  bytes — it must not let a signed event for pull request A be aimed at pull
+  request B.
+* D5 **actor authority is a permission, not an allowlist entry.**  The open
+  comment channel carries a payload *claim* and needs an externally reverified
+  current permission; a revoked or downgraded actor is refused even when the
+  login is still allowlisted.
 * D6 untrusted PR text is refused when it carries a secret shape or the
   untrusted fence, and is otherwise carried inside an explicit fence so it can
   never become instruction, authority, or argv.
-* D7 the admission identity binds the frozen head, so a redelivery dedupes
-  while a moved head is a different run — and publication fails closed on a
-  moved head rather than silently re-pointing at it.
+* D7 **one exact head earns exactly one review run**, whatever channels fire,
+  and a distinct rerun exists only behind an explicit, separately authorized
+  reference.  Publication fails closed on a moved head rather than silently
+  re-pointing at it.
 * D8 every refusal names exactly one closed-vocabulary value, and a draft or
   non-open PR never opens a run.
 
@@ -44,9 +49,12 @@ from control_plane import github_review_intent as gri
 
 SECRET = "webhook-secret-value"
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
+OTHER_REPOSITORY = "attacker/evil"
 HEAD_SHA = "a" * 40
 OTHER_HEAD_SHA = "b" * 40
 DELIVERY_ID = "11111111-2222-3333-4444-555555555555"
+PULL_NUMBER = 1739
+OTHER_PULL_NUMBER = 1740
 
 
 def _policy(**overrides) -> gri.ReviewIntentPolicy:
@@ -60,10 +68,14 @@ def _policy(**overrides) -> gri.ReviewIntentPolicy:
     return gri.ReviewIntentPolicy(**base)
 
 
+def _permission(permission: str = "write", *, login: str = "alice", repository: str = REPOSITORY):
+    return gri.CurrentPermission(repository=repository, login=login, permission=permission)
+
+
 def _pull_request(**overrides) -> gri.PullRequestFacts:
     base = {
         "repository": REPOSITORY,
-        "number": 1739,
+        "number": PULL_NUMBER,
         "state": "open",
         "draft": False,
         "head_sha": HEAD_SHA,
@@ -77,12 +89,30 @@ def _pull_request(**overrides) -> gri.PullRequestFacts:
     return gri.PullRequestFacts(**base)
 
 
+# ---------------------------------------------------------------------------
+# signed payloads — every supported channel carries its own pull-request identity
+# ---------------------------------------------------------------------------
+
+
+def _signed_pull_request(number: int = PULL_NUMBER, repository: str = REPOSITORY) -> dict:
+    return {"number": number, "base": {"repo": {"full_name": repository}}}
+
+
+def _signed_issue(number: int = PULL_NUMBER, repository: str = REPOSITORY) -> dict:
+    return {
+        "number": number,
+        "pull_request": {"url": f"https://api.github.com/repos/{repository}/pulls/{number}"},
+    }
+
+
 def _label_body(*, sender="alice", label="independent-review") -> bytes:
     return json.dumps(
         {
             "action": "labeled",
             "installation": {"id": 4242},
             "repository": {"full_name": REPOSITORY},
+            "number": PULL_NUMBER,
+            "pull_request": _signed_pull_request(),
             "sender": {"login": sender},
             "label": {"name": label},
         }
@@ -95,18 +125,23 @@ def _review_requested_body(*, sender="alice", reviewer="mastermind-reviewer") ->
             "action": "review_requested",
             "installation": {"id": 4242},
             "repository": {"full_name": REPOSITORY},
+            "number": PULL_NUMBER,
+            "pull_request": _signed_pull_request(),
             "sender": {"login": sender},
             "requested_reviewer": {"login": reviewer},
         }
     ).encode("utf-8")
 
 
-def _comment_body(*, sender="alice", body="/independent-review", association="MEMBER") -> bytes:
+def _comment_body(
+    *, sender="alice", body="/independent-review", association="MEMBER", link=True
+) -> bytes:
     return json.dumps(
         {
             "action": "created",
             "installation": {"id": 4242},
             "repository": {"full_name": REPOSITORY},
+            "issue": _signed_issue() if link else {"number": PULL_NUMBER},
             "comment": {
                 "body": body,
                 "user": {"login": sender},
@@ -116,7 +151,16 @@ def _comment_body(*, sender="alice", body="/independent-review", association="ME
     ).encode("utf-8")
 
 
-def _decide(body: bytes, *, event: str, policy=None, pull_request=None, admitted=frozenset()):
+def _decide(
+    body: bytes,
+    *,
+    event: str,
+    policy=None,
+    pull_request=None,
+    admitted=frozenset(),
+    current=None,
+    rerun=None,
+):
     parsed = json.loads(body)
     envelope = gri.parse_webhook_envelope(delivery_id=DELIVERY_ID, event=event, body=parsed)
     if gri.intent_channel_for(envelope.event, envelope.action) is None:
@@ -135,6 +179,8 @@ def _decide(body: bytes, *, event: str, policy=None, pull_request=None, admitted
         pull_request=pull_request or _pull_request(),
         signal=signal,
         admitted_command_ids=admitted,
+        current_permission=current,
+        rerun_authorization=rerun,
     )
 
 
@@ -152,7 +198,7 @@ def _refuse_unsupported(envelope, *, event: str) -> gri.ReviewIntentDecision:
         command_id=None,
         delivery_command_id=gri.delivery_command_id(DELIVERY_ID),
         repository=envelope.repository,
-        pull_number=1739,
+        pull_number=envelope.pull_number,
         frozen_head_sha=None,
         actor=None,
     )
@@ -232,7 +278,8 @@ class TestAllowlist:
 
     def test_foreign_repository_is_refused(self) -> None:
         parsed = json.loads(_label_body())
-        parsed["repository"]["full_name"] = "attacker/evil"
+        parsed["repository"]["full_name"] = OTHER_REPOSITORY
+        parsed["pull_request"] = _signed_pull_request(repository=OTHER_REPOSITORY)
         body = json.dumps(parsed).encode("utf-8")
         refused = _decide(body, event="pull_request")
         assert refused.refusal is gri.ReviewIntentRefusal.REPOSITORY_NOT_ALLOWLISTED
@@ -269,8 +316,10 @@ class TestIntentChannels:
         )
         assert decision.refusal is gri.ReviewIntentRefusal.REVIEW_REQUEST_FOR_OTHER_REVIEWER
 
-    def test_command_comment_admits(self) -> None:
-        decision = _decide(_comment_body(), event="issue_comment")
+    def test_command_comment_admits_with_a_reverified_permission(self) -> None:
+        decision = _decide(
+            _comment_body(), event="issue_comment", current=_permission("write")
+        )
         assert decision.admitted is True
         assert decision.intent_source is gri.IntentSource.COMMAND_COMMENT
 
@@ -278,6 +327,7 @@ class TestIntentChannels:
         decision = _decide(
             _comment_body(body="please run /independent-review when you can"),
             event="issue_comment",
+            current=_permission("write"),
         )
         assert decision.refusal is gri.ReviewIntentRefusal.COMMAND_NOT_PRESENT
 
@@ -298,37 +348,223 @@ class TestIntentChannels:
 
 
 # ---------------------------------------------------------------------------
-# D4 — actor permission
+# D4 — the signed payload binds the pull request
 # ---------------------------------------------------------------------------
 
 
-class TestActorPermission:
+class TestSignedPullRequestIdentity:
+    def test_signed_event_for_a_paired_with_a_read_of_b_is_refused(self) -> None:
+        # The delivery is genuinely GitHub's and verifies.  Only the number the
+        # host aimed the read at is wrong.  A correct HMAC proves who signed the
+        # bytes; it must not authorise a review of a different pull request.
+        decision = _decide(
+            _label_body(), event="pull_request", pull_request=_pull_request(number=OTHER_PULL_NUMBER)
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH
+        assert decision.admitted is False
+        assert decision.command_id is None
+
+    def test_the_mismatching_refusal_reports_the_signed_number(self) -> None:
+        decision = _decide(
+            _label_body(), event="pull_request", pull_request=_pull_request(number=OTHER_PULL_NUMBER)
+        )
+        assert decision.pull_number == PULL_NUMBER
+
+    def test_a_comment_on_a_plain_issue_is_refused_not_parsed_as_a_pr(self) -> None:
+        envelope = gri.parse_webhook_envelope(
+            delivery_id=DELIVERY_ID,
+            event="issue_comment",
+            body=json.loads(_comment_body(link=False)),
+        )
+        assert envelope.pull_number is None
+        decision = _decide(_comment_body(link=False), event="issue_comment")
+        assert decision.refusal is gri.ReviewIntentRefusal.PULL_REQUEST_IDENTITY_UNBOUND
+
+    def test_a_comment_pointing_at_another_repository_is_refused(self) -> None:
+        parsed = json.loads(_comment_body())
+        parsed["issue"] = _signed_issue(repository=OTHER_REPOSITORY)
+        with pytest.raises(gri.ReviewIntentError):
+            gri.parse_webhook_envelope(
+                delivery_id=DELIVERY_ID, event="issue_comment", body=parsed
+            )
+
+    def test_a_comment_pointing_at_another_number_is_refused(self) -> None:
+        # ``issue.number`` and the linked pull request disagree: the payload
+        # names one pull request and the comment is attached to another.
+        parsed = json.loads(_comment_body())
+        parsed["issue"] = {
+            "number": OTHER_PULL_NUMBER,
+            "pull_request": {
+                "url": f"https://api.github.com/repos/{REPOSITORY}/pulls/{PULL_NUMBER}"
+            },
+        }
+        with pytest.raises(gri.ReviewIntentError):
+            gri.parse_webhook_envelope(
+                delivery_id=DELIVERY_ID, event="issue_comment", body=parsed
+            )
+
+    def test_disagreeing_pull_request_numbers_are_refused(self) -> None:
+        parsed = json.loads(_label_body())
+        parsed["pull_request"]["number"] = OTHER_PULL_NUMBER
+        with pytest.raises(gri.ReviewIntentError):
+            gri.parse_webhook_envelope(
+                delivery_id=DELIVERY_ID, event="pull_request", body=parsed
+            )
+
+    def test_a_pull_request_from_a_foreign_base_repository_is_refused(self) -> None:
+        parsed = json.loads(_label_body())
+        parsed["pull_request"]["base"]["repo"]["full_name"] = OTHER_REPOSITORY
+        with pytest.raises(gri.ReviewIntentError):
+            gri.parse_webhook_envelope(
+                delivery_id=DELIVERY_ID, event="pull_request", body=parsed
+            )
+
+    @pytest.mark.parametrize("number", ["1739", 0, -1, True, None, 1.5])
+    def test_a_malformed_signed_number_is_refused(self, number: object) -> None:
+        parsed = json.loads(_label_body())
+        parsed["number"] = number
+        with pytest.raises(gri.ReviewIntentError):
+            gri.parse_webhook_envelope(
+                delivery_id=DELIVERY_ID, event="pull_request", body=parsed
+            )
+
+    def test_a_non_github_issue_pull_request_url_is_refused(self) -> None:
+        parsed = json.loads(_comment_body())
+        parsed["issue"]["pull_request"]["url"] = "https://evil.example/repos/x/y/pulls/1739"
+        with pytest.raises(gri.ReviewIntentError):
+            gri.parse_webhook_envelope(
+                delivery_id=DELIVERY_ID, event="issue_comment", body=parsed
+            )
+
+    def test_the_envelope_carries_the_signed_number(self) -> None:
+        envelope = gri.parse_webhook_envelope(
+            delivery_id=DELIVERY_ID,
+            event="pull_request",
+            body=json.loads(_label_body()),
+        )
+        assert envelope.pull_number == PULL_NUMBER
+
+    def test_an_unsupported_event_carries_no_number_and_is_never_parsed_for_one(self) -> None:
+        envelope = gri.parse_webhook_envelope(
+            delivery_id=DELIVERY_ID, event="push", body=json.loads(_label_body())
+        )
+        assert envelope.pull_number is None
+
+
+# ---------------------------------------------------------------------------
+# D5 — actor authority is a permission, not an allowlist entry
+# ---------------------------------------------------------------------------
+
+
+class TestActorPermissionFreshness:
     def test_unauthorized_login_is_refused(self) -> None:
         decision = _decide(_label_body(sender="stranger"), event="pull_request")
         assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED
 
-    def test_comment_by_outsider_association_is_refused(self) -> None:
-        decision = _decide(
-            _comment_body(sender="alice", association="NONE"), event="issue_comment"
-        )
-        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_ASSOCIATION_INSUFFICIENT
+    def test_the_open_comment_channel_without_a_permission_read_is_refused(self) -> None:
+        # ``issue_comment`` is writable by anyone and GitHub enforces nothing, so
+        # the payload's association is a claim.  Without an externally reverified
+        # read the channel is refused by name instead of passed on the claim.
+        decision = _decide(_comment_body(), event="issue_comment")
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
 
-    def test_comment_by_first_time_contributor_is_refused(self) -> None:
+    def test_a_revoked_actor_is_refused_even_while_allowlisted(self) -> None:
         decision = _decide(
-            _comment_body(sender="alice", association="FIRST_TIME_CONTRIBUTOR"),
-            event="issue_comment",
+            _comment_body(), event="issue_comment", current=_permission("none")
         )
-        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_ASSOCIATION_INSUFFICIENT
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_INSUFFICIENT
 
-    def test_collaborator_association_is_permitted(self) -> None:
+    def test_a_downgraded_actor_is_refused(self) -> None:
         decision = _decide(
-            _comment_body(sender="alice", association="COLLABORATOR"), event="issue_comment"
+            _comment_body(), event="issue_comment", current=_permission("read")
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_INSUFFICIENT
+
+    def test_triage_clears_the_default_ceiling(self) -> None:
+        decision = _decide(
+            _comment_body(), event="issue_comment", current=_permission("triage")
         )
         assert decision.admitted is True
 
+    def test_a_read_for_another_account_proves_nothing(self) -> None:
+        decision = _decide(
+            _comment_body(), event="issue_comment", current=_permission("write", login="bob")
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+
+    def test_a_read_for_another_repository_proves_nothing(self) -> None:
+        decision = _decide(
+            _comment_body(),
+            event="issue_comment",
+            current=_permission("write", repository=OTHER_REPOSITORY),
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+
+    def test_a_reverified_permission_does_not_raise_a_stale_association_claim(self) -> None:
+        decision = _decide(
+            _comment_body(association="NONE"),
+            event="issue_comment",
+            current=_permission("admin"),
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_ASSOCIATION_INSUFFICIENT
+
+    def test_a_first_time_contributor_claim_is_refused(self) -> None:
+        decision = _decide(
+            _comment_body(association="FIRST_TIME_CONTRIBUTOR"),
+            event="issue_comment",
+            current=_permission("write"),
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_ASSOCIATION_INSUFFICIENT
+
+    def test_the_static_fallback_requires_an_explicit_operator_opt_in(self) -> None:
+        # The narrow, named escape exists — but it is off by default, so a host
+        # that has not bound a permission read cannot pass a claim by accident.
+        permissive = _policy(allow_static_actor_authority=True)
+        refused = _decide(_comment_body(), event="issue_comment", policy=permissive)
+        assert refused.admitted is True
+        assert _decide(_comment_body(), event="issue_comment").refusal is (
+            gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+        )
+
+    def test_the_strict_posture_can_be_required_on_every_channel(self) -> None:
+        strict = _policy(require_current_permission_for_all_channels=True)
+        decision = _decide(_label_body(), event="pull_request", policy=strict)
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+
+    def test_a_revoked_actor_is_refused_on_a_github_enforced_channel_too(self) -> None:
+        # GitHub enforced triage/write when it accepted the delivery, but a
+        # bound read still catches an actor who lost access since.
+        decision = _decide(
+            _label_body(), event="pull_request", current=_permission("none")
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_INSUFFICIENT
+
+    def test_a_higher_ceiling_refuses_an_otherwise_permitted_actor(self) -> None:
+        strict = _policy(minimum_permission="admin")
+        decision = _decide(
+            _comment_body(), event="issue_comment", policy=strict, current=_permission("write")
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_INSUFFICIENT
+
+    def test_an_out_of_vocabulary_permission_is_not_a_permission(self) -> None:
+        assert gri.current_permission_is_valid(_permission("superuser")) is False
+        assert gri.current_permission_is_valid(_permission("write")) is True
+
+    def test_the_policy_refuses_an_unknown_permission_ceiling(self) -> None:
+        with pytest.raises(gri.ReviewIntentError):
+            _policy(minimum_permission="superuser")
+
+    @pytest.mark.parametrize(
+        "flag",
+        ["allow_static_actor_authority", "require_current_permission_for_all_channels", "allow_explicit_rerun"],
+    )
+    def test_the_policy_refuses_a_non_bool_flag(self, flag: str) -> None:
+        with pytest.raises(gri.ReviewIntentError):
+            _policy(**{flag: "yes"})
+
 
 # ---------------------------------------------------------------------------
-# D5 — exact PR identity and fork refusal
+# D6 — exact PR identity and fork refusal
 # ---------------------------------------------------------------------------
 
 
@@ -337,7 +573,7 @@ class TestPullRequestIdentity:
         decision = _decide(
             _label_body(),
             event="pull_request",
-            pull_request=_pull_request(head_repository="attacker/evil"),
+            pull_request=_pull_request(head_repository=OTHER_REPOSITORY),
         )
         assert decision.refusal is gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH
 
@@ -345,7 +581,7 @@ class TestPullRequestIdentity:
         decision = _decide(
             _label_body(),
             event="pull_request",
-            pull_request=_pull_request(repository="attacker/evil"),
+            pull_request=_pull_request(repository=OTHER_REPOSITORY),
         )
         assert decision.refusal is gri.ReviewIntentRefusal.REPOSITORY_NOT_ALLOWLISTED
 
@@ -369,7 +605,7 @@ class TestPullRequestIdentity:
 
 
 # ---------------------------------------------------------------------------
-# D6 — untrusted retrieved content
+# D7 — untrusted retrieved content
 # ---------------------------------------------------------------------------
 
 
@@ -422,7 +658,7 @@ class TestUntrustedContent:
 
 
 # ---------------------------------------------------------------------------
-# D7 — identity, idempotency and the head freeze
+# D8 — identity, one review per head, and the head freeze
 # ---------------------------------------------------------------------------
 
 
@@ -442,10 +678,28 @@ class TestIdentityAndFreeze:
         assert re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{0,127}", decision.command_id)
         assert gri.COMMAND_ID_RE.fullmatch(decision.command_id)
 
-    def test_intent_channel_changes_the_identity(self) -> None:
+    def test_every_intent_channel_collapse_onto_one_identity_per_head(self) -> None:
+        # The channel is deliberately not part of the identity: one reviewer
+        # requested, the label applied, and the slash command commented in the
+        # same minute is one human intent, not three paid Fabric reviews.
         label = _decide(_label_body(), event="pull_request")
         requested = _decide(_review_requested_body(), event="pull_request")
-        assert label.intent_id != requested.intent_id
+        commented = _decide(
+            _comment_body(), event="issue_comment", current=_permission("write")
+        )
+        assert label.intent_id == requested.intent_id == commented.intent_id
+        assert label.command_id == requested.command_id == commented.command_id
+
+    def test_a_second_channel_on_the_same_head_is_already_admitted(self) -> None:
+        first = _decide(_label_body(), event="pull_request")
+        second = _decide(
+            _comment_body(),
+            event="issue_comment",
+            admitted=frozenset({first.command_id}),
+            current=_permission("write"),
+        )
+        assert second.refusal is gri.ReviewIntentRefusal.ALREADY_ADMITTED
+        assert second.command_id == first.command_id
 
     def test_moved_head_changes_the_identity(self) -> None:
         first = _decide(_label_body(), event="pull_request")
@@ -455,6 +709,38 @@ class TestIdentityAndFreeze:
             pull_request=_pull_request(head_sha=OTHER_HEAD_SHA),
         )
         assert first.intent_id != second.intent_id
+
+    def test_a_rerun_is_refused_unless_the_policy_authorizes_it(self) -> None:
+        decision = _decide(
+            _label_body(), event="pull_request", rerun="rerun-" + "e" * 32
+        )
+        assert decision.refusal is gri.ReviewIntentRefusal.RERUN_NOT_AUTHORIZED
+        assert decision.command_id is None
+
+    def test_an_authorized_rerun_mints_a_distinct_identity(self) -> None:
+        plain = _decide(_label_body(), event="pull_request")
+        policy = _policy(allow_explicit_rerun=True)
+        rerun = _decide(
+            _label_body(), event="pull_request", policy=policy, rerun="rerun-" + "e" * 32
+        )
+        assert rerun.admitted is True
+        assert rerun.intent_id != plain.intent_id
+
+    def test_a_rerun_is_bound_to_its_own_authorization(self) -> None:
+        policy = _policy(allow_explicit_rerun=True)
+        first = _decide(
+            _label_body(), event="pull_request", policy=policy, rerun="rerun-" + "e" * 32
+        )
+        second = _decide(
+            _label_body(), event="pull_request", policy=policy, rerun="rerun-" + "f" * 32
+        )
+        assert first.intent_id != second.intent_id
+
+    @pytest.mark.parametrize("authorization", ["", "rerun-", "rerun-zzzz", "approve", "e" * 32])
+    def test_a_malformed_rerun_authorization_is_refused(self, authorization: str) -> None:
+        policy = _policy(allow_explicit_rerun=True)
+        with pytest.raises(gri.ReviewIntentError):
+            _decide(_label_body(), event="pull_request", policy=policy, rerun=authorization)
 
     def test_duplicate_delivery_is_refused_as_already_admitted(self) -> None:
         first = _decide(_label_body(), event="pull_request")
@@ -485,7 +771,7 @@ class TestIdentityAndFreeze:
 
 
 # ---------------------------------------------------------------------------
-# D8 — closed refusal vocabulary and shape
+# D9 — closed refusal vocabulary and shape
 # ---------------------------------------------------------------------------
 
 
@@ -504,7 +790,7 @@ class TestDecisionShape:
                 command_id="gh-review-intent:gr-" + "0" * 32,
                 delivery_command_id="gh-review-delivery:" + "0" * 32,
                 repository=REPOSITORY,
-                pull_number=1,
+                pull_number=PULL_NUMBER,
                 frozen_head_sha=HEAD_SHA,
                 actor="alice",
             )
@@ -519,7 +805,7 @@ class TestDecisionShape:
                 command_id=None,
                 delivery_command_id="gh-review-delivery:" + "0" * 32,
                 repository=REPOSITORY,
-                pull_number=1,
+                pull_number=PULL_NUMBER,
                 frozen_head_sha=None,
                 actor=None,
             )
@@ -530,6 +816,7 @@ class TestDecisionShape:
         assert payload["schema"] == gri.SCHEMA
         assert payload["admitted"] is True
         assert payload["frozen_head_sha"] == HEAD_SHA
+        assert payload["pull_number"] == PULL_NUMBER
 
     def test_policy_refuses_an_empty_allowlist(self) -> None:
         with pytest.raises(gri.ReviewIntentError):
@@ -555,7 +842,7 @@ class TestDecisionShape:
 
 
 # ---------------------------------------------------------------------------
-# D9 — parsing fences
+# D10 — parsing fences
 # ---------------------------------------------------------------------------
 
 
