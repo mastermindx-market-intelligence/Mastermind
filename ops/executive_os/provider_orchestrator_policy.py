@@ -76,7 +76,7 @@ child request/status/result/accept and admitted operator-to-leaf procedures.
 Native Codex child spawning is not paid Fabric admission. Preserve the current
 thread lineage, provider grants, root budget and active effects; no second router.
 <!-- /mastermind-codex-fabric-entrypoint-v1 -->
-"
+"""
 FABRIC_ENTRY_BEGIN = "<!-- mastermind-claude-fabric-entrypoint-v1 -->"
 FABRIC_ENTRY_END = "<!-- /mastermind-claude-fabric-entrypoint-v1 -->"
 FABRIC_ENTRY_BODY = """<!-- mastermind-claude-fabric-entrypoint-v1 -->
