@@ -56,11 +56,11 @@ byte-identical document.  Cards, identities, PRs, issues, findings and
 unattributed findings are each emitted in a total order, and no
 ``generated_at`` clock is stamped into the output.
 
-One documented, bounded degradation: a carrier that carries no ``workstream``
-of its own is attached to the closure's workstream **only when the closure
-names exactly one**.  That is cardinality, not identity, and it is labelled as
-such here rather than presented as an exact join; with an ambiguous closure the
-row is left unattributed instead of being pinned to a guess.
+Unbound carriers and issues are **never** assigned to the sole selected
+workstream merely because the closure has cardinality one. Only a positive
+owner-authored workstream key makes a workstream card. Selected-but-unbound
+identities are returned as explicit typed degradation evidence instead of
+being silently dropped or falsely linked.
 
 Scope note: this is the first vertical.  It renders the exact-identity closure
 the receipt's own scope selects and is exercised end-to-end against a single
@@ -818,19 +818,18 @@ def build_cross_plane_view(
     issue_to_workstream: dict[str, str] = {}
     operation_hits: dict[str, set[str]] = {}
 
-    def _sole_workstream() -> str | None:
-        """The closure's one workstream, or ``None`` when attribution is ambiguous."""
-
-        return next(iter(selection.workstreams)) if len(selection.workstreams) == 1 else None
+    # Selection is not attribution. An operation-key or explicitly seeded ID
+    # can bring a carrier/issue into scope without proving any WS ownership.
+    # Keep those identities in typed omission evidence, never on a WS card.
+    unattributed_pr_identities: list[tuple[str, int]] = []
+    unattributed_issue_ids: list[str] = []
 
     pr_cards_by_workstream: dict[str, list[dict[str, Any]]] = {}
     for identity in selected_prs:
         pr = github_rows[identity]
-        # Documented bounded degradation: an unbound carrier is attached only
-        # when the closure names exactly one workstream.  With several,
-        # attribution would be a guess and the row stays unattributed.
-        workstream = _text(pr.get("workstream")) or _sole_workstream()
-        if workstream is None:
+        workstream = _text(pr.get("workstream"))
+        if workstream not in selection.workstreams:
+            unattributed_pr_identities.append(identity)
             continue
         pr_to_workstream[identity] = workstream
         pr_cards_by_workstream.setdefault(workstream, []).append(_pull_request_card(pr))
@@ -841,8 +840,9 @@ def build_cross_plane_view(
     issue_cards_by_workstream: dict[str, list[dict[str, Any]]] = {}
     for issue_id in selected_issues:
         issue = linear_rows[issue_id]
-        workstream = _text(issue.get("workstream")) or _sole_workstream()
-        if workstream is None:
+        workstream = _text(issue.get("workstream"))
+        if workstream not in selection.workstreams:
+            unattributed_issue_ids.append(issue_id)
             continue
         issue_to_workstream[issue_id] = workstream
         issue_cards_by_workstream.setdefault(workstream, []).append(_issue_card(issue))
@@ -950,6 +950,20 @@ def build_cross_plane_view(
                 _fact("MISSING_PRODUCER", f"observations.{name}.freshness", name,
                       "no caller-supplied evaluation window; freshness is undetermined")
             )
+    # Exact identity is observable without turning scope cardinality into
+    # an authored owner edge. Every unbound selected row remains accounted for.
+    for repository, number in unattributed_pr_identities:
+        unknowns.append(
+            _fact("DEGRADED", "cards.github.pull_requests", "github",
+                  f"{repository}#{number}: selected GitHub carrier has no exact "
+                  "source-authored workstream binding; not attributed to a workstream")
+        )
+    for issue_id in unattributed_issue_ids:
+        unknowns.append(
+            _fact("DEGRADED", "cards.linear.issues", "linear",
+                  f"{issue_id}: selected Linear issue has no exact source-authored "
+                  "workstream binding; not attributed to a workstream")
+        )
     if dropped_prs:
         unknowns.append(
             _fact("DEGRADED", "observations.github.pull_requests", "github",
@@ -986,6 +1000,8 @@ def build_cross_plane_view(
         bool(unavailable_sources)
         or dropped_prs > 0
         or dropped_issues > 0
+        or bool(unattributed_pr_identities)
+        or bool(unattributed_issue_ids)
         or digest_check["state"] != "VERIFIED"
         or any(block["freshness"] == "STALE" for block in (github_block, linear_block))
         or not cards
