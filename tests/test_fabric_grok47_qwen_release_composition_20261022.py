@@ -92,3 +92,38 @@ def test_builder_rejects_changed_accepted_grok_source(tmp_path):
     assert proc.returncode != 0
     assert "accepted Grok 4.7 source digest mismatch: remote_sub_exec.py" in proc.stderr
     assert not (stage / "native-manifest.json").exists()
+
+def test_approved_grok_bytes_stay_pinned_after_concurrent_source_change(tmp_path, monkeypatch):
+    """The accepted bytes are staged once, even if their source changes."""
+    clone_root = tmp_path / "ops/native_fabric"
+    candidate_native = clone_root / "quota_continuity"
+    shutil.copytree(NATIVE / "candidate", candidate_native / "candidate")
+    shutil.copytree(NATIVE / "source", candidate_native / "source")
+    shutil.copytree(NATIVE / "rollout", candidate_native / "rollout")
+    shutil.copytree(GROK, clone_root / "grok47/overlay")
+    changed = clone_root / "grok47/overlay/artifact_delivery.py"
+    spec = importlib.util.spec_from_file_location(
+        "raced_qwen_grok_builder", candidate_native / "rollout/build_review_stage.py"
+    )
+    builder = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(builder)
+    original = Path.read_bytes
+    seen = {"changed": False}
+
+    def read_then_mutate(path):
+        raw = original(path)
+        if path == changed and not seen["changed"]:
+            seen["changed"] = True
+            changed.write_bytes(raw + b"\n# source modified after first read\n")
+        return raw
+
+    stage = tmp_path / "stage"
+    monkeypatch.setattr(Path, "read_bytes", read_then_mutate)
+    monkeypatch.setattr(sys, "argv", ["build_review_stage.py", "--output", str(stage)])
+    builder.main()
+    assert seen["changed"]
+    manifest = json.loads((stage / "native-manifest.json").read_text())
+    pin = read_builder().GROK47_MERGED_SOURCE_DIGESTS["artifact_delivery.py"]
+    assert manifest["ext/artifact_delivery.py"] == pin
+    assert digest((stage / "native-code-stage/ext/artifact_delivery.py").read_bytes()) == pin
+    assert digest(changed.read_bytes()) != pin

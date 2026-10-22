@@ -85,8 +85,12 @@ def main():
     for name in sorted(BASE_FILES | ADDITIONS):
         if name in GROK47_MERGED_SOURCE_DIGESTS:
             source = root.parent / "grok47" / "overlay" / name
-            if (source.is_symlink() or not source.is_file()
-                    or sha(source.read_bytes()) != GROK47_MERGED_SOURCE_DIGESTS[name]):
+            if source.is_symlink() or not source.is_file():
+                raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+            # The staged bytes must be the exact approved source bytes,
+            # not a second unverified read after the digest check.
+            raw = source.read_bytes()
+            if sha(raw) != GROK47_MERGED_SOURCE_DIGESTS[name]:
                 raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
         else:
             choices = (root / "candidate" / name,)
@@ -95,13 +99,13 @@ def main():
             source = next((p for p in choices if p.is_file()), None)
             if source is None or source.is_symlink():
                 raise ValueError("missing explicit regular code dependency: " + name)
+            raw = source.read_bytes()
         preimage = rows.get(name)
         if name in BASE_FILES:
             original = root / "source" / PREIMAGE_ONLY.get(name, name)
             if (not preimage or original.is_symlink()
                     or sha(original.read_bytes()) != preimage):
                 raise ValueError("installed preimage mismatch: " + name)
-        raw = source.read_bytes()
         relative = "ext/" + name
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)

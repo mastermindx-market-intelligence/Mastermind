@@ -21,7 +21,16 @@ class RetiredCredentialPreimageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        # Reproduce native_fabric's sibling Grok overlay source in scratch.
+        # Otherwise the builder fails before this credential-safety fixture.
+        self.root = Path(self.temp.name) / "quota_continuity"
+        self.root.mkdir()
+        grok = self.root.parent / "grok47" / "overlay"
+        grok.mkdir(parents=True)
+        for name, expected in builder.GROK47_MERGED_SOURCE_DIGESTS.items():
+            raw = (ROOT.parent / "grok47" / "overlay" / name).read_bytes()
+            self.assertEqual(hashlib.sha256(raw).hexdigest(), expected)
+            (grok / name).write_bytes(raw)
         for directory in ("source", "candidate", "rollout"):
             (self.root / directory).mkdir()
         for name in builder.BASE_FILES | {"pool_launcher.sh"}:
