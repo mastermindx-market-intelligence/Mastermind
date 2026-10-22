@@ -270,6 +270,47 @@ def test_foreign_bot_messages_with_unproven_identity_or_mutation_fail_closed(
     assert len(transport.calls) == 1
 
 
+def test_duplicate_ignored_foreign_bot_timestamp_never_proves_history_complete() -> None:
+    bot = message(ts="1787471000.000001", user="U0C4BC13Q84", text="foreign")
+    bot["bot_id"] = "B0C45P45M6J"
+    human = message(ts="1787471000.000002", user=HUMAN, text="eligible")
+    adapter, _ = client(
+        lambda call: response(
+            call["path"], page_payload([bot, dict(bot), human]),
+            query=call["query"],
+        )
+    )
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+    assert page.complete is False
+    assert [entry.ts for entry in page.messages] == ["1787471000.000002"]
+
+
+def test_foreign_bot_cursor_overlap_never_proves_history_complete() -> None:
+    bot = message(ts="1787471000.000001", user="U0C4BC13Q84", text="foreign")
+    bot["bot_id"] = "B0C45P45M6J"
+    human1 = message(ts="1787471000.000002", user=HUMAN)
+    human2 = message(ts="1787471000.000003", user=HUMAN)
+
+    def handler(call):
+        query = call["query"]
+        if "cursor" not in query:
+            return response(
+                call["path"],
+                page_payload([bot, human1], has_more=True, cursor="cursor-one"),
+                query=query,
+            )
+        assert query["cursor"] == "cursor-one"
+        return response(call["path"], page_payload([dict(bot), human2]), query=query)
+
+    adapter, transport = client(handler)
+    page = run(adapter.fetch_channel_history(channel_id=CHANNEL, limit=3))
+    assert len(transport.calls) == 2
+    assert page.complete is False
+    assert [entry.ts for entry in page.messages] == [
+        "1787471000.000002", "1787471000.000003"
+    ]
+
+
 def test_large_channel_history_uses_small_complete_cursor_pages() -> None:
     items = [
         message(ts=f"1787471000.{index:06d}", text=f"message-{index}")

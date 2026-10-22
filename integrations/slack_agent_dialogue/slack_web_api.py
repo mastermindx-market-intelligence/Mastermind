@@ -143,6 +143,7 @@ class _ParsedHistoryPage:
     has_more: bool
     next_cursor: str
     structurally_complete: bool
+    foreign_bot_timestamps: tuple[str, ...] = ()
 
 
 class SlackHttpTransport(Protocol):
@@ -608,12 +609,18 @@ class SlackWebApiDialogueClient:
         ):
             raise _unavailable()
         messages: list[SlackMessage] = []
+        foreign_bot_timestamps: list[str] = []
         mutation_complete = True
         seen: set[str] = set()
         structurally_complete = len(raw_messages) <= limit
         try:
             for raw in raw_messages[:limit]:
                 if self._foreign_bot_history_message(raw):
+                    ts = raw["ts"]
+                    if ts in seen:
+                        structurally_complete = False
+                    seen.add(ts)
+                    foreign_bot_timestamps.append(ts)
                     continue
                 parsed, evidence_complete = self._parse_message(raw)
                 if parsed.ts in seen:
@@ -630,6 +637,7 @@ class SlackWebApiDialogueClient:
             has_more=has_more,
             next_cursor=metadata["next_cursor"],
             structurally_complete=structurally_complete,
+            foreign_bot_timestamps=tuple(foreign_bot_timestamps),
         )
 
     @staticmethod
@@ -700,8 +708,13 @@ class SlackWebApiDialogueClient:
             mutation_complete = (
                 mutation_complete and parsed.mutation_evidence_complete
             )
+            # Skipped foreign bot messages still consume real Slack cursor
+            # positions: preserve duplicate detection for the entire page.
+            page_timestamps = tuple(message.ts for message in parsed.messages) + (
+                parsed.foreign_bot_timestamps
+            )
             if not parsed.structurally_complete or any(
-                message.ts in seen_timestamps for message in parsed.messages
+                ts in seen_timestamps for ts in page_timestamps
             ):
                 return self._incomplete_history(
                     messages + list(parsed.messages),
@@ -709,7 +722,7 @@ class SlackWebApiDialogueClient:
                     response_page_bytes=response_page_bytes,
                 )
             messages.extend(parsed.messages)
-            seen_timestamps.update(message.ts for message in parsed.messages)
+            seen_timestamps.update(page_timestamps)
 
             terminal = parsed.has_more is False and parsed.next_cursor == ""
             continuation = parsed.has_more is True and self._cursor_is_valid(
