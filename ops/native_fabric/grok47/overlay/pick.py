@@ -1997,7 +1997,7 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
         if not ok:
             return f"NONE reason={reason}"
         if is_execute_class(tc, doc) and floor_demotes(
-                "grok", tc, doc=doc, needs=needs, model="grok-4.7"):
+                "grok", tc, doc=doc, needs=needs, model="grok-4.6"):
             return "NONE reason=Grok model quality floor remains binding across products (R22)"
         # This exact high-effort alias was observed in the authenticated Cursor
         # catalog. Capability/host, economic, quality and independence gates

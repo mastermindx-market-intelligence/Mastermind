@@ -112,6 +112,21 @@ class Grok47WorkerContracts(unittest.TestCase):
                     self.assertEqual(call.returncode==0,valid,(call.stdout,call.stderr))
                     if valid:self.assertIn('grok_native_headless',call.stdout)
 
+    def test_cursor_grok_46_alias_does_not_inherit_47_quality_floor(self):
+        picker = load('pick')
+        seen = []
+        def check_floor(*args, **kwargs):
+            seen.append(kwargs.get('model'))
+            return True
+        with patch.object(picker, '_cursor_grok_quota_affinity', return_value=True), \
+             patch.object(picker, '_subject_ok', return_value=(True, 'ok')), \
+             patch.object(picker, 'is_execute_class', return_value=True), \
+             patch.object(picker, 'floor_demotes', side_effect=check_floor):
+            value = picker._format_pick('execute',pool='cursor',
+                                        requested_model='cursor-grok-4.6-high')
+        self.assertIn('quality floor', value)
+        self.assertEqual(seen, ['grok-4.6'])
+
     def test_operator_model_pairs_closed(self):
         contract=load('fabric_operator_contract')
         self.assertIn(('grok','grok-4.7'),contract.ALLOWED_POOL_MODEL)
