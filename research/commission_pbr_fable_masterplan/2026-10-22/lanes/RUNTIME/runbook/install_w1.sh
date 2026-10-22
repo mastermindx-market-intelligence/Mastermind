@@ -9,7 +9,8 @@
 #   OPERATOR_SESSION_ID=<id> /opt/homebrew/bin/bash --noprofile --norc install_w1.sh s0
 #   PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.sh" <step>
 #
-# Exit: 0 step PASS, 1 ABORT (reason in $PBR_EV/logs/stops.log), 4 deploy still running.
+# Exit: 0 step PASS, 1 ABORT (reason in $PBR_EV/logs/stops.log), 4 deploy still running,
+# 5 HOLD (s4a: report to the seat; not a rollback trigger by itself).
 set -u -o pipefail
 export TZ=UTC LC_ALL=C
 umask 022
@@ -437,10 +438,118 @@ s4() {
   "${VPS[@]}" "cd $DPATH && MASTERMIND_FORWARD_EVALUATION_RELEASE_STATE_ROOT=$LIVE python3 -B -m portfolio.forward_evaluation status" \
     > "$P/forward_status.json" 2> "$P/forward_status.stderr" || { say "forward_evaluation status rc != 0 after the deploy"; fail=1; }
   case $fail in
-    0) state INSTALLED "$SHA"; pass PROOF; say "s4 PASS: installed = $SHA (T1 T2 T3 T4 /health app_started + snapshot + marker) - run s5" ;;
+    0) state INSTALLED "$SHA"; pass PROOF; say "s4 PASS: installed = $SHA (T1 T2 T3 T4 /health app_started + snapshot + marker) - run s4a, then s5" ;;
     2) stop "T2 FAIL - STOP: venv changed outside the deploy; no rollback without the seat" ;;
     *) stop "post-install proof FAILED (see captures/post, identity/post) - R-b decision table with the seat" ;;
   esac
+}
+
+# ------------------------------------------------------------------ s4a: D-ACCT-1 account-load check
+# Read-only. A quarantine file in any paper_account data dir, an account_state_invalid run_event /
+# journal line since DEPLOY_T0 (any book), or an INVALID classification of an active paper_account
+# book is a HOLD (exit 5): report to the seat. It is NOT a rollback trigger by itself.
+# Classified: the active paper_account books. self_directed has its own engine (scheduler.py, the
+# _MARK_BOOK_IDS note) and is never loaded through paper_account, so AccountStateInvalid cannot arise for it.
+BOOKS_PA="autonomous china hk"
+s4a() {  # s4a [label]: run after s4 PASS (label post-restart) and after each first-natural-cycle read
+  STEP=s4a; load
+  [ -f "$EV/gates/PROOF.PASS" ] || stop "run s4 first"
+  local label=${1:-post-restart} hold=0 fc=0 b rc st summary=""
+  case $label in ''|*[!A-Za-z0-9_.-]*) stop "label must match [A-Za-z0-9_.-]+" ;; esac
+  local A=$EV/proof/account_load/$label
+  [ -e "$A" ] && stop "$A exists - use a new label"
+  mkdir -p "$A/src" || stop "mkdir $A"
+  # grep without -q reads to EOF: under pipefail an early exit would SIGPIPE git show (rc 141)
+  if git -C "$WT" show "$SHA:portfolio/paper_account.py" 2>/dev/null | grep '^class AccountStateInvalid(' > /dev/null; then fc=1; fi
+  say "D-ACCT-1 fail-closed load present in $SHA: $([ "$fc" = 1 ] && echo yes || echo NO)"
+  # 1. quarantine census over every paper_account data dir (legacy portfolio/ + portfolios/*/, archived
+  #    books included: any load that quarantines leaves its copy beside the original). test/sha256sum/stat only.
+  "${VPS[@]}" 'bash -s' > "$A/quarantine_census.txt" <<'EOF' || stop "quarantine census read"
+cd /opt/mastermind-live-data || exit 1
+k=0
+for d in portfolio portfolios/*/; do
+  d=${d%/}
+  [ -d "$d" ] || continue
+  n=0
+  for f in "$d"/account.quarantine.*.json "$d"/account_quarantine.jsonl; do
+    [ -e "$f" ] || continue
+    n=$((n+1)); sha256sum -- "$f"; stat -c '%n size=%s mtime=%Y' -- "$f"
+  done
+  echo "dir $d quarantine_files=$n"; k=$((k+1))
+done
+echo "census_done dirs=$k"
+EOF
+  grep -q '^census_done dirs=' "$A/quarantine_census.txt" || stop "quarantine census incomplete"
+  for b in $BOOKS_PA; do
+    grep -q "^dir portfolios/$b quarantine_files=" "$A/quarantine_census.txt" || stop "quarantine census has no portfolios/$b"
+  done
+  grep -q 'quarantine_files=[1-9]' "$A/quarantine_census.txt" && { say "HOLD: quarantine file(s) present - $A/quarantine_census.txt"; hold=1; }
+  # 2. run_events since DEPLOY_T0
+  events_tail "$A/run_events.tail.jsonl" || stop "run_events read"
+  [ -s "$A/run_events.tail.jsonl" ] || stop "run_events tail is empty"
+  "$PY" -I -B - "$EV/tools" "$A/run_events.tail.jsonl" "$DEPLOY_T0" > "$A/account_state_invalid_events.jsonl" <<'PYEOF' || stop "run_events scan"
+import json, sys
+sys.path.insert(0, sys.argv[1])
+import pbr_rb
+since = float(sys.argv[3])
+for line in open(sys.argv[2]):
+    try:
+        r = json.loads(line)
+    except ValueError:
+        continue
+    if r.get("kind") != "account_state_invalid":
+        continue
+    try:
+        late = pbr_rb.parse_ts(r.get("ts")) >= since
+    except Exception:
+        late = True  # an unparseable stamp is never read as "before the deploy"
+    if late:
+        print(json.dumps({k: r.get(k) for k in ("ts", "book", "status", "severity", "extra")}, sort_keys=True))
+PYEOF
+  [ -s "$A/account_state_invalid_events.jsonl" ] && { say "HOLD: account_state_invalid run_event(s) since DEPLOY_T0"; hold=1; }
+  # 3. journal since DEPLOY_T0 (the logger line); pipefail keeps a journalctl failure visible
+  "${VPS[@]}" "set -o pipefail; journalctl -u $SVC --since=@$DEPLOY_T0 --no-pager -o short-iso-precise | { grep -E 'account_state_invalid|AccountStateInvalid' || true; }" \
+    > "$A/journal_hits.txt" || stop "journal read"
+  [ -s "$A/journal_hits.txt" ] && { say "HOLD: account_state_invalid in the journal since DEPLOY_T0"; hold=1; }
+  # 4. classification with SHA's own read-only account_file_status, run on the Mac (no host import,
+  #    so the host's .env is never loaded); the account bytes are deleted after classification
+  if [ "$fc" = 1 ]; then
+    git -C "$WT" archive "$SHA" portfolio/__init__.py portfolio/paper_account.py bot/__init__.py | tar -x -C "$A/src" \
+      || stop "classifier extract"
+    for b in $BOOKS_PA; do
+      "${VPS[@]}" "test -e $LIVE/portfolios/$b/account.json"; rc=$?
+      case $rc in
+        1) printf '{"path": "%s", "problems": [], "sha256": null, "size": null, "status": "MISSING"}\n' \
+             "$LIVE/portfolios/$b/account.json" > "$A/status.$b.json" ;;
+        0) ( umask 077; "${VPS[@]}" "cat -- $LIVE/portfolios/$b/account.json" > "$A/src/.acct.$b" ) || stop "account.json read $b"
+           "$PY_WT" -I -B - "$A/src" "$A/src/.acct.$b" "$LIVE/portfolios/$b/account.json" > "$A/status.$b.json" <<'PYEOF' \
+             || { rm -f "$A/src/.acct.$b"; stop "classifier $b"; }
+import json, sys
+sys.path.insert(0, sys.argv[1])
+from portfolio.paper_account import account_file_status
+s = account_file_status(path=sys.argv[2])
+s["path"] = sys.argv[3]
+print(json.dumps(s, sort_keys=True))
+PYEOF
+           rm -f "$A/src/.acct.$b" ;;
+        *) stop "account.json existence check $b (ssh rc $rc)" ;;
+      esac
+      st=$(jget "$A/status.$b.json" status | tr -d '"')
+      summary="$summary $b=$st"
+      [ "$st" = INVALID ] && { say "HOLD: $b account.json classifies INVALID ($(jget "$A/status.$b.json" problems))"; hold=1; }
+      [ "$st" = MISSING ] && { say "HOLD: $b account.json is MISSING (an active paper_account book would seed a fresh book)"; hold=1; }
+    done
+    summary="$summary self_directed=n/a(own-engine)"
+  else
+    say "classification skipped: $SHA has no account_file_status (D-ACCT-1 not installed)"
+  fi
+  if [ "$hold" = 0 ]; then
+    pass "ACCT_$label"; say "s4a PASS ($label): no quarantine file, no account_state_invalid event/journal line since DEPLOY_T0;${summary:- classification skipped}"
+  else
+    : > "$EV/gates/ACCT_$label.HOLD"
+    say "s4a HOLD ($label): report $A to the seat - not a rollback trigger by itself; the affected book stays halted"
+    exit 5
+  fi
 }
 
 # ------------------------------------------------------------------ s5: needrestart release row
@@ -635,6 +744,7 @@ case "${1:-}" in
   s3) s3 ;;
   s3-result) s3_result ;;
   s4) s4 ;;
+  s4a) shift; s4a "$@" ;;
   s5) s5 ;;
   s5-revert) s5_revert ;;
   s6) s6 ;;
@@ -645,5 +755,5 @@ case "${1:-}" in
   rollback-c) rollback_c ;;
   rollback-c-result) rollback_c_result ;;
   status) status ;;
-  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status" >&2; exit 2 ;;
+  *) echo "usage: install_w1.sh s0|s1|s2|s3|s3-result|s4|s4a [label]|s5|s5-revert|s6|cycle <job> <HH:MM> [book] [day]|restart-check [HH:MM] [day]|proof-old|rollback-b|rollback-c|rollback-c-result|status" >&2; exit 2 ;;
 esac

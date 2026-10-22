@@ -29,7 +29,7 @@ These are sha256 values. s0 re-verifies the three helpers; a mismatch aborts.
 
 | File | sha256 |
 |---|---|
-| `runbook/install_w1.sh` | `9001e7585b979eacfa0ab0e48e685925248fdf45f7d7585681d814f9a1309661` |
+| `runbook/install_w1.sh` | `3d3f8f8f50b79b2118c9c8737b427662697e34982f319f006dfe7fbe883d3568` |
 | `runbook/pbr_rb.py` | `536e038bb357e88926edf2613840b5d74431ccfb63c88dbe08a889f3abfa14ac` |
 | `runbook/remote_blob_manifest.py` | `49b3ca7d8b53074f1b6491eccc6371c8b214c75f86c6b75c6f126a6dcd4852bf` |
 | `runbook/remote_dists.py` | `b15841d63d3480ea5b8af68ab2d321f2f65d546fa74365153979e127c32776e0` |
@@ -44,7 +44,7 @@ RB=research/commission_pbr_fable_masterplan/2026-10-22/lanes/RUNTIME/runbook
 B=$(mktemp -d)
 git -C "$SEAT_WT" fetch -q origin claude/ssd-pbr-runtime-85f3de87bc7b8894
 git -C "$SEAT_WT" show "FETCH_HEAD:$RB/install_w1.sh" > "$B/install_w1.sh"
-echo "9001e7585b979eacfa0ab0e48e685925248fdf45f7d7585681d814f9a1309661  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
+echo "3d3f8f8f50b79b2118c9c8737b427662697e34982f319f006dfe7fbe883d3568  $B/install_w1.sh" | shasum -a 256 -c -      # expect: <path>: OK   (anything else: STOP)
 env -u PBR_EV OPERATOR_SESSION_ID=<executing session id> /opt/homebrew/bin/bash --noprofile --norc "$B/install_w1.sh" s0
 # s0's last line prints:  export PBR_EV=/Volumes/Mastermind/evidence/pbr/install-<UTCyyyymmddThhmmZ>_<sha8>
 ```
@@ -63,13 +63,14 @@ PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/to
 | `1` | ABORT. The reason is on stdout and appended to `$PBR_EV/logs/stops.log`. Nothing after an ABORT ran. |
 | `2` | Usage error. |
 | `4` | The deploy (or R-c) is still running. |
+| `5` | HOLD (s4a only). Report the listed evidence to the seat. A HOLD is not a rollback trigger by itself. |
 
 ### Conventions
 
 **Host contact.** Every host contact is `ssh -o BatchMode=yes` to `root@146.190.142.17` with the deploy key, pipe-only.
 
 **Read and write steps.**
-- Read-only steps: s1, s2, s3-result, s4, s6, cycle, restart-check, proof-old, status.
+- Read-only steps: s1, s2, s3-result, s4, s4a, s6, cycle, restart-check, proof-old, status.
 - Steps that change the host:
   - **s3**: the repo's deploy wrapper.
   - **s5 / s5-revert**: `/etc/needrestart` only.
@@ -90,12 +91,13 @@ PBR_EV=<dir printed by s0> /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/to
 | immediately after an s2 PASS, **before 05:30** | `s3` deploy (exactly once) | **write (deploy wrapper)** |
 | every 60–90 s until exit ≠ 4 (expect 2–6 min) | `s3-result` | read |
 | right after s3-result PASS | `s4` T1–T4 + /health + app_started + snapshot + marker | read |
+| right after s4 PASS | `s4a` account-load check (D-ACCT-1), label `post-restart` | read |
 | after s4 PASS (or after proof-old if the seat wants the row anyway), before 05:40 | `s5` needrestart row | **write (/etc/needrestart)** |
 | after s5 | `s6` close (manifest + redaction scan) | none |
-| 07:05 | `cycle watch_us_overnight 06:20 autonomous` | read |
+| 07:05 | `cycle watch_us_overnight 06:20 autonomous`, then `s4a after-watch_us_overnight` | read |
 | 08:40 | `restart-check 08:30` | read |
-| 08:45 | `cycle china_daily 08:00 china` | read |
-| 09:45 | `cycle hk_daily 09:00 hk` | read |
+| 08:45 | `cycle china_daily 08:00 china`, then `s4a after-china_daily` | read |
+| 09:45 | `cycle hk_daily 09:00 hk`, then `s4a after-hk_daily` | read |
 | 15:45 | `cycle settle_pending 15:00 autonomous` (+G4 read) | read |
 | 23:55 | `cycle autonomous_daily 23:10 autonomous` | read |
 | Mon 10-26 02:20 | `cycle settle_brain_asia 01:35 china 2026-10-26` and `… hk 2026-10-26` | read |
@@ -277,6 +279,56 @@ PBR_EV=… /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.s
 
 A `quarantined` cutover preflight is printed as an INCIDENT. It does not fail the proof; report it to the seat.
 
+### s4a: account-load check (D-ACCT-1; read-only)
+
+Run this right after s4 PASS, and again after each book's first natural cycle (see s7):
+
+```sh
+PBR_EV=… /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.sh" s4a                        # label: post-restart
+PBR_EV=… /opt/homebrew/bin/bash --noprofile --norc "$PBR_EV/tools/install_w1.sh" s4a after-china_daily      # one new label per read
+```
+
+**Why.** #1747 (D-ACCT-1, `portfolio/paper_account.py`) makes an existing-but-invalid `account.json` fail closed. The load raises `AccountStateInvalid`. Before raising, it does three things:
+- writes a byte-for-byte copy `account.quarantine.<sha16>.json` beside the original;
+- appends one row to `account_quarantine.jsonl`;
+- emits one `account_state_invalid` run_event.
+
+If #1747 lands before s0, the install carries this behaviour. The proof is that the active books load without `AccountStateInvalid`.
+
+**Scope.** Four books are active. Three of them (autonomous, china, hk) load through `paper_account`. **self_directed does not.** It has its own engine and account file (`portfolio/self_directed.py`, `data/portfolio/self_directed/account.json`). `app/scheduler.py` excludes it from the paper_account books (the `_MARK_BOOK_IDS` note). `AccountStateInvalid` therefore cannot arise for it, and s4a reports it as `self_directed=n/a(own-engine)`.
+
+| Check | PASS condition |
+|---|---|
+| Quarantine census | No `account.quarantine.*.json` and no `account_quarantine.jsonl` in any paper_account data dir. The dirs scanned are the legacy `/opt/mastermind-live-data/portfolio/` and every `/opt/mastermind-live-data/portfolios/*/`, archived books included, because a load quarantines beside the original. Only `test`, `sha256sum` and `stat` run. The census must finish (`census_done`) and must list autonomous, china and hk. |
+| run_events | No `kind=account_state_invalid` row with `ts ≥ DEPLOY_T0`. An unparseable `ts` counts as after the deploy. |
+| Journal | No `account_state_invalid` / `AccountStateInvalid` line in the unit journal since `DEPLOY_T0`. |
+| Classification | autonomous, china and hk each classify VALID. INVALID is a HOLD. MISSING is also a HOLD, because the next load of an active book would seed a fresh one. |
+
+**How classification works.**
+- It runs only when SHA contains `class AccountStateInvalid`.
+- It uses SHA's own read-only `account_file_status(path=…)`, run on the Mac from `git archive SHA`.
+- Each `account.json` is read over ssh into a 0600 temp file and deleted right after classification.
+- Nothing is imported on the host, so the host `.env` is never loaded.
+- `status.<book>.json` holds only the status, sha256, size and problem codes (ticker labels at most).
+
+If SHA does not contain #1747, s4a prints `classification skipped` and runs the other three checks.
+
+**PASS output:** `GATE ACCT_<label> PASS` and `s4a PASS (<label>): no quarantine file, no account_state_invalid event/journal line since DEPLOY_T0; autonomous=VALID china=VALID hk=VALID self_directed=n/a(own-engine)`.
+
+**HOLD (exit 5).** Any quarantine file, event, journal line, or INVALID/MISSING classification writes `gates/ACCT_<label>.HOLD`. The expected result is that no book is quarantined.
+
+A HOLD is **not a rollback trigger by itself**:
+- Report `proof/account_load/<label>/` to the seat.
+- The affected book stays halted by design. Do not "repair" the account, reset it, or delete the quarantine file.
+- Clearing the quarantine is a human action outside this runbook.
+- s5/s6 may proceed unless the seat says otherwise.
+
+**ABORT (exit 1).** Any of the following is a read failure, not a verdict; re-run s4a with a new label:
+- the census, run_events, journal or `account.json` read fails;
+- the census is incomplete or lacks an active paper_account book's dir;
+- the run_events tail is empty;
+- the label already exists.
+
 ### s5: needrestart release row (writes `/etc/needrestart` only)
 
 ```sh
@@ -341,6 +393,8 @@ PBR_EV=… …/install_w1.sh restart-check [HH:MM] [YYYY-MM-DD]
 Every due cycle maps to exactly one §5 disposition: `not_due`, `disabled`, `started`, `accepted_no_change`, `accepted_change`, `rejected`, `failed` or `incomplete_uncertain`. The hint is the RUNTIME reading; the seat records the final disposition. An `incomplete_uncertain` requires an incident note naming the missing evidence.
 
 **Known hazard:** the 08:30Z `mastermind-restart.timer` can cut an in-flight `china_daily` (fired at 08:00). If `restarts_in_window>0`, record it.
+
+**Account load at the cycle.** A book's `account.json` is definitively loaded by its first natural cycle, not necessarily at startup. After each first cycle read (`watch_us_overnight` for autonomous, `china_daily`, `hk_daily`), run `s4a after-<job>`. self_directed is outside D-ACCT-1 (own engine). An s4a HOLD is reported to the seat; it is not a rollback trigger by itself.
 
 `restart-check` refuses before fire + 10 min. It requires an `app_started` with `INSTALLED` after the timer, plus /health. A failure is an incident; it does not trigger a rollback.
 
@@ -408,6 +462,9 @@ captures/pre/                systemctl_show execstart_path environment_file_name
 captures/post/               systemctl_show health.json health_verdict app_started_verdict run_events.tail deploy_prev forward_marker forward_status
 needrestart/                 conf_include verify_before backup_sha256 99-mastermind-no-autorestart.conf dropin_sha256 verify_after [verify_after_revert]
 cycles/<day>T<HHMM>Z_<job>[_<book>]/  run_events.tail cycle.json decisions.trimmed health(+verdict) journal_pid1_unit [settlement_state]
+proof/account_load/<label>/  quarantine_census.txt run_events.tail.jsonl account_state_invalid_events.jsonl journal_hits.txt
+                             status.<book>.json src/ (SHA's paper_account.py + package inits; account bytes deleted)
+gates/ACCT_<label>.PASS|HOLD  s4a verdict per label
 rollback/                    rb_* / rc.* / proof/ (only if used)
 manifest.json                sha256 of every file (s6)
 ```
@@ -429,6 +486,9 @@ manifest.json                sha256 of every file (s6)
 11. **run_id formats** differ between decision rows and run_events (handed to RESEARCH). RUNTIME passes run identity. `replace_for_asof` identity loss is ruled correction-as-new-record, owned by RESEARCH as a wave-2 P0.
 12. **Seat-tool kill.** The detach (`setsid` + `nohup`) is tested locally. If it fails anyway, s3-result classifies "pid gone, no rc" as EFFECT UNKNOWN; it never re-runs the deploy.
 13. **Forward marker** is active (deployment_sha `3c4ef7f8…`). G6 re-proves it at the gate time; a different status means STOP, not init.
+14. **Host import loads `.env`.** s4's `forward_evaluation status` (and G6) runs `python -m portfolio.forward_evaluation` on the host. `portfolio/__init__.py` imports `bot`, and `bot/__init__.py` loads `.env`/`.env.local` into that process's environment. Nothing is printed or captured, but the process does hold them. s4a deliberately classifies on the Mac to avoid a second host import.
+15. **D-ACCT-1 timing.** s4a's classification needs #1747 in SHA. If #1747 lands after s0, the window installs the old load path; s4a then only runs the census/event/journal checks, and the fail-closed behaviour arrives with the next release.
+16. **self_directed is not covered by D-ACCT-1.** It keeps its own lenient loader (`portfolio/self_directed.py`), which falls back to a default state on a bad file. A corrupt self_directed account would not fail closed and is not detected by s4a. This is a D-ACCT-1 scope question for the seat, not a W1 proof item.
 
 ## 7. Verification of this runbook (offline, by RUNTIME)
 
@@ -441,6 +501,19 @@ manifest.json                sha256 of every file (s6)
 - needrestart verify: a fake conf gives rc 3 before, rc 0 after, rc 4 on a parse error. The regex matches `mastermind(.service)`, not `mastermind-restart.service`.
 - `pbr_rb` gates/app-started/t1/t4/health/cycle/close against dated fixtures.
 - G1/G2E waiver paths.
+- s4a against a fake host (`VPS=(fakessh)` rewriting the live-data root, fake `journalctl`), 16/16 cases:
+  - clean (3 VALID, self_directed n/a) → 0, with no account bytes retained;
+  - a quarantine file in an archived book's dir → 5, and in the legacy `portfolio/` → 5;
+  - an active book's dir absent → 1, and its `account.json` MISSING → 5;
+  - a reused label → 1;
+  - a quarantine file → 5;
+  - an `account_state_invalid` event after `DEPLOY_T0` → 5, and one before `DEPLOY_T0` → 0;
+  - an unparseable `account.json` → 5, naming the book;
+  - a journal hit → 5, and a journal read failure → 1;
+  - SHA without #1747 (`3a6d165f`) → classification skipped, 0;
+  - no `PROOF.PASS` → 1;
+  - a bad label → 1;
+  - the `after-china_daily` label → 0.
 
 **Read-only host observation (2026-10-22 13:41Z):** the forward marker is active.
 
