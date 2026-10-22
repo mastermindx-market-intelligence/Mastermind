@@ -399,6 +399,37 @@ partial/malformed timestamps, percentages, duplicates and non-mutating
 sanitized output. This is the provider observation interface available
 to future qualification, not a parallel quota accounting service.
 
+### Codex CLI as a second *supported personal coding tool*, not a second pool
+
+The vendor's **Personal Coding Plan / Codex CLI** integration explicitly
+supports OpenAI **Responses** protocol at
+`https://ark.ap-southeast.bytepluses.com/api/coding/v3`. It uses
+`wire_api = "responses"` and one exact approved model (or
+`ark-code-latest`). The general ModelArk PAYG
+`https://ark.ap-southeast.bytepluses.com/api/v3` is a **different
+billable product** and must never be used as a plan fallback.
+
+Current code intentionally exposes ONLY the reviewed
+`byteplus-coding-plan-personal.claude-code-anthropic` source binding.
+`control_plane.subscription_harness_bindings` rejects any alternate
+BytePlus harness; existing Codex-specific provider-realm allowlist
+does not admit BytePlus. Therefore no Codex integration or
+Codex-based autonomous worker was installed by this PR.
+
+A future supported **individual, attended Codex CLI** enrollment can be
+prepared from the vendor guide, with its own closed protocol-specific
+binding, exact dedicated provider realm, isolated Codex home, unchanged
+user defaults and safe credential custody. Both supported coding clients
+must **share the same one BytePlus personal subscription/account quota**
+(5-hour/weekly/monthly) and must not mint two independent worker slots.
+Before adding a Codex binding, its existing Codex ProviderRealm owner
+must review Responses wire compatibility, source-profile identity,
+private credential isolation, no freefall to PAYG, and manual tool
+qualification. Neither foreground Codex support nor native Claude
+subagent configuration authorizes unattended custom Fabric dispatch.
+
+Source: https://docs.byteplus.com/en/docs/ModelArk/coding-plan-personal-ai-codex
+
 ### Required load-balancing invariants
 
 1. Model Router fixes the first lawful capability/quality tier. Capacity

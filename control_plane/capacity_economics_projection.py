@@ -169,7 +169,7 @@ def project_quota_preference(
     # Never turn a forged positive Capacity estimate into an autonomous worker.
     # A separately licensed BytePlus PAYG/enterprise API must use its own
     # independently reviewed provider and model aliases.
-    if provider == "byteplus" or model_alias == "byteplus.attended":
+    if provider.casefold() == "byteplus" or model_alias.casefold() == "byteplus.attended":
         raise CapacityEconomicsProjectionError(
             "personal BytePlus Coding Plan cannot enter autonomous Capacity preference"
         )

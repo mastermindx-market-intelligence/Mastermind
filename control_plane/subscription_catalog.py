@@ -142,7 +142,7 @@ def project_byteplus_plan_readback(
             refuse("quota window must be a mapping")
         label = row.get("label")
         percent = row.get("percent")
-        if label not in ("session", "weekly", "monthly") or label in seen:
+        if type(label) is not str or label not in ("session", "weekly", "monthly") or label in seen:
             refuse("unexpected or duplicated quota window")
         if type(percent) is not int or not 0 <= percent <= 100:
             refuse("quota percent must be a bounded whole number")

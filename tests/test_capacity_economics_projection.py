@@ -122,13 +122,17 @@ def test_one_startable_job_remains_an_advisory_preference_not_a_claim():
 @pytest.mark.parametrize(
     "provider,alias",
     [("byteplus", "byteplus.attended"), ("xai", "byteplus.attended"),
-     ("byteplus", "fast.engineering")],
+     ("byteplus", "fast.engineering"), ("BytePlus", "fast.engineering"),
+     ("BYTEPLUS", "fast.engineering"), ("xai", "BYTEPLUS.ATTENDED"),
+     ("xai", "BytePlus.Attended")],
 )
 def test_rejects_byteplus_personal_plan_even_if_preview_forces_positive_capacity(provider, alias):
     # A quota-preview producer can never mint use rights or account-backed
     # subscription capacity by asserting a non-zero parallelism estimate.
+    # The spoofed casing must remain rejected EVEN IF a caller's supplied
+    # first-tier aliases use that exact casing.
     tiers = ({"tier_id": "implementation.routine.primary",
-              "model_aliases": ["fast.engineering", "byteplus.attended"]},)
+              "model_aliases": [alias]},)
     doc = preview()
     doc["options"][0]["provider"] = provider
     doc["options"][0]["model_alias"] = alias

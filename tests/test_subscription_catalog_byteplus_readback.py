@@ -95,6 +95,14 @@ def test_reject_missing_duplicate_window_missing_timestamp_and_partial_subscript
             project_byteplus_plan_readback(h, u)
 
 
+@pytest.mark.parametrize("malformed_label", [[], {}, ["session"], 1, None, True])
+def test_malformed_label_fails_closed_with_typed_error(malformed_label):
+    holdings, usage = fixture()
+    usage["items"][0]["periods"][0]["label"] = malformed_label
+    with pytest.raises(HarnessBindingError, match="unexpected or duplicated"):
+        project_byteplus_plan_readback(holdings, usage)
+
+
 def test_mismatched_duplicate_or_other_products_do_not_mint_capacity():
     holdings, usage = fixture()
     other = copy.deepcopy(usage["items"][0])
