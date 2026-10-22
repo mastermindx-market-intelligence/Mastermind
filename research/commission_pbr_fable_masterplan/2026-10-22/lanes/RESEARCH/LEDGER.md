@@ -192,3 +192,25 @@ Pre-SR-1 verbatim production rows remain in public git history: #1703 commit `a7
   6. evidence off-repo under `/Volumes/Mastermind/evidence/pbr/`.
 - **W2-R5 APPROVED**: one C1 leaf lane for the three open MINORs above. Runs after W2-R4's head is fixed, gets its own exact-head review, opens RESERVED, lands W2.
 - Merge hold: nothing of RESEARCH's enqueues on master before "s3 launched" or "window lost"; no `gh pr merge` on a pending-check PR after 02:00Z. Both W2 PRs are seat-merged.
+
+## W2-R4 step 2 (append-only decision ledger, #1757) and W2-R5 (#1766)
+
+| step | run-id / PR | model | wall (Z) | result |
+|---|---|---|---|---|
+| census | `pbr-res-w2r4-census` | glm-5.3-flash | 13:00–13:35 | reader/writer census (the precondition above) |
+| build | `pbr-res-w2r4-sup-r1` | glm-5.3-flash | 16:02 | not started: remote admission refused on host load (`host_load_at_or_above_limit`); same host and model relaunched once load fell |
+| build | `pbr-res-w2r4-sup-r2` → #1757 `5c4a8658` | glm-5.3-flash | 16:04–16:53 | one writer API, `append_decision_row`; one accessor, `effective_rows`/`read_effective_rows`; fields `supersedes` (list), `supersede_mode`, `row_id` |
+| review | `pbr-res-r1757` | glm-5.3 | 17:01 | not started: `ECONOMIC_POLICY_REFUSED` (C2 needs `POOL_ESCALATION_REASON`); relaunched with a truthful reason under a new run-id |
+| review | `pbr-res-r1757b` | glm-5.3 | 17:02–17:17 | **PARTIAL**: R-1757 sha256 `696be213…afbce0`. A1–A10 met; A5 false conflict reproduced on master and fixed at head; mutations caught. F1 MAJOR (PRODUCT raw-row cap), F2 MAJOR (`remove_positions` docstring promised erasure), F3–F8 lesser, F9/F10 notes. It counted 9 production write sites; the GO's "11" did not reproduce, and no writer was missed |
+| repair | `pbr-res-w2r4-fix1` → #1757 `8c47d521` | glm-5.3-flash | 17:22–17:43 | F2, F3, F4, F5, F7, F8 fixed in 6 files; 5 new tests fail on `5c4a8658`; F1 not touched (GO #2) |
+| replay | off-repo harness | — | 17:45 | at `8c47d521`: 0 mismatches at every asof; capture sha256 verified; harness byte-identical to the first run. Controls are in the first run's evidence dir |
+| re-review | `pbr-res-r1757r2` | glm-5.3 | 17:44–17:59 | **PASS**: R-1757-r2 sha256 `33727fa8…46e3a`, delta B1–B8 met; the accessor matched `5c4a8658` in 240/240 randomized trials; F1 CARRIED. Two MINORs: the scrub skip keys on identity alone (hand-edit edge case); the long-chain test comment overstates the old cost |
+| W2-R5 build | `pbr-res-w2r5-minors` → #1766 `7ce2865d` | glm-5.3-flash | 17:45–17:48 | three MINORs from R-1750-r2: rename, comment, spec word; 4 files, no file overlap with #1757; 48 passed / 5 skipped at base and head |
+| W2-R5 review | `pbr-res-r1766` | glm-5.3-flash | 17:51–17:57 | **PASS**, no findings: R-1766 sha256 `caf709e8…3bc7ed`; repo-wide grep for the old name is empty, and no golden file uses it |
+
+- **#1757**: "[RESERVED: seat merge]", head `8c47d5210f2b21e3ac0b5f68fb7ec0f9c4227a13`, base master `05a9eb52`. The PR body records both review rows, the fix round and the caveats. **#1766**: "[RESERVED: seat merge]", head `7ce2865def75dbe325cce83195db764374e31486`, base `05a9eb52`. Neither is enqueued (merge hold).
+- **Evidence** (off-repo, no capture magnitudes here): `/Volumes/Mastermind/evidence/pbr/research-w2r4-supersedes-20261022T170248Z/` holds the first head's replay and three discriminating controls. `/Volumes/Mastermind/evidence/pbr/research-w2r4-supersedes-fix1-20261022T174514Z/` holds the fix-round replay. Each has SHA256SUMS. The replay result is 0 mismatches against master's view.
+- **R-1757 F1 (MAJOR, open)**: `app/decision_availability._MAX_ROWS`/`_MAX_BYTES` count raw rows, so the availability source reaches its cap sooner than it did on master. Escalated to the seat with two options: (a) a PRODUCT follow-up (recommended, which keeps #1757 inside GO #2), or (b) a one-line PRODUCT change in #1757 with PRODUCT reading it. The ruling is pending.
+- **ECON slice**: the `bot/etf.py`, `bot/heavyweight.py` and outcome-reader slice (diff sha256 `8fb5a914…`) went to the seat for routing to ECON. Fix round 1 leaves those files with zero diff. ECON's read is pending.
+- **Follow-ups outside this PR**: R-1757 F9, a stale docstring at `brain/management_lifecycle.py:450-451`; the reader sites on the #673 carrier's decision-snapshot, which need the accessor when that carrier rebases; and r2's two MINORs.
+- **Cost**: USAGE_RECEIPT_MISSING for every lane (`usage_saved=0`). Only process receipts and the wall times above exist.
