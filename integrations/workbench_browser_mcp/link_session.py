@@ -18,6 +18,7 @@ from typing import Any, Mapping
 
 from control_plane.codex_worker import ProcessInspector
 from integrations.mastermind_browser_link.native_bridge import require_peer_uid
+from integrations.mastermind_browser_link.endpoint_evidence import capture_native_endpoint
 from integrations.mastermind_browser_link.native_channel import (
     COMMAND_SCHEMA, INVENTORY_SCHEMA, OBSERVE_SCHEMA, READY_SCHEMA,
     Deadline, LinkEnrollment, LinkProtocolError, MAX_LIFETIME_MS, NativeHostError,
@@ -53,7 +54,6 @@ class _Connection:
     peer_identity: Any
     pending: dict[str, _Pending] = field(default_factory=dict)
     used: set[str] = field(default_factory=set)
-    uncertain_tabs: set[int] = field(default_factory=set)
     busy_tabs: set[int] = field(default_factory=set)
     next_fence: int = 0
     write_gate: threading.Lock = field(default_factory=threading.Lock)
@@ -91,6 +91,8 @@ class BrowserLinkSession(BrowserSession):
         self._accept_thread = self._reader_thread = None
         self._active: _Connection | None = None
         self._receipt = None
+        self._endpoint = None
+        self._uncertain_tabs: set[int] = set()
 
     def _chrome_current(self):
         chrome = self._inspector.inspect(self._chrome_pid)
@@ -131,6 +133,14 @@ class BrowserLinkSession(BrowserSession):
                     **({"connection_generation": selected.generation} if selected is not None else {})}
 
     @property
+    def native_endpoint(self):
+        with self._gate:
+            if self._server is None or self._endpoint is None:
+                raise BrowserRelayError("Link endpoint is not started")
+            self._endpoint.qualify(self.enrollment.socket_path)
+            return self._endpoint.document()
+
+    @property
     def receipt(self):
         if self._receipt is None:
             raise BrowserRelayError("Link session is not started")
@@ -141,7 +151,16 @@ class BrowserLinkSession(BrowserSession):
             if self._server is not None or self._stop.is_set():
                 raise BrowserRelayError("Link session cannot be restarted")
             self._chrome_current()
+            parent = self.enrollment.socket_path.parent.lstat()
+            parent_identity = (parent.st_dev, parent.st_ino)
             self._server = open_private_server(self.enrollment.socket_path, owner_uid=os.geteuid())
+            try:
+                self._endpoint = capture_native_endpoint(self._server, self.enrollment.socket_path,
+                                                         parent_identity=parent_identity)
+            except BaseException:
+                close_private_server(self._server, self.enrollment.socket_path, owner_uid=os.geteuid())
+                self._server = None
+                raise
             self._server.settimeout(0.2)
             self._receipt = McpSessionReceipt(
                 child_pid=os.getpid(), tool_schema_digest=LINK_TOOL_SCHEMA_DIGEST,
@@ -152,7 +171,7 @@ class BrowserLinkSession(BrowserSession):
                 self._accept_thread.start()
             except BaseException:
                 close_private_server(self._server, self.enrollment.socket_path, owner_uid=os.geteuid())
-                self._server = self._receipt = self._accept_thread = None
+                self._server = self._receipt = self._accept_thread = self._endpoint = None
                 raise
             return self._receipt
 
@@ -239,6 +258,10 @@ class BrowserLinkSession(BrowserSession):
             if self._active is selected:
                 self._active = None
             for pending in selected.pending.values():
+                if pending.kind == "write" and (pending.result is None
+                        or pending.result.get("effect") == "EFFECT_UNKNOWN"
+                        or "original_effect" in pending.result):
+                    self._uncertain_tabs.add(pending.tab_id)
                 if pending.result is None:
                     pending.failed = True
                 pending.event.set()
@@ -290,7 +313,7 @@ class BrowserLinkSession(BrowserSession):
                 else:
                     if target["connection_generation"] != selected.generation:
                         raise BrowserRequestRefused("Link generation changed")
-                    if kind == "write" and (target["tab_id"] in selected.uncertain_tabs or target["tab_id"] in selected.busy_tabs):
+                    if kind == "write" and (target["tab_id"] in self._uncertain_tabs or target["tab_id"] in selected.busy_tabs):
                         raise BrowserRequestRefused("Link target is busy or unresolved")
                     now = self._clock_ms()
                     command = {"schema": COMMAND_SCHEMA, "request_id": request_id, **target,
@@ -321,16 +344,16 @@ class BrowserLinkSession(BrowserSession):
             result = pending.result
             if pending.failed or result is None:
                 if kind == "write":
-                    selected.uncertain_tabs.add(target["tab_id"])
+                    self._uncertain_tabs.add(target["tab_id"])
                 raise BrowserRelayError("Link response unavailable after dispatch")
             if kind == "write" and (result.get("effect") == "EFFECT_UNKNOWN" or "original_effect" in result):
-                selected.uncertain_tabs.add(target["tab_id"])
+                self._uncertain_tabs.add(target["tab_id"])
             if "original_effect" in result:
                 raise BrowserRelayError("Link original effect requires reconciliation")
             if kind == "inventory":
                 result = snapshot(result)
                 for row in result["shared_tabs"]:
-                    if row["tab_id"] in selected.uncertain_tabs and row["state"] == "shared":
+                    if row["tab_id"] in self._uncertain_tabs and row["state"] == "shared":
                         row["state"] = "effect_unresolved"
             return snapshot(result)
 

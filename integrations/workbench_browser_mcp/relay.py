@@ -135,6 +135,10 @@ class BrowserSession:
     def connection_status(self):
         return None
 
+    @property
+    def native_endpoint(self):
+        return None
+
     def call_with_identity(self, request_id, tool, arguments):
         return self.call(tool, arguments)
 
@@ -539,6 +543,7 @@ class BrowserRelayServer:
                 raise BrowserRelayError("relay status request is invalid")
             receipt = self._session.receipt
             connection_status = self._session.connection_status
+            native_endpoint = self._session.native_endpoint
             return self._response(
                 request_id=request_id,
                 ok=True,
@@ -546,6 +551,7 @@ class BrowserRelayServer:
                 allowed_tools=list(receipt.allowed_tools),
                 child_pid=receipt.child_pid,
                 **({"connection_status": connection_status} if connection_status is not None else {}),
+                **({"native_endpoint": native_endpoint} if native_endpoint is not None else {}),
             )
         if kind == "tool":
             if set(value) != {

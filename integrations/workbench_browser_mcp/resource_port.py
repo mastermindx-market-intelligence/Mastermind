@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
+import json
 import os
 from pathlib import Path
 import secrets
@@ -22,6 +24,10 @@ from control_plane.browser_resource_contract import (
 from control_plane.codex_worker import ProcessIdentityError, ProcessInspector
 from integrations.workbench_action_mcp.action_artifacts import (
     ACTION_PURPOSE_BROWSER_RESOURCE,
+    ACTION_PURPOSE_BROWSER_ACTION,
+    ActionArtifactError,
+    BrowserResourceDescriptor,
+    enumerate_action_evidence,
     ActionArtifactBusy,
     ActionArtifactIdentity,
     ActionArtifactStore,
@@ -48,10 +54,11 @@ from .contracts import (
     BrowserResourceRef,
     PreparedBrowserStart,
 )
-from .relay import RELAY_REQUEST_SCHEMA, BrowserRelayError, relay_request
+from .relay import RELAY_REQUEST_SCHEMA, RELAY_RESPONSE_SCHEMA, BrowserRelayError, relay_request
 from integrations.mastermind_browser_link.native_channel import LinkProtocolError
 from integrations.mastermind_browser_link.native_bridge import private_parent
-from integrations.mastermind_browser_link.profile_grant import LinkProfileGrant
+from integrations.mastermind_browser_link.profile_grant import LinkProfileGrant, historical_profile_document
+from integrations.mastermind_browser_link.endpoint_evidence import NativeEndpointEvidence
 from integrations.mastermind_browser_link.tool_contract import LINK_TOOL_SCHEMA_DIGEST, LINK_TOOLS
 
 
@@ -270,6 +277,7 @@ class BrowserResourcePort:
         relay_requester: RelayRequester = relay_request,
         relay_command_builder: RelayCommandBuilder = default_relay_command,
         start_ttl_ms: int = 30 * 60 * 1000,
+        has_active_actions: Callable[[], bool] = lambda: False,
     ) -> None:
         if not callable(resolve_binding) or not callable(clock_ms):
             raise TypeError("browser resource callbacks must be callable")
@@ -281,6 +289,9 @@ class BrowserResourcePort:
             raise TypeError("browser artifact store is required")
         if not isinstance(host_binding, ActionHostBinding):
             raise TypeError("browser host binding is required")
+        if not callable(has_active_actions):
+            raise TypeError("browser action observation must be callable")
+        self._has_active_actions = has_active_actions
         self._resolve_binding = resolve_binding
         self._clock_ms = clock_ms
         self._codec = codec
@@ -294,6 +305,7 @@ class BrowserResourcePort:
         if type(start_ttl_ms) is not int or not 10_000 <= start_ttl_ms <= 24 * 60 * 60 * 1000:
             raise TypeError("browser start TTL is invalid")
         self._start_ttl_ms = start_ttl_ms
+        self._owner_identity = self._inspector.inspect(os.getpid()) if type(self._config) is BrowserLinkHostConfig else None
 
     @property
     def codec(self) -> BrowserRefCodec:
@@ -341,6 +353,7 @@ class BrowserResourcePort:
         if (value.profile_ref != start.profile_ref or value.owner_ref != start.owner_ref
                 or value.operation_ref != start.operation_ref or value.generation != start.generation
                 or value.host_id != start.host_id or value.boot_session_id != start.boot_session_id
+                or value.store_device != self._store.device or value.store_inode != self._store.inode
                 or value.expires_at_ms < start.resource_expires_at_ms
                 or self._now() >= value.expires_at_ms):
             raise BrowserResourceRefused("LINK_PROFILE_GRANT_MISMATCH")
@@ -498,6 +511,9 @@ class BrowserResourcePort:
     def _identity(
         self, start: PreparedBrowserStart, binding: ProjectActionBinding
     ) -> ActionArtifactIdentity:
+        return self._start_identity(start, self._config.expected_tool_schema_digest)
+
+    def _start_identity(self, start, backend_digest):
         store = revalidate_artifact_store(self._store)
         return ActionArtifactIdentity(
             action_id=start.action_id,
@@ -511,14 +527,14 @@ class BrowserResourcePort:
             operation_ref=start.operation_ref,
             owner_ref=start.owner_ref,
             generation=start.generation,
-            root_device=binding.scope.root_device,
-            root_inode=binding.scope.root_inode,
+            root_device=start.root_device,
+            root_inode=start.root_inode,
             store_device=store.device,
             store_inode=store.inode,
             host_id=start.host_id,
             boot_session_id=start.boot_session_id,
             relative_path=f"browser:{start.action_id}",
-            source_identity=self._config.expected_tool_schema_digest,
+            source_identity=backend_digest,
         )
 
     def _socket_path(self, action_id: str) -> Path:
@@ -573,6 +589,7 @@ class BrowserResourcePort:
             raise BrowserResourceRefused("BROWSER_RELAY_UNAVAILABLE") from error
         if (
             type(response) is not dict
+            or response.get("schema") != RELAY_RESPONSE_SCHEMA
             or response.get("request_id") != request_id
             or response.get("resource_id") != start.action_id
             or response.get("ok") is not True
@@ -584,6 +601,8 @@ class BrowserResourcePort:
             response.get("child_pid") != process.pid or response.get("allowed_tools") != sorted(LINK_TOOLS)
         ):
             raise BrowserResourceRefused("BROWSER_RELAY_BINDING_CHANGED")
+        if not self._process_matches(process):
+            raise BrowserResourceRefused("BROWSER_RELAY_BINDING_CHANGED")
         return response
 
     def _browser_ref(
@@ -592,6 +611,9 @@ class BrowserResourcePort:
         process: ActionProcessRecord,
     ) -> str:
         self._status(start, process)
+        return self._encode_browser_ref(start, process)
+
+    def _encode_browser_ref(self, start, process):
         value = BrowserResourceRef(
             schema="mastermind.workbench_browser_ref.v1",
             start_action_id=start.action_id,
@@ -618,12 +640,255 @@ class BrowserResourcePort:
         )
         return self._codec.encode_resource(value)
 
+    def _owner_current(self):
+        observed = self._inspector.inspect(os.getpid())
+        if (self._owner_identity is None or observed != self._owner_identity
+                or observed.real_uid != os.getuid() or observed.effective_uid != os.geteuid()):
+            raise BrowserResourceRefused("BROWSER_OWNER_CHANGED")
+        return observed
+
+    def _descriptor(self, start_ref, grant):
+        owner = self._owner_current()
+        return BrowserResourceDescriptor(
+            start_ref=start_ref, owner_pid=os.getpid(), owner_start_identity=owner.start_identity,
+            profile_grant_json=json.dumps(grant.document(), sort_keys=True, separators=(",", ":"),
+                                          ensure_ascii=False, allow_nan=False),
+        )
+
+    def _descriptor_is_current(self, claim):
+        if type(self._config) is not BrowserLinkHostConfig:
+            return True
+        descriptor = claim.descriptor if claim is not None else None
+        owner = self._owner_current()
+        return (descriptor is not None and claim.identity.boot_session_id == self._host.boot_session_id
+                and descriptor.owner_pid == os.getpid()
+                and descriptor.owner_start_identity == owner.start_identity)
+
+    def _ready_resource(self, start, process):
+        if type(self._config) is not BrowserLinkHostConfig:
+            return self._browser_ref(start, process), {
+                "relay": "ready", "tool_schema_digest": self._config.expected_tool_schema_digest}
+        status = self._status(start, process)
+        grant = self._link_profile(start)
+        endpoint = NativeEndpointEvidence.from_document(status.get("native_endpoint"))
+        endpoint.qualify(grant.enrollment.socket_path)
+        return self._encode_browser_ref(start, process), {
+            "relay": "ready", "tool_schema_digest": self._config.expected_tool_schema_digest,
+            "native_endpoint": endpoint.document(),
+        }
+
+    def _historical_start(self, claim):
+        descriptor = claim.descriptor
+        if descriptor is None:
+            raise BrowserResourceRefused("BROWSER_RESOURCE_HISTORY_UNMAPPED")
+        try:
+            start = self._codec.decode_start(descriptor.start_ref, now_ms=self._now(), require_fresh=False)
+            grant = historical_profile_document(json.loads(descriptor.profile_grant_json))
+            if (self._start_identity(start, grant["backend_schema_digest"]) != claim.identity
+                    or start.mode != "extension" or start.profile_ref != grant["profile_ref"]
+                    or start.host_id != grant["host_id"] or start.host_id != self._host.host_id
+                    or start.boot_session_id != grant["boot_session_id"]
+                    or start.store_device != grant["store_device"] or start.store_inode != grant["store_inode"]
+                    or start.store_device != self._store.device or start.store_inode != self._store.inode
+                    or start.owner_ref != grant["owner_ref"] or start.operation_ref != grant["operation_ref"]
+                    or start.generation != grant["generation"]
+                    or start.resource_expires_at_ms > grant["expires_at_ms"]):
+                raise ValueError("historical identity differs")
+            return start, grant
+        except (ValueError, TypeError, KeyError, ActionArtifactError) as error:
+            raise BrowserResourceRefused("BROWSER_RESOURCE_HISTORY_INVALID") from error
+
+    def _owner_proved_absent(self, descriptor, boot_session_id):
+        if boot_session_id != self._host.boot_session_id:
+            return True
+        try:
+            current = self._inspector.inspect(descriptor.owner_pid)
+        except (ProcessIdentityError, OSError, ValueError):
+            try:
+                os.kill(descriptor.owner_pid, 0)
+            except ProcessLookupError:
+                return True
+            except OSError:
+                pass
+            return False
+        return current.start_identity != descriptor.owner_start_identity
+
+    def _profile_history(self, grant, evidence, *, excluding=None):
+        relevant = []
+        resources = {}
+        for classified in evidence:
+            claim = classified.claim
+            if claim.identity.purpose != ACTION_PURPOSE_BROWSER_RESOURCE or claim.identity.action_id == excluding:
+                continue
+            # The known legacy backend has no Link native endpoint. Unknown
+            # backend history cannot silently become "some other profile".
+            if claim.descriptor is None and claim.identity.source_identity == WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST:
+                continue
+            start, old_grant = self._historical_start(claim)
+            resources[start.action_id] = claim.identity
+            old_enrollment = old_grant["enrollment"]
+            same_instance = old_enrollment["instance_id"] == grant.enrollment.instance_id
+            same_path = old_enrollment["socket_path"] == str(grant.enrollment.socket_path)
+            if not same_instance and not same_path:
+                continue
+            if (not same_instance or not same_path
+                    or old_enrollment["extension_id"] != grant.enrollment.extension_id):
+                raise BrowserResourceRefused("BROWSER_PROFILE_ROUTE_CHANGED")
+            relevant.append((classified, start, old_grant))
+        start_ids = {row[1].action_id for row in relevant}
+        for classified in evidence:
+            identity = classified.claim.identity
+            if identity.purpose != ACTION_PURPOSE_BROWSER_ACTION:
+                continue
+            parts = identity.relative_path.split(":")
+            if len(parts) != 3 or parts[0] != "browser":
+                raise BrowserResourceRefused("BROWSER_ACTION_HISTORY_UNMAPPED")
+            if identity.source_identity != WORKBENCH_BROWSER_TOOL_SCHEMA_DIGEST:
+                resource_identity = resources.get(parts[1])
+                if resource_identity is None:
+                    raise BrowserResourceRefused("BROWSER_ACTION_HISTORY_UNMAPPED")
+                fields = ("subject_digest", "client_ref", "resource", "project_ref", "context_ref",
+                          "responsibility_ref", "operation_ref", "owner_ref", "generation",
+                          "root_device", "root_inode", "store_device", "store_inode",
+                          "host_id", "boot_session_id", "source_identity")
+                if any(getattr(identity, name) != getattr(resource_identity, name) for name in fields):
+                    raise BrowserResourceRefused("BROWSER_ACTION_HISTORY_MISMATCH")
+            if parts[1] in start_ids and (classified.evidence_status != "qualified"
+                                        or classified.effect_state == "EFFECT_UNKNOWN"):
+                raise BrowserResourceRefused("BROWSER_EFFECT_UNRESOLVED")
+        return relevant
+
+    def _recover_profile_locked(self, caller, binding, grant, evidence, *, allow_reuse):
+        """Recover existing receipts under the same writer used for the new claim."""
+        relevant = self._profile_history(grant, evidence)
+        if any(row.evidence_status != "qualified" or row.effect_state == "EFFECT_UNKNOWN"
+               for row, _start, _grant in relevant):
+            raise BrowserResourceRefused("BROWSER_RESOURCE_UNRESOLVED")
+        current = []
+        retired = []
+        endpoints = []
+        for classified, start, old_grant in relevant:
+            if classified.evidence_status != "qualified" or classified.effect_state == "EFFECT_UNKNOWN":
+                raise BrowserResourceRefused("BROWSER_RESOURCE_UNRESOLVED")
+            if self._descriptor_is_current(classified.claim):
+                if (allow_reuse and start.profile_ref == grant.profile_ref
+                        and self._same_binding(start, binding)
+                        and (start.subject_digest, start.client_ref, start.resource)
+                        == (caller.subject_digest, caller.client_ref, caller.resource)
+                        and self._now() < start.resource_expires_at_ms):
+                    current.append((classified, start))
+                    continue
+                if self._now() < start.resource_expires_at_ms:
+                    raise BrowserResourceRefused("BROWSER_PROFILE_ALREADY_ACTIVE")
+            elif not self._owner_proved_absent(classified.claim.descriptor, start.boot_session_id):
+                raise BrowserResourceRefused("BROWSER_PREVIOUS_OWNER_ACTIVE")
+            if classified.effect_state == "NOT_APPLIED":
+                continue
+            retired.append((classified, start))
+        if current:
+            if len(current) != 1:
+                raise BrowserResourceRefused("BROWSER_PROFILE_HISTORY_CONFLICT")
+            # The qualified immutable receipt needs no writer for live status I/O.
+            return current[0]
+        self._require_idle_action_owner()
+        for classified, start in retired:
+            process = read_action_process(self._store, classified.claim.identity)
+            if process is None:
+                raise BrowserResourceRefused("BROWSER_RESOURCE_PROCESS_UNRESOLVED")
+            if start.boot_session_id == self._host.boot_session_id:
+                if not self._terminate_exact_process(process):
+                    raise BrowserResourceRefused("BROWSER_PREVIOUS_RELAY_UNRESOLVED")
+            endpoint = NativeEndpointEvidence.from_document(classified.result.details.get("native_endpoint"))
+            if endpoint.socket_path != str(grant.enrollment.socket_path):
+                raise BrowserResourceRefused("BROWSER_RESOURCE_ENDPOINT_MISMATCH")
+            endpoints.append(endpoint)
+        # Multiple immutable generations can name this path. Only the receipt
+        # matching the current inode can authorize its removal. Old receipts
+        # neither take ownership of a new inode nor permanently block B -> C.
+        present = os.path.lexists(grant.enrollment.socket_path)
+        if present:
+            matches = []
+            for endpoint in endpoints:
+                try:
+                    if endpoint.qualify(grant.enrollment.socket_path):
+                        matches.append(endpoint)
+                except (LinkProtocolError, OSError):
+                    continue
+            if len(matches) != 1:
+                raise BrowserResourceRefused("BROWSER_NATIVE_ENDPOINT_UNOWNED")
+            matches[0].remove_after_owner_proved_absence(grant.enrollment.socket_path)
+        elif endpoints:
+            # Parent replacement is an ownership change even when the new
+            # directory happens to contain no socket.
+            if not any(self._absent_endpoint_matches(endpoint, grant) for endpoint in endpoints):
+                raise BrowserResourceRefused("BROWSER_NATIVE_PARENT_CHANGED")
+        return None
+
+    @staticmethod
+    def _absent_endpoint_matches(endpoint, grant):
+        try:
+            return not endpoint.qualify(grant.enrollment.socket_path, missing_ok=True)
+        except (LinkProtocolError, OSError):
+            return False
+
+    def _require_idle_action_owner(self):
+        # Checked under the existing store writer: no new action can claim
+        # between this observation and the long start/retirement section.
+        # Do not make a completed Chrome action compete with lifecycle I/O
+        # for its bounded durable-result finalization.
+        if type(self._config) is BrowserLinkHostConfig and self._has_active_actions():
+            raise BrowserResourceRefused("BROWSER_ACTIVATION_DEFERRED")
+
+    def activate_configured_profile(self, caller, *, project_ref, profile_ref):
+        """Host lifecycle activation, admitted by the existing Workbench owner."""
+        if type(self._config) is not BrowserLinkHostConfig:
+            raise BrowserResourceRefused("BROWSER_ACTIVATION_UNSUPPORTED")
+        self._owner_current()
+        binding = self._binding(caller, project_ref)
+        grant = self._profile_resolver(profile_ref)
+        if type(grant) is not LinkProfileGrant:
+            raise BrowserResourceRefused("LINK_PROFILE_GRANT_INVALID")
+        # Current admission is separate from historical evidence qualification.
+        token = self.prepare_resource(caller, project_ref=project_ref, mode="extension", profile_ref=profile_ref)
+        candidate, _ = self._decode_start(caller, token)
+        material = {"domain": "mastermind.browser_link.activation.v1",
+                    "owner_pid": os.getpid(), "owner_start": self._owner_identity.start_identity,
+                    "start": {key: value for key, value in dataclasses.asdict(candidate).items()
+                              if key not in {"action_id", "issued_at_ms", "expires_at_ms"}}}
+        action_id = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode()).hexdigest()[:32]
+        try:
+            writer = acquire_store_writer(self._store)
+        except ActionArtifactError as error:
+            raise BrowserResourceRefused("BROWSER_ACTIVATION_UNAVAILABLE") from error
+        with writer:
+            evidence = enumerate_action_evidence(self._store)
+            reuse = self._recover_profile_locked(caller, binding, grant, evidence, allow_reuse=True)
+            if reuse is None:
+                existing = next((row for row in evidence if row.claim.identity.action_id == action_id), None)
+                if existing is not None:
+                    # Terminal NOT_APPLIED and uncertain attempts are retained.
+                    start, _ = self._historical_start(existing.claim)
+                    if existing.evidence_status == "qualified":
+                        reuse = (existing, start)
+                    else:
+                        return self._reconcile_existing(start, existing.claim.identity, existing)
+                else:
+                    start = dataclasses.replace(candidate, action_id=action_id)
+                    token = self._codec.encode_start(start)
+                    return self._start_resource_locked(caller, token, start, binding, self._identity(start, binding),
+                                                       history_checked=True)
+        classified, start = reuse
+        return self._reconcile_existing(start, classified.claim.identity, classified)
+
     def _reconcile_existing(
         self,
         start: PreparedBrowserStart,
         identity: ActionArtifactIdentity,
         classified,
     ) -> dict[str, Any]:
+        if type(self._config) is BrowserLinkHostConfig and not self._descriptor_is_current(classified.claim):
+            return {"status": "OK", "effect_state": classified.effect_state,
+                    "browser_ref": None, "reconciled": True}
         if classified.evidence_status == "qualified":
             if classified.effect_state != "APPLIED":
                 return {
@@ -641,11 +906,13 @@ class BrowserResourcePort:
                     "reconciled": True,
                 }
             try:
-                browser_ref = self._browser_ref(start, process)
-            except BrowserResourceRefused:
+                browser_ref, details = self._ready_resource(start, process)
+                if type(self._config) is BrowserLinkHostConfig and details["native_endpoint"] != classified.result.details.get("native_endpoint"):
+                    raise BrowserResourceRefused("BROWSER_NATIVE_ENDPOINT_CHANGED")
+            except (BrowserResourceRefused, LinkProtocolError, OSError):
                 return {
                     "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
+                    "effect_state": "APPLIED" if type(self._config) is BrowserLinkHostConfig else "EFFECT_UNKNOWN",
                     "browser_ref": None,
                     "reconciled": True,
                 }
@@ -657,6 +924,7 @@ class BrowserResourcePort:
             }
 
         if classified.evidence_status == "pending":
+            self._require_idle_action_owner()
             process = read_action_process(self._store, identity)
             if process is None:
                 return {
@@ -666,8 +934,8 @@ class BrowserResourcePort:
                     "reconciled": True,
                 }
             try:
-                browser_ref = self._browser_ref(start, process)
-            except BrowserResourceRefused:
+                browser_ref, details = self._ready_resource(start, process)
+            except (BrowserResourceRefused, LinkProtocolError, OSError):
                 return {
                     "status": "OK",
                     "effect_state": "EFFECT_UNKNOWN",
@@ -681,7 +949,7 @@ class BrowserResourcePort:
                 observed_sha256=self._config.expected_tool_schema_digest,
                 completed_at_ms=self._now(),
                 durability="durable",
-                details={"relay": "ready", "reconciled_start": True},
+                details={**details, "reconciled_start": True},
             )
             return {
                 "status": "OK",
@@ -721,7 +989,9 @@ class BrowserResourcePort:
         # startup's final receipt and trigger cleanup of an applied resource.
         with writer:
             classified = classify_action(self._store, identity)
-            return self._reconcile_existing(start, identity, classified)
+            if classified.evidence_status != "qualified":
+                return self._reconcile_existing(start, identity, classified)
+        return self._reconcile_existing(start, identity, classified)
 
     @staticmethod
     def _terminate_unrecorded_prebarrier_process(
@@ -821,172 +1091,182 @@ class BrowserResourcePort:
 
         with writer:
             classified = classify_action(self._store, identity)
-            if classified.evidence_status != "absent":
-                return self._reconcile_existing(start, identity, classified)
+            if classified.evidence_status != "qualified":
+                return self._start_resource_locked(caller, start_ref, start, binding, identity)
+        return self._reconcile_existing(start, identity, classified)
 
-            outcome = claim_action(
+    def _start_resource_locked(self, caller, start_ref, start, binding, identity, *, history_checked=False):
+        classified = classify_action(self._store, identity)
+        if classified.evidence_status != "absent":
+            return self._reconcile_existing(start, identity, classified)
+
+        link_grant = self._link_profile(start) if type(self._config) is BrowserLinkHostConfig else None
+        if link_grant is not None and not history_checked:
+            evidence = enumerate_action_evidence(self._store)
+            self._recover_profile_locked(caller, binding, link_grant, evidence, allow_reuse=False)
+        descriptor = self._descriptor(start_ref, link_grant) if link_grant is not None else None
+        outcome = claim_action(
+            self._store, identity, claimed_at_ms=self._now(), descriptor=descriptor,
+        )
+        if not outcome.created:
+            return {
+                "status": "OK",
+                "effect_state": "EFFECT_UNKNOWN",
+                "browser_ref": None,
+                "reconciled": True,
+            }
+
+        socket_path = self._socket_path(start.action_id)
+        output_path = self._output_path(start.action_id)
+        if os.path.lexists(socket_path) or output_path.exists():
+            return {
+                "status": "OK",
+                "effect_state": "EFFECT_UNKNOWN",
+                "browser_ref": None,
+                "reconciled": False,
+            }
+        output_path.mkdir(mode=stat.S_IRWXU)
+        profile_path = self._profile_path(start)
+        if link_grant is not None and self._link_profile(start) != link_grant:
+            raise BrowserResourceRefused("LINK_PROFILE_GRANT_CHANGED")
+
+        read_fd, write_fd = os.pipe()
+        os.set_inheritable(read_fd, False)
+        os.set_inheritable(write_fd, False)
+        process: subprocess.Popen[bytes] | None = None
+        process_record: ActionProcessRecord | None = None
+        try:
+            command = tuple(
+                self._relay_command_builder(
+                    config=self._config,
+                    prepared=start,
+                    barrier_fd=read_fd,
+                    socket_path=socket_path,
+                    output_dir=output_path,
+                    profile_dir=profile_path,
+                    **({"profile_grant": link_grant} if link_grant is not None else {}),
+                )
+            )
+            if not command or not os.path.isabs(command[0]):
+                raise BrowserResourceRefused("BROWSER_RELAY_COMMAND_INVALID")
+            process = subprocess.Popen(
+                list(command),
+                cwd="/",
+                env={
+                    "PYTHONDONTWRITEBYTECODE": "1",
+                    "PYTHONSAFEPATH": "1",
+                },
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                close_fds=True,
+                pass_fds=(read_fd,),
+                start_new_session=True,
+            )
+            os.close(read_fd)
+            read_fd = -1
+            observed = self._inspector.inspect(process.pid)
+            if (
+                not observed.start_identity
+                or observed.pgid != process.pid
+                or observed.session_id != process.pid
+                or observed.effective_uid != os.geteuid()
+                or observed.real_uid != os.getuid()
+                or observed.effective_gid != os.getegid()
+                or observed.real_gid != os.getgid()
+            ):
+                raise BrowserResourceRefused("BROWSER_RELAY_PROCESS_INVALID")
+            process_record = write_action_process(
                 self._store,
                 identity,
-                claimed_at_ms=self._now(),
+                pid=process.pid,
+                process_start_identity=observed.start_identity,
+                pgid=observed.pgid,
+                session_id=observed.session_id,
+                host_id=start.host_id,
+                boot_session_id=start.boot_session_id,
+                recorded_at_ms=self._now(),
             )
-            if not outcome.created:
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "browser_ref": None,
-                    "reconciled": True,
-                }
+            current = self._binding(caller, start.project_ref)
+            if (
+                not self._same_binding(start, current)
+                or self._now() >= start.expires_at_ms
+            ):
+                raise BrowserResourceRefused("BROWSER_START_BINDING_CHANGED")
+            if link_grant is not None and self._link_profile(start) != link_grant:
+                raise BrowserResourceRefused("LINK_PROFILE_GRANT_CHANGED")
+            os.write(write_fd, b"\x01")
+            os.close(write_fd)
+            write_fd = -1
 
-            socket_path = self._socket_path(start.action_id)
-            output_path = self._output_path(start.action_id)
-            if os.path.lexists(socket_path) or output_path.exists():
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
-                    "browser_ref": None,
-                    "reconciled": False,
-                }
-            output_path.mkdir(mode=stat.S_IRWXU)
-            profile_path = self._profile_path(start)
-            link_grant = self._link_profile(start) if type(self._config) is BrowserLinkHostConfig else None
+            deadline = time.monotonic() + self._config.startup_timeout_seconds
+            while True:
+                try:
+                    browser_ref, details = self._ready_resource(start, process_record)
+                    break
+                except (BrowserResourceRefused, LinkProtocolError, OSError):
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(0.05)
 
-            read_fd, write_fd = os.pipe()
-            os.set_inheritable(read_fd, False)
-            os.set_inheritable(write_fd, False)
-            process: subprocess.Popen[bytes] | None = None
-            process_record: ActionProcessRecord | None = None
-            try:
-                command = tuple(
-                    self._relay_command_builder(
-                        config=self._config,
-                        prepared=start,
-                        barrier_fd=read_fd,
-                        socket_path=socket_path,
-                        output_dir=output_path,
-                        profile_dir=profile_path,
-                        **({"profile_grant": link_grant} if link_grant is not None else {}),
-                    )
-                )
-                if not command or not os.path.isabs(command[0]):
-                    raise BrowserResourceRefused("BROWSER_RELAY_COMMAND_INVALID")
-                process = subprocess.Popen(
-                    list(command),
-                    cwd="/",
-                    env={
-                        "PYTHONDONTWRITEBYTECODE": "1",
-                        "PYTHONSAFEPATH": "1",
-                    },
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    close_fds=True,
-                    pass_fds=(read_fd,),
-                    start_new_session=True,
-                )
-                os.close(read_fd)
-                read_fd = -1
-                observed = self._inspector.inspect(process.pid)
-                if (
-                    not observed.start_identity
-                    or observed.pgid != process.pid
-                    or observed.session_id != process.pid
-                    or observed.effective_uid != os.geteuid()
-                    or observed.real_uid != os.getuid()
-                    or observed.effective_gid != os.getegid()
-                    or observed.real_gid != os.getgid()
-                ):
-                    raise BrowserResourceRefused("BROWSER_RELAY_PROCESS_INVALID")
-                process_record = write_action_process(
-                    self._store,
-                    identity,
-                    pid=process.pid,
-                    process_start_identity=observed.start_identity,
-                    pgid=observed.pgid,
-                    session_id=observed.session_id,
-                    host_id=start.host_id,
-                    boot_session_id=start.boot_session_id,
-                    recorded_at_ms=self._now(),
-                )
-                current = self._binding(caller, start.project_ref)
-                if (
-                    not self._same_binding(start, current)
-                    or self._now() >= start.expires_at_ms
-                ):
-                    raise BrowserResourceRefused("BROWSER_START_BINDING_CHANGED")
-                if link_grant is not None and self._link_profile(start) != link_grant:
-                    raise BrowserResourceRefused("LINK_PROFILE_GRANT_CHANGED")
-                os.write(write_fd, b"\x01")
-                os.close(write_fd)
-                write_fd = -1
-
-                deadline = time.monotonic() + self._config.startup_timeout_seconds
-                while True:
-                    try:
-                        browser_ref = self._browser_ref(start, process_record)
-                        break
-                    except BrowserResourceRefused:
-                        if time.monotonic() >= deadline:
-                            raise
-                        time.sleep(0.05)
-
+            finalize_action(
+                self._store,
+                identity,
+                effect_state="APPLIED",
+                observed_sha256=self._config.expected_tool_schema_digest,
+                completed_at_ms=self._now(),
+                durability="durable",
+                details=details,
+            )
+            return {
+                "status": "OK",
+                "effect_state": "APPLIED",
+                "browser_ref": browser_ref,
+                "reconciled": False,
+            }
+        except BaseException:
+            completed = classify_action(self._store, identity)
+            if completed.evidence_status == "qualified" and completed.effect_state == "APPLIED":
+                return self._reconcile_existing(start, identity, completed)
+            if process_record is not None:
+                clean = self._terminate_exact_process(process_record)
+            elif process is not None and write_fd >= 0:
+                # The launch barrier is still closed, so no browser resource
+                # effect can have begun. Prove the exact wrapper absent and
+                # record NOT_APPLIED rather than leaking a blocked process.
+                clean = self._terminate_unrecorded_prebarrier_process(process)
+            else:
+                clean = False
+            if clean:
                 finalize_action(
                     self._store,
                     identity,
-                    effect_state="APPLIED",
-                    observed_sha256=self._config.expected_tool_schema_digest,
+                    effect_state="NOT_APPLIED",
+                    observed_sha256=None,
                     completed_at_ms=self._now(),
                     durability="durable",
-                    details={
-                        "relay": "ready",
-                        "tool_schema_digest": self._config.expected_tool_schema_digest,
-                    },
+                    details={"relay": "startup_failed_cleanly"},
                 )
                 return {
                     "status": "OK",
-                    "effect_state": "APPLIED",
-                    "browser_ref": browser_ref,
-                    "reconciled": False,
-                }
-            except BaseException:
-                if process_record is not None:
-                    clean = self._terminate_exact_process(process_record)
-                elif process is not None and write_fd >= 0:
-                    # The launch barrier is still closed, so no browser resource
-                    # effect can have begun. Prove the exact wrapper absent and
-                    # record NOT_APPLIED rather than leaking a blocked process.
-                    clean = self._terminate_unrecorded_prebarrier_process(process)
-                else:
-                    clean = False
-                if clean:
-                    finalize_action(
-                        self._store,
-                        identity,
-                        effect_state="NOT_APPLIED",
-                        observed_sha256=None,
-                        completed_at_ms=self._now(),
-                        durability="durable",
-                        details={"relay": "startup_failed_cleanly"},
-                    )
-                    return {
-                        "status": "OK",
-                        "effect_state": "NOT_APPLIED",
-                        "browser_ref": None,
-                        "reconciled": False,
-                    }
-                self._store.mark_cleanup_uncertain("browser_relay_start")
-                return {
-                    "status": "OK",
-                    "effect_state": "EFFECT_UNKNOWN",
+                    "effect_state": "NOT_APPLIED",
                     "browser_ref": None,
                     "reconciled": False,
                 }
-            finally:
-                for fd in (read_fd, write_fd):
-                    if fd >= 0:
-                        try:
-                            os.close(fd)
-                        except OSError:
-                            self._store.mark_cleanup_uncertain("browser_barrier_close")
+            self._store.mark_cleanup_uncertain("browser_relay_start")
+            return {
+                "status": "OK",
+                "effect_state": "EFFECT_UNKNOWN",
+                "browser_ref": None,
+                "reconciled": False,
+            }
+        finally:
+            for fd in (read_fd, write_fd):
+                if fd >= 0:
+                    try:
+                        os.close(fd)
+                    except OSError:
+                        self._store.mark_cleanup_uncertain("browser_barrier_close")
 
     def cleanup_resource(
         self,

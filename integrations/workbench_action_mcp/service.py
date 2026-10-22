@@ -14,7 +14,7 @@ Key rotation is a generation boundary and must not strand an unresolved effect.
 from __future__ import annotations
 
 import asyncio
-from contextlib import AsyncExitStack, asynccontextmanager, contextmanager
+from contextlib import AsyncExitStack, asynccontextmanager, contextmanager, suppress
 import dataclasses
 import enum
 import json
@@ -32,6 +32,7 @@ from integrations.business_mcp_auth.contracts import load_resource_policy
 from integrations.business_mcp_auth.jwks import BoundedJwksCache, HttpxJwksFetcher
 from integrations.business_mcp_auth.jwt_verifier import JwtAuthenticator
 from integrations.workbench_read_mcp.runtime import (
+    RuntimeClosed,
     RuntimeCloseIncomplete,
     RuntimeCloseUncertain,
 )
@@ -42,6 +43,7 @@ from .runtime import StableWorkbenchActionLease, WorkbenchActionRuntime
 SERVICE_SCHEMA = "mastermind.workbench_action_service.v1"
 SERVICE_SCHEMA_V2 = "mastermind.workbench_action_service.v2"
 SERVICE_SCHEMA_V3 = "mastermind.workbench_action_service.v3"
+BROWSER_ACTIVATION_INTERVAL_SECONDS = 10.0
 MAX_CONFIG_BYTES = 64 * 1024
 MAX_POLICY_BYTES = 64 * 1024
 MAX_BROWSER_CATALOG_BYTES = 2 * 1024 * 1024
@@ -118,6 +120,7 @@ class ServiceConfigurationError(RuntimeError):
             "SERVICE_CONFIGURATION_REFUSED",
             "SERVICE_BIND_REFUSED",
             "SERVICE_STARTUP_CLEANUP_UNCERTAIN",
+            "BROWSER_ACTIVATION_BUDGET_TOO_SMALL",
         }
     )
 
@@ -202,6 +205,7 @@ class ServiceState:
     socket_owned: bool = False
     stopping: bool = False
     shutdown_outcome: ShutdownOutcome | None = None
+    browser_activation: tuple[dict[str, str], ...] = ()
 
 
 def _refuse(code: str = "SERVICE_CONFIGURATION_REFUSED") -> None:
@@ -393,6 +397,9 @@ def parse_service_config(value: object) -> ServiceConfig:
     if value.get("bind_host") != "127.0.0.1":
         _refuse()
     ttl = _bounded_int(value.get("action_ttl_ms"), minimum=1000, maximum=MAX_ACTION_TTL_MS)
+    io_timeout = _bounded_timeout(value.get("io_timeout_seconds"))
+    if type(browser) is BrowserLinkServiceConfig and io_timeout < browser.startup_timeout_seconds + 5:
+        _refuse("BROWSER_ACTIVATION_BUDGET_TOO_SMALL")
     return ServiceConfig(
         schema=schema,
         policy_file=_absolute_path(value.get("policy_file")),
@@ -407,7 +414,7 @@ def parse_service_config(value: object) -> ServiceConfig:
         max_concurrency=_bounded_int(
             value.get("max_concurrency"), minimum=1, maximum=MAX_CONCURRENCY
         ),
-        io_timeout_seconds=_bounded_timeout(value.get("io_timeout_seconds")),
+        io_timeout_seconds=io_timeout,
         close_timeout_seconds=_bounded_timeout(value.get("close_timeout_seconds")),
         action_ttl_ms=ttl,
         lease=_lease(value.get("lease")),
@@ -855,6 +862,7 @@ def create_browser_sibling(
             grants = parse_profile_grants(
                 _secure_json(selected.profiles_file, maximum=256 * 1024),
                 lease=config.lease, host_binding=runtime.services.host_binding,
+                artifact_store=runtime.services.artifact_store,
             )
             return create_browser_deployment(
                 services=runtime.services,
@@ -864,6 +872,7 @@ def create_browser_sibling(
                     startup_timeout_seconds=selected.startup_timeout_seconds,
                 ),
                 tool_catalog=tool_catalog(), profile_resolver=grants.get,
+                configured_profile_refs=tuple(grants),
             )
         if type(selected) is not BrowserServiceConfig:
             _refuse()
@@ -1132,10 +1141,34 @@ def build_service_app(
                             browser_fabric_app
                         )
                     )
+                activation_task = None
+                if type(config.browser) is BrowserLinkServiceConfig and browser_deployment is not None:
+                    from integrations.mastermind_browser_plugin.workbench_service import browser_broker_caller_from_lease
+                    broker_caller = browser_broker_caller_from_lease(config.lease)
+                    async def observe_configured_profiles():
+                        state.browser_activation = await browser_deployment.activate_configured_profiles(
+                            broker_caller, config.lease.project_ref)
+                    await observe_configured_profiles()
+                    async def maintain_configured_profiles():
+                        while True:
+                            await asyncio.sleep(BROWSER_ACTIVATION_INTERVAL_SECONDS)
+                            try:
+                                await observe_configured_profiles()
+                            except RuntimeClosed:
+                                # Expiry/revocation closes the incumbent owner.
+                                # Observation stops without reopening admission.
+                                return
+                    # Revisit the same deterministic starts, never issue a new
+                    # page action or replace an unresolved original attempt.
+                    activation_task = asyncio.create_task(maintain_configured_profiles())
                 state.lifespan_started = True
                 try:
                     yield
                 finally:
+                    if activation_task is not None:
+                        activation_task.cancel()
+                        with suppress(asyncio.CancelledError):
+                            await activation_task
                     await _close_runtime(runtime, config, state)
             state.lifespan_completed = True
         except BaseException:

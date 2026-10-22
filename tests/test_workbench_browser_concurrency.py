@@ -85,3 +85,38 @@ def test_link_action_receipts_have_explicit_effect_semantics(status, effect, is_
     assert module.BrowserActionPort._result_effect(browser, prepared, result) == expected
     result["structuredContent"]["request_id"] = "b" * 32
     assert module.BrowserActionPort._result_effect(browser, prepared, result) is None
+
+
+@pytest.mark.parametrize("failure", ["lost_response", "persistence_failure", "qualified_unknown"])
+def test_link_durable_uncertainty_blocks_later_new_mutation(tmp_path, monkeypatch, failure):
+    from integrations.workbench_action_mcp.action_artifacts import ActionArtifactUncertain
+    from integrations.mastermind_browser_link.tool_contract import ACTION_TOOL
+    from integrations.workbench_browser_mcp.browser_port import BrowserPortRefused
+    from integrations.workbench_browser_mcp.relay import BrowserRelayError
+    calls = []
+    def relay(_path, request, **_):
+        calls.append(request)
+        if failure == "lost_response":
+            raise BrowserRelayError("receipt lost after dispatch")
+        effect = "EFFECT_UNKNOWN" if failure == "qualified_unknown" else "APPLIED"
+        return {**reply(request), "result": {"content": [], "isError": effect != "APPLIED",
+                "structuredContent": {"schema": OWNER_RESULT_SCHEMA, "request_id": request["request_id"],
+                    "status": "refused" if effect == "EFFECT_UNKNOWN" else "completed", "effect_state": effect}}}
+    fd, caller, port, legacy_ref = _fixture(tmp_path, relay)
+    try:
+        browser = port.codec.decode_resource(legacy_ref, now_ms=2000)
+        browser_ref = port.codec.encode_resource(replace(browser, mode="extension",
+            profile_ref="link-" + "a" * 64, tool_schema_digest=LINK_TOOL_SCHEMA_DIGEST))
+        first = port.prepare_action(caller, browser_ref, ACTION_TOOL, {"fixture": 1})
+        second = port.prepare_action(caller, browser_ref, ACTION_TOOL, {"fixture": 2})
+        if failure == "persistence_failure":
+            monkeypatch.setattr(port, "_finalize_claimed",
+                                lambda *a, **kw: (_ for _ in ()).throw(ActionArtifactUncertain("fsync failed")))
+        assert port.run_action(caller, browser_ref, first)["effect_state"] == "EFFECT_UNKNOWN"
+        assert not port._inflight_actions
+        with pytest.raises(BrowserPortRefused, match="BROWSER_EFFECT_UNRESOLVED"):
+            port.run_action(caller, browser_ref, second)
+        assert len(calls) == 1
+        assert port.reconcile_action(caller, browser_ref, first)["effect_state"] == "EFFECT_UNKNOWN"
+    finally:
+        os.close(fd)

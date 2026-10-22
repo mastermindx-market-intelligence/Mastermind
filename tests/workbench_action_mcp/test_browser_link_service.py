@@ -39,6 +39,8 @@ def configuration(tmp_path, short_root):
         generation=lease["generation"], host_id=document["host_id"],
         boot_session_id=ProcessInspector().boot_session_id(),
         expires_at_ms=lease["lease_expires_at_ms"], exclusive=True,
+        store_device=Path(document["artifact_directory"]).stat().st_dev,
+        store_inode=Path(document["artifact_directory"]).stat().st_ino,
         enrollment=enrollment, chrome_pid=os.getpid(), chrome_start_identity=chrome.start_identity,
     )
     profiles = short_root / "profiles.json"

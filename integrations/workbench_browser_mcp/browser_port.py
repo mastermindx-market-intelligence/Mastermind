@@ -13,6 +13,7 @@ import os
 from pathlib import Path
 import secrets
 import stat
+import threading
 import time
 from collections.abc import Callable, Mapping
 from typing import Any
@@ -32,6 +33,7 @@ from integrations.workbench_action_mcp.action_artifacts import (
     ActionArtifactUncertain,
     ActionHostBinding,
     acquire_store_writer,
+    enumerate_action_evidence,
     claim_action,
     classify_action,
     finalize_action,
@@ -156,6 +158,8 @@ class BrowserActionPort:
         self._relay_requester = relay_requester
         self._action_ttl_ms = action_ttl_ms
         self._relay_timeout = float(relay_timeout_seconds)
+        self._inflight_gate = threading.RLock()
+        self._inflight_actions: set[str] = set()
 
     @property
     def codec(self) -> BrowserRefCodec:
@@ -637,6 +641,26 @@ class BrowserActionPort:
             return None
         return metadata["effect_state"]
 
+    def has_active_actions(self) -> bool:
+        """Observe this original action owner's dispatches; caller holds the store writer."""
+        with self._inflight_gate:
+            return bool(self._inflight_actions)
+
+    def _require_resolved_link_history(self, browser):
+        if browser.tool_schema_digest != LINK_TOOL_SCHEMA_DIGEST:
+            return
+        with self._inflight_gate:
+            inflight = frozenset(self._inflight_actions)
+        prefix = f"browser:{browser.start_action_id}:"
+        for classified in enumerate_action_evidence(self._store):
+            identity = classified.claim.identity
+            if identity.purpose != ACTION_PURPOSE_BROWSER_ACTION or not identity.relative_path.startswith(prefix):
+                continue
+            if classified.evidence_status == "pending" and identity.action_id in inflight:
+                continue
+            if classified.evidence_status != "qualified" or classified.effect_state == "EFFECT_UNKNOWN":
+                raise BrowserPortRefused("BROWSER_EFFECT_UNRESOLVED")
+
     def run_action(
         self, caller: ActionCaller, browser_ref: object, action_ref: object,
     ) -> dict[str, Any]:
@@ -644,89 +668,100 @@ class BrowserActionPort:
             caller, browser_ref, action_ref, require_live=False
         )
         identity = self._action_identity(browser, binding, prepared)
-        original_binding = _binding_key(binding)
+        owns_claim = False
         try:
-            writer = self._action_writer()
-        except (ActionArtifactBusy, ActionArtifactUncertain):
-            # Another invocation could already have claimed this original ID.
-            return self._unknown(reconciled=True)
-        with writer:
-            classified = classify_action(self._store, identity)
-            if classified.evidence_status == "qualified":
-                return self._classification_receipt(classified, reconciled=True)
-            if classified.evidence_status != "absent":
-                return self._unknown(reconciled=True)
-            fresh_browser, fresh_binding, fresh_socket, fresh_prepared = self._decode_action(
-                caller, browser_ref, action_ref
-            )
-            if (fresh_browser != browser or _binding_key(fresh_binding) != original_binding
-                    or fresh_socket != socket_path or fresh_prepared != prepared):
-                raise BrowserPortRefused("BROWSER_ACTION_BINDING_CHANGED")
-            outcome = claim_action(self._store, identity, claimed_at_ms=self._now())
-            if not outcome.created:
-                return self._unknown(reconciled=True)
-
-        # Only this invocation created the durable claim. Release the shared
-        # store lock while Chrome works; duplicates only observe the claim.
-        reason = None
-        try:
-            current_browser, current_binding, current_socket = self._resource(caller, browser_ref)
-        except BrowserPortRefused:
-            reason = "binding_refused_before_dispatch"
-        else:
-            if (_binding_key(current_binding) != original_binding or current_browser != browser
-                    or current_socket != socket_path or self._now() >= prepared.expires_at_ms):
-                reason = "binding_changed_before_dispatch"
-        if reason is not None:
-            self._finalize_claimed(
-                identity, outcome.claim, effect_state="NOT_APPLIED", observed_sha256=None,
-                completed_at_ms=self._now(), durability="durable", details={"reason": reason},
-            )
-            return {"status": "OK", "effect_state": "NOT_APPLIED",
-                    "observed_sha256": None, "reconciled": False}
-        try:
-            response = self._relay(
-                socket_path=socket_path, browser=browser, request_id=prepared.action_id,
-                tool=prepared.tool_name, arguments=json.loads(prepared.arguments_json),
-            )
-        except BrowserRelayError:
-            return self._unknown()
-
-        observed_sha256 = None
-        result = None
-        if response["ok"] is not True:
-            if response.get("error") != "REQUEST_REFUSED":
-                return self._unknown()
-            effect_state = "NOT_APPLIED"
-            details = {"relay_error": "REQUEST_REFUSED"}
-        else:
-            result = response.get("result")
-            if type(result) is not dict:
-                return self._unknown()
-            effect_state = self._result_effect(browser, prepared, result)
-            if effect_state is None:
-                return self._unknown()
+            original_binding = _binding_key(binding)
             try:
-                result_bytes = json.dumps(result, sort_keys=True, separators=(",", ":"),
-                                          ensure_ascii=False, allow_nan=False).encode("utf-8")
-            except (TypeError, ValueError):
+                writer = self._action_writer()
+            except (ActionArtifactBusy, ActionArtifactUncertain):
+                # Another invocation could already have claimed this original ID.
+                return self._unknown(reconciled=True)
+            with writer:
+                classified = classify_action(self._store, identity)
+                if classified.evidence_status == "qualified":
+                    return self._classification_receipt(classified, reconciled=True)
+                if classified.evidence_status != "absent":
+                    return self._unknown(reconciled=True)
+                fresh_browser, fresh_binding, fresh_socket, fresh_prepared = self._decode_action(
+                    caller, browser_ref, action_ref
+                )
+                if (fresh_browser != browser or _binding_key(fresh_binding) != original_binding
+                        or fresh_socket != socket_path or fresh_prepared != prepared):
+                    raise BrowserPortRefused("BROWSER_ACTION_BINDING_CHANGED")
+                self._require_resolved_link_history(browser)
+                outcome = claim_action(self._store, identity, claimed_at_ms=self._now())
+                if not outcome.created:
+                    return self._unknown(reconciled=True)
+                with self._inflight_gate:
+                    self._inflight_actions.add(identity.action_id)
+                    owns_claim = True
+
+            # Only this invocation created the durable claim. Release the shared
+            # store lock while Chrome works; duplicates only observe the claim.
+            reason = None
+            try:
+                current_browser, current_binding, current_socket = self._resource(caller, browser_ref)
+            except BrowserPortRefused:
+                reason = "binding_refused_before_dispatch"
+            else:
+                if (_binding_key(current_binding) != original_binding or current_browser != browser
+                        or current_socket != socket_path or self._now() >= prepared.expires_at_ms):
+                    reason = "binding_changed_before_dispatch"
+            if reason is not None:
+                self._finalize_claimed(
+                    identity, outcome.claim, effect_state="NOT_APPLIED", observed_sha256=None,
+                    completed_at_ms=self._now(), durability="durable", details={"reason": reason},
+                )
+                return {"status": "OK", "effect_state": "NOT_APPLIED",
+                        "observed_sha256": None, "reconciled": False}
+            try:
+                response = self._relay(
+                    socket_path=socket_path, browser=browser, request_id=prepared.action_id,
+                    tool=prepared.tool_name, arguments=json.loads(prepared.arguments_json),
+                )
+            except BrowserRelayError:
                 return self._unknown()
-            observed_sha256 = hashlib.sha256(result_bytes).hexdigest()
-            details = {"tool": prepared.tool_name, "browser_tool_effect_only": True}
-        try:
-            # Persist the exact original effect even if its lease has since
-            # expired. Saving evidence requires no new browser authority.
-            result_record = self._finalize_claimed(
-                identity, outcome.claim, effect_state=effect_state, observed_sha256=observed_sha256,
-                completed_at_ms=self._now(), durability="durable", details=details,
-            )
-        except (ActionArtifactBusy, ActionArtifactUncertain, OSError):
-            return self._unknown()
-        receipt = {"status": "OK", "effect_state": result_record.effect_state,
-                   "observed_sha256": result_record.observed_sha256, "reconciled": False}
-        if result is not None and result_record.effect_state == "APPLIED":
-            receipt["result"] = result
-        return receipt
+
+            observed_sha256 = None
+            result = None
+            if response["ok"] is not True:
+                if response.get("error") != "REQUEST_REFUSED":
+                    return self._unknown()
+                effect_state = "NOT_APPLIED"
+                details = {"relay_error": "REQUEST_REFUSED"}
+            else:
+                result = response.get("result")
+                if type(result) is not dict:
+                    return self._unknown()
+                effect_state = self._result_effect(browser, prepared, result)
+                if effect_state is None:
+                    return self._unknown()
+                try:
+                    result_bytes = json.dumps(result, sort_keys=True, separators=(",", ":"),
+                                              ensure_ascii=False, allow_nan=False).encode("utf-8")
+                except (TypeError, ValueError):
+                    return self._unknown()
+                observed_sha256 = hashlib.sha256(result_bytes).hexdigest()
+                details = {"tool": prepared.tool_name, "browser_tool_effect_only": True}
+            try:
+                # Persist the exact original effect even if its lease has since
+                # expired. Saving evidence requires no new browser authority.
+                result_record = self._finalize_claimed(
+                    identity, outcome.claim, effect_state=effect_state, observed_sha256=observed_sha256,
+                    completed_at_ms=self._now(), durability="durable", details=details,
+                )
+            except (ActionArtifactBusy, ActionArtifactUncertain, OSError):
+                return self._unknown()
+            receipt = {"status": "OK", "effect_state": result_record.effect_state,
+                       "observed_sha256": result_record.observed_sha256, "reconciled": False}
+            if result is not None and result_record.effect_state == "APPLIED":
+                receipt["result"] = result
+            return receipt
+        finally:
+            if owns_claim:
+                with self._inflight_gate:
+                    self._inflight_actions.discard(identity.action_id)
+
 
 
 __all__ = [
