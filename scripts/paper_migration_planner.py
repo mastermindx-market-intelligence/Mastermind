@@ -71,6 +71,32 @@ def validate_inventory(inventory: dict) -> list[dict]:
     return pages
 
 
+def validate_visibility_delta(inventory: dict, delta: dict | None) -> set[str]:
+    """A read-only observation can exclude absent pages, but never prove movement."""
+    if delta is None:
+        return set()
+    if (not isinstance(delta, dict)
+            or delta.get("schema") != "mastermind.paper-source-visibility-drift.v1"
+            or delta.get("source_file_id") != SOURCE_FILE_ID
+            or delta.get("baseline_page_count") != inventory["inventory_count"]
+            or delta.get("classification") != "READ_ONLY_DELTA_NOT_PROOF_OF_MOVE_DELETE_OR_LOSSLESS_COPY"):
+        raise InventoryError("Invalid source-visibility delta contract")
+    missing = delta.get("unobserved_baseline_pages")
+    added = delta.get("added_visible_page_ids")
+    if not isinstance(missing, list) or not isinstance(added, list) or added:
+        raise InventoryError("Added pages or malformed visibility delta need fresh source census")
+    observed_ids = [row.get("source_page_id") for row in missing if isinstance(row, dict)]
+    if len(observed_ids) != len(missing) or len(observed_ids) != len(set(observed_ids)):
+        raise InventoryError("Duplicate or malformed absent source page")
+    expected = {row["source_page_id"] for row in inventory["pages"]}
+    if not set(observed_ids).issubset(expected):
+        raise InventoryError("Visibility delta references an unknown baseline page")
+    current = delta.get("current_visible_page_count")
+    if type(current) is not int or current != len(expected) - len(observed_ids):
+        raise InventoryError("Visibility delta page totals are inconsistent")
+    return set(observed_ids)
+
+
 def slugify(text: str) -> str:
     result = re.sub(r"[^a-z0-9]+", "-", text.casefold()).strip("-")
     if not result:
@@ -79,8 +105,10 @@ def slugify(text: str) -> str:
 
 
 def make_plan(inventory: dict, node_target: int = DEFAULT_NODE_TARGET,
-              artboard_target: int = DEFAULT_ARTBOARD_TARGET) -> dict:
+              artboard_target: int = DEFAULT_ARTBOARD_TARGET,
+              visibility_delta: dict | None = None) -> dict:
     pages = validate_inventory(inventory)
+    absent_ids = validate_visibility_delta(inventory, visibility_delta)
     if type(node_target) is not int or type(artboard_target) is not int or node_target <= 0 or artboard_target <= 0:
         raise InventoryError("Planning targets must be positive integer heuristics")
     groups = defaultdict(list)
@@ -89,6 +117,7 @@ def make_plan(inventory: dict, node_target: int = DEFAULT_NODE_TARGET,
     destinations = []
     assignments = []
     held = []
+    externally_absent = []
     for family in sorted(groups, key=str.casefold):
         slug = slugify(family)
         volumes = []
@@ -96,6 +125,11 @@ def make_plan(inventory: dict, node_target: int = DEFAULT_NODE_TARGET,
         ordered = sorted(groups[family], key=lambda r: (-r["node_count"], -r["artboard_count"], r["source_page_id"]))
         for row in ordered:
             page_id, n, b = row["source_page_id"], row["node_count"], row["artboard_count"]
+            if page_id in absent_ids:
+                externally_absent.append({"source_page_id": page_id, "source_url": row["source_url"],
+                    "destination_family": family, "baseline_nodes": n, "baseline_artboards": b,
+                    "reason": "EXTERNALLY_ABSENT_NOT_PROVEN_MIGRATED_OR_DELETED"})
+                continue
             if n > node_target or b > artboard_target:
                 held.append({
                     "source_page_id": page_id,
@@ -130,24 +164,29 @@ def make_plan(inventory: dict, node_target: int = DEFAULT_NODE_TARGET,
                                  h["source_page_id"] for h in held if h["destination_family"] == family)})
     assigned_ids = {row["source_page_id"] for row in assignments}
     held_ids = {row["source_page_id"] for row in held}
+    missing_ids = {row["source_page_id"] for row in externally_absent}
     expected_ids = {row["source_page_id"] for row in pages}
-    if assigned_ids & held_ids or assigned_ids | held_ids != expected_ids:
+    if assigned_ids & held_ids or assigned_ids & missing_ids or held_ids & missing_ids or assigned_ids | held_ids | missing_ids != expected_ids:
         raise InventoryError("Planner omitted, duplicated, or misclassified a source page")
     if len({d["family_slug"] for d in destinations}) != len(destinations):
         raise InventoryError("Colliding destination slugs")
     assignments.sort(key=lambda r: r["source_page_id"])
     held.sort(key=lambda r: r["source_page_id"])
+    externally_absent.sort(key=lambda r: r["source_page_id"])
     return {
         "schema": "mastermind.paper-migration-offline-plan.v1",
         "classification": "READ_ONLY_PREFLIGHT_NOT_TRANSFER_OR_DELETE_AUTHORITY",
         "source_file_id": SOURCE_FILE_ID,
         "source_inventory_sha256": inventory_fingerprint(inventory),
+        "source_visibility_delta_sha256": inventory_fingerprint(visibility_delta) if visibility_delta else None,
+        "source_visibility_is_currently_unverified": visibility_delta is None,
         "source_observed_date": inventory.get("observed_date"),
         "source_warning": inventory.get("warning_observed"),
         "planning_heuristics_not_vendor_limits": {
             "max_nodes_per_proposed_volume": node_target,
             "max_artboards_per_proposed_volume": artboard_target},
-        "counts": {"source_pages": len(pages), "whole_page_planning_candidates": len(assignments),
+        "counts": {"source_pages": len(pages), "last_observed_visible_pages": len(pages) - len(absent_ids) if visibility_delta else None,
+                   "externally_absent_pages": len(externally_absent), "whole_page_planning_candidates": len(assignments),
                    "pages_requiring_artboard_census": len(held),
                    "proposed_whole_page_volumes": sum(len(d["volumes"]) for d in destinations),
                    "source_nodes": inventory["total_observed_nodes"],
@@ -155,6 +194,7 @@ def make_plan(inventory: dict, node_target: int = DEFAULT_NODE_TARGET,
         "destinations": destinations,
         "whole_page_assignments": assignments,
         "pages_requiring_artboard_census": held,
+        "externally_absent_unproven_pages": externally_absent,
         "unresolved_drift": [{"source_page_id": "p-19-0",
                               "classification": "ABSENT_FROM_LATER_SOURCE_READ_NOT_PROVEN_DELETED",
                               "required_action": "Reconcile vendor history and concurrent Paper editor before any source cleanup"}],
@@ -185,12 +225,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--check-plan", type=Path, help="Compare a saved plan to regenerated source fingerprint")
     parser.add_argument("--node-target", type=int, default=DEFAULT_NODE_TARGET)
     parser.add_argument("--artboard-target", type=int, default=DEFAULT_ARTBOARD_TARGET)
+    parser.add_argument("--visibility-delta", type=Path,
+                        help="Read-only observed page-list delta; exclude disappeared pages, never infer successful relocation")
     args = parser.parse_args(argv)
     if args.out and args.check_plan:
         parser.error("--out and --check-plan cannot be combined")
     try:
         inventory = json.loads(args.inventory.read_text(encoding="utf-8"))
-        plan = make_plan(inventory, args.node_target, args.artboard_target)
+        visibility = json.loads(args.visibility_delta.read_text(encoding="utf-8")) if args.visibility_delta else None
+        plan = make_plan(inventory, args.node_target, args.artboard_target, visibility)
         if args.check_plan:
             observed = json.loads(args.check_plan.read_text(encoding="utf-8"))
             if observed != plan:
