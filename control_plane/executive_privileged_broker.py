@@ -211,6 +211,7 @@ class ReconcileNotAppliedRequest:
     requalify_terminal_adverse_sha256: str | None = None
     renew_device_revalidation_sha256: str | None = None
     requalify_company_device_drift_sha256: str | None = None
+    requalify_native_probe_drift_sha256: str | None = None
     recover_current_pin_grant_sha256: str | None = None
     successor_request_id: str | None = None
 
@@ -249,6 +250,9 @@ def _reconciliation_target(raw: Mapping[str, Any]):
         })
         variants.append({
             **args, "requalify_company_device_drift_sha256": raw.get("readiness_receipt_sha256"),
+        })
+        variants.append({
+            **args, "requalify_native_probe_drift_sha256": raw.get("readiness_receipt_sha256"),
         })
         # The bounded current-pin recovery route carries the grant digest, not
         # the predecessor digest, so its only reconstructable source is the
@@ -323,6 +327,7 @@ def validate_reconcile_not_applied_request(
         requalify_terminal_adverse_sha256=args.get("requalify_terminal_adverse_sha256"),
         renew_device_revalidation_sha256=args.get("renew_device_revalidation_sha256"),
         requalify_company_device_drift_sha256=args.get("requalify_company_device_drift_sha256"),
+        requalify_native_probe_drift_sha256=args.get("requalify_native_probe_drift_sha256"),
         recover_current_pin_grant_sha256=args.get("recover_current_pin_grant_sha256"),
         successor_request_id=args.get("successor_request_id"),
     )
@@ -1224,6 +1229,17 @@ class PrivilegedActionBroker:
         self._check_inflight(request, digest)
         if request.action == INCIDENT_ISSUER_ACTION:
             return self._issue_incident_grant(request, digest)
+        if request.args_dict().get("requalify_native_probe_drift_sha256") is not None:
+            # Preserve historical terminal/inflight/reconciliation handling
+            # above. A new native qualification must execute the complete
+            # sealed source closure, not merely the trusted shell wrapper.
+            from ops.executive_os import provider_recovery
+            try:
+                source = provider_recovery.current_executive_source()
+            except (provider_recovery.RecoveryError, OSError) as exc:
+                raise BrokerTrustError("native-probe drift Executive source is unverified") from exc
+            if source["release_sha"] != self.config.release_root.name:
+                raise BrokerTrustError("native-probe drift Executive source changed")
 
         started_at = _utc_now()
         self._write_inflight(request, digest, started_at)
@@ -1558,7 +1574,8 @@ class PrivilegedActionBroker:
         if evidence["readiness_receipt_sha256"] != request.readiness_receipt_sha256:
             raise BrokerTrustError("provider readiness receipt changed after target request")
         document = evidence["readiness_document"]
-        if (request.requalify_company_device_drift_sha256 is not None
+        if (request.requalify_native_probe_drift_sha256 is not None
+                or request.requalify_company_device_drift_sha256 is not None
                 or request.requalify_terminal_adverse_sha256 is not None
                 or request.renew_device_revalidation_sha256 is not None
                 or request.recover_current_pin_grant_sha256 is not None):
@@ -1567,6 +1584,7 @@ class PrivilegedActionBroker:
                 ReadinessError, validate_terminal_predecessor_document,
                 validate_revalidation_predecessor_document,
                 validate_company_device_drift_predecessor_document,
+                validate_native_probe_drift_predecessor_document,
             )
             if (not isinstance(document, Mapping)
                     or not isinstance(evidence["current_auth_identity"], Mapping)
@@ -1649,7 +1667,9 @@ class PrivilegedActionBroker:
                 # reconciliation are the only remaining operations.
             else:
                 predecessor_validator = (
-                    validate_company_device_drift_predecessor_document
+                    validate_native_probe_drift_predecessor_document
+                    if request.requalify_native_probe_drift_sha256 is not None
+                    else validate_company_device_drift_predecessor_document
                     if request.requalify_company_device_drift_sha256 is not None
                     else validate_revalidation_predecessor_document
                     if request.renew_device_revalidation_sha256 is not None
