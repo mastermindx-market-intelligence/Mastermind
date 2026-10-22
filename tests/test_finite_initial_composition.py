@@ -109,7 +109,9 @@ def test_actual_control_config_accepts_only_fixed_optional_definition(fault):
         return
     if fault=='extra':raw['native_capacity_v2']['available']=True
     if fault=='path':raw['native_capacity_v2']['macro_release']='../caller'
-    if fault=='nonground':raw['coo_foreground_only']=False
+    if fault=='nonground':
+        raw['coo_foreground_only']=False
+        raw['coo_autonomy_armed']=True
     if fault=='no-probe':del raw['fabric_attended_probe']
     with pytest.raises(service.ServiceError):service._validate_fabric_bridge_config(raw)
 

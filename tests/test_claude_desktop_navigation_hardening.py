@@ -16,6 +16,12 @@ from control_plane import surface_bindings as sb
 from integrations.chairman_surfaces import claude, contract, runner
 from scripts import chairman_control_room as server
 
+
+@pytest.fixture(autouse=True)
+def _single_account_native_bridge_fixture(monkeypatch):
+    monkeypatch.setattr(claude, "_has_multiple_parall_claude_wrappers", lambda: False)
+
+
 SID = "22222222-2222-4222-8222-222222222222"
 BID = "33333333-3333-4333-8333-333333333333"
 

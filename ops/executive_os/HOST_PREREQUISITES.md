@@ -759,6 +759,32 @@ sudo /bin/bash "$SOURCE_REPO/ops/executive_os/install.sh" \
   --arm-privileged-broker
 ```
 
+#### Workspace Control Room migration (install inputs)
+
+The live `control.json` is never hand-edited. The seat generates the
+successor control input as today, then runs the reviewed stdlib migration
+tool against the exact clean release clone it passes to `install.sh` as
+`--source-repo`, verified at the merge SHA:
+
+```bash
+sudo /Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12 -I -S -B \
+  "$SOURCE_REPO/ops/executive_os/migrate_workspace_control_room.py" \
+  --input "$CONTROL_INPUT" --output "$CONTROL_INPUT_UNIX"
+```
+
+and passes `"$CONTROL_INPUT_UNIX"` as `--control-config` to `install.sh`.
+
+The tool removes `workspace_control_room.port` and adds the closed
+`{"transport": "unix", "socket_path": <canonical>, "launchd_socket_name":
+"WorkspaceControlRoom", "allowed_peer_uids": [control_uid]}` stanza in the
+same key position; every other top-level key is unchanged and
+`workspace_acquisition` is preserved.
+
+Exit codes: `0` migrated, `2` refused (no output written), `3` not needed
+(no output written), `64` usage error. A legacy `{"port": int}` stanza that
+reaches `install.sh` or `load_control_config` is refused loudly by the
+shared `validate_workspace_control_room` validator.
+
 Installation still leaves the ordinary Executive control/worker/backup daemons
 disabled and stopped. With the explicit arm flag, only the root privileged
 broker is socket-activated. From this point onward, reviewed host effects use
@@ -1192,7 +1218,9 @@ refund its allocation. Live reuse and reservation still require the grant to
 be within its actual current window; there is no caller-selectable expiry bypass.
 
 **Because the producer table is empty, no current Due10 or same-generation
-failure is recoverable today.** This section documents a capability whose
+failure is recoverable through this section today; a same-generation terminal
+failure is admitted only by the explicit option in the dedicated subsection
+above.** This section documents a capability whose
 admission is closed, not an available procedure. Enabling it requires a new
 source review that adds a qualified producer to the table plus an
 authority-installed grant; both are out of scope for this runbook. The explicit
@@ -1349,10 +1377,14 @@ configs, exact release and Runtime quiescence:
 
 ```bash
 AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
-EXPECTED_CREDENTIAL_KIND='service-account'
-WORKSPACE_BINDING_CLASS='company-workspace-admin-attested'
-# Reuse the exact finite UTC value already used for --verify-ready.
-CREDENTIAL_EXPIRES_AT='YYYY-MM-DDTHH:MM:SSZ'
+# Copy the exact values recorded in the device-auth readiness receipt at
+# /Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json
+# (JSON keys "expected_credential_kind", "credential_expires_at", and
+# "workspace_binding_class", emitted by ops/executive_os/provider_readiness.py);
+# do not invent or recompute them locally.
+EXPECTED_CREDENTIAL_KIND='<expected_credential_kind from provider-readiness-v2.json>'
+CREDENTIAL_EXPIRES_AT='<credential_expires_at from provider-readiness-v2.json>'
+WORKSPACE_BINDING_CLASS='<workspace_binding_class from provider-readiness-v2.json>'
 
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
@@ -1362,9 +1394,12 @@ sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --gate-b-receipt "$GATE_B_RECEIPT" \
   --expected-credential-kind "$EXPECTED_CREDENTIAL_KIND" \
   --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
-  --credential-expires-at "$CREDENTIAL_EXPIRES_AT"
+  --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
+  --foreground-only
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
+
+The sample always passes `--foreground-only` and never `--native-return`: `--native-return` selects the bounded native-return profile, which the `arm` parser in ops/executive_os/autonomy_control.py documents as requiring full v5 acceptance and the installed Company listener.
 
 The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 

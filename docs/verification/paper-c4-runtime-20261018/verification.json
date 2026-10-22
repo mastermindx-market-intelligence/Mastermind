@@ -1,0 +1,40 @@
+{
+  "current_master_integration": {
+    "installer_sha256": "36de5c47234da8e98b995a0ecc2fd7e60716290927404bfdbc677c260ed47aed",
+    "live_preflight": "paper-c4-integrated-preflight.json",
+    "master_commit": "89cf2399c47da20c0c23826266e52984f88c27e7",
+    "protected_1592_fabric_owner_preserved": true,
+    "protected_1604_behavior_preserved": true,
+    "result": "PASS",
+    "separate_account_decorators_preserved": true,
+    "source_commit_qualified": "7347c319db18c86b4f6f6dc5a0714e0aebca56c3",
+    "test_command": "python3 -m unittest integrations.studio_direct_mcp.private_service_test integrations.studio_direct_mcp.private_service_backend_release_test",
+    "test_log_sha256": "313b98ec5027d38efd23c917080e6e01d79195555640a269a496d2d85603d211",
+    "tests": 162
+  },
+  "fixture_scope": "isolated sealed installations, real admission and mutex logic, fixture launchctl responses",
+  "installed_cohort_observation": "paper-c4-cohort.json",
+  "installer_sha256": "20ec3cbcb0182788796dbf9270c5f09377752a6dfdacd2f7d4821c389c97a123",
+  "live_preflight": "paper-c4-live-preflight.json",
+  "new_c4_command_path_tests": 10,
+  "new_shared_mutex_exclusion_and_recovery_tests": 4,
+  "paper_edit_proven": false,
+  "production_acceptance": false,
+  "protected_1604_integration": {
+    "installer_sha256": "2d1a49d7ed25c3f0afb72ebfe5f42f4cfdbfa555ba925c27d218aec5a5e50aa4",
+    "master_commit": "d5cce731a23588ddbf4df806bd9e8dcfa5eecf24",
+    "new_personal_publisher_mutex_tests": 2,
+    "protected_1604_behavior_preserved": true,
+    "result": "PASS",
+    "source_commit_qualified": "b442c550dde1fe4136f93806516b108b0ef20590",
+    "test_command": "python3 -m unittest integrations.studio_direct_mcp.private_service_test",
+    "test_log_sha256": "6e1cfb1748c27ecdbcaaf15201f34de4b6d0f3605df556a6791728ff89070cea",
+    "tests": 153
+  },
+  "result": "PASS",
+  "runtime_selection_applied": false,
+  "source_commit_qualified": "0ef1aa2c1900ee5b0141c2e6357dac20187de3e2",
+  "test_command": "python3 -m unittest integrations.studio_direct_mcp.private_service_test",
+  "test_log_sha256": "1e23435a5c9cda608d0fe9a52f57b277b530b3d4f95de06af635ce07e749b891",
+  "tests": 148
+}

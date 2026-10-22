@@ -1,8 +1,10 @@
 # Mastermind Executive Ecosystem — integrated programme plan (2026-10-17)
 
 **Programme:** Executive Ecosystem Completion (Chairman brief 2026-10-17 "FABLE CEO META — Executive
-Ecosystem Completion Mission"). **Seat:** Fable Meta-CEO, Claude session `873aabd3`, holding the Chairman's
-programme delegation for this scope. **Ledger:** `research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md`
+Ecosystem Completion Mission"). **Current accountable integrator:** Astra, native root
+`01a15741-5e68-7803-8eb4-ccac74a6c04b`, directly assigned by Chris on October 21.
+Fable Claude session `873aabd3` retains its original host-operation custody; this assignment does not transfer an unresolved effect.
+**Ledger:** `research/EXECUTIVE_ECOSYSTEM_COMPLETION_CAPABILITY_LEDGER_2026-10-17.md`
 (row IDs `E*` runtime, `F*` fabric/capacity, `G*` gateway/edge, `A*` app, `C*` continuity, `H*` journeys are cited
 below). **Continuity:** macro `agentos/workstreams/WS-EXECUTIVE-ECOSYSTEM-COMPLETION.md` + dated handoffs.
 **Prior plan this extends, never replaces:** `research/mastermind_meta_ceo_master_plan_r2_2026-10-12.md` (R2) and
@@ -13,6 +15,52 @@ authenticated identity, correct source custody, valid admission, economical rout
 review, original-parent consumption, recoverable continuation and a coherent Mastermind OS outcome; both a
 successful and an interrupted journey are proven. Census, architecture, a merged PR, green CI, one worker run or a
 dashboard demo are rungs, not the outcome.
+
+## Current execution — October 21 commission
+
+This is the continuation of the full programme under
+`EXECUTIVE_ECOSYSTEM_ASTRA_CEO_HANDOFF_2026-10-21.md` at
+`8dd8bebfc525d6f688d7356027f3c3279be93759`, not a replacement architecture or smaller source-only outcome.
+The ledger's October21 delta supersedes stale current-state claims in the historical sections below.
+Protected procedure/source pin for this integration is `3905e79ed7996c52a42d78838ebc9df16ed2818a`.
+
+Four native Sol6.1/high coordinators have verified ancestry under original root01a15741:
+
+| Slice | Immediate parent identity | Integration responsibility and real return |
+| --- | --- | --- |
+| Release | `01a15e3f-9979-7372-81e2-8e172d948736` | Installed80f, existing Gate B/descriptor, Control-start custody and credential qualification. Read-only judgment returned and consumed; same coordinator continues the exact technical dependency. Host effects remain held. |
+| Bridge | `01a15e3f-d59f-7730-90a4-61e3b82447d1` | Preserve original #1362 staged work; integrate newer protected changes, review changed risk, consume CI and continue normal source release. Runtime target/CONTINUE/send proof remains a separate admitted operation. |
+| App | `01a15e40-1c76-79d0-8c95-debeb71ca320` | Existing app/#1515 custody, actual gateway binding and H4/H7 behavior; bounded Fabric source work with retained results consumed by this coordinator. No conflicting WIP or refused edit is taken over. |
+| Fabric | `01a15e40-6b75-7f62-810a-12f9ac4ecf20` | #1359 facade/backend and current sequence11 installation qualified; source judgment returned and consumed. Missing current admission/original-parent execution proof remains explicit. No extra manager or duplicate worker is needed. |
+
+Native children are finite foreground coordinators, not daemons. Fabric descendants keep original root01a15741,
+their verified assigning native parent, original budget and existing adapter. Request/queue evidence is not START;
+worker return is not acceptance. Root-only native-return hooks are not used by coordinator children.
+
+**Next milestone:** complete review/admission and CI for published original #1362 integration `dd9f1bbc`,
+while resolving the host-release dependency. The app slice found no demonstrated disjoint source defect;
+its signed-out browser proof passed. Its next meaningful delivery step is existing sealed transport
+installation and authenticated consumption after host predicates qualify, not another speculative patch. Keep the original H1–H8 ambition and V1 P4/P5 obligations intact.
+Acceptance advances in this dependency order:
+
+1. Attribute the current Control start and qualify the actual host-release receiver. Reconcile permitted current
+   config/seal/quiescence predicates and the exact credential mismatch. Installation80f and Gate B are complete;
+   repeating them does not repair the mismatch. Preserve the denied config read and original probe refusal.
+2. At a technically ready point, obtain the reserved new one-canary decision and explicit valid UTC deadline.
+   Preserve the same descriptor lineage; installed acceptance expects canonical digest
+   `359eac8e8a894d706e6eb547a6a3f69ccdbd884a75f10db1a5118c5e28d40ca2`, not its file byte hash15359.
+   Successful readiness precedes one acceptance, refreshed independent two-verb arming judgment and conditional arm.
+3. Qualify installed Bridge and Fabric through the actual originating parent and admitted runtime target; prove
+   retained bytes, review and original-parent consumption. A manual worker's native labels do not satisfy H1 Job ancestry.
+4. Complete sealed gateway/app composition and authenticated web/native/mobile journeys. Public `/os/` HTTP200,
+   source tests and the separate #1672 edge lane do not satisfy this step.
+5. Execute H1–H8, including one normal and one interrupted Chairman request, and record the actual result in
+   existing Agent OS records. Preserve historical root dispositions, failure/correction/source-conflict evidence,
+   original-parent consumption and consumer-rendered outcome; then adjudicate programme completion.
+
+No new canary, credential rotation, service mutation, acceptance, arm, historical replay, refused quality/legacy
+continuation or #1515 refused edit is authorized by this plan update. The reserved human decision is reached only
+after the preceding technical work; it is not a reason to stop the ready source lanes now.
 
 ## 1. Architecture (Phase B) — ownership preserved, nothing duplicated
 
@@ -182,8 +230,60 @@ enrollment ceremonies (human/provider) · Fable `intent.submit` enrollment (`REJ
   market-view dates, #1491 fail-closed finite definition publication, #1565 fabric bootstrap effect classes,
   #1535 Studio Direct typed Git publisher). None touches `research/`, the OS app or the executive transport; the
   ledger's states hold at the pin.
+- **2026-10-18 04:2xZ checkpoint (seat 873aabd3).** The facts below were observed by the seat (UTC) and recorded
+  docs-only on #1598; the recorder took no host action. Where the facts and R1 CORRECTION 2 differ, the facts
+  govern. The credential was not rotated: the same-generation admission replaced the "Human gate (Lane R)"
+  rotation for this canary.
+  1. *Engineering.* #1591 (explicit same-generation terminal requalification on the current pin) merged through
+     the merge queue (GitHub `mergedAt` 2026-10-18T03:49:58Z; the seat observed it at 03:52Z). Protected master
+     S2 = `08d7887335ee8aea11f0809e0660a5298c3ef68c`. The independent read-only Opus review verdict was MERGE, and
+     CI was green.
+  2. *Staging.* S2 was staged on the host from clone `Mastermind-08d78873`:
+     - `os-web-assets` manifest `98ae8aad…`;
+     - install-inputs successor control sha256 `0593db43…`, produced programmatically from the live root-only
+       `control.json`.
+  3. *The one canary.* `provision-worker-auth.sh --verify-ready` ran under the new same-generation admission:
+     codex 0.159.2, pin `16593cc2…`, credential UNCHANGED (same `auth.json` lstat). It PASSED at 03:59:35Z. The
+     receipt's `readiness_expires_at` is 04:56:45Z.
+  4. *Install.* `stop-readside` ran at 04:01Z. The supersede prepare descriptor is
+     `6594613bacf18c12f0494ac7983e6e2f2c4b2e27075a8cb6077ee5623b22d906`. Install SUCCEEDED at 04:08Z ("installed
+     exact Executive OS release 08d78873"; privileged broker armed). Two install refusals were repaired first:
+     - 20 stray root-owned `.pyc` files in the sealed Python framework were removed and the seal was restored;
+     - `--protected-master-sha` is frozen-mode only, so it was dropped for plain mode.
+  5. *Acceptance.* `acceptance.sh` at 04:09Z REFUSED fail-closed with "control account directory group set
+     drifted" (`ops/executive_os/acceptance.py:1053`).
+     - Cause: `_mastermind_exec` is a member of gid 470 `_mastermind_minimax`. The finite lane registered those
+       finite worker principals on the host on 2026-10-14 at 19:57. Meanwhile `control.json` has no
+       `fabric_attended_probe` stanza, and `FINITE_DEFINITION_DIR` `config/fabric-minimax-finite-01` is absent.
+     - Source cross-check by the recorder at `08d78873`: with no stanza, `_attended_worker_membership` returns
+       none, so gid 470 is not in the expected control group set.
+     - #1563 is merged (the seat brief says 03:04Z; GitHub `mergedAt` is 2026-10-17T23:57:29Z). The host
+       publication chain (`finite_definition_publication.py` → `autonomy_control.py finite-control-stage`) was
+       never run.
+     - The seat did not remedy the drift: no group strip, no check weakening, no hand edit of `control.json`.
+  6. *Margin.* Acceptance and arm both enforce `MIN_ACCEPTANCE_MARGIN` = 30 min
+     (`provider_readiness.validate_receipt_file`). The passing receipt therefore became unusable for acceptance
+     at 04:26:45Z. The one canary is SPENT without acceptance or arm, and a further canary needs the Chairman's
+     word.
+  7. *Restore.* `start-readside` ran at 04:17Z from release 08d78873: control pid 78990, sol-state-relay
+     pid 78959, mcp running. The `worker.codex` launchd job is ABSENT (preserved). The system was not left down.
+  8. *Ladder.* Lane R engineering MERGED; S2 install DELIVERED on host; acceptance BLOCKED (cross-lane drift);
+     NOT ARMED; no PRODUCTION_PROOF. The Chairman's decision was asked once:
+     - (a) finite host publication + `finite-control-stage`, then `stop-readside` → ONE further canary →
+       acceptance → arm → Phase F; or
+     - (b) hold S2 installed-unaccepted.
+  9. *Ledger F3.* F3 stays `BUILT_NOT_PROVEN` with a new completion blocker. The host principals are registered
+     but the control stanza is unstaged, which blocks acceptance of ANY release until it is published or ruled.
+     The ledger records this in rows E4–E7, F1 and F3.
 
 ## 7. Checkpoint (newest first)
+
+- **2026-10-18 04:2xZ** — S2 `08d78873` is installed on the host (04:08Z) and the read side is restored
+  (04:17Z). Acceptance REFUSED fail-closed on cross-lane finite group drift (gid 470). The one same-generation
+  canary (PASSED 03:59:35Z) is spent. NOT ARMED.
+  Next exact action: the Chairman's one ruling, either (a) finite host publication + `finite-control-stage`,
+  then one further canary → acceptance → arm, or (b) hold S2 installed-unaccepted.
+  Evidence: §6 "2026-10-18 04:2xZ checkpoint".
 
 - **2026-10-17 ~12:00Z** — Phase A census complete; ledger + this plan written in Mastermind worktree
   `claude/ssd-executive-ecosystem-completion-20261017-427d19196cd8f420` (SSD mint, base `a552a5e5`).

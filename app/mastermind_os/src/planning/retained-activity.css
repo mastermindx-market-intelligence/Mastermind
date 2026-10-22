@@ -1,0 +1,9 @@
+.mm-retained { margin: 9px 0 0; padding: 8px 0 0; border-top: 1px dashed var(--line, rgba(120,130,150,.24)); font-size: .76rem; min-width: 0; overflow-wrap: anywhere; }
+.mm-retained button { color: inherit; background: transparent; border: 1px solid var(--line, rgba(120,130,150,.4)); border-radius: 7px; padding: 6px 9px; cursor: pointer; font: inherit; }
+.mm-retained button:disabled { opacity: .5; cursor: not-allowed; }
+.mm-retained [role=status] { margin-left: 8px; color: var(--muted, #89919f); }
+.mm-retained__details { padding: 10px 0; min-width: 0; }
+.mm-retained__details p, .mm-retained__details small { color: var(--muted, #89919f); margin: 4px 0 7px; }
+.mm-retained__details ol { list-style: none; margin: 8px 0; padding: 0; }
+.mm-retained__details li { margin: 0; padding: 6px 0; border-top: 1px solid var(--line, rgba(120,130,150,.2)); }
+.mm-retained__footnote { opacity: .9; font-size: .72rem; }

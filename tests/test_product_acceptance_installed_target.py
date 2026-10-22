@@ -115,16 +115,32 @@ def test_actual_control_factory_binds_same_installed_owner(tmp_path, monkeypatch
     fixture_root, host_root = tmp_path / 'installed', tmp_path / 'host'
     fixture_root.mkdir(); host_root.mkdir()
     owner, path, _, raw_install = installed(fixture_root, monkeypatch, selected=selected)
-    raw, options = configured(host_root, monkeypatch, False)
+    raw, options, _ = configured(host_root, monkeypatch, False)
     options['coo_source'] = owner
     captured = {}
     def service(config, **bindings):
         captured.update(bindings)
         return SimpleNamespace(config=config)
     monkeypatch.setattr(cli, 'ExecutiveControlService', service)
-    monkeypatch.setattr(cli, 'activate_launchd_socket', lambda name: object())
+    from tests.executive_installed_control_fixture import unix_listener
+    import shutil
+    room_sockets = []
+    def activated(name):
+        # Only the Control Room adopts a real listener; give it a test-owned egid dir.
+        if name == 'WorkspaceControlRoom':
+            listener, room_path = unix_listener()
+            room_sockets.append((listener, room_path))
+            raw['workspace_control_room']['socket_path'] = room_path
+            return listener
+        return object()
+    monkeypatch.setattr(cli, 'activate_launchd_socket', activated)
     monkeypatch.setattr(executive_worker_broker, 'WorkerBrokerClient', lambda *a, **kw: object())
-    service = cli._service_from_config(raw, **options)
+    try:
+        service = cli._service_from_config(raw, **options)
+    finally:
+        for listener, room_path in room_sockets:
+            listener.close()
+            shutil.rmtree(os.path.dirname(room_path), ignore_errors=True)
     runtime = Runtime.at(tmp_path / 'runtime')
     service.runtime = runtime
     service._namespace_custody = SimpleNamespace(bound_runtime=lambda actual: actual)

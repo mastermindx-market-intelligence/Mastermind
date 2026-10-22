@@ -33,6 +33,61 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
 
+## Quota continuity
+
+The production facade enables the existing adapter's bounded foreground quota
+continuation. Before creating a controller it checks for `request --quota-fallback`
+and `status --follow` support. An older installed adapter returns
+`ADAPTER_CONTINUITY_UNAVAILABLE` before dispatch. Capabilities report whether the
+adapter supports this contract, with a maximum of three sequential attempts.
+
+Eligible ordinary requests can move to another admitted pool after a proven
+pre-task capacity rejection. Inside the selected MiniMax/GLM Claude wrapper, a
+single small provider request checks capacity before the task CLI, hooks or MCP
+servers start. It uses the exact leased endpoint/model/account and a fixed prompt
+with one maximum generated token; task content and tools are absent. The check
+adds one request, has a 20-second whole-response deadline, and neither follows
+redirects nor retries. Unknown responses and timeouts leave the original CLI path
+available. Documented billing, authentication, policy and spend-limit responses
+are distinct from capacity and do not authorize migration.
+
+Automatic continuation requires the source-bound pre-task proof, actual process
+cleanup, a strict terminal quota outcome, release of the original lease, and the
+unchanged frozen task digest. A CLI's initial error alone is insufficient.
+Successors keep the original root and immediate parent but receive distinct run
+IDs and immutable predecessor links. Existing admission, model quality, account
+and economic rules still select the successor. The whole attempt chain remains
+within the original commission timeout; it creates no background queue or wake.
+
+Status, wait and result return the actual `effective_run_id` and prior attempts.
+Review the successful leaf's complete result and pass its explicit `accept_run_id`
+to acceptance. Accepting through a failed origin is refused with
+`ACCEPT_EXPLICIT_SUCCESSOR_REQUIRED`. Missing controller completion remains
+unconfirmed; reading status never starts another attempt.
+
+The native broker stores shared cooldowns across requests and permits only one
+probe lease when a cooldown expires. Model aliases conservatively share their
+account's short backoff; known cross-product subscriptions require explicit
+existing `quota_scope` metadata. A failure after work starts preserves the
+session and cools the allowance but does not automatically replay actions.
+Native parent token/context exhaustion, fixed-model or artifact contracts and
+cross-provider resume after tool activity require their existing lifecycle and
+review owners. This feature does not restart a native parent conversation.
+
+Roll out the complete native code generation first, then select this same facade
+account's backend from the actual merged release with its existing service owner.
+For the enrolled `subagent-fabric-c3` account, use the narrow
+`private_service.py fabric-backend-release` preview and apply contract. It checks
+the old manifest and full runtime seal, the merged backend's Git blob and SHA256,
+and the exact preview plan; apply requires the original service to be unloaded.
+It updates only `config.args[0]` and the corresponding three manifest fields,
+preserving the gateway bundle, private SDK, account, tunnel, port and selected
+protocol. The generic `upgrade` retains its same-backend-path requirement.
+The operator separately reconciles existing controllers, then stops and starts
+this original service through the same owner. See
+`ops/native_fabric/quota_continuity/README.md` for native evidence, retention and
+publication boundaries.
+
 ## Opt-in stateless protocol compatibility
 
 The private Fabric profile may explicitly enable `modernFabricProtocol: true` through
