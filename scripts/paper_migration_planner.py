@@ -72,29 +72,53 @@ def validate_inventory(inventory: dict) -> list[dict]:
 
 
 def validate_visibility_delta(inventory: dict, delta: dict | None) -> set[str]:
-    """A read-only observation can exclude absent pages, but never prove movement."""
+    """Verify a complete exact-file page-list comparison, never infer migration.
+
+    A dated observation remains non-atomic, regardless of this structural proof.
+    Missing pages are reconciliation holds, not copy/delete receipts.
+    """
     if delta is None:
         return set()
     if (not isinstance(delta, dict)
             or delta.get("schema") != "mastermind.paper-source-visibility-drift.v1"
             or delta.get("source_file_id") != SOURCE_FILE_ID
             or delta.get("baseline_page_count") != inventory["inventory_count"]
-            or delta.get("classification") != "READ_ONLY_DELTA_NOT_PROOF_OF_MOVE_DELETE_OR_LOSSLESS_COPY"):
-        raise InventoryError("Invalid source-visibility delta contract")
+            or delta.get("classification") != "READ_ONLY_DELTA_NOT_PROOF_OF_MOVE_DELETE_OR_LOSSLESS_COPY"
+            or delta.get("visible_page_list_truncated") is not False):
+        raise InventoryError("Invalid, truncated, or unqualified source-visibility observation")
     missing = delta.get("unobserved_baseline_pages")
+    present = delta.get("observed_visible_page_ids")
     added = delta.get("added_visible_page_ids")
-    if not isinstance(missing, list) or not isinstance(added, list) or added:
-        raise InventoryError("Added pages or malformed visibility delta need fresh source census")
+    if (not isinstance(missing, list) or not isinstance(present, list)
+            or not isinstance(added, list) or added):
+        raise InventoryError("Missing full visible-page list or unexpected additions; recensus required")
     observed_ids = [row.get("source_page_id") for row in missing if isinstance(row, dict)]
     if len(observed_ids) != len(missing) or len(observed_ids) != len(set(observed_ids)):
         raise InventoryError("Duplicate or malformed absent source page")
-    expected = {row["source_page_id"] for row in inventory["pages"]}
-    if not set(observed_ids).issubset(expected):
-        raise InventoryError("Visibility delta references an unknown baseline page")
+    if (len(present) != len(set(present)) or
+            any(not isinstance(page_id, str) for page_id in present) or
+            any(not isinstance(page_id, str) for page_id in observed_ids)):
+        raise InventoryError("Duplicate or invalid visible source page ID")
+    originals = {row["source_page_id"]: row for row in inventory["pages"]}
+    absent_ids, visible_ids = set(observed_ids), set(present)
+    if (absent_ids & visible_ids or absent_ids | visible_ids != set(originals)):
+        raise InventoryError("Observed visible and absent pages do not exactly partition the baseline")
     current = delta.get("current_visible_page_count")
-    if type(current) is not int or current != len(expected) - len(observed_ids):
-        raise InventoryError("Visibility delta page totals are inconsistent")
-    return set(observed_ids)
+    if type(current) is not int or current != len(present):
+        raise InventoryError("Observed page-list total disagrees with returned identities")
+    n = b = 0
+    for row in missing:
+        baseline = originals[row["source_page_id"]]
+        if (row.get("source_url") != baseline["source_url"]
+                or row.get("baseline_nodes") != baseline["node_count"]
+                or row.get("baseline_artboards") != baseline["artboard_count"]):
+            raise InventoryError("Absent-page provenance does not match historical inventory")
+        n += baseline["node_count"]
+        b += baseline["artboard_count"]
+    if (delta.get("baseline_nodes_associated_with_unobserved_pages") != n or
+            delta.get("baseline_artboards_associated_with_unobserved_pages") != b):
+        raise InventoryError("Absent-page historical size totals mismatch")
+    return absent_ids
 
 
 def slugify(text: str) -> str:
