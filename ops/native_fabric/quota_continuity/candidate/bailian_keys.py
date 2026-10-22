@@ -213,7 +213,7 @@ def _key_value(name: str) -> str:
 
 
 def _ensure_slots() -> None:
-    os.makedirs(SLOTS_ROOT, exist_ok=True)
+    os.makedirs(SLOTS_ROOT, mode=0o700, exist_ok=True)
 
 
 def _with_lock() -> IO[str]:
@@ -303,7 +303,7 @@ def cooldown_rank_readonly(name: str) -> int:
     3 live non-429 hard denial. Never delete, write or pick a key.
     """
     if (not isinstance(name, str) or not name or len(name) > 128
-            or "/" in name or "\\x00" in name or name in (".", "..")):
+            or "/" in name or "\x00" in name or name in (".", "..")):
         return 1
     # A directory fd binds file reads to the original owned slots directory;
     # O_NOFOLLOW rejects a symlinked *final* directory component. Installed
@@ -475,14 +475,14 @@ def _effective_cap_for_key(name: str) -> int:
     """Effective per-key cap: 0 for non-429 cooldown; soft cap for 429 cooldown."""
     rank = cooldown_rank_readonly(name)
     cap = current_per_key_cap()
-    if rank == 3:
-        # Non-429 cooldown (401/403/402 etc.) — key is parked.
+    if rank in (1, 3):
+        # Unsafe/unreadable evidence is NOT permission to re-admit a possibly
+        # 401/403/402-denied credential. Keep provider access fail-closed.
         return 0
-    if rank != 2:
-        # A missing/expired record uses the ordinary cap. Unknown (rank=1)
-        # remains a deprioritized fallback in the broker, not healthy proof.
+    if rank == 0:
+        # Proven absent or expired: ordinary policy cap.
         return cap
-    # A live 429 retains the existing reduced soft-cap policy.
+    # A verified live 429 retains the existing reduced soft-cap policy.
     pol = load_policy()
     if not pol.get("soft_cap_on_429", False):
         return cap

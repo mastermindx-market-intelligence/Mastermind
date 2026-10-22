@@ -213,6 +213,30 @@ class QwenCooldownReadOnly(unittest.TestCase):
         with patch.object(self.keys, "SLOTS_ROOT", str(parent / "slots" / "slots")):
             self.assertEqual(self.rank(), 2)
 
+    def test_broker_rejects_corrupt_evidence_instead_of_granting_base_cap(self):
+        self.write("corrupt http_429\n")
+        self.assertEqual(self.rank(), 1)
+        self.assertIsNone(self.broker_cap())
+
+    def test_broker_rejects_unsafe_group_writable_root(self):
+        self.write(f"{int(time.time())+120} access_denied\n")
+        self.root.chmod(0o770)
+        self.assertEqual(self.rank(), 1)
+        self.assertIsNone(self.broker_cap())
+
+    def test_broker_rejects_group_writable_hard_denial_file(self):
+        self.write(f"{int(time.time())+120} access_denied\n", mode=0o660)
+        self.assertEqual(self.rank(), 1)
+        self.assertIsNone(self.broker_cap())
+
+    def test_broker_rejects_missing_slot_directory(self):
+        self.root.rmdir()
+        self.assertEqual(self.rank(), 1)
+        self.assertIsNone(self.broker_cap())
+
+    def test_null_byte_account_alias_cannot_select_path(self):
+        self.assertEqual(self.keys.cooldown_rank_readonly("Ry\x00an"), 1)
+
     def test_symlinked_cooldown_root_refused(self):
         self.write(f"{int(time.time())+120} access_denied\n")
         other = self.root.with_name("real_slots")
