@@ -1,0 +1,642 @@
+{
+  "observed_date": "2026-10-22",
+  "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+  "inventory_count": 63,
+  "total_observed_nodes": 139812,
+  "total_observed_artboards": 903,
+  "node_count_note": "Node count is a diagnostic proxy, NOT exact Paper file byte size.",
+  "warning_observed": "Your file is too large. Further changes will result in data loss. Please start a new file.",
+  "concurrency_note": "p-19-0 was present in first inspect and absent on later explicit page lookup; another session may be modifying this file. 63 inventory pages exclude p-19-0.",
+  "pages": [
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-5-0",
+      "node_count": 362,
+      "artboard_count": 9,
+      "suggested_destination": "01 Design system",
+      "name_transcribed": "Archetype Starters - Governed",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-5-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-24-0",
+      "node_count": 7065,
+      "artboard_count": 23,
+      "suggested_destination": "04 Sector R3 - dedicated",
+      "name_transcribed": "Sector Intelligence R3 Completion 2026-10-21",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-24-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-23-0",
+      "node_count": 1938,
+      "artboard_count": 17,
+      "suggested_destination": "02 Shared shell",
+      "name_transcribed": "Shared Shell Completion and Integration R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-23-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-22-0",
+      "node_count": 574,
+      "artboard_count": 8,
+      "suggested_destination": "03 Market memory",
+      "name_transcribed": "Market Memory Evidence workspace R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-22-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-21-0",
+      "node_count": 1003,
+      "artboard_count": 2,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Terminal Chart Context R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-21-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-20-0",
+      "node_count": 776,
+      "artboard_count": 10,
+      "suggested_destination": "14 Catalyst and policy",
+      "name_transcribed": "Catalyst Intelligence Decision Desk R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-20-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1Z-1",
+      "node_count": 315,
+      "artboard_count": 5,
+      "suggested_destination": "14 Catalyst and policy",
+      "name_transcribed": "Catalyst-to-Opportunity Source-bound integration",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1Z-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1Y-1",
+      "node_count": 5121,
+      "artboard_count": 28,
+      "suggested_destination": "08 Bonds archive - dedicated",
+      "name_transcribed": "ARCHIVE Bonds and Transmission pre-R30",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1Y-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1X-1",
+      "node_count": 2277,
+      "artboard_count": 15,
+      "suggested_destination": "10 Forex archive",
+      "name_transcribed": "Forex Archive Prior studies and build history",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1X-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1W-1",
+      "node_count": 111,
+      "artboard_count": 2,
+      "suggested_destination": "12 Macro commodities",
+      "name_transcribed": "Macro Dark Flow Implementation",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1W-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1V-0",
+      "node_count": 209,
+      "artboard_count": 2,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Terminal Portfolio Builder and Acceptance References",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1V-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1U-0",
+      "node_count": 2877,
+      "artboard_count": 20,
+      "suggested_destination": "03 Shared market references",
+      "name_transcribed": "Shared Market Prepared Research and Reading Reference",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1U-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1T-0",
+      "node_count": 1956,
+      "artboard_count": 22,
+      "suggested_destination": "03 Shared market references",
+      "name_transcribed": "Shared Market Watchlists and Save States Reference",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1T-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1S-0",
+      "node_count": 1423,
+      "artboard_count": 18,
+      "suggested_destination": "03 Shared market references",
+      "name_transcribed": "Shared Market Search and Comparison Reference",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1S-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1R-0",
+      "node_count": 3925,
+      "artboard_count": 16,
+      "suggested_destination": "03 Shared market references",
+      "name_transcribed": "Shared Market All Tools and Research Launcher Reference",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1R-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1Q-0",
+      "node_count": 870,
+      "artboard_count": 10,
+      "suggested_destination": "01 Design system",
+      "name_transcribed": "Design Foundations Components and Archetype Rules",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1Q-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1P-0",
+      "node_count": 58,
+      "artboard_count": 3,
+      "suggested_destination": "01 Design system",
+      "name_transcribed": "START HERE Product and File Navigation",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1P-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1O-0",
+      "node_count": 1218,
+      "artboard_count": 6,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Terminal Portfolio Personal Desk",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1O-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1N-0",
+      "node_count": 550,
+      "artboard_count": 2,
+      "suggested_destination": "15 Gov and Bio builders",
+      "name_transcribed": "Gov Revenue Builder Contracts and State Specimens",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1N-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1M-0",
+      "node_count": 566,
+      "artboard_count": 3,
+      "suggested_destination": "15 Gov and Bio builders",
+      "name_transcribed": "BioCatalyst Builder and Acceptance Contracts",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1M-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1L-0",
+      "node_count": 1293,
+      "artboard_count": 11,
+      "suggested_destination": "15 Gov and Bio builders",
+      "name_transcribed": "ARCHIVE Synthetic Catalyst Investment Cases",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1L-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1K-0",
+      "node_count": 1918,
+      "artboard_count": 14,
+      "suggested_destination": "15 Gov and Bio builders",
+      "name_transcribed": "MedTech Regulatory Catalyst R13 References",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1K-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1J-0",
+      "node_count": 1205,
+      "artboard_count": 14,
+      "suggested_destination": "14 Catalyst and policy",
+      "name_transcribed": "REFERENCE Policy Watch R2-R3 and HELD",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1J-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1I-0",
+      "node_count": 405,
+      "artboard_count": 5,
+      "suggested_destination": "12 Macro commodities",
+      "name_transcribed": "ARCHIVE Commodities Legacy 90-94",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1I-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1H-0",
+      "node_count": 2340,
+      "artboard_count": 12,
+      "suggested_destination": "07 Bonds current studies",
+      "name_transcribed": "Bonds Advanced Mechanism and Decision Studies R18-R25",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1H-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1G-0",
+      "node_count": 43,
+      "artboard_count": 3,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Terminal R3 Refraction Top-edge only",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1G-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1F-0",
+      "node_count": 3411,
+      "artboard_count": 23,
+      "suggested_destination": "10 Forex archive",
+      "name_transcribed": "Forex Advanced Movement and Decision Studies R17-R24",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1F-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1E-0",
+      "node_count": 2473,
+      "artboard_count": 11,
+      "suggested_destination": "07 Bonds current studies",
+      "name_transcribed": "Cross-Asset Bonds x Forex Transmission and Confluence",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1E-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1D-0",
+      "node_count": 344,
+      "artboard_count": 3,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Terminal Settings Original Pane Aurora Only R2",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1D-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1C-0",
+      "node_count": 288,
+      "artboard_count": 2,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Terminal Account and Settings",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1C-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1B-0",
+      "node_count": 698,
+      "artboard_count": 5,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "ARCHIVE Earnings and Dossiers Original Source",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1B-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-1A-0",
+      "node_count": 7087,
+      "artboard_count": 66,
+      "suggested_destination": "13 Intelligence Hub archive - dedicated",
+      "name_transcribed": "ARCHIVE Intelligence Hub R4 Original Source",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-1A-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-18-0",
+      "node_count": 262,
+      "artboard_count": 3,
+      "suggested_destination": "02 Shared shell",
+      "name_transcribed": "Investor Shell Market Overview Design Candidates",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-18-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-17-0",
+      "node_count": 870,
+      "artboard_count": 6,
+      "suggested_destination": "10 Forex archive",
+      "name_transcribed": "REFERENCE Forex Alternate R19-R21 Studies",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-17-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-16-0",
+      "node_count": 138,
+      "artboard_count": 1,
+      "suggested_destination": "10 Forex archive",
+      "name_transcribed": "ARCHIVE Forex Duplicate Study",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-16-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-15-0",
+      "node_count": 1237,
+      "artboard_count": 12,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Returns Calendar Terminal and Dossier",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-15-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-14-0",
+      "node_count": 2000,
+      "artboard_count": 13,
+      "suggested_destination": "17 Bot designs",
+      "name_transcribed": "Bot Paper Portfolio V3 Upgrade",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-14-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-Q-0",
+      "node_count": 10,
+      "artboard_count": 1,
+      "suggested_destination": "06 Terminal",
+      "name_transcribed": "Earnings and Dossiers North Star Study - placeholder",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-Q-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-3-1",
+      "node_count": 3509,
+      "artboard_count": 20,
+      "suggested_destination": "16 News breadth and confluence",
+      "name_transcribed": "News Intelligence",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-3-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-D-0",
+      "node_count": 2162,
+      "artboard_count": 11,
+      "suggested_destination": "02 Shared shell",
+      "name_transcribed": "Mastermind Shared Shell Review 01",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-D-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-13-1",
+      "node_count": 1563,
+      "artboard_count": 3,
+      "suggested_destination": "16 News breadth and confluence",
+      "name_transcribed": "Market Breadth Command Center R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-13-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-A-0",
+      "node_count": 1102,
+      "artboard_count": 12,
+      "suggested_destination": "16 News breadth and confluence",
+      "name_transcribed": "Confluence Screener Governed Reference",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-A-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-H-1",
+      "node_count": 1571,
+      "artboard_count": 13,
+      "suggested_destination": "16 News breadth and confluence",
+      "name_transcribed": "Confluence Screener R2",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-H-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-O-1",
+      "node_count": 4299,
+      "artboard_count": 29,
+      "suggested_destination": "07 Bonds current studies",
+      "name_transcribed": "Bonds Decision Workspace R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-O-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-N-1",
+      "node_count": 14225,
+      "artboard_count": 101,
+      "suggested_destination": "09 Forex R1 - subdivide artboards",
+      "name_transcribed": "Forex Guided Intelligence R1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-N-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-J-1",
+      "node_count": 1154,
+      "artboard_count": 9,
+      "suggested_destination": "14 Catalyst and policy",
+      "name_transcribed": "Policy Watch Decision Desk R1 Study",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-J-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-8-1",
+      "node_count": 11305,
+      "artboard_count": 10,
+      "suggested_destination": "18 Live site baselines - subdivide artboards",
+      "name_transcribed": "Live Site Baselines Wave 1",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-8-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-T-0",
+      "node_count": 10,
+      "artboard_count": 1,
+      "suggested_destination": "13 Intelligence Hub archive - dedicated",
+      "name_transcribed": "Intelligence Hub Unified US and China R4 - placeholder",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-T-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-10-0",
+      "node_count": 991,
+      "artboard_count": 8,
+      "suggested_destination": "11 Crypto",
+      "name_transcribed": "Crypto Intelligence R3 Current Build",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-10-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-L-0",
+      "node_count": 5664,
+      "artboard_count": 39,
+      "suggested_destination": "12 Macro commodities",
+      "name_transcribed": "Commodities R1 Study",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-L-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-Y-0",
+      "node_count": 3840,
+      "artboard_count": 26,
+      "suggested_destination": "05 Sector R2 and references",
+      "name_transcribed": "Sector Intelligence R2 Current Build",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-Y-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-S-1",
+      "node_count": 4362,
+      "artboard_count": 25,
+      "suggested_destination": "15 Gov and Bio builders",
+      "name_transcribed": "Gov Revenue Signal Desk R5",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-S-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-K-0",
+      "node_count": 2372,
+      "artboard_count": 23,
+      "suggested_destination": "15 Gov and Bio builders",
+      "name_transcribed": "BioCatalyst North Star and Build Blueprint",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-K-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-Z-0",
+      "node_count": 11638,
+      "artboard_count": 71,
+      "suggested_destination": "19 Sector archive - subdivide artboards",
+      "name_transcribed": "ARCHIVE Sector Intelligence Legacy Studies",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-Z-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-V-0",
+      "node_count": 1931,
+      "artboard_count": 5,
+      "suggested_destination": "20 Misc legacy archives",
+      "name_transcribed": "ARCHIVE Company Intelligence",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-V-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-11-0",
+      "node_count": 2807,
+      "artboard_count": 23,
+      "suggested_destination": "11 Crypto",
+      "name_transcribed": "ARCHIVE Crypto Intelligence R1-R2",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-11-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-X-0",
+      "node_count": 2420,
+      "artboard_count": 25,
+      "suggested_destination": "13 Intelligence Hub archive - dedicated",
+      "name_transcribed": "ARCHIVE Intelligence Hub R1-R3",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-X-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-W-0",
+      "node_count": 2533,
+      "artboard_count": 14,
+      "suggested_destination": "20 Misc legacy archives",
+      "name_transcribed": "ARCHIVE International Markets R9",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-W-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-E-1",
+      "node_count": 25,
+      "artboard_count": 1,
+      "suggested_destination": "05 Sector R2 and references",
+      "name_transcribed": "Sector Intelligence vNext Study - placeholder",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-E-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-6-1",
+      "node_count": 10,
+      "artboard_count": 1,
+      "suggested_destination": "05 Sector R2 and references",
+      "name_transcribed": "Sector Intelligence Unified Detail - placeholder",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-6-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-I-1",
+      "node_count": 25,
+      "artboard_count": 1,
+      "suggested_destination": "13 Intelligence Hub archive - dedicated",
+      "name_transcribed": "Intelligence Hub R1 Study - placeholder",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-I-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-9-0",
+      "node_count": 10,
+      "artboard_count": 1,
+      "suggested_destination": "05 Sector R2 and references",
+      "name_transcribed": "Sector Central Redesign - placeholder",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-9-0",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    },
+    {
+      "source_file_id": "01M2WGNCX9475G79JRKJTCM08P",
+      "source_page_id": "p-7-1",
+      "node_count": 1068,
+      "artboard_count": 5,
+      "suggested_destination": "13 Intelligence Hub archive - dedicated",
+      "name_transcribed": "China Intelligence vNext",
+      "source_url": "https://app.paper.design/file/01M2WGNCX9475G79JRKJTCM08P/p-7-1",
+      "status": "SOURCE_OBSERVED_NOT_MIGRATED"
+    }
+  ]
+}
