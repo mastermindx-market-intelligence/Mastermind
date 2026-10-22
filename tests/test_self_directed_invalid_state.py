@@ -543,3 +543,366 @@ def test_web_order_route_reports_the_typed_invalid_account(
     assert (tmp_path / "account.json").read_bytes() == payload, "the order must not touch disk"
     assert not (tmp_path / "pending.json").exists()
     assert not (tmp_path / "fills.jsonl").exists()
+
+
+# ===========================================================================
+# W3-E14 — book paths fail closed; load/save never create a book directory.
+# Everything below exercises the PRODUCTION behaviour: the conftest book-dir
+# bootstrap shim is OFF for tests marked ``strict_book_dirs``.
+# ===========================================================================
+
+import errno
+import os
+
+_BOOKS = "books"
+
+_VALID_STATE: dict = {"inception_date": "2026-01-05", "starting_nav": 1_000_000.0,
+                      "cash": 900_000.0, "positions": {"BBB": {"shares": 2.0, "avg_cost": 50.0}}}
+
+_STAT_FAILURE_CASES: dict[str, OSError] = {
+    "eacces": PermissionError(errno.EACCES, "Permission denied"),
+    "enotdir": NotADirectoryError(errno.ENOTDIR, "Not a directory"),
+    "eloop": OSError(errno.ELOOP, "Too many levels of symbolic links"),
+}
+
+
+@pytest.fixture()
+def strict_sd(tmp_path: Path, monkeypatch) -> Path:
+    """A REAL books/self_directed + books/published tree (production behaviour — the
+    conftest bootstrap shim is OFF under ``strict_book_dirs``), with every module path
+    re-pointed into it."""
+    from portfolio import self_directed as sd
+
+    books = tmp_path / _BOOKS
+    base = books / "self_directed"
+    published = books / "published"
+    base.mkdir(parents=True, exist_ok=True)
+    published.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setattr(sd, "_DATA", base)
+    monkeypatch.setattr(sd, "_ACCOUNT_PATH", base / "account.json")
+    monkeypatch.setattr(sd, "_FILLS_PATH", base / "fills.jsonl")
+    monkeypatch.setattr(sd, "_PENDING_PATH", base / "pending.json")
+    monkeypatch.setattr(sd, "_THESES_PATH", base / "theses.json")
+    monkeypatch.setattr(sd, "_NAV_PATH", base / "nav_history.jsonl")
+    monkeypatch.setattr(sd, "_PUBLISHED_PATH", published / "latest.json")
+    return base
+
+
+def _tree(root: Path) -> dict[str, object]:
+    """Snapshot every path under root: file bytes, ("link", target) for a symlink, "dir"."""
+    out: dict[str, object] = {}
+    for dirpath, dirnames, filenames in os.walk(root, followlinks=False):
+        dp = Path(dirpath)
+        for name in dirnames + filenames:
+            p = dp / name
+            rel = p.relative_to(root).as_posix()
+            if os.path.islink(p):
+                out[rel] = ("link", os.readlink(p))
+            elif p.is_dir():
+                out[rel] = "dir"
+            else:
+                out[rel] = p.read_bytes()
+    return out
+
+
+def _deny_stat_for(monkeypatch, target: Path, exc: OSError) -> None:
+    """Patch os.stat AND os.lstat so either raises ``exc`` for exactly one path and calls
+    through for every other path."""
+    target_str = os.fsdecode(os.fspath(target))
+    real_stat = os.stat
+    real_lstat = os.lstat
+
+    def _deny_stat(path, *args, **kwargs):
+        if os.fsdecode(os.fspath(path)) == target_str:
+            raise exc
+        return real_stat(path, *args, **kwargs)
+
+    def _deny_lstat(path, *args, **kwargs):
+        if os.fsdecode(os.fspath(path)) == target_str:
+            raise exc
+        return real_lstat(path, *args, **kwargs)
+
+    monkeypatch.setattr(os, "stat", _deny_stat)
+    monkeypatch.setattr(os, "lstat", _deny_lstat)
+
+
+def _fresh_tripwire(*_args, **_kwargs):
+    raise AssertionError("fresh-book fallback reached")
+
+
+def _write_tripwire(*_args, **_kwargs):
+    raise AssertionError("write reached")
+
+
+def _assert_path_invalid(excinfo, problem: str) -> None:
+    err = excinfo.value
+    assert isinstance(err, RuntimeError) and err.__class__.__name__ == "SelfDirectedAccountInvalid"
+    assert err.problems == [problem]
+    assert err.record is not None
+    assert err.record["status"] == "path_invalid"
+    assert err.record["quarantine_file"] is None
+    assert err.record["source_sha256"] is None
+    assert err.record["recoverable"] is True
+
+
+# ── B1. book dir renamed (unmount simulation) ─────────────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_renamed_book_dir_fails_closed_everywhere_and_creates_nothing(
+        strict_sd: Path, run_events_recorder: list[dict], monkeypatch, tmp_path: Path) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    (base / "account.json").write_bytes(_valid_book_bytes())
+    base.rename(base.with_name(base.name + ".unmounted"))
+    books_root = tmp_path / _BOOKS
+    snapshot = _tree(books_root)
+    fresh = sd._fresh_account()
+    monkeypatch.setattr(sd, "_fresh_account", _fresh_tripwire)
+    monkeypatch.setattr(sd, "_atomic_write_bytes", _write_tripwire)
+
+    calls = [
+        lambda: sd._load_account(),
+        lambda: sd.book(prices={}, read_only=True, resolve_missing_prices=False),
+        lambda: sd.place_order("AAA", "buy", 1, price=10.0, market_open=True),
+        lambda: sd.place_order("AAA", "buy", 1, price=10.0, market_open=False),
+        lambda: sd._save_account(dict(fresh)),
+        lambda: sd._save_pending([]),
+        lambda: sd._append_fill({"ticker": "AAA"}),
+        lambda: sd._save_theses({}),
+    ]
+    for call in calls:
+        with pytest.raises(sd.SelfDirectedAccountInvalid) as excinfo:
+            call()
+        _assert_path_invalid(excinfo, "data_dir_missing")
+
+    status = sd.account_file_status()
+    assert status == {"status": "INVALID", "problems": ["data_dir_missing"],
+                      "sha256": None, "size": None, "path": str(base / "account.json")}
+    assert sd.mark(prices={"AAA": 12.0}) is None
+    assert sd.publish(prices={"AAA": 12.0}) is None
+
+    assert not base.exists()
+    assert not (books_root / "published" / "latest.json").exists()
+    assert _tree(books_root) == snapshot
+    assert run_events_recorder, "the path-invalid raise must emit its HARD_STOP event"
+    for event in run_events_recorder:
+        assert event["kind"] == "account_state_invalid"
+        assert event["severity"] == "HARD_STOP"
+        assert event["job"] == "self_directed"
+        assert event["book"] == "self_directed"
+        assert event["extra"]["quarantine_status"] == "path_invalid"
+
+
+# ── B2. dangling symlink ──────────────────────────────────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_dangling_symlink_fails_closed_and_writes_nothing(
+        strict_sd: Path, run_events_recorder: list[dict], monkeypatch) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    account_path = base / "account.json"
+    try:
+        os.symlink("missing-target.json", account_path)
+    except OSError as exc:  # pragma: no cover — filesystems without symlink support
+        pytest.skip(f"symlinks unavailable: {exc!r}")
+    snapshot = _tree(base)
+    fresh = sd._fresh_account()
+    monkeypatch.setattr(sd, "_fresh_account", _fresh_tripwire)
+    monkeypatch.setattr(sd, "_atomic_write_bytes", _write_tripwire)
+
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as first:
+        sd._load_account()
+    _assert_path_invalid(first, "dangling_symlink")
+    hard = [e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]
+    assert len(hard) == 1
+    assert hard[0]["job"] == "self_directed"
+    assert hard[0]["book"] == "self_directed"
+    assert hard[0]["step"] == "load_account"
+    assert hard[0]["extra"]["quarantine_status"] == "path_invalid"
+
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as book_exc:
+        sd.book(prices={}, read_only=True, resolve_missing_prices=False)
+    _assert_path_invalid(book_exc, "dangling_symlink")
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as order_exc:
+        sd.place_order("AAA", "buy", 1, price=10.0, market_open=True)
+    _assert_path_invalid(order_exc, "dangling_symlink")
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as save_exc:
+        sd._save_account(dict(fresh))
+    _assert_path_invalid(save_exc, "dangling_symlink")
+
+    status = sd.account_file_status()
+    assert status["status"] == "INVALID"
+    assert status["problems"] == ["dangling_symlink"]
+
+    assert os.readlink(account_path) == "missing-target.json"
+    assert not (base / "missing-target.json").exists()
+    assert not (base / "account_quarantine.jsonl").exists()
+    assert not list(base.glob("account.quarantine.*.json"))
+    assert _tree(base) == snapshot
+
+
+# ── B3. absent file in an existing dir is a new book ──────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_absent_file_in_existing_dir_is_a_new_book(
+        strict_sd: Path, run_events_recorder: list[dict]) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    snapshot = _tree(base)
+    state = sd._load_account()
+    assert state == sd._fresh_account()
+    status = sd.account_file_status()
+    assert status == {"status": "MISSING", "path": str(base / "account.json"),
+                      "sha256": None, "size": None, "problems": []}
+    assert run_events_recorder == []
+    assert _tree(base) == snapshot
+
+    sd._save_account(sd._fresh_account())
+    assert (base / "account.json").is_file()
+
+
+# ── B4. a stat failure on the file is INVALID (quarantine path) ───────────────
+
+@pytest.mark.strict_book_dirs
+@pytest.mark.parametrize("case_id", sorted(_STAT_FAILURE_CASES))
+def test_stat_failure_on_account_file_fails_closed(
+        strict_sd: Path, run_events_recorder: list[dict], monkeypatch, case_id: str) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    account_path = base / "account.json"
+    original = _valid_book_bytes()
+    account_path.write_bytes(original)
+    exc = _STAT_FAILURE_CASES[case_id]
+    expected = f"unreadable:{type(exc).__name__}"
+    _deny_stat_for(monkeypatch, account_path, exc)
+    fresh = sd._fresh_account()
+    monkeypatch.setattr(sd, "_fresh_account", _fresh_tripwire)
+
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as first:
+        sd._load_account()
+    assert first.value.record["status"] == "quarantine_failed"
+    assert first.value.record["problems"] == [expected]
+    rows = _ledger_rows(base)
+    assert len(rows) == 1
+    assert rows[0]["book"] == "self_directed"
+    hard = [e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]
+    assert len(hard) == 1
+
+    status = sd.account_file_status()
+    assert status["status"] == "INVALID"
+    assert status["problems"] == [expected]
+    assert len(_ledger_rows(base)) == 1
+    assert len([e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]) == 1
+
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as book_exc:
+        sd.book(prices={}, read_only=True, resolve_missing_prices=False)
+    assert book_exc.value.record["status"] == "quarantine_failed"
+    assert book_exc.value.record["problems"] == [expected]
+    with pytest.raises(sd.SelfDirectedAccountInvalid):
+        sd._save_account(dict(fresh))
+    with pytest.raises(sd.SelfDirectedAccountInvalid):
+        sd.place_order("AAA", "buy", 1, price=10.0, market_open=True)
+    assert not (base / "fills.jsonl").exists()
+    assert not (base / "pending.json").exists()
+    assert sd.mark(prices={"AAA": 12.0}) is None
+    assert not (base / "nav_history.jsonl").exists()
+
+    with open(account_path, "rb") as fh:  # os.stat is patched; read without it
+        assert fh.read() == original
+
+
+# ── B5. a REAL ELOOP (no monkeypatch) ─────────────────────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_real_eloop_self_symlink_fails_closed(
+        strict_sd: Path, run_events_recorder: list[dict]) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    account_path = base / "account.json"
+    account_path.write_bytes(_valid_book_bytes())
+    account_path.unlink()
+    os.symlink("account.json", account_path)
+    fresh = sd._fresh_account()
+
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as excinfo:
+        sd._load_account()
+    assert excinfo.value.record["problems"] == ["unreadable:OSError"]
+
+    status = sd.account_file_status()
+    assert status["status"] == "INVALID"
+    assert status["problems"] == ["unreadable:OSError"]
+
+    with pytest.raises(sd.SelfDirectedAccountInvalid):
+        sd._save_account(dict(fresh))
+    assert os.readlink(account_path) == "account.json"
+    assert run_events_recorder, "the unreadable ELOOP must be audited"
+
+
+# ── B6. read race: vanish and phantom ─────────────────────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_read_race_vanish_returns_a_new_book_without_auditing(
+        strict_sd: Path, run_events_recorder: list[dict], monkeypatch) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    account_path = base / "account.json"
+    account_path.write_bytes(_valid_book_bytes())
+    real_read_bytes = Path.read_bytes
+
+    def vanishing_read(self):
+        if self == account_path:
+            account_path.unlink()
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(self))
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", vanishing_read)
+    state = sd._load_account()
+    assert state == sd._fresh_account()
+    assert _ledger_rows(base) == []
+    assert run_events_recorder == []
+
+
+@pytest.mark.strict_book_dirs
+def test_read_race_phantom_fails_closed(
+        strict_sd: Path, run_events_recorder: list[dict], monkeypatch) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    account_path = base / "account.json"
+    account_path.write_bytes(_valid_book_bytes())
+    real_read_bytes = Path.read_bytes
+
+    def phantom_read(self):
+        if self == account_path:
+            raise FileNotFoundError(errno.ENOENT, "No such file or directory", str(self))
+        return real_read_bytes(self)
+
+    monkeypatch.setattr(Path, "read_bytes", phantom_read)
+    with pytest.raises(sd.SelfDirectedAccountInvalid) as excinfo:
+        sd._load_account()
+    assert excinfo.value.record["problems"] == ["unreadable:FileNotFoundError"]
+    assert excinfo.value.record["status"] == "quarantine_failed"
+    assert len(_ledger_rows(base)) == 1
+    assert len([e for e in run_events_recorder if e.get("severity") == "HARD_STOP"]) == 1
+
+
+# ── B7. publish never creates its directory ───────────────────────────────────
+
+@pytest.mark.strict_book_dirs
+def test_publish_never_creates_its_directory(
+        strict_sd: Path, run_events_recorder: list[dict]) -> None:
+    from portfolio import self_directed as sd
+
+    base = strict_sd
+    (base / "account.json").write_bytes(_valid_book_bytes())
+    published = base.parent / "published"
+    published.rmdir()
+
+    assert sd.publish(prices={"AAA": 12.0}) is None
+    assert not published.exists()
