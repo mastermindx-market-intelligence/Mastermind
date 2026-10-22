@@ -147,6 +147,35 @@ def perform(plan=None, *, client=None, clipboard=None, ui=None, page_id="p-3-0")
 
 
 class NativePageUITests(unittest.TestCase):
+    def test_copy_link_anchor_only_with_two_verified_first_party_menu_rows(self):
+        from copy import deepcopy
+        client, clipboard, ui = scenario()
+        snapshot = ui.menu(313, __import__("pathlib").Path("/tmp"))
+        # Real M1 OCR omitted Copy link while recognizing Add divider and
+        # Delete page. First row may be clicked non-destructively but its
+        # clipboard result must still independently match exact IDs.
+        snapshot["ui_elements"] = [
+            {"id": "ocr_28", "label": "Add divider", "confidence": 0.5,
+             "bounds": {"x": 620, "y": 286, "width": 64, "height": 9}},
+            {"id": "ocr_31", "label": "Delete page", "confidence": 0.5,
+             "bounds": {"x": 621, "y": 347, "width": 67, "height": 12}},
+        ]
+        x, y = ui_module._menu_target(snapshot, "Young harmony (copy)", "Copy link", 313)
+        self.assertTrue(120 <= x <= 180)
+        self.assertTrue(150 <= y <= 190)
+        for change in ("missing", "duplicate", "faraway", "wrong_title"):
+            broken = deepcopy(snapshot)
+            if change == "missing":
+                broken["ui_elements"] = broken["ui_elements"][:1]
+            elif change == "duplicate":
+                broken["ui_elements"].append(deepcopy(broken["ui_elements"][1]))
+            elif change == "faraway":
+                broken["ui_elements"][1]["bounds"]["y"] += 90
+            else:
+                broken["window_title"] = "MASTERMIND PAGES"
+            with self.subTest(case=change), self.assertRaises(ui_module.bridge.Refusal):
+                ui_module._menu_target(broken, "Young harmony (copy)", "Copy link", 313)
+
     def test_every_paper_rpc_is_checked_by_canonical_read_allowlist(self):
         client = FakeClient()
         self.assertIn("list_resources", ui_module.bridge.READ_TOOLS)

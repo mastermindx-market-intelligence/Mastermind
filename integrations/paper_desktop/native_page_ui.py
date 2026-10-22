@@ -255,9 +255,39 @@ def _menu_target(snapshot: dict, expected_file_name: str, label: str,
         and isinstance(z.get("confidence"), (int, float))
         and z["confidence"] >= OCR_MIN_CONFIDENCE
     ]
-    if len(matches) != 1:
+    if len(matches) == 0 and label.casefold() == "copy link":
+        # OCR may miss the first context-menu line. The non-destructive
+        # Copy link click can be inferred ONLY from two individually observed
+        # later rows of the *same* first-party menu. Any ambiguity refuses.
+        def anchor(name):
+            a = [q for q in snapshot.get("ui_elements", []) or []
+                 if isinstance(q, dict)
+                 and str(q.get("id", "")).startswith("ocr_")
+                 and str(q.get("label", "")).strip().casefold() == name
+                 and isinstance(q.get("confidence"), (int, float))
+                 and q["confidence"] >= OCR_MIN_CONFIDENCE]
+            if len(a) != 1:
+                raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
+            b = a[0].get("bounds") or {}
+            if not all(isinstance(b.get(k), (int, float))
+                       for k in ("x", "y", "width", "height")):
+                raise bridge.Refusal("UI_MENU_BOUNDS_UNVERIFIED")
+            return b
+        add, delete = anchor("add divider"), anchor("delete page")
+        add_y = add["y"] + add["height"] / 2
+        delete_y = delete["y"] + delete["height"] / 2
+        step = delete_y - add_y
+        add_x = add["x"] + add["width"] / 2
+        delete_x = delete["x"] + delete["width"] / 2
+        if (not 42 <= step <= 80 or abs(add_x - delete_x) > 16
+                or not 6 <= add["height"] <= 20
+                or not 6 <= delete["height"] <= 20):
+            raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
+        rect = {"x": add_x, "y": add_y - step, "width": 0, "height": 0}
+    elif len(matches) == 1:
+        rect = matches[0].get("bounds") or {}
+    else:
         raise bridge.Refusal("UI_MENU_ITEM_UNVERIFIED")
-    rect = matches[0].get("bounds") or {}
     if not all(isinstance(rect.get(k), (int, float)) for k in ("x", "y", "width", "height")):
         raise bridge.Refusal("UI_MENU_BOUNDS_UNVERIFIED")
     x = round(rect["x"] + rect["width"] / 2 - origin_x)
