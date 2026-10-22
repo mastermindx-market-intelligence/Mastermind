@@ -25,3 +25,5 @@ section.card.session-continuation .unjoined { display:grid; gap:12px; border-sty
 
 section.card.session-continuation .state { color:var(--muted); background:var(--raised); border:1px solid var(--border); font-size:14px; line-height:20px; }
 [data-theme="light"] section.card.session-continuation textarea { background:var(--panel); }
+
+section.card.session-continuation .session-keyboard-hint { font-size:12px; line-height:18px; color:var(--muted); }
