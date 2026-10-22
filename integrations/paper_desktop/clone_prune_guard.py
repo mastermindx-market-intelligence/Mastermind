@@ -121,7 +121,33 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
     }
 
 
-def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None) -> dict:
+def _read_jsx(file_id: str, node_id: str, *,
+              reader: Callable[[str, str], str] | None = None) -> str:
+    if reader is not None:
+        body = reader(file_id, node_id)
+    else:
+        result = bridge.execute("read", tool="get_jsx", arguments={
+            "fileId": file_id, "nodeId": node_id,
+            "format": "inline-styles", "includeNodeIds": True,
+        })
+        raw = result.get("result") or {}
+        if result.get("state") != "OBSERVED" or raw.get("isError"):
+            raise bridge.Refusal("JSX_READ_UNAVAILABLE")
+        blocks = [x.get("text") for x in raw.get("content", [])
+                  if isinstance(x, dict) and x.get("type") == "text"]
+        # Paper emits an identity/header record and a separate JSX body.
+        # Never compare two identical tool-error messages as design proof.
+        if len(blocks) != 2 or not isinstance(blocks[1], str):
+            raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
+        body = blocks[1]
+    if not isinstance(body, str) or not body.lstrip().startswith("(") or "<" not in body:
+        raise bridge.Refusal("JSX_SCHEMA_UNVERIFIED")
+    return body
+
+
+def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
+                evidence_node_ids: list[str] | None = None,
+                jsx_reader: Callable[[str, str], str] | None = None) -> dict:
     if not isinstance(plan, dict) or plan.get("schema") != SCHEMA or plan.get("state") != "CLONE_PRUNE_PLAN_READY":
         raise bridge.Refusal("INVALID_PRUNE_PLAN")
     source_id = _require_file_id(plan.get("source_file_id"))
@@ -157,6 +183,17 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None) -> d
     if (plan.get("clone_token_hash_before") is not None
             and clone_tokens != plan["clone_token_hash_before"]):
         raise bridge.Refusal("CLONE_TOKENS_CHANGED")
+    node_ids = evidence_node_ids or []
+    if (not isinstance(node_ids, list)
+            or any(not isinstance(x, str) or not OPERATION_RE.fullmatch(x) for x in node_ids)
+            or len(set(node_ids)) != len(node_ids) or len(node_ids) > 24):
+        raise bridge.Refusal("INVALID_JSX_EVIDENCE_TARGETS")
+    for node_id in node_ids:
+        original_jsx = _read_jsx(source_id, node_id, reader=jsx_reader)
+        cloned_jsx = _read_jsx(clone_id, node_id, reader=jsx_reader)
+        if original_jsx != cloned_jsx:
+            raise bridge.Refusal("CLONE_JSX_MISMATCH",
+                                 "Source and retained native node JSX differ.")
     return {
         "schema": SCHEMA,
         "state": "CLONE_PRUNE_METADATA_VERIFIED",
@@ -167,6 +204,8 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None) -> d
         "clone_retained_page_ids": [p["id"] for p in expected_kept],
         "clone_removed_page_ids": [p["id"] for p in expected_removed],
         "page_metadata_verified": True,
+        "exact_jsx_node_ids_verified": node_ids,
+        "full_page_visual_fidelity_verified": False,
         "original_deletion_authorized": False,
         "image_component_comment_fidelity_verified": False,
         "production_migration_accepted": False,
@@ -183,13 +222,15 @@ def main() -> int:
     prepare.add_argument("--operation-id", required=True)
     verify = sub.add_parser("verify")
     verify.add_argument("--plan", type=Path, required=True)
+    verify.add_argument("--verify-node-id", action="append", default=[])
     args = parser.parse_args()
     try:
         if args.action == "plan":
             receipt = make_plan(args.source_file_id, args.clone_file_id,
                                 args.keep_page_id, args.operation_id)
         else:
-            receipt = verify_plan(bridge.load_json(args.plan.read_bytes()))
+            receipt = verify_plan(bridge.load_json(args.plan.read_bytes()),
+                                  evidence_node_ids=args.verify_node_id)
         print(json.dumps(receipt, sort_keys=True, indent=2))
         return 0
     except (bridge.Refusal, OSError) as exc:

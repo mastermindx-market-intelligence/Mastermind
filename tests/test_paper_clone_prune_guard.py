@@ -168,6 +168,41 @@ class ClonePruneGuardTests(unittest.TestCase):
                 with self.assertRaisesRegex(g.bridge.Refusal, expected):
                     g.verify_plan(plan, reader=f.read)
 
+    def test_selected_native_jsx_exact_parity_passes(self):
+        f = Copy()
+        plan = f.plan()
+        f.delete_clone_page_2()
+        jsx_reads = []
+        def jsx(file_id, node_id):
+            jsx_reads.append((file_id, node_id))
+            return '(\n  <div id="1-1" style={{ color: "#ffffff" }}>content</div>\n)'
+        result = g.verify_plan(plan, reader=f.read,
+                               evidence_node_ids=["1-1"], jsx_reader=jsx)
+        self.assertEqual(result["exact_jsx_node_ids_verified"], ["1-1"])
+        self.assertFalse(result["full_page_visual_fidelity_verified"])
+        self.assertEqual(jsx_reads, [(SRC, "1-1"), (CLONE, "1-1")])
+
+    def test_selected_jsx_mismatch_fails_closed(self):
+        f = Copy()
+        plan = f.plan()
+        f.delete_clone_page_2()
+        with self.assertRaisesRegex(g.bridge.Refusal, "CLONE_JSX_MISMATCH"):
+            g.verify_plan(plan, reader=f.read, evidence_node_ids=["1-1"],
+                          jsx_reader=lambda file_id, node_id: (
+                              "(<div>same</div>)" if file_id == SRC else "(<div>wrong</div>)"))
+
+    def test_invalid_jsx_targets_and_non_jsx_reads_refused(self):
+        f = Copy()
+        plan = f.plan()
+        f.delete_clone_page_2()
+        for node_ids in ([""], ["1-1", "1-1"], ["x" * 121], list(map(str, range(25)))):
+            with self.subTest(node_ids=node_ids), self.assertRaisesRegex(
+                    g.bridge.Refusal, "INVALID_JSX_EVIDENCE_TARGETS"):
+                g.verify_plan(plan, reader=f.read, evidence_node_ids=node_ids)
+        with self.assertRaisesRegex(g.bridge.Refusal, "JSX_SCHEMA_UNVERIFIED"):
+            g.verify_plan(plan, reader=f.read, evidence_node_ids=["1-1"],
+                          jsx_reader=lambda *_: "unexpected tool error")
+
     def test_plan_no_modifying_dispatch(self):
         f = Copy()
         f.plan()

@@ -78,8 +78,47 @@ python3 integrations/paper_desktop/clone_prune_guard.py verify \
 were preserved, clone retained precisely the designated pages and removed
 the expected others, and available token content hashes remained stable.
 It explicitly returns `production_migration_accepted: false` and
-`original_deletion_authorized: false`. It cannot attest to images,
-complex styling, artboards, fonts, linked components or comments.
+`original_deletion_authorized: false`. With no `--verify-node-id` it cannot
+attest to retained native node styling. With specific node IDs, matching
+native JSX provides bounded structure/style evidence but **not** image
+pixels, imported fonts, linked components, references or comments.
+
+### Contentful scratch upgrade (same M1/M2 team, 2026-10-22)
+
+Following the first blank-page proof, the exact source scratch
+`01M5HPWFPQ2Z5X79A9H8MJFKK0` gained Paper-native artboard `1-1`,
+"Migration fidelity specimen" (1440x900), with an editable child frame,
+two text nodes, inline typography and a dark background. On the accepted
+M2 Paper carrier, `create_artboard` and incremental `write_html` each
+returned `APPLIED_RESPONSE_OBSERVED`, and an exact source read showed
+five total nodes on Page 1.
+
+The first-party M1 Dashboard duplicated that file into a **new**
+contentful clone, `01M5HRAG5659SFE58D3PTA7D0V`, preserving page
+IDs `p-1-0,p-3-0`, artboard ID `1-1` and child hierarchy. The two
+file headers naturally differed, but Paper `get_jsx` for artboard `1-1`
+with explicit `inline-styles` returned identical 1,017-character JSX
+bodies. The read-only `clone_prune_guard.py plan` then produced a
+bound plan to retain `p-1-0` and remove `p-3-0`.
+
+The first-party UI deletion affected **only the new clone**. M1
+exact-file postreads independently confirmed the source still held
+both pages and five nodes, while the clone retained `p-1-0`, artboard
+`1-1` and five nodes. M2 `clone_prune_guard.py verify` returned
+`CLONE_PRUNE_METADATA_VERIFIED`. The retained native artboard JSX
+body remained byte-for-byte identical after pruning.
+
+For a known native artboard, optionally add `--verify-node-id 1-1`
+to the `verify` command to compare source and clone native JSX bodies
+again at verification time. The option does **not** auto-select nodes,
+and never makes image pixels, imported fonts, linked components or
+comments proven. Failures `CLONE_JSX_MISMATCH`,
+`JSX_SCHEMA_UNVERIFIED`, and `INVALID_JSX_EVIDENCE_TARGETS` all
+refuse completion without any write.
+
+**Production original remains untouched:** MASTERMIND PAGES
+`01M2WGNCX9475G79JRKJTCM08P` still reported 57 pages on a separate
+exact-file read after this contentful scratch test.
 
 ## Release and permission fence
 
