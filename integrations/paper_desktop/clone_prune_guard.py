@@ -113,9 +113,21 @@ def _read_native_page(file_id: str, page: dict, *,
             "font_families": sorted(fonts) if fonts is not None else None}
 
 
+def _jsx_ids(node_ids: list[str] | None) -> list[str]:
+    if node_ids is None:
+        return []
+    if (not isinstance(node_ids, list)
+            or any(not isinstance(x, str) or not OPERATION_RE.fullmatch(x) for x in node_ids)
+            or len(set(node_ids)) != len(node_ids) or len(node_ids) > 24):
+        raise bridge.Refusal("INVALID_JSX_EVIDENCE_TARGETS")
+    return node_ids
+
+
 def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
               operation_id: str, *, reader: Callable[[str], dict] | None = None,
-              page_reader: Callable[[str, str], dict] | None = None) -> dict:
+              page_reader: Callable[[str, str], dict] | None = None,
+              evidence_node_ids: list[str] | None = None,
+              jsx_reader: Callable[[str, str], str] | None = None) -> dict:
     source_id, clone_id = _require_file_id(source_id), _require_file_id(clone_id)
     if source_id == clone_id:
         raise bridge.Refusal("SOURCE_EQUALS_CLONE")
@@ -148,6 +160,7 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
     # become authoritative, and may continue receiving legitimate source edits.
     kept_pages = [p for p in source_pages if p["id"] in keep_ids]
     retained_census = []
+    retained_artboard_ids = set()
     for page in kept_pages:
         source_native = _read_native_page(source_id, page, page_reader=page_reader)
         clone_native = _read_native_page(clone_id, page, page_reader=page_reader)
@@ -156,6 +169,19 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
                                  "Do not prune a stale or structurally divergent clone.")
         retained_census.append({"page_id": page["id"],
                                 "native_metadata_sha256": bridge.digest(source_native)})
+        retained_artboard_ids.update(board["id"] for board in source_native["artboards"])
+    sample_ids = _jsx_ids(evidence_node_ids)
+    if any(node_id not in retained_artboard_ids for node_id in sample_ids):
+        raise bridge.Refusal("JSX_TARGET_NOT_RETAINED_ARTBOARD")
+    pre_prune_jsx = []
+    for node_id in sample_ids:
+        source_jsx = _read_jsx(source_id, node_id, reader=jsx_reader)
+        clone_jsx = _read_jsx(clone_id, node_id, reader=jsx_reader)
+        if source_jsx != clone_jsx:
+            raise bridge.Refusal("CLONE_JSX_MISMATCH",
+                                 "Selected native style differs before any deletion.")
+        pre_prune_jsx.append({"node_id": node_id,
+                              "native_jsx_sha256": bridge.digest(source_jsx)})
     return {
         "schema": SCHEMA,
         "state": "CLONE_PRUNE_PLAN_READY",
@@ -173,6 +199,8 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
         "clone_page_list_sha256": bridge.digest(clone_pages),
         "retained_native_census": retained_census,
         "retained_native_census_sha256": bridge.digest(retained_census),
+        "pre_prune_native_jsx": pre_prune_jsx,
+        "pre_prune_native_jsx_sha256": bridge.digest(pre_prune_jsx),
         "native_metadata_only_not_full_visual_fidelity": True,
         "actuation": "FIRST_PARTY_PAPER_UI_ONLY_SEPARATE_CARRIER_PROOF_REQUIRED",
         "original_deletion_authorized": False,
@@ -257,17 +285,32 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
             raise bridge.Refusal("SOURCE_NATIVE_PAGE_DRIFT")
         if bridge.digest(current_clone) != baseline["native_metadata_sha256"]:
             raise bridge.Refusal("CLONE_NATIVE_PAGE_DRIFT")
-    node_ids = evidence_node_ids or []
-    if (not isinstance(node_ids, list)
-            or any(not isinstance(x, str) or not OPERATION_RE.fullmatch(x) for x in node_ids)
-            or len(set(node_ids)) != len(node_ids) or len(node_ids) > 24):
-        raise bridge.Refusal("INVALID_JSX_EVIDENCE_TARGETS")
-    for node_id in node_ids:
+    requested_ids = _jsx_ids(evidence_node_ids)
+    pre_prune = plan.get("pre_prune_native_jsx", [])
+    if (not isinstance(pre_prune, list)
+            or bridge.digest(pre_prune) != plan.get("pre_prune_native_jsx_sha256")
+            or any(not isinstance(x, dict)
+                   or not isinstance(x.get("node_id"), str)
+                   or not OPERATION_RE.fullmatch(x["node_id"])
+                   or not isinstance(x.get("native_jsx_sha256"), str)
+                   or not re.fullmatch(r"[a-f0-9]{64}", x["native_jsx_sha256"])
+                   for x in pre_prune)):
+        raise bridge.Refusal("PRE_PRUNE_JSX_PLAN_INVALID")
+    pre_ids = [x["node_id"] for x in pre_prune]
+    if len(set(pre_ids)) != len(pre_ids):
+        raise bridge.Refusal("PRE_PRUNE_JSX_PLAN_INVALID")
+    if pre_ids and requested_ids and requested_ids != pre_ids:
+        raise bridge.Refusal("PRE_PRUNE_JSX_TARGET_MISMATCH")
+    node_ids = pre_ids or requested_ids
+    for index, node_id in enumerate(node_ids):
         original_jsx = _read_jsx(source_id, node_id, reader=jsx_reader)
         cloned_jsx = _read_jsx(clone_id, node_id, reader=jsx_reader)
         if original_jsx != cloned_jsx:
             raise bridge.Refusal("CLONE_JSX_MISMATCH",
                                  "Source and retained native node JSX differ.")
+        if pre_ids and bridge.digest(original_jsx) != pre_prune[index]["native_jsx_sha256"]:
+            raise bridge.Refusal("RETAINED_NATIVE_JSX_DRIFT",
+                                 "Selected retained artboard content changed since pre-prune read.")
     return {
         "schema": SCHEMA,
         "state": "CLONE_PRUNE_METADATA_VERIFIED",
@@ -281,6 +324,8 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
         "clone_removed_page_ids": [p["id"] for p in expected_removed],
         "page_metadata_verified": True,
         "exact_jsx_node_ids_verified": node_ids,
+        "pre_prune_native_jsx_verified_ids": pre_ids,
+        "post_only_native_jsx_ids": [x for x in node_ids if x not in pre_ids],
         "full_page_visual_fidelity_verified": False,
         "original_deletion_authorized": False,
         "image_component_comment_fidelity_verified": False,
@@ -296,6 +341,7 @@ def main() -> int:
     prepare.add_argument("--clone-file-id", required=True)
     prepare.add_argument("--keep-page-id", action="append", required=True)
     prepare.add_argument("--operation-id", required=True)
+    prepare.add_argument("--verify-node-id", action="append", default=[])
     verify = sub.add_parser("verify")
     verify.add_argument("--plan", type=Path, required=True)
     verify.add_argument("--verify-node-id", action="append", default=[])
@@ -303,7 +349,8 @@ def main() -> int:
     try:
         if args.action == "plan":
             receipt = make_plan(args.source_file_id, args.clone_file_id,
-                                args.keep_page_id, args.operation_id)
+                                args.keep_page_id, args.operation_id,
+                                evidence_node_ids=args.verify_node_id)
         else:
             receipt = verify_plan(bridge.load_json(args.plan.read_bytes()),
                                   evidence_node_ids=args.verify_node_id)

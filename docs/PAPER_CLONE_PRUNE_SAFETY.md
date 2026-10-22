@@ -133,6 +133,21 @@ The separate `verify` step re-reads that retained page from **both files** and c
 
 The live production clone must **not** be pruned based on a historical creation receipt: its active retained pages have to pass this fresh check. The existing clone of MASTERMIND PAGES is preserved intact.
 
+## Selected native JSX check before clone-only pruning
+
+The guarded `plan` command now accepts optional `--verify-node-id ARTBOARD_ID` (repeatable, up to 24), and **refuses any selected ID that is not a top-level artboard on a retained page**. For each selected artboard it reads full native JSX from original and clone **before** any first-party UI page deletion; a mismatch refuses `CLONE_JSX_MISMATCH`, including OKLab-to-hex conversion, even when node counts agree. It records the original JSX content digest and selected artboard IDs in the plan. Later `verify` re-reads the same selected IDs automatically, detects content drift relative to the pre-prune baseline, and refuses an attempted switch of targets. Without selected IDs it still only proves structural metadata; it does not imply full visual or asset fidelity.
+
+Example **on a future fresh, authorized disposable unpruned clone** (do not rerun the historical already-pruned scratch):
+
+```sh
+python3 -m integrations.paper_desktop.clone_prune_guard plan \
+  --source-file-id SOURCE_FILE_ID --clone-file-id VERIFIED_NEW_CLONE_FILE_ID \
+  --keep-page-id p-1-0 --operation-id approved-scratch-unique-id \
+  --verify-node-id 1-1 > /private/scratch-plan.json
+```
+
+No GUI mutation or Paper source deletion is performed by this helper. For the existing production-sized historical clone, any retained artboard whose source/clone JSX differs must be held for exact style-semantic reconciliation **before** attempting clone-only page pruning.
+
 ## Release and permission fence
 
 The current task authorizes bounded local scratch testing, not unrestricted

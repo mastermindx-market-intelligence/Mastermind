@@ -272,6 +272,57 @@ class ClonePruneGuardTests(unittest.TestCase):
         with self.assertRaisesRegex(g.bridge.Refusal, "NATIVE_PAGE_CENSUS_PLAN_INVALID"):
             g.verify_plan(plan, reader=f.read, page_reader=f.read_page)
 
+    def test_pre_prune_artboard_jsx_bound_and_reverified(self):
+        f = Copy()
+        def native(file_id, node_id):
+            self.assertEqual(node_id, "1-1")
+            return '(\\n  <div id="1-1">editable native specimen</div>\\n)'
+        plan = g.make_plan(SRC, CLONE, ["p-1-0"], "pre-prune-native-1",
+                           reader=f.read, page_reader=f.read_page,
+                           evidence_node_ids=["1-1"], jsx_reader=native)
+        self.assertEqual([x["node_id"] for x in plan["pre_prune_native_jsx"]], ["1-1"])
+        f.delete_clone_page_2()
+        result = g.verify_plan(plan, reader=f.read, page_reader=f.read_page, jsx_reader=native)
+        self.assertEqual(result["pre_prune_native_jsx_verified_ids"], ["1-1"])
+        self.assertEqual(result["exact_jsx_node_ids_verified"], ["1-1"])
+        self.assertFalse(result["production_migration_accepted"])
+
+    def test_pre_prune_jsx_mismatch_rejected_before_deletion(self):
+        f = Copy()
+        with self.assertRaisesRegex(g.bridge.Refusal, "CLONE_JSX_MISMATCH"):
+            g.make_plan(SRC, CLONE, ["p-1-0"], "pre-prune-native-2",
+                        reader=f.read, page_reader=f.read_page,
+                        evidence_node_ids=["1-1"], jsx_reader=lambda file_id, node_id: (
+                            "(<div>oklab</div>)" if file_id == SRC else "(<div>#5B9BF014</div>)"))
+        self.assertEqual(f.infos[CLONE]["pages"], PAGES)
+
+    def test_pre_prune_target_must_be_retained_artboard(self):
+        f = Copy()
+        for target in ("1-NOT-RETAINED", "p-3-0"):
+            with self.subTest(target=target), self.assertRaisesRegex(
+                    g.bridge.Refusal, "JSX_TARGET_NOT_RETAINED_ARTBOARD"):
+                g.make_plan(SRC, CLONE, ["p-1-0"], "pre-prune-native-3",
+                            reader=f.read, page_reader=f.read_page,
+                            evidence_node_ids=[target], jsx_reader=lambda *_: "(<div>same</div>)")
+
+    def test_pre_prune_jsx_drift_and_evidence_omission_refused(self):
+        f = Copy()
+        body = '(\\n  <div id="1-1">original</div>\\n)'
+        plan = g.make_plan(SRC, CLONE, ["p-1-0"], "pre-prune-native-4",
+                           reader=f.read, page_reader=f.read_page,
+                           evidence_node_ids=["1-1"], jsx_reader=lambda *_: body)
+        f.delete_clone_page_2()
+        with self.assertRaisesRegex(g.bridge.Refusal, "RETAINED_NATIVE_JSX_DRIFT"):
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page,
+                          jsx_reader=lambda *_: "(<div>changed text without node count change</div>)")
+        with self.assertRaisesRegex(g.bridge.Refusal, "PRE_PRUNE_JSX_TARGET_MISMATCH"):
+            g.verify_plan(plan, reader=f.read, page_reader=f.read_page,
+                          evidence_node_ids=["another-id"], jsx_reader=lambda *_: body)
+        tampered = copy.deepcopy(plan)
+        tampered["pre_prune_native_jsx"].clear()
+        with self.assertRaisesRegex(g.bridge.Refusal, "PRE_PRUNE_JSX_PLAN_INVALID"):
+            g.verify_plan(tampered, reader=f.read, page_reader=f.read_page)
+
     def test_plan_no_modifying_dispatch(self):
         f = Copy()
         f.plan()
