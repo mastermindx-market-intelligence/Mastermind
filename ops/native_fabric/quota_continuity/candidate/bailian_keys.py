@@ -452,10 +452,8 @@ def cooldown_info(name: str) -> Optional[Tuple[int, str]]:
     reason = parts[1] if len(parts) > 1 else ""
     now = int(time.time())
     if expiry <= now:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+        # Observing expired evidence is not authority to unlink it.
+        # Explicit original-owner writer paths retain cleanup custody.
         return None
     return expiry, reason
 
@@ -509,19 +507,13 @@ def active_count(name: str) -> int:
 
 
 def usable_names() -> List[str]:
-    """Configured keys. Keys in non-429 cooldown are excluded; 429 keys are included
-    (they can still handle reduced traffic at their soft cap)."""
-    names = []
-    for name in key_names():
-        cd = cooldown_info(name)
-        if cd is None:
-            names.append(name)
-        else:
-            reason = cd[1] if len(cd) > 1 else ""
-            if reason == "http_429":
-                names.append(name)
-    return names
+    """Read-only names requiring verified healthy or soft-429 evidence.
 
+    Unknown/unsafe and known hard-denial accounts are excluded, including
+    from unleased CLI callers. This helper never clears expired evidence.
+    """
+    return [name for name in key_names()
+            if cooldown_rank_readonly(name) in (0, 2)]
 
 def _effective_cap_for_key(name: str) -> int:
     """Effective per-key cap: 0 for non-429 cooldown; soft cap for 429 cooldown."""
@@ -556,39 +548,57 @@ def total_cap() -> int:
     return cap
 
 
-def next_usable_in() -> int:
-    """Seconds until the earliest cooldown frees a key; 0 if one is pickable now.
+def _active_count_readonly(name: str) -> int:
+    """Advisory PID-marker count without pruning original-owner state."""
+    directory = _name_dir(name)
+    if not os.path.isdir(directory):
+        return 0
+    cutoff = int(time.time()) - 6 * 3600
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return sys.maxsize
+    count = 0
+    for item in names:
+        try:
+            pid = int(item)
+        except ValueError:
+            continue
+        path = os.path.join(directory, item)
+        try:
+            if (pid > 0 and os.path.isfile(path)
+                    and os.path.getmtime(path) >= cutoff and _pid_alive(pid)):
+                count += 1
+        except OSError:
+            return sys.maxsize
+    return count
 
-    Mirrors `pick`'s admission rules (not in non-429 cooldown, active slots
-    under the effective per-key cap). Keys in 429-cooldown are treated as
-    available at their soft cap, so next_usable_in returns 0 if any such key
-    has headroom. Returns -1 when waiting cannot help: no keys configured, or
-    every key is at its effective cap with no cooldown left to expire.
-    Never returns a key name or value.
+
+def next_usable_in() -> int:
+    """Read-only wait hint; never grants, removes cooldowns or prunes PID state.
+
+    Hard-denial wait time is advisory and is read only after strict rank 3.
+    Unknown/unsafe evidence offers no justified restart time.
     """
     names = key_names()
     if not names:
         return -1
-    base_cap = current_per_key_cap()
     now = int(time.time())
     soonest: Optional[int] = None
     for name in names:
-        cd = cooldown_info(name)
-        if cd is None:
-            eff_cap = base_cap
-        else:
-            reason = cd[1] if len(cd) > 1 else ""
-            if reason != "http_429":
-                # Non-429 cooldown: wait for it to clear.
+        rank = cooldown_rank_readonly(name)
+        if rank == 1:
+            continue
+        if rank == 3:
+            cd = cooldown_info(name)
+            if cd is not None and cd[1] != "http_429":
                 remain = max(1, cd[0] - now)
-                if soonest is None or remain < soonest:
-                    soonest = remain
-                continue
-            eff_cap = _effective_cap_for_key(name)
-        if prune_stale(name) < eff_cap:
+                soonest = remain if soonest is None else min(soonest, remain)
+            continue
+        cap = _effective_cap_for_key(name)
+        if cap > 0 and _active_count_readonly(name) < cap:
             return 0
     return soonest if soonest is not None else -1
-
 
 def pick(
     pid: Optional[int] = None,
@@ -612,7 +622,6 @@ def pick(
     prefer = (prefer or os.environ.get("BAILIAN_PREFER") or os.environ.get("POOL_ACCOUNT") or "").strip()
     if prefer in skip_set:
         prefer = ""
-    base_cap = current_per_key_cap()
     lock = _with_lock()
     try:
         candidates: List[Tuple[int, str]] = []
@@ -627,19 +636,17 @@ def pick(
         for name in names:
             if name in skip_set:
                 continue
-            cd = cooldown_info(name)
-            if cd is None:
-                # No cooldown: use base per-key cap.
-                eff_cap = base_cap
-                reason = ""
-            else:
-                reason = cd[1] if len(cd) > 1 else ""
-                if reason != "http_429":
-                    # Non-429 cooldown: key is not available.
-                    unavailable_reason = "cooldown"
-                    continue
-                # 429-cooldown key: use soft cap, key stays in the pool.
-                eff_cap = _effective_cap_for_key(name)
+            rank = cooldown_rank_readonly(name)
+            if rank in (1, 3):
+                # Unleased CLI accounts need the same refusal as the broker.
+                # Malformed/unreadable/unsafe evidence is NOT healthy state.
+                unavailable_reason = "cooldown_unverified" if rank == 1 else "cooldown"
+                continue
+            # Recheck strict rank under the incumbent writer lock.
+            eff_cap = _effective_cap_for_key(name)
+            if eff_cap <= 0:
+                unavailable_reason = "cooldown_unverified"
+                continue
             n = prune_stale(name)
             if n >= eff_cap:
                 continue

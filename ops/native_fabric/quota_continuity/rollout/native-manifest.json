@@ -3,7 +3,7 @@
   "ext/artifact_delivery.py": "447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3",
   "ext/artifact_production.py": "0be15bd5d3304a65673576fd30386bcc977c02ed8ee28313a4cb1ed454f8c409",
   "ext/artifact_reader.py": "e2b08b7967df0e4193ba668cf6f72225429138a9361322c42db6ec84150e3469",
-  "ext/bailian_keys.py": "9ff0b2e3d130429677e7f5d70bd3900d60dbc9cc90ae1c79e5b85822397985fc",
+  "ext/bailian_keys.py": "9dc1af88ce28e557cd93f98e84a1d0e95202492581ec633f38595c313443b8dd",
   "ext/bootstrap_clis.py": "14a859e644268f6d92ff19c6899955b57fa67c1a68c085cb33bab3949de6909f",
   "ext/capacity_preflight.py": "d1856491df257f885a37d06b23c9f98d621f25c08ec376251b614deb32ce94b0",
   "ext/codex_usage.py": "8f06f5f7195917db02e5a2bc406ca5f28c8f8fb1c5432ccc7bc12921e1db3b7a",

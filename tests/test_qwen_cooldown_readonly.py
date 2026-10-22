@@ -262,5 +262,110 @@ class QwenCooldownReadOnly(unittest.TestCase):
         self.assertEqual(self.keys.cooldown_rank_readonly("../other"), 1)
 
 
+    def _unleased_cli_pick(self, *, require=None, prefer=None):
+        """Actual pick with inert account names and private PID slot root."""
+        with (patch.object(self.keys, "key_names", return_value=["Ryan"]),
+              patch.object(self.keys, "current_per_key_cap", return_value=7),
+              patch.object(self.keys, "load_policy",
+                           return_value={"soft_cap_on_429": True}),
+              patch.object(self.keys, "_read_soft_cap", return_value=5),
+              patch.object(self.keys, "LOCK_PATH", str(self.root / ".lock"))):
+            return self.keys.pick(pid=987654, require=require, prefer=prefer)
+
+    def test_unleased_picker_refuses_malformed_empty_and_unsafe_evidence(self):
+        cases = (
+            ("malformed", "not_an_epoch http_429\n", 0o600),
+            ("empty", "", 0o600),
+            ("unreadable_mode", "9999999999 http_429\n", 0o660),
+        )
+        for label, value, mode in cases:
+            with self.subTest(case=label):
+                if self.path.exists():
+                    self.path.unlink()
+                self.write(value, mode=mode)
+                before = self.path.read_bytes()
+                inode = self.path.stat().st_ino
+                with patch.object(self.keys.os, "unlink",
+                                  side_effect=AssertionError("cooldown mutation")):
+                    with self.assertRaises(SystemExit) as refused:
+                        self._unleased_cli_pick(require="Ryan")
+                self.assertEqual(refused.exception.code, 3)
+                self.assertEqual(self.path.read_bytes(), before)
+                self.assertEqual(self.path.stat().st_ino, inode)
+                self.assertFalse((self.root / "Ryan" / "987654").exists())
+
+    def test_unleased_picker_never_follows_cooldown_symlink(self):
+        other = self.root / "external"
+        other.write_text(f"{int(time.time()) + 120} http_429\n")
+        self.path.symlink_to(other)
+        with self.assertRaises(SystemExit) as refused:
+            self._unleased_cli_pick(require="Ryan")
+        self.assertEqual(refused.exception.code, 3)
+        self.assertFalse((self.root / "Ryan" / "987654").exists())
+
+    def test_unleased_picker_keeps_verified_hard_denial_excluded(self):
+        self.write(f"{int(time.time()) + 120} access_denied\n")
+        old = self.path.read_bytes()
+        with self.assertRaises(SystemExit) as refused:
+            self._unleased_cli_pick(prefer="Ryan")
+        self.assertEqual(refused.exception.code, 3)
+        self.assertEqual(self.path.read_bytes(), old)
+
+    def test_unleased_picker_preserves_verified_soft_429_fallback(self):
+        self.write(f"{int(time.time()) + 120} http_429\n")
+        self.assertEqual(self._unleased_cli_pick(require="Ryan"), "Ryan")
+        self.assertTrue((self.root / "Ryan" / "987654").is_file())
+
+    def test_expired_record_is_not_deleted_by_unleased_picker(self):
+        self.write("1 http_429\n")
+        original = self.path.read_bytes()
+        inode = self.path.stat().st_ino
+        with patch.object(self.keys.os, "unlink",
+                          side_effect=AssertionError("expired deletion")):
+            self.assertEqual(self._unleased_cli_pick(), "Ryan")
+        self.assertEqual(self.path.read_bytes(), original)
+        self.assertEqual(self.path.stat().st_ino, inode)
+
+    def test_usable_names_excludes_unknown_without_deleting(self):
+        self.write("corrupted http_429\n")
+        old = self.path.read_bytes()
+        with patch.object(self.keys, "key_names", return_value=["Ryan"]):
+            with patch.object(self.keys.os, "unlink",
+                              side_effect=AssertionError("read mutates")):
+                self.assertEqual(self.keys.usable_names(), [])
+        self.assertEqual(self.path.read_bytes(), old)
+        self.write(f"{int(time.time()) + 120} http_429\n")
+        with patch.object(self.keys, "key_names", return_value=["Ryan"]):
+            self.assertEqual(self.keys.usable_names(), ["Ryan"])
+
+    def test_next_usable_in_has_no_cooldown_or_pid_marker_mutation(self):
+        self.write("1 http_429\n")
+        old = self.path.read_bytes()
+        directory = self.root / "Ryan"
+        directory.mkdir()
+        dead = directory / "999999"
+        dead.write_text("old pid fixture")
+        os.utime(dead, (1, 1))
+        with (patch.object(self.keys, "key_names", return_value=["Ryan"]),
+              patch.object(self.keys, "current_per_key_cap", return_value=7),
+              patch.object(self.keys.os, "unlink",
+                           side_effect=AssertionError("ETA reader mutated state"))):
+            self.assertEqual(self.keys.next_usable_in(), 0)
+        self.assertTrue(dead.is_file())
+        self.assertEqual(self.path.read_bytes(), old)
+
+    def test_next_usable_in_hard_denial_wait_and_unknown_are_distinct(self):
+        self.write(f"{int(time.time()) + 120} access_denied\n")
+        with (patch.object(self.keys, "key_names", return_value=["Ryan"]),
+              patch.object(self.keys.os, "unlink",
+                           side_effect=AssertionError("ETA reader mutated state"))):
+            wait = self.keys.next_usable_in()
+            self.assertGreater(wait, 0)
+            self.assertLessEqual(wait, 120)
+        self.write("invalid http_429\n")
+        with patch.object(self.keys, "key_names", return_value=["Ryan"]):
+            self.assertEqual(self.keys.next_usable_in(), -1)
+
+
 if __name__ == "__main__":
     unittest.main()
