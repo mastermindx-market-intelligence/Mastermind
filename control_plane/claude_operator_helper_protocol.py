@@ -21,16 +21,18 @@ MAX_EVENTS = 256
 EXECUTIVE_PLAN_CONTRACT = "executive-plan-v1"
 EXECUTIVE_PLAN_CONTRACT_V3 = "executive-plan-v3"
 EXECUTIVE_PLAN_CONTRACT_V4 = "executive-plan-v4"
+EXECUTIVE_PLAN_CONTRACT_V5 = "executive-plan-v5"
 
 
 def _plan_version(contract_name: str) -> str:
     from control_plane.executive_orchestration_result import (
-        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
     )
     admitted = {
         EXECUTIVE_PLAN_CONTRACT: PLAN_SCHEMA_V1,
         EXECUTIVE_PLAN_CONTRACT_V3: PLAN_SCHEMA_V3,
         EXECUTIVE_PLAN_CONTRACT_V4: PLAN_SCHEMA_V4,
+        EXECUTIVE_PLAN_CONTRACT_V5: PLAN_SCHEMA_V5,
     }
     if type(contract_name) is not str or contract_name not in admitted:
         raise HelperProtocolError("native result contract is unsupported")
@@ -53,6 +55,18 @@ def native_plan_contract(contract_name: str = EXECUTIVE_PLAN_CONTRACT) -> dict[s
             "schema_digest": hashlib.sha256(
                 canonical_bytes(native_plan_schema(contract_name))
             ).hexdigest()}
+
+
+def native_plan_contract_for_version(plan_schema_version: str) -> dict[str, str]:
+    """Resolve only the closed producer wire; this grants no adapter capability."""
+    if type(plan_schema_version) is str:
+        for contract in (EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3,
+                         EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5):
+            if _plan_version(contract) == plan_schema_version:
+                return native_plan_contract(contract)
+    raise HelperProtocolError("native plan schema version is unsupported")
+
+
 REQUEST_ID_RE = re.compile(r"req-[A-Za-z0-9_-]{1,64}")
 OPERATIONS = frozenset(
     {

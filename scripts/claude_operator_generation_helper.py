@@ -115,14 +115,14 @@ class HelperRuntime:
         self._drain_closed = True
         from control_plane.claude_operator_helper_protocol import (
             EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3,
-            EXECUTIVE_PLAN_CONTRACT_V4, native_plan_contract,
+            EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5, native_plan_contract,
         )
         result_contract = self.config.get("result_contract")
         if result_contract is not None and (
             type(result_contract) is not str
             or result_contract not in {
                 EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3,
-                EXECUTIVE_PLAN_CONTRACT_V4,
+                EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5,
             }
         ):
             raise HelperProtocolError("native result contract is unsupported")

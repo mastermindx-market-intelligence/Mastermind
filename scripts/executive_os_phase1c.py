@@ -1809,10 +1809,10 @@ def _service_from_config(
         raise ServiceError("dialogue canary profile requires trusted composition")
     # This is trusted host composition, never a JSON/model-selected factory.
     from control_plane.executive_orchestration_result import (
-        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
     )
     if type(plan_schema_version) is not str or plan_schema_version not in {
-        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4,
+        PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
     }:
         raise ServiceError("trusted planner plan schema is unsupported")
     if plan_schema_version != PLAN_SCHEMA_V1 and (

@@ -312,7 +312,7 @@ def test_native_requested_version_cannot_override_bound_runtime_floor(configured
     assert 'native model/runtime is not qualified' in validation.reasons
     assert not c.running and not c.calls
 
-@pytest.mark.parametrize("contract", ["executive-plan-v3", "executive-plan-v4"])
+@pytest.mark.parametrize("contract", ["executive-plan-v3", "executive-plan-v4", "executive-plan-v5"])
 def test_native_adapter_selects_exact_versioned_plan_contract(configured, contract):
     a, client, profile, epoch, generation = configured
     from control_plane.claude_operator_helper_protocol import native_plan_contract
@@ -344,7 +344,7 @@ def test_native_adapter_selects_exact_versioned_plan_contract(configured, contra
     alt.graceful_stop(generation, operation_id=OperationId("ohf-op:stop"))
 
 
-@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v5", "", True, None])
+@pytest.mark.parametrize("contract", ["executive-plan-v2", "executive-plan-v6", "", True, None])
 def test_native_adapter_refuses_unqualified_plan_contract(configured, contract):
     a, _, _, _, _ = configured
     with pytest.raises(ValueError, match="contract"):

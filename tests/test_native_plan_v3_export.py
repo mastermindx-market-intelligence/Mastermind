@@ -115,7 +115,7 @@ def test_v3_explicit_placement_required_and_v4_auto_placement_allowed():
     assert not Draft7Validator(v3).is_valid(_envelope(PLAN_SCHEMA_V4))
 
 
-@pytest.mark.parametrize("value", [None, "", "executive-plan-v2", "executor-plan-v3", "executive-plan-v5", True])
+@pytest.mark.parametrize("value", [None, "", "executive-plan-v2", "executor-plan-v3", "executive-plan-v6", True])
 def test_unknown_native_contract_fails_closed(value):
     with pytest.raises((ValueError, OrchestrationResultError)):
         native_plan_schema(value)
@@ -251,7 +251,9 @@ def test_current_runtime_attempt_refuses_claimed_adapter_contract_mismatch(
     from control_plane.executive_runtime import AttemptLease, OrchestrationDispatchOutcome
     from test_executive_operator_supervisor import _seed_dispatchable_operator_planner
 
-    runtime, root, planner = _seed_dispatchable_operator_planner(tmp_path)
+    runtime, root, planner = _seed_dispatchable_operator_planner(
+        tmp_path, plan_schema_version=selected,
+    )
     dispatched = runtime.attempts.dispatch_cycle_job(
         planner.job_id,
         command_id=f"coo-cycle:{root.job_id}:dispatch:{planner.job_id}:attempt:1",
@@ -270,13 +272,31 @@ def test_current_runtime_attempt_refuses_claimed_adapter_contract_mismatch(
         runtime, claimed_adapter_factory=claimed_factory,
         prompt_source=object(), plan_schema_version=selected,
     )
-    profile = SimpleNamespace(
-        worker_id=dispatched.attempt.worker_id,
-        authority_policy_hash=dispatched.attempt.authority_policy_hash,
-    )
+    profile = supervisor._requested_profile(planner, lease)
     with pytest.raises(ExecutiveOperatorSupervisorError, match="contract"):
         supervisor._adapter_for_attempt(
             lease, profile, lambda _turn: "inert", recovery=False,
         )
     assert factory_calls == [(dispatched.attempt.attempt_id, False)]
     assert runtime.attempts.get_attempt(dispatched.attempt.attempt_id).status.name == "CLAIMED"
+
+
+def test_v5_native_producer_binds_immediate_coordinator():
+    from control_plane.executive_orchestration_result import PLAN_SCHEMA_V5
+    envelope = _envelope(PLAN_SCHEMA_V4, placement=False)
+    body = envelope["role_result"]
+    body["schema_version"] = PLAN_SCHEMA_V5
+    body["coordinator_job_id"] = "JOB-009"
+    for step in body["steps"]:
+        step["delegation"] = None
+    Draft7Validator(native_plan_schema("executive-plan-v5")).validate(envelope)
+    bound = worker_result_schema(
+        job_id="JOB-100", run_id="ATT-100", worker_id="planner-1",
+        effective_grant_digest="a" * 64, orchestration_role="plan",
+        root_job_id="JOB-0", plan_schema_version=PLAN_SCHEMA_V5,
+        coordinator_job_id="JOB-009",
+    )
+    Draft202012Validator(bound).validate(envelope)
+    body["coordinator_job_id"] = "JOB-010"
+    assert not Draft202012Validator(bound).is_valid(envelope)
+    assert role_schema_digest("plan") == GOLDEN_ROLE_SCHEMA_DIGESTS["plan"]

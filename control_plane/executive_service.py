@@ -5323,7 +5323,7 @@ class ExecutiveControlService:
                         else:
                             validate_acceptance_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == ACTIVITY_FRAME_SCHEMA:
@@ -5331,7 +5331,7 @@ class ExecutiveControlService:
                     try:
                         validate_activity_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == FRAME_SCHEMA_V3:
@@ -5339,7 +5339,7 @@ class ExecutiveControlService:
                     try:
                         validate_v3_frame(parsed)
                     except (TypeError, ValueError):
-                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", 400),
+                        await self._send_ceo_ingress_response(writer, workspace_error("invalid_input", HTTPStatus.BAD_REQUEST),
                                                              response_ceiling=ceiling)
                         return
                 elif parsed.get("schema") == FRAME_SCHEMA_V2:
@@ -7582,6 +7582,8 @@ class ExecutiveControlService:
                 # The executor thread may begin after its originating request closes.
                 self._require_foreground_only_source(root_id)
                 return CooCycle(self._require_runtime(), dispatcher=dispatch,
+                    planner_plan_schema_version=getattr(
+                        self.operator_supervisor, "fresh_planner_schema_version", None),
                     before_admission=(require_cycle_admission
                                       if self.config.coo_foreground_only or self._foreground_cycle_owner is not None
                                       else None)).run_once(root_id)

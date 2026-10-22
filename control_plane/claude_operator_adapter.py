@@ -21,7 +21,7 @@ from typing import Any, Callable, Mapping
 
 from control_plane.claude_operator_helper_protocol import (
     INTERFACE_VERSION, security_settings, EXECUTIVE_PLAN_CONTRACT,
-    EXECUTIVE_PLAN_CONTRACT_V3, EXECUTIVE_PLAN_CONTRACT_V4, native_plan_contract,
+    EXECUTIVE_PLAN_CONTRACT_V3, EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5, native_plan_contract,
 )
 from control_plane.claude_mcp_client_projection import ClaudeMcpClientProjection
 from control_plane.executive_agent_capabilities import claude_security_config_digest
@@ -420,7 +420,7 @@ class ClaudeOperatorAdapter:
         self.sdk_python = Path(sdk_python or sys.executable)
         self.helper_path = Path(helper_path or Path(__file__).resolve().parents[1] / "scripts/claude_operator_generation_helper.py")
         if type(plan_contract) is not str or plan_contract not in {
-            EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3, EXECUTIVE_PLAN_CONTRACT_V4,
+            EXECUTIVE_PLAN_CONTRACT, EXECUTIVE_PLAN_CONTRACT_V3, EXECUTIVE_PLAN_CONTRACT_V4, EXECUTIVE_PLAN_CONTRACT_V5,
         }:
             raise ValueError("native plan contract is not qualified")
         self.plan_contract = plan_contract

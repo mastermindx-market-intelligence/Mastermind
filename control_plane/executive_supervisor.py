@@ -530,6 +530,7 @@ def worker_result_schema(
     root_job_id: str | None = None,
     plan_schema_version: str = "mastermind.execution_plan/v1",
     aggregation_schema_version: str = "mastermind.aggregation_result/v1",
+    coordinator_job_id: str | None = None,
 ) -> dict[str, Any]:
     """Return the strict final-output contract for one immutable attempt."""
 
@@ -548,10 +549,13 @@ def worker_result_schema(
             root_job_id=root_job_id,
             plan_schema_version=plan_schema_version,
             aggregation_schema_version=aggregation_schema_version,
+            coordinator_job_id=coordinator_job_id,
         )
         result["x-mastermind-effective-grant-digest"] = effective_grant_digest
         return result
 
+    if coordinator_job_id is not None:
+        raise SupervisorError("coordinator binding requires the V5 planner role")
     if plan_schema_version != "mastermind.execution_plan/v1":
         raise SupervisorError("versioned plan schema requires the planner role")
     if aggregation_schema_version != "mastermind.aggregation_result/v1":

@@ -113,6 +113,130 @@ _COO_PLAN_ADMISSION_SCHEMA_V2 = "mastermind.coo_plan_admission/v2"
 _COO_PLAN_ADMISSION_SCHEMA_V3 = "mastermind.coo_plan_admission/v3"
 
 
+_PLANNER_PRODUCER_BINDING_SCHEMA = "mastermind.planner_producer_binding/v1"
+_PLANNER_EXECUTION_FIELDS = (
+    "eligible_quota_classes", "provider", "model", "effort", "cost_class",
+    "routing_policy_version", "execution_profile_id", "execution_profile_digest",
+    "capability_policy_version", "capability_policy_digest",
+    "harness_binary_digest", "harness_version", "base_sha",
+)
+
+
+def _planner_execution_binding_digest(constraints: Mapping[str, Any]) -> str:
+    """Bind the complete admitted constraints, not a caller's proof string."""
+    if not isinstance(constraints, Mapping) or any(
+        not constraints.get(key) for key in _PLANNER_EXECUTION_FIELDS
+    ):
+        raise StateConflict("planner producer requires complete execution constraints")
+    quotas = constraints["eligible_quota_classes"]
+    if (type(quotas) is not list or not quotas
+            or any(type(value) is not str or not value for value in quotas)
+            or len(set(quotas)) != len(quotas)):
+        raise StateConflict("planner producer quota binding is invalid")
+    for key in _PLANNER_EXECUTION_FIELDS[1:]:
+        if type(constraints[key]) is not str or not constraints[key].strip():
+            raise StateConflict("planner producer execution identity is invalid")
+    for key in ("execution_profile_digest", "capability_policy_digest", "harness_binary_digest"):
+        if re.fullmatch(r"[0-9a-f]{64}", constraints[key]) is None:
+            raise StateConflict("planner producer execution digest is invalid")
+    if re.fullmatch(r"[0-9a-f]{40}", constraints["base_sha"]) is None:
+        raise StateConflict("planner producer release identity is invalid")
+    return orchestration_digest(dict(constraints))
+
+
+def _make_planner_producer_binding(
+    *, root_job_id: str, coordinator_job_id: str, planner_job_id: str,
+    plan_schema_version: str, constraints: Mapping[str, Any],
+) -> dict[str, Any]:
+    from control_plane.claude_operator_helper_protocol import native_plan_contract_for_version
+    try:
+        contract = native_plan_contract_for_version(plan_schema_version)
+    except (TypeError, ValueError) as exc:
+        raise StateConflict("planner producer schema version is not admitted") from exc
+    if coordinator_job_id != root_job_id and plan_schema_version != "mastermind.execution_plan/v5":
+        raise StateConflict("nested planner producer requires V5")
+    return {
+        "schema_version": _PLANNER_PRODUCER_BINDING_SCHEMA,
+        "root_job_id": root_job_id,
+        "coordinator_job_id": coordinator_job_id,
+        "planner_job_id": planner_job_id,
+        "plan_schema_version": plan_schema_version,
+        "native_result_contract": contract,
+        "execution_binding_digest": _planner_execution_binding_digest(constraints),
+    }
+
+
+def _validated_planner_producer_binding(
+    connection: sqlite3.Connection, job_row: sqlite3.Row,
+) -> dict[str, Any] | None:
+    """Read the original creation receipt; absence never adopts a new default."""
+    if job_row["orchestration_role"] != "plan":
+        raise StateConflict("planner producer binding requires the plan role")
+    rows = connection.execute(
+        "SELECT * FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
+        (job_row["job_id"],),
+    ).fetchall()
+    if len(rows) != 1:
+        raise StateConflict("planner producer requires one immutable creation receipt")
+    event = rows[0]
+    payload = _strict_canonical_json_loads(
+        str(event["payload_json"]), name="planner producer JOB_CREATED payload"
+    )
+    if (not isinstance(payload, dict) or event["aggregate_type"] != "job"
+            or event["aggregate_id"] != job_row["job_id"]
+            or payload.get("parent_job_id") != job_row["parent_job_id"]
+            or payload.get("root_job_id") != job_row["root_job_id"]
+            or payload.get("orchestration_role") != "plan"
+            or payload.get("orchestration_provenance_digest") != job_row["orchestration_provenance_digest"]):
+        raise StateConflict("planner producer creation identity is invalid")
+    keys = {"planner_producer_binding", "planner_producer_binding_digest"}
+    present = keys.intersection(payload)
+    if not present:
+        return None
+    if present != keys:
+        raise StateConflict("planner producer binding must be all-or-absent")
+    binding = payload["planner_producer_binding"]
+    if type(binding) is not dict:
+        raise StateConflict("planner producer binding is not a closed record")
+    expected = _make_planner_producer_binding(
+        root_job_id=str(job_row["root_job_id"]),
+        coordinator_job_id=str(job_row["parent_job_id"]),
+        planner_job_id=str(job_row["job_id"]),
+        plan_schema_version=binding.get("plan_schema_version"),
+        constraints=_strict_canonical_json_loads(
+            str(job_row["constraints_json"]), name="planner execution constraints"
+        ),
+    )
+    if (binding != expected
+            or payload["planner_producer_binding_digest"] != orchestration_digest(expected)):
+        raise StateConflict("planner producer binding identity or digest differs")
+    return expected
+
+
+def _assert_planner_producer_result(
+    connection: sqlite3.Connection, planner: sqlite3.Row,
+    attempt: sqlite3.Row, plan: Mapping[str, Any],
+) -> None:
+    binding = _validated_planner_producer_binding(connection, planner)
+    if binding is not None:
+        version = binding["plan_schema_version"]
+        if (plan.get("schema_version") != version
+                or plan.get("root_job_id") != binding["root_job_id"]
+                or (version == "mastermind.execution_plan/v5"
+                    and plan.get("coordinator_job_id") != binding["coordinator_job_id"])):
+            raise StateConflict("plan result differs from immutable producer binding")
+    elif (attempt["execution_mode"] == AttemptExecutionMode.OPERATOR_HARNESS.value
+            and _strict_canonical_json_loads(str(planner["constraints_json"]),
+                name="legacy planner constraints").get("execution_profile_id") in {
+                    "operator.appserver.readonly.docs-mcp.native-helper.v1",
+                    "operator.browser.local-review.v1", "operator.claude.readonly.v1",
+                }
+            and plan.get("schema_version") != "mastermind.execution_plan/v1"):
+        # Identify the historical one-shot producer by its retained profile.
+        # OHF also serves interactive and other reviewed versioned-plan paths.
+        raise StateConflict("legacy operator planner result must remain V1")
+
+
 def _path_matches_patterns(value: str, patterns: Sequence[str]) -> bool:
     value_parts = value.split("/")
 
@@ -2342,6 +2466,7 @@ class _JobCreationSpec:
     command_id: str | None
     event_provenance: Mapping[str, Any] | None
     timestamp_ms: int
+    planner_plan_schema_version: str | None = None
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -9195,6 +9320,7 @@ def _validated_orchestration_child_terminal_payload(
     if result_digest(body) != seal.get("role_result_digest"):
         raise StateConflict("orchestration role body digest mismatches its seal")
     if role == "plan":
+        _assert_planner_producer_result(connection, job_row, attempt_row, body)
         if (
             body.get("coordinator_job_id", body.get("root_job_id")) != job_row["parent_job_id"]
             or body.get("root_job_id") != job_row["root_job_id"]
@@ -9636,6 +9762,7 @@ def _validated_plan_admission(
     except Exception as exc:
         raise StateConflict(f"sealed plan result is invalid: {exc}") from exc
     plan_body = dict(envelope["role_result"])
+    _assert_planner_producer_result(connection, plan_attempt, plan_attempt, plan_body)
     expected_admission_schema = (
         _COO_PLAN_ADMISSION_SCHEMA_V3 if plan_body.get("schema_version") == "mastermind.execution_plan/v5" else _COO_PLAN_ADMISSION_SCHEMA_V2
         if plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
@@ -12908,6 +13035,16 @@ class JobRegistry:
                     "supersedes_job_id": spec.supersedes_job_id,
                 }
             )
+        if spec.planner_plan_schema_version is not None:
+            if spec.orchestration_role != "plan" or spec.parent_job_id is None:
+                raise StateConflict("planner producer cannot bind another role")
+            producer = _make_planner_producer_binding(
+                root_job_id=str(root_job_id), coordinator_job_id=spec.parent_job_id,
+                planner_job_id=job_id, plan_schema_version=spec.planner_plan_schema_version,
+                constraints=spec.constraints,
+            )
+            event_payload["planner_producer_binding"] = producer
+            event_payload["planner_producer_binding_digest"] = orchestration_digest(producer)
         if spec.event_provenance is not None:
             event_payload["provenance"] = dict(spec.event_provenance)
         self.store.append_event(
@@ -13189,6 +13326,7 @@ class JobRegistry:
         root_job_id: str,
         *,
         command_id: str,
+        plan_schema_version: str | None = None,
     ) -> Job:
         """Create or reconcile the sole deterministic planner child.
 
@@ -13261,7 +13399,15 @@ class JobRegistry:
                 "source_digest": str(root.orchestration_provenance_digest),
             },
             _coo_cycle_planner_capability=_COO_CYCLE_PLANNER_CREATION_CAPABILITY,
+            _planner_plan_schema_version=plan_schema_version,
         )
+
+    def get_planner_producer_binding(self, job_id: str) -> dict[str, Any] | None:
+        with self.store.read() as connection:
+            row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
+            if row is None:
+                raise StateConflict("planner producer Job does not exist")
+            return _validated_planner_producer_binding(connection, row)
 
     def _operator_child_constraints(self, root: Job) -> dict[str, Any]:
         root_constraints = dict(root.constraints)
@@ -13597,6 +13743,7 @@ class JobRegistry:
             except Exception as exc:
                 raise StateConflict(f"typed plan is invalid: {exc}") from exc
             plan_body = dict(envelope["role_result"])
+            _assert_planner_producer_result(connection, planner, plan_attempt, plan_body)
             plan_digest = result_digest(plan_body)
             if plan_digest != seal["role_result_digest"]:
                 raise StateConflict("typed plan digest differs from its seal")
@@ -15179,6 +15326,7 @@ class JobRegistry:
         _coo_cycle_planner_capability: object | None = None,
         _coo_cycle_child_capability: object | None = None,
         _principal_commit_guard: Callable[[], None] | None = None,
+        _planner_plan_schema_version: str | None = None,
     ) -> Job:
         """Insert one QUEUED Job and its ``JOB_CREATED`` receipt in one transaction.
 
@@ -15218,6 +15366,11 @@ class JobRegistry:
         orchestration_role = (
             str(orchestration_role).strip().lower() if orchestration_role else None
         )
+        if _planner_plan_schema_version is not None and (
+            orchestration_role != "plan"
+            or _coo_cycle_planner_capability is not _COO_CYCLE_PLANNER_CREATION_CAPABILITY
+        ):
+            raise StateConflict("producer selection requires the private planner owner")
         lineage_values = (
             plan_attempt_id,
             plan_digest,
@@ -15471,6 +15624,11 @@ class JobRegistry:
                         raise StateConflict(
                             "planner command replay semantic target drifted"
                         )
+                    retained_producer = _validated_planner_producer_binding(connection, existing)
+                    if (_planner_plan_schema_version is not None
+                            and (retained_producer is None
+                                 or retained_producer["plan_schema_version"] != _planner_plan_schema_version)):
+                        raise StateConflict("planner replay cannot replace or add a producer binding")
                     return replay_job
             parent_row = None
             if parent_job_id is not None:
@@ -15679,6 +15837,7 @@ class JobRegistry:
                     command_id=command_id,
                     event_provenance=provenance,
                     timestamp_ms=timestamp,
+                    planner_plan_schema_version=_planner_plan_schema_version,
                 ),
             )
             # Refusal rolls back both the Job and its JOB_CREATED event.
@@ -20659,6 +20818,8 @@ class OperatorHarnessRegistry:
                 raise StateConflict(
                     "raw orchestration result failed closed validation"
                 ) from None
+            if role == "plan":
+                _assert_planner_producer_result(connection, job, row, envelope["role_result"])
             observation_value = observation.to_dict()
             candidate_digest = orchestration_digest(candidate_payload)
             result_envelope_digest = result_digest(envelope)
