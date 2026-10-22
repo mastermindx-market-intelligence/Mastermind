@@ -56,11 +56,12 @@ byte-identical document.  Cards, identities, PRs, issues, findings and
 unattributed findings are each emitted in a total order, and no
 ``generated_at`` clock is stamped into the output.
 
-Unbound carriers and issues are **never** assigned to the sole selected
-workstream merely because the closure has cardinality one. Only a positive
-owner-authored workstream key makes a workstream card. Selected-but-unbound
-identities are returned as explicit typed degradation evidence instead of
-being silently dropped or falsely linked.
+The Agent OS workstream registry is the sole authority for which selected
+workstreams may own carrier or issue cards. The exact-scope selector may
+include self-declared contextual keys; those can never mint new owners.
+A conflicting explicit Agent OS PR relationship likewise never promotes a
+GitHub declaration into the organizational owner. Unbound or unverified
+identities remain typed degradation evidence instead of silently joining.
 
 Scope note: this is the first vertical.  It renders the exact-identity closure
 the receipt's own scope selects and is exercised end-to-end against a single
@@ -787,6 +788,52 @@ def build_cross_plane_view(
         if isinstance(value, str) and value
     }
 
+    # Scope membership includes context learned from selected carriers, but
+    # a carrier's *own* workstream declaration cannot create an authoritative
+    # workstream. Recover the owner registry from the already-acquired Agent OS
+    # observation; never construct another registry or source client here.
+    agentos = observations.get("agentos")
+    agentos_state = (
+        agentos.get("state")
+        if isinstance(agentos, Mapping) and agentos.get("available") is True
+        else None
+    )
+    owner_rows = (
+        agentos_state.get("workstreams") or []
+        if isinstance(agentos_state, Mapping)
+        else []
+    )
+    owner_keys: set[str] = set()
+    owner_prs: dict[tuple[str, int], set[str]] = {}
+    # Bare Agent OS PR numbers can become repo-qualified only with one
+    # explicit repository seed; the selector follows the identical fence.
+    only_repository = next(iter(scope_repositories)) if len(scope_repositories) == 1 else None
+    for row in owner_rows:
+        if not isinstance(row, Mapping):
+            continue
+        key = _text(row.get("key"))
+        if key is None:
+            continue
+        ws = f"WS:{key}"
+        owner_keys.add(ws)
+        if only_repository:
+            for linked_pr in row.get("prs") or []:
+                if not isinstance(linked_pr, Mapping):
+                    continue
+                number = _whole(linked_pr.get("number"))
+                if number is not None:
+                    owner_prs.setdefault((only_repository, number), set()).add(ws)
+
+    requested_workstreams = {
+        ws for ws in (scope.get("workstreams") or [])
+        if isinstance(ws, str) and ws
+    }
+    # Requested seeds may still get a named empty card for diagnosis, but
+    # self-declared extra workstreams outside the Agent OS owner registry
+    # cannot mint their own card, even if the shared closure mentions them.
+    card_workstreams = requested_workstreams | (selection.workstreams & owner_keys)
+    unknown_owner_seeds = requested_workstreams - owner_keys
+
     # Card membership is the closure UNION every identity this receipt's own
     # findings name, repository-fenced.  A receipt produced by an earlier rules
     # revision may carry a finding about a carrier the current closure no longer
@@ -821,15 +868,27 @@ def build_cross_plane_view(
     # Selection is not attribution. An operation-key or explicitly seeded ID
     # can bring a carrier/issue into scope without proving any WS ownership.
     # Keep those identities in typed omission evidence, never on a WS card.
-    unattributed_pr_identities: list[tuple[str, int]] = []
-    unattributed_issue_ids: list[str] = []
+    unattributed_pr_identities: list[tuple[tuple[str, int], str]] = []
+    unattributed_issue_ids: list[tuple[str, str]] = []
 
     pr_cards_by_workstream: dict[str, list[dict[str, Any]]] = {}
     for identity in selected_prs:
         pr = github_rows[identity]
         workstream = _text(pr.get("workstream"))
-        if workstream not in selection.workstreams:
-            unattributed_pr_identities.append(identity)
+        authored_pr_owners = owner_prs.get(identity, set())
+        if workstream not in owner_keys or workstream not in card_workstreams:
+            unattributed_pr_identities.append((
+                identity, "declared workstream has no verified Agent OS owner registry entry"
+            ))
+            continue
+        if authored_pr_owners and authored_pr_owners != {workstream}:
+            # Agent OS explicitly binds this repository-qualified PR to
+            # another or multiple workstreams. Never silently prefer GitHub
+            # metadata (a projection) over an organizational owner record.
+            unattributed_pr_identities.append((
+                identity, "GitHub workstream declaration conflicts with "
+                "the exact Agent OS PR ownership record"
+            ))
             continue
         pr_to_workstream[identity] = workstream
         pr_cards_by_workstream.setdefault(workstream, []).append(_pull_request_card(pr))
@@ -841,8 +900,10 @@ def build_cross_plane_view(
     for issue_id in selected_issues:
         issue = linear_rows[issue_id]
         workstream = _text(issue.get("workstream"))
-        if workstream not in selection.workstreams:
-            unattributed_issue_ids.append(issue_id)
+        if workstream not in owner_keys or workstream not in card_workstreams:
+            unattributed_issue_ids.append((
+                issue_id, "declared workstream has no verified Agent OS owner registry entry"
+            ))
             continue
         issue_to_workstream[issue_id] = workstream
         issue_cards_by_workstream.setdefault(workstream, []).append(_issue_card(issue))
@@ -858,7 +919,7 @@ def build_cross_plane_view(
             pr_to_workstream=pr_to_workstream,
             issue_to_workstream=issue_to_workstream,
             operation_to_workstreams=operation_to_workstreams,
-            workstreams=selection.workstreams,
+            workstreams=frozenset(card_workstreams),
         )
         if not targets:
             unattributed.append(_finding_card(finding))
@@ -874,7 +935,7 @@ def build_cross_plane_view(
     )
 
     cards: list[dict[str, Any]] = []
-    for workstream in sorted(selection.workstreams):
+    for workstream in sorted(card_workstreams):
         pull_requests = sorted(
             pr_cards_by_workstream.get(workstream, []),
             key=lambda card: (str(card["repository"]), _sort_whole(card["number"])),
@@ -952,17 +1013,21 @@ def build_cross_plane_view(
             )
     # Exact identity is observable without turning scope cardinality into
     # an authored owner edge. Every unbound selected row remains accounted for.
-    for repository, number in unattributed_pr_identities:
+    for (repository, number), reason in unattributed_pr_identities:
         unknowns.append(
             _fact("DEGRADED", "cards.github.pull_requests", "github",
-                  f"{repository}#{number}: selected GitHub carrier has no exact "
-                  "source-authored workstream binding; not attributed to a workstream")
+                  f"{repository}#{number}: {reason}; not attributed to a workstream")
         )
-    for issue_id in unattributed_issue_ids:
+    for issue_id, reason in unattributed_issue_ids:
         unknowns.append(
             _fact("DEGRADED", "cards.linear.issues", "linear",
-                  f"{issue_id}: selected Linear issue has no exact source-authored "
-                  "workstream binding; not attributed to a workstream")
+                  f"{issue_id}: {reason}; not attributed to a workstream")
+        )
+    for workstream in sorted(unknown_owner_seeds):
+        unknowns.append(
+            _fact("DEGRADED", "cards.workstreams", "agentos",
+                  f"{workstream}: requested workstream has no Agent OS registry entry; "
+                  "source-owned membership is unverified")
         )
     if dropped_prs:
         unknowns.append(
@@ -1002,6 +1067,7 @@ def build_cross_plane_view(
         or dropped_issues > 0
         or bool(unattributed_pr_identities)
         or bool(unattributed_issue_ids)
+        or bool(unknown_owner_seeds)
         or digest_check["state"] != "VERIFIED"
         or any(block["freshness"] == "STALE" for block in (github_block, linear_block))
         or not cards
