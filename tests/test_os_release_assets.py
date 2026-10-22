@@ -46,6 +46,10 @@ NOTICE_BYTES = {
     "third-party/deepseek-client-dependency-NOTICES.txt": b"Dependency copyright notices\n",
     "third-party/deepseek-harness-LICENSE.txt": b"Harness license and copyright\n",
 }
+MARKDOWN_BYTES = {
+    "assets/SourceMarkdown-_Pti-jmH.css": b".source-markdown{white-space:normal}",
+    "assets/SourceMarkdown-uaH98n-2.js": b"export const renderMarkdown = () => 'source';",
+}
 
 
 def built_dist(app, *, noir_notices=False):
@@ -64,6 +68,8 @@ def built_dist(app, *, noir_notices=False):
             "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
             **NOTICE_BYTES,
         }
+        if noir_notices == "markdown":
+            extra.update(MARKDOWN_BYTES)
         for name, data in extra.items():
             path = dist / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -203,12 +209,12 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
-def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path):
+@pytest.mark.parametrize("bundle,expected_count", [(True, 11), ("markdown", 13)], indirect=["bundle"])
+def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path, expected_count):
     mod, out, sha, tree = bundle
     manifest = json.loads((out / mod.DIST / "asset-manifest.json").read_bytes())
     rows = {item["path"]: item for item in manifest["files"]}
-    assert len(rows) == 11
+    assert len(rows) == expected_count
     checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
     stage = tmp_path / "notice-stage"
     stage.mkdir()
@@ -219,11 +225,17 @@ def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, 
                               "mime": "text/plain; charset=utf-8"}
         assert checked.files[name] == data
         assert (stage / mod.DIST / name).read_bytes() == data
+    if expected_count == 13:
+        for name, data in MARKDOWN_BYTES.items():
+            mime = "text/css; charset=utf-8" if name.endswith(".css") else "text/javascript; charset=utf-8"
+            assert rows[name] == {"path": name, "byte_count": len(data),
+                                  "sha256": hashlib.sha256(data).hexdigest(), "mime": mime}
+            assert checked.files[name] == (stage / mod.DIST / name).read_bytes() == data
     mod.compare_existing(checked, stage)
 
 
-@pytest.mark.parametrize("bundle", [True], indirect=True)
-def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
+@pytest.mark.parametrize("bundle,expected_count", [(True, 11), ("markdown", 13)], indirect=["bundle"])
+def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch, expected_count):
     pytest.importorskip("mcp", reason="real HTTP loading belongs to the optional MCP network test environment")
     _, out, _, _ = bundle
     from ops.executive_os import executive_mcp_entry as entry
@@ -231,6 +243,7 @@ def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
     # manifest, hashes, file loading, route admission and response bytes are real.
     monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
     app = entry.load_os_app(out)
+    assert len(app._assets) == expected_count
     import asyncio
     async def request(path):
         messages = []
@@ -246,6 +259,13 @@ def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
         assert messages[0]["status"] == 200
         assert dict(messages[0]["headers"])[b"content-type"] == b"text/plain; charset=utf-8"
         assert messages[-1]["body"] == data
+    if expected_count == 13:
+        for name, data in MARKDOWN_BYTES.items():
+            messages = asyncio.run(request("/os/" + name))
+            mime = b"text/css; charset=utf-8" if name.endswith(".css") else b"text/javascript; charset=utf-8"
+            assert messages[0]["status"] == 200
+            assert dict(messages[0]["headers"])[b"content-type"] == mime
+            assert messages[-1]["body"] == data
     assert asyncio.run(request("/os/third-party/unknown.txt"))[0]["status"] == 404
 
 
@@ -263,6 +283,32 @@ def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage
         (dist / "third-party/extra.txt").write_text("unapproved")
     else:
         (dist / "third-party/extra").mkdir()
+    with pytest.raises(ValueError):
+        mod._capture_dist(out, sealed=False)
+
+
+@pytest.mark.parametrize("bundle", ["markdown"], indirect=True)
+@pytest.mark.parametrize("damage", ["missing_css", "missing_js", "renamed_css", "renamed_js",
+                                    "duplicate_css", "extra_directory", "no_notices"])
+def test_markdown_chunks_are_an_exact_pair_with_notices(bundle, damage):
+    mod, out, _, _ = bundle
+    dist = out / mod.DIST
+    css, js = [dist / name for name in MARKDOWN_BYTES]
+    if damage == "missing_css":
+        css.unlink()
+    elif damage == "missing_js":
+        js.unlink()
+    elif damage == "renamed_css":
+        css.rename(css.with_name("OtherMarkdown-a.css"))
+    elif damage == "renamed_js":
+        js.rename(js.with_name("OtherMarkdown-a.js"))
+    elif damage == "duplicate_css":
+        css.with_name("SourceMarkdown-extra.css").write_bytes(css.read_bytes())
+    elif damage == "extra_directory":
+        (dist / "assets/unadmitted").mkdir()
+    else:
+        for name in NOTICE_BYTES:
+            (dist / name).unlink()
     with pytest.raises(ValueError):
         mod._capture_dist(out, sealed=False)
 
