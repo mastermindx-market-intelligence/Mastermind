@@ -72,8 +72,50 @@ def _read(file_id: str, *, reader: Callable[[str], dict] | None = None) -> dict:
     return info
 
 
+def _read_native_page(file_id: str, page: dict, *,
+                      page_reader: Callable[[str, str], dict] | None = None) -> dict:
+    """Exact-page structural census, not complete style/asset equivalence."""
+    page_id = page["id"]
+    if page_reader is None:
+        result = bridge.execute("read", tool="get_basic_info", arguments={
+            "fileId": file_id, "pageId": page_id,
+        })
+        if result.get("state") != "OBSERVED":
+            raise bridge.Refusal("NATIVE_PAGE_READ_UNAVAILABLE")
+        info = (result.get("document") or {}).get("basic_info")
+    else:
+        info = page_reader(file_id, page_id)
+    if (not isinstance(info, dict) or info.get("fileId") != file_id
+            or info.get("pageId") != page_id or info.get("pageName") != page["name"]):
+        raise bridge.Refusal("NATIVE_PAGE_IDENTITY_MISMATCH")
+    nodes, count = info.get("nodeCount"), info.get("artboardCount")
+    rows = info.get("artboards")
+    if (type(nodes) is not int or nodes < 1 or type(count) is not int
+            or count < 0 or not isinstance(rows, list)
+            or len(rows) != count or info.get("truncated") is True):
+        raise bridge.Refusal("NATIVE_PAGE_CENSUS_INCOMPLETE")
+    boards = []
+    for row in rows:
+        if (not isinstance(row, dict) or not isinstance(row.get("id"), str)
+                or not isinstance(row.get("name"), str)
+                or type(row.get("childCount")) is not int or row["childCount"] < 0):
+            raise bridge.Refusal("NATIVE_ARTBOARD_SCHEMA_UNVERIFIED")
+        boards.append({"id": row["id"], "name": row["name"],
+                       "childCount": row["childCount"]})
+    if len({x["id"] for x in boards}) != len(boards):
+        raise bridge.Refusal("NATIVE_ARTBOARD_ID_DUPLICATE")
+    fonts = info.get("fontFamilies")
+    if fonts is not None and (not isinstance(fonts, list)
+                             or any(not isinstance(x, str) for x in fonts)):
+        raise bridge.Refusal("NATIVE_FONT_FAMILY_SCHEMA_UNVERIFIED")
+    return {"page_id": page_id, "node_count": nodes,
+            "artboard_count": count, "artboards": boards,
+            "font_families": sorted(fonts) if fonts is not None else None}
+
+
 def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
-              operation_id: str, *, reader: Callable[[str], dict] | None = None) -> dict:
+              operation_id: str, *, reader: Callable[[str], dict] | None = None,
+              page_reader: Callable[[str, str], dict] | None = None) -> dict:
     source_id, clone_id = _require_file_id(source_id), _require_file_id(clone_id)
     if source_id == clone_id:
         raise bridge.Refusal("SOURCE_EQUALS_CLONE")
@@ -102,6 +144,18 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
     if source_token_hash is not None and clone_token_hash is not None:
         if source_token_hash != clone_token_hash:
             raise bridge.Refusal("CLONE_TOKENS_MISMATCH")
+    # Only retained pages need native parity: pages pruned from a copy never
+    # become authoritative, and may continue receiving legitimate source edits.
+    kept_pages = [p for p in source_pages if p["id"] in keep_ids]
+    retained_census = []
+    for page in kept_pages:
+        source_native = _read_native_page(source_id, page, page_reader=page_reader)
+        clone_native = _read_native_page(clone_id, page, page_reader=page_reader)
+        if source_native != clone_native:
+            raise bridge.Refusal("RETAINED_PAGE_NATIVE_STRUCTURE_MISMATCH",
+                                 "Do not prune a stale or structurally divergent clone.")
+        retained_census.append({"page_id": page["id"],
+                                "native_metadata_sha256": bridge.digest(source_native)})
     return {
         "schema": SCHEMA,
         "state": "CLONE_PRUNE_PLAN_READY",
@@ -117,6 +171,9 @@ def make_plan(source_id: str, clone_id: str, keep_ids: list[str],
         "clone_token_hash_before": clone_token_hash,
         "source_page_list_sha256": bridge.digest(source_pages),
         "clone_page_list_sha256": bridge.digest(clone_pages),
+        "retained_native_census": retained_census,
+        "retained_native_census_sha256": bridge.digest(retained_census),
+        "native_metadata_only_not_full_visual_fidelity": True,
         "actuation": "FIRST_PARTY_PAPER_UI_ONLY_SEPARATE_CARRIER_PROOF_REQUIRED",
         "original_deletion_authorized": False,
         "image_component_comment_fidelity_verified": False,
@@ -148,6 +205,7 @@ def _read_jsx(file_id: str, node_id: str, *,
 
 
 def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
+                page_reader: Callable[[str, str], dict] | None = None,
                 evidence_node_ids: list[str] | None = None,
                 jsx_reader: Callable[[str, str], str] | None = None) -> dict:
     if not isinstance(plan, dict) or plan.get("schema") != SCHEMA or plan.get("state") != "CLONE_PRUNE_PLAN_READY":
@@ -185,6 +243,20 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
     if (plan.get("clone_token_hash_before") is not None
             and clone_tokens != plan["clone_token_hash_before"]):
         raise bridge.Refusal("CLONE_TOKENS_CHANGED")
+    retained_census = plan.get("retained_native_census")
+    if (not isinstance(retained_census, list)
+            or len(retained_census) != len(expected_kept)
+            or bridge.digest(retained_census) != plan.get("retained_native_census_sha256")
+            or [x.get("page_id") for x in retained_census if isinstance(x, dict)]
+                != [p["id"] for p in expected_kept]):
+        raise bridge.Refusal("NATIVE_PAGE_CENSUS_PLAN_INVALID")
+    for page, baseline in zip(expected_kept, retained_census):
+        current_source = _read_native_page(source_id, page, page_reader=page_reader)
+        current_clone = _read_native_page(clone_id, page, page_reader=page_reader)
+        if bridge.digest(current_source) != baseline["native_metadata_sha256"]:
+            raise bridge.Refusal("SOURCE_NATIVE_PAGE_DRIFT")
+        if bridge.digest(current_clone) != baseline["native_metadata_sha256"]:
+            raise bridge.Refusal("CLONE_NATIVE_PAGE_DRIFT")
     node_ids = evidence_node_ids or []
     if (not isinstance(node_ids, list)
             or any(not isinstance(x, str) or not OPERATION_RE.fullmatch(x) for x in node_ids)
@@ -202,7 +274,9 @@ def verify_plan(plan: dict, *, reader: Callable[[str], dict] | None = None,
         "operation_id": plan.get("operation_id"),
         "source_file_id": source_id,
         "clone_file_id": clone_id,
-        "source_unchanged_page_ids": [p["id"] for p in originals],
+        "source_page_list_unchanged_ids": [p["id"] for p in originals],
+        "retained_native_metadata_verified_ids": [p["id"] for p in expected_kept],
+        "retained_native_metadata_only_not_full_fidelity": True,
         "clone_retained_page_ids": [p["id"] for p in expected_kept],
         "clone_removed_page_ids": [p["id"] for p in expected_removed],
         "page_metadata_verified": True,
