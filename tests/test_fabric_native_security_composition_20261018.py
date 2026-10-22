@@ -34,7 +34,9 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # slot diagnostics with retention recovery and explicit acquisition correlation.
 # Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "e5655954e70f1f2f97f97f303ccac6fdbd3129cca1c0948e99be8c1ba8a77823"
+# Candidate operator-instruction overlay updates only ext/fabric_operator_client.py;
+# historical executor/donor/quota/root pins above remain unchanged.
+NATIVE_MANIFEST_SHA = "8378a26b9691dfb38cbf2192ac2dd7c41bef14678638195c922dce370341aac0"
 
 
 def _sha(raw):
