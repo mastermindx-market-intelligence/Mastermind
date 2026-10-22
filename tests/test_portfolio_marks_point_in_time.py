@@ -5,6 +5,8 @@ requested as-of date. They are deliberately offline: Polygon and Yahoo are injec
 """
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 import pytest
 
 from portfolio import marks as M
@@ -56,11 +58,12 @@ def test_prior_carry_remains_usable_with_directional_staleness():
         persist=False,
     )
     assert result["prices"]["AAPL"] == pytest.approx(123.45)
-    assert result["sources"]["AAPL"] == {
-        "source": M.SOURCE_CARRY,
-        "price": 123.45,
-        "stale_days": 4,
-    }
+    assert result["sources"]["AAPL"]["source"] == M.SOURCE_CARRY
+    assert result["sources"]["AAPL"]["price"] == pytest.approx(123.45)
+    assert result["sources"]["AAPL"]["stale_days"] == 4
+    assert result["sources"]["AAPL"]["observed_asof"] == "2026-06-01"
+    assert result["sources"]["AAPL"]["time_kind"] == "carry"
+    assert result["sources"]["AAPL"]["close_qualified"] is False
 
 
 def test_historical_polygon_uses_exact_asof_aggregate_not_live_snapshot(monkeypatch):
@@ -68,8 +71,8 @@ def test_historical_polygon_uses_exact_asof_aggregate_not_live_snapshot(monkeypa
 
     observed = {}
 
-    def fake_daily(symbol, start, end, cache=True):
-        observed.update(symbol=symbol, start=start, end=end, cache=cache)
+    def fake_daily(symbol, start, end, cache=True, adjusted=True):
+        observed.update(symbol=symbol, start=start, end=end, cache=cache, adjusted=adjusted)
         return {"2026-06-01": 101.25}
 
     def forbidden_snapshot(_symbol):
@@ -78,12 +81,14 @@ def test_historical_polygon_uses_exact_asof_aggregate_not_live_snapshot(monkeypa
     monkeypatch.setattr(polygon, "daily_closes", fake_daily)
     monkeypatch.setattr(polygon, "snapshot_price", forbidden_snapshot)
 
-    assert M._polygon_eod("AAPL", "2026-06-01") == pytest.approx(101.25)
+    now = datetime(2026, 6, 2, 22, 0, tzinfo=timezone.utc)   # 2026-06-01 is historical
+    assert M._polygon_eod("AAPL", "2026-06-01", now=now) == pytest.approx(101.25)
     assert observed == {
         "symbol": "AAPL",
         "start": "2026-06-01",
         "end": "2026-06-01",
         "cache": True,
+        "adjusted": False,
     }
 
 
@@ -96,11 +101,11 @@ def test_historical_polygon_miss_does_not_fall_through_to_current_snapshot(monke
     assert M._polygon_eod("AAPL", "2026-06-01") is None
 
 
-def test_current_day_polygon_can_still_use_snapshot_fallback(monkeypatch):
+def test_current_day_polygon_can_still_use_snapshot_fallback_before_close(monkeypatch):
     from data_layer import polygon
 
-    today = M.date.today().isoformat()
     monkeypatch.setattr(polygon, "daily_closes", lambda *args, **kwargs: {})
-    monkeypatch.setattr(polygon, "snapshot_price", lambda _symbol: 111.5)
+    monkeypatch.setattr(polygon, "_snapshot", lambda _symbol: {"lastTrade": {"p": 111.5}})
 
-    assert M._polygon_eod("AAPL", today) == pytest.approx(111.5)
+    now = datetime(2026, 10, 21, 15, 0, tzinfo=timezone.utc)   # 11:00 ET, a trading day
+    assert M._polygon_eod("AAPL", "2026-10-21", now=now) == pytest.approx(111.5)
