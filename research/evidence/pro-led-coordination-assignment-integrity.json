@@ -1,0 +1,162 @@
+{
+  "base_head": "58cea1c0469f33f58df1ae05284e7fa8bea96a4f",
+  "capability_delta": "The work prompt now binds the complete current assignment, reobserves it after rendering/source validation, and enforces its complete UTF-8 byte bound without truncation or retargeting.",
+  "do_not_redo": [
+    "Do not recreate already-published 58cea1c review/parent implementation.",
+    "Do not rerun unchanged research, old 682-case campaign or prior native ACL/import diagnostics.",
+    "Do not bypass readonly ingress, replay completed commands or reassign the enhancement to the busy base team."
+  ],
+  "fixture_parent_protocol": {
+    "COORDINATION_PARENT_INPUT_RETURN_COMPILED_READY": {
+      "candidate_artifact_digest": "97a67739179d3f806eacbb90e33c2ff7ced4137baa80637ae698d43b827e012d",
+      "context_acquisition": "EXPLICIT_FAKE_CLI_THROUGH_CONCRETE_READER",
+      "full_proposal_present_in_parent_input": true,
+      "next_instruction_executed": false,
+      "parent_attempt_id": "ATT-5646111040584395ac5a082904a7db37",
+      "parent_handoff_digest": "34a57a0c443a47085baab8519a1b6f539501e616e847e99f64ccc9dc38157f93",
+      "parent_job_id": "JOB-001",
+      "parent_result_envelope_digest": "495c423a7c811fcd37a87c77efde001adadb2d2b121ab668cef2dc83ccac89e9",
+      "proposal_used_in_parent_result": true,
+      "qualification": "TEMPORARY_RUNTIME_EXPLICIT_FAKE_MODELS_AND_REVIEW_PRINCIPAL",
+      "real_model_usefulness_proven": false,
+      "web_pro_input_turn_return_proven": false
+    },
+    "COORDINATION_PARENT_INPUT_RETURN_READY": {
+      "candidate_artifact_digest": "32c128208738c5770bf036d2b505d11d45d872160341ed58a4e523db44637d68",
+      "context_acquisition": "EXPLICIT_STATIC_FIXTURE",
+      "full_proposal_present_in_parent_input": true,
+      "next_instruction_executed": false,
+      "parent_attempt_id": "ATT-475139a304a947d4b08f6023ae8f7fa6",
+      "parent_handoff_digest": "e98949c0d8198880c5daa86a38fded89f0d0f99ec6a38cfe30c385c268c61266",
+      "parent_job_id": "JOB-001",
+      "parent_result_envelope_digest": "5f4a6a4796f570cddd40f739eab6978cbac289d59670471511e3c74ef959314e",
+      "proposal_used_in_parent_result": true,
+      "qualification": "TEMPORARY_RUNTIME_EXPLICIT_FAKE_MODELS_AND_REVIEW_PRINCIPAL",
+      "real_model_usefulness_proven": false,
+      "web_pro_input_turn_return_proven": false
+    }
+  },
+  "issue": 1056,
+  "live_gate": {
+    "installed_activation": false,
+    "installed_macro": "88804ed7079700c598bb8e04aa64307d1335402d",
+    "installed_mastermind": "c7407c6c77ef82cc6590401e80cc8f1868dc9085",
+    "mode": "readonly",
+    "observed_at": "2026-10-02T04:34:34Z",
+    "submit_or_provider_launch_attempted": false
+  },
+  "mission_complete": false,
+  "new_qualification_cases": [
+    "test_assignment_cancelled_during_request_rendering_is_not_returned_as_current",
+    "test_current_work_request_binds_complete_assignment_without_changing_runtime",
+    "test_read_namespace_loss_during_request_rendering_is_not_reacquired",
+    "test_stale_outer_work_assignment_cannot_pollute_prompt[objective-Unrelated replacement goal]",
+    "test_stale_outer_work_assignment_cannot_pollute_prompt[plan_step_id-foreign-step]",
+    "test_combined_work_prompt_bound_covers_original_contract_and_appended_evidence",
+    "test_assignment_is_reobserved_after_final_source_revalidation[cancel]",
+    "test_assignment_is_reobserved_after_final_source_revalidation[namespace_lost]",
+    "test_combined_work_prompt_bound_is_exact_utf8_and_does_not_truncate",
+    "test_unselected_work_prompt_remains_byte_identical_and_does_not_acquire_sources"
+  ],
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "preserved_owners": {
+    "identity_memory_compiler_and_admission_unchanged": true,
+    "no_new_workspace_worker_queue_watcher_or_next_action_execution": true,
+    "review_and_aggregation_role_schemas_unchanged": true,
+    "review_and_parent_digest_helper_same_object": true,
+    "runtime_supervisor_source_unchanged": true
+  },
+  "procedure_pin": "cfd3b996a2bf286f86375a5243232e027d58f724",
+  "remaining_proofs": [
+    "Independent exact-candidate source review and all current release/collision gates.",
+    "Accepted original source release/install and current host-owned source/profile/permission admission.",
+    "Actually admitted model judgment using current project evidence and physical independent review.",
+    "Real parent consumption and useful goal-preserving continuation.",
+    "Actual Web Pro input/turn/return.",
+    "Agent OS incorporation through the original organizational record owner."
+  ],
+  "selected_protected_source_comparison": {
+    "change": "Adds _planner_routing_options; complete helper returns None immediately for non-plan roles, including work/review/aggregation. Original delegation remains inherited.",
+    "changed_seam": "ExecutiveSupervisor._prompt",
+    "release_compatibility_proven": false,
+    "same_ast_count": 11,
+    "scope": "Twelve direct imported owner seams, not complete dependency or integrated-candidate proof."
+  },
+  "source_pr": 1059,
+  "source_sha256": {
+    "control_plane/chairman_coordination_acquisition.py": "0986f178ce11a02b493fd8ec151dd6253a6d1465676e418600bf9cf183923fb1",
+    "control_plane/chairman_coordination_host.py": "fcc78c562b918bce7dd9177efbb3b5818f2b479ed7cb4f1b1a1d67d52af9664f",
+    "control_plane/chairman_coordination_parent.py": "186cc97f4965bfb8f43751b0e020f587edcc45343e0b6f08108fe994548d025f",
+    "control_plane/chairman_coordination_review.py": "8e81114a182733bfa0df1dddab45737a966e3928751093f7f01be10aee07cf98",
+    "control_plane/chairman_coordination_work.py": "01d2ed018095cbc135fae70b52ae25e9ffcc9b533cb10cdeb5770a53b2840060",
+    "control_plane/executive_runtime.py": "eaa28cf578a6f8868b49b1afdb395e4baafe4ef3450699a9cb62aca1320b50a2",
+    "control_plane/executive_supervisor.py": "a06cfc88eb0616d357e11a5d243e9bc5040072af811e08a7080aeabcf7a8f095",
+    "control_plane/workspace_source_join.py": "8d213b6b21befd9afaa1e7bfab8ab8b5a11813ac848e76fa0ea51bebb956f3fd",
+    "tests/test_chairman_coordination_host.py": "c91b5d973b1df070379f73ff27aa6fe57a66fa85ea83219b4b4e4eef4ed820b8",
+    "tests/test_chairman_coordination_parent.py": "e45f2f2dd4473ad99f7dbcb5c8d059ebd1f7232b15ab2ed87de804ce2e6f925d",
+    "tests/test_chairman_coordination_review.py": "98cb2abf2acea56318cef998d4a525c1518a5fc4639d4bf5cff71194641b764a",
+    "tests/test_chairman_coordination_work.py": "19a95ecc826e39a4b76d6f0fd18f6190ae7e75811c1e6e00ab5b924357f54e77"
+  },
+  "state": "BUILT_NOT_PROVEN",
+  "test_first_discriminators": [
+    {
+      "failures": [
+        {
+          "failure": "Failed: DID NOT RAISE SupervisorError",
+          "test": "test_stale_outer_work_assignment_cannot_pollute_prompt[objective-Unrelated replacement goal]"
+        },
+        {
+          "failure": "Failed: DID NOT RAISE SupervisorError",
+          "test": "test_stale_outer_work_assignment_cannot_pollute_prompt[plan_step_id-foreign-step]"
+        },
+        {
+          "failure": "Failed: DID NOT RAISE SupervisorError",
+          "test": "test_combined_work_prompt_bound_covers_original_contract_and_appended_evidence"
+        }
+      ],
+      "fixture_errors": 0,
+      "log_sha256": "6f7e4c5f9b1f726b9c5faaf50c1a5094eef3fa486c51fbb7e8df28e5b367c546",
+      "receipt": ".pytest_cache/coordination-assignment-red1.json"
+    },
+    {
+      "failures": [
+        {
+          "failure": "Failed: DID NOT RAISE ChairmanCognitionError",
+          "test": "test_assignment_cancelled_during_request_rendering_is_not_returned_as_current"
+        },
+        {
+          "failure": "Failed: DID NOT RAISE SupervisorError",
+          "test": "test_assignment_is_reobserved_after_final_source_revalidation[cancel]"
+        },
+        {
+          "failure": "Failed: DID NOT RAISE SupervisorError",
+          "test": "test_assignment_is_reobserved_after_final_source_revalidation[namespace_lost]"
+        }
+      ],
+      "fixture_errors": 0,
+      "log_sha256": "68811c0191454b05e26ae5718181508cf3d374a6b5760f1ade6b6792682f3b55",
+      "receipt": ".pytest_cache/coordination-assignment-red2.json"
+    }
+  ],
+  "verification": {
+    "duration_seconds": 33.75,
+    "errors": 0,
+    "failed": 0,
+    "log_sha256": "f24b0ee38cbdf15269c7724da1f3143f026dc85a8058799166ce6a9a39672381",
+    "new_cases": 10,
+    "owned_test_processes_after_run": "ABSENT",
+    "passed": 146,
+    "previous_full_682_campaign_repeated": false,
+    "prior_native_permission_failures_retested_or_weakened": false,
+    "skipped": 0,
+    "source_unchanged_across_run": true,
+    "suite_counts": {
+      "tests.test_chairman_coordination_acquisition": 2,
+      "tests.test_chairman_coordination_host": 50,
+      "tests.test_chairman_coordination_parent": 17,
+      "tests.test_chairman_coordination_review": 36,
+      "tests.test_chairman_coordination_work": 41
+    },
+    "xml_sha256": "df8bc1d4ee8a3e936953087edfe43ad5aff18d6fc10eafd0979009ce4961d351"
+  }
+}

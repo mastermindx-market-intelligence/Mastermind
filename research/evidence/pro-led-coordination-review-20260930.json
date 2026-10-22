@@ -1,0 +1,192 @@
+{
+  "base_head": "759cb423931214bfcd56f80bfaa966939faf2ca3",
+  "capability_delta": "Concrete project context and sealed proposal -> exact review task/full return -> canonical independent handoff -> complete parent prompt and sealed aggregation result.",
+  "custody": {
+    "base_team_reassigned": false,
+    "existing_lock_preserved": true,
+    "ignored_cache_artifacts_preserved": true,
+    "new_worker_or_watcher": false,
+    "prior_checkpoint_note_body_sha256": "6735e06d9b7b4577c7853b54275db9aa86e87fa1cdbbace20afa4aaf71c85383",
+    "same_registered_branch_and_workspace": true
+  },
+  "findings": [
+    "Review target binds the work role-result digest, not its envelope digest or candidate artifact digest.",
+    "Current assignment comparison refuses stale outer prompt arguments despite current acquired evidence.",
+    "ExactWorkerClaimTarget is work-only; supplied failing targets are not dropped for generic retries.",
+    "Original parent refuses same-author and same-OS reviews; differing worker labels alone do not establish physical independence.",
+    "Full parent input/return is distinct from reference-only handoff bookkeeping, independent review eligibility, semantic quality and project acceptance."
+  ],
+  "issue": 1056,
+  "limits": {
+    "actual_project_model_and_parent_consumption": "OWED",
+    "actual_web_pro_input_turn_return_proven": false,
+    "agentos_organizational_projection": "OWED_TO_EXISTING_OWNER",
+    "current_host_source_permission_profile_admission": "OWED",
+    "independent_source_review": "OWED",
+    "missing_active_build_join": "EXPLICIT_PARTIAL_COVERAGE_UNTIL_EXISTING_OWNER_SUPPLIES",
+    "physical_independent_review_proven": false,
+    "project_acceptance_proven": false,
+    "protected_release_and_install": "OWED",
+    "real_model_executed": false,
+    "real_model_usefulness_proven": false
+  },
+  "live_observation": {
+    "counts_are_not_native_chat_census": true,
+    "generated_at": "2026-09-30T08:07:20Z",
+    "installed_macro": "88804ed7079700c598bb8e04aa64307d1335402d",
+    "installed_mastermind": "c7407c6c77ef82cc6590401e80cc8f1868dc9085",
+    "mode": "readonly",
+    "production_attempts": 10,
+    "production_jobs": 7,
+    "running_attempts": 0,
+    "running_jobs": 0
+  },
+  "mission_complete": false,
+  "next_gate": "Independent review of exact published source, then only original accepted release/install and admitted live qualification; no provider or ingress bypass.",
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "preserved_owners": {
+    "acceptance_and_parent_handoff_unchanged": true,
+    "compiler_memory_and_source_composer_unchanged": true,
+    "no_next_action_execution": true,
+    "original_dependency_files_modified": [],
+    "runtime_and_identity_unchanged": true,
+    "work_only_target_contract_unchanged": true
+  },
+  "procedure_pin": "0c75bc308da39c099b42f10e30741bec416b5afc",
+  "protocol_evidence": {
+    "COORDINATION_PARENT_FLOW": {
+      "compiled_context_digest": "sha256:4b774b0cbd4fa31978d95f4565af47b70afef12f85654fa723588669a8108d43",
+      "parent_handoff_digest": "cb93ff36e4adeed173aaabdd81e54b0bd9b1685017fc5dc878d6996e4f42d562",
+      "parent_project_acceptance_proven": false,
+      "parent_revision": {
+        "artifact_receipt_digest": "1f1bbaea82d6464355448ac0a5d78b68e746821941e7a53f55f6b282cc53171a",
+        "current_attempt_id": "ATT-d887776e984f419d8641d0bd84b01050",
+        "current_job_id": "JOB-003",
+        "current_raw_result_digest": "81cc89e94a9d5468a2f3e0bb10f0b02317aeda749e80bfca6cc31a99f1a03d7e",
+        "current_result_digest": "549534093478ed74ca7aacf3bcb08d94a89c39509293276a69e01fb541c3bd68",
+        "effective_grant_digest": "57cd6ecdbde2bed640a8bb16db6408d0237439b6e363dacadbbbe7df83d3f548",
+        "execution_principal_snapshot_digest": "6508d4639ecf711d4e988bd7411626d0916cc3a6d5873328fee98cb522aad2bd",
+        "ordinal": 0,
+        "placement_snapshot_digest": "9285525539cc85d2a4f8a74ee649341fb66bfd8a6c31434a0968da7fc7f2edec",
+        "plan_step_id": "coordination-1",
+        "qualifying_review_attempt_id": "ATT-6acf6e029f5a431f9bf0b4a712f9a6f6",
+        "qualifying_review_effective_grant_digest": "50c1300c8a109eb764f19bdc3368116c5e084e47de380e66389f15513e1a58ce",
+        "qualifying_review_job_id": "JOB-004",
+        "qualifying_review_principal_snapshot_digest": "139b23f23d4068d153fc4c7af135c6c0d4ad8664927e6c40bb1a6abe2c1473e2",
+        "qualifying_review_result_digest": "295f1a4d77bd04ff8a20c620c9debb851d06e8975c013ced28f0a72dfa1c2023",
+        "repair_round": 0,
+        "review_required": true,
+        "validation_receipt_digest": "fbed6ff11a314fdd5c74a7fc104f8b7a66ae356df60b2713570e54cdc08e6576"
+      },
+      "project_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+      "qualification": "TEMPORARY_RUNTIME_EXPLICIT_FAKE_COMPILER_AND_MODELS",
+      "review_role_result_digest": "295f1a4d77bd04ff8a20c620c9debb851d06e8975c013ced28f0a72dfa1c2023",
+      "review_selection": {
+        "attempt_id": "ATT-6acf6e029f5a431f9bf0b4a712f9a6f6",
+        "job_id": "JOB-004",
+        "result_envelope_digest": "684d44953f2a2c1214b3383ba9f8bb920c0c7b1d87e769e174feafa8864edf8b",
+        "root_job_id": "JOB-001"
+      },
+      "review_worker_id": "worker-b",
+      "web_pro_round_trip_proven": false,
+      "work_worker_id": "worker-a"
+    },
+    "COORDINATION_PARENT_INPUT_RETURN_COMPILED_READY": {
+      "candidate_artifact_digest": "306c29f3f6c81b4c980ccd59c26bfd60996fb46c8beafab72f66e17da9ad45c1",
+      "context_acquisition": "EXPLICIT_FAKE_CLI_THROUGH_CONCRETE_READER",
+      "full_proposal_present_in_parent_input": true,
+      "next_instruction_executed": false,
+      "parent_attempt_id": "ATT-7c868bb5dca94c2b8d253ddef234493c",
+      "parent_handoff_digest": "8c839d6173b2f45e6149b7fabdf704860b0bd0c901cad00719507db9e9316401",
+      "parent_job_id": "JOB-001",
+      "parent_result_envelope_digest": "19415e8ad6a6e689e30527e35fc109c1db70d5bd9e7614ddd1e628338aca0d94",
+      "parent_revisions": [
+        {
+          "current_attempt_id": "ATT-70a057ec81c045cbbcb177a6e4ac8d52",
+          "current_job_id": "JOB-003",
+          "current_result_digest": "af74d33f341fb2a596a342c3a7d2a02f4c0520bd179d2879510e8b7630293c1a",
+          "ordinal": 0,
+          "plan_step_id": "coordination-1",
+          "qualifying_review_attempt_id": "ATT-b66dd4532d9346c890a55242b32da580",
+          "qualifying_review_job_id": "JOB-004",
+          "qualifying_review_result_digest": "b4f9391add11278c99962d7ba5eb8b35216a93b41bff846b6acf6cb8e7b40cdd",
+          "repair_round": 0,
+          "review_required": true
+        }
+      ],
+      "project_acceptance_proven": false,
+      "proposal_used_in_parent_result": true,
+      "qualification": "TEMPORARY_RUNTIME_EXPLICIT_FAKE_MODELS_AND_REVIEW_PRINCIPAL",
+      "real_model_usefulness_proven": false,
+      "web_pro_input_turn_return_proven": false
+    },
+    "COORDINATION_PARENT_INPUT_RETURN_READY": {
+      "candidate_artifact_digest": "32c128208738c5770bf036d2b505d11d45d872160341ed58a4e523db44637d68",
+      "context_acquisition": "EXPLICIT_STATIC_FIXTURE",
+      "full_proposal_present_in_parent_input": true,
+      "next_instruction_executed": false,
+      "parent_attempt_id": "ATT-bba642eaed3d405c98d0b267065b973b",
+      "parent_handoff_digest": "bdbab1fd2b7183828b3c3913ad8370b2c83d8cbd1210cc8bb9640ea00df2008c",
+      "parent_job_id": "JOB-001",
+      "parent_result_envelope_digest": "21d5754a2832f356972dd7e176b22a5c3f138f5469511bb2c0e8daa2cbe8dc91",
+      "parent_revisions": [
+        {
+          "current_attempt_id": "ATT-fecf2a2f7295437bbeef76595d2106f6",
+          "current_job_id": "JOB-003",
+          "current_result_digest": "11a3d3e274b215c022449541416baaa1be4ad8ad442575f95c290a1fcc92026b",
+          "ordinal": 0,
+          "plan_step_id": "coordination-1",
+          "qualifying_review_attempt_id": "ATT-9bba17995c914807993adbcdb0ebb644",
+          "qualifying_review_job_id": "JOB-004",
+          "qualifying_review_result_digest": "6826164f9b060c4b32d32e5e85b90d5baa9036772f021369bd9ff8d5c2970a79",
+          "repair_round": 0,
+          "review_required": true
+        }
+      ],
+      "project_acceptance_proven": false,
+      "proposal_used_in_parent_result": true,
+      "qualification": "TEMPORARY_RUNTIME_EXPLICIT_FAKE_MODELS_AND_REVIEW_PRINCIPAL",
+      "real_model_usefulness_proven": false,
+      "web_pro_input_turn_return_proven": false
+    }
+  },
+  "review_scope": [
+    "control_plane/chairman_coordination_parent.py",
+    "control_plane/chairman_coordination_review.py",
+    "tests/test_chairman_coordination_parent.py",
+    "tests/test_chairman_coordination_review.py"
+  ],
+  "source_pr": 1059,
+  "source_sha256": {
+    "control_plane/chairman_coordination_acquisition.py": "0986f178ce11a02b493fd8ec151dd6253a6d1465676e418600bf9cf183923fb1",
+    "control_plane/chairman_coordination_host.py": "aca665f011e69434732c11a1be6fceb91c5185721c64efa992e413ab47714991",
+    "control_plane/chairman_coordination_parent.py": "186cc97f4965bfb8f43751b0e020f587edcc45343e0b6f08108fe994548d025f",
+    "control_plane/chairman_coordination_review.py": "ab52c8cb5bb66132486591706a2022498fb768b6d86e912836aee54316ab53ff",
+    "control_plane/chairman_coordination_work.py": "ae0496e7a581b16f2c66b4b7fce1f00c8e336a44919f4e4bb5f827ceb421b2da",
+    "control_plane/executive_orchestration_result.py": "903df2eb6501e1a58bbf1127ab591a7910e1fc17d85c2d446bec54f9644695a9",
+    "control_plane/executive_runtime.py": "eaa28cf578a6f8868b49b1afdb395e4baafe4ef3450699a9cb62aca1320b50a2",
+    "control_plane/executive_supervisor.py": "a06cfc88eb0616d357e11a5d243e9bc5040072af811e08a7080aeabcf7a8f095",
+    "control_plane/fabric_result_projection.py": "765fd3f16594f08fade9b3689da3995e51c6836c9d7d928032ad03a125858e73",
+    "control_plane/workspace_source_join.py": "8d213b6b21befd9afaa1e7bfab8ab8b5a11813ac848e76fa0ea51bebb956f3fd",
+    "tests/test_chairman_coordination_parent.py": "e45f2f2dd4473ad99f7dbcb5c8d059ebd1f7232b15ab2ed87de804ce2e6f925d",
+    "tests/test_chairman_coordination_review.py": "98cb2abf2acea56318cef998d4a525c1518a5fc4639d4bf5cff71194641b764a"
+  },
+  "state": "BUILT_NOT_PROVEN",
+  "verification": {
+    "duration_seconds": 22.322,
+    "errors": 0,
+    "existing_acquisition_integration_guards": 2,
+    "failed": 0,
+    "log_sha256": "3a3ed778ecbb161232a9a064caf28fab082c2fe632ff7439eec160feb5317278",
+    "new_parent_tests": 17,
+    "new_review_tests": 36,
+    "own_test_pgid": 50694,
+    "own_test_pid": 50694,
+    "passed": 55,
+    "process_group_after_run": "ABSENT",
+    "skipped": 0,
+    "source_unchanged_across_run": true,
+    "unchanged_historical_682_suite_repeated": false,
+    "xml_sha256": "3cae40e57cdc48e086afb6ba99b9ccd449beee8ee182ab773b0df37726112a44"
+  }
+}

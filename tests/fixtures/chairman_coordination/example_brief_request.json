@@ -1,0 +1,76 @@
+{
+  "bundle_source_ref": "SRC-BUNDLE",
+  "context": {
+    "accepted_plan_source_ref": "SRC-PLAN",
+    "coverage": "COMPLETE",
+    "effect_hold_refs": [],
+    "intent_source_ref": "SRC-CHAIRMAN",
+    "omissions": [],
+    "permission_hold_refs": [],
+    "project_ref": "WS:CHAIRMAN-CONTROL-ROOM",
+    "required_acceptance_refs": [
+      "SRC-PROOF"
+    ],
+    "required_return_refs": [
+      "SRC-RETURN"
+    ],
+    "schema": "mastermind.chairman_coordination_context.v1",
+    "source_revisions": {
+      "SRC-BUNDLE": "sha256:3ea3ee1ca164ad1955e1943c43ec16962d5f354bf760a11cedd33399af6a3813",
+      "SRC-CHAIRMAN": "conversation:2026-08-30;envelope-sha256:2b79a9ae98cd9388c62a4c405f3c7aa0e047ff3584444842b391cfb3511bb00a",
+      "SRC-EFFECT": "revision:SRC-EFFECT",
+      "SRC-GITHUB": "620263090fb9f272f763e420ba103b0ff8dc5f31;classification-sha256:0494993ae671f3a0cd5673b6e9238df997e8e4b1cc9f862a837f7f9436d9bec3",
+      "SRC-PERMISSION": "revision:SRC-PERMISSION",
+      "SRC-PLAN": "revision:SRC-PLAN",
+      "SRC-PROOF": "revision:SRC-PROOF",
+      "SRC-RETURN": "revision:SRC-RETURN",
+      "SRC-TARGET": "revision:SRC-TARGET"
+    },
+    "target_ref": "TARGET-A",
+    "target_source_ref": "SRC-TARGET"
+  },
+  "context_bundle": {
+    "degraded": [],
+    "excluded": [
+      {
+        "key": "DEC:OLD",
+        "reason": "superseded"
+      }
+    ],
+    "generated_at": "2026-08-30T15:00:00Z",
+    "no_answer_reason": null,
+    "omitted_due_to_budget": [],
+    "repo_sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "schema": "context_bundle.v1",
+    "sections": [
+      {
+        "framing": "State, not permission",
+        "id": "workstream",
+        "items": [
+          {
+            "authority_class": "A2",
+            "excerpt": "Deliver the accepted project without routine Chairman coordination.",
+            "key": "WS:CHAIRMAN-CONTROL-ROOM",
+            "kind": "workstream",
+            "locator": "L1-L20",
+            "path": "agentos/workstreams/WS-example.md",
+            "status": "active",
+            "updated": "2026-08-30T15:00:00Z",
+            "why_included": "selected workstream"
+          }
+        ],
+        "title": "Workstream"
+      }
+    ],
+    "source_records_digest": "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "target": {
+      "candidates": [],
+      "resolution": "explicit",
+      "task": null,
+      "wait": null,
+      "workstream": "WS:CHAIRMAN-CONTROL-ROOM"
+    },
+    "token_budget": 8000,
+    "token_estimate": 400
+  }
+}

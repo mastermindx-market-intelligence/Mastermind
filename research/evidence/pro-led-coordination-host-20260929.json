@@ -1,0 +1,149 @@
+{
+  "behavior": [
+    "selected exact Job only",
+    "original task contract and effective grant preserved",
+    "source/target refusal before adapter start",
+    "in-flight duplicate does not recompose or relaunch",
+    "completed replay recovers exact prior result",
+    "current Chairman correction holds old candidate",
+    "reply acquisition failure leaves completed work intact",
+    "original private recovery prompt preserved",
+    "failed execution returns original failure without decision review",
+    "proposal next_step never executed by this helper"
+  ],
+  "capability_state": "BUILT_NOT_PROVEN",
+  "checks": [
+    {
+      "errors": 0,
+      "failures": 20,
+      "junit_sha256": "000b9034113ba2fd0008fe701b8cee69c00e8200bca884e25106961a27ac182d",
+      "log_sha256": "e4da391fa0c5016f1b42cfdb5c57a5e3afab17e6c49983ba5af2f3537dbb32d1",
+      "name": "coordination-host-red",
+      "skipped": 0,
+      "tests": 20
+    },
+    {
+      "errors": 0,
+      "failures": 5,
+      "junit_sha256": "37380238739331864c484bb5bdbcaed30619c827a3ca35962f25c876b86e6ac4",
+      "log_sha256": "af25ea1a3cf832ffc4d767fdc5fc6ea4f5b8b5566a44fe9f060b030538891950",
+      "name": "coordination-host-adverse-red",
+      "skipped": 0,
+      "tests": 29
+    },
+    {
+      "errors": 0,
+      "failures": 3,
+      "junit_sha256": "e38e781c5a2e05b5adc9878e690f039a8c58d046d67038bc900fad5d40cd9a74",
+      "log_sha256": "ed8d0ca8fb1f7010ed39fb7a1c02a0c1b1f4ecff8456fff11d0caec8dcc84d71",
+      "name": "coordination-host-target-red",
+      "skipped": 0,
+      "tests": 3
+    },
+    {
+      "errors": 0,
+      "failures": 5,
+      "junit_sha256": "9e0163819f9b39e45f61fd203c08bddf398fe8775cac943d7a86233c2c419f65",
+      "log_sha256": "ee31f154f879baed6cc6e071e1728b194a5a8ce74d0acae33d3b68631fa90a42",
+      "name": "coordination-host-step-red",
+      "skipped": 0,
+      "tests": 5
+    },
+    {
+      "errors": 0,
+      "failures": 1,
+      "junit_sha256": "e193233af6d951a22638399b836ba8629777c66e340adb5ba9938fcda30f95b4",
+      "log_sha256": "0964830b548199d2e122058c6b3b09bb98a7598cd81c97dae5b133afe226e7f1",
+      "name": "coordination-host-final-edge-red",
+      "skipped": 0,
+      "tests": 2
+    },
+    {
+      "errors": 0,
+      "failures": 0,
+      "junit_sha256": "16a696246549a8cc280706d34f92ad716551ef73606ecbbbaaded63155d86932",
+      "log_sha256": "9eb55ac1cca76e1c6d0ce3c0e304e0415e62041d6fecbc06e7c540950f046929",
+      "name": "coordination-host-final",
+      "skipped": 0,
+      "tests": 577
+    }
+  ],
+  "cleanup": {
+    "members_after_completion": [],
+    "owned_test_group": 7650
+  },
+  "final_related_suite": {
+    "errors": 0,
+    "failed": 0,
+    "files": [
+      "tests/test_chairman_cognition.py",
+      "tests/test_chairman_cognition_agentos_warning_currentness.py",
+      "tests/test_chairman_cognition_hardening.py",
+      "tests/test_chairman_cognition_source_contract.py",
+      "tests/test_chairman_cognition_sources.py",
+      "tests/test_chairman_coordination.py",
+      "tests/test_chairman_coordination_return.py",
+      "tests/test_chairman_coordination_work.py",
+      "tests/test_chairman_coordination_host.py",
+      "tests/test_fabric_result_projection.py",
+      "tests/test_executive_runtime_bounded_role_result.py",
+      "tests/test_workspace_source_join.py",
+      "tests/test_executive_supervisor.py"
+    ],
+    "new_host_cases": 43,
+    "passed": 577,
+    "skipped": 0
+  },
+  "fixture_corrections": [
+    "Read fake adapter result JSON from its actual stored result rather than serializing nested frozen mappings.",
+    "Use actual OrchestrationLaunchSpec.result_schema_path."
+  ],
+  "known_limits": [
+    "Host requires actual authorized source and artifact providers; dataclasses/callbacks are not authentication.",
+    "Prompt snapshot and revalidator do not replace original final dispatch/effect fencing.",
+    "Existing artifact reader owns physical file safety and permission; no generic file reader was introduced.",
+    "Related tests do not replace independent review, full fresh hosted CI or actual model/user proof.",
+    "Previous native full-suite environment failures not rerun without a relevant change."
+  ],
+  "operation": "mastermind-pro-led-project-delivery-20260929-sol-001",
+  "prior_hosted_evidence": {
+    "all_six_observed_checks": "success",
+    "applies_to_new_head": false,
+    "head": "730af761363411f019508d5d12efe926ac2c8e5d",
+    "test_check_id": 109336648982,
+    "test_conclusion": "success"
+  },
+  "procedure_pin": "3c4c24058415354865b4c068defa93298c697d3e",
+  "recorded_at": "2026-09-29T10:20:59.346046+00:00",
+  "runtime_observation": {
+    "degraded": [],
+    "generated_at": "2026-09-29T09:58:22Z",
+    "installed_mastermind": "432c5e3178c6abd34f7d44bc06f30974739f47cd",
+    "mode": "readonly",
+    "ok": true,
+    "submit_or_dispatch_attempted": false
+  },
+  "scope": {
+    "actual_supervisor": true,
+    "actual_temporary_runtime": true,
+    "fake_model_output": true,
+    "fake_provider": true,
+    "full_repository_rerun": false,
+    "installed_host_activation": false,
+    "live_provider_invocation": false,
+    "new_worker_assignment": false,
+    "original_lifecycle_methods_inherited": true,
+    "project_acceptance": false
+  },
+  "source": [
+    {
+      "path": "control_plane/chairman_coordination_host.py",
+      "sha256": "aca665f011e69434732c11a1be6fceb91c5185721c64efa992e413ab47714991"
+    },
+    {
+      "path": "tests/test_chairman_coordination_host.py",
+      "sha256": "ef2beed0b4b659e01dc72b8162123b659483aa7d0713cd98802acd7d69cf55c1"
+    }
+  ],
+  "source_parent": "730af761363411f019508d5d12efe926ac2c8e5d"
+}
