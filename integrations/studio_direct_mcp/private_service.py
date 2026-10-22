@@ -840,7 +840,14 @@ def _c2_lifecycle_serialized(*, readonly_preflight: bool = False):
     def decorate(function):
         @wraps(function)
         def guarded(args):
-            if (args.account not in PAPER_RUNTIME_UPGRADE_ACCOUNTS
+            # Pool-pin migration holds this original per-account mutex for the
+            # selected, exact historical cohort. Normal start/stop/seal must
+            # respect the same inode. Existing Fabric-backend seats retain
+            # their own outer decorator and are not double-locked here.
+            locked_accounts = PAPER_RUNTIME_UPGRADE_ACCOUNTS | frozenset(
+                FABRIC_POOL_PIN_MIGRATION,
+            )
+            if (args.account not in locked_accounts
                     or (readonly_preflight and getattr(args, "preflight_only", False) is True)):
                 return function(args)
             with _c2_lifecycle_mutex(args.account):
