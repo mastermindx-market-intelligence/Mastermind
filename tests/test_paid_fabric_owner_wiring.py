@@ -1,5 +1,6 @@
 """Offline source checks; these fixtures do not authenticate a live owner."""
 import asyncio
+import ast
 from copy import deepcopy
 import dataclasses
 import hashlib
@@ -235,3 +236,26 @@ def test_status_lost_terminal_never_reenters_provider(tmp_path,monkeypatch):
     for mode in (False,True):
         with pytest.raises(backend.PaidOwnerRefused):owner._quota_bootstrap_owned('status-original',scope,allow_start=mode)
     assert calls==[1]
+
+
+def test_raced_incumbent_singleton_refuses_before_any_credential_read():
+    source = ROOT/'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py'
+    tree = ast.parse(source.read_bytes())
+    node = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                and n.name == 'build_canonical_incumbent_context')
+    calls = []
+    class IncumbentBusy(Exception):
+        pass
+    def acquire(path):
+        calls.append(('singleton', path))
+        raise IncumbentBusy()
+    def forbidden(*args, **kwargs):
+        calls.append(('credential_or_state_read',))
+        raise AssertionError('a raced legacy owner must not load credentials')
+    scope = {'os': SimpleNamespace(path=os.path, open=forbidden),
+             'acquire_singleton_lock': acquire, 'load_config': forbidden}
+    exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), 'exec'), scope)
+    fixed = '/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext'
+    with pytest.raises(IncumbentBusy):
+        scope['build_canonical_incumbent_context'](fixed)
+    assert calls == [('singleton', fixed+'/glm_shim/shim.lock')]

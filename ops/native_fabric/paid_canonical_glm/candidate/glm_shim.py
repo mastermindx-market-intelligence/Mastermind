@@ -1829,6 +1829,9 @@ def build_canonical_incumbent_context(owner_ext):
     if owner_ext != fixed:
         raise ValueError('canonical incumbent owner unavailable')
     state = os.path.join(fixed, 'glm_shim')
+    # The incumbent singleton is acquired before existing credential/state reads.
+    # A legacy owner racing the start must refuse here, without loading its token.
+    acquire_singleton_lock(os.path.join(state, 'shim.lock'))
     token_path = os.path.join(state, '.token')
     fd = os.open(token_path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
     try:
@@ -1853,7 +1856,6 @@ def build_canonical_incumbent_context(owner_ext):
         os.close(fd)
     # This is the SAME singleton lock and provisioned account table; no second
     # shim/controller, alternate credential store or public canonical issuer.
-    acquire_singleton_lock(os.path.join(state,'shim.lock'))
     cfg = load_config()
     import glm_keys
     accounts = glm_keys.accounts()
