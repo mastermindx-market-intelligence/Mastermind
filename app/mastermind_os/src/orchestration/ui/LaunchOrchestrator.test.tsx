@@ -76,6 +76,110 @@ describe("LaunchOrchestrator", () => {
     });
   });
 
+  describe("acceptance contract", () => {
+    it("sends specified criteria in the existing launch goal", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Implement project chat" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "One message is delivered\nReopening does not duplicate it" } });
+      fireEvent.click(launchButton());
+      expect(onSubmit).toHaveBeenCalledTimes(1);
+      const submitted = onSubmit.mock.calls[0][0] as LaunchForm;
+      expect(submitted.goal).toContain(" [MASTERMIND_ACCEPTANCE_CRITERIA_V1:");
+      expect(submitted.goal).toContain('["One message is delivered","Reopening does not duplicate it"]]');
+      expect(submitted.goal).toContain("One message is delivered");
+      expect(submitted.goal).toContain("Reopening does not duplicate it");
+    });
+
+    it("blocks oversized or excessive criteria without dispatch", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "x\n".repeat(7) } });
+      expect(launchButton().disabled).toBe(true);
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("encodes newlines for the real Executive normalizer without discarding paragraph boundaries", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Plan first\nImplement second" } });
+      fireEvent.click(launchButton());
+      const sent = onSubmit.mock.calls[0][0] as LaunchForm;
+      expect(sent.goal).toBe("Plan first\u2028Implement second");
+      expect(sent.goal).not.toContain("\n");
+    });
+
+    it("refuses unsupported controls even without optional criteria", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal\x00invalid" } });
+      expect(launchButton().disabled).toBe(true);
+      expect(screen.getByRole("alert")).toBeTruthy();
+      fireEvent.submit(goalForm());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("refuses preexisting versioned markers in a goal before launch", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Report on [MASTERMIND_ACCEPTANCE_CRITERIA_V1: syntax" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Verify report" } });
+      expect(launchButton().disabled).toBe(true);
+      expect(screen.getByRole("alert")).toBeTruthy();
+      fireEvent.submit(goalForm());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("refuses ambiguous markers and control characters inside criteria", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "Goal" } });
+      for (const text of ["Report [MASTERMIND_ACCEPTANCE_CRITERIA_V1:", "Bad\tcriterion", "Nested [MASTERMIND_ACCEPTANCE_CRITERIA_V1:"]) {
+        fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: text } });
+        expect(launchButton().disabled).toBe(true);
+      }
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("blocks goals whose criteria push the combined objective beyond the adapter limit", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "a".repeat(3990) } });
+      expect(launchButton().disabled).toBe(false);
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Demonstrate proof" } });
+      expect(launchButton().disabled).toBe(true);
+      expect(screen.getByRole("alert").textContent).toContain("4,000 UTF-8 bytes");
+      fireEvent.submit(goalForm());
+      expect(onSubmit).not.toHaveBeenCalled();
+    });
+
+    it("rejects criteria above 500 characters and handles UTF-8 multibyte limits", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "z".repeat(501) } });
+      expect(launchButton().disabled).toBe(true);
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "é".repeat(300) } });
+      expect(launchButton().disabled).toBe(false);
+      fireEvent.click(launchButton());
+      expect((onSubmit.mock.calls[0][0] as LaunchForm).goal).toContain("é".repeat(300));
+    });
+
+    it("preserves criteria on refusal and clears on accepted completion", () => {
+      const onSubmit = vi.fn();
+      render(<LaunchOrchestrator {...makeProps({ onSubmit })} />);
+      fireEvent.change(screen.getByLabelText("Goal"), { target: { value: "A goal" } });
+      fireEvent.change(screen.getByLabelText(/Acceptance criteria/), { target: { value: "Requirement" } });
+      fireEvent.click(launchButton());
+      act(() => onSubmit.mock.calls[0][1]({ status: "refused" }));
+      expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("Requirement");
+      fireEvent.click(launchButton());
+      act(() => onSubmit.mock.calls[1][1]({ status: "accepted" }));
+      expect((screen.getByLabelText(/Acceptance criteria/) as HTMLTextAreaElement).value).toBe("");
+    });
+  });
+
   describe("default selections", () => {
     it("selects first eligible project and profile by default", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
@@ -178,10 +282,10 @@ describe("LaunchOrchestrator", () => {
       expect(btn.disabled).toBe(true);
     });
 
-    it("shows byte length error when goal exceeds 16384 bytes", () => {
+    it("shows byte length error when goal exceeds the adapter-compatible 4000 bytes", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "a".repeat(16385) } });
+      fireEvent.change(textarea, { target: { value: "a".repeat(4001) } });
       expect(screen.getByText(/bytes/)).toBeTruthy();
       expect(launchButton().disabled).toBe(true);
     });
@@ -189,7 +293,7 @@ describe("LaunchOrchestrator", () => {
     it("allows submit when goal is exactly at the ASCII byte limit", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      fireEvent.change(textarea, { target: { value: "a".repeat(16384) } });
+      fireEvent.change(textarea, { target: { value: "a".repeat(4000) } });
       expect(screen.queryByText(/bytes/)).toBeNull();
       expect(launchButton().disabled).toBe(false);
     });
@@ -197,12 +301,12 @@ describe("LaunchOrchestrator", () => {
     it("counts multi-byte UTF-8 characters against the byte ceiling", () => {
       render(<LaunchOrchestrator {...makeProps()} />);
       const textarea = screen.getByLabelText("Goal") as HTMLTextAreaElement;
-      // é is two bytes: 8192 chars = 16384 bytes, exactly at the ceiling
-      fireEvent.change(textarea, { target: { value: "é".repeat(8192) } });
+      // é is two bytes: 2000 chars = 4000 bytes, exactly at the ceiling
+      fireEvent.change(textarea, { target: { value: "é".repeat(2000) } });
       expect(screen.queryByText(/bytes/)).toBeNull();
       expect(launchButton().disabled).toBe(false);
 
-      fireEvent.change(textarea, { target: { value: "é".repeat(8193) } });
+      fireEvent.change(textarea, { target: { value: "é".repeat(2001) } });
       expect(screen.getByText(/bytes/)).toBeTruthy();
       expect(launchButton().disabled).toBe(true);
     });

@@ -47,6 +47,7 @@ export type LaunchOutcome = { status: "accepted" } | { status: "refused" };
 export type LaunchCompletion = (outcome: LaunchOutcome) => void;
 
 export interface LaunchOrchestratorProps {
+  locale?: "en" | "zh-CN";
   projects: readonly LaunchChoice[];
   profiles: readonly LaunchChoice[];
   /** Owner-side pending signal. Disables the form; never releases the guard. */
@@ -64,7 +65,41 @@ export interface LaunchOrchestratorProps {
 // ---------------------------------------------------------------------------
 
 /** Conservative UI ceiling for user-supplied goal text */
-const MAX_GOAL_BYTES = 16384;
+// The Executive launch adapter limits objective to 4,000 characters.
+// Use a conservative UTF-8 byte ceiling so the visible UI never promises a
+// launch the existing command adapter will reject.
+const MAX_GOAL_BYTES = 4000;
+const MAX_ACCEPTANCE_ITEMS = 6;
+// Versioned human-readable section in the existing objective. This is a
+// requirement description, not signed proof or a product-acceptance verdict.
+const ACCEPTANCE_OPEN = " [MASTERMIND_ACCEPTANCE_CRITERIA_V1:";
+const ACCEPTANCE_CLOSE = "]";
+/**
+ * Executive rejects Cc/Cs characters, including CR/LF, in its 4000-char
+ * objective. Preserve paragraph boundaries as U+2028 (Zl) and reject invalid
+ * controls/surrogates. Do not loosen or duplicate the Executive normalizer.
+ */
+function executiveGoal(goal: string): string | null {
+  const normalized = goal.trim().replace(/\r\n?|\n/g, "\u2028").replace(/\t/g, " ");
+  return /[\p{Cc}\p{Cs}]/u.test(normalized) ? null : normalized;
+}
+/** A versioned requirements suffix, not signed proof or a product verdict. */
+export function composeAcceptanceGoal(goal: string, criteria: string): string | null {
+  const lines = criteria.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
+  if (lines.length > MAX_ACCEPTANCE_ITEMS || lines.some((line) =>
+    line.length > 500 || /[\p{Cc}\p{Cs}\u2028\u2029]/u.test(line),
+  )) return null;
+  const normalizedGoal = executiveGoal(goal);
+  if (normalizedGoal === null) return null;
+  // The marker is reserved: a second occurrence makes the source ambiguous.
+  if ([normalizedGoal, ...lines].some((part) =>
+    part.includes("[MASTERMIND_ACCEPTANCE_CRITERIA_V1:"),
+  )) return null;
+  const composed = lines.length
+    ? `${normalizedGoal}${ACCEPTANCE_OPEN}${JSON.stringify(lines)}${ACCEPTANCE_CLOSE}`
+    : normalizedGoal;
+  return utf8ByteLength(composed) <= MAX_GOAL_BYTES ? composed : null;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -98,6 +133,7 @@ function readTerminalStatus(outcome: unknown): "accepted" | "refused" | null {
 // ---------------------------------------------------------------------------
 
 export function LaunchOrchestrator({
+  locale = "en",
   projects,
   profiles,
   submitting,
@@ -107,13 +143,26 @@ export function LaunchOrchestrator({
   onSubmit,
   onCancel,
 }: LaunchOrchestratorProps) {
+  const criteriaCopy = locale === "zh-CN" ? {
+    label: "验收条件（可选，每行一项）",
+    placeholder: "完成这项任务时，哪些结果必须有证据证明？",
+    error: "最多填写六项条件，每项不超过 500 个字符。目标和条件合计不得超过 4,000 个 UTF-8 字节。",
+    help: "验收条件会随任务目标提交，用于后续验证；填写条件不代表验证已通过。",
+  } : {
+    label: "Acceptance criteria (optional, one per line)",
+    placeholder: "What must be demonstrably true when this mission is finished?",
+    error: "Use at most six criteria (500 characters each). Goal and criteria together must fit 4,000 UTF-8 bytes.",
+    help: "Criteria travel with the existing mission goal. They are requirements for validation, not a claim that checks have passed.",
+  };
   const formId = useId();
   const goalId = `${formId}-goal`;
   const projectId = `${formId}-project`;
   const profileId = `${formId}-profile`;
+  const acceptanceId = `${formId}-acceptance`;
 
   // Draft state — preserved across error and rerender
   const [draftGoal, setDraftGoal] = useState("");
+  const [draftAcceptance, setDraftAcceptance] = useState("");
   const [draftProject, setDraftProject] = useState("");
   const [draftProfile, setDraftProfile] = useState("");
 
@@ -139,6 +188,7 @@ export function LaunchOrchestrator({
       // Success consumes the goal so the same intent cannot be launched twice
       // by a parent that stays mounted. A refusal keeps the draft.
       setDraftGoal("");
+      setDraftAcceptance("");
     }
   };
 
@@ -167,7 +217,10 @@ export function LaunchOrchestrator({
     : selectedProfileChoice.unavailableReason;
 
   const goalBytes = utf8ByteLength(draftGoal);
+  const composedGoal = composeAcceptanceGoal(draftGoal, draftAcceptance);
+  const acceptanceInvalid = draftAcceptance.trim().length > 0 && composedGoal === null;
   const goalTooLong = goalBytes > MAX_GOAL_BYTES;
+  const goalInvalid = !acceptanceInvalid && !goalTooLong && composedGoal === null;
   const goalBlank = draftGoal.trim().length === 0;
 
   const canSubmit =
@@ -179,7 +232,8 @@ export function LaunchOrchestrator({
     !selectedProjectChoice?.unavailableReason &&
     !selectedProfileChoice?.unavailableReason &&
     !goalBlank &&
-    !goalTooLong;
+    !goalTooLong &&
+    composedGoal !== null;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -190,7 +244,7 @@ export function LaunchOrchestrator({
     try {
       onSubmit(
         {
-          goal: draftGoal,
+          goal: composedGoal ?? draftGoal,
           projectRef: selectedProject,
           profileRef: selectedProfile,
         },
@@ -213,7 +267,9 @@ export function LaunchOrchestrator({
     ? `Goal exceeds ${MAX_GOAL_BYTES} byte UTF-8 limit.`
     : goalBlank
       ? "Goal is required."
-      : undefined;
+      : goalInvalid
+        ? "Goal contains an unsupported control or a reserved marker, or exceeds the serialized limit."
+        : undefined;
 
   return (
     <section className="card">
@@ -247,7 +303,7 @@ export function LaunchOrchestrator({
               rows={4}
               placeholder="Describe the objective for this launch…"
               disabled={launchPending}
-              aria-describedby={goalTooLong ? `${goalId}-length` : undefined}
+              aria-describedby={goalTooLong ? `${goalId}-length` : goalInvalid ? `${goalId}-invalid` : undefined}
               aria-invalid={!!goalError}
             />
             {goalTooLong && (
@@ -255,6 +311,31 @@ export function LaunchOrchestrator({
                 Goal exceeds the {MAX_GOAL_BYTES} byte UTF-8 ceiling.
               </p>
             )}
+            {goalInvalid && (
+              <p id={`${goalId}-invalid`} className="field-error" role="alert">
+                Remove unsupported control characters or reserved markers. The original objective must fit 4,000 UTF-8 bytes.
+              </p>
+            )}
+          </div>
+
+          <div className="form-field">
+            <label htmlFor={acceptanceId}>{criteriaCopy.label}</label>
+            <textarea
+              id={acceptanceId}
+              value={draftAcceptance}
+              onChange={(e) => setDraftAcceptance(e.target.value)}
+              rows={3}
+              placeholder={criteriaCopy.placeholder}
+              disabled={launchPending}
+              aria-invalid={acceptanceInvalid}
+              aria-describedby={acceptanceInvalid ? `${acceptanceId}-error` : undefined}
+            />
+            {acceptanceInvalid && (
+              <p id={`${acceptanceId}-error`} className="field-error" role="alert">
+                {criteriaCopy.error}
+              </p>
+            )}
+            <p className="muted">{criteriaCopy.help}</p>
           </div>
 
           {/* Project select */}
