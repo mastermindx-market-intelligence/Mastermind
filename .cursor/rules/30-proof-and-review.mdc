@@ -1,0 +1,12 @@
+---
+description: Product verification, independent engineering review, acceptance of code changes, CI diagnostics, browser checks, deployments and correctness gates
+alwaysApply: false
+---
+# Evidence before acceptance
+
+- Use the `mastermind-verify-and-close` skill. Tie tests to the actual user-facing or machine consumer, not just a passing unit fixture.
+- Separate source edited, tests passed, PR checks passed, merge, deployment, actual consumer path, and authoritative acceptance. Report each independently.
+- For data or security effects, verify identity, permission, correction/failure semantics and unchanged neighbor behavior; never infer user authority from a helpful model response.
+- Independent reviewers are read-only unless a separately authorized carrier exists. A timed-out or incomplete review is not a PASS.
+- Do not turn green CI into an automatic merge or deployment. When CI is pending, retain one existing watcher/return mechanism and continue useful independent work.
+- Keep evidence at the existing GitHub/Agent OS owner with commit or attempt IDs, a bounded summary, known gaps and the next exact action.

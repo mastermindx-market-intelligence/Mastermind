@@ -234,6 +234,23 @@ secret configuration or arbitrary CLI output. It deliberately returns
 `observed_actual_models=false` until proven elsewhere. No scheduled health
 polling, retries, worker dispatch, credentials or extra runtime state exist.
 
+### Operation-owned M2 project consumer proof
+
+On the existing operation-owned source checkout at
+`sol/cursor-fabric-parity-20261022-sol-001`, the reviewed installer first
+performed a no-write `plan`, then projected all 12 files into the actual
+Mastermind Git root, and `verify` read back all 12 hashes successfully.
+Those root `.cursor/` files are tracked with this same PR so a subsequently
+reviewed merge would make them project-local for compatible Cursor clients
+without copying another user's global Cursor profile or credentials.
+
+A fresh Cursor CLI root session using Composer 2.5 and `--mode=ask`
+answered `--force, --yolo` from the Mastermind always rule with **zero
+tool calls**, exit 0 and unchanged project files. This is real-worktree
+rule-consistent behavior but not a proof of a native Task child,
+selected subagent model or external Fabric START. The incumbent installed
+Claude preToolUse guard and global MCP settings were not changed.
+
 ### M2 scratch evidence
 
 A disposable Git-root projection installed/verified all 12 assets and the
