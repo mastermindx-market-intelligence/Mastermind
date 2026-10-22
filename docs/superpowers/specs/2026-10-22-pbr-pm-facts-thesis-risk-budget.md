@@ -60,8 +60,8 @@ Precedent for typed, unit-carrying, authority-labelled records: `brain/decision_
 
 `VERIFIED | CONTRADICTED | UNVERIFIED | BASIS_UNRECONCILED | NOT_APPLICABLE`, with a reason string and the compared values. `verify_fact(fact, *, primary_evidence, reference_mark=None, config) -> Outcome`:
 
-- **(i) Dated catalyst.** kind `event_date`, where the claim asserts a *future* catalyst relative to `decision_asof`: if any primary evidence record (source_class `primary_filing` or `company_release`) shows the event date ≤ decision asof, the outcome is `CONTRADICTED`. MU: claim "due 2026-10-22" vs X6 event_date 2026-09-30 ≤ asof 2026-10-02 → CONTRADICTED. The rule evaluates **every** `event_date` fact extracted from the entry package — why_now, falsifier, exit_plan, rationale, top-level falsifiers, memo timing — so it fires regardless of which component carried the bad date (the MU date appears in all of them; the checker must not privilege one field).
-- **(ii) Price basis bridge.** kind `price_level` or `price_target`: compute `ratio = claim_value / reference_mark` (reference mark = decision-time mark if supplied, else the episode entry fill; currency and basis from `fact.basis` must match the mark's). Ratio outside the declared tolerance band (config, §4.3) **without** an explicit bridge (a stated currency/adjustment/split reconciliation in `fact.basis.bridge`) → `BASIS_UNRECONCILED`. MU: targets 130–140 and trail 107.5 against fill 1069.68 (ratio ≈ 0.10–0.13) → BASIS_UNRECONCILED. XOM: 153 and 137.50 against 158.03 (0.87–0.97) → inside band, not BASIS_UNRECONCILED. This is an unexplained scale/basis discontinuity finding — **not** a claim that the fill price was wrong (MASTERPLAN §2.6).
+- **(i) Dated catalyst.** *(Narrowed by §8 E1: identity agreement first, forward claims only.)* kind `event_date`, where the claim asserts a *future* catalyst relative to `decision_asof`: if any primary evidence record (source_class `primary_filing` or `company_release`) shows the event date ≤ decision asof, the outcome is `CONTRADICTED`. MU: claim "due 2026-10-22" vs X6 event_date 2026-09-30 ≤ asof 2026-10-02 → CONTRADICTED. The rule evaluates **every** `event_date` fact extracted from the entry package — why_now, falsifier, exit_plan, rationale, top-level falsifiers, memo timing — so it fires regardless of which component carried the bad date (the MU date appears in all of them; the checker must not privilege one field).
+- **(ii) Price basis bridge.** *(Reference-mark qualification per §8 Q2; the entry-fill fallback is withdrawn.)* kind `price_level` or `price_target`: compute `ratio = claim_value / reference_mark` (reference mark = decision-time mark if supplied, else the episode entry fill; currency and basis from `fact.basis` must match the mark's). Ratio outside the declared tolerance band (config, §4.3) **without** an explicit bridge (a stated currency/adjustment/split reconciliation in `fact.basis.bridge`) → `BASIS_UNRECONCILED`. MU: targets 130–140 and trail 107.5 against fill 1069.68 (ratio ≈ 0.10–0.13) → BASIS_UNRECONCILED. XOM: 153 and 137.50 against 158.03 (0.87–0.97) → inside band, not BASIS_UNRECONCILED. This is an unexplained scale/basis discontinuity finding — **not** a claim that the fill price was wrong (MASTERPLAN §2.6).
 - **(iii) Risk-increase eligibility.** `entry_fact_findings(facts, outcomes, action)` → an add/new-entry claim is **ineligible** when any supporting fact is CONTRADICTED or BASIS_UNRECONCILED (frozen law 13, :496 — contradiction is not averaged away; MASTERPLAN §7.5 "the affected risk-increasing claim must remain ineligible"). Shadow output only; it does not veto anything live.
 - **(iv) Advisory-coverage asymmetry.** A missing advisory fact, missing provider coverage, or UNVERIFIED facts never produce ineligibility for a **hold** or an **authorized risk reduction** (exit/trim). Rule (iii) conditions only risk-*increasing* actions (MASTERPLAN §7.5, §7.8 "missing data must not silently liquidate a name").
 - Facts with insufficient evidence resolve `UNVERIFIED` and are recorded, never discarded; kind `other` without a check resolves `NOT_APPLICABLE`.
@@ -180,7 +180,65 @@ Seat-reserved later steps (each needs its own assignment and review): (1) normal
 
 ## 7. Open questions
 
+*All four are answered by seat rulings recorded in §8.*
+
 1. Does the UNRECORDED_AMENDMENT change-set include `conviction` (a sizing input that changed medium→high at MU 76) or only thesis-semantic fields? MU 76 changed both, so the case cannot decide it; the ruling affects false-positive rate on pure conviction upgrades.
 2. Which reference mark is canonical for the §2.2(ii) bridge at entry time — the decision-time quote or the realized fill? This wave accepts either (fill as fallback, as in the MU fixture); a live shadow run must pin one to stay point-in-time honest.
 3. Who freezes and owns `config/pbr_shadow_risk_budget.yml` (which seat signs `frozen_at`), and where does the freeze-order evidence live beyond the commit history?
 4. Should `INVALIDATED`/`EXCLUDED` terminal amendments require a linked fact outcome (e.g. a dated falsifier event) rather than free-text reason, to keep MASTERPLAN §7.8's "review large losses against the original decision" auditable?
+
+## 8. Seat rulings and errata (recorded after PR #1701 merged)
+
+These amend the sections they name. Where this section and an earlier section differ, this section wins. Implementation: PR #1750
+(`brain/facts.py`, `brain/thesis_store.py`, `brain/shadow_risk_budget.py` and their tests). Seat rulings are quoted from the PBR
+seat's wave-2 commission (2026-10-22); errata come from independent reviews R-1701 (F1) and R-1750 (F1).
+
+**Q1 (answers §7 Q1; amends §3.3 and `test_unrecorded_amendment_detected_mu_75_to_76`).** `AMENDMENT_WATCHED_FIELDS` = thesis
+statement, falsifier, check_by/time_stop, exit_plan, size_cap/target_weight, catalyst. Conviction is not watched: doctrine restates
+the probability every cycle, so it is a per-cycle observation (schema `pbr.thesis_observation.v1`, append-only, carrying the cycle
+id), never an amendment and never part of an UNRECORDED_AMENDMENT finding. A watched change between consecutive held-episode rows
+with no linking AmendmentRecord is rejected (`check_continuity` → `REJECTED_UNRECORDED_AMENDMENT`), not only reported.
+
+**Q2 (answers §7 Q2; amends §2.2(ii)).** A caller-supplied reference mark never qualifies: it is accepted only as a labelled input
+with `source=CALLER_SUPPLIED` and yields `BASIS_UNRECONCILED` (reason `reference_mark_not_qualified`; an absent mark gives
+`reference_mark_absent`), never `VERIFIED` and never an "inside band" result. Qualifying marks come from ECON's union-mark
+store with complete provenance (`pbr.reference_mark.v1`). The episode-entry-fill fallback in §2.2(ii) is withdrawn.
+
+**Q3 (answers §7 Q3).** `freeze_owner` of `config/pbr_shadow_risk_budget.yml` is `pbr-seat` for the program's life; a change is a
+version bump plus a seat ruling row in the program ledger. The module is shadow-only: a negative test asserts that no sizing or
+decision path imports it. After closeout the owner follows `config/authority_map.yml`.
+
+**Q4 (answers §7 Q4).** Terminal amendments (`INVALIDATED`, `EXCLUDED`) require a closed-enum `reason_code` in {FALSIFIED,
+TIME_STOP, EXIT_PLAN_HIT, SUPERSEDED, MANUAL}. An optional free-text `note` is allowed in the runtime record only (off-repo
+evidence); fixtures and tests carry a sha256 and length, never prose.
+
+**CR-R7.** `pbr.fact.v1`, `pbr.thesis.v1`, `pbr.thesis_amendment.v1`, `pbr.thesis_observation.v1`, `pbr.reference_mark.v1` and
+`pbr.shadow_risk_budget_params.v1` are internal module schemas. They stay spec-local as module constants pinned by tests and are
+not entered in `config/contracts.yml`.
+
+**E1 (amends §2.2(i); from R-1701 F1 and R-1750 F1).** Rule (i) compares the *same* event only.
+1. Event identity is the `period` label (e.g. `FY2026-Q4`), compared after trimming and upper-casing. When both the fact and the
+   evidence record also carry an `event` kind label, it must match too.
+2. A record is primary only when its `source_class` is `primary_filing` or `company_release`. Class-less records are excluded.
+3. Only identity-matched primary records take part in any date comparison. A record with a different period, or with no period,
+   neither confirms nor contradicts.
+4. The "already published" contradiction applies to forward claims only (claimed date > `decision_asof`): a matched record dated
+   ≤ asof → `CONTRADICTED`. For a past claim (claimed ≤ asof), a matched record on the claimed date → `VERIFIED`, and a matched
+   record on another date → `CONTRADICTED`.
+5. A fact without a `period` → `UNVERIFIED` (reason `event_identity_absent`) when primary records exist. A fact with a period but
+   no matched record → `UNVERIFIED` (reason `no_identity_matched_primary_record`). Neither case is `CONTRADICTED`.
+6. MU stays `CONTRADICTED`. The claimed catalyst and both fixture `external_facts` concern the fiscal Q4 2026 results release.
+   That identity (`period=FY2026-Q4`) is declared in the tests under §5 SR-1 rule (3), because the digests carry no period label.
+
+Tests added under §5.1:
+- `test_event_date_unrelated_period_never_contradicts` (a FY2026-Q3 release dated 2026-08-26 does not contradict a forward
+  FY2026-Q4 claim);
+- `test_event_date_unrelated_past_record_does_not_mask_matching_forward_record`;
+- `test_event_date_requires_identity_and_primary_class`;
+- `test_event_date_past_claim_checked_only_against_same_identity`.
+
+**E2 (amends §4.1; from R-1750 F2 and F5).**
+- When a supporting fact is CONTRADICTED or BASIS_UNRECONCILED, the evidence step multiplies by the configured
+  `evidence_multiplier.unreconciled_fact_factor` (frozen at 0.0), not a hard-coded constant.
+- The parameter loader rejects any bare numeric or boolean leaf outside a `{value, justification}` node, except the top-level
+  `version`.
