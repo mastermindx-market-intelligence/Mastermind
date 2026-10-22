@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -1473,6 +1474,168 @@ def _collision_census(
     )
 
 
+def _collision_overlap_projection(
+    owned_paths: tuple[str, ...],
+    evidence: tuple[str, ...] | _SaturatedCollisionEvidence,
+) -> tuple[str, ...]:
+    owned = set(owned_paths)
+    if isinstance(evidence, _SaturatedCollisionEvidence):
+        projected = {
+            path
+            for path, base_entry, head_entry in evidence.owned_path_entries
+            if path in owned and base_entry != head_entry
+        }
+        return tuple(sorted(projected))
+    if not isinstance(evidence, tuple) or not all(
+        isinstance(path, str) for path in evidence
+    ):
+        raise _RemoteProbeError()
+    return tuple(sorted(owned.intersection(evidence)))
+
+
+def _git_tree_entry_payload(entry: _GitTreeEntry | None) -> object:
+    if entry is None:
+        return None
+    return {
+        "mode": entry.mode,
+        "object_type": entry.object_type,
+        "object_sha": entry.object_sha,
+    }
+
+
+def _collision_record_payload(
+    record: _ForeignCollisionRecord,
+    owned_paths: tuple[str, ...],
+) -> dict[str, object]:
+    projection = _collision_overlap_projection(owned_paths, record.evidence)
+    if record.overlaps != bool(projection):
+        raise _RemoteProbeError()
+    identity: object
+    if record.identity is None:
+        identity = None
+    else:
+        identity = {
+            "head_repository": record.identity.head_repository,
+            "head_sha": record.identity.head_sha,
+            "base_repository": record.identity.base_repository,
+            "base_sha": record.identity.base_sha,
+        }
+    evidence: object
+    if isinstance(record.evidence, _SaturatedCollisionEvidence):
+        evidence = {
+            "proof_method": record.evidence.proof_method,
+            "merge_base_sha": record.evidence.merge_base_sha,
+            "owned_path_entries": [
+                {
+                    "path": path,
+                    "base": _git_tree_entry_payload(base_entry),
+                    "head": _git_tree_entry_payload(head_entry),
+                }
+                for path, base_entry, head_entry in record.evidence.owned_path_entries
+            ],
+        }
+    else:
+        evidence = {"changed_paths": list(record.evidence)}
+    return {
+        "pr_number": record.pr_number,
+        "identity": identity,
+        "overlap_paths": list(projection),
+        "evidence": evidence,
+    }
+
+
+def _collision_evidence_fingerprint(
+    records: tuple[_ForeignCollisionRecord, ...],
+    owned_paths: tuple[str, ...],
+) -> str:
+    rows = [
+        _collision_record_payload(record, owned_paths)
+        for record in sorted(records, key=lambda item: item.pr_number)
+        if record.overlaps
+    ]
+    return hashlib.sha256(canonical_json(rows).encode("utf-8")).hexdigest()
+
+
+def _revalidate_collision_records(
+    http_get: HTTPGet,
+    token: str,
+    repository: str,
+    owned_paths: tuple[str, ...],
+    first_records: tuple[_ForeignCollisionRecord, ...],
+    first_colliding_pr_numbers: tuple[int, ...],
+    second_details: _CollisionCensusDetails,
+) -> tuple[bool, bool, tuple[_ForeignCollisionRecord, ...]]:
+    if not second_details.complete or second_details.state is CollisionState.INCOMPLETE:
+        return False, False, ()
+
+    first_by_number = {record.pr_number: record for record in first_records}
+    if len(first_by_number) != len(first_records):
+        raise _RemoteProbeError()
+    if tuple(sorted(
+        number for number, record in first_by_number.items() if record.overlaps
+    )) != tuple(sorted(first_colliding_pr_numbers)):
+        raise _RemoteProbeError()
+
+    second_by_number = {
+        record.pr_number: record for record in second_details.foreign_records
+    }
+    if len(second_by_number) != len(second_details.foreign_records):
+        raise _RemoteProbeError()
+
+    for number, first_record in first_by_number.items():
+        if first_record.identity is None:
+            raise _RemoteProbeError()
+        second_record = second_by_number.get(number)
+        if second_record is None:
+            if first_record.overlaps:
+                return False, True, ()
+            direct = _api(
+                http_get=http_get,
+                token=token,
+                endpoint=f"repos/{repository}/pulls/{number}",
+            )
+            if not isinstance(direct, dict) or direct.get("state") != "closed":
+                return False, True, ()
+            if _foreign_pull_identity(direct, repository).pr_number != number:
+                raise _RemoteProbeError()
+            continue
+        if second_record.identity is None:
+            raise _RemoteProbeError()
+
+        if first_record.overlaps:
+            if not second_record.overlaps:
+                return False, True, ()
+            first_identity = first_record.identity
+            second_identity = second_record.identity
+            if (
+                first_identity.head_repository != second_identity.head_repository
+                or first_identity.base_repository != second_identity.base_repository
+            ):
+                return False, True, ()
+            first_projection = _collision_overlap_projection(
+                owned_paths, first_record.evidence
+            )
+            second_projection = _collision_overlap_projection(
+                owned_paths, second_record.evidence
+            )
+            if not first_projection or second_projection != first_projection:
+                return False, True, ()
+            continue
+
+        if second_record.overlaps:
+            return False, True, ()
+
+    for number, second_record in second_by_number.items():
+        if number in first_by_number:
+            continue
+        if second_record.identity is None:
+            raise _RemoteProbeError()
+        if second_record.overlaps:
+            return False, True, ()
+
+    return True, True, second_details.foreign_records
+
+
 def _revalidate_collision_census(
     http_get: HTTPGet,
     token: str,
@@ -1481,19 +1644,19 @@ def _revalidate_collision_census(
     owned_paths: tuple[str, ...],
     first_records: tuple[_ForeignCollisionRecord, ...],
     first_colliding_pr_numbers: tuple[int, ...],
-) -> tuple[bool, bool]:
-    """Re-prove custody under a complete second open-PR census.
+) -> tuple[bool, bool, tuple[_ForeignCollisionRecord, ...]]:
+    """Re-prove custody without re-fetching stable foreign evidence.
 
-    Stable foreign identities reuse their first collision evidence. New or
-    moved disjoint identities are freshly checked. A missing first-pass
-    disjoint PR must be directly proven closed; a colliding PR may never move
-    or disappear.
+    The second pass reads only the open-PR roster first. Stable immutable
+    identities reuse their first-pass collision evidence. New or moved
+    identities are freshly proved. A moved collider may continue only when
+    its exact non-empty target-owned overlap projection is unchanged.
     """
 
     reader = _collision_reader(http_get)
     pulls, complete = _read_open_pull_roster(reader, token, repository)
     if not complete:
-        return False, False
+        return False, False, ()
 
     seen_numbers: set[int] = set()
     target_seen = False
@@ -1516,11 +1679,9 @@ def _revalidate_collision_census(
         else:
             second_foreign[number] = raw_pr
     if not target_seen:
-        return False, True
+        return False, True, ()
 
-    first_by_number = {
-        record.pr_number: record for record in first_records
-    }
+    first_by_number = {record.pr_number: record for record in first_records}
     if len(first_by_number) != len(first_records):
         raise _RemoteProbeError()
     if tuple(sorted(
@@ -1528,29 +1689,33 @@ def _revalidate_collision_census(
     )) != tuple(sorted(first_colliding_pr_numbers)):
         raise _RemoteProbeError()
 
-    for number, record in first_by_number.items():
-        if record.identity is None:
+    final_records: list[_ForeignCollisionRecord] = []
+    for number, first_record in first_by_number.items():
+        if first_record.identity is None:
             raise _RemoteProbeError()
         raw_pr = second_foreign.pop(number, None)
-        if record.overlaps:
-            if raw_pr is None:
-                return False, True
-            if _foreign_pull_identity(raw_pr, repository) != record.identity:
-                return False, True
-            continue
-
         if raw_pr is None:
-            direct = _api(http_get=reader, token=token, endpoint=f"repos/{repository}/pulls/{number}")
+            if first_record.overlaps:
+                return False, True, ()
+            direct = _api(
+                http_get=reader,
+                token=token,
+                endpoint=f"repos/{repository}/pulls/{number}",
+            )
             if not isinstance(direct, dict) or direct.get("state") != "closed":
-                return False, True
+                return False, True, ()
             if _foreign_pull_identity(direct, repository).pr_number != number:
                 raise _RemoteProbeError()
             continue
 
         second_identity = _foreign_pull_identity(raw_pr, repository)
-        if second_identity == record.identity:
+        if second_identity == first_record.identity:
+            # Stable identity means the first-pass changed-path/tree evidence is
+            # still the current evidence. Reuse it; do not spend file reads.
+            final_records.append(first_record)
             continue
-        _, overlaps = _foreign_collision_evidence(
+
+        second_evidence, second_overlaps = _foreign_collision_evidence(
             reader,
             token,
             repository,
@@ -1558,14 +1723,40 @@ def _revalidate_collision_census(
             number,
             owned_paths,
         )
-        if overlaps:
-            return False, True
+        second_record = _ForeignCollisionRecord(
+            pr_number=number,
+            identity=second_identity,
+            evidence=second_evidence,
+            overlaps=second_overlaps,
+        )
+
+        if first_record.overlaps:
+            if not second_overlaps:
+                return False, True, ()
+            first_identity = first_record.identity
+            if (
+                first_identity.head_repository != second_identity.head_repository
+                or first_identity.base_repository != second_identity.base_repository
+            ):
+                return False, True, ()
+            first_projection = _collision_overlap_projection(
+                owned_paths, first_record.evidence
+            )
+            second_projection = _collision_overlap_projection(
+                owned_paths, second_evidence
+            )
+            if not first_projection or second_projection != first_projection:
+                return False, True, ()
+        elif second_overlaps:
+            return False, True, ()
+
+        final_records.append(second_record)
 
     for number, raw_pr in second_foreign.items():
-        identity = _foreign_pull_identity(raw_pr, repository)
-        if identity.pr_number != number:
+        second_identity = _foreign_pull_identity(raw_pr, repository)
+        if second_identity.pr_number != number:
             raise _RemoteProbeError()
-        _, overlaps = _foreign_collision_evidence(
+        second_evidence, second_overlaps = _foreign_collision_evidence(
             reader,
             token,
             repository,
@@ -1573,10 +1764,19 @@ def _revalidate_collision_census(
             number,
             owned_paths,
         )
-        if overlaps:
-            return False, True
+        if second_overlaps:
+            return False, True, ()
+        final_records.append(
+            _ForeignCollisionRecord(
+                pr_number=number,
+                identity=second_identity,
+                evidence=second_evidence,
+                overlaps=False,
+            )
+        )
 
-    return True, True
+    return True, True, tuple(sorted(final_records, key=lambda item: item.pr_number))
+
 
 def _probe_remote_prefix(
     http_get: HTTPGet,
@@ -2047,6 +2247,7 @@ def _probe_local_and_entries(
 class _RemoteRevalidation:
     current_base_head: str
     merge_base_sha: str
+    collision_records: tuple[_ForeignCollisionRecord, ...] = ()
 
 
 def _branch_head_sha(payload: object) -> str | None:
@@ -2203,8 +2404,13 @@ def _remote_still_matches(
             )
             if not collision_matches:
                 return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
+            final_collision_records = second_details.foreign_records
         else:
-            collision_matches, collision_complete = _revalidate_collision_census(
+            (
+                collision_matches,
+                collision_complete,
+                final_collision_records,
+            ) = _revalidate_collision_census(
                 http_get,
                 token,
                 request.repository,
@@ -2221,13 +2427,17 @@ def _remote_still_matches(
         update_reader = getattr(http_get, "base_head_update", None)
         update = update_reader() if callable(update_reader) else None
         if update is None:
+            if _is_sha(first_merge_base_sha):
+                return _RemoteRevalidation(
+                    current_base_head, first_merge_base_sha, final_collision_records
+                )
             return None
         old_base_head, new_base_head = update
         if not _is_sha(first_merge_base_sha):
             raise _RemoteProbeError()
         if old_base_head != current_base_head:
             return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
-        return _revalidate_moved_base(
+        moved = _revalidate_moved_base(
             http_get,
             token,
             request,
@@ -2235,6 +2445,11 @@ def _remote_still_matches(
             new_base_head=new_base_head,
             remote_head=remote_head,
             first_merge_base_sha=first_merge_base_sha,
+        )
+        if isinstance(moved, SourceContinuityRefusal):
+            return moved
+        return _RemoteRevalidation(
+            moved.current_base_head, moved.merge_base_sha, final_collision_records
         )
 
     pr_endpoint = f"repos/{request.repository}/pulls/{request.pr_number}"
@@ -2277,12 +2492,7 @@ def _remote_still_matches(
     if second_changed_paths != first_changed_paths:
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
-    (
-        second_collision_state,
-        second_colliding_pr_numbers,
-        second_collisions_complete,
-        second_collision_snapshot,
-    ) = _collision_census(
+    second_collision_details = _collision_census_details(
         http_get,
         token,
         request.repository,
@@ -2292,22 +2502,51 @@ def _remote_still_matches(
     if (
         not first_collisions_complete
         or first_collision_state is CollisionState.INCOMPLETE
-        or not second_collisions_complete
-        or second_collision_state is CollisionState.INCOMPLETE
+        or not second_collision_details.complete
+        or second_collision_details.state is CollisionState.INCOMPLETE
     ):
         return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
     if (
-        second_collision_state is not first_collision_state
-        or second_colliding_pr_numbers != first_colliding_pr_numbers
-        or second_collision_snapshot != first_collision_snapshot
+        not first_collision_records
+        or any(record.identity is None for record in first_collision_records)
     ):
+        # Preserve the protected legacy/injected seam: without a complete first-pass
+        # immutable identity set, only exact snapshot equality is admissible.
+        collision_matches = (
+            second_collision_details.state is first_collision_state
+            and second_collision_details.colliding_pr_numbers
+            == first_colliding_pr_numbers
+            and second_collision_details.snapshot == first_collision_snapshot
+        )
+        final_collision_records = second_collision_details.foreign_records
+    else:
+        (
+            collision_matches,
+            collision_complete,
+            final_collision_records,
+        ) = _revalidate_collision_records(
+            _collision_reader(http_get),
+            token,
+            request.repository,
+            request.owned_paths,
+            first_collision_records,
+            first_colliding_pr_numbers,
+            second_collision_details,
+        )
+        if not collision_complete:
+            return _refusal(RefusalCode.REMOTE_CENSUS_INCOMPLETE, 2)
+    if not collision_matches:
         return _refusal(RefusalCode.REMOTE_PROOF_CHANGED, 1)
 
     if second_base_head == current_base_head:
+        if _is_sha(first_merge_base_sha):
+            return _RemoteRevalidation(
+                current_base_head, first_merge_base_sha, final_collision_records
+            )
         return None
     if not _is_sha(first_merge_base_sha):
         raise _RemoteProbeError()
-    return _revalidate_moved_base(
+    moved = _revalidate_moved_base(
         http_get,
         token,
         request,
@@ -2315,6 +2554,11 @@ def _remote_still_matches(
         new_base_head=second_base_head,
         remote_head=remote_head,
         first_merge_base_sha=first_merge_base_sha,
+    )
+    if isinstance(moved, SourceContinuityRefusal):
+        return moved
+    return _RemoteRevalidation(
+        moved.current_base_head, moved.merge_base_sha, final_collision_records
     )
 
 def _is_github_id(value: object) -> bool:
@@ -2651,7 +2895,12 @@ def main(
         if isinstance(remote_refusal, _RemoteRevalidation):
             current_base_head = remote_refusal.current_base_head
             merge_base_sha = remote_refusal.merge_base_sha
+            if remote_refusal.collision_records:
+                collision_records = remote_refusal.collision_records
 
+        collision_evidence_fingerprint = _collision_evidence_fingerprint(
+            collision_records, request.owned_paths
+        )
         remote_facts = RemoteGitFacts(
             repository=remote_repo,
             pr_number=request.pr_number,
@@ -2667,6 +2916,7 @@ def main(
             path_entries=path_entries,
             collision_state=collision_state,
             colliding_pr_numbers=colliding_pr_numbers,
+            collision_evidence_fingerprint=collision_evidence_fingerprint,
             pagination_complete=files_complete and collisions_complete,
         )
         external = ExternalEffectEvidence(
