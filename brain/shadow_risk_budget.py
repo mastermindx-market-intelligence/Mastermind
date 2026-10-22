@@ -399,7 +399,8 @@ def assess(inputs: Mapping, params: Mapping) -> dict:
     running = min(cap, role_budget)
 
     # Step 3 — evidence haircut (composition drivers, floored; a contradicted or
-    # basis-unreconciled supporting fact multiplies by zero).
+    # basis-unreconciled supporting fact multiplies by the configured
+    # ``unreconciled_fact_factor`` — 0.0 in the frozen config).
     evidence_step, evidence_assumptions = _evidence_step(inp, params, running)
     assumptions.extend(evidence_assumptions)
 
