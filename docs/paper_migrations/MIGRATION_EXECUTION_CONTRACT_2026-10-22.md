@@ -237,3 +237,21 @@ Before a small-page canary, capture its actual artboard identity: the test fixtu
 6. Admit a separately reviewed page cleanup action only after all evidence resolves; verify original source warning removal, content recovery and actual new-file usability.
 
 State remains **PREPARED, NOT MIGRATED BY THIS LANE**. Original Paper still reports its oversized warning. PR #1721 owns planning/verification; PR #1722 owns adapter evolution, source releases and its own canary.
+
+
+## 13. Heavy-page semantic partition candidates
+
+The [read-only name-and-journey partition candidates](HEAVY_PAGE_SEMANTIC_PARTITION_CANDIDATES_2026-10-22.json) map all 310 artboards of the six largest pages into **29 provisional semantic groups**, with unique exact source artboard IDs and no duplicate assignments. Group counts per source page:
+
+| Heavy source page | Artboards | Proposed journey clusters |
+|---|---:|---:|
+| Forex R1 p-N-1 | 101 | 7: early spec/routes; R2–R11 evidence; R26 navigation; case/event; watch lifecycle; decision panels; evidence/contracts |
+| Sector archive p-Z-0 | 71 | 4: vNext intelligence; themes/rotation; Sector Central; detail and authority |
+| Live site baselines p-8-1 | 10 | 2: historical live-source specimens 1–5 and 6–10; these are evidence, not new product UI authority |
+| Intelligence Hub R4 archive p-1A-0 | 66 | 5: commands/evidence; build contracts; risk cases; research filters; recovery and locale states |
+| Sector Intelligence R3 p-24-0 | 23 | 7: cycles, watches, brief, explore, dossier, research, shared/state/authority |
+| Commodities p-L-0 | 39 | 4: R2 desktop primary, R2 states/device variants, North Star studies, R3 decision |
+
+Max group size is 22 **artboards**, but that is NOT a safe vendor storage measurement. One complex artboard can still exceed the provisional per-file target. The artifact explicitly leaves per-board subtree-node counts, actual asset bytes, shared component dependencies, new destination file IDs and native copy verification unknown.
+
+Before moving: obtain real per-artboard subtree weights, inspect references/components that cross proposed groups, move paired dark/light/EN/ZH/device states together when feasible, and revise any grouping that would break reuse, history lineage or useful end-user experience. The first source copy should remain small and non-destructive, with readback and native editability. Neither this partition proposal nor the preceding offline 51-page plan authorizes file creation or source cleanup.
