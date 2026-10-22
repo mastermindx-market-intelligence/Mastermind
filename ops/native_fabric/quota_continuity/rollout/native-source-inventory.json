@@ -180,10 +180,10 @@
       "source": "candidate/glm_codex_exec.sh"
     },
     "ext/glm_host_account_probe.py": {
-      "bytes": 6286,
+      "bytes": 6546,
       "installed_preimage_sha256": "52ed645e22954476cbe0879c3c8a04be61e455435e9b81b8a404955829137a86",
-      "sha256": "52ed645e22954476cbe0879c3c8a04be61e455435e9b81b8a404955829137a86",
-      "source": "source/glm_host_account_probe.py"
+      "sha256": "2dbbdf5c7585b45c34269d8d19a8eb68c3919423b91164a024d8a558b42d3325",
+      "source": "candidate/glm_host_account_probe.py"
     },
     "ext/glm_host_account_readiness.py": {
       "bytes": 8445,
@@ -192,9 +192,9 @@
       "source": "source/glm_host_account_readiness.py"
     },
     "ext/glm_host_account_source.py": {
-      "bytes": 4491,
+      "bytes": 5339,
       "installed_preimage_sha256": "1ec07bd756e8b3edc66f39218b69876f2e9aa898b0b539319e93d8c2ff68587c",
-      "sha256": "8edcc28a6620e2b1468273f19e22fd6dafcb46691ede8a95eb82c7cdfc7ff967",
+      "sha256": "34501b394c24fffd13374894c2c375d2b123c28580ed02335c5e7e19a29d83ab",
       "source": "candidate/glm_host_account_source.py"
     },
     "ext/glm_keys.py": {
@@ -282,9 +282,9 @@
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
-      "bytes": 70061,
+      "bytes": 70456,
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
-      "sha256": "9f4b9d81b1952c5644f6f6b2a436621218934036807a38d8a233de27d6db0b73",
+      "sha256": "dc54cb641ec7d5b1bd76aaabf2fbe3c33b0526fdab5648125621d2fc33b133ba",
       "source": "candidate/lease_broker.py"
     },
     "ext/mac_policy_return.py": {

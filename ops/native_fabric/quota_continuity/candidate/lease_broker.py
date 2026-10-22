@@ -930,18 +930,26 @@ class Broker:
             # unpinned *new* grants if another qualified account is healthy.
             # Exact-account pins above, model/host pairing, quota guards and
             # the prior held/cap/history order inside each tier are unchanged.
+            # Host evidence is the already-verified, fresh account intersection.
+            # No second read, quota authority or host-scanning side channel.
+            host_rank = {
+                str(a["name"]): a.get("_host_qwen_429_rank", 1)
+                for a in grantable
+            } if grantable_override is not None else {}
+
             def cooldown_priority(name: str) -> int:
                 if not self.external_gates:
                     return 0
                 try:
                     import bailian_keys
                     cooldown = bailian_keys.cooldown_info(name)
+                    local_rank = 0 if cooldown is None else 2
                 except Exception:
-                    # Missing evidence is not evidence of a healthy account.
-                    return 1
-                if cooldown is None:
-                    return 0
-                return 2  # A current 429 is softly eligible, not preferred.
+                    local_rank = 1
+                observed = host_rank.get(name, 0)
+                if type(observed) is not int or observed not in (0, 1, 2):
+                    observed = 1
+                return max(local_rank, observed)
 
             scored.sort(key=lambda t: (
                 cooldown_priority(t[2]),

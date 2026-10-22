@@ -92,8 +92,13 @@ class Qwen429AccountPriorityTests(unittest.TestCase):
         self.modules.stop()
         self.conn.close()
 
-    def pick(self, *, pool="bailian", preferred=None, model=""):
-        return self.method(self.broker, self.conn, pool, preferred, model=model)
+    def pick(self, *, pool="bailian", preferred=None, model="", host_rows=None):
+        return self.method(self.broker, self.conn, pool, preferred, model=model,
+                           grantable_override=host_rows)
+
+    def observed(self, rankings):
+        return [dict(name=name, _eff_cap=7, _host_qwen_429_rank=rank)
+                for name, rank in rankings.items()]
 
     def test_healthy_keeps_existing_history(self):
         self.assertEqual(self.pick(), "Ryan")
@@ -157,6 +162,30 @@ class Qwen429AccountPriorityTests(unittest.TestCase):
         self.statuses["Ryan"] = "http_429"
         # Non-Bailian ties use alphabetical order, not Qwen grant history.
         self.assertEqual(self.pick(pool="glm"), "Chris")
+
+    def test_host_reported_429_beats_stale_local_healthy(self):
+        rows = self.observed({"Ryan": 2, "Kris": 0})
+        self.assertEqual(self.pick(host_rows=rows), "Kris")
+
+    def test_host_unknown_rank_is_not_healthy(self):
+        rows = self.observed({"Ryan": 1, "Kris": 0})
+        self.assertEqual(self.pick(host_rows=rows), "Kris")
+
+    def test_hard_denied_host_account_is_not_reintroduced(self):
+        rows = self.observed({"Ryan": 2, "Kris": 0})
+        self.assertIsNone(self.pick(preferred="Chris", host_rows=rows))
+
+    def test_exact_host_account_pin_does_not_rotate(self):
+        rows = self.observed({"Ryan": 2, "Kris": 0})
+        self.assertEqual(self.pick(preferred="Ryan", host_rows=rows), "Ryan")
+
+    def test_all_host_accounts_429_remain_soft_eligible(self):
+        rows = self.observed({"Ryan": 2, "Kris": 2})
+        self.assertEqual(self.pick(host_rows=rows), "Ryan")
+
+    def test_malformed_host_hint_cannot_claim_health(self):
+        rows = self.observed({"Ryan": False, "Kris": 0})
+        self.assertEqual(self.pick(host_rows=rows), "Kris")
 
     def test_disabled_external_gate_keeps_original_ranking(self):
         self.statuses["Ryan"] = "http_429"
