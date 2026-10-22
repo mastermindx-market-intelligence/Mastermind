@@ -31,14 +31,21 @@ def source_preflight() -> dict[str, object]:
     binding = get_binding(_BINDING)
     descriptor = adapter_descriptor(binding.adapter_id)
     router = ModelRouter.load()
+    # This is only a source diagnostic: missing catalog entries must fail
+    # closed with a useful message, never imply permission or zero capacity.
+    if "byteplus" not in router.providers or _ALIAS not in router.model_aliases:
+        raise RuntimeError("BytePlus reviewed router provider/alias is missing")
     provider = router.providers["byteplus"]
     alias = router.model_aliases[_ALIAS]
-    in_automatic_tiers = any(
-        _ALIAS in tier.model_aliases
-        for work_routes in router.routes.values()
-        for risk in ("routine", "elevated")
-        for tier in work_routes[risk]
-    )
+    try:
+        in_automatic_tiers = any(
+            _ALIAS in tier.model_aliases
+            for work_routes in router.routes.values()
+            for risk in ("routine", "elevated")
+            for tier in work_routes[risk]
+        )
+    except (KeyError, TypeError, AttributeError) as exc:
+        raise RuntimeError("BytePlus router suitability catalog is incomplete") from exc
     if (
         not profile.supported_tool_only
         or profile.autonomous_allowed
@@ -73,6 +80,12 @@ def source_preflight() -> dict[str, object]:
         real_canary_passed=False,
         usage_policy_satisfied=False,  # real user/harness use not attested
     )
+    # Catalog lookup normally validates the models first, but this explicit
+    # check makes offline diagnostics truthful even if upstream readbacks drift.
+    missing_model_roles = set(binding.model_classes) - set(profile.models)
+    if missing_model_roles:
+        raise RuntimeError("BytePlus reviewed model class is missing from source")
+    models_by_role = {key: profile.models[key] for key in sorted(binding.model_classes)}
     return {
         "schema": "mastermind.byteplus_coding_plan_source_preflight/v1",
         "evidence_scope": "SOURCE_ONLY",
@@ -87,7 +100,7 @@ def source_preflight() -> dict[str, object]:
         "profile_id": profile.profile_id,
         "source_catalog_digest": compose_catalog_digest(),
         "endpoint": binding.effective_base_url,
-        "models_by_source_role": {key: profile.models[key] for key in sorted(binding.model_classes)},
+        "models_by_source_role": models_by_role,
         "individual_supported_tool_mode_statically_allowed": statically_allowed,
         "canary_preparation_only": True,
         "canary_start_authorized": False,

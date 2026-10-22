@@ -8,7 +8,7 @@ From this follow-up checkout, with the existing repo test environment:
 
 ```sh
 python -m scripts.byteplus_coding_plan_preflight
-python -m pytest -q tests/test_byteplus_coding_plan_preflight.py tests/test_capacity_economics_projection.py tests/test_subscription_harness_bindings.py tests/test_fabric_attended_claude.py
+python -m pytest -q tests/test_byteplus_coding_plan_preflight.py tests/test_capacity_economics_projection.py tests/test_subscription_harness_bindings.py tests/test_fabric_attended_claude.py tests/test_claude_subscription_worker.py
 ```
 
 The preflight imports only the existing **source catalog, Model Router, reviewed adapter descriptor, and activation blocker functions**. It creates no queue, worker, credential, account, lease, provider watcher, secret file or independent admission controller. It never queries Keychain, shell execution, BytePlus network APIs, personal CLI state, quota or host health. Its report is intentionally `SOURCE_ONLY`, not an Executive receipt. This is a preflight diagnostic, not a registration command; do **not** interpret a true source catalog validation as an authorization to start.
@@ -40,14 +40,18 @@ Only the actual subscriber on an approved, individually attended **Claude Code**
 | --- | --- | --- |
 | Exact source/harness identity and model roles | Source tests PASS | Preserve checked commit and catalog digest |
 | Independent source review of original head | Fabric review accepted (source-only) | This follow-up must be independently reviewed on its own new exact SHA |
-| Full current-head CI | Original #1725 green | Follow-up exact-head CI before any merge |
+| Full current-head CI | Original #1725 [Actions run 39841508894](https://github.com/mastermindx-market-intelligence/Mastermind/actions/runs/39841508894) completed SUCCESS at original head; this is historical GitHub evidence only | Follow-up exact-head CI before any merge |
 | Binary, isolation and attended model result | Not proved by source-only test | Supported-tool execution owner, exact real-path canary |
-| Account-bound subscription tier/usage | Earlier CLI reported Personal Pro Running, integer 0% | Provider-control owner: fresh attestation, response/debit attribution |
+| Account-bound subscription tier/usage | Earlier operator-reported CLI snapshot: Personal Pro Running and rounded 0%; **not re-verified by this source test** | Provider-control owner: fresh attestation, response/debit attribution |
 | Hosted ProviderRealm receipt | Not issued here | Existing realm owner, exact binding/account/host and generation |
 | Capacity available slot | Unknown | Existing Capacity owner, typed current fact, verified quota/window |
 | First-lawful-tier eligibility | Disabled by reviewed Model Router | Release-owner-approved scoped model/harness policy only |
 | Worker launch and post-START reconciliation | Not performed | Existing Executive/Fabric broker with lease/effect proof |
 | Automated shared inference through Personal Pro | **Not permitted by source use policy** | Different commercially authorized account/API product + review |
+
+Vendor policy boundary: both the [Personal Coding Plan](https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-plan-overview) and the [Enterprise Team Coding Plan](https://docs.byteplus.com/en/docs/modelark/coding-plan-enterprise-plan-overview) restrict their subscription quota to supported coding tools, not arbitrary API inference. Buying Enterprise Team seats alone is **not** sufficient authorization to run a generic unattended Fabric broker. That use case requires a separately contracted/licensed API product and its own reviewed provider/realm/Capacity identity.
+
+The preview-only `_mentions_byteplus` guard is defensive normalization of names literally containing `byteplus`, **not** a complete brand registry: aliases such as `ark.payg` or `modelark.claude` do not match this string guard. They are currently **unknown to the canonical Model Router and cannot be routed** (negative tests assert this). Any future BytePlus ModelArk commercial API provider must enter through the existing reviewed provider/model alias, entitlement, and claim-time admission owners, never through a claim that a substring check licensed it.
 
 **Do not force a production start to satisfy an implementation checklist.** An individually attended coding-tool subscription may be useful without ever becoming an unrestricted autonomous Fabric pool. Separate commercial API rights, independent security/review, source release, capacity binding and production-path proof remain distinct gates.
 

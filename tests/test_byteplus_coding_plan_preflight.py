@@ -1,8 +1,10 @@
 """Offline BytePlus preflight does not start a process or mint admission."""
 from __future__ import annotations
 
+import dataclasses
 import json
 import os
+from types import SimpleNamespace
 from pathlib import Path
 import socket
 import subprocess
@@ -75,6 +77,52 @@ def test_unowned_or_caller_boolean_capacity_never_seals_admission(kwargs):
     with pytest.raises(CanaryAdmissionError):
         seal_subscription_canary_admission(**kwargs)
 
+
+
+@pytest.mark.parametrize("missing", ["provider", "alias", "route"])
+def test_missing_router_catalog_fails_with_typed_source_diagnostic(monkeypatch, missing):
+    from control_plane.model_router import ModelRouter
+
+    original = ModelRouter.load()
+    providers = dict(original.providers)
+    aliases = dict(original.model_aliases)
+    routes = {key: dict(value) for key, value in original.routes.items()}
+    if missing == "provider":
+        providers.pop("byteplus")
+    elif missing == "alias":
+        aliases.pop("byteplus.attended")
+    else:
+        routes["implementation"].pop("routine")
+    fake = SimpleNamespace(providers=providers, model_aliases=aliases, routes=routes)
+    with monkeypatch.context() as patcher:
+        patcher.setattr(ModelRouter, "load", classmethod(lambda cls: fake))
+        with pytest.raises(RuntimeError, match="BytePlus reviewed router|BytePlus router suitability"):
+            source_preflight()
+
+
+def test_missing_reviewed_model_role_fails_closed(monkeypatch):
+    import scripts.byteplus_coding_plan_preflight as preflight
+
+    original_get = preflight.get_profile
+
+    def incomplete(profile_id):
+        profile = original_get(profile_id)
+        models = dict(profile.models)
+        models.pop("backend_coding")
+        return dataclasses.replace(profile, models=models)
+
+    with monkeypatch.context() as patcher:
+        patcher.setattr(preflight, "get_profile", incomplete)
+        with pytest.raises(RuntimeError, match="model class is missing"):
+            source_preflight()
+
+
+@pytest.mark.parametrize("alias", ["ark.payg", "modelark.claude", "volcengine.model"])
+def test_new_byteplus_branded_alias_requires_canonical_router_admission(alias):
+    from control_plane.model_router import ModelRouter, RoutingPolicyError
+
+    with pytest.raises(RoutingPolicyError, match="unknown model alias"):
+        ModelRouter.load().resolve_model_alias(alias)
 
 
 def test_preflight_cli_emits_closed_json_without_activation():
