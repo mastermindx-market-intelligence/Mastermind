@@ -388,3 +388,25 @@ def test_closed_model_entry_and_empty_metadata_are_accepted():
     catalog["profiles"]["glm-coding-plan"]["models"]["routine"] = {"id": "GLM-5.3-Flash"}
     validate_profiles(catalog)
     assert get_profile("glm-coding-plan", document=catalog).model_for("routine") == "GLM-5.3-Flash"
+
+
+
+def test_byteplus_rejects_payg_endpoint_and_preserves_attended_policy():
+    reviewed = _catalog()
+    row = reviewed["profiles"]["byteplus-coding-plan-personal"]
+    assert row["quota_profile"]["tier"] is None
+    assert row["supported_tool_only"] is True
+    assert row["usage_policy"]["single_user_only"] is True
+    assert row["usage_policy"]["supported_harness_required"] is True
+    assert row["usage_policy"]["interactive_only"] is True
+    assert row["usage_policy"]["unattended_background_allowed"] is False
+    assert row["usage_policy"]["production_backend_allowed"] is False
+    for wrong_url in (
+        "https://ark.ap-southeast.bytepluses.com/api/v3",
+        "https://ark.ap-southeast.bytepluses.com/api/coding/v3",
+        "https://evil.example/api/coding",
+    ):
+        altered = _catalog()
+        altered["profiles"]["byteplus-coding-plan-personal"]["base_url"] = wrong_url
+        with pytest.raises(ProviderProfileError, match="reviewed BytePlus Coding Plan endpoint"):
+            validate_profiles(altered)

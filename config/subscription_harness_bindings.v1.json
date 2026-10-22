@@ -160,7 +160,8 @@
       "adapter_id": "claude-compatible-subscription",
       "protocol": "anthropic",
       "endpoint": {
-        "source": "profile"
+        "source": "reviewed_override",
+        "base_url": "https://ark.ap-southeast.bytepluses.com/api/coding"
       },
       "model_classes": [
         "routine",

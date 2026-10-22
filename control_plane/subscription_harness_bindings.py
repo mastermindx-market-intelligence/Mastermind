@@ -183,6 +183,17 @@ def validate_bindings(
             _safe_https(endpoint.get("base_url"))
         else:
             raise HarnessBindingError(f"binding {binding_id!r} endpoint source is invalid")
+        if profile_id == "byteplus-coding-plan-personal" and (
+            binding_id != "byteplus-coding-plan-personal.claude-code-anthropic"
+            or provider != "byteplus"
+            or harness_id != "claude-code"
+            or adapter_id != "claude-compatible-subscription"
+            or protocol != "anthropic"
+            or source != "reviewed_override"
+            or endpoint.get("base_url") != profile.base_url
+            or endpoint.get("base_url") != "https://ark.ap-southeast.bytepluses.com/api/coding"
+        ):
+            raise HarnessBindingError("reviewed BytePlus Coding Plan harness/endpoint required")
         model_classes = row.get("model_classes")
         if (
             not isinstance(model_classes, list)

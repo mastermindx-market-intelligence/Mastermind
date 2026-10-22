@@ -319,6 +319,10 @@ def _validate_row(profile_id: str, row: Any) -> Mapping[str, Any]:
     if protocol not in _ALLOWED_PROTOCOLS:
         _raise(f"profile {profile_id!r} has unsupported protocol")
     _validate_base_url(mapping.get("base_url"), f"{path}.base_url")
+    if profile_id == "byteplus-coding-plan-personal" and mapping.get("base_url") != (
+        "https://ark.ap-southeast.bytepluses.com/api/coding"
+    ):
+        _raise(f"{path}.base_url: reviewed BytePlus Coding Plan endpoint required")
     if mapping.get("credential_binding") != _CREDENTIAL_BINDING:
         _raise(f"profile {profile_id!r} leaks credential authority")
     _exact_string(mapping.get("credential_binding"), f"{path}.credential_binding")

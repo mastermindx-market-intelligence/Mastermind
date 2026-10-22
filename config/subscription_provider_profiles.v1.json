@@ -1,6 +1,6 @@
 {
   "schema": "mastermind.subscription_provider_profiles/v1",
-  "verified_at": "2026-09-27T03:17:36Z",
+  "verified_at": "2026-10-22T11:20:00Z",
   "profiles": {
     "glm-coding-plan": {
       "provider": "glm",
@@ -105,7 +105,7 @@
       "quota_profile": {
         "provider": "byteplus",
         "product": "coding_plan_personal",
-        "tier": "pro"
+        "tier": null
       },
       "autonomous_allowed": false,
       "activation_gate": "provider_realm_enrolled_and_capacity_known",

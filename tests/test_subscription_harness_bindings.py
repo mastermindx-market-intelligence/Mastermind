@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import pytest
 import json
 import unittest
 
@@ -450,3 +451,20 @@ def test_byteplus_plan_binding_inert_and_private():
     assert row["implementation_state"] == "SPEC_ONLY"
     assert row["autonomous_allowed"] is False
     assert "real_canary_passed" in row["activation_gates"]
+
+
+
+def test_byteplus_independent_endpoint_anchor_refuses_profile_mismatch():
+    profiles = load_profiles()
+    bindings = load_bindings(profiles_document=profiles)
+    key = "byteplus-coding-plan-personal.claude-code-anthropic"
+    assert bindings["bindings"][key]["endpoint"] == {
+        "source": "reviewed_override",
+        "base_url": "https://ark.ap-southeast.bytepluses.com/api/coding",
+    }
+    broken = copy.deepcopy(bindings)
+    broken["bindings"][key]["endpoint"]["base_url"] = (
+        "https://ark.ap-southeast.bytepluses.com/api/v3"
+    )
+    with pytest.raises(HarnessBindingError):
+        validate_bindings(broken, profiles_document=profiles)
