@@ -65,6 +65,32 @@ class NativeManualPreviewTest(unittest.TestCase):
             self.assertIn("--pool",p.stdout)
         self.assertIn("--strict-manual-pin",subprocess.run([sys.executable,str(ROOT/"ext"/"fabric_task.py"),"request","--help"],env=env,text=True,capture_output=True,check=True).stdout)
 
+    def test_picker_accepts_exact_worker_default_with_unchanged_eligibility_guards(self):
+        policy={"pools":{"grok":{"default_model":"grok-4.6"}}}
+        from contextlib import ExitStack
+        with ExitStack() as guards:
+            for key,result in {
+                "load_pools":policy, "_glm_models":{"reviewer":"glm-5.3","executor":"glm-5.3-flash"},
+                "policy_allows":(True,"admitted"), "_needs_ok":(True,"admitted"),
+                "_subject_ok":(True,"admitted"), "floor_demotes":False,
+                "hard_filter":(True,"admitted"), "is_execute_class":False,
+                "_emit":"POOL=grok MODEL=grok-4.6 HOST=ubuntu1 MODE=grok",
+            }.items():
+                guards.enter_context(patch.object(task.pick,key,return_value=result))
+            allowed=task.pick._format_pick("review",pool="grok",requested_model="grok-4.6")
+            self.assertTrue(allowed.startswith("POOL=grok"),allowed)
+            denied=task.pick._format_pick("review",pool="grok",requested_model="grok-4.7")
+            self.assertIn("not admitted for selected pool/task",denied)
+            unscoped=task.pick._format_pick("review",requested_model="grok-4.6")
+            self.assertIn("requires provider pool",unscoped)
+
+    def test_future_catalog_default_pins_only_after_catalog_owner_promotes_it(self):
+        policy={"pools":{"grok":{"default_model":"grok-4.7"}}}
+        with patch.object(task.pick,"load_pools",return_value=policy), patch.object(task.pick,"_glm_models",return_value={}):
+            with patch.object(task.pick,"policy_allows",return_value=(True,"admitted")),patch.object(task.pick,"_needs_ok",return_value=(True,"admitted")),patch.object(task.pick,"_subject_ok",return_value=(True,"admitted")),patch.object(task.pick,"floor_demotes",return_value=False),patch.object(task.pick,"hard_filter",return_value=(True,"admitted")),patch.object(task.pick,"is_execute_class",return_value=False),patch.object(task.pick,"_emit",return_value="POOL=grok MODEL=grok-4.7 HOST=ubuntu1 MODE=grok"):
+                allowed=task.pick._format_pick("review",pool="grok",requested_model="grok-4.7")
+                self.assertTrue(allowed.startswith("POOL=grok"),allowed)
+
     def test_no_manual_continuity_and_direct_strict_route_helper(self):
         task._enforce_manual_route({"POOL":"grok","MODEL":"grok-4.7"},"grok","grok-4.7")
         with self.assertRaisesRegex(task.FabricTaskError,"MANUAL_MODEL_ROUTE_MISMATCH"):
