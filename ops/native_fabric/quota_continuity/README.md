@@ -368,3 +368,53 @@ admission and supervised deadline expiry. No test starts a provider worker or
 alters a live host/configuration owner. Passing these tests is source
 qualification, not live installation, worker START, result acceptance, or
 permission to replay any held operation.
+
+## Explicit per-request turn ceilings
+
+The native `fabric_task.py request --max-turns N` constrains one new commission
+without changing global defaults. N must be an integer in 1..400. Validation
+precedes request retention and routing, including the foreground continuation
+entry. The transient request constraint is cleared at request ingress, retained
+with the commission, and carried by the existing environment relay. The incumbent
+`sub.sh` profile resolves its normal limit first, then applies the smaller request
+ceiling. An invalid incumbent limit is never sanitized by a valid request.
+
+Only the existing GLM and MiniMax Claude modes are qualified for this option.
+Model suitability, economic, host and lease guards still run; unsupported routes
+cannot silently execute without the ceiling. Quota successors preserve the
+ceiling and original deadline. Mid-task exhaustion never gains replay authority.
+This is a CLI-turn fuse, not a tool-call or token counter and not guaranteed cost.
+
+Repository test `tests/test_fabric_request_turn_budget.py` runs native and Web
+contracts in fresh processes, including actual shell/CLI fixture transport and
+negative tests. No provider calls or installed state are used. Release needs the
+full regenerated native manifest and its composition-test fingerprint, protected
+checks, then existing publisher/CAS selection. The Web facade is a separate
+same-account release and refuses an older native adapter for this opt-in.
+
+This change does not replace the OPT-007 outcome-classification repair in #1720.
+Compose any newer protected native closure before installation; never select this
+branch's earlier dependency snapshot over a later installed generation.
+
+### Request-ceiling qualification, 2026-10-22
+
+Operation `fabric-request-turn-budget-20261022-c3` keeps #1720's incumbent source
+and CI untouched. Direct scoped implementation was retained for lower total
+framing/review overhead; no new provider worker or native helper was commissioned.
+The new regressions first failed on the preimage. Local checks then passed 12
+native ceiling/continuation/profile cases, 43 Web facade cases (including actual
+isolated shell/CLI transport), and the two corresponding repository wrapper cases.
+Separate incumbent suites passed: adapter 4, foreground continuation 7, owned
+wrappers 3, capacity preflight 6, physical transport owner 20, support publication 3.
+Counts overlap in exercised behavior and are not independent product capabilities.
+
+The existing 19-case commission-deadline suite returned two failures on M2, with
+retained evidence of an expired original deadline during routing-env processing.
+No timeout was relaxed and causation is not established. A subsequent isolated
+Ubuntu qualification transport was refused by the platform before dispatch; it
+was not replayed through another connector. The repository CI wrapper now includes
+the unchanged deadline suite so a protected release cannot silently omit it.
+Local regression artifacts remain at
+`/Volumes/Mastermind/evidence/fabric-request-turn-budget-20261022-c3/native-regression`.
+Full current-head hosted CI, native selection and live Web/native consumption
+remain unproven. This candidate is source-only until those release gates clear.

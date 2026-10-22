@@ -33,6 +33,34 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
 
+## Optional per-request turn ceiling
+
+`fabric_request.max_turns` is an integer from 1 through 400. It narrows one new
+commission through the incumbent native `request --max-turns` and Claude wrapper;
+it does not change fleet defaults, model tiers, admission, leases or acceptance.
+The effective limit is the smaller of this request ceiling and the existing
+model/complexity/operator profile. An omitted value preserves existing behavior.
+A turn is not a tool-call count, token allowance or dollar budget.
+
+Before creating a controller, the facade verifies that the native request help
+advertises `--max-turns`. An older adapter returns
+`ADAPTER_TURN_LIMIT_UNAVAILABLE` rather than silently discarding the constraint.
+The existing router considers only qualified `glm`/`minimax` modes for a capped
+request; another mode is refused before launch. This filter is not admission or
+permission to use a new provider. Unsupported modes remain available to requests
+without this option under their unchanged rules.
+
+The native owner retains the requested ceiling with the original request. Its
+existing foreground quota continuation preserves that same ceiling, root, parent
+and deadline, and still requires its original pre-task rejection proof. Reaching
+the turn limit is not a capacity rejection and does not authorize another attempt.
+A returned controller receipt reports the requested value, not proven worker START
+or acceptance. Inspect the actual terminal result and retain partial work.
+
+Roll out the complete protected native generation before the same-account facade
+release. Until both are qualified, the new opt-in must fail closed. Existing
+controllers remain on their original code and cannot be retroactively capped.
+
 ## Quota continuity
 
 The production facade enables the existing adapter's bounded foreground quota
