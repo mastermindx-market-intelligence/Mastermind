@@ -799,3 +799,32 @@ Running (r6, 2026-10-12 ~08:45Z): no native Opus orchestrator — ORCH-I and ORC
 1. Land this PR (merge queue) and Macro #9636 (merge-on-green; hand-merge `--match-head-commit` only on the inherited-RIG basis).
 2. The WP31 live read after the first eligible release; its counts go in r14.
 3. Nothing else is owed by the seat until the clock or the Chairman moves; the seat ends on `DURABLE_EXECUTION_RUNNING` while the PRs are in flight and on `PROVEN_OUTCOME` for the seat's lane once they land.
+
+#### r14 cycle 2026-10-22 03:4xZ (seat 7ab343c8, Fable 5.1) — wave 13: G9 / WP32 P2 PROVEN (entitled 200 for AAPL + MSFT with private headers), P3 free-tier still unproven, WP31 natural clock unfired (watcher armed), W9 → done
+
+**FACTS**
+- **Entitled-path proof (WP32 P2 / G9 / WP33 "P0 real capability").** Performed in the Chairman's own Chrome profile through Claude in Chrome (Chairman ruling 2026-10-22: 1Password is not used; the profile's saved session is the permitted route). No credential was typed, seen or printed: the `www.mastermind-x.com` origin was already signed in as a `mastermind-x.com` account (cookie storage `sb-<ref>-auth-token.0/.1`), the bearer was obtained in-page via `window.MDXAuth.client()` → `auth.getSession()` and used only inside same-origin `fetch` calls (`Authorization: Bearer`, `credentials: omit`, `cache: no-store`). Only status, timing, header names/values and body key names + byte lengths were read — no body values (exposure protocol; no universe issuer has released since registration).
+  - 03:30Z cold: `/api/health` **200** in 0.85 s (keys `status, commit, checkout, fif_financial_dataset_mode`); `/api/integrated-answer/v1/AAPL` **524** after 30.6 s (`server: TencentEdgeOne`, empty body, no private headers) — the first authenticated compose after idle exceeded the edge's ~30 s origin budget; two earlier attempts had been aborted client-side at 15 s.
+  - 03:32Z warm, in parallel: **AAPL 200 in 8.2 s**, 29 404 B, keys `as_of, composed_at, coverage_note, display_only, footer, legs, schema, stance, ticker`; **MSFT 200 in 2.1 s**, 27 001 B, same keys. Headers on both: `cache-control: private, no-store`; `vary: Authorization, Accept-Encoding`; `content-type: application/json`; `eo-cache-status: MISS`; `x-integrated-answer-sha256` present (value not recorded). `x-consumed-receipts` was NOT visible to the browser fetch (absent at the edge, stripped, or renamed — owner to confirm from the origin).
+  - The Terminal origin `app.mastermind-x.com` does not serve the path (Next.js 404 document, `vary: rsc, next-router-…`), stores no Supabase token in localStorage, and a cross-origin fetch from it to www fails (no CORS): the entitled contract is a www-origin contract.
+- **WP32 P3 (free-tier 403): NOT proven.** The only saved session is entitled; no free-tier account exists in the profile. The seat creates no account.
+- **WP31 natural clock unfired.** EDGAR submission headers (form / filingDate / items only) for AAPL, DHI, PHM, KBH, TOL show no 8-K item 2.02, 10-Q or 10-K dated ≥ 2026-10-19 through 2026-10-22T03:08Z (DHI last 8-K 2026-09-15; PHM 08-12; KBH 8-K 10-14 is pre-registration; TOL 10-Q 08-28). `scripts/c19_wp31_evaluate.py` was NOT run — `eligible` would be 0 and the single gated read is preserved. Seat watcher `$W5/wp31/edgar_watch.py` (30-min header polls, exits on `EVENT RELEASE`) arms the read; the evaluator's `--repo` tree is staged (below).
+- **Seat tree.** The session-root quarantine (detached HEAD on the SSD init tree) was self-remedied per the 10-10 ruling: storage helper mint → `/Volumes/Mastermind 2/agent-workspaces/claude/14851c4656838a3b/fable-ceo-project-init-9656b2-da5ad30a59bedaa7-e7739cb58a18e0b6`, branch `claude/ssd-fable-ceo-project-init-9656b2-da5ad30a59bedaa7-e7739cb58a18e0b6`, fast-forwarded to origin/main `562fc7dd02a9`, `data/` materialized (`data/trial_ledger.jsonl` 685 142 B, 2026-10-21). The `c19-ledger-r8` tree is retired.
+- 1Password `request_credentials` returned `not_connected` twice before the Chairman's ruling; never retried after it.
+
+**DECIDED**
+- D5 **The P0 proof lands now (r14), not with the WP31 read.** The first eligible release date is unknown; the entitled-path proof is the WP33 positive-proof item and waits for nothing. WP31's first counts become r15.
+- D6 **W9 → done; W10 opened** (Macro Agent OS, this cycle): W10 = the clock wave (WP31 first live read, counts only) plus WP32 P3 when a free-tier account exists.
+- D7 **Routed, not fixed by C19:** (a) cold-compose **524** at the edge's 30 s origin budget on the first authenticated compose after idle (warm 8.2 s / 2.1 s is inside budget) → composer/edge owner (pre-warm, longer private-route timeout, or a cache of the composed page are their calls); (b) `x-consumed-receipts` not visible at the edge → composer/edge owner; (c) r13 D4's "absent `Vary` on the 401 path" is narrowed: `Vary: Authorization, Accept-Encoding` IS present on the 200 path.
+- D8 **WP33 "P0 real capability" flips from one-human-step-away to PROVEN for the entitled 200 path**; the free-tier 403 half stays an open proof item with a named receiver (Chairman supplies a free-tier login, or the composer owner proves it from a test account).
+
+**OPEN** (owner → next action)
+- **WP31 first live read** — C19 seat → on `EVENT RELEASE`: evaluator once, counts only, prereg §7 residual caveats stated → r15 + W10.
+- **WP32 P3 free-tier 403** — Chairman / composer owner → a free-tier session; status/timing/headers only.
+- **Cold-compose 524; `x-consumed-receipts` at the edge** — composer/edge owner (D7).
+- Unchanged from r13: P4/P6/P5/P7; K1 Q2/Q3 residuals; WP18 UI (R-WP18); EDGAR clock gap; R2 source_clock regression; G10/G11; G3; G1/G8/WP28; Linear MAS-263 / Executive OAuth (human).
+
+**NEXT**
+1. Land this r14 (Mastermind merge queue) and the Macro Agent OS PR (W9 → done, W10 opened, handoff 2026-10-22).
+2. On `EVENT RELEASE`: the gated evaluator run → r15 + W10 (counts only).
+3. The seat ends this cycle on `DURABLE_EXECUTION_RUNNING` (watcher live) and on `PROVEN_OUTCOME` for the entitled-path proof.
