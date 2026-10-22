@@ -67,7 +67,7 @@ def build_server(allow_write=False, allow_prepare=False, *, execution_binding=No
                 })
         if execution_binding is not None:
             value = dict(value, execution_binding=dict(execution_binding))
-        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "PAPER_READY", "PAPER_READY_READ_ONLY"}
+        bad = value.get("state") not in {None, "CONNECTED", "OBSERVED", "APPLIED_RESPONSE_OBSERVED", "RESPONSE_OBSERVED_REQUIRES_TARGET_VERIFICATION", "PAPER_READY", "PAPER_READY_READ_ONLY"}
         # Formatting is downstream of effect observation. A missing reply or
         # malformed image must not erase the operation's canonical receipt.
         value = copy.deepcopy(value)
