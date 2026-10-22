@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -136,7 +137,7 @@ def test_default_policy_is_secret_free_unarmed_and_resolves_closed_profiles():
     registry = ExecutionCapabilityRegistry.load()
     assert registry.lifecycle_authority == "executive_os"
     assert registry.production_armed is False
-    assert registry.policy_version == "2026-09-22.native-claude-admission-p0"
+    assert registry.policy_version == "2026-10-03.acp-providerfree-read-p0"
     assert len(registry.policy_digest) == 64
 
     sealed = registry.resolve("sealed.worker.write.no-extensions.v1")
@@ -699,7 +700,7 @@ def test_v3_ratified_generation_and_schema_constants_remain_exact():
     assert registry.schema_version == CAPABILITY_POLICY_SCHEMA_V3
     assert registry.capability_packages == {}
     assert registry.policy_digest == (
-        "c2f74c244464bee6d8bbc9d38d430aec362835234ae798b42c045da86c3bdd7a"
+        "08089a81ad3650094ca33b67a4f2fb4fe3378f7d03b4ad7ba2eda233b97e796d"
     )
     assert registry.resolve(
         "operator.appserver.readonly.docs-mcp.native-helper.v1"
@@ -817,3 +818,54 @@ def test_wave3_partB_duplicate_key_refusal_reason_is_fixed_regardless_of_key(tmp
         messages.add(str(excinfo.value))
 
     assert messages == {_DUPLICATE_JSON_KEY_REASON}
+
+
+def test_checked_in_provider_free_acp_profile_uses_exact_workspace_read_grant():
+    from control_plane.executive_agent_capabilities import (
+        ACP_EXECUTION_SURFACE,
+        ACP_PROVIDER_FREE_AUTH_REALM,
+        ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        ACP_WORKSPACE_READ_MCP_COMMAND,
+        ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST,
+    )
+
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("worker.acp.providerfree.readonly.v1")
+    assert profile.enabled is True
+    assert profile.execution_surface == ACP_EXECUTION_SURFACE == "acp-agent"
+    assert profile.auth_realm == ACP_PROVIDER_FREE_AUTH_REALM == "dedicated-worker-no-auth"
+    assert profile.write_capable is False
+    assert profile.network_policy == "disabled"
+    assert profile.native_helper_policy is NativeHelperPolicy.DISABLED
+    assert profile.skills == profile.plugins == profile.resource_grants == ()
+    assert len(profile.mcp_server_grants) == 1
+    grant = profile.mcp_server_grants[0]
+    assert grant.capability_id == ACP_WORKSPACE_READ_MCP_CAPABILITY_ID
+    assert grant.transport == "stdio"
+    assert grant.command == ACP_WORKSPACE_READ_MCP_COMMAND
+    assert grant.args == ()
+    assert grant.auth_status == "unsupported"
+    assert grant.enabled_tools == ("read_file", "search_text")
+    assert grant.tool_schema_digest == ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST
+    projection = profile.acp_config_projection()
+    assert projection["execution_surface"] == "acp-agent"
+    assert projection["auth_realm"] == "dedicated-worker-no-auth"
+    assert projection["mcp_servers"] == [{
+        "capability_id": ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        "grant_digest": grant.grant_digest,
+    }]
+    assert profile.expected_config_digest == hashlib.sha256(
+        json.dumps(
+            projection,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    ).hexdigest()
+    assert registry.production_armed is False
+
+
+def test_acp_projection_refuses_non_acp_surface():
+    profile = ExecutionCapabilityRegistry.load().profiles["operator.appserver.readonly.v1"]
+    with pytest.raises(CapabilityPolicyError, match="not an ACP profile"):
+        profile.acp_config_projection()

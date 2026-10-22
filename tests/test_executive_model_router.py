@@ -93,7 +93,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
     assert implementation.required_capabilities == ("code",)
     assert implementation.execution_profile_id == "sealed.worker.write.no-extensions.v1"
     assert len(implementation.execution_profile_digest) == 64
-    assert implementation.capability_policy_version == "2026-09-22.native-claude-admission-p0"
+    assert implementation.capability_policy_version == "2026-10-03.acp-providerfree-read-p0"
     assert len(implementation.capability_policy_digest) == 64
 
     elevated = router.route(WorkRequest("implementation", risk="elevated"))
@@ -154,6 +154,9 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert adapter_descriptor("codex-cli").implemented
     assert not adapter_descriptor("claude-code").implemented
     assert not adapter_descriptor("openai-compatible").implemented
+    assert not adapter_descriptor("acp").implemented
+    assert all(provider.adapter_id != "acp" for provider in router.providers.values())
+    assert all(alias.adapter_id != "acp" for alias in router.model_aliases.values())
 
 
 def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_path):
