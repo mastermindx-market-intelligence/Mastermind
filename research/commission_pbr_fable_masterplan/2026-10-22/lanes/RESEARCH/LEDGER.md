@@ -35,6 +35,9 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 | 08:38 | R-1701 review r2 | ubuntu3 / glm-5.3 | review · C2 | pbr-res-r1701-r2 | DELIVERED (rc 0) — **VERDICT: PASS** | `reviews/R-1701.REVIEW.md` sha256 `2917044eae355693c9195c6edf3204d37a4a6ccbde1b11cfe66cb22a698c01df` (57 lines; collected sha == lane-reported sha) | exact head `cdc79d10`; 35/35 repo citations verified; A1–A9 MET; all A8 case facts supported. 3 MINOR: F1 rule (i) needs event/period identity matching before an evidence date can CONTRADICT (carried to L-S5 review as a check on `brain/facts.py`); F2 two settle dates (rows 76, 39) unverified — not contradicted; F3 typo 'Falls'→'Fills'. MINORs not repaired on this head (no re-review churn); folded into the next amendment. USAGE_RECEIPT_MISSING |
 | 08:39 | cleanup | ubuntu3 | — | pbr-res-r1701 | CLEANED | — | wt `pbr-res-r1701` removed; `~/lanes/tmp/pbr-res-r1701` (case row/fill copies) deleted; verified by `git worktree list` |
 | 08:39 | R-1703 review | ubuntu3 / glm-5.3 | review · C2_COMPLEX_BOUNDED | pbr-res-r1703 | LAUNCHED | `~/lanes/tmp/pbr-res-r1703/out/REVIEW.md` (pending) | exact head `a71544d9bf8537757641b10d7b6577202091f492`, base `d31aade9`; A1–A11 incl. byte-regeneration + public-repo data-rights inventory (A10, facts only — SR-1 stays the seat's). Capacity reroute (bailian Ryan cooling to ~08:56Z; R-1704 holds the bailian slot); dry-run `bounded_complexity_escalation_recorded`. Builder was glm-5.3-flash (different model, same family). Inputs staged sha-verified (MANIFEST `4c55f3f8…`, rows `3f2fae42…`, fills `ca0390d5…`) — delete at cleanup |
+| 08:40 | #1701 merge | GitHub merge queue | — | — | QUEUED | queue entry `AWAITING_CHECKS`, position 2, enqueued 08:40:32Z (queue head `b7f44fd1`) | merged by RESEARCH under commission merge authority: spec-only, own family, CI green at `cdc79d10`, independent VERDICT: PASS (R-1701-r2). Merge commit recorded on landing |
+| 08:44 | #1703 CI triage | — | — | run 39745534732 / job 119712908804 | DIAGNOSED — unrelated timing flake | job log (shard 2) | sole failure `tests/test_provider_incident_forward.py::test_malformed_forward_slots_are_never_absence[terminal-malformed]` — `assert path.lstat() == before` (`:459`) compares full `stat_result` incl. `st_atime`; diff only `st_atime` 1792657545 vs 1792657544 (read crossed a second under relatime). Not a RESEARCH file (provider-incident family, #1468). `tests/test_pbr_decision_case_fixtures.py` passed 11/11 in the same shard. No rerun: #1703 merge is HELD for SR-1 regardless. FYI to RUNTIME below (O-1) |
+| 08:44 | #1704 CI | — | — | — | GREEN | head `6d1195f8` all checks complete, 0 failing | awaiting R-1704 verdict |
 
 ## Findings from the capture (facts, not verdicts)
 
@@ -61,6 +64,12 @@ Lane packets: `packets/` (each `<lane>.packet.md` = lane body + `_common.md`). R
 | CR-R6 | PRODUCT (`pbr-product`) | Pick exactly one `GET /api/decision-snapshot` (#673 inline `app/web.py` vs #1357 operator-gated router + `app/response_cache.py` deny entry); RESEARCH recommends #1357's auth posture | `S0_LINEAGE.md` §A disagreement 9, §E.1 | L-S4 follow-up (inspector surface) |
 | CR-R7 | seat (`config/contracts.yml` owner) | Admit the decision-snapshot and shadow-module contracts (`pbr.decision_case_fixture.v1`, `pbr.shadow_risk_budget_params.v1`, `pbr.trial_protocol.v1`) into `config/contracts.yml` or rule that they stay spec-local in wave 1 | #1701, #1704, L-S5 | W6/W7 adoption |
 | CR-R8 | ECON (`pbr-econ`) | Include `account.json` (cash, NAV basis) in the next read-only capture or expose it through the ECON evidence pack; the RESEARCH capture saw the autonomous book with `account` MISSING at the #673 source | L-S4 real-capture test expects account MISSING | W5 snapshot COMPLETE-ness |
+
+## Observations to other domains (no request; FYI)
+
+| id | to | observation | evidence |
+|---|---|---|---|
+| O-1 | RUNTIME (`pbr-runtime`) | `tests/test_provider_incident_forward.py:459` asserts `path.lstat() == before`; `os.stat_result` equality includes `st_atime`, which a read can advance under relatime, so the case fails whenever the forward read crosses a second boundary. Comparing `(st_ino, st_mode, st_size, st_mtime_ns)` would keep the intent | #1703 run 39745534732 job 119712908804 (shard 2), only diff `st_atime` |
 
 ## Seat rulings requested (consequential; one each)
 
