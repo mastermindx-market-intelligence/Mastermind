@@ -117,3 +117,77 @@ def test_existing_guard_distinguishes_cursor_and_claude(cursor_project, monkeypa
     denied = json.loads(capsys.readouterr().out)
     assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
     assert "native Claude children" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+
+def test_cursor_version_mismatch_refuses_without_model_assumption(cursor_project) -> None:
+    w, payload, env = cursor_project
+    env["CURSOR_VERSION"] = "3.25.8"
+    observed = cursor_policy.evaluate_cursor_task(payload, env)
+    assert not observed.admitted
+    assert observed.code == "CURSOR_RUNTIME_VERSION_MISMATCH"
+
+
+def test_cursor_missing_payload_cwd_uses_actual_hook_process_cwd(
+    cursor_project, monkeypatch
+) -> None:
+    w, payload, env = cursor_project
+    payload.pop("cwd")
+    monkeypatch.chdir(w)
+    assert cursor_policy.evaluate_cursor_task(payload, env).admitted
+    monkeypatch.chdir(w.parent)
+    observed = cursor_policy.evaluate_cursor_task(payload, env)
+    assert not observed.admitted
+    assert observed.code == "CURSOR_CWD_UNVERIFIED"
+
+
+def test_cursor_env_only_never_hijacks_claude_task(
+    cursor_project, monkeypatch, capsys
+) -> None:
+    w, payload, env = cursor_project
+    monkeypatch.setenv("MASTERMIND_SCOPE_ROOTS", str(w))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    payload.pop("cursor_version")
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    with pytest.raises(SystemExit) as e:
+        guard.main()
+    assert e.value.code == 0
+    denied = json.loads(capsys.readouterr().out)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "native Claude children" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_cursor_project_scope_remains_enforced_without_payload_cwd(
+    cursor_project, monkeypatch, capsys
+) -> None:
+    w, payload, env = cursor_project
+    monkeypatch.setenv("MASTERMIND_SCOPE_ROOTS", str(w))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    payload.pop("cwd")
+    monkeypatch.chdir(w.parent)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    with pytest.raises(SystemExit) as e:
+        guard.main()
+    assert e.value.code == 0
+    denied = json.loads(capsys.readouterr().out)
+    assert denied["hookSpecificOutput"]["permissionDecision"] == "deny"
+    assert "CURSOR_CWD_UNVERIFIED" in denied["hookSpecificOutput"]["permissionDecisionReason"]
+
+
+def test_cursor_project_scope_succeeds_with_real_project_hook_cwd(
+    cursor_project, monkeypatch, capsys
+) -> None:
+    w, payload, env = cursor_project
+    monkeypatch.setenv("MASTERMIND_SCOPE_ROOTS", str(w))
+    for key, value in env.items():
+        monkeypatch.setenv(key, value)
+    payload.pop("cwd")
+    monkeypatch.chdir(w)
+    monkeypatch.setattr(sys, "stdin", io.StringIO(json.dumps(payload)))
+    with pytest.raises(SystemExit) as e:
+        guard.main()
+    assert e.value.code == 0
+    result = json.loads(capsys.readouterr().out)
+    assert "read-only Cursor role declaration" in result["hookSpecificOutput"]["additionalContext"]

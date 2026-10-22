@@ -55,15 +55,21 @@ def evaluate_cursor_task(
     version = payload.get("cursor_version")
     if not isinstance(version, str) or not version.strip():
         return _refuse("CURSOR_RUNTIME_UNVERIFIED")
-    if not isinstance(env.get("CURSOR_VERSION"), str) or not env["CURSOR_VERSION"].strip():
+    env_version = env.get("CURSOR_VERSION")
+    if not isinstance(env_version, str) or not env_version.strip():
         return _refuse("CURSOR_RUNTIME_UNVERIFIED")
+    if version != env_version:
+        return _refuse("CURSOR_RUNTIME_VERSION_MISMATCH")
     raw_root = env.get("CURSOR_PROJECT_DIR")
     if not isinstance(raw_root, str) or not os.path.isabs(raw_root):
         return _refuse("CURSOR_PROJECT_UNVERIFIED")
     root = Path(raw_root)
     if root.is_symlink() or not root.is_dir():
         return _refuse("CURSOR_PROJECT_UNVERIFIED")
-    cwd = payload.get("cwd") or raw_root
+    # Actual Cursor 3.25.9 hooks omit cwd but run in CURSOR_PROJECT_DIR.
+    # Validate the hook process cwd; never silently assume the claimed project
+    # when a different executable/working directory is invoking this script.
+    cwd = payload["cwd"] if "cwd" in payload else os.getcwd()
     if not isinstance(cwd, str) or not os.path.isabs(cwd):
         return _refuse("CURSOR_CWD_UNVERIFIED")
     try:
