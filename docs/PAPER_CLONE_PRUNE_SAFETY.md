@@ -148,6 +148,62 @@ python3 -m integrations.paper_desktop.clone_prune_guard plan \
 
 No GUI mutation or Paper source deletion is performed by this helper. For the existing production-sized historical clone, any retained artboard whose source/clone JSX differs must be held for exact style-semantic reconciliation **before** attempting clone-only page pruning.
 
+
+
+## Candidate exact-page UI adapter (dependent follow-up, NOT installed)
+
+`integrations/paper_desktop/native_page_ui.py` is a **single-page**, fail-closed
+native UI deletion candidate. It is separate from the reviewed Paper MCP
+catalogue because Paper 0.5.14/0.5.15 do not expose a `delete_page` MCP tool.
+Do not advertise this candidate as an accepted worker-facing `paper_edit`
+action until exact-source review, a selected-host scratch canary, protected
+merge, runtime stage, and the actual ChatGPT app publication have passed.
+
+The adapter uses the **existing** Paper Desktop bridge for source/clone/page
+readback and the same OS-user desktop mutex. It does not create another
+server, listener, credential, lifecycle, effect journal, or retry engine.
+
+Before any UI write it requires:
+
+- A saved `CLONE_PRUNE_PLAN_READY` manifest with two distinct exact file IDs,
+  original page IDs/names/icons and a retained nonempty keep-set.
+- A live Paper `list_resources` receipt identifying an actual newer
+  `(copy)` resource with creation time after its source; the plan cannot
+  designate the original as clone by mere assertion.
+- Unchanged original page metadata, source/clone file names and token
+  hashes; clone page list remains an order-preserving subset and includes
+  every page being retained.
+- Foreground file identity `clone_file_id`, exact Paper window title,
+  nonambiguous delete target page name and live menu accessibility.
+- On the **clone** row only: native Paper right-click `Copy link` must yield
+  a *fresh* canonical `https://app.paper.design/file/<clone>/<page>`
+  with **both** IDs exactly matching the planned target. A wrong file,
+  wrong page, stale clipboard, duplicate label, missing OCR menu target
+  or foreground drift must refuse before deletion.
+- Re-open the same menu, re-check the file/page inventory immediately, and
+  dispatch **one** native UI `Delete page` only after all guards passed.
+  Never use this script to delete a page in MASTERMIND PAGES itself.
+- Re-read the exact original and clone. Only a match between expected
+  before/after page lists, unchanged source and clone token hashes and
+  correct clone identity returns `CLONE_PAGE_UI_DELETE_VERIFIED`.
+  A post-dispatch transport/read uncertainty returns `EFFECT_UNKNOWN`.
+  Caller must reconcile the original carrier; there is **no retry**.
+
+The command has an explicit `--execute-ui-prune` flag so accidental CLI
+execution without write selection refuses. The window ID and row coordinates
+are input **hints**, not identity proofs. The code verifies the real
+context and canonical Paper page link before ever deleting, and refuses
+if that cannot be established. Further human/app release must ensure a
+single UI owner for the target file throughout this non-atomic interaction;
+unexpected UI movement is not grounds for guessing coordinates.
+
+A successful one-page result is not a complete 57-page migration, and the
+adapter intentionally reports `production_migration_accepted:false`.
+Do not claim all image URLs, attached comments, cross-file links, fonts,
+shared components, or large-file stability are proven by page metadata
+alone. Reviewers must inspect the exact M1 Paper UI scratch receipt and
+adversarial tests before enabling this as an autonomous operation.
+
 ## Release and permission fence
 
 The current task authorizes bounded local scratch testing, not unrestricted
