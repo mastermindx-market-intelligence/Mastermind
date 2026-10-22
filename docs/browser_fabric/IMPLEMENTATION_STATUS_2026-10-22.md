@@ -112,6 +112,14 @@ The broad central campaign passed **1,080 tests**. The preceding review-focused 
 
 The existing service v4 integration test starts the normal runtime and actual relay process, degrades a remote host whose credential artifact is absent, and exercises transport lifespan closure. Remote browser owners and Chrome native peers remain synthetic in these tests. This checkpoint proves source composition and transport behavior; it does not prove deployed ingress, enrolled OAuth clients, installed Chrome, or cross-provider acceptance.
 
+## Client enrollment projection checkpoint
+
+The existing client projection now renders OpenClaw's native `mcp.servers` Streamable HTTP/OAuth configuration. A new review-only `mastermind_browser_client.py` command produces public ingress setup for OpenClaw, Codex, Claude Code, Grok Build, ChatGPT web, Claude web, Grok Bot and Grok web. Hosted setup is explicit manual OAuth guidance where no import format is documented. The complete ingress plan is recomputed before rendering; private URLs cannot leak into public configuration. No token, client grant, installation or successful connection is fabricated. OpenClaw's ordinary OAuth login is a shared operator credential, not unique requester identity.
+
+The client and ingress campaign passed **57 tests** and independent read-only review. These are configuration projections and setup instructions; actual account enrollment and cross-client acceptance remain outstanding.
+
+Primary client references: https://docs.openclaw.ai/cli/mcp/transports ; https://docs.x.ai/grok-bot/team-bots ; https://developers.openai.com/plugins/build/auth ; https://claude.com/docs/connectors/building .
+
 ## Operational composition findings
 
 The next source phase must use the incumbent private-service lifecycle, exact-SHA release exporter, signed Python provisioner and sealed MCP runtime materializer. A Workbench target requires a distinct typed label/configuration and a dedicated Browser dependency closure with Pillow; it must not repurpose Studio or Company account bindings. Persistent action-store identity, key, grants and original receipts survive source/runtime replacement. Workbench shutdown exit 3 or 4 retains an unresolved physical/cleanup hold; generic launchd restart-on-nonzero semantics are unsuitable.

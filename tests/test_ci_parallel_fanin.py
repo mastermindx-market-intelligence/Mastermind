@@ -76,6 +76,17 @@ def test_live_ci_workflow_fan_in_is_fail_closed_and_uses_three_full_shards() -> 
         ),
         ("if: matrix.index == 0", "if: matrix.index == 1"),
         (
+            "      - name: Verify Browser Link package\n        if: matrix.index == 0",
+            "      - name: Verify Browser Link package\n        if: matrix.index == 1",
+        ),
+        (
+            "      - name: Verify Browser Link package\n        if: matrix.index == 0",
+            "      - name: Verify Browser Link package\n        if: false",
+        ),
+        ("name: Verify Browser Link package", "name: Skipped Browser Link package"),
+        ("npm run build --prefix integrations/mastermind_browser_link", "echo skipped build"),
+        ("node --test tests/browser_link/*.test.mjs", "echo skipped tests"),
+        (
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 0",
             "      - name: Verify private Fabric HTTP compatibility and incumbent backend lifetime\n        if: matrix.index == 2",
         ),

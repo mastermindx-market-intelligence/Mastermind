@@ -134,3 +134,55 @@ def test_projection_contains_no_host_profile_account_or_credential_input_channel
         "attempt_id",
     ):
         assert forbidden not in rendered
+
+
+def test_openclaw_projection_uses_native_registry_and_client_owned_oauth():
+    row = project_browser_client("openclaw", browser_url=URL)
+    assert row.config_format == "openclaw-json"
+    assert json.loads(row.config_text) == {"mcp": {"servers": {SERVER_NAME: {
+        "url": URL, "transport": "streamable-http", "auth": "oauth",
+        "connectionTimeoutMs": 30000, "requestTimeoutMs": 90000,
+        "supportsParallelToolCalls": True,
+    }}}}
+    assert row.cli_args == ()
+
+
+@pytest.mark.parametrize("provider", ["chatgpt-web", "claude-web", "grok-bot", "grok-web",
+                                      "openclaw", "codex", "claude", "grok"])
+def test_public_client_projection_keeps_web_setup_distinct_from_native_config(provider):
+    from integrations.mastermind_browser_plugin.client_projection import project_public_browser_client, WEB_CLIENTS
+    from integrations.mastermind_browser_plugin.ingress import build_browser_ingress_plan
+    plan = build_browser_ingress_plan(
+        public_resource_url="https://browser.example/mcp", internal_upstream_url=URL)
+    value = project_public_browser_client(provider, ingress_plan=plan).to_dict()
+    assert value["url"] == plan.public_resource_url
+    assert value["authentication"] == "client_owned_oauth"
+    assert value["installation_performed"] is False and value["connection_proven"] is False
+    assert value["setup_steps"]
+    if provider in WEB_CLIENTS:
+        assert value["config_format"] == "manual-oauth-setup" and value["config_text"] is None
+    else:
+        assert plan.public_resource_url in value["config_text"]
+        assert "browser-fabric" not in value["config_text"]
+
+
+def test_public_projection_revalidates_every_ingress_plan_field():
+    from dataclasses import replace
+    from integrations.mastermind_browser_plugin.client_projection import project_public_browser_client
+    from integrations.mastermind_browser_plugin.ingress import build_browser_ingress_plan
+    plan = build_browser_ingress_plan(
+        public_resource_url="https://browser.example/mcp", internal_upstream_url=URL)
+    for changed in (replace(plan, public_resource_url="http://browser.example/mcp"),
+                    replace(plan, web_lane="fixed_bearer"),
+                    replace(plan, same_browser_owner_required=False)):
+        with pytest.raises(BrowserClientProjectionError):
+            project_public_browser_client("grok-bot", ingress_plan=changed)
+
+
+def test_client_setup_cli_emits_reviewable_projection_only(capsys):
+    from scripts.mastermind_browser_client import main
+    assert main(["--provider", "grok-bot", "--public-url", "https://browser.example/mcp",
+                 "--internal-url", URL]) == 0
+    value = json.loads(capsys.readouterr().out)
+    assert value["provider"] == "grok-bot"
+    assert value["config_text"] is None and not value["installation_performed"]
