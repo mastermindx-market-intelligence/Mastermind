@@ -4335,7 +4335,7 @@ class TestFabricPoolPinMigration(unittest.TestCase):
                 svc.cmd_fabric_pool_pin_migrate(self.args())
         with self.assertRaisesRegex(SystemExit, "exact reviewed target"):
             svc.cmd_fabric_pool_pin_migrate(self.args(target=False))
-        with self.assertRaisesRegex(SystemExit, "unrecognized original"):
+        with self.assertRaisesRegex(SystemExit, "unrecognized account"):
             svc.cmd_fabric_pool_pin_migrate(self.args(account="fabric-future"))
         self.assert_original()
 
