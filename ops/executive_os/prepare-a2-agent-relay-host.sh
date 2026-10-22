@@ -11,6 +11,9 @@ umask 077
 SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 CONFIG_ROOT="$SYSTEM_ROOT/config"
 RUNTIME_ROOT="/var/db/mastermind-agent-relay"
+# This shared relay directory is the live Unix-socket prerequisite.
+# The unprivileged Agent Relay cannot create it beneath root-owned /var/run.
+SOCKET_ROOT="/var/run/mastermind-agent-relay"
 RELAY_HOME="$RUNTIME_ROOT/home"
 TOKEN_PATH="$CONFIG_ROOT/agent-relay.token"
 CONFIG_PATH="$CONFIG_ROOT/agent-relay.json"
@@ -215,6 +218,7 @@ preflight_directory "$SYSTEM_ROOT" 0 0 755
 preflight_directory "$CONFIG_ROOT" 0 0 755
 preflight_directory "$RUNTIME_ROOT" 0 0 711
 preflight_directory "$RELAY_HOME" "$RELAY_UID" "$RELAY_GID" 700
+preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" 710
 ensure_numeric_unused Groups PrimaryGroupID "$RELAY_GID" "$RELAY_GROUP"
 ensure_numeric_unused Users UniqueID "$RELAY_UID" "$RELAY_USER"
 
@@ -235,6 +239,7 @@ ensure_directory "$SYSTEM_ROOT" root wheel 0 0 755
 ensure_directory "$CONFIG_ROOT" root wheel 0 0 755
 ensure_directory "$RUNTIME_ROOT" root wheel 0 0 711
 ensure_directory "$RELAY_HOME" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 700
+ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 710
 
 assert_relay_unloaded
 

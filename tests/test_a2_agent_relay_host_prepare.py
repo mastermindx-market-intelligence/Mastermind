@@ -116,6 +116,7 @@ def _fake_host_script(tmp_path: Path) -> tuple[Path, Path, dict[str, Path]]:
     state_path = tmp_path / "state.json"
     system_root = tmp_path / "Library" / "Application Support" / "MastermindExecutive"
     runtime_root = tmp_path / "var" / "db" / "mastermind-agent-relay"
+    socket_root = tmp_path / "var" / "run" / "mastermind-agent-relay"
     plist_path = tmp_path / "Library" / "LaunchDaemons" / "com.mastermind.executive.agent-relay.plist"
     release_root = system_root / "releases" / ("a" * 40)
     release_root.mkdir(parents=True)
@@ -393,6 +394,7 @@ print('{"status":"A2_DISABLE_PREPARED"}')
         "/usr/bin/sudo": str(fake_bin / "forbidden-effect"),
         "/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist": str(plist_path),
         "/var/db/mastermind-agent-relay": str(runtime_root),
+        "/var/run/mastermind-agent-relay": str(socket_root),
         "/Library/Application Support/MastermindExecutive": str(system_root),
     }
     for original, replacement in replacements.items():
@@ -404,6 +406,7 @@ print('{"status":"A2_DISABLE_PREPARED"}')
         "plist": plist_path,
         "release": release_root,
         "runtime": runtime_root,
+        "socket": socket_root,
         "system": system_root,
     }
 
@@ -441,6 +444,7 @@ def test_prepares_exact_identity_directories_and_disabled_unloaded_relay_idempot
         (paths["config"], "0:0:755"),
         (paths["runtime"], "0:0:711"),
         (paths["home"], "457:457:700"),
+        (paths["socket"], "457:457:710"),
     ):
         assert path.is_dir()
         assert state_after_first["metadata"][str(path)] == metadata
@@ -454,6 +458,64 @@ def test_prepares_exact_identity_directories_and_disabled_unloaded_relay_idempot
 
     assert second.returncode == 0, second.stderr
     assert json.loads(state_path.read_text(encoding="utf-8")) == state_after_first
+
+
+@pytest.mark.parametrize("foreign", ["symlink", "uid", "mode"])
+def test_socket_parent_refuses_untrusted_existing_directory_before_identity_changes(
+    foreign, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    target = paths["socket"]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    if foreign == "symlink":
+        stable = tmp_path / "foreign-socket-parent"
+        stable.mkdir()
+        target.symlink_to(stable, target_is_directory=True)
+    else:
+        target.mkdir()
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        state["metadata"][str(target)] = (
+            "450:457:710" if foreign == "uid" else "457:457:777"
+        )
+        state_path.write_text(json.dumps(state, sort_keys=True), encoding="utf-8")
+    original = state_path.read_bytes()
+
+    result = subprocess.run(
+        ["/bin/bash", str(artifact), "--release-root", str(paths["release"])],
+        check=False, capture_output=True, text=True,
+    )
+
+    assert result.returncode == 65
+    assert "existing prerequisite directory differs" in result.stderr
+    assert state_path.read_bytes() == original
+    assert not Path(str(state_path) + ".effects").exists()
+
+
+def test_socket_parent_is_recreated_in_unenrolled_host_preparation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+):
+    artifact, state_path, paths = _fake_host_script(tmp_path)
+    monkeypatch.setenv("A2_FAKE_STATE", str(state_path))
+    command = ["/bin/bash", str(artifact), "--release-root", str(paths["release"])]
+    assert subprocess.run(command, check=False, capture_output=True).returncode == 0
+    before = json.loads(state_path.read_text(encoding="utf-8"))
+    assert before["metadata"][str(paths["socket"])] == "457:457:710"
+
+    # The volatile socket parent can disappear. Re-entry on an un-enrolled
+    # host restores only the expected directory, without repeating disable.
+    paths["socket"].rmdir()
+    before["metadata"].pop(str(paths["socket"]))
+    state_path.write_text(json.dumps(before, sort_keys=True), encoding="utf-8")
+    result = subprocess.run(command, check=False, capture_output=True, text=True)
+
+    assert result.returncode == 0, result.stderr
+    after = json.loads(state_path.read_text(encoding="utf-8"))
+    assert after["metadata"][str(paths["socket"])] == "457:457:710"
+    assert after["relay_disabled"] is True
+    assert Path(str(state_path) + ".effects").read_text().splitlines() == [
+        "disable system/com.mastermind.executive.agent-relay"
+    ]
 
 
 def test_idempotent_preparation_accepts_native_is_hidden_attribute_spelling(
