@@ -71,13 +71,36 @@ def qualify(store: Path, release_stage: Path | None = None):
             new_hashes[rel] = sha(raw)
         manifest = temp/'manifest.json'
         manifest.write_text(json.dumps(new_hashes, sort_keys=True))
+        # Exercise a REAL incumbent -> successor CAS transition, not only a
+        # first selection into an empty fake store.  Both generations are
+        # published into an isolated scratch owner, never the live M2 pointer.
+        previous_source = temp/'previous-source'
+        for rel in original['files']:
+            target = previous_source/rel
+            target.parent.mkdir(exist_ok=True, parents=True)
+            target.write_bytes((base_root/rel).read_bytes())
+        prior = generation.publish(previous_source, stable_ext, original['files'])
+        scratch_store = stable_ext.parent/'native-code-releases'
+        prior_pointer = generation.select(scratch_store, prior.name, None)
+        if prior_pointer['sequence'] != 1:
+            raise ValueError('isolated prior selection mismatch')
         issued = generation.publish(source, stable_ext, new_hashes)
-        root, qualified = generation.verify(stable_ext.parent/'native-code-releases', issued.name)
+        root, qualified = generation.verify(scratch_store, issued.name)
         if root != issued or qualified['files'] != new_hashes:
             raise ValueError('qualification manifest mismatch')
-        pointed = generation.select(stable_ext.parent/'native-code-releases', issued.name, None)
-        if pointed['generation'] != issued.name or pointed['sequence'] != 1:
-            raise ValueError('isolated selection mismatch')
+        pointed = generation.select(scratch_store, issued.name, prior.name)
+        if (pointed['generation'] != issued.name or pointed['sequence'] != 2
+                or pointed['previous'] != prior.name):
+            raise ValueError('isolated CAS transition mismatch')
+        try:
+            generation.select(scratch_store, prior.name, prior.name)
+        except ValueError as exc:
+            if 'compare-and-swap refused' not in str(exc):
+                raise
+        else:
+            raise ValueError('stale original-source CAS unexpectedly accepted')
+        if generation.current(scratch_store) != pointed:
+            raise ValueError('stale CAS affected qualified selection')
         # Real import from the complete 85-file published clone. No worker start.
         code = ("import native_remote, remote_sub_exec; "
                 "cmd=native_remote.command('grok','grok-4.7','offline-probe','/tmp',validated=True); "
@@ -95,7 +118,8 @@ def qualify(store: Path, release_stage: Path | None = None):
                   'files_verified':len(new_hashes), 'overlaid_files':changed,
                   'code_manifest_sha256':sha(generation.canonical(new_hashes)),
                   'isolated_publish_verified':True,
-                  'isolated_select_verified':True}
+                  'isolated_select_verified':True,
+                  'isolated_stale_cas_refused':True}
         if release_stage is not None:
             # Stage reviewed bytes only. The installed publisher and pointer are untouched.
             pending = Path(tempfile.mkdtemp(prefix='.grok47-pending-', dir=release_stage.parent))
