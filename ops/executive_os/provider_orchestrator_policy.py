@@ -59,6 +59,9 @@ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 
 # Fixed source assets, not a role/identity/grant registry.
 ROLE_PACKAGE = "mastermind-fabric-orchestration"
+CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
+# Git blob digest of the separately reviewed local Skill source; not a runtime grant.
+CLAUDE_FABRIC_SKILL_BLOB_SHA = "3dc63723e0e002bdb2337aaf68dfa97b7c0ced5f"
 ROLE_SHA256 = {'SKILL.md': '2afa8ef094b9a6a8236973d7e28a5b0781b8376f4aba0ce9cbd31f3f8e1e72f8', 'references/meta-ceo.md': 'df5076efcc355507f7589126048120b817f3ceefd2295974a825914b8f161240', 'references/program-ceo.md': '91652d5e0c68b092aa442c3f7af5f280ed344b1321b47a0ae87f86402cbc3b47', 'references/operator.md': '8c4c5aca6321d4dc9c0a2e6cf4265e9a40a56ded7b247b5e0f17cd346b94259c', 'references/worker.md': 'c43c135729a0565f1dabfc2e912c18cf7f7d8f3786f49cc7647853b84402b924', 'references/reviewer.md': '0d10a348c874d3288636e449fe1961357cb30e81fe0be87cefef3246feac5d5c'}
 
 POLICY_BODY = f"""{BEGIN}
@@ -71,6 +74,18 @@ agent count, tokens, elapsed time, tool calls, PR count, or administrative motio
 ### Operating shape
 
 __OPERATOR_FIRST_CORE__
+
+### M2 Claude delegation discovery
+
+- For an assigned M2 Claude CEO/orchestrator, read the installed
+  `~/.claude/skills/mastermind-claude-fabric-delegation/SKILL.md` before external
+  worker submission. It gives the exact incumbent Fabric CLI/MCP path and
+  same-root submit, collect, review and acceptance sequence. A missing skill,
+  session identity, or authenticated entrypoint is not a delegation grant.
+- Paid Fabric operators spawned as `domain_orchestration` receive a separate
+  per-run capability and auto-injected instructions only when admitted. They use
+  the existing `mastermindStudio` `fabric_operator_scope` and `fabric_child_*`
+  tools, never native subagents, raw SSH or borrowed parent credentials.
 
 ### Forward-execution and burn guards
 
@@ -574,6 +589,8 @@ def _paths(home: Path) -> dict[str, Path]:
     for provider, directory in (("codex", ".agents"), ("claude", ".claude")):
         for index, relative in enumerate(ROLE_SHA256):
             paths[f"{provider}_role_{index}"] = home / directory / "skills" / ROLE_PACKAGE / relative
+    paths["claude_fabric_skill"] = (home / ".claude" / "skills" /
+                                    CLAUDE_FABRIC_SKILL_PACKAGE / "SKILL.md")
     return paths
 
 
@@ -599,6 +616,18 @@ def _canonical_role_files() -> dict[str, bytes]:
             raise OrchestratorPolicyError("orchestration role source digest mismatch")
         rows[relative] = payload
     return rows
+
+
+def _canonical_claude_fabric_skill() -> bytes:
+    """Pin the audited invocation instructions, not an account or tool entitlement."""
+    source_root = Path(__file__).resolve().parents[2]
+    path = source_root / "skills" / CLAUDE_FABRIC_SKILL_PACKAGE / "SKILL.md"
+    _preflight_destination(path, source_root)
+    payload = _regular_bytes(path)
+    blob = hashlib.sha1(b"blob " + str(len(payload)).encode("ascii") + b"\\0" + payload).hexdigest()
+    if not 0 < len(payload) <= 8192 or blob != CLAUDE_FABRIC_SKILL_BLOB_SHA:
+        raise OrchestratorPolicyError("Claude Fabric Skill source digest mismatch")
+    return payload
 
 
 def _refuse_existing_claude_native_limit_reset(raw: bytes) -> None:
@@ -627,6 +656,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
     paths = _paths(resolved_home)
     guard = _canonical_guard(guard_source)
     roles = _canonical_role_files()
+    claude_fabric_skill = _canonical_claude_fabric_skill()
     _preflight_destination(paths["claude_settings"], resolved_home)
     _refuse_existing_claude_native_limit_reset(
         _regular_bytes(paths["claude_settings"], missing=b"{}\n")
@@ -671,7 +701,7 @@ def apply_policy(home: Path, *, guard_source: Path | None = None) -> dict[str, o
         for provider in ("codex", "claude")
         for index, relative in enumerate(ROLE_SHA256)
     ]
-    operations = operations[:2] + role_operations + operations[2:]
+    operations = operations[:2] + role_operations + [("claude_fabric_skill", claude_fabric_skill)] + operations[2:]
     modified: list[str] = []
     try:
         for key, payload in operations:
@@ -761,6 +791,7 @@ def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str
     canonical = _canonical_guard(guard_source)
     issues: list[str] = []
     roles = _canonical_role_files()
+    claude_fabric_skill = _canonical_claude_fabric_skill() if "claude" in selected else None
     for enrolled_provider in selected:
         for index, relative in enumerate(ROLE_SHA256):
             key = f"{enrolled_provider}_role_{index}"
@@ -773,6 +804,16 @@ def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str
             if installed != roles[relative]:
                 issues.append(f"{key}.digest")
 
+
+    if "claude" in selected:
+        try:
+            _preflight_destination(paths["claude_fabric_skill"], Path(home).expanduser().resolve())
+            installed_skill = _regular_bytes(paths["claude_fabric_skill"])
+        except OrchestratorPolicyError:
+            issues.append("claude_fabric_skill.missing_or_unsafe")
+        else:
+            if installed_skill != claude_fabric_skill:
+                issues.append("claude_fabric_skill.digest")
 
     for name in (f"{p}_guard" for p in selected):
         try:
@@ -854,6 +895,7 @@ def verify_policy(home: Path, *, guard_source: Path | None = None, provider: str
         "issues": issues,
         "guard_sha256": _sha256(canonical),
         "role_source_sha256": dict(ROLE_SHA256),
+        "claude_fabric_skill_blob_sha": CLAUDE_FABRIC_SKILL_BLOB_SHA if "claude" in selected else None,
         "session_loading_proven": False,
         "runtime_admission_proven": False,
         "managed_files": {
@@ -890,6 +932,7 @@ def apply_provider_policy(
     selected = {k: path for k, path in paths.items() if k.startswith(provider + "_")}
     guard = _canonical_guard(guard_source)
     roles = _canonical_role_files()
+    claude_fabric_skill = _canonical_claude_fabric_skill() if provider == "claude" else None
 
     # All destination and exact-config preconditions before a single write.
     for path in selected.values():
@@ -920,7 +963,7 @@ def apply_provider_policy(
         (f"{provider}_role_{index}", roles[relative])
         for index, relative in enumerate(ROLE_SHA256)
     ]
-    operations = operations[:1] + role_operations + operations[1:]
+    operations = operations[:1] + role_operations + ([("claude_fabric_skill", claude_fabric_skill)] if provider == "claude" else []) + operations[1:]
     modified: list[str] = []
     try:
         for key, payload in operations:
