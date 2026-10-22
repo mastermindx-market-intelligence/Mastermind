@@ -335,6 +335,23 @@ def test_attribution_scores_on_aligned_window():
     assert block["defensive_return"] == pytest.approx(0.1)
 
 
+def test_attribution_book_term_is_window_return_not_stored_return_pct():
+    """LR-A12B finding 1: the stored per-inception book return (−50%) differs from the book's
+    return over the shared window (+5%). Only the window return may reach the active term."""
+    import brain.attribution as ATTR
+    led = _falsifier_ledger(book_curves={"autonomous": {"2026-10-01": 1.0, "2026-10-02": 2.0,
+                                                        "2026-10-03": 0.5}})
+    stored = next(r for r in led["leaderboard"] if r.get("id") == "autonomous")["return_pct"]
+    assert stored == pytest.approx(-50.0)                   # the fixture really diverges
+    block = ATTR.allocation_attribution(
+        date(2026, 10, 3),
+        book_curves={"autonomous": {"2026-10-02": 1.0, "2026-10-03": 1.05}})
+    b = block["books"]["autonomous"]
+    # window Oct2..Oct3: book +5%, SPY 200→180 = −10% → active +15% (stored −50% would give −40%)
+    assert b["active_return"] == pytest.approx(0.15)
+    assert b["window"] == {"start": "2026-10-02", "end": "2026-10-03", "common_point_count": 2}
+
+
 @pytest.mark.parametrize("start_label,end_label,expected", [
     ("QUALIFIED", None, "UNLABELLED"),          # one endpoint carries no label
     ("QUALIFIED", "ESTIMATED", "UNLABELLED"),   # an unknown label is not a qualification
