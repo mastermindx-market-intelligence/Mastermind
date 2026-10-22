@@ -34,7 +34,9 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # slot diagnostics with retention recovery and explicit acquisition correlation.
 # Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "3feb21e00fa73f76dcb17311b712b46a7617766055e9ba913ec28196d3f41138"
+# Integrated protected Fabric qualification and task/host overlays with
+# PR #1694 operator instructions, retaining all installed code preimages.
+NATIVE_MANIFEST_SHA = "5933b8cb90f1d4bfe18ce8ae4c5f9d857b61a908d9c199e94ef533e56a5c3843"
 
 
 def _sha(raw):
