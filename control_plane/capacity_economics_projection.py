@@ -163,6 +163,16 @@ def project_quota_preference(
             "suggested model alias is outside the first lawful suitability tier"
         )
     provider = _token(row.get("provider"), field="option.provider")
+    # BytePlus Personal Coding Plan quota is valid only inside vendor-supported
+    # coding tools for its individual subscriber. A provider-economics PREVIEW
+    # does not attest that execution surface, consent or a plan-funded worker.
+    # Never turn a forged positive Capacity estimate into an autonomous worker.
+    # A separately licensed BytePlus PAYG/enterprise API must use its own
+    # independently reviewed provider and model aliases.
+    if provider == "byteplus" or model_alias == "byteplus.attended":
+        raise CapacityEconomicsProjectionError(
+            "personal BytePlus Coding Plan cannot enter autonomous Capacity preference"
+        )
     option_id = _token(row.get("option_id"), field="option.option_id")
     estimated = _nonnegative_int(
         row.get("estimated_startable_jobs"), field="option.estimated_startable_jobs"

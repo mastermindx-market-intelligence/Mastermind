@@ -1,11 +1,14 @@
 # BytePlus Personal Coding Plan — Fabric enrollment and qualification
 
 **Status:** source-only DRAFT/HOLD; **not a funded/runnable Fabric pool**. The
-Chairman reports purchasing the first $50 personal Pro subscription. That
-purchase/tier claim is user-reported, **not** provider-console attested. Credential
-transfer and private account state remain outside this public repository.
-Provider login validity, active subscription entitlement, quota balance,
-concurrent worker limit, and model invocation were **not** observed.
+Chairman purchased a $50 Personal Pro subscription. On October 22, 2026,
+BytePlus's official CLI returned **Coding Plan / Personal / Pro / Running**
+after a human-completed SSO ceremony on an authorized host. This proves one
+account's then-current subscription tier, not any worker grant, model canary,
+usage headroom in request units, production pool enrollment or legal right
+to broker unrestricted inference. No account IDs, credentials or subscriber
+profile files are published in this repository. Credential access remains
+with the existing private owner; no raw secrets were observed.
 Do not record private enrollment state, a key or personal account identifier
 in GitHub, logs, events, worker packets, provider profiles or reports.
 
@@ -34,7 +37,7 @@ Exact supported OpenAI-compatible coding endpoint:
 Provider docs: https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-plan-overview
 and https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-ai-claude-code
 
-## Published Pro-tier quota estimates (actual subscribed tier not attested)
+## Published Pro-tier quota estimates (tier attested, capacity not measured)
 
 | Window | Advertised personal Pro capacity, not account measurement | Reset basis |
 | --- | ---: | --- |
@@ -146,3 +149,154 @@ capacity, use the incumbent existing admitted pool; never invent availability.
 tool through the approved provider credential owner and obtain a
 positive coding-plan quota consumption/canary receipt, without
 changing the incumbent MiniMax realm or live Fabric router.
+
+
+## October 22 owner observations: plan, catalog, quota, runtime
+
+Source scope: authenticated BytePlus **official Ark CLI** for the subscribed
+Personal Pro account in Singapore region, without raw credential disclosure.
+A one-time management read returned scope Personal, tier Pro, status Running.
+The account's `usage plan` and `usage balance --type plan` returned:
+
+| Window | Displayed usage | Reset as reported by provider |
+| --- | --- | --- |
+| 5-hour | 0% (integer) | Not returned |
+| Weekly | 0% (integer) | 2026-10-26T00:00:00+08:00 |
+| Subscription month | 0% (integer) | 2026-11-22T23:59:59+08:00 |
+
+**0% is a rounded display, not zero model requests or proof of a canary
+debit.** The CLI did not return exact model-request counts, monetary
+cost, weighted burn coefficient, or a numeric simultaneous-worker cap.
+The prior human-reported attended Claude Code canary is not an
+independently captured model response or quota decrement.
+
+The vendor-authenticated `plans model-list --mode direct` offered
+`dola-seed-2.0-pro`, `dola-seed-2.0-lite`, `dola-seed-2.0-code`,
+`deepseek-v4.1-flash`, `glm-5.2`, `deepseek-v4-flash`,
+`deepseek-v4-pro`, `glm-5.3-flash`, `ark-code-latest`,
+and `skylark-embedding-vision` (embedding-only). This **does not**
+qualify a model for every coding client. The routing catalog identified
+DeepSeek V4.1 Flash's served snapshot as `deepseek-v4-1-flash-260910`;
+do not claim BytePlus serves the newer October 17 release without another
+provider-current readback. Models deprecated September 23 did not appear.
+
+Provider sources:
+- https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-plan-overview
+- https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-model-deprecation
+- https://docs.byteplus.com/en/docs/modelark/coding-plan-personal-ai-claude-code
+
+## Seven-subscription comparison and actual router observations
+
+Fleet premise supplied by Chairman: three existing Z.AI plans, three Alibaba
+plans, one BytePlus Personal Pro account. The current repo does **not** contain
+a common normalized, provider-attested unit of cost or per-account residual
+capacity for all seven plans. Never equate BytePlus model requests with
+Z.AI weighted credits or with Alibaba token counts. Subscription price is a
+sunk monthly cost for plans already purchased; rank incremental work by
+first-accepted outcome and opportunity cost of exhausting the right window.
+
+### Actual incumbent routing
+
+The live Ubuntu1 Fabric read-only observation on October 22 found
+`execute_order = minimax, glm-flash, bailian, go, grok, cursor`.
+The current preference weights already favor MiniMax for eligible leaves;
+`glm_peak_active` applies during weekdays 14:00-18:00 Asia/Singapore,
+but its existing GLM peak selection logic only demotes a **full**
+GLM labor request to Flash when one is requested. It **does not**
+in itself move the whole Z.AI Flash pool behind other eligible providers.
+
+The tracked source version of the native picker is not identical to the
+installed Ubuntu1 picker: exact observed live SHA-256
+`957b05438170c3e1205d3ea6637241a5b90750b1ea7cf2da93867a659c36714b`;
+source-tree `ops/native_fabric/quota_continuity/source/pick.py`
+SHA-256 `0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2`.
+They differ materially (over 300 live/source line differences).
+**Do not** overwrite the installed picker with this historical staged source
+or apply an unreviewed direct runtime patch. The existing generation/install
+owner must reconcile the exact live baseline and release the next reviewed
+generation without disturbing active original operations.
+
+The incumbent launch ledger for October 15–22, 2026 showed approximately
+172 GLM launch rows, 220 combined Alibaba/Qwen rows, and 71 MiniMax rows.
+The corresponding `rc == 0` row counts were 164, 190 and 67.
+Adapter exits are **not** accepted jobs; duplicate or follow-on rows are
+possible. No baseline quality/accepted-outcome comparison with BytePlus exists.
+`bailian` and `qwen` both refer to the Alibaba family and must not be
+double-counted as independent subscription pools.
+
+### Proposed decision matrix (not autonomous activation)
+
+| Original job | Preferred eligible candidate | Scarcity and qualification rule |
+| --- | --- | --- |
+| Easy mechanical/code validation | Existing Qwen/MiniMax; GLM Flash if required | Cheapest *qualified* existing worker within first lawful tier, respecting cooldowns and first-pass acceptance |
+| Routine backend coding | Z.AI GLM-5.3-Flash; BytePlus DeepSeek-V4.1-Flash challenger | BytePlus only inside subscribed user's supported coding tool, after measured coding canary |
+| Frontend UI, screenshot-to-code | BytePlus Dola-Seed-2.0-Code challenger | Image+tool quality benchmark required; alternatives remain eligible |
+| Difficult technical reasoning/independent review | Z.AI GLM-5.3 full or qualified independent provider | Do not equate GLM Flash on BytePlus with provider-independent review of Z.AI GLM |
+| Long context technical code | BytePlus DeepSeek V4.1 Flash or GLM Flash challenger | Published 1M window != 1M reliably usable tokens; run actual long-context benchmark |
+| Complex code planning in supported IDE | BytePlus Dola-Seed-2.0-Pro challenger | Supervised coding seat; no implied team/API backend permission |
+| Exceptional expensive review | BytePlus DeepSeek V4 Pro only after outcome win | Higher published quota deduction coefficient; never routine default |
+
+**Time-aware GLM rule:** Current Z.AI Devpack documentation states
+5-hour/weekly Max budgets of 28,000/140,000 *weighted credits* per
+account; input/cache/output multipliers for GLM-5.3 are 6.9/1.7/24,
+and for GLM-5.3-Flash are 2.3/0.56/8, per 10,000 tokens. Both models
+are charged half those subscription credits **off-peak**, with peak
+Monday–Friday 14:00–18:00 Asia/Singapore. The special all-day
+September 25–October 7 promotion has expired. Rank Z.AI's *eligible*
+GLM use preferentially off-peak, but do not delay urgent work or
+promote a less-suitable tier purely to exploit discounts. During peak,
+prefer a qualified Alibaba/MiniMax alternative if it can satisfy the
+same task/review rules, or BytePlus when a **separately supported human
+coding-tool** job can lawfully consume it. Never apply Z.AI's discount
+to BytePlus GLM Flash or Alibaba GLM.
+
+Reference: https://docs.z.ai/devpack/overview
+
+### Required load-balancing invariants
+
+1. Model Router fixes the first lawful capability/quality tier. Capacity
+   ranks only eligible options *within* it, based on currently observed
+   account-specific quota, expiry, health, task quality and host room.
+2. The existing account/lease broker owns each exact provider-plan-account-
+   model-harness-host claim. Same vendor/model on separate subscriptions
+   is **not** the same pool; conversely a single subscription used by
+   several tools is **one shared allowance**.
+3. Unsupported or stale quota, unknown concurrency or rounded-percent-only
+   usage cannot originate a positive startable-job estimate. Never
+   convert a nominal 9,500-call 5-hour package into '8 workers'.
+4. A credit multiplier is economic advice, not permission to work.
+   Respect server 401/403, 429/cooldown, quota, reviewer-not-author,
+   original lease, no-double-start, host eligibility and root-budget
+   before comparing costs.
+5. Only an observed typed **pre-task** capacity rejection with existing
+   effect-fence proof can permit the incumbent limited fallback. Post-START
+   error, incomplete response and effect-unknown may not be replayed.
+6. BytePlus Personal Pro may not be selected by the generic
+   `capacity_economics_projection.project_quota_preference`; its
+   `byteplus.attended` route is excluded even if a forged positive
+   quota preview advertises many worker slots. Use only a reviewed
+   supported coding-tool consumer and the existing provider realm.
+7. Score candidate models on acceptance probability, reviewer independence,
+   validated complexity/vision skill, measured latency and *real*
+   incremental quota consumption. Unknown metrics remain unknown, never
+   zero cost or unlimited slots.
+
+### Qualification experiment (do not dispatch unattended calls)
+
+Use one operator-attended approved coding tool on the subscribed user's
+device. Capture redacted current plan tier and before/after usage via
+BytePlus management API; run one small coding test with an exact model,
+then a repeatable representative coding task. Record tool identity, model
+alias and served snapshot, wall time, terminal exit, deterministic
+artifact/test acceptance, throttling class and provider quota delta.
+Only with observed permitted use should a conditional 2/4 concurrent
+supported-tool session trial be attempted, with no uncontrolled background
+pool or auto-retry. Stop on provider-policy denial, 401/403, ambiguous
+effects or unexpected separate pay-as-you-go charges.
+
+Benchmark each candidate against the incumbent Z.AI/Alibaba/MiniMax
+candidate within the same *first-lawful* task tier. Use 30+ bounded
+representative coding tasks with frozen source revisions, tests,
+independent reviewer and paired success metrics before assigning new
+default weight. Until then BytePlus is a qualified seat candidate,
+**not** a measured low-cost general-purpose Fabric worker.

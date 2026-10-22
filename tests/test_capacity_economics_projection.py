@@ -117,3 +117,24 @@ def test_one_startable_job_remains_an_advisory_preference_not_a_claim():
     assert result.claim_time_revalidation_required is True
     assert result.selection_is_commitment is False
     assert doc == before
+
+
+@pytest.mark.parametrize(
+    "provider,alias",
+    [("byteplus", "byteplus.attended"), ("xai", "byteplus.attended"),
+     ("byteplus", "fast.engineering")],
+)
+def test_rejects_byteplus_personal_plan_even_if_preview_forces_positive_capacity(provider, alias):
+    # A quota-preview producer can never mint use rights or account-backed
+    # subscription capacity by asserting a non-zero parallelism estimate.
+    tiers = ({"tier_id": "implementation.routine.primary",
+              "model_aliases": ["fast.engineering", "byteplus.attended"]},)
+    doc = preview()
+    doc["options"][0]["provider"] = provider
+    doc["options"][0]["model_alias"] = alias
+    doc["options"][0]["estimated_startable_jobs"] = 25
+    doc["options"][0]["suggested_parallelism"] = 8
+    frozen = copy.deepcopy(doc)
+    with pytest.raises(CapacityEconomicsProjectionError, match="personal BytePlus Coding Plan"):
+        project_quota_preference(tiers, doc)
+    assert doc == frozen
