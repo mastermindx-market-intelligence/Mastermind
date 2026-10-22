@@ -172,3 +172,21 @@ Official Paper documentation consulted on October 22, 2026:
 **Engineering inference, not vendor promise:** A compatible, authorized native clipboard copy can be tested on an entirely disposable pair of Paper files while waiting for a reviewed cross-file MCP tool. First copy tokens into the target scratch file, then copy ONE simple native artboard, then a component/image-rich board, and compare deeply. If fidelity fails, abandon this path; never recreate from HTML/JSX and call it lossless. The source 63-page file remains read-only during this feasibility check.
 
 **Specific adapter PR #1722 compatibility requirement:** treat release publication/installed source SHA/catalog SHA as distinct. The historical 0.5.14 full-catalog digest is not guaranteed to match 0.5.16. A version bump alone is not a proof of drift or compatibility; compare the actual reviewed catalog and accepted schema under the existing bridge and no-replay laws.
+
+
+## 9. Tracked-source link-impact scanner and safe report output
+
+The separate scripts/paper_link_reference_audit.py provides a reproducible local tracked-file census for **specific existing Git worktrees**, using the known original file ID and the 63-page inventory. Example, after replacing the sample paths with actual authorized Git roots:
+
+    python3 scripts/paper_link_reference_audit.py \
+      --inventory docs/paper_migrations/MASTERMIND_PAGES_INVENTORY_2026-10-22.json \
+      --root mastermind=/ABSOLUTE/PATH/TO/Mastermind \
+      --root macro=/ABSOLUTE/PATH/TO/macro \
+      --root terminal=/ABSOLUTE/PATH/TO/mastermind-terminal \
+      --out /tmp/mastermind-paper-link-impact.json
+
+It uses local git ls-files (tracked files only) and bounded UTF-8 text reads, refuses a non-repository root and symlinks, reports skipped oversized/binary files instead of silently claiming completeness, identifies known vs historical/unknown page IDs, and never edits source links. Treat source-file-ID-only references as requiring manual scope review. Preserve original evidence links when they are historical and rewrite current build links only through the owning source branch.
+
+Both offline CLIs now create report files **exclusively** (refuse existing outputs rather than overwriting). The partition planner explicitly refuses to overwrite its input inventory; the link scanner refuses any report output path **inside one of the scanned Git roots**. These guards and synthetic temporary-Git fixtures have **16 locally passing tests** (the added 2 tests verify no source-inventory or tracked worktree corruption). This is *not* a hosted CI or production acceptance claim.
+
+Known source archive refs are not automatically authorized destination mappings. After adapter/native copy qualification, re-run the live exact-file source read, generate a fresh mapping, then run this scanner against actual current worktrees. Resolve skipped files and references in historical branches as needed before marking link cutover complete.
