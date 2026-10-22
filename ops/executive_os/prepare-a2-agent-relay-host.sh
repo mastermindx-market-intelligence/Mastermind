@@ -12,8 +12,8 @@ SYSTEM_ROOT="/Library/Application Support/MastermindExecutive"
 CONFIG_ROOT="$SYSTEM_ROOT/config"
 RUNTIME_ROOT="/var/db/mastermind-agent-relay"
 # This shared relay directory is the live Unix-socket prerequisite.
-# The unprivileged Agent Relay cannot create it beneath root-owned /var/run.
-SOCKET_ROOT="/var/run/mastermind-agent-relay"
+# Persistent parent survives /var/run cleanup; UID457 cannot create it under root-owned /var/db.
+SOCKET_ROOT="/var/db/mastermind-agent-relay/socket"
 RELAY_HOME="$RUNTIME_ROOT/home"
 TOKEN_PATH="$CONFIG_ROOT/agent-relay.token"
 CONFIG_PATH="$CONFIG_ROOT/agent-relay.json"
@@ -30,9 +30,10 @@ EXEC_UID="450"
 EXEC_GID="450"
 
 RELEASE_ROOT=""
+SOCKET_ONLY_UPGRADE=false
 
 usage() {
-  /bin/echo "usage: $0 --release-root /Library/Application\\ Support/MastermindExecutive/releases/<40hex>" >&2
+  /bin/echo "usage: $0 --release-root /Library/Application\\ Support/MastermindExecutive/releases/<40hex> [--ensure-enrolled-socket-parent]" >&2
   exit 64
 }
 
@@ -46,7 +47,14 @@ if [ "$(/usr/bin/uname -s)" != "Darwin" ]; then
   exit 69
 fi
 
-[ "$#" -eq 2 ] || usage
+case "$#" in
+  2) ;;
+  3)
+    [ "$3" = "--ensure-enrolled-socket-parent" ] || usage
+    SOCKET_ONLY_UPGRADE=true
+    ;;
+  *) usage ;;
+esac
 [ "$1" = "--release-root" ] || usage
 RELEASE_ROOT="$2"
 case "$RELEASE_ROOT" in
@@ -190,6 +198,8 @@ ensure_directory() {
     [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "$uid:$gid:$mode" ] \
       || refuse "created prerequisite directory differs from the reviewed identity"
   fi
+  # Recheck the newly created inode including native ACL state.
+  preflight_directory "$path" "$uid" "$gid" "$mode"
 }
 
 preflight_directory() {
@@ -198,6 +208,9 @@ preflight_directory() {
     [ -d "$path" ] && [ ! -L "$path" ] \
       && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$path")" = "$uid:$gid:$mode" ] \
       || refuse "existing prerequisite directory differs from the reviewed identity"
+    case "$(/usr/bin/stat -f '%Sp' "$path")" in
+      *+) refuse "existing prerequisite directory has a filesystem ACL" ;;
+    esac
   fi
 }
 
@@ -207,6 +220,46 @@ assert_relay_unloaded() {
   [ "$status" -eq 113 ] || refuse "Agent Relay must be proven unloaded before enrollment"
 }
 
+
+# In-place upgrade for an already-enrolled host. Only the one fixed durable
+# socket directory may be created. No disable, account, token or service effect.
+if [ "$SOCKET_ONLY_UPGRADE" = true ]; then
+  assert_exec_identity
+  [ "$(read_attribute "/Groups/$RELAY_GROUP" PrimaryGroupID)" = "$RELAY_GID" ] \
+    && [ "$(read_attribute "/Groups/$RELAY_GROUP" GroupMembership)" = "$EXEC_USER" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" UniqueID)" = "$RELAY_UID" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" PrimaryGroupID)" = "$RELAY_GID" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" NFSHomeDirectory)" = "$RELAY_HOME" ] \
+    && [ "$(read_attribute "/Users/$RELAY_USER" UserShell)" = "/usr/bin/false" ] \
+    || refuse "enrolled principal identity differs from the reviewed host"
+  for contract in "$SYSTEM_ROOT:0:0:755" "$CONFIG_ROOT:0:0:755" \
+                  "$RUNTIME_ROOT:0:0:711" "$RELAY_HOME:$RELAY_UID:$RELAY_GID:700"; do
+    target="${contract%%:*}"
+    expected="${contract#*:}"
+    [ -d "$target" ] && [ ! -L "$target" ] \
+      && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$target")" = "$expected" ] \
+      || refuse "enrolled directory differs from reviewed identity"
+    case "$(/usr/bin/stat -f '%Sp' "$target")" in
+      *+) refuse "enrolled directory has a filesystem ACL" ;;
+    esac
+  done
+  for contract in "$TOKEN_PATH:$RELAY_UID:$RELAY_GID:400" \
+                  "$CONFIG_PATH:$RELAY_UID:$RELAY_GID:400" \
+                  "$PLIST_PATH:0:0:644"; do
+    target="${contract%%:*}"
+    expected="${contract#*:}"
+    [ -f "$target" ] && [ ! -L "$target" ] \
+      && [ "$(/usr/bin/stat -f '%u:%g:%Lp' "$target")" = "$expected" ] \
+      || refuse "enrolled file metadata differs from reviewed identity"
+    case "$(/usr/bin/stat -f '%Sp' "$target")" in
+      *+) refuse "enrolled file has a filesystem ACL" ;;
+    esac
+  done
+  preflight_directory "$SOCKET_ROOT" "$RELAY_UID" "$RELAY_GID" 710
+  ensure_directory "$SOCKET_ROOT" "$RELAY_USER" "$RELAY_GROUP" "$RELAY_UID" "$RELAY_GID" 710
+  /bin/echo "A2 persistent socket directory ready; no service or enrollment effect"
+  exit 0
+fi
 
 assert_exec_identity
 for reserved in "$TOKEN_PATH" "$CONFIG_PATH" "$PLIST_PATH"; do

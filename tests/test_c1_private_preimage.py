@@ -917,7 +917,7 @@ class InstalledFilesystem:
                     "-B",
                     f"{release_root}/scripts/slack_agent_dialogue_service.py",
                     "--socket-path",
-                    "/var/run/mastermind-agent-relay/agent-relay.sock",
+                    "/var/db/mastermind-agent-relay/socket/agent-relay.sock",
                     "--token-file",
                     f"{module.SYSTEM_ROOT}/config/agent-relay.token",
                     "--workspace-id",
