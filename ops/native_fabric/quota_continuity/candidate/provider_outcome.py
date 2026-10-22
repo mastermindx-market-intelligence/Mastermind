@@ -162,13 +162,32 @@ def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
     errors = [m.get("error") for m in messages if m.get("type") == "assistant"
               and isinstance(m.get("error"), str)]
     kind = STOP_REASONS.get(subtype) or TERMINAL_REASONS.get(terminal_reason)
-    denied = bool(fields.get("permission_denials"))
-    if denied:
+    denials = fields.get("permission_denials", [])
+    denied = bool(denials)
+    # Claude reports the history of denied tool requests even when the CLI
+    # subsequently completes successfully. That history is useful for parent
+    # review, but is not a terminal permission failure. Require an unambiguous
+    # complete success before treating it as historical; a missing/failing CLI,
+    # real terminal error, malformed denial list or ambiguous stream keeps the
+    # existing fail-closed behavior. This grants neither acceptance nor replay.
+    denial_history_only = (
+        denied and isinstance(denials, list)
+        and all(isinstance(item, dict) for item in denials)
+        and complete and len(finals) == 1 and final is messages[-1]
+        and type(command_rc) is int and command_rc == 0
+        and subtype == "success" and fields.get("is_error") is False
+        and fields.get("terminal_reason") in (None, "completed")
+        and fields.get("api_error_status") is None
+        and not fields.get("errors") and not errors
+    )
+    permission_failure = denied and not denial_history_only
+    if permission_failure:
         kind = "permission"
     elif kind is None:
         kind = next((ERRORS[e] for e in reversed(errors) if e in ERRORS), None)
     failed = (command_rc != 0 or fields.get("is_error") is True
-              or subtype in STOP_REASONS or kind is not None or bool(errors) or denied)
+              or subtype in STOP_REASONS or kind is not None or bool(errors)
+              or permission_failure)
     code = fields.get("api_error_status")
     if type(code) is not int or not 100 <= code <= 599:
         code = None
@@ -218,6 +237,11 @@ def parse_claude(raw: bytes, command_rc: int) -> tuple[str, dict, dict | None]:
     return display, {
         "kind": kind, "command_rc": command_rc, "initial_rejection": initial_rejection,
         "complete_event_capture": complete, "api_status": code,
+        "cli_command_rc": command_rc,
+        "cli_subtype": subtype, "cli_terminal_reason": terminal_reason,
+        "permission_denial_count": len(denials) if isinstance(denials, list) else None,
+        "permission_denials_role": ("historical_nonterminal" if denial_history_only
+                                   else "failure_evidence" if denied else "none"),
         "reset_at": reset, "reset_source": "provider_event" if reset else None,
         "session_id": sid, "capture_sha256": digest(raw), "capture_bytes": len(raw),
         "stdout_sha256": digest(display.encode()),

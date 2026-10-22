@@ -438,9 +438,9 @@
       "source": "source/pool_status.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 17966,
+      "bytes": 19425,
       "installed_preimage_sha256": null,
-      "sha256": "1dd42bd43d5581cebaccb96c460174b02e32d93c758132b1037cc1619a27a07b",
+      "sha256": "a2b7bd5cf67078cba19095ce53d175af6209c9365cb50468bc06f199023d8d17",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
