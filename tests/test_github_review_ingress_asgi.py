@@ -175,3 +175,27 @@ def test_header_duplicates_refuse_before_credential():
     asyncio.run(app(scope, receive, send))
     assert sent[0]["status"] == 400
     assert secrets.calls == pulls.calls == [] and fabric.calls == 0
+
+def test_never_ending_body_is_bounded_before_secret(monkeypatch):
+    from integrations import github_review_ingress_asgi as receiver_module
+    monkeypatch.setattr(receiver_module, "BODY_DEADLINE_SECONDS", 0.01)
+    app, secrets, pulls, fabric = make()
+    messages = []
+    async def receive():
+        await asyncio.sleep(0.1)
+        return {"type": "http.request", "body": b"a", "more_body": True}
+    async def send(message):
+        messages.append(message)
+    scope = {
+        "type": "http", "method": "POST", "path": app._settings.delivery_path,
+        "query_string": b"", "scheme": "https",
+        "headers": [(b"host", b"review.example.com"),
+                    (b"content-type", b"application/json"),
+                    (b"x-github-event", b"pull_request"),
+                    (b"x-github-delivery", DELIVERY.encode()),
+                    (b"x-hub-signature-256", sign_webhook_body(secret=SECRET, body=delivery()).encode())],
+    }
+    asyncio.run(app(scope, receive, send))
+    assert messages[0]["status"] == 408
+    assert json.loads(messages[1]["body"])["status"] == "BODY_TIMEOUT"
+    assert secrets.calls == pulls.calls == [] and fabric.calls == 0

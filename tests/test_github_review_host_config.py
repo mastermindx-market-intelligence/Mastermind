@@ -70,6 +70,15 @@ def test_invalid_configuration_refused(changes):
         _valid(**changes)
 
 
+def test_host_policy_requires_fresh_permission_for_every_channel():
+    policy = _valid().review_policy()
+    assert policy.require_current_permission_for_all_channels is True
+    assert policy.allow_static_actor_authority is False
+    assert policy.allow_explicit_rerun is False
+    assert policy.minimum_permission == "write"
+    assert _valid(minimum_actor_permission="admin").review_policy().minimum_permission == "admin"
+
+
 def test_signed_pr_payload_number_must_be_exact():
     payload = {"pull_request": {"number": 1741}}
     assert closed_pull_number(payload, event="pull_request") == 1741

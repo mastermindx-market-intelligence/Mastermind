@@ -59,6 +59,7 @@ SCHEMA = "mastermind.github_review_host_config.v1"
 #: posture used by hermetic tests and by an operator who fronts the receiver
 #: with a private listener.
 LOOPBACK_HOST = "127.0.0.1"
+EXACT_REVIEW_DELIVERY_PATH = "/internal/github/review-intent/delivery"
 
 #: GitHub's exact PR permission vocabulary.  The receiver's closed
 #: current-permission gate clears ``push`` and ``admin`` only.
@@ -152,9 +153,9 @@ class ReviewHostSettings:
         if (
             not isinstance(self.delivery_path, str)
             or _PATH_RE.fullmatch(self.delivery_path) is None
-            or self.delivery_path.endswith("/")
+            or self.delivery_path != EXACT_REVIEW_DELIVERY_PATH
         ):
-            raise ReviewHostConfigError("delivery_path must be one exact absolute path")
+            raise ReviewHostConfigError("delivery_path must be the fixed GitHub review ingress path")
         if (
             not isinstance(self.max_body_bytes, int)
             or isinstance(self.max_body_bytes, bool)
@@ -244,6 +245,12 @@ class ReviewHostSettings:
                 intent_label=self.intent_label,
                 intent_command=self.intent_command,
                 allowed_associations=frozenset(self.allowed_associations),
+                minimum_permission=(
+                    "admin" if self.minimum_actor_permission == "admin" else "write"
+                ),
+                require_current_permission_for_all_channels=True,
+                allow_static_actor_authority=False,
+                allow_explicit_rerun=False,
             )
         except ReviewIntentError as exc:
             raise ReviewHostConfigError(f"host settings do not project a policy: {exc}") from exc

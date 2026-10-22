@@ -123,6 +123,7 @@ class ExecutiveReviewJobAdmission:
                 # This Job is the review itself, not a builder awaiting review.
                 review_required=False,
                 orchestration_role=None,
+                _principal_commit_guard=self._authorize,
             )
             return job.job_id
         except StateConflict:

@@ -30,7 +30,8 @@ from control_plane.github_review_host_config import (
 
 
 MAX_HEADER_BYTES = 8192
-READ_DEADLINE_SECONDS = 8.0
+READ_DEADLINE_SECONDS = 6.0
+BODY_DEADLINE_SECONDS = 2.0
 _SCHEMA = "mastermind.github_review_delivery_http.v1"
 
 
@@ -104,7 +105,9 @@ class GitHubReviewReceiver:
         if not settings.enabled or not settings.publication_enabled:
             await self._reply(send, 404, "RECEIVER_DISABLED")
             return
-        if scope.get("path") != settings.delivery_path or scope.get("query_string", b""):
+        if (scope.get("path") != settings.delivery_path
+                or scope.get("raw_path", settings.delivery_path.encode("ascii")) != settings.delivery_path.encode("ascii")
+                or scope.get("query_string", b"")):
             await self._reply(send, 404, "PATH_NOT_FOUND")
             return
         if scope.get("method") != "POST":
@@ -141,8 +144,13 @@ class GitHubReviewReceiver:
                 return
         body = bytearray()
         try:
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + BODY_DEADLINE_SECONDS
             while True:
-                message = await receive()
+                remaining = deadline - loop.time()
+                if remaining <= 0:
+                    raise asyncio.TimeoutError()
+                message = await asyncio.wait_for(receive(), timeout=remaining)
                 if message.get("type") == "http.disconnect":
                     return
                 if message.get("type") != "http.request":
@@ -155,6 +163,9 @@ class GitHubReviewReceiver:
                 body.extend(chunk)
                 if not message.get("more_body", False):
                     break
+        except asyncio.TimeoutError:
+            await self._reply(send, 408, "BODY_TIMEOUT")
+            return
         except Exception:
             await self._reply(send, 400, "BODY_INVALID")
             return

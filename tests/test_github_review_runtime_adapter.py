@@ -73,3 +73,18 @@ def test_refusing_admission_guard_has_no_effect(tmp_path):
     with pytest.raises(ReviewAdmissionUnavailable, match="REFUSED"):
         adapter.admit_review_intent(decision=decision(), objective="Review exact PR")
     assert runtime.jobs.list_jobs() == []
+
+def test_commit_rechecks_external_authority_in_transaction(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    checks = []
+    def changing_guard():
+        checks.append(True)
+        if len(checks) > 1:
+            raise PermissionError("retracted before commit")
+    adapter = ExecutiveReviewJobAdmission(
+        runtime=runtime, admission_guard=changing_guard
+    )
+    with pytest.raises(ReviewAdmissionUnavailable, match="REFUSED"):
+        adapter.admit_review_intent(decision=decision(), objective="Review exact PR")
+    assert len(checks) >= 2
+    assert runtime.jobs.list_jobs() == []
