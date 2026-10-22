@@ -74,11 +74,17 @@ def test_receipt_reconciles_original_queued_decision_for_all_brains(
     assert result["ok"] is True
     assert result["receipt_acknowledged"] is True
     assert result["decision_reconciliation"]["reconciled"] is True
-    rows = [
+    from bot import decision_rows
+    raw_rows = [
         json.loads(line)
         for line in (registry.data_dir(portfolio_id) / "decisions.jsonl").read_text().splitlines()
         if line
     ]
+    # raw truth: append-only — settlement APPENDS the executed row superseding the queued row
+    assert len(raw_rows) == 2
+    assert raw_rows[1]["supersede_mode"] == "revise"
+    assert raw_rows[1]["supersedes"] == [raw_rows[0]["row_id"]]
+    rows = decision_rows.effective_rows(raw_rows)
     assert len(rows) == 1
     row = rows[0]
     assert row["asof"] == row["accepted_asof"] == "2026-08-12"

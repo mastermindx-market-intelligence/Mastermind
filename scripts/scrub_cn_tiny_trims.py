@@ -79,17 +79,24 @@ def main() -> None:
     print(f"fills: {len(fills)} -> {len(kept)}")
 
     # ---- decisions.jsonl: drop the two sells from `executed` ----
+    # The ledger is append-only: each changed EFFECTIVE row gets a revise-mode row appended
+    # naming the row it corrects; superseded history keeps its original bytes.
+    from bot import decision_rows
     drop_tickers = {tk for tk, _, _ in TRIMS}
-    decisions = _read_jsonl(decisions_p)
+    decisions = decision_rows.read_effective_rows(decisions_p)
     n_removed = 0
     for d in decisions:
         ex = d.get("executed")
         if not ex:
             continue
         new_ex = [e for e in ex if not (e.get("side") == "sell" and e.get("ticker") in drop_tickers)]
-        n_removed += len(ex) - len(new_ex)
-        d["executed"] = new_ex
-    decisions_p.write_text("".join(json.dumps(d, ensure_ascii=False, default=str) + "\n" for d in decisions))
+        removed = len(ex) - len(new_ex)
+        if not removed:
+            continue
+        n_removed += removed
+        scrubbed = dict(d)
+        scrubbed["executed"] = new_ex
+        decision_rows.append_decision_row(decisions_p, scrubbed, d["asof"], revises=d)
     print(f"decisions: removed {n_removed} executed sell record(s)")
 
     # ---- latest.json: recompute marks/cash/gross/NAV from the fixed account ----

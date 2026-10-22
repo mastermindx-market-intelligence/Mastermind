@@ -98,25 +98,28 @@ def _scrub_ledger(ledger_path: Path, targets: set[str]) -> int:
 
 
 def _scrub_decisions(dec_path: Path, targets: set[str]) -> int:
+    """Scrub target tickers from each EFFECTIVE decision row; the ledger is append-only.
+
+    Each changed row gets a revise-mode row appended naming the row it corrects; superseded
+    history keeps its original bytes by design. Returns the number of dropped
+    holdings/executed entries, exactly as before.
+    """
+    from bot import decision_rows
     if not dec_path.exists():
         return 0
-    out, touched = [], 0
-    for line in dec_path.read_text().splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        try:
-            rec = json.loads(line)
-        except Exception:
-            out.append(line)
-            continue
+    touched = 0
+    for row in decision_rows.read_effective_rows(dec_path):
+        rec = dict(row)
+        changed = False
         for arr in ("holdings", "executed"):
             if isinstance(rec.get(arr), list):
                 before = len(rec[arr])
                 rec[arr] = [h for h in rec[arr] if (h.get("ticker") or "").upper() not in targets]
-                touched += before - len(rec[arr])
-        out.append(json.dumps(rec, default=str))
-    dec_path.write_text(("\n".join(out) + "\n") if out else "")
+                dropped = before - len(rec[arr])
+                touched += dropped
+                changed = changed or dropped > 0
+        if changed:
+            decision_rows.append_decision_row(dec_path, rec, row["asof"], revises=row)
     return touched
 
 

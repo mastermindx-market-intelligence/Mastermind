@@ -910,13 +910,12 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         **decision_submission.audit_fields(submission),
         **lesson_links,
     }
-    # idempotent per date: keep exactly one entry per asof (latest SUBSTANTIVE run wins — a
-    # failed re-run must not erase a good book; see bot/decision_rows)
+    # idempotent per date in the EFFECTIVE view: the appended row supersedes this date's earlier
+    # rows (latest SUBSTANTIVE run wins — a failed re-run writes nothing; see bot/decision_rows).
+    # The ledger file itself is append-only: prior bytes are never rewritten.
     from portfolio import paper_account
     def _persist() -> None:
-        existing = decision_rows.read_rows(p)
-        rows = decision_rows.replace_for_asof(existing, entry, asof)
-        decision_rows.write_rows(p, rows)
+        decision_rows.append_decision_row(p, entry, asof, strict=True)
     if _locked:
         _persist()
     else:
@@ -926,6 +925,7 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
 
 def load_decisions(limit: int = 60) -> list[dict]:
     """The daily decision log, NEWEST first. Backs /api/decisions."""
+    from bot import decision_rows
     from portfolio import registry
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     rows: list[dict] = []
@@ -938,6 +938,7 @@ def load_decisions(limit: int = 60) -> list[dict]:
                 rows.append(json.loads(line))
             except Exception:
                 pass
+    rows = decision_rows.effective_rows(rows)
     rows.sort(key=lambda r: (r.get("asof") or "", r.get("ts") or ""), reverse=True)
     return rows[:limit]
 

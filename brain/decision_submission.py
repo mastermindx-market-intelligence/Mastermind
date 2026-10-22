@@ -228,8 +228,13 @@ def _latest_holdings(book: str) -> dict[str, dict]:
             .read_text(encoding="utf-8")
             .splitlines()
         )
-        for line in reversed(lines):
-            record = json.loads(line)
+        # Append-only ledger: the prior-target scan runs over the effective view, so a
+        # superseded history row can never win. A malformed line raises into the same handler.
+        from bot import decision_rows as _decision_rows
+        records = _decision_rows.effective_rows(
+            [json.loads(line) for line in lines]
+        )
+        for record in reversed(records):
             if (
                 not isinstance(record, dict)
                 or record.get("decision_effective") is not True

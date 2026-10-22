@@ -16,6 +16,16 @@ The rule here: **a barren row may never supersede a substantive one for the same
 failed re-run is a non-event for the ledger — the failure is already recorded in the run log
 (``brain.runlog`` / ``run_events.jsonl``), which is where errors belong. A substantive re-run
 still supersedes freely, so a genuinely better book replaces an earlier one as before.
+
+2026-10-22, all books: the ledger became **append-only**. A write never rewrites, reorders or
+deletes an existing line — the file bytes only ever grow. A write that would have replaced a
+row instead APPENDS a new row whose ``supersedes`` field lists the ``row_id`` identities of the
+rows it replaces (``supersede_mode`` ``"asof"`` for the one-row-per-date idempotency above,
+``"revise"`` for an in-place correction such as a settlement transition or an operator scrub).
+Every reader collapses the file to the effective view through ``effective_rows`` /
+``read_effective_rows``, which reproduces exactly the historical one-row-per-asof file, and
+orders a ``"revise"`` chain at the slot of the row it corrects. The 2026-07-24 barren-row rule
+still holds, and is now even safer: a barren re-run writes NOTHING at all.
 """
 from __future__ import annotations
 
@@ -23,6 +33,7 @@ import hashlib
 import json
 import math
 import os
+import re
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -38,6 +49,11 @@ _LESSON_LINK_KEYS = {
     "lesson_application_ids",
     "lesson_ids_cited",
 }
+
+# Append-only supersession bookkeeping, appended at the END of every planned row's key order.
+_SUPERSESSION_KEYS = ("supersedes", "supersede_mode", "row_id")
+
+_ROW_ID_RE = re.compile(r"row\.v1\.[0-9a-f]{24}")
 
 
 class DecisionSettlementConflict(RuntimeError):
@@ -128,6 +144,117 @@ def accepted_identity_fields(
     }
 
 
+# --------------------------------------------------------------------------
+# append-only ledger: row identity + the effective view
+# --------------------------------------------------------------------------
+
+def strip_supersession(row: Any) -> Any:
+    """Copy of ``row`` without the three supersession keys (non-dicts returned unchanged)."""
+    if not isinstance(row, dict):
+        return row
+    return {key: value for key, value in row.items() if key not in _SUPERSESSION_KEYS}
+
+
+def row_identity(row: Any) -> str:
+    """Stable identity of one ledger row: its stored ``row_id``, else a legacy row's canonical
+    hash. Identical payloads share one identity, so a pointer supersedes every byte-equal copy."""
+    if isinstance(row, dict):
+        stored = row.get("row_id")
+        if isinstance(stored, str) and _ROW_ID_RE.fullmatch(stored):
+            return stored
+    return "row.v1." + _canonical_sha256(row)[:24]
+
+
+def _build_row(entry: dict, supersedes: list[str], mode: str) -> dict:
+    """``entry`` (insertion order kept) + ``supersedes``/``supersede_mode``/``row_id``."""
+    row = strip_supersession(entry)
+    row["supersedes"] = list(supersedes)
+    row["supersede_mode"] = mode
+    # hashed BEFORE row_id exists, so the identity covers the row without row_id itself
+    row["row_id"] = "row.v1." + _canonical_sha256(row)[:24]
+    return row
+
+
+def _valid_supersedes(row: dict) -> list[str] | None:
+    """``row["supersedes"]`` when it is a non-empty list of str, else None (pointers ignored)."""
+    raw = row.get("supersedes")
+    if not isinstance(raw, list) or not raw or not all(isinstance(x, str) for x in raw):
+        return None
+    return raw
+
+
+def effective_rows(rows: list) -> list:
+    """The effective view of an append-only decision ledger. Pure; never mutates.
+
+    Non-dict items pass through at their position — never superseded, never superseding. A dict
+    row ``R`` supersedes every EARLIER dict row whose identity is listed in ``R["supersedes"]``
+    AND whose ``asof`` equals R's; unknown, forward or cross-asof pointers are ignored, and a
+    ``supersedes`` that is not a list of str is ignored. Ordering reproduces the historical
+    rewritten-in-place file: each surviving row sorts by the slot of its own index, except a
+    ``supersede_mode == "revise"`` row, which takes the slot of the row it supersedes (resolved
+    through the revision chain to the corrected row's original position).
+
+    Fast path: with no row carrying a non-empty ``supersedes`` this returns ``list(rows)``
+    without hashing anything; otherwise only legacy rows whose ``asof`` occurs among superseding
+    rows are hashed.
+    """
+    pointers: list[tuple[int, list[str], dict]] = []
+    for index, row in enumerate(rows):
+        if isinstance(row, dict):
+            supersedes = _valid_supersedes(row)
+            if supersedes:
+                pointers.append((index, supersedes, row))
+    if not pointers:
+        return list(rows)
+
+    superseding_asofs = {str(row.get("asof")) for _, _, row in pointers}
+    identities: dict[int, str] = {}
+    for index, row in enumerate(rows):
+        if not isinstance(row, dict):
+            continue
+        stored = row.get("row_id")
+        if isinstance(stored, str) and _ROW_ID_RE.fullmatch(stored):
+            identities[index] = stored
+        elif str(row.get("asof")) in superseding_asofs:
+            identities[index] = row_identity(row)
+    by_identity: dict[str, list[int]] = {}
+    for index, identity in identities.items():
+        by_identity.setdefault(identity, []).append(index)
+
+    superseded: set[int] = set()
+    revise_target: dict[int, int] = {}
+    for index, supersedes, row in pointers:
+        wanted = set(supersedes)
+        nearest: int | None = None
+        for identity in wanted:
+            for candidate in by_identity.get(identity, ()):
+                if candidate >= index:
+                    continue
+                if rows[candidate].get("asof") != row.get("asof"):
+                    continue
+                superseded.add(candidate)
+                if nearest is None or candidate > nearest:
+                    nearest = candidate
+        if nearest is not None:
+            revise_target[index] = nearest
+
+    def _slot(index: int) -> int:
+        seen: set[int] = set()
+        current = index
+        while (
+            current not in seen
+            and current in revise_target
+            and rows[current].get("supersede_mode") == "revise"
+        ):
+            seen.add(current)
+            current = revise_target[current]
+        return current
+
+    surviving = [index for index in range(len(rows)) if index not in superseded]
+    surviving.sort(key=lambda index: (_slot(index), index))
+    return [rows[index] for index in surviving]
+
+
 def validate_queued_decision_snapshot(
     portfolio_id: str,
     decision_snapshot: dict | None,
@@ -159,7 +286,7 @@ def validate_queued_decision_snapshot(
     path = registry.data_dir(portfolio_id) / "decisions.jsonl"
     if not path.exists():
         raise DecisionSettlementConflict("required queued decision ledger is missing")
-    rows = read_rows(path)
+    rows = effective_rows(read_rows(path))
     exact = [
         row
         for row in rows
@@ -230,11 +357,8 @@ def _row_target_sha256(row: dict) -> str:
     return str(target_sha256(target))
 
 
-def _atomic_write_rows(path: Path, rows: list[dict]) -> None:
+def _atomic_write_bytes(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    payload = (
-        "\n".join(json.dumps(row, default=str, ensure_ascii=False) for row in rows) + "\n"
-    ).encode("utf-8")
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as handle:
@@ -255,6 +379,13 @@ def _atomic_write_rows(path: Path, rows: list[dict]) -> None:
             tmp.unlink()
         except FileNotFoundError:
             pass
+
+
+def _atomic_write_rows(path: Path, rows: list[dict]) -> None:
+    payload = (
+        "\n".join(json.dumps(row, default=str, ensure_ascii=False) for row in rows) + "\n"
+    ).encode("utf-8")
+    _atomic_write_bytes(path, payload)
 
 
 def is_substantive(row: Any) -> bool:
@@ -284,19 +415,156 @@ def is_substantive(row: Any) -> bool:
     return bool(row.get("holdings")) or bool(row.get("summary"))
 
 
-def replace_for_asof(existing: list[dict], entry: dict, asof: str) -> list[dict]:
-    """The rows to persist after ``entry`` is recorded for ``asof`` (idempotent per date).
+def plan_decision_row(
+    existing: list,
+    entry: dict,
+    asof: str,
+    *,
+    revises: dict | None = None,
+) -> dict | None:
+    """The row a write appends — or None when nothing is written. Pure; touches no file.
 
-    Rows for other dates are preserved in order. For ``asof`` itself: normally ``entry``
-    supersedes whatever was there; but when ``entry`` is barren and something substantive
-    already exists for that date, the existing row(s) are KEPT and ``entry`` is dropped —
-    a failed re-run cannot destroy a good book.
+    asof mode (``revises is None``) reproduces the historical per-date idempotency: the new row
+    supersedes every effective row for ``asof`` — except that a barren entry never supersedes a
+    substantive one (the 2026-07-24 rule: NOTHING is written), and an identical re-write is a
+    no-op. revise mode corrects exactly one effective row: ``revises`` must be a dict present in
+    the effective view (by identity) with ``revises.get("asof") == asof``, else ``ValueError``;
+    an unchanged correction writes nothing.
     """
-    kept = [r for r in existing if r.get("asof") != asof]
-    same_day = [r for r in existing if r.get("asof") == asof]
-    if same_day and not is_substantive(entry) and any(is_substantive(r) for r in same_day):
-        return kept + same_day
-    return kept + [entry]
+    if entry.get("asof") != asof:
+        raise ValueError("entry asof does not match the write asof")
+    effective = effective_rows(existing)
+    if revises is None:
+        same_day = [r for r in effective if isinstance(r, dict) and r.get("asof") == asof]
+        if same_day and not is_substantive(entry) and any(is_substantive(r) for r in same_day):
+            return None
+        if len(same_day) == 1 and strip_supersession(same_day[0]) == strip_supersession(entry):
+            return None
+        supersedes: list[str] = []
+        for row in same_day:
+            identity = row_identity(row)
+            if identity not in supersedes:
+                supersedes.append(identity)
+        return _build_row(entry, supersedes, "asof")
+    if not isinstance(revises, dict) or revises.get("asof") != asof or not any(
+        isinstance(row, dict) and row_identity(row) == row_identity(revises)
+        for row in effective
+    ):
+        raise ValueError("revises must name exactly one effective row for this asof")
+    if strip_supersession(entry) == strip_supersession(revises):
+        return None
+    return _build_row(entry, [row_identity(revises)], "revise")
+
+
+def replace_for_asof(existing: list[dict], entry: dict, asof: str) -> list[dict]:
+    """APPEND-ONLY law: the ledger list after ``entry`` is recorded for ``asof``.
+
+    The result is ``existing`` with AT MOST ONE new row appended — prior rows are never
+    rewritten, reordered or deleted. The appended row's ``supersedes`` field names the
+    identities it replaces, and ``effective_rows`` collapses the file back to the historical
+    one-row-per-asof view. For ``asof`` itself: normally ``entry`` supersedes whatever was
+    there; but when ``entry`` is barren and something substantive already exists for that
+    date, NOTHING is appended — a failed re-run cannot destroy a good book.
+    """
+    planned = plan_decision_row(existing, entry, asof)
+    if planned is None:
+        return list(existing)
+    return list(existing) + [planned]
+
+
+def _parse_strict_rows(raw: bytes) -> list[dict]:
+    """Parse exactly like ``read_rows`` (same errors), from already-read bytes."""
+    rows: list[dict] = []
+    for line in raw.decode("utf-8").splitlines():
+        if not line.strip():
+            continue
+        row = json.loads(line)
+        if not isinstance(row, dict):
+            raise ValueError("decision ledger row must be an object")
+        rows.append(row)
+    return rows
+
+
+def _parse_lenient_rows(raw: bytes) -> list[dict]:
+    """Skip blank, undecodable and non-dict lines instead of raising."""
+    rows: list[dict] = []
+    for raw_line in raw.splitlines():
+        try:
+            line = raw_line.decode("utf-8")
+        except UnicodeDecodeError:
+            continue
+        if not line.strip():
+            continue
+        try:
+            row = json.loads(line)
+        except Exception:
+            continue
+        if isinstance(row, dict):
+            rows.append(row)
+    return rows
+
+
+def read_effective_rows(
+    path: Path,
+    *,
+    strict: bool = False,
+    tail: int | None = None,
+) -> list[dict]:
+    """Effective view of the ledger at ``path``.
+
+    ``strict=True`` parses exactly like ``read_rows`` (same errors). Lenient mode returns ``[]``
+    for a missing/unreadable file and skips blank, undecodable and non-dict lines. With
+    ``tail=N`` the last N effective rows are returned — the whole file is always read first.
+    """
+    if strict:
+        rows: list = read_rows(path)
+    else:
+        try:
+            raw = path.read_bytes()
+        except OSError:
+            return []
+        rows = _parse_lenient_rows(raw)
+    effective = effective_rows(rows)
+    if tail is not None:
+        count = int(tail)
+        if count <= 0:
+            return []
+        return effective[-count:]
+    return effective
+
+
+def append_decision_row(
+    path: Path,
+    entry: dict,
+    asof: str,
+    *,
+    revises: dict | None = None,
+    strict: bool = False,
+) -> dict | None:
+    """THE one writer: plan the row against the current bytes, then APPEND it.
+
+    Never rewrites existing bytes: the payload is ``old_bytes + [one \n if needed] + newline``.
+    Reads the file bytes ONCE, parses them (strict or lenient), plans, and writes atomically
+    (tmp + fsync + os.replace + directory fsync), asserting the append-only invariant before
+    the replace. Returns the appended row, or None when nothing was written. No locking here —
+    the caller keeps exactly the lock it holds today.
+    """
+    try:
+        old_bytes = path.read_bytes()
+    except FileNotFoundError:
+        old_bytes = b""
+    rows = _parse_strict_rows(old_bytes) if strict else _parse_lenient_rows(old_bytes)
+    planned = plan_decision_row(rows, entry, asof, revises=revises)
+    if planned is None:
+        return None
+    separator = b"" if not old_bytes or old_bytes.endswith(b"\n") else b"\n"
+    payload = (
+        old_bytes + separator
+        + json.dumps(planned, default=str, ensure_ascii=False).encode("utf-8") + b"\n"
+    )
+    assert payload.startswith(old_bytes), "append-only ledger invariant violated"
+    _atomic_write_bytes(path, payload)
+    return planned
 
 
 def reconcile_settlement(
@@ -359,7 +627,7 @@ def reconcile_settlement(
             "transaction_id": transaction_id,
         }
     rows: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in path.read_bytes().decode("utf-8").splitlines():
         if not line.strip():
             continue
         try:
@@ -369,10 +637,13 @@ def reconcile_settlement(
         if not isinstance(row, dict):
             raise DecisionSettlementConflict("queued decision ledger contains a non-object row")
         rows.append(row)
+    # Append-only ledger: match and revise over the effective view so superseded history can
+    # never double-match a settlement.
+    effective = effective_rows(rows)
 
     exact = [
-        index
-        for index, row in enumerate(rows)
+        row
+        for row in effective
         if str(row.get("accepted_asof") or row.get("asof") or "")[:10] == accepted_asof
         # Compatibility for rows queued by the immediately preceding v2 release: it already
         # persisted the trusted lesson decision id and/or exact effective target, but not the new
@@ -397,8 +668,7 @@ def reconcile_settlement(
             "settlement did not match exactly one queued decision row"
         )
 
-    index = exact[0]
-    current = rows[index]
+    current = exact[0]
     original_target_hash = _row_target_sha256(current)
     try:
         receipt_fills = paper_account.validated_settlement_receipt_fills(receipt)
@@ -459,7 +729,7 @@ def reconcile_settlement(
     returned_decision_id = refreshed_links.get("decision_id")
     if returned_decision_id not in {None, expected_decision_id}:
         raise DecisionSettlementConflict("lesson links contain a conflicting decision id")
-    rows[index] = {
+    revised = {
         **base,
         "accepted_asof": accepted_asof,
         "submission_sha256": expected_submission_hash,
@@ -479,11 +749,13 @@ def reconcile_settlement(
         if not current.get(key)
     ]
     if identity_backfilled:
-        rows[index]["settlement_identity_backfilled"] = identity_backfilled
+        revised["settlement_identity_backfilled"] = identity_backfilled
     if original_target_hash != receipt_target_hash:
-        rows[index]["accepted_target_sha256"] = original_target_hash
-        rows[index]["target_lineage"] = list(decision.get("target_lineage") or [])
-    _atomic_write_rows(path, rows)
+        revised["accepted_target_sha256"] = original_target_hash
+        revised["target_lineage"] = list(decision.get("target_lineage") or [])
+    # Append-only: the executed row is appended in revise mode naming the queued row it advances.
+    # An unchanged revision (cannot normally occur past the dedupe guard above) writes nothing.
+    append_decision_row(path, revised, current.get("asof"), revises=current, strict=True)
     return {
         "ok": True,
         "reconciled": True,
@@ -511,8 +783,11 @@ def refresh_lesson_links(
     path = registry.data_dir(portfolio_id) / "decisions.jsonl"
     with paper_account._paper_transaction_lock(portfolio_id):
         rows = read_rows(path)
+        # Append-only ledger: match over the effective view so superseded history can never
+        # double-match a lesson refresh.
+        effective = effective_rows(rows)
         matches = [
-            index for index, row in enumerate(rows)
+            row for row in effective
             if str(row.get("accepted_asof") or row.get("asof") or "")[:10]
             == str(accepted_asof)[:10]
             and row.get("decision_id") == expected_id
@@ -533,13 +808,15 @@ def refresh_lesson_links(
         returned_decision_id = links.get("decision_id")
         if returned_decision_id not in {None, expected_id}:
             raise DecisionSettlementConflict("lesson links contain a conflicting decision id")
-        index = matches[0]
-        rows[index] = {
-            **{key: value for key, value in rows[index].items()
+        matched = matches[0]
+        revised = {
+            **{key: value for key, value in matched.items()
                if key not in _LESSON_LINK_KEYS},
             **links,
         }
-        write_rows(path, rows)
+        # Append-only: the refreshed row is appended in revise mode naming the row it refreshes.
+        # An unchanged refresh (links equal) writes nothing.
+        append_decision_row(path, revised, matched.get("asof"), revises=matched, strict=True)
     return {"ok": True, "updated": True, "decision_id": expected_id}
 
 
@@ -547,17 +824,14 @@ def read_rows(path: Path) -> list[dict]:
     """Strictly read a decision JSONL ledger for serialized read-modify-write callers."""
     if not path.exists():
         return []
-    rows: list[dict] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if not line.strip():
-            continue
-        row = json.loads(line)
-        if not isinstance(row, dict):
-            raise ValueError("decision ledger row must be an object")
-        rows.append(row)
-    return rows
+    return _parse_strict_rows(path.read_bytes())
 
 
 def write_rows(path: Path, rows: list[dict]) -> None:
-    """Atomically persist a complete decision ledger while the caller holds its book lock."""
+    """Atomically persist a complete decision ledger while the caller holds its book lock.
+
+    NOT a production writer: every production module must append through
+    ``append_decision_row`` (the ledger is append-only). ``write_rows`` remains for tests
+    seeding fixtures.
+    """
     _atomic_write_rows(path, rows)

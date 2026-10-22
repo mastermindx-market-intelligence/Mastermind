@@ -835,23 +835,14 @@ def _append_decision_log(asof: str, submission: dict | None, kept: list[dict], n
         "packet_id": packet_id,
     }
     from bot import decision_rows
-    existing = []
-    if p.exists():
-        for line in p.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                existing.append(json.loads(line))
-            except Exception:
-                continue
-    # Idempotent per asof — but a FAILED re-run must not erase a good book. See bot/decision_rows.
-    rows = decision_rows.replace_for_asof(existing, entry, asof)
-    p.write_text("\n".join(json.dumps(r, default=str, ensure_ascii=False) for r in rows) + "\n")
+    # Idempotent per asof in the EFFECTIVE view — but a FAILED re-run writes nothing, and the
+    # ledger file is append-only: prior bytes are never rewritten. See bot/decision_rows.
+    decision_rows.append_decision_row(p, entry, asof)
 
 
 def load_decisions(limit: int = 60) -> list[dict]:
     """The daily decision log, NEWEST first. Backs /api/decisions?portfolio=heavyweight."""
+    from bot import decision_rows
     from portfolio import registry
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
     rows: list[dict] = []
@@ -864,6 +855,7 @@ def load_decisions(limit: int = 60) -> list[dict]:
                 rows.append(json.loads(line))
             except Exception:
                 pass
+    rows = decision_rows.effective_rows(rows)
     rows.sort(key=lambda r: (r.get("asof") or "", r.get("ts") or ""), reverse=True)
     return rows[:limit]
 
