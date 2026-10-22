@@ -27,7 +27,7 @@ function config(overrides = {}) {
   };
 }
 
-function harness({ remoteSchema = READ_SCHEMA, callImpl = null } = {}) {
+function harness({ remoteSchema = READ_SCHEMA, callImpl = null, extraTools = [] } = {}) {
   const created = [];
   const factory = async (route) => {
     const state = {
@@ -52,6 +52,7 @@ function harness({ remoteSchema = READ_SCHEMA, callImpl = null } = {}) {
           tools: [
             { name: 'read_file', inputSchema: remoteSchema },
             { name: 'studio_ping', inputSchema: { type: 'object' } },
+            ...extraTools,
           ],
         };
       },
@@ -212,4 +213,162 @@ test('deterministic remote refusal keeps the route but ambiguous failure retires
   const rebound = await router.preflight('mini4', expected);
   assert.equal(rebound.state, 'READY');
   assert.equal(h.created.length, 2);
+});
+
+test('modern Desktop Commander may omit only get_prompts; missing tool is refused before dispatch', async () => {
+  const h = harness();
+  const router = createFleetRouter(config(), { clientFactory: h.factory });
+  const expected = new Map([
+    ['read_file', READ_SCHEMA],
+    ['get_prompts', { type: 'object', properties: {} }],
+  ]);
+  const receipt = await router.preflight('mini4', expected);
+  assert.equal(receipt.state, 'READY');
+  assert.deepEqual(receipt.toolNames, ['read_file']);
+  await assert.rejects(
+    router.call('mini4', { name: 'get_prompts', arguments: { action: 'get_prompt', promptId: 'onboarding' } }),
+    /FLEET_ROUTE_TOOL_UNAVAILABLE/,
+  );
+  assert.equal(h.created[0].calls, 0, 'unavailable helper must have zero remote effects');
+  await router.call('mini4', { name: 'read_file', arguments: { path: '/etc/os-release' } });
+  assert.equal(h.created[0].calls, 1);
+  await router.close();
+});
+
+test('modern contract does not tolerate another missing core tool', async () => {
+  const h = harness();
+  const router = createFleetRouter(config(), { clientFactory: h.factory });
+  await assert.rejects(
+    router.preflight('mini4', new Map([
+      ['read_file', READ_SCHEMA],
+      ['get_prompts', { type: 'object' }],
+      ['write_file', { type: 'object' }],
+    ])),
+    /FLEET_ROUTE_PREFLIGHT_REFUSED/,
+  );
+  assert.equal(h.created[0].calls, 0);
+  assert.equal(h.created[0].clientCloses, 1);
+  await router.close();
+});
+
+test('present get_prompts must still match its exact schema', async () => {
+  const h = harness();
+  const factory = async (...args) => {
+    const result = await h.factory(...args);
+    const originalList = result.client.listTools;
+    result.client.listTools = async () => ({
+      tools: [...(await originalList()).tools,
+        { name: 'get_prompts', inputSchema: { type: 'array' } }],
+    });
+    return result;
+  };
+  const router = createFleetRouter(config(), { clientFactory: factory });
+  await assert.rejects(
+    router.preflight('mini4', new Map([
+      ['read_file', READ_SCHEMA],
+      ['get_prompts', { type: 'object', properties: {} }],
+    ])),
+    /FLEET_ROUTE_PREFLIGHT_REFUSED/,
+  );
+  assert.equal(h.created[0].calls, 0);
+  await router.close();
+});
+
+test('gateway-owned output pager remains routable after a modern-host binding', async () => {
+  const h = harness();
+  const router = createFleetRouter(config(), { clientFactory: h.factory });
+  await router.preflight('mini4', new Map([
+    ['read_file', READ_SCHEMA],
+    ['get_prompts', { type: 'object', properties: {} }],
+  ]));
+  await router.call('mini4', { name: 'studio_output_page', arguments: { receipt_id: 'test', offset: 0 } });
+  assert.equal(h.created[0].calls, 1);
+  await router.close();
+});
+
+
+test('known modern integer-only search deltas bind and validate arguments locally before dispatch', async () => {
+  const oldSearch = {
+    type: 'object', properties: {
+      pattern: { type: 'string' },
+      maxResults: { type: 'number' },
+      contextLines: { type: 'number' },
+      timeout_ms: { type: 'number' },
+    },
+  };
+  const modernSearch = structuredClone(oldSearch);
+  for (const name of ['maxResults', 'contextLines', 'timeout_ms']) {
+    modernSearch.properties[name].type = 'integer';
+    modernSearch.properties[name].minimum = 0;
+  }
+  const oldMore = {
+    type: 'object', properties: {
+      sessionId: { type: 'string' },
+      offset: { type: 'number' },
+      length: { type: 'number' },
+    },
+  };
+  const modernMore = structuredClone(oldMore);
+  modernMore.properties.offset.type = 'integer';
+  modernMore.properties.length.type = 'integer';
+  modernMore.properties.length.minimum = 1;
+  const h = harness({extraTools: [
+    {name:'start_search',inputSchema:modernSearch},
+    {name:'get_more_search_results',inputSchema:modernMore},
+  ]});
+  const router=createFleetRouter(config(),{clientFactory:h.factory});
+  const expected=new Map([
+    ['read_file',READ_SCHEMA],
+    ['get_prompts',{type:'object'}],
+    ['start_search',oldSearch],
+    ['get_more_search_results',oldMore],
+  ]);
+  const receipt=await router.preflight('mini4',expected);
+  assert.equal(receipt.state,'READY');
+  for(const [name,args] of [
+    ['start_search',{maxResults:2.5}],
+    ['start_search',{maxResults:-1}],
+    ['start_search',{contextLines:0.5}],
+    ['start_search',{timeout_ms:-2}],
+    ['start_search',{timeout_ms:0.2}],
+    ['get_more_search_results',{offset:0.75,length:5}],
+    ['get_more_search_results',{offset:0,length:0}],
+    ['get_more_search_results',{offset:0,length:1.25}],
+    ['get_more_search_results',{offset:9007199254740992,length:1}],
+    ['start_search',{maxResults:9007199254740992}],
+  ]) {
+    await assert.rejects(
+      router.call('mini4',{name,arguments:args}),
+      /FLEET_ROUTE_TOOL_ARGUMENTS_INCOMPATIBLE/,
+    );
+  }
+  assert.equal(h.created[0].calls,0,'invalid requests must never reach remote MCP');
+  await router.call('mini4',{
+    name:'start_search',
+    arguments:{pattern:'abc',maxResults:10,contextLines:0,timeout_ms:2000},
+  });
+  await router.call('mini4',{
+    name:'get_more_search_results',
+    arguments:{sessionId:'one',offset:0,length:1},
+  });
+  assert.equal(h.created[0].calls,2);
+  await router.close();
+});
+
+test('unknown modern schema difference still fails closed before binding', async () => {
+  const oldSchema = {type:'object',properties:{maxResults:{type:'number'},contextLines:{type:'number'},timeout_ms:{type:'number'}}};
+  const newSchema=structuredClone(oldSchema);
+  for(const field of ['maxResults','contextLines','timeout_ms']){
+    newSchema.properties[field].type='integer';newSchema.properties[field].minimum=0;
+  }
+  newSchema.properties.maxResults.maximum=100;
+  const h=harness({extraTools:[{name:'start_search',inputSchema:newSchema}]});
+  const router=createFleetRouter(config(),{clientFactory:h.factory});
+  await assert.rejects(
+    router.preflight('mini4',new Map([['read_file',READ_SCHEMA],['start_search',oldSchema]])),
+    /FLEET_ROUTE_PREFLIGHT_REFUSED/,
+  );
+  assert.equal(h.created[0].calls,0);
+  assert.equal(h.created[0].clientCloses,1);
+  await router.close();
 });
