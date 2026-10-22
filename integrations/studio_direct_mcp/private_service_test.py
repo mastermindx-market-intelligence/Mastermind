@@ -4205,3 +4205,196 @@ class TestSealedV2FleetGatewayManifestRoster(unittest.TestCase):
                     svc, "_sealed_v2_fleet_gateway_predecessor", return_value=False
                 ):
                     self.assertFalse(helper(account, manifest, roots, expected, historical))
+
+
+class TestFabricPoolPinMigration(unittest.TestCase):
+    """Synthetic owner-bound CAS tests. Live M2 evidence is separately retained."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.home = Path(self.temporary.name) / "home"
+        self.home.mkdir(mode=0o700)
+        self.account = "chatgpt1"
+        self.label = f"com.mastermind.studio-direct-private.{self.account}"
+        self.roots = {
+            "config": self.home / ".local/share/studio-direct-mcp/private/chatgpt1/config.json",
+            "manifest": self.home / ".local/share/studio-direct-mcp/private/chatgpt1/manifest.json",
+        }
+        self.roots["config"].parent.mkdir(parents=True, mode=0o700)
+        self.pool = self.home / ".local/bin/pool"
+        self.pool.parent.mkdir(parents=True, mode=0o700)
+        self.pool.write_bytes(b"fixture-reviewed-native-bridge\n")
+        self.original_pool_pin = "a" * 64
+        self.selected_pool_pin = hashlib.sha256(self.pool.read_bytes()).hexdigest()
+        self.original_config = {
+            "accountLabel": self.account,
+            "fleetStatus": {
+                "enabled": True,
+                "fabricLauncherPath": str(self.pool),
+                "fabricLauncherSha256": self.original_pool_pin,
+            },
+        }
+        self.original_config_bytes = json.dumps(
+            self.original_config, indent=2, sort_keys=True
+        ).encode()
+        self.original_manifest = {
+            "version": svc.MANIFEST_VERSION,
+            "account": self.account,
+            "label": self.label,
+            "configHash": hashlib.sha256(self.original_config_bytes).hexdigest(),
+            "files": {},
+        }
+        self.original_manifest_bytes = json.dumps(
+            self.original_manifest, indent=2, sort_keys=True
+        ).encode()
+        self.successor_config = dict(self.original_config)
+        self.successor_config["fleetStatus"] = dict(
+            self.original_config["fleetStatus"],
+            fabricLauncherSha256=self.selected_pool_pin,
+        )
+        self.successor_config_bytes = json.dumps(
+            self.successor_config, indent=2, sort_keys=True
+        ).encode()
+        self.successor_manifest = dict(
+            self.original_manifest,
+            configHash=hashlib.sha256(self.successor_config_bytes).hexdigest(),
+        )
+        self.successor_manifest_bytes = json.dumps(
+            self.successor_manifest, indent=2, sort_keys=True
+        ).encode()
+        sha = lambda raw: hashlib.sha256(raw).hexdigest()
+        self.pins = (
+            sha(self.original_manifest_bytes), sha(self.original_config_bytes),
+            sha(self.successor_manifest_bytes), sha(self.successor_config_bytes),
+            svc._canonical_json_sha256(self.successor_manifest),
+        )
+        self.roots["config"].write_bytes(self.original_config_bytes)
+        self.roots["manifest"].write_bytes(self.original_manifest_bytes)
+        self.patch("_user_root", return_value=self.home)
+        self.patch("FABRIC_POOL_PIN_MIGRATION", {self.account: self.pins})
+        self.patch("FABRIC_POOL_ORIGINAL_SHA256", self.original_pool_pin)
+        self.patch("FABRIC_POOL_SELECTED_SHA256", self.selected_pool_pin)
+        self.patch("_lifecycle_inspect", return_value=None)
+        self.patch("_valid_manifest", return_value=True)
+        self.patch("_verify_staged_install", side_effect=self.verify_fixture)
+        self.patch("_c2_lifecycle_mutex", side_effect=self.noop_lock)
+
+    def patch(self, name, *args, **kwargs):
+        item = mock.patch.object(svc, name, *args, **kwargs)
+        value = item.start()
+        self.addCleanup(item.stop)
+        return value
+
+    @contextmanager
+    def noop_lock(self, *_):
+        yield
+
+    def verify_fixture(self, account, label, roots, *, require_runtime_seal=True):
+        self.assertEqual(account, self.account)
+        self.assertEqual(label, self.label)
+        value = json.loads(self.roots["manifest"].read_bytes())
+        self.assertEqual(
+            hashlib.sha256(self.roots["config"].read_bytes()).hexdigest(),
+            value["configHash"],
+        )
+        self.assertTrue(require_runtime_seal)
+        return value
+
+    def args(self, *, preflight=False, target=True, account=None):
+        return type("Args", (), dict(
+            account=self.account if account is None else account,
+            expected_manifest_sha256=self.pins[0],
+            expected_target_manifest_sha256=self.pins[2] if target else None,
+            preflight_only=preflight,
+        ))()
+
+    def assert_original(self):
+        self.assertEqual(self.roots["config"].read_bytes(), self.original_config_bytes)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.original_manifest_bytes)
+
+    def test_preflight_while_service_loaded_does_not_write_or_stop(self):
+        with mock.patch.object(
+            svc, "_lifecycle_inspect", return_value={"state": "running"},
+        ), mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True)), 0)
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["effect"], "NOT_APPLIED")
+        self.assertEqual(result["targetManifestSha256"], self.pins[2])
+        self.assertFalse(result["serviceStarted"])
+        self.assert_original()
+
+    def test_live_apply_and_unreviewed_target_refuse_without_changes(self):
+        with mock.patch.object(
+            svc, "_lifecycle_inspect", return_value={"state": "running"},
+        ):
+            with self.assertRaisesRegex(SystemExit, "stop exact seat first"):
+                svc.cmd_fabric_pool_pin_migrate(self.args())
+        with self.assertRaisesRegex(SystemExit, "exact reviewed target"):
+            svc.cmd_fabric_pool_pin_migrate(self.args(target=False))
+        with self.assertRaisesRegex(SystemExit, "unrecognized original"):
+            svc.cmd_fabric_pool_pin_migrate(self.args(account="fabric-future"))
+        self.assert_original()
+
+    def test_apply_commits_only_exact_pinned_config_and_manifest(self):
+        with mock.patch("sys.stdout", new_callable=io.StringIO) as stdout:
+            self.assertEqual(svc.cmd_fabric_pool_pin_migrate(self.args()), 0)
+        result = json.loads(stdout.getvalue())
+        self.assertEqual(result["effect"], "APPLIED")
+        self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+        with self.assertRaisesRegex(SystemExit, "original sealed generation no longer matches"):
+            svc.cmd_fabric_pool_pin_migrate(self.args())
+
+    def test_manifest_failure_restores_precommit_config_without_false_success(self):
+        original_write = svc._atomic_write_bytes
+        def fail_manifest(path, value, *args, **kwargs):
+            if Path(path) == self.roots["manifest"]:
+                raise OSError("deliberate precommit failure")
+            return original_write(path, value, *args, **kwargs)
+        with mock.patch.object(svc, "_atomic_write_bytes", side_effect=fail_manifest):
+            with self.assertRaisesRegex(SystemExit, "NOT_APPLIED original state restored"):
+                svc.cmd_fabric_pool_pin_migrate(self.args())
+        self.assert_original()
+
+    def test_postcommit_verification_failure_freezes_effect(self):
+        original_verify = self.verify_fixture
+        def refuse_successor(account, label, roots, *, require_runtime_seal=True):
+            value = original_verify(
+                account, label, roots, require_runtime_seal=require_runtime_seal,
+            )
+            if value["configHash"] == self.pins[3]:
+                raise RuntimeError("deliberate postcommit failure")
+            return value
+        with mock.patch.object(
+            svc, "_verify_staged_install", side_effect=refuse_successor,
+        ):
+            with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN"):
+                svc.cmd_fabric_pool_pin_migrate(self.args())
+        self.assertEqual(self.roots["manifest"].read_bytes(), self.successor_manifest_bytes)
+        self.assertEqual(self.roots["config"].read_bytes(), self.successor_config_bytes)
+
+    def test_original_drift_and_launcher_change_refuse_without_effect(self):
+        self.roots["config"].write_bytes(self.original_config_bytes + b" ")
+        with self.assertRaisesRegex(SystemExit, "original sealed generation no longer matches"):
+            svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True))
+        self.roots["config"].write_bytes(self.original_config_bytes)
+        self.pool.write_bytes(b"unreviewed-native-wrapper")
+        with self.assertRaisesRegex(SystemExit, "selected native launcher bytes drifted"):
+            svc.cmd_fabric_pool_pin_migrate(self.args(preflight=True))
+        self.assert_original()
+
+    def test_closed_successor_rejects_cross_account_and_resealed_foreign_data(self):
+        self.assertTrue(
+            svc._sealed_fabric_pool_pin_successor(self.successor_manifest, self.account)
+        )
+        tamper = dict(self.successor_manifest, configHash="f" * 64)
+        self.assertFalse(svc._sealed_fabric_pool_pin_successor(tamper, self.account))
+        self.assertFalse(svc._sealed_fabric_pool_pin_successor(
+            dict(self.successor_manifest, account="fabric-future"),
+            "fabric-future",
+        ))
+        self.assertFalse(svc._sealed_fabric_pool_pin_successor(
+            dict(self.successor_manifest, files={"other.mjs": "f" * 64}),
+            self.account,
+        ))
