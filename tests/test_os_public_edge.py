@@ -8,23 +8,26 @@ from integrations.mastermind_executive_app.os_assets import os_asset_mimes
 from ops.executive_os.os_public_edge import asset_routes, render, stage
 
 
-def manifest(noir=False):
+def manifest(noir=False, notices=False):
     names = ["index.html", "assets/index-a.css", "assets/index-b.js"]
     if noir:
         names += ["assets/atelier-office-a.jpg", "assets/Manrope-Variable-a.ttf",
                   "assets/Inter-Variable-a.woff2", "licenses/fonts/Inter-OFL.txt",
                   "licenses/fonts/Manrope-OFL.txt", "licenses/fonts/Manrope-FONTLOG.txt"]
+    if notices:
+        names += ["third-party/deepseek-client-dependency-NOTICES.txt",
+                  "third-party/deepseek-harness-LICENSE.txt"]
     return {"schema": "mastermind.os_assets.v1", "files": [
         {"path": name, "byte_count": 1, "sha256": "a" * 64, "mime": mime}
         for name, mime in os_asset_mimes(names).items()
     ]}
 
 
-@pytest.mark.parametrize("noir", [False, True])
-def test_both_accepted_topologies_have_exact_routes(noir):
-    value = manifest(noir)
+@pytest.mark.parametrize("noir,notices,count", [(False, False, 3), (True, False, 9), (True, True, 11)])
+def test_all_accepted_topologies_have_exact_routes(noir, notices, count):
+    value = manifest(noir, notices)
     routes = asset_routes(value)
-    assert len(routes) == (9 if noir else 3)
+    assert len(routes) == count
     config = render(value, 49152)
     assert config.count("reverse_proxy 127.0.0.1:49152") == 2
     assert "path /os/executive/context /os/executive/submit /os/executive/status" in config
@@ -33,6 +36,37 @@ def test_both_accepted_topologies_have_exact_routes(noir):
     assert "/mcp" not in config
     for route in routes:
         assert route in config
+    if notices:
+        for name in ("deepseek-client-dependency-NOTICES.txt", "deepseek-harness-LICENSE.txt"):
+            assert "/os/third-party/" + name in routes
+            item = next(item for item in value["files"] if item["path"] == "third-party/" + name)
+            assert item["mime"] == "text/plain; charset=utf-8"
+
+
+@pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "duplicate", "traversal", "mime"])
+def test_notice_layout_remains_closed(damage):
+    value = manifest(True, True)
+    if damage == "missing":
+        value["files"].pop()
+    elif damage == "renamed":
+        value["files"][-1]["path"] = "third-party/other-LICENSE.txt"
+    elif damage == "extra":
+        extra = copy.deepcopy(value["files"][-1])
+        extra["path"] = "third-party/extra.txt"
+        value["files"].append(extra)
+    elif damage == "duplicate":
+        value["files"][-1] = copy.deepcopy(value["files"][-2])
+    elif damage == "traversal":
+        value["files"][-1]["path"] = "third-party/../deepseek-harness-LICENSE.txt"
+    else:
+        value["files"][-1]["mime"] = "text/javascript; charset=utf-8"
+    with pytest.raises(ValueError):
+        render(value, 49152)
+
+
+def test_legacy_plus_notices_is_not_an_admitted_five_file_layout():
+    with pytest.raises(ValueError, match="fixed OS asset set"):
+        manifest(False, True)
 
 
 @pytest.mark.parametrize("path", [
