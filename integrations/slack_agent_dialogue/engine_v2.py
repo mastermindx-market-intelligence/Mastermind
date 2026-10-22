@@ -123,6 +123,9 @@ class _ClassifiedThreadHistory:
     consultation_packet_ineligible_count: int
     response_page_bytes: tuple[int, ...] | None
     response_byte_limit: int | None
+    # Present only for a pre-bound, exact-thread read. This attests the
+    # physical root locally, not uniqueness across unrelated channel history.
+    canonical_parent: Mapping[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -660,6 +663,53 @@ class DialogueEngineV2:
             policy=self.policy,
         )
 
+    def _verified_exact_relay_parent(
+        self,
+        page: HistoryPage,
+        *,
+        thread_ts: str,
+        normalized_context: Mapping[str, Any],
+        expected_parent_fingerprint: str,
+    ) -> Mapping[str, Any]:
+        """Check the immutable physical parent of a *pre-bound* exact thread.
+
+        Only a trusted upstream source may supply the thread and fingerprint.
+        This does not claim a channel-wide uniqueness search or mint a binding.
+        """
+        if (
+            type(expected_parent_fingerprint) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", expected_parent_fingerprint) is None
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        roots = [message for message in page.messages if message.ts == thread_ts]
+        if (
+            len(roots) != 1
+            or roots[0].thread_ts not in {None, thread_ts}
+            or any(
+                message.ts != thread_ts and message.thread_ts != thread_ts
+                for message in page.messages
+            )
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        root = roots[0]
+        if root.edited or root.deleted or root.created_text not in {None, root.text}:
+            raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
+        if root.author_user_id != self.policy.relay_bot_user_id:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        if not root.text.startswith(PARENT_DISCRIMINATOR_V2):
+            raise DialogueEngineError("PARENT_MESSAGE_INVALID")
+        try:
+            parent = parse_parent_frame_v2(root.text)
+        except DialogueContractError:
+            raise DialogueEngineError("PARENT_MESSAGE_INVALID") from None
+        if (
+            parent["fingerprint"] != expected_parent_fingerprint
+            or _parent_identity(parent) != _context_parent_identity(normalized_context)
+            or tuple(parent["allowed_sol_user_ids"]) != self.policy.allowed_sol_user_ids
+        ):
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return parent
+
     async def bind_or_verify_thread(self, context: DialogueContextV2) -> BoundThread:
         normalized = context.normalized()
         match = self._scan_parent(
@@ -901,12 +951,23 @@ class DialogueEngineV2:
         )
 
     async def _classified_history(
-        self, *, thread_ts: str, context: DialogueContextV2
+        self,
+        *,
+        thread_ts: str,
+        context: DialogueContextV2,
+        exact_parent_fingerprint: str | None = None,
     ) -> _ClassifiedThreadHistory:
         if not isinstance(thread_ts, str) or _TS_RE.fullmatch(thread_ts) is None:
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
-        bound = await self.bind_or_verify_thread(context)
-        if bound.thread_ts != thread_ts:
+        if exact_parent_fingerprint is None:
+            # Unchanged discovery path: channel-wide completeness is mandatory.
+            bound = await self.bind_or_verify_thread(context)
+            if bound.thread_ts != thread_ts:
+                raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        elif (
+            type(exact_parent_fingerprint) is not str
+            or re.fullmatch(r"[0-9a-f]{64}", exact_parent_fingerprint) is None
+        ):
             raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
 
         try:
@@ -927,6 +988,16 @@ class DialogueEngineV2:
             raise DialogueEngineError("THREAD_RECONCILIATION_INCOMPLETE")
 
         normalized_context = context.normalized()
+        canonical_parent = (
+            self._verified_exact_relay_parent(
+                page,
+                thread_ts=thread_ts,
+                normalized_context=normalized_context,
+                expected_parent_fingerprint=exact_parent_fingerprint,
+            )
+            if exact_parent_fingerprint is not None
+            else None
+        )
         eligible: dict[str, list[tuple[SlackMessage, Mapping[str, Any]]]] = {}
         packet_entries: dict[
             str, list[tuple[SlackMessage, Mapping[str, Any]]]
@@ -1048,6 +1119,7 @@ class DialogueEngineV2:
             consultation_packet_ineligible_count=consultation_packet_ineligible_count,
             response_page_bytes=response_page_bytes,
             response_byte_limit=response_byte_limit,
+            canonical_parent=canonical_parent,
         )
 
     async def _history(
@@ -1061,6 +1133,32 @@ class DialogueEngineV2:
         self, *, thread_ts: str, context: DialogueContextV2
     ) -> ThreadRead:
         return await self._history(thread_ts=thread_ts, context=context)
+
+    async def read_exact_canonical_thread(
+        self,
+        *,
+        context: DialogueContextV2,
+        thread_ts: str,
+        expected_parent_fingerprint: str,
+    ) -> dict[str, Any]:
+        """One physical thread read for an upstream-minted canonical source.
+
+        The source owner authenticates and binds the caller, exact thread and
+        parent fingerprint. This read verifies the root and lifecycle messages
+        in one immutable page without scanning unrelated channel traffic.
+        """
+        classified = await self._classified_history(
+            thread_ts=thread_ts,
+            context=context,
+            exact_parent_fingerprint=expected_parent_fingerprint,
+        )
+        if classified.canonical_parent is None:
+            raise DialogueEngineError("THREAD_CONTEXT_MISMATCH")
+        return {
+            "thread_ts": thread_ts,
+            "parent": classified.canonical_parent,
+            "thread": classified.lifecycle,
+        }
 
     async def read_consultation_packet(
         self,

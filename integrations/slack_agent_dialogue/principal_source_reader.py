@@ -8,10 +8,13 @@ decision semantics or the current attempt, transmit, select another thread,
 create a parent, or mint authority.  Those belong to the parent host and the
 existing Runtime fences.
 
-The adapter reuses the existing closed ``status``, ``read_bound_parent`` and
-``read_thread`` service operations on one socket, one attempt each, with no
-second attempt and no alternate carrier path.  Every refusal is one fixed
-non-sensitive code; no service, transport, or caller detail is carried.
+The adapter reuses the existing ``status`` check and adds one closed
+``read_exact_canonical_thread`` operation to the existing Relay service,
+bound to the immutable PhysicalDialogueSourceIdentity minted by the trusted
+host. The one reply contains parent and thread evidence from one Slack read.
+No channel-wide discovery, second attempt, alternate carrier or authority
+is introduced. Every refusal is one fixed non-sensitive code; no service,
+transport or caller detail is carried.
 """
 from __future__ import annotations
 
@@ -37,7 +40,7 @@ from integrations.slack_agent_dialogue.service import (
 
 PRINCIPAL_SOURCE_ERROR_CODE = "PRINCIPAL_SOURCE_UNAVAILABLE"
 _STATUS_SCHEMA_V2 = "mastermind.agent_dialogue_status.v2"
-_PARENT_BOUND_KEYS = {"attestation", "thread_ts", "parent"}
+_EXACT_THREAD_KEYS = {"attestation", "thread_ts", "parent", "thread"}
 _THREAD_KEYS = {
     "thread_ts",
     "messages",
@@ -236,19 +239,23 @@ async def _read(
     ):
         raise PrincipalSourceError()
 
-    bound = await request(
-        "read_bound_parent",
-        {"context": normalized, "thread_ts": physical_source.thread_ts},
+    exact = await request(
+        "read_exact_canonical_thread",
+        {
+            "context": normalized,
+            "thread_ts": physical_source.thread_ts,
+            "expected_parent_fingerprint": physical_source.parent_fingerprint,
+        },
     )
     if (
-        type(bound) is not dict
-        or set(bound) != _PARENT_BOUND_KEYS
-        or bound["attestation"] != RELAY_PARENT_ATTESTATION
-        or bound["thread_ts"] != physical_source.thread_ts
+        type(exact) is not dict
+        or set(exact) != _EXACT_THREAD_KEYS
+        or exact["attestation"] != RELAY_PARENT_ATTESTATION
+        or exact["thread_ts"] != physical_source.thread_ts
     ):
         raise PrincipalSourceError()
     try:
-        parent = validate_parent_v2(bound["parent"])
+        parent = validate_parent_v2(exact["parent"])
     except (DialogueContractError, TypeError, ValueError):
         raise PrincipalSourceError() from None
     if (
@@ -258,12 +265,8 @@ async def _read(
     ):
         raise PrincipalSourceError()
 
-    thread_read = await request(
-        "read_thread",
-        {"context": normalized, "thread_ts": physical_source.thread_ts},
-    )
     thread = _decode_thread(
-        thread_read,
+        exact["thread"],
         thread_ts=physical_source.thread_ts,
         parent=parent,
     )
