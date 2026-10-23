@@ -838,8 +838,10 @@ fi
 if [ "$DRY_RUN" -ne 1 ]; then
   case "$MODE" in
     glm|glm-codex|grok|cursor|go|go-codex|qwen|bailian|codex-native|claude-native|oc-free)
-      POLICY_SOURCE="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
-      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$POLICY_SOURCE/pick.py" launch-policy \
+      # POLICY_SOURCE remains the exact pools.yaml file for later scp.
+      # Economic helpers resolve independently; never send ext/ as pools.yaml.
+      POLICY_HELPER_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$POLICY_HELPER_DIR/pick.py" launch-policy \
           --mode "$MODE" --class "${POOL_TASK_CLASS:-}" --model "$MODEL" \
           --task-complexity "${POOL_TASK_COMPLEXITY:-}" \
           --escalation-reason "${POOL_ESCALATION_REASON:-}"); then

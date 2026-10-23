@@ -12,6 +12,25 @@ import unittest
 
 
 class RemoteBindingPublication(unittest.TestCase):
+    def test_current_frontier_policy_helper_never_overwrites_upload_policy_file(self):
+        # Regression: original remote_sub.sh selected ext/ as POLICY_SOURCE,
+        # then scp tried uploading that directory to a file named pools.yaml.
+        from pathlib import Path
+        import re
+        candidate = Path(__file__).resolve().parents[1] / "candidate/remote_sub.sh"
+        text = candidate.read_text()
+        assignments = re.findall(r"^\s*POLICY_SOURCE=", text, flags=re.MULTILINE)
+        self.assertEqual(len(assignments), 2, "policy source may only select file sources")
+        self.assertIn('POLICY_SOURCE="$HERE/../orch/fabric/pools.yaml"', text)
+        self.assertIn('POLICY_SOURCE="${STATE_HERE%/*}/orch/fabric/pools.yaml"', text)
+        helper = 'POLICY_HELPER_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"'
+        self.assertEqual(text.count(helper), 1)
+        self.assertIn('"$POLICY_HELPER_DIR/pick.py" launch-policy', text)
+        upload = 'commission_run policy-upload "$SCP_CMD" -q "$POLICY_SOURCE"'
+        self.assertEqual(text.count(upload), 1)
+        self.assertLess(text.index(helper), text.index(upload))
+        self.assertNotIn('POLICY_SOURCE="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"', text)
+
     def test_exact_closure_import_and_prior_generation_reuse(self):
         root = Path(__file__).resolve().parents[1]
         sys.path.insert(0, str(root / "source"))

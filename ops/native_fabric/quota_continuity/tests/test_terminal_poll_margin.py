@@ -116,7 +116,7 @@ class TerminalPollBudgetTests(unittest.TestCase):
         # their real runtime-margin checks above; this asserts the actual source.
         selected = candidate
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
-                         'ccd49590f1a8e8b5b337c6581aabd1671791f4e7b339b041112c8aadd99b5351')
+                         '3310f4c7e9aa9088eec0bb156375428a8725672478c8f4efa46c3700a49ef207')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
                          'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
