@@ -2,6 +2,7 @@
 import asyncio
 import json
 import os
+import plistlib
 from pathlib import Path
 
 import pytest
@@ -73,6 +74,67 @@ def rebind():
 
 def pair():
     return (a2.PLIST_PATH.read_bytes(), a2.CONFIG_PATH.read_bytes())
+
+
+def seed_legacy_socket_pair():
+    # Exact canonical output of the previous release: change *only* its
+    # historical socket in both bound files; preserve token inode and bytes.
+    config = json.loads(a2.CONFIG_PATH.read_bytes())
+    assert config["relay_socket_path"] == str(a2.SOCKET_PATH)
+    config["relay_socket_path"] = str(a2.LEGACY_SOCKET_PATH)
+    a2.CONFIG_PATH.chmod(0o600)
+    a2.CONFIG_PATH.write_bytes(a2._canonical_json_bytes(config))
+    a2.CONFIG_PATH.chmod(0o400)
+
+    plist = plistlib.loads(a2.PLIST_PATH.read_bytes())
+    args = plist["ProgramArguments"]
+    index = args.index("--socket-path") + 1
+    assert args[index] == str(a2.SOCKET_PATH)
+    args[index] = str(a2.LEGACY_SOCKET_PATH)
+    a2.PLIST_PATH.write_bytes(plistlib.dumps(plist, fmt=plistlib.FMT_XML, sort_keys=False))
+    a2.PLIST_PATH.chmod(0o644)
+
+
+@pytest.mark.parametrize("current_release", [False, True])
+def test_legacy_socket_pair_rebinds_once_to_persistent_path_without_token_read(host, monkeypatch, current_release):
+    if current_release:
+        host(sha=NEW)
+    seed_legacy_socket_pair()
+    token_identity = a2.TOKEN_PATH.stat()
+    read = os.read
+    def forbid_token_read(fd, size):
+        assert os.fstat(fd).st_ino != token_identity.st_ino
+        return read(fd, size)
+    monkeypatch.setattr(os, "read", forbid_token_read)
+
+    result = rebind()
+    assert result["action"] == "rebound"
+    assert json.loads(a2.CONFIG_PATH.read_bytes())["relay_socket_path"] == str(a2.SOCKET_PATH)
+    doc = plistlib.loads(a2.PLIST_PATH.read_bytes())
+    args = doc["ProgramArguments"]
+    assert args[args.index("--socket-path") + 1] == str(a2.SOCKET_PATH)
+    assert rebind()["action"] == "already-current"
+    assert a2.TOKEN_PATH.stat() == token_identity
+
+
+@pytest.mark.parametrize("alter", ["config", "plist"])
+def test_legacy_mixed_socket_pair_refused_without_any_mutation(host, alter):
+    seed_legacy_socket_pair()
+    if alter == "config":
+        new_document = json.loads(a2.CONFIG_PATH.read_bytes())
+        new_document["relay_socket_path"] = str(a2.SOCKET_PATH)
+        a2.CONFIG_PATH.chmod(0o600)
+        a2.CONFIG_PATH.write_bytes(a2._canonical_json_bytes(new_document))
+        a2.CONFIG_PATH.chmod(0o400)
+    else:
+        doc = plistlib.loads(a2.PLIST_PATH.read_bytes())
+        args = doc["ProgramArguments"]
+        args[args.index("--socket-path") + 1] = str(a2.SOCKET_PATH)
+        a2.PLIST_PATH.write_bytes(plistlib.dumps(doc, fmt=plistlib.FMT_XML, sort_keys=False))
+    before = pair()
+    with pytest.raises(a2.A2EnrollmentError, match="STATE_REFUSED"):
+        rebind()
+    assert pair() == before
 
 
 @pytest.mark.parametrize('scopes', [a2.DEDICATED_A2_SCOPES, a2.SHARED_A2_SCOPES])

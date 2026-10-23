@@ -58,7 +58,9 @@ SYSTEM_RELEASE_ROOT = SYSTEM_ROOT / "releases"
 TOKEN_PATH = SYSTEM_ROOT / "config" / "agent-relay.token"
 CONFIG_PATH = SYSTEM_ROOT / "config" / "agent-relay.json"
 PLIST_PATH = Path("/Library/LaunchDaemons/com.mastermind.executive.agent-relay.plist")
-SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
+SOCKET_PATH = Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+# Exact prior installed release identity. Read-only preimage for governed rebind.
+LEGACY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
 DIALOGUE_COORDINATION_SOCKET_PATH = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
@@ -817,6 +819,34 @@ def _read_bound_exact(
             os.close(descriptor)
 
 
+def _socket_parent_prepared() -> bool:
+    """Only the enrolled service-owned shared socket directory is admissible.
+
+    Host preparation creates this privileged /var/run prerequisite. The A2
+    non-root process cannot create it after enrollment or an OS boot cleanup.
+    Neither this read nor a failed enrollment may try to repair its ownership.
+    """
+    try:
+        info = SOCKET_PATH.parent.lstat()
+    except (OSError, ValueError):
+        return False
+    if not (
+        stat.S_ISDIR(info.st_mode)
+        and not stat.S_ISLNK(info.st_mode)
+        and info.st_uid == RELAY_UID
+        and info.st_gid == RELAY_GID
+        and stat.S_IMODE(info.st_mode) == 0o710
+    ):
+        return False
+    try:
+        # Reject native macOS ACLs even when POSIX mode/ownership match.
+        return not c1_enrollment.c1_runtime._path_has_acl(  # noqa: SLF001
+            SOCKET_PATH.parent, expected_info=info
+        )
+    except Exception:
+        return False
+
+
 def _assert_host_prepared() -> str:
     if os.geteuid() != 0 or sys.platform != "darwin":
         raise A2EnrollmentError("A2_ENROLLMENT_HOST_REFUSED")
@@ -844,6 +874,7 @@ def _assert_host_prepared() -> str:
         or EXEC_GID in relay_gids
         or RELAY_GID not in exec_gids
         or credential_chain is None
+        or not _socket_parent_prepared()
         or not all(
             _principal_can_traverse(path, uid=RELAY_UID, gids=relay_gids)
             for path in credential_chain
@@ -1410,13 +1441,40 @@ async def _rebind(*, bot_user_id: str, enable_w3c: bool = False) -> dict[str, ob
                     scopes=scopes, w3c_enabled=w3c_enabled))
                 old_plist = render_plist(bot_user_id=bot_user_id, release_sha=old_sha,
                                          w3c_enabled=w3c_enabled)
-                if old != tx.preimages[CONFIG_PATH].payload or old_plist != tx.preimages[PLIST_PATH].payload:
-                    raise ValueError("noncanonical or mixed generation")
+                current_socket = (
+                    old == tx.preimages[CONFIG_PATH].payload
+                    and old_plist == tx.preimages[PLIST_PATH].payload
+                )
+                if not current_socket:
+                    # The installed pre-fix release uses the volatile /var/run
+                    # path. Accept exactly its matching canonical config+plist
+                    # as a read-only preimage, then publish the new path through
+                    # the existing two-file CAS transaction. Never synthesize
+                    # a mixed-generation preimage or read the token contents.
+                    legacy_document = json.loads(old)
+                    if legacy_document.get("relay_socket_path") != os.fspath(SOCKET_PATH):
+                        raise ValueError("noncanonical new socket")
+                    legacy_document["relay_socket_path"] = os.fspath(LEGACY_SOCKET_PATH)
+                    legacy_config = _canonical_json_bytes(legacy_document)
+                    legacy_plist = plistlib.loads(old_plist)
+                    argv = legacy_plist["ProgramArguments"]
+                    socket_index = argv.index("--socket-path") + 1
+                    if argv[socket_index] != os.fspath(SOCKET_PATH):
+                        raise ValueError("noncanonical new socket argument")
+                    argv[socket_index] = os.fspath(LEGACY_SOCKET_PATH)
+                    legacy_plist_bytes = plistlib.dumps(
+                        legacy_plist, fmt=plistlib.FMT_XML, sort_keys=False
+                    )
+                    if (
+                        legacy_config != tx.preimages[CONFIG_PATH].payload
+                        or legacy_plist_bytes != tx.preimages[PLIST_PATH].payload
+                    ):
+                        raise ValueError("noncanonical or mixed generation")
             except Exception:
                 raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
             tx.check()
             desired_w3c = w3c_enabled or enable_w3c
-            if old_sha == release_sha and desired_w3c == w3c_enabled:
+            if old_sha == release_sha and desired_w3c == w3c_enabled and current_socket:
                 return {"action": "already-current", "bot_user_id": bot_user_id,
                         "release_sha": release_sha}
             target = {
@@ -1475,17 +1533,14 @@ def _run_invocation(
     try:
         assert_secret_surfaces_clean(argv=argv, environ=environ)
         args = build_parser().parse_args(list(argv))
-        if require_native_tty and args.command == "enroll":
-            _require_native_tty(stdin)
         if args.command == "enroll":
-            enroll_kwargs = {
-                "bot_user_id": args.expected_bot_user_id,
-                "stdin": stdin,
-            }
-            if args.enable_w3c:
-                enroll_kwargs["w3c_enabled"] = True
-            receipt = asyncio.run(_enroll(**enroll_kwargs))
-        elif args.command == "enroll-shared":
+            # The accepted Agent OS decision admits only the shared C1/A2
+            # Slack app for *new* enrollment. An operator-supplied flag or
+            # token cannot reselect the deprecated dedicated app. Preserve
+            # installed legacy verify/rebind. Restoring new dedicated
+            # enrollment requires an explicitly reviewed source-law reversal.
+            raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+        if args.command == "enroll-shared":
             shared_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
                 shared_kwargs["w3c_enabled"] = True

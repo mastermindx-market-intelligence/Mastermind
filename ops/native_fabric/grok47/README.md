@@ -163,3 +163,18 @@ read credentials or select an account; the existing Capacity broker still
 owns account binding. A regression injects a credential-shaped alias and
 asserts it cannot appear in the selected result. All 50 tests pass
 locally; hosted CodeQL must independently qualify the current head.
+
+
+## Subsequent exact-model failover integrity repair
+
+Post-selection source follow-up, NOT included in the already selected
+generation-16 release: a request explicitly pinned to `grok-4.6` or
+`grok-4.7` must not become `cursor-grok-4.6-high` on weekly exhaustion.
+The previous router disclosed `MODEL_CHANGED=true`, but disclosure alone
+does not fulfill an exact-model task contract. This repair returns the
+original truthful Grok refusal for pinned jobs and preserves the
+Grok-to-monthly-Cursor affinity route for **unpinned** jobs. Unit tests
+cover both paths and the non-Grok-alias case. Deploy only through
+protected master, original-owner native-generation publication/verification
+and exact-predecessor selection; the initial stage -009 manifest is
+historical evidence for generation 16, not a source for these new changes.

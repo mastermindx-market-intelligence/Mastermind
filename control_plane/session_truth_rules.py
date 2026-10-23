@@ -226,9 +226,16 @@ def _completion_evidence_class(proof_state: object) -> str:
     current or future value remains typed uncertainty instead of reading healthy.
     """
 
-    if proof_state in _TERMINAL_PROOF:
+    # Source-owned proof state may be an uppercase capability enum
+    # (e.g. BUILT_NOT_PROVEN or PROVEN_LIVE). Preserve the raw observation
+    # in findings, but classify known ASCII spellings in either case.
+    # Unknown future values remain blocking uncertainty, not completion.
+    if type(proof_state) is not str:
+        return "unknown"
+    classified = proof_state.lower()
+    if classified in _TERMINAL_PROOF:
         return "terminal"
-    if proof_state in _NONTERMINAL_PROOF:
+    if classified in _NONTERMINAL_PROOF:
         return "nonterminal"
     return "unknown"
 

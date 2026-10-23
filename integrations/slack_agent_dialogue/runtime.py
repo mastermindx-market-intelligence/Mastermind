@@ -125,7 +125,7 @@ from integrations.slack_agent_dialogue.wake_projection import (
 )
 
 _TOKEN_MAX_BYTES = 2048
-AGENT_RELAY_SOCKET_PATH = Path("/var/run/mastermind-agent-relay/agent-relay.sock")
+AGENT_RELAY_SOCKET_PATH = Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
 EXECUTIVE_OBSERVATION_SOCKET_PATH = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
