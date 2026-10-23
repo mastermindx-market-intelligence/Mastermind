@@ -94,12 +94,14 @@ class RequestContract(unittest.TestCase):
         with (mock.patch.object(fabric_task.pick, 'format_pick', return_value='POOL=glm HOST=ubuntu2 MODE=glm MODEL=glm-5.3-flash'),
              mock.patch.object(fabric_task.pick, 'launch_policy', return_value={'allowed': True}),
              mock.patch.object(fabric_task.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run):
-            self.assertEqual(0, self.request('fixture-past', not_before=PAST))
+            self.assertEqual(0, self.request('fixture-past', not_before=PAST, max_turns=25))
         argv = run.call_args.args[0]
         self.assertEqual(PAST, argv[argv.index('--not-before') + 1])
         self.assertEqual(PAST, run.call_args.kwargs['env'][bound.NOT_BEFORE_ENV])
+        self.assertEqual('25', run.call_args.kwargs['env']['POOL_REQUEST_MAX_TURNS'])
         directory = self.root / 'state/remote_sub'
         raw = (directory / 'fixture-past.request.json').read_bytes()
+        self.assertEqual(25, json.loads(raw)['max_turns'])
         launch = json.loads((directory / 'fixture-past.request-launch.json').read_text())
         self.assertEqual(PAST, launch['not_before'])
         self.assertEqual(hashlib.sha256(raw).hexdigest(), launch['request_sha256'])
