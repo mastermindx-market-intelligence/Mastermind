@@ -115,6 +115,22 @@
       ],
       "default_tools_approval_mode": "approve",
       "tool_schema_digest": "a8a86ebfc59820efafe0810e08f3897583ab104817596c2d4e94f8f80c93e84d"
+    },
+    "mastermind-acp-workspace-read-v1": {
+      "config_name": "mastermindAcpWorkspaceRead",
+      "transport": "stdio",
+      "command": "/Library/Application Support/MastermindExecutive/bin/mmx-acp-workspace-read-mcp",
+      "args": [],
+      "required": true,
+      "auth_status": "unsupported",
+      "server_identity": "mastermind-acp-workspace-read",
+      "server_version": "1.0.0",
+      "enabled_tools": [
+        "read_file",
+        "search_text"
+      ],
+      "default_tools_approval_mode": "approve",
+      "tool_schema_digest": "76bc2f621a26a36cae7a1e90edab3af113cdc6924a662fa83004f6b56babd18d"
     }
   },
   "resources": {
@@ -400,6 +416,24 @@
       "native_helper": null,
       "skills": [],
       "mcp_servers": [],
+      "resources": [],
+      "plugins": [],
+      "forbidden": []
+    },
+    "worker.acp.providerfree.readonly.v1": {
+      "enabled": true,
+      "execution_surface": "acp-agent",
+      "auth_realm": "dedicated-worker-no-auth",
+      "sandbox_policy": "read-only",
+      "approval_policy": "never",
+      "network_policy": "disabled",
+      "write_capable": false,
+      "native_helper_policy": "disabled",
+      "native_helper": null,
+      "skills": [],
+      "mcp_servers": [
+        "mastermind-acp-workspace-read-v1"
+      ],
       "resources": [],
       "plugins": [],
       "forbidden": []
