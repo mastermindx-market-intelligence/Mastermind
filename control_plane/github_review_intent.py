@@ -178,6 +178,7 @@ class ReviewIntentRefusal(str, Enum):
     ACTOR_ASSOCIATION_INSUFFICIENT = "ACTOR_ASSOCIATION_INSUFFICIENT"
     PULL_REQUEST_NOT_OPEN = "PULL_REQUEST_NOT_OPEN"
     PULL_REQUEST_DRAFT = "PULL_REQUEST_DRAFT"
+    PULL_NUMBER_MISMATCH = "PULL_NUMBER_MISMATCH"
     HEAD_REPOSITORY_MISMATCH = "HEAD_REPOSITORY_MISMATCH"
     HEAD_SHA_MALFORMED = "HEAD_SHA_MALFORMED"
     UNTRUSTED_CONTENT_DETECTED = "UNTRUSTED_CONTENT_DETECTED"
@@ -848,6 +849,9 @@ def decide_review_intent(
     try:
         assert_untrusted_text_admissible(pull_request.title, name="pull_request.title")
         assert_untrusted_text_admissible(pull_request.body, name="pull_request.body")
+        # Both fields fit individually, but the combined objective might not.
+        # Refuse within the typed decision rather than crashing after admission.
+        build_review_objective(pull_request=pull_request, intent_source=intent_source)
     except ReviewIntentError:
         return _refuse(
             ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED,

@@ -507,7 +507,7 @@ def publish_verified_review(
     *,
     decision: ReviewIntentDecision,
     job_id: str,
-    pull_request: PullRequestFacts,
+    pull_requests: PullRequestReadPort,
     results: ReviewResultPort,
     publications: ReviewPublicationPort,
 ) -> ReviewPublishOutcome:
@@ -520,8 +520,10 @@ def publish_verified_review(
 
     result_port = _require(results, name="ReviewResultPort")
     publication_port = _require(publications, name="ReviewPublicationPort")
+    pull_read = _require(pull_requests, name="PullRequestReadPort")
     assert isinstance(result_port, ReviewResultPort)
     assert isinstance(publication_port, ReviewPublicationPort)
+    assert isinstance(pull_read, PullRequestReadPort)
 
     if not decision.admitted or decision.frozen_head_sha is None:
         raise ReviewVerificationRefused("only an admitted decision may publish a review")
@@ -542,16 +544,7 @@ def publish_verified_review(
             state=PublishState.ALREADY_PUBLISHED, publication_command_id=command
         )
 
-    # Head freeze, re-checked against a fresh read immediately before effect.
-    try:
-        verify_frozen_head(decision=decision, pull_request=pull_request)
-    except ReviewIntentError:
-        return ReviewPublishOutcome(
-            state=PublishState.REFUSED,
-            publication_command_id=command,
-            refusal=ReviewIntentRefusal.HEAD_MOVED.value,
-        )
-
+    # The result is verified first. A rejected result needs no fresh API call.
     result = result_port.load_verified_result(job_id=job_id)
     if result is None:
         return ReviewPublishOutcome(
@@ -591,6 +584,45 @@ def publish_verified_review(
             publication_command_id=command,
             refusal="REVIEW_SUMMARY_OVER_BOUND",
         )
+
+    # Obtain *new* installation-scoped facts at the effect boundary, never
+    # reuse a caller's admission-time snapshot or trust an unchanged SHA to
+    # prove that draft/state/PR text has not changed.
+    current = pull_read.read_pull_request(
+        repository=decision.repository, pull_number=decision.pull_number
+    )
+    if not isinstance(current, PullRequestFacts):
+        raise ReviewVerificationRefused("PullRequestReadPort returned a non-exact fact shape")
+
+    def refused(reason: ReviewIntentRefusal) -> ReviewPublishOutcome:
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED,
+            publication_command_id=command,
+            refusal=reason.value,
+        )
+
+    if current.repository != decision.repository or current.number != decision.pull_number:
+        return refused(ReviewIntentRefusal.PULL_NUMBER_MISMATCH)
+    try:
+        verify_frozen_head(decision=decision, pull_request=current)
+    except ReviewIntentError:
+        return refused(ReviewIntentRefusal.HEAD_MOVED)
+    if current.state != "open":
+        return refused(ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN)
+    if current.draft:
+        return refused(ReviewIntentRefusal.PULL_REQUEST_DRAFT)
+    if (current.base_repository != decision.repository
+            or current.head_repository != current.base_repository):
+        return refused(ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH)
+    if decision.intent_source is None:
+        raise ReviewVerificationRefused("admitted decision lacks an intent source")
+    try:
+        # This also checks secret/fence forms and the *combined* objective bound.
+        build_review_objective(
+            pull_request=current, intent_source=decision.intent_source
+        )
+    except ReviewIntentError:
+        return refused(ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED)
 
     event = REVIEW_VERDICT_EVENTS[result.verdict]
     review_id = publication_port.publish_review(

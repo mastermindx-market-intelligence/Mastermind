@@ -387,7 +387,7 @@ class TestUnboundPorts:
             ing.publish_verified_review(
                 decision=outcome.decision,
                 job_id=outcome.job_id,
-                pull_request=_pull_request(),
+                pull_requests=FakePullRequests(_pull_request()),
                 results=None,
                 publications=FakePublications(),
             )
@@ -405,7 +405,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(_verified(job_id=outcome.job_id)),
             publications=publications,
         )
@@ -423,7 +423,7 @@ class TestPublication:
         ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(_verified(job_id=outcome.job_id, verdict="REQUEST_CHANGES")),
             publications=publications,
         )
@@ -436,14 +436,14 @@ class TestPublication:
         first = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=results,
             publications=publications,
         )
         second = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=results,
             publications=publications,
         )
@@ -457,7 +457,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(head_sha=MOVED_HEAD_SHA),
+            pull_requests=FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA)),
             results=FakeResults(_verified(job_id=outcome.job_id)),
             publications=publications,
         )
@@ -471,7 +471,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(None),
             publications=publications,
         )
@@ -484,7 +484,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(
                 _verified(job_id=outcome.job_id, builder_worker_id="worker-reviewer")
             ),
@@ -499,7 +499,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(_verified(job_id=outcome.job_id, reviewer_worker_id="")),
             publications=publications,
         )
@@ -512,7 +512,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(_verified(job_id=outcome.job_id, verdict="LGTM")),
             publications=publications,
         )
@@ -524,7 +524,7 @@ class TestPublication:
         published = ing.publish_verified_review(
             decision=outcome.decision,
             job_id=outcome.job_id,
-            pull_request=_pull_request(),
+            pull_requests=FakePullRequests(_pull_request()),
             results=FakeResults(_verified(job_id="JOB-999")),
             publications=FakePublications(),
         )
@@ -536,7 +536,7 @@ class TestPublication:
             ing.publish_verified_review(
                 decision=outcome.decision,
                 job_id="JOB-001",
-                pull_request=_pull_request(),
+                pull_requests=FakePullRequests(_pull_request()),
                 results=FakeResults(_verified()),
                 publications=FakePublications(),
             )
@@ -562,3 +562,64 @@ class TestPublication:
         assert "Verdict: PASS" in body
         assert "worker-reviewer" in body
         assert "worker-builder" in body
+
+# ---------------------------------------------------------------------------
+# Audit #1741: publication facts MUST be freshly sourced on exact frozen head.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    "changed,refusal",
+    [
+        ({"state": "closed"}, gri.ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN.value),
+        ({"draft": True}, gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT.value),
+        ({"head_repository": "attacker/fork"}, gri.ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH.value),
+        ({"title": "xoxb-secret-shaped-token"}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
+        ({"title": "A" * 13000, "body": "B" * 13000}, gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED.value),
+        ({"number": 9001}, gri.ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value),
+    ],
+)
+def test_publication_refuses_changed_current_pr_facts_without_head_change(changed, refusal):
+    _, admitted = _admitted_decision()
+    reads = FakePullRequests(_pull_request(**changed))
+    publications = FakePublications()
+    result = ing.publish_verified_review(
+        decision=admitted.decision,
+        job_id=admitted.job_id,
+        pull_requests=reads,
+        results=FakeResults(_verified(job_id=admitted.job_id)),
+        publications=publications,
+    )
+    assert reads.reads == 1
+    assert result.state is ing.PublishState.REFUSED
+    assert result.refusal == refusal
+    assert publications.calls == []
+
+
+def test_publication_fetches_current_facts_not_admission_snapshot():
+    _, admitted = _admitted_decision()
+    reads = FakePullRequests(_pull_request(head_sha=MOVED_HEAD_SHA))
+    publications = FakePublications()
+    result = ing.publish_verified_review(
+        decision=admitted.decision,
+        job_id=admitted.job_id,
+        pull_requests=reads,
+        results=FakeResults(_verified(job_id=admitted.job_id)),
+        publications=publications,
+    )
+    assert reads.reads == 1
+    assert result.refusal == gri.ReviewIntentRefusal.HEAD_MOVED.value
+    assert publications.calls == []
+
+
+def test_combined_objective_over_bound_refused_before_ledger():
+    fabric = FakeFabric()
+    outcome = _admit(
+        fabric=fabric,
+        pull_requests=FakePullRequests(_pull_request(
+            title="A" * 13000, body="B" * 13000
+        )),
+    )
+    assert outcome.state is ing.AdmissionState.REFUSED
+    assert outcome.decision.refusal is gri.ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED
+    assert fabric.admit_calls == 0
+    assert fabric.jobs == {}
