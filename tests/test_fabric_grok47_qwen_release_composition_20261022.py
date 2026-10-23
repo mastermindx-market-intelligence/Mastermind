@@ -74,6 +74,48 @@ def test_rebuild_staged_manifest_is_exact(tmp_path):
         assert digest((stage / "native-code-stage" / path).read_bytes()) == digest_value
 
 
+def test_published_bundle_keeps_protected_worker_ceiling_and_operator_scope(tmp_path):
+    """Test what the native stage actually publishes, never just candidate files."""
+    root = tmp_path / "published-stage"
+    p = subprocess.run([sys.executable,
+        str(NATIVE / "rollout/build_review_stage.py"), "--output", str(root)],
+        text=True, capture_output=True, timeout=25)
+    assert p.returncode == 0, p.stderr
+    ext = root / "native-code-stage/ext"
+    manifest = json.loads((root / "native-manifest.json").read_text())
+    files = ("sub.sh", "remote_sub_helpers.py", "fabric_operator_client.py")
+    for name in files:
+        assert digest((ext / name).read_bytes()) == manifest["ext/" + name]
+    sub = (ext / "sub.sh").read_text()
+    assert "POOL_REQUEST_MAX_TURNS" in sub
+    assert "LOCAL_GROK_MODEL_REFUSED unsupported_model" in sub
+    assert "LOCAL_CURSOR_MODEL_REFUSED unsupported_model" in sub
+    body = sub.split('CLAUDE_WORKER_MAX_TURNS=120\n', 1)[1]
+    body = body.split('\n}\n', 1)[0] + '\n}\n'
+    bash = ('CLAUDE_WORKER_MAX_TURNS=120\n' + body
+            + '\n_claude_worker_profile glm glm-5.3 || exit $?\n'
+            + 'printf "%s\n" "$CLAUDE_WORKER_MAX_TURNS"\n')
+    env = {"PATH": "/usr/bin:/bin", "POOL_TASK_COMPLEXITY": "C0_MECHANICAL",
+           "POOL_MAX_TURNS": "40", "POOL_REQUEST_MAX_TURNS": "7"}
+    call = subprocess.run(["bash", "-c", bash], env=env,
+                          text=True, capture_output=True, timeout=5)
+    assert call.returncode == 0, call.stderr
+    assert call.stdout.strip() == "7"
+    forwarded = subprocess.run([sys.executable, str(ext / "remote_sub_helpers.py"),
+                                "routing-env"], env=env, text=True,
+                               capture_output=True, timeout=5)
+    assert forwarded.returncode == 0, forwarded.stderr
+    assert "POOL_REQUEST_MAX_TURNS=7" in forwarded.stdout
+    helper = (ext / "remote_sub_helpers.py").read_text()
+    assert "mastermind.grok_usage.v2" in helper
+    assert "requested_cli_only" in helper
+    operator = (ext / "fabric_operator_client.py").read_text()
+    assert "('grok', 'grok-4.7')" in operator
+    assert "Submit fabric_child_request ONCE" in operator
+    assert "Never resubmit an uncertain/dispatched request" in operator
+    assert "unexpired grant" in operator
+
+
 def test_builder_rejects_changed_accepted_grok_source(tmp_path):
     clone_root = tmp_path / "ops/native_fabric"
     candidate_native = clone_root / "quota_continuity"

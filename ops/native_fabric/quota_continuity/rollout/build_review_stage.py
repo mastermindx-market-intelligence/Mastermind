@@ -45,14 +45,14 @@ PREIMAGE_ONLY = {"bailian_keys.py": "bailian_keys.py.preimage"}
 # Never derive these names from a runtime scan or mutable published stage.
 GROK47_MERGED_SOURCE_DIGESTS = {
     'artifact_delivery.py': '447ab9d65264f46acfe5662d60e38c1f4db97198afc9113c2717109e298db9c3',
-    'fabric_operator_client.py': '8473ba07f597d84605940897cb0f4047a9ad7458380be10d4e122456e88a0645',
+    'fabric_operator_client.py': 'fcb79e9dc4b873832e18e1fde16f0ba900374a08d62d0fc8b9b624a40ec1cd17',
     'fabric_operator_contract.py': 'e642e36ef99d2c40b1254975b9ad3cc218fb9ef81c4ce87f3c7b6e7be0808c6a',
     'native_remote.py': '388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e',
     'pick.py': '02afff09760a98d593f6bb25c4e6a41e2d7bd4d450d0c668b63c5d4aedf8e0e6',
     'remote_sub.sh': '648802593d34d15a956a6558a5e6014c1982e352ae8c82dfc8b7b49b5c0ec084',
     'remote_sub_exec.py': 'afa10b7c6298f53fd214cb436d489119eb4caba3155903e7d1be45713dfb8c05',
-    'remote_sub_helpers.py': '075108ad8c2ea69ce4af0ff93ba55484cb135342b0096d536c1bec72637df295',
-    'sub.sh': '72b3d9f7d7eec22f3cffb768f4795e144737623f1a46f5a59f4e9951a19df817',
+    'remote_sub_helpers.py': 'c2b3859be4ba6f47b4ee9e07a372d7a2841e923818951594fcc5c5fcbabd17b6',
+    'sub.sh': '7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2',
 }
 
 EXTRA_PREIMAGES = {

@@ -114,9 +114,9 @@
       "source": "candidate/fabric_host_qualification.py"
     },
     "ext/fabric_operator_client.py": {
-      "bytes": 7587,
+      "bytes": 9676,
       "installed_preimage_sha256": "6718ade7a1245c8e5295edaee3ca75330bde4c92fd69c531caeee8d9c6f10d08",
-      "sha256": "8473ba07f597d84605940897cb0f4047a9ad7458380be10d4e122456e88a0645",
+      "sha256": "fcb79e9dc4b873832e18e1fde16f0ba900374a08d62d0fc8b9b624a40ec1cd17",
       "source": "../grok47/overlay/fabric_operator_client.py"
     },
     "ext/fabric_operator_contract.py": {
@@ -480,9 +480,9 @@
       "source": "../grok47/overlay/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {
-      "bytes": 75306,
+      "bytes": 75332,
       "installed_preimage_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
-      "sha256": "075108ad8c2ea69ce4af0ff93ba55484cb135342b0096d536c1bec72637df295",
+      "sha256": "c2b3859be4ba6f47b4ee9e07a372d7a2841e923818951594fcc5c5fcbabd17b6",
       "source": "../grok47/overlay/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
@@ -510,9 +510,9 @@
       "source": "source/studio_mcp_projection.sh"
     },
     "ext/sub.sh": {
-      "bytes": 42054,
+      "bytes": 42698,
       "installed_preimage_sha256": "39601b1c2485190049b54183bed82f43c9390339bce59b460d5e6aed9e3e6866",
-      "sha256": "72b3d9f7d7eec22f3cffb768f4795e144737623f1a46f5a59f4e9951a19df817",
+      "sha256": "7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2",
       "source": "../grok47/overlay/sub.sh"
     },
     "ext/support_bundle.py": {
