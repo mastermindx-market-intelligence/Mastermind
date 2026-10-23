@@ -128,7 +128,7 @@ def v1_profile_files(release, manifest_raw):
 
 
 
-def build_release(scratch):
+def build_release(scratch, manifest_size=0):
     release = scratch / 'releases' / SHA
     files = release_files()
     for name in sorted(qual.QUALIFIER_SOURCE_NAMES):
@@ -141,6 +141,9 @@ def build_release(scratch):
                               'mastermind.executive_release_manifest/v1',
                               'commit_sha': SHA, 'tree_sha': TREE,
                               'entries': entries})
+    if manifest_size:
+        assert len(manifest_raw) < manifest_size
+        manifest_raw += b' ' * (manifest_size - len(manifest_raw))
     for relative, raw in files.items():
         path = release / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -313,10 +316,10 @@ def fire_on_call(env, name, index, action):
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, request):
     scratch = tmp_path / 'Library' / 'Application Support' / 'MastermindExecutive'
     config_root = scratch / 'config'
-    release, manifest_raw, files = build_release(scratch)
+    release, manifest_raw, files = build_release(scratch, getattr(request, 'param', 0))
     destination = config_root / base.PAID_DEFINITION_DIRNAME
     staging = config_root / (base.PAID_DEFINITION_DIRNAME + '.initial-qualification')
     _profile, artifacts = v1_profile_files(release, manifest_raw)
@@ -374,6 +377,13 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setattr(owner, '_fsync_directory', lambda path: None)
     reads = []
     monkeypatch.setattr(owner, '_read_root_file', mechanical_reader(reads))
+    def mechanical_manifest(expected_sha):
+        assert expected_sha == SHA
+        raw, _info = mechanical_reader(reads)(
+            scratch / 'releases' / expected_sha / base._MANIFEST_NAME,
+            modes=frozenset({0o444}), uid=0, gid=0)
+        return raw
+    monkeypatch.setattr(owner, '_release_manifest_bytes', mechanical_manifest)
     monkeypatch.setattr(owner, '_atomic_file', mechanical_atomic)
     host = MechanicalHost()
     monkeypatch.setattr(owner, 'ProductionCeoSubmitHost', lambda: host)
@@ -604,11 +614,14 @@ def test_occupied_bundle_corruption_refused_before_qualification(env, tmp_path):
 
 
 
+@pytest.mark.parametrize('env', [0, 1059792], indirect=True)
 def test_published_bytes_round_trip_with_unchanged_config_plist(env, tmp_path):
     result = run_publish(env, tmp_path)
     artifacts = {name: (env.destination / name).read_bytes()
                  for name in sorted(base.FILES)}
     verified = qual.verify_qualified_artifacts(artifacts)
+    manifest_raw = (env.release / base._MANIFEST_NAME).read_bytes()
+    assert verified['profile']['release_manifest_sha256'] == digest_raw(manifest_raw)
     assert verified['hashes'] == result['artifacts']
     assert artifacts['bridge.json'] == canonical(qual._expected_bridge_document())
     with pytest.raises(BridgeProtocolError):
