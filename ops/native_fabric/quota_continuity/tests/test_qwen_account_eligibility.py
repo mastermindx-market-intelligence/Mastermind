@@ -70,7 +70,12 @@ import lease_broker  # noqa: E402
 import pick  # noqa: E402
 
 DATA_KEYS = {"state", "parked", "observed_at", "reset_at"}
-NOW_DT = datetime(2026, 10, 22, 12, 0, 0, tzinfo=timezone.utc)
+# One real-time anchor per test-process import. Pure eligibility boundary
+# assertions use NOW explicitly, while integration paths use the production
+# real-time read. A fixed historical instant made "fresh" parked accounts stale
+# once CI moved beyond the 24-hour eligibility horizon (7 false failures).
+# Keep the source's real clock and all expiry assertions unchanged.
+NOW_DT = datetime.now(timezone.utc).replace(microsecond=0)
 NOW = NOW_DT.timestamp()
 
 
