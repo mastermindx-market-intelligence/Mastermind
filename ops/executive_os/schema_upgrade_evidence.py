@@ -53,6 +53,8 @@ from ops.executive_os import autonomy_control
 from ops.executive_os import release_manifest
 
 MATERIAL_SCHEMA_VERSION = "mastermind.executive_schema_upgrade_evidence_material/v1"
+RECOVERED_MATERIAL_SCHEMA_VERSION = "mastermind.executive_schema_upgrade_evidence/pre_census_recovery_v1"
+_RECOVERED_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_preflight/v1"
 EVIDENCE_PHASE_INITIAL = "INITIAL"
 EVIDENCE_PHASE_HISTORICAL = "HISTORICAL"
 _EVIDENCE_PHASES = (EVIDENCE_PHASE_INITIAL, EVIDENCE_PHASE_HISTORICAL)
@@ -186,6 +188,11 @@ _EXPECTED_ROLES = (
     "v7_backup_database",
     "v7_backup_manifest",
 )
+_RECOVERY_ROLES = ("pre_census_qualification", "pre_census_continuation")
+_RECOVERED_ROLES = _EXPECTED_ROLES + _RECOVERY_ROLES
+_RECOVERY_REFERENCE_KEYS = frozenset({"qualification_identity", "continuation_identity"})
+_RECOVERY_CHAIN_KEYS = frozenset({"original_tool", "original_barrier",
+                                  "qualification_identity", "continuation_identity"})
 
 
 class SchemaUpgradeEvidenceError(RuntimeProofError):
@@ -1083,8 +1090,11 @@ def _load_receipt(
         )
     )
     payload = _strict_evidence_json(held.raw, role)
-    payload = _require_closed(payload, _RECEIPT_KEYS[role], role)
-    if payload["schema_version"] != schema:
+    recovered = (role == "P56" and isinstance(payload, dict)
+                 and payload.get("schema_version") == _RECOVERED_PREFLIGHT_SCHEMA)
+    keys = _RECEIPT_KEYS[role] | {"pre_census_reconciliation"} if recovered else _RECEIPT_KEYS[role]
+    payload = _require_closed(payload, keys, role)
+    if payload["schema_version"] != (_RECOVERED_PREFLIGHT_SCHEMA if recovered else schema):
         raise RetainedChainInvalid(f"{role} schema version is not the closed producer")
     if (
         payload["source_schema_version"] != source_version
@@ -1101,6 +1111,105 @@ def _load_receipt(
         held_dirs=guard.dirs,
     )
     return held, payload, digest
+
+
+def _artifact_reference(held: _HeldFile, payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {"path": str(held.path), "device": held.held.st_dev,
+            "inode": held.held.st_ino, "size": held.held.st_size,
+            "sha256": held.sha256, "payload_digest": backup._upgrade_digest(payload)}
+
+
+def _load_pre_census_reconciliation(guard, preflight, state_directory):
+    """Retain two explicit recovery origins without changing the normal wire."""
+    if preflight["schema_version"] != _RECOVERED_PREFLIGHT_SCHEMA:
+        return None
+    refs = _require_closed(preflight["pre_census_reconciliation"],
+                           _RECOVERY_REFERENCE_KEYS, "recovery preflight references")
+    specifications = (
+        ("pre_census_qualification", backup.PRE_CENSUS_QUALIFICATION_NAME,
+         _control_config_profile(guard.control_uid, guard.control_gid)),
+        ("pre_census_continuation", backup.PRE_CENSUS_CONTINUATION_NAME,
+         _control_profile(guard.control_uid, guard.control_gid)),
+    )
+    records, payloads, identities = [], [], []
+    for role, name, profile in specifications:
+        held = guard.hold(_qualify_control_file(
+            state_directory / name, role=role, kind="receipt", profile=profile,
+            limit=_MAX_RECEIPT_BYTES))
+        value = _strict_evidence_json(held.raw, role)
+        if not isinstance(value, dict) or backup._upgrade_receipt_bytes(value) != held.raw:
+            raise RetainedChainInvalid("recovery origin is not canonical producer bytes")
+        held = dataclasses.replace(held, payload=value,
+                                   payload_digest=backup._upgrade_digest(value))
+        guard.files[-1] = held
+        identity = _artifact_reference(held, value)
+        ref_key = ("qualification_identity" if role == "pre_census_qualification"
+                   else "continuation_identity")
+        if refs[ref_key] != identity:
+            raise RetainedChainInvalid("recovery preflight origin identity differs")
+        records.append(held.origin_record())
+        payloads.append(value)
+        identities.append(identity)
+    qualification, continuation = payloads
+    backup._validate_pre_census_qualification(qualification)
+    expected_intent_keys = {"schema_version", "operation_id", "original_barrier_identity",
+                            "qualification_identity", "recovery_tool", "created_at"}
+    _require_closed(continuation, expected_intent_keys, "recovery continuation")
+    if (continuation["schema_version"] != backup.PRE_CENSUS_CONTINUATION_SCHEMA
+            or continuation["operation_id"] != qualification["operation_id"]
+            or continuation["original_barrier_identity"] != qualification["original_barrier"]["identity"]
+            or continuation["qualification_identity"] != identities[0]
+            or continuation["recovery_tool"] != qualification["recovery_tool"]):
+        raise RetainedChainInvalid("one-use recovery continuation binding differs")
+    _require_text(continuation["created_at"], "continuation issuance time")
+    return {"qualification": qualification, "continuation": continuation,
+            "qualification_identity": identities[0], "continuation_identity": identities[1],
+            "records": records}
+
+
+def _validate_pre_census_reconciliation(recovery, receipts, pairs, chain,
+                                       runtime_root, backup_root, control_uid, control_gid):
+    """Join historical Root qualification to genuine source backup and executors.
+
+    This is immutable provenance validation in both phases. It does not infer
+    the original failed process's phase or read the present authoritative DB.
+    """
+    qualification = recovery["qualification"]
+    preflight = receipts["P56"][0]
+    original = qualification["original_barrier"]
+    if (qualification["operation_id"] != preflight["operation_id"]
+            or original["identity"] != preflight["barrier_identity"]
+            or original["payload"]["created_at"] != preflight["created_at"]
+            or original["payload"]["database_path"] != chain["database_path"]
+            or qualification["host"] != {"runtime_root": str(runtime_root),
+                                         "backup_root": str(backup_root),
+                                         "control_uid": control_uid, "control_gid": control_gid}
+            or qualification["recovery_tool"] != chain["tool_release"]):
+        raise RetainedChainInvalid("recovery source, original barrier or executor differs")
+    source = qualification["database"]
+    if any(source[key] != preflight["database"][key] for key in _DATABASE_KEYS):
+        raise RetainedChainInvalid("recovery qualified database differs from migration source")
+    verified = pairs["P56"]["verification"]
+    if (qualification["full_v5_content_digest"] != chain["original_full_v5_content_digest"]
+            or qualification["normalized_schema_digest"] != verified.normalized_schema_digest
+            or qualification["migration_vector"] != [row.to_dict() for row in verified.migrations]):
+        raise RetainedChainInvalid("recovery Root source proof differs from verified v5 backup")
+    if qualification["source_control_config"]["path"] != str(_control_config_path()):
+        raise RetainedChainInvalid("recovery qualification names a foreign source config")
+    tool = qualification["original_tool"]
+    if (tool["root"] != original["payload"]["tool_release_root"]
+            or tool["sha"] != original["payload"]["release_sha"]
+            or tool["tree_sha"] != original["payload"]["tool_release_tree_sha"]
+            or tool["manifest_sha256"] != original["payload"]["tool_release_manifest_sha256"]):
+        raise RetainedChainInvalid("recovery original tool differs from its retained barrier")
+    verified_tool = _verify_pinned_release(Path(tool["root"]), tool["sha"], tool["tree_sha"])
+    if (verified_tool.get("commit_sha") != tool["sha"]
+            or verified_tool.get("tree_sha") != tool["tree_sha"]
+            or verified_tool.get("manifest_sha256") != tool["manifest_sha256"]):
+        raise RetainedChainInvalid("recovery original tool seal differs")
+    return {"original_tool": dict(tool), "original_barrier": dict(original),
+            "qualification_identity": recovery["qualification_identity"],
+            "continuation_identity": recovery["continuation_identity"]}
 
 
 def _normalize_drill(drill: Mapping[str, Any]) -> dict[str, Any]:
@@ -1226,6 +1335,7 @@ def _validate_retained_producer_evidence(
     receipts: Mapping[str, tuple[dict[str, Any], str]],
     pairs: Mapping[str, dict[str, Any]],
     *, database: Path, control_uid: int,
+    recovered_barrier: Mapping[str, Any] | None = None,
 ) -> None:
     """Validate retained producer DATA without invoking its effectful observer.
 
@@ -1251,6 +1361,7 @@ def _validate_retained_producer_evidence(
         payload = receipts[role][0]
         if payload["normalized_schema_digest"] != pairs[role]["verification"].normalized_schema_digest:
             raise RetainedChainInvalid(f"{role} schema digest differs from recomputation")
+        recovered_census = role == "P56" and recovered_barrier is not None
         census = _require_closed(payload["quiesce_writer_census"], frozenset({
             "schema_version", "control_uids", "upgrader_pid", "inspected_paths",
             "process_sensor", "file_sensor", "processes", "open_files"}), f"{role} census")
@@ -1259,7 +1370,9 @@ def _validate_retained_producer_evidence(
             "binary", "upgrader_observed", "sensor_child_observed"}), "census process sensor")
         file_sensor = _require_closed(census["file_sensor"], frozenset({
             "binary", "held_lock_observed"}), "census file sensor")
-        if (census["schema_version"] != backup.UPGRADE_CENSUS_SCHEMA
+        expected_census_schema = (backup.PRE_CENSUS_CENSUS_SCHEMA if recovered_census
+                                  else backup.UPGRADE_CENSUS_SCHEMA)
+        if (census["schema_version"] != expected_census_schema
                 or type(census["control_uids"]) is not list
                 or census["control_uids"] != [control_uid]
                 or any(type(uid) is not int for uid in census["control_uids"])
@@ -1270,15 +1383,25 @@ def _validate_retained_producer_evidence(
                 or process_sensor["sensor_child_observed"] is not True
                 or file_sensor["binary"] != "/usr/sbin/lsof"
                 or file_sensor["held_lock_observed"] is not True
-                or type(census["open_files"]) is not list or len(census["open_files"]) != 1):
+                or type(census["open_files"]) is not list
+                or len(census["open_files"]) != (3 if recovered_census else 1)):
             raise RetainedChainInvalid(f"{role} retained census is adverse or inconsistent")
-        row = _require_closed(census["open_files"][0], frozenset({"pid", "uid", "fd", "path"}),
-                              "census original lock sentinel")
-        if (type(row["pid"]) is not int or row["pid"] != pid
-                or type(row["uid"]) is not int or row["uid"] != control_uid
-                or not isinstance(row["fd"], str) or re.fullmatch(r"[0-9]+", row["fd"]) is None
-                or row["path"] != str(lock)):
-            raise RetainedChainInvalid(f"{role} retained census lock binding differs")
+        paths, descriptors = [], []
+        for row in census["open_files"]:
+            row = _require_closed(row, frozenset({"pid", "uid", "fd", "path"}),
+                                  "census original retained descriptor")
+            if (type(row["pid"]) is not int or row["pid"] != pid
+                    or type(row["uid"]) is not int or row["uid"] != control_uid
+                    or not isinstance(row["fd"], str)
+                    or re.fullmatch(r"[0-9]+", row["fd"]) is None):
+                raise RetainedChainInvalid(f"{role} retained census descriptor binding differs")
+            paths.append(row["path"])
+            descriptors.append(int(row["fd"]))
+        expected_open_paths = [str(lock), str(barrier), str(database)] if recovered_census else [str(lock)]
+        if (sorted(paths) != sorted(expected_open_paths)
+                or len(set(descriptors)) != len(descriptors)
+                or (recovered_census and descriptors != sorted(descriptors))):
+            raise RetainedChainInvalid(f"{role} retained census paths or descriptors differ")
         original_barrier = {
             "schema_version": backup.UPGRADE_BARRIER_SCHEMA,
             "operation_id": payload["operation_id"], "database_path": str(database),
@@ -1288,6 +1411,13 @@ def _validate_retained_producer_evidence(
             "release_sha": payload["release_sha"], "control_uid": control_uid,
             "created_at": payload["created_at"],
         }
+        if role == "P56" and recovered_barrier is not None:
+            original_barrier = dict(recovered_barrier)
+            if (original_barrier["operation_id"] != payload["operation_id"]
+                    or original_barrier["created_at"] != payload["created_at"]
+                    or original_barrier["database_path"] != str(database)
+                    or original_barrier["control_uid"] != control_uid):
+                raise RetainedChainInvalid("recovered original barrier lineage differs")
         raw = backup._upgrade_receipt_bytes(original_barrier)
         identity = _require_closed(payload["barrier_identity"], _BARRIER_IDENTITY_KEYS,
                                    "retained original barrier")
@@ -1366,9 +1496,10 @@ def _validate_chain(
     for payload in (pre56, p67):
         _require_closed(payload["barrier_identity"], _BARRIER_IDENTITY_KEYS, "barrier")
         census = payload["quiesce_writer_census"]
-        if not isinstance(census, Mapping) or census.get("schema_version") != (
-            backup.UPGRADE_CENSUS_SCHEMA
-        ):
+        expected_schema = (backup.PRE_CENSUS_CENSUS_SCHEMA
+                           if payload is pre56 and pre56["schema_version"] == _RECOVERED_PREFLIGHT_SCHEMA
+                           else backup.UPGRADE_CENSUS_SCHEMA)
+        if not isinstance(census, Mapping) or census.get("schema_version") != expected_schema:
             raise RetainedChainInvalid("retained preflight census is not the closed wire")
         if backup._upgrade_digest(census) != _require_hex(
             payload["quiesce_writer_census_digest"], "preflight census digest"
@@ -1709,8 +1840,10 @@ def _verify_current_initial(
 
 def _validate_pinned_material(pinned: Mapping[str, Any]) -> dict[str, Any]:
     value = _require_closed(pinned, _MATERIAL_KEYS, "pinned material")
-    if value["schema_version"] != MATERIAL_SCHEMA_VERSION:
+    recovered = value["schema_version"] == RECOVERED_MATERIAL_SCHEMA_VERSION
+    if value["schema_version"] not in {MATERIAL_SCHEMA_VERSION, RECOVERED_MATERIAL_SCHEMA_VERSION}:
         raise RetainedChainInvalid("pinned material schema version is unsupported")
+    expected_roles = _RECOVERED_ROLES if recovered else _EXPECTED_ROLES
     if value["phase"] != EVIDENCE_PHASE_INITIAL:
         raise RetainedChainInvalid("pinned material is not original INITIAL provenance")
     host = _require_closed(value["host"], _HOST_KEYS, "pinned host mapping")
@@ -1723,7 +1856,7 @@ def _validate_pinned_material(pinned: Mapping[str, Any]) -> dict[str, Any]:
     _require_int(host["control_uid"], "pinned control_uid")
     _require_int(host["control_gid"], "pinned control_gid")
     records = value["origin_records"]
-    if not isinstance(records, list) or len(records) != len(_EXPECTED_ROLES):
+    if not isinstance(records, list) or len(records) != len(expected_roles):
         raise RetainedChainInvalid(
             "pinned material does not carry the closed twelve origin records"
         )
@@ -1754,9 +1887,11 @@ def _validate_pinned_material(pinned: Mapping[str, Any]) -> dict[str, Any]:
         if record["kind"] == "receipt":
             _require_hex(record["payload_digest"], "origin payload digest")
         roles.append(record["role"])
-    if sorted(roles) != sorted(_EXPECTED_ROLES):
+    if sorted(roles) != sorted(expected_roles):
         raise RetainedChainInvalid("pinned origin records are not the closed twelve roles")
-    chain = _require_closed(value["chain"], _CHAIN_KEYS, "pinned chain")
+    chain = _require_closed(value["chain"], _CHAIN_KEYS | ({"pre_census_reconciliation"} if recovered else set()), "pinned chain")
+    if recovered:
+        _require_closed(chain["pre_census_reconciliation"], _RECOVERY_CHAIN_KEYS, "pinned recovery")
     if chain["source_schema_version"] != 5 or chain["target_schema_version"] != 7:
         raise RetainedChainInvalid("pinned chain does not prove the closed 5-to-7 span")
     _require_text(chain["database_path"], "pinned database path")
@@ -1822,8 +1957,11 @@ class RetainedV5ToV7Evidence:
         control_config_bytes: bytes,
         control_config_identity: dict[str, Any],
         backup_root: Path,
+        pre_census_qualification: dict[str, Any] | None = None,
     ) -> None:
         self.phase = phase
+        self.pre_census_qualification = (json.loads(json.dumps(pre_census_qualification))
+                                         if pre_census_qualification is not None else None)
         self.material = material
         self.source_v5_database = source_v5_database
         self.source_v5_content_digest = source_v5_content_digest
@@ -2068,6 +2206,8 @@ def _open_chain_evidence(
             receipt_records[role] = held.origin_record()
             receipt_identities[role] = (path, held.sha256)
 
+        recovery = _load_pre_census_reconciliation(guard, receipts["P56"][0], state_directory)
+
         pair_specs = (
             ("P56", "v5_backup", 5, _BACKUP_V5_KEYS,
              "v5_backup_database", "v5_backup_manifest"),
@@ -2097,12 +2237,18 @@ def _open_chain_evidence(
             pairs=pairs,
             expected_release=expected_release,
         )
+        if recovery is not None:
+            chain["pre_census_reconciliation"] = _validate_pre_census_reconciliation(
+                recovery, receipts, pairs, chain, runtime_physical, backup_physical,
+                control_uid, control_gid)
         if Path(chain["database_path"]) != db_path:
             raise RetainedChainInvalid(
                 "retained chain does not name the fixed authoritative database layout"
             )
         _validate_retained_producer_evidence(
             receipts, pairs, database=db_path, control_uid=control_uid,
+            recovered_barrier=(recovery["qualification"]["original_barrier"]["payload"]
+                               if recovery is not None else None),
         )
         if chain["tool_release"]["sha"] != expected_release_sha:
             raise RetainedChainInvalid("retained tool release differs from expected SHA")
@@ -2161,10 +2307,12 @@ def _open_chain_evidence(
             "control_uid": control_uid,
             "control_gid": control_gid,
         }
-        order = {role: index for index, role in enumerate(_EXPECTED_ROLES)}
+        expected_roles = _RECOVERED_ROLES if recovery is not None else _EXPECTED_ROLES
+        order = {role: index for index, role in enumerate(expected_roles)}
         origin_records = sorted(
             [
                 *receipt_records.values(),
+                *(recovery["records"] if recovery is not None else []),
                 pairs["P56"]["database_identity"],
                 pairs["P56"]["manifest_identity"],
                 pairs["C56"]["database_identity"],
@@ -2180,7 +2328,8 @@ def _open_chain_evidence(
         # phase of this opening is carried separately on the evidence object.
         material_phase = pinned["phase"] if pinned is not None else EVIDENCE_PHASE_INITIAL
         material = {
-            "schema_version": MATERIAL_SCHEMA_VERSION,
+            "schema_version": (RECOVERED_MATERIAL_SCHEMA_VERSION if recovery is not None
+                               else MATERIAL_SCHEMA_VERSION),
             "phase": material_phase,
             "host": host,
             "origin_records": origin_records,
@@ -2205,6 +2354,7 @@ def _open_chain_evidence(
             control_config_bytes=config_raw,
             control_config_identity=held_config.identity_record(),
             backup_root=backup_physical,
+            pre_census_qualification=(recovery["qualification"] if recovery is not None else None),
         )
     except BaseException:
         guard.close()
