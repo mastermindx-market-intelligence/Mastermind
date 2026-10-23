@@ -655,6 +655,13 @@ def _route_with_deadline(task_class, options, deadline_ns, env, state_dir, run_i
     return result.stdout.strip()
 
 
+def validate_request_max_turns(value: object) -> int:
+    """Validate a per-request ceiling; the existing shell profile owns limits."""
+    if type(value) is not int or not 1 <= value <= 400:
+        raise FabricTaskError("REQUEST_MAX_TURNS_INVALID")
+    return value
+
+
 def request(
     run_id: str,
     task_class: str,
@@ -675,6 +682,7 @@ def request(
     qualification_host: str | None = None,
     new_macro_worktree: str | None = None,
     cpu_scope_percent: int | None = None,
+    max_turns: int | None = None,
     request_remaining_seconds: int | None = None,
     request_capacity_preflight: bool = False,
     request_deadline_ns: int | None = None,
@@ -683,6 +691,8 @@ def request(
     rid = validate_run_id(run_id)
     if bool(packet) == bool(stdin_bytes is not None):
         raise ValueError("provide exactly one of packet or stdin")
+    if max_turns is not None:
+        max_turns = validate_request_max_turns(max_turns)
     env = os.environ.copy()
     # An inherited transport label cannot silently constrain or authorize a new request.
     env.pop("POOL_CALLER_NOT_BEFORE", None)
@@ -690,6 +700,10 @@ def request(
         from commission_deadline import validate_not_before
         not_before = validate_not_before(not_before)
         env["POOL_CALLER_NOT_BEFORE"] = not_before
+    # A parent request ceiling must not leak into unrelated child commissions.
+    env.pop("POOL_REQUEST_MAX_TURNS", None)
+    if max_turns is not None:
+        env["POOL_REQUEST_MAX_TURNS"] = str(max_turns)
     env.pop("POOL_CAPACITY_PREFLIGHT",None)
     env.pop("POOL_COMMISSION_DEADLINE_NS", None)
     env.pop("POOL_PRELEASE_HANDOFF", None)
@@ -745,6 +759,7 @@ def request(
         "packet_bytes": len(source), "created_at": time.time(),
         "automatic_background_execution": False,
         **({"not_before": not_before} if not_before is not None else {}),
+        **({"max_turns": max_turns} if max_turns is not None else {}),
     })
     packet, stdin_bytes = retained_packet, None
     try:
@@ -789,10 +804,18 @@ def request(
                     "required_platforms": ["linux"]} if artifact_names else
                    {"required_platforms": ["linux"]} if (new_macro_worktree is not None or cpu_scope_percent is not None) else {}),
             )
+            if max_turns is not None:
+                # Only these admitted remote wrappers enforce the existing Claude
+                # turn fuse. Never silently ignore the requested ceiling elsewhere.
+                route_options["required_modes"] = sorted(
+                    set(route_options.get("required_modes", ("glm", "minimax")))
+                    & {"glm", "minimax"})
             route = _parse_route(
                 _route_with_deadline(task_class, route_options, request_deadline_ns, env, state_dir, rid)
                 if request_deadline_ns is not None else pick.format_pick(task_class, **route_options))
         check_deadline()
+        if max_turns is not None and route["MODE"] not in {"glm", "minimax"}:
+            raise FabricTaskError("REQUEST_MAX_TURNS_ROUTE_UNSUPPORTED")
         guard = pick.launch_policy(
             route["MODE"], task_class, route["MODEL"],
             escalation_reason=reason, task_complexity=complexity,
@@ -1218,6 +1241,8 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--escalation-reason")
     p_request.add_argument("--model", dest="requested_model")
     p_request.add_argument("--not-before", help="Strict UTC Z lower bound for this new request; never queues or authorizes retry")
+    p_request.add_argument("--max-turns", type=int,
+                           help="Per-request Claude turn ceiling (1..400); only tightens the existing admitted wrapper limit")
     p_request.add_argument("--quota-fallback", action="store_true",
                            help="Bounded foreground successors for proven initial quota rejection; inspect with status --follow")
 
@@ -1483,6 +1508,7 @@ def main(argv: list[str] | None = None) -> int:
                 new_macro_worktree=args.new_macro_worktree,
                 cpu_scope_percent=args.cpu_scope_percent,
                 **({"not_before": args.not_before} if args.not_before is not None else {}),
+                **({"max_turns": args.max_turns} if args.max_turns is not None else {}),
             )
         if args.cmd == "status":
             if args.follow:
