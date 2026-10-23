@@ -70,7 +70,9 @@ import lease_broker  # noqa: E402
 import pick  # noqa: E402
 
 DATA_KEYS = {"state", "parked", "observed_at", "reset_at"}
-NOW_DT = datetime(2026, 10, 22, 12, 0, 0, tzinfo=timezone.utc)
+# Snapshot one shared UTC clock for synthetic usage rows and implicit real-time routing.
+# A calendar-pinned fixture silently becomes stale, making fresh-park tests fail.
+NOW_DT = datetime.now(timezone.utc).replace(microsecond=0)
 NOW = NOW_DT.timestamp()
 
 
