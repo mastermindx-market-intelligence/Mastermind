@@ -123,6 +123,12 @@ def harness(tmp_path):
         shutil.copy2(ROOT / "ops/executive_os" / name, surface / name)
     closure = ROOT / "ops/native_fabric/quota_continuity"
     shutil.copytree(closure, source / "ops/native_fabric/quota_continuity")
+    # The native review builder pins nine independently accepted Grok files.
+    # The release fixture must archive those exact bytes, not just the older
+    # candidate tree, or real stage verification fails before fault injection.
+    shutil.copytree(ROOT / "ops/native_fabric/grok47/overlay",
+                    source / "ops/native_fabric/grok47/overlay",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     # The builder resolves the reviewed pure-YAML lock relative to the release
     # root; track the same reviewed lock bytes at that released location.
     lock = Path(json.loads(
