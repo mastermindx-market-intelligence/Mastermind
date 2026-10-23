@@ -10,9 +10,11 @@ import dataclasses
 import hashlib
 import json
 import os
+import posixpath
 import re
 import stat
 from collections.abc import Iterator, Mapping
+from datetime import datetime
 from enum import Enum
 from pathlib import Path
 from types import MappingProxyType
@@ -53,6 +55,10 @@ _SUBSCRIPTION_CANARY_TOKEN_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$
 MAX_ARTIFACTS = 32
 MAX_ARTIFACT_BYTES = 8 * 1024 * 1024
 MAX_ARTIFACT_TOTAL_BYTES = 32 * 1024 * 1024
+PAID_MODEL_PROCESS_REF_SCHEMA = "mastermind.paid_model_process_ref/v1"
+_PAID_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+_PAID_MODEL_IDENTITY_MAX_BYTES = 512
+_PAID_MODEL_PATH_MAX_BYTES = 4096
 
 
 class _FrozenMapping(Mapping[Any, Any]):
@@ -361,6 +367,224 @@ class WorkerProcessRef:
 
 class WorkerRecoveryContractError(ValueError):
     """Durable worker recovery evidence is malformed or has drifted."""
+
+
+class PaidModelProcessRefError(ValueError):
+    """Paid model process identity evidence is malformed or has drifted."""
+
+
+def _paid_model_identity_text(value: Any, field_name: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > _PAID_MODEL_IDENTITY_MAX_BYTES
+        or value.strip() != value
+        or "\x00" in value
+    ):
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    try:
+        if len(value.encode("utf-8")) > _PAID_MODEL_IDENTITY_MAX_BYTES:
+            raise PaidModelProcessRefError("paid model process ref text is invalid")
+    except UnicodeError:
+        raise PaidModelProcessRefError("paid model process ref text is invalid") from None
+    return value
+
+
+def _paid_model_identifier(value: Any, field_name: str) -> str:
+    if type(value) is not str or _PAID_MODEL_ID_RE.fullmatch(value) is None:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    return value
+
+
+def _paid_model_positive_int(value: Any, field_name: str) -> int:
+    if type(value) is not int or not 0 < value < 2**63:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    return value
+
+
+def _paid_model_uid_int(value: Any, field_name: str) -> int:
+    if type(value) is not int or not 0 <= value <= 2**31 - 1:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        )
+    return value
+
+
+def _paid_model_timestamp(value: Any, field_name: str) -> str:
+    text = _paid_model_identity_text(value, field_name)
+    candidate = text[:-1] + "+00:00" if text.endswith("Z") else text
+    try:
+        moment = datetime.fromisoformat(candidate)
+    except ValueError as exc:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is invalid"
+        ) from exc
+    if moment.tzinfo is None or moment.utcoffset() is None:
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is not timezone aware"
+        )
+    return text
+
+
+def _paid_model_absolute_path(value: Any, field_name: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or len(value) > _PAID_MODEL_PATH_MAX_BYTES
+        or not value.startswith("/")
+        or value.strip() != value
+        or "\x00" in value
+        or "//" in value
+        or ".." in value.split("/")
+        or posixpath.normpath(value) != value
+    ):
+        raise PaidModelProcessRefError(
+            f"paid model process ref {field_name} is not a canonical absolute path"
+        )
+    try:
+        if len(value.encode("utf-8")) > _PAID_MODEL_PATH_MAX_BYTES:
+            raise PaidModelProcessRefError("paid model process ref path is invalid")
+    except UnicodeError:
+        raise PaidModelProcessRefError("paid model process ref path is invalid") from None
+    return value
+
+
+def _paid_model_binary(value: Any) -> BinaryAttestation:
+    if type(value) is not BinaryAttestation:
+        raise PaidModelProcessRefError("paid model process ref binary is invalid")
+    for field_name in ("path", "real_path"):
+        _paid_model_absolute_path(getattr(value, field_name), f"binary {field_name}")
+    _paid_model_identity_text(value.version, "binary version")
+    if type(value.sha256) is not str or _SHA256_RE.fullmatch(value.sha256) is None:
+        raise PaidModelProcessRefError("paid model process ref binary digest is invalid")
+    if value.team_identifier is not None:
+        _paid_model_identity_text(value.team_identifier, "binary team identifier")
+    for field_name in ("size", "device", "inode", "mode", "uid", "gid", "mtime_ns"):
+        number = getattr(value, field_name)
+        if type(number) is not int or number < 0:
+            raise PaidModelProcessRefError(
+                f"paid model process ref binary {field_name} is invalid"
+            )
+    return value
+
+
+_BINARY_ATTESTATION_FIELDS = frozenset(
+    field.name for field in dataclasses.fields(BinaryAttestation)
+)
+
+
+@dataclasses.dataclass(frozen=True)
+class PaidModelProcessRef:
+    """Closed, secret-free process identity for one paid model execution.
+
+    Unlike :class:`WorkerProcessRef` this shape carries no provider session,
+    workspace, or admission fields: it is the durable evidence that a specific
+    paid process ran under a specific non-forged OS identity on one host.
+    """
+
+    run_id: str
+    worker_id: str
+    host_ref: str
+    pid: int
+    pgid: int
+    session_id: int
+    process_start_identity: str
+    boot_session_id: str
+    launch_nonce: str
+    started_at: str
+    effective_uid: int
+    effective_gid: int
+    real_uid: int
+    real_gid: int
+    binary: BinaryAttestation
+    stdout_path: str
+    stderr_path: str
+    result_path: str
+    schema_version: str = PAID_MODEL_PROCESS_REF_SCHEMA
+
+    def __post_init__(self) -> None:
+        if type(self.schema_version) is not str or (
+            self.schema_version != PAID_MODEL_PROCESS_REF_SCHEMA
+        ):
+            raise PaidModelProcessRefError(
+                "paid model process ref schema is unsupported"
+            )
+        for field_name in ("run_id", "worker_id", "host_ref"):
+            _paid_model_identifier(getattr(self, field_name), field_name)
+        for field_name in ("pid", "pgid", "session_id"):
+            _paid_model_positive_int(getattr(self, field_name), field_name)
+        for field_name in (
+            "process_start_identity",
+            "boot_session_id",
+            "launch_nonce",
+        ):
+            _paid_model_identity_text(getattr(self, field_name), field_name)
+        _paid_model_timestamp(self.started_at, "started_at")
+        for field_name in ("effective_uid", "effective_gid", "real_uid", "real_gid"):
+            _paid_model_uid_int(getattr(self, field_name), field_name)
+        if self.real_uid != self.effective_uid or self.real_gid != self.effective_gid:
+            raise PaidModelProcessRefError(
+                "paid model process ref real and effective identities differ"
+            )
+        _paid_model_binary(self.binary)
+        paths = [
+            _paid_model_absolute_path(getattr(self, field_name), field_name)
+            for field_name in ("stdout_path", "stderr_path", "result_path")
+        ]
+        if len(set(paths)) != len(paths):
+            raise PaidModelProcessRefError(
+                "paid model process ref output paths are not distinct"
+            )
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "schema_version": self.schema_version,
+            "run_id": self.run_id,
+            "worker_id": self.worker_id,
+            "host_ref": self.host_ref,
+            "pid": self.pid,
+            "pgid": self.pgid,
+            "session_id": self.session_id,
+            "process_start_identity": self.process_start_identity,
+            "boot_session_id": self.boot_session_id,
+            "launch_nonce": self.launch_nonce,
+            "started_at": self.started_at,
+            "effective_uid": self.effective_uid,
+            "effective_gid": self.effective_gid,
+            "real_uid": self.real_uid,
+            "real_gid": self.real_gid,
+            "binary": dataclasses.asdict(self.binary),
+            "stdout_path": self.stdout_path,
+            "stderr_path": self.stderr_path,
+            "result_path": self.result_path,
+        }
+
+    @classmethod
+    def from_dict(cls, value: Any) -> "PaidModelProcessRef":
+        if type(value) is not dict or set(value) != _PAID_MODEL_PROCESS_REF_FIELDS:
+            raise PaidModelProcessRefError("paid model process ref fields are invalid")
+        raw_binary = value.get("binary")
+        if type(raw_binary) is not dict or set(raw_binary) != _BINARY_ATTESTATION_FIELDS:
+            raise PaidModelProcessRefError("paid model process ref binary is invalid")
+        fields = {key: item for key, item in value.items() if key != "binary"}
+        try:
+            fields["binary"] = BinaryAttestation(**raw_binary)
+            return cls(**fields)
+        except (TypeError, ValueError) as exc:
+            raise PaidModelProcessRefError(
+                "paid model process ref is invalid"
+            ) from exc
+
+
+_PAID_MODEL_PROCESS_REF_FIELDS = frozenset(
+    field.name for field in dataclasses.fields(PaidModelProcessRef)
+)
 
 
 def _canonical_sha256(value: Any) -> str:
@@ -863,4 +1087,7 @@ __all__ = [
     "WorkerProcessRef",
     "WorkerResult",
     "WorkerRunStatus",
+    "PAID_MODEL_PROCESS_REF_SCHEMA",
+    "PaidModelProcessRef",
+    "PaidModelProcessRefError",
 ]

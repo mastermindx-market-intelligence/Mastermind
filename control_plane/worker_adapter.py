@@ -49,6 +49,10 @@ class AdapterDescriptor:
 
 
 ADAPTER_DESCRIPTORS: dict[str, AdapterDescriptor] = {
+    "canonical-paid-fabric": AdapterDescriptor(
+        adapter_id="canonical-paid-fabric", implemented=True,
+        implementation="control_plane.executive_paid_fabric_adapter.CanonicalPaidFabricWorkerAdapter",
+    ),
     # The retained facade exists; its concrete qualified host backend is not
     # installed. Catalogue source must not imply worker admission.
     "attended-fabric": AdapterDescriptor(

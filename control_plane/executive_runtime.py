@@ -639,6 +639,94 @@ def _normalise_capabilities(
     )
 
 
+def normalize_paid_subject_review_binding(value: Any) -> dict[str, Any]:
+    """Validate the root-declared first-profile Codex review recipe.
+
+    This is routing DATA, not admission or physical independence evidence.
+    Actual Worker/quota and owned-process checks still occur at claim/run time.
+    """
+    from control_plane.model_router import ModelRouter, RoutingPolicyError
+    keys = {
+        "schema_version", "model_alias", "eligible_quota_classes", "provider",
+        "model", "effort", "cost_class", "routing_policy_version",
+        "execution_profile_id", "execution_profile_digest",
+        "capability_policy_version", "capability_policy_digest", "authorities",
+    }
+    if (type(value) is not dict or any(type(key) is not str for key in value)
+            or set(value) != keys
+            or any(type(value[key]) is not str for key in keys - {
+                "eligible_quota_classes", "authorities"})
+            or type(value["eligible_quota_classes"]) is not list
+            or len(value["eligible_quota_classes"]) != 1
+            or type(value["eligible_quota_classes"][0]) is not str
+            or _ROUTING_VALUE_RE.fullmatch(value["eligible_quota_classes"][0]) is None
+            or type(value["authorities"]) is not list
+            or any(type(item) is not str for item in value["authorities"])
+            or value["authorities"] != ["READ"]
+            or value["schema_version"] != "mastermind.paid_subject_review_binding/v1"
+            or value["model_alias"] != "standard.review"
+            or value["provider"] != "codex" or value["cost_class"] != "default"):
+        raise StateConflict("paid-subject review recipe is not the closed READ-only Codex binding")
+    try:
+        router = ModelRouter.load()
+        alias = router.resolve_model_alias("standard.review")
+        profile = router.capability_registry.resolve(alias.execution_profile_id)
+    except (RoutingPolicyError, CapabilityPolicyError, KeyError, ValueError) as exc:
+        raise StateConflict("paid-subject review catalogue is unavailable") from exc
+    expected = {
+        "model": alias.model, "effort": alias.effort,
+        "cost_class": alias.cost_class, "provider": alias.provider_alias,
+        "routing_policy_version": router.policy_version,
+        **{key: getattr(alias, key) for key in (
+            "execution_profile_id", "execution_profile_digest",
+            "capability_policy_version", "capability_policy_digest")},
+    }
+    if (any(value[key] != expected[key] for key in expected)
+            or alias.adapter_id != "codex-cli" or not alias.worker_eligible
+            or profile.profile_id != "sealed.worker.readonly.no-extensions.v1"
+            or not profile.enabled or profile.write_capable
+            or profile.execution_surface != "codex-exec"
+            or profile.sandbox_policy != "read-only"
+            or profile.auth_realm != "dedicated-worker-account"
+            or profile.approval_policy != "never" or profile.network_policy != "disabled"
+            or profile.native_helper_policy.value != "DISABLED"
+            or profile.native_helper is not None or profile.skills or profile.mcp_servers
+            or profile.plugins or profile.resource_grants):
+        raise StateConflict("paid-subject review recipe differs from the qualified readonly catalogue")
+    return json.loads(json.dumps(value, sort_keys=True, allow_nan=False))
+
+
+def paid_subject_review_constraints(root_constraints: Mapping[str, Any]) -> dict[str, Any]:
+    """Project only the host-declared recipe, without widening its root ceiling."""
+    recipe = normalize_paid_subject_review_binding(
+        root_constraints.get("paid_subject_review_binding")
+    )
+    root_cost = root_constraints.get("cost_class")
+    if root_cost not in _COST_CLASS_RANK or _COST_CLASS_RANK[root_cost] < _COST_CLASS_RANK["default"]:
+        raise StateConflict("paid-subject review requires an originally declared default-tier root ceiling")
+    projected = {key: recipe[key] for key in (
+        "eligible_quota_classes", "provider", "model", "effort", "cost_class",
+        "routing_policy_version", "execution_profile_id", "execution_profile_digest",
+        "capability_policy_version", "capability_policy_digest")}
+    projected.update(preferred_model_aliases=[recipe["model_alias"]], required_capabilities=["read"])
+    if root_constraints.get("base_sha"):
+        projected["base_sha"] = root_constraints["base_sha"]
+    return _normalise_constraints(projected)
+
+
+def _paid_review_constraints_for_target(connection, root_row, reviewed_job_id):
+    if reviewed_job_id is None:
+        return None
+    reviewed = connection.execute("SELECT * FROM jobs WHERE job_id=?", (reviewed_job_id,)).fetchone()
+    if reviewed is None:
+        raise StateConflict("paid-subject review lost its target")
+    target_constraints = _strict_canonical_json_loads(str(reviewed["constraints_json"]), name="review target constraints")
+    if target_constraints.get("execution_profile_id") != "fabric.paid.glm.sealed-input.v1":
+        return None
+    root_constraints = _strict_canonical_json_loads(str(root_row["constraints_json"]), name="review root constraints")
+    return paid_subject_review_constraints(root_constraints)
+
+
 def _normalise_constraints(
     value: dict[str, Any] | None,
     *,
@@ -886,10 +974,30 @@ def _normalise_constraints(
         if result.get("provider") != route["provider_alias"]:
             raise StateConflict("attended route provider drifted")
         result["attended_route"] = route
+    if "paid_execution_route" in raw:
+        from control_plane.executive_paid_fabric_composition import normalize_paid_execution_route
+        if "attended_route" in raw:
+            raise StateConflict("paid and attended route kinds cannot be mixed")
+        try:
+            route = normalize_paid_execution_route(raw["paid_execution_route"])
+        except ValueError as exc:
+            raise StateConflict("paid route constraints are invalid") from exc
+        for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
+            if result.get(key) != route[key].lower():
+                raise StateConflict(f"paid route constraint drifted at {key}")
+        if (result.get("preferred_model_aliases") != [route["model_alias"]]
+                or result.get("provider") != route["provider_alias"]):
+            raise StateConflict("paid route catalogue identity drifted")
+        result["paid_execution_route"] = route
     if host_admitted_placement_union and "work_placement_union" in raw:
         result["work_placement_union"] = _normalise_work_placement_union(
             raw["work_placement_union"]
         )
+        if "paid_subject_review_binding" in raw:
+            result["paid_subject_review_binding"] = normalize_paid_subject_review_binding(
+                raw["paid_subject_review_binding"]
+            )
     return result
 
 
@@ -910,6 +1018,7 @@ def _normalise_work_placement_union(
         if not isinstance(member, Mapping) or set(member) not in (
             {"provider_realm", "quota_class"},
             {"provider_realm", "quota_class", "attended_route"},
+            {"provider_realm", "quota_class", "paid_execution_route"},
         ):
             raise StateConflict(
                 "host work-placement union member must name exactly "
@@ -934,6 +1043,16 @@ def _normalise_work_placement_union(
                 raise StateConflict(str(exc)) from exc
             if normalized_member["provider_realm"] != normalized_member["attended_route"]["provider_alias"]:
                 raise StateConflict("attended host member provider differs from its route")
+        if "paid_execution_route" in member:
+            from control_plane.executive_paid_fabric_composition import normalize_paid_execution_route
+            try:
+                normalized_member["paid_execution_route"] = normalize_paid_execution_route(
+                    member["paid_execution_route"]
+                )
+            except ValueError as exc:
+                raise StateConflict("paid host placement route is invalid") from exc
+            if normalized_member["provider_realm"] != normalized_member["paid_execution_route"]["provider_alias"]:
+                raise StateConflict("paid host member provider differs from its route")
         identity = (
             normalized_member["provider_realm"],
             normalized_member["quota_class"],
@@ -1066,6 +1185,24 @@ def _project_work_placement(
             projected[key] = route[key].lower()
         if "model" in placement and str(placement["model"]).lower() != route["model"].lower():
             raise StateConflict("attended placement cannot change its exact catalogue model")
+    if "paid_execution_route" in member:
+        from control_plane.executive_paid_fabric_composition import normalize_paid_execution_route
+        if "attended_route" in member:
+            raise StateConflict("paid and attended placement kinds cannot be mixed")
+        try:
+            route = normalize_paid_execution_route(member["paid_execution_route"])
+        except ValueError as exc:
+            raise StateConflict("paid placement route is invalid") from exc
+        if provider_realm != route["provider_alias"]:
+            raise StateConflict("paid placement provider differs from its route")
+        projected.pop("attended_route", None)
+        projected["paid_execution_route"] = route
+        projected["preferred_model_aliases"] = [route["model_alias"]]
+        for key in ("execution_profile_id", "execution_profile_digest", "capability_policy_version",
+                    "capability_policy_digest", "routing_policy_version", "model", "effort", "cost_class"):
+            projected[key] = route[key].lower()
+        if "model" in placement and str(placement["model"]).lower() != route["model"].lower():
+            raise StateConflict("paid placement cannot change its exact catalogue model")
     if plan_schema_version in {"mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}:
         reasons = list(projected.get("routing_reason_codes") or [])
         if "manual_pool_override" not in reasons:
@@ -1133,6 +1270,11 @@ def _capacity_matches_route(row: sqlite3.Row, constraints: dict[str, Any]) -> bo
         return True
     metadata = _capacity_route_metadata(row)
     if "attended_route" in constraints and metadata.get("attended_route") != constraints["attended_route"]:
+        return False
+    if "paid_execution_route" in constraints and (
+        "attended_route" in constraints
+        or metadata.get("paid_execution_route") != constraints["paid_execution_route"]
+    ):
         return False
     if aliases:
         worker_policy_version = (
@@ -1526,6 +1668,8 @@ def _constraints_with_host_execution_binding(
 
     raw_caller = dict(constraints or {})
     normalized_caller = _normalise_constraints(raw_caller)
+    if "paid_subject_review_binding" in raw_caller:
+        raise StateConflict("paid-subject review recipe is host composition, not caller constraints")
     if execution_binding is None:
         return normalized_caller
     if not isinstance(execution_binding, Mapping):
@@ -1539,8 +1683,12 @@ def _constraints_with_host_execution_binding(
     carried = dict(execution_binding)
     carried.pop(HOST_EXECUTION_BINDING_VERSION_KEY, None)
     admitted_union = None
+    review_recipe = None
     if version == HOST_EXECUTION_BINDING_V3:
-        if set(carried) != set(V3_HOST_EXECUTION_BINDING_KEYS):
+        expected_keys = set(V3_HOST_EXECUTION_BINDING_KEYS)
+        if "paid_subject_review_binding" in carried:
+            expected_keys.add("paid_subject_review_binding")
+        if set(carried) != expected_keys:
             raise StateConflict(
                 "v2 host execution binding fields are incomplete or drifted"
             )
@@ -1552,6 +1700,10 @@ def _constraints_with_host_execution_binding(
         admitted_union = _normalise_work_placement_union(
             carried.pop("work_placement_union")
         )
+        if "paid_subject_review_binding" in carried:
+            review_recipe = normalize_paid_subject_review_binding(
+                carried.pop("paid_subject_review_binding")
+            )
     if set(carried) != set(V2_HOST_EXECUTION_BINDING_KEYS):
         raise StateConflict(
             "v2 host execution binding fields are incomplete or drifted"
@@ -1567,6 +1719,9 @@ def _constraints_with_host_execution_binding(
     normalized_caller.update(bound)
     if admitted_union is not None:
         normalized_caller["work_placement_union"] = admitted_union
+        if review_recipe is not None:
+            normalized_caller["paid_subject_review_binding"] = review_recipe
+            paid_subject_review_constraints(normalized_caller)
         return _normalise_constraints(
             normalized_caller,
             host_admitted_placement_union=True,
@@ -7909,6 +8064,7 @@ def _validated_sealed_worker_launch_material(
     attempt_row: sqlite3.Row,
     *,
     allow_unsealed_principal: bool = False,
+    connection: sqlite3.Connection | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Re-derive a SEALED_WORKER principal from its complete launch receipt.
 
@@ -7918,6 +8074,27 @@ def _validated_sealed_worker_launch_material(
     projection.  No caller text, Worker row, or later model result contributes
     to this identity.
     """
+
+    from control_plane.executive_paid_runtime import (
+        is_paid_attempt, validated_paid_launch_material,
+    )
+    if connection is not None and is_paid_attempt(connection, attempt_row):
+        return validated_paid_launch_material(
+            connection, attempt_row,
+            allow_unsealed_principal=allow_unsealed_principal,
+        )
+    if connection is None:
+        # A direct legacy helper caller cannot qualify a paid Job/claim join.
+        raw = _strict_canonical_json_loads(
+            str(attempt_row["launch_metadata_json"]), name="launch dispatch metadata"
+        )
+        if isinstance(raw, dict) and (
+            raw.get("schema_version") == "mastermind.executive_paid_process_launch/v1"
+            or (isinstance(raw.get("launch_attestation"), dict)
+                and raw["launch_attestation"].get("schema_version")
+                == "mastermind.executive_paid_model_launch_attestation/v1")
+        ):
+            raise StateConflict("paid launch validation requires its original transaction")
 
     metadata = _strict_canonical_json_loads(
         str(attempt_row["launch_metadata_json"]), name="sealed-worker launch metadata"
@@ -8262,6 +8439,15 @@ def _sealed_worker_result_payload(
 ) -> dict[str, Any]:
     """Build seal-equivalent evidence from the immutable sealed-worker receipt."""
 
+    from control_plane.executive_paid_runtime import (
+        is_paid_attempt, paid_sealed_worker_result_payload,
+    )
+    if is_paid_attempt(connection, attempt_row):
+        return paid_sealed_worker_result_payload(
+            connection, attempt_row, expected_role=expected_role,
+            terminal_payload=terminal_payload,
+        )
+
     if not isinstance(terminal_payload, dict):
         raise StateConflict("sealed-worker terminal payload is not an object")
     evidence = terminal_payload.get("result_evidence")
@@ -8482,7 +8668,7 @@ def _sealed_worker_result_payload(
     ):
         raise StateConflict("sealed-worker collection/result identity is invalid")
     attestation, _principal, _placement, grant = (
-        _validated_sealed_worker_launch_material(attempt_row)
+        _validated_sealed_worker_launch_material(attempt_row, connection=connection)
     )
     job_row = connection.execute(
         "SELECT root_job_id,validation_commands_json,result_json FROM jobs WHERE job_id=?",
@@ -9000,8 +9186,16 @@ def _validated_sealed_worker_terminal_evidence(
 ) -> dict[str, Any]:
     """Validate the sealed-worker equivalent without accepting OHF table evidence."""
 
+    from control_plane.executive_paid_runtime import (
+        is_paid_attempt, validated_paid_terminal_evidence,
+    )
+    if is_paid_attempt(connection, attempt_row):
+        return validated_paid_terminal_evidence(
+            connection, attempt_row=attempt_row, seal=seal,
+        )
+
     attestation, principal, placement, grant = _validated_sealed_worker_launch_material(
-        attempt_row
+        attempt_row, connection=connection
     )
     attestation_digest = orchestration_digest(attestation)
     exit_events = connection.execute(
@@ -9830,7 +10024,7 @@ def _validated_plan_admission(
 
 def _review_candidate_exclusions(
     connection: sqlite3.Connection, review_job: sqlite3.Row
-) -> tuple[str, str]:
+) -> tuple[str, str] | tuple[str, str, str]:
     """Exclude known non-independent placement before spending a review claim.
 
     The completed target's sealed identity supplies the exclusions. Final
@@ -9859,6 +10053,17 @@ def _review_candidate_exclusions(
         )
     except PersistenceError as exc:
         raise StateConflict("review target has no qualified execution identity") from exc
+    if isinstance(principal, dict) and principal.get("schema_version") == (
+        "mastermind.paid_model_execution_principal/v1"
+    ):
+        from control_plane.executive_paid_runtime import validated_paid_launch_material
+        _attestation, qualified, _placement, _grant = validated_paid_launch_material(
+            connection, attempt
+        )
+        if principal != qualified:
+            raise StateConflict("paid review target principal differs from its owned launch")
+        # The third member narrows claim-time selection; v1 keeps its original tuple.
+        return qualified["worker_id"], qualified["account_label"], "codex"
     if (
         not isinstance(principal, dict)
         or set(principal) != {
@@ -9874,6 +10079,94 @@ def _review_candidate_exclusions(
     ):
         raise StateConflict("review target execution identity differs from its completed Attempt")
     return principal["worker_id"], principal["account_label"]
+
+
+def _paid_subject_codex_review_is_independent(
+    connection: sqlite3.Connection, *, review: sqlite3.Row,
+    reviewed: sqlite3.Row, review_grant: dict[str, Any],
+) -> bool:
+    """Narrow paid SUBJECT -> qualified sealed Codex REVIEWER policy.
+
+    Both identities are re-derived through their real owned launch receipts.
+    An absent paid home never participates in an independence comparison.
+    This grants neither paid review nor shared-UID execution independence.
+    """
+    try:
+        from control_plane.executive_paid_runtime import validated_paid_launch_material
+        subject_att, subject, _subject_placement, _subject_grant = (
+            validated_paid_launch_material(connection, reviewed)
+        )
+        reviewer_att, reviewer, _reviewer_placement, qualified_review_grant = (
+            _validated_sealed_worker_launch_material(review, connection=connection)
+        )
+        jobs = connection.execute(
+            "SELECT * FROM jobs WHERE job_id IN (?,?)",
+            (review["job_id"], reviewed["job_id"]),
+        ).fetchall()
+        by_id = {row["job_id"]: row for row in jobs}
+        review_job, subject_job = by_id[review["job_id"]], by_id[reviewed["job_id"]]
+        if (
+            review["execution_mode"] != AttemptExecutionMode.SEALED_WORKER.value
+            or reviewed["execution_mode"] != AttemptExecutionMode.SEALED_WORKER.value
+            or review_job["orchestration_role"] != "review"
+            or subject_job["orchestration_role"] not in {"work", "repair"}
+            or review_job["reviews_job_id"] != subject_job["job_id"]
+            or review_job["root_job_id"] != subject_job["root_job_id"]
+            or review_job["parent_job_id"] != subject_job["parent_job_id"]
+            or review_job["current_attempt_id"] != review["attempt_id"]
+            or subject_job["current_attempt_id"] != reviewed["attempt_id"]
+            or reviewer_att["schema_version"] != "mastermind.executive_launch_attestation/v1"
+            or reviewer["schema_version"] != "mastermind.execution_principal_snapshot/v1"
+            or reviewer["provider"] != "codex" or subject["provider"] != "glm"
+            or review["attempt_id"] == reviewed["attempt_id"]
+            or reviewer["worker_id"] == subject["worker_id"]
+            or reviewer["account_label"] == subject["account_label"]
+            or not reviewer["account_label"] or not subject["account_label"]
+            or review_grant != qualified_review_grant
+            or review_grant.get("authorities") != ["READ"]
+            or review_grant.get("write_paths") != []
+            or review_grant.get("validation_argv") != []
+        ):
+            return False
+        # Canonical boot identity has provenance through each complete owned
+        # launch; a caller-supplied PID/boot label is never accepted here.
+        rproc, sproc = reviewer_att["process_identity"], subject_att["process_identity"]
+        r_os = (rproc["boot_id"], reviewer["os_principal_name"], reviewer["os_principal_uid"])
+        s_os = (sproc["boot_id"], subject["os_principal_name"], subject["os_principal_uid"])
+        if (not all(isinstance(v, str) and v for v in (r_os[0], r_os[1], s_os[0], s_os[1]))
+                or type(r_os[2]) is not int or type(s_os[2]) is not int
+                or r_os == s_os
+                or (r_os[0], r_os[2]) == (s_os[0], s_os[2])):
+            return False
+        r_generation = tuple(rproc[k] for k in ("boot_id", "pid", "pgid", "start_identity"))
+        s_generation = tuple(sproc[k] for k in ("boot_id", "pid", "pgid", "start_identity"))
+        if r_generation == s_generation:
+            return False
+        # Retain the existing profile/capability qualification on the v1 side.
+        constraints = _strict_canonical_json_loads(
+            str(review_job["constraints_json"]), name="Codex review constraints"
+        )
+        metadata = _strict_canonical_json_loads(
+            str(review["launch_metadata_json"]), name="Codex review launch"
+        )
+        routing = metadata.get("routing", {})
+        profile = ExecutionCapabilityRegistry.load().resolve(constraints["execution_profile_id"])
+        if (routing.get("adapter_id") != "codex-cli"
+                or routing.get("execution_profile_id") != profile.profile_id
+                or routing.get("execution_profile_digest") != profile.profile_digest
+                or constraints.get("execution_profile_digest") != profile.profile_digest
+                or profile.execution_surface != "codex-exec"
+                or profile.auth_realm != "dedicated-worker-account"
+                or profile.sandbox_policy != "read-only" or profile.write_capable
+                or profile.mcp_servers or profile.plugins or profile.skills
+                or profile.resource_grants or profile.skill_grants
+                or not profile.enabled or profile.approval_policy != "never"
+                or profile.network_policy != "disabled"
+                or profile.native_helper is not None):
+            return False
+        return True
+    except (KeyError, TypeError, ValueError, RuntimeProofError, CapabilityPolicyError):
+        return False
 
 
 def _review_attempt_is_independent(
@@ -9909,6 +10202,12 @@ def _review_attempt_is_independent(
         )
     except PersistenceError:
         return False
+    if isinstance(reviewed_principal, dict) and reviewed_principal.get("schema_version") == (
+        "mastermind.paid_model_execution_principal/v1"
+    ):
+        return _paid_subject_codex_review_is_independent(
+            connection, review=review, reviewed=reviewed, review_grant=review_grant,
+        )
     principal_keys = {
         "schema_version",
         "attempt_id",
@@ -11524,6 +11823,13 @@ def _insert_cycle_child(
     )
     constraints = dict(root_constraints)
     constraints["cost_class"] = cost_class
+    paid_review = (_paid_review_constraints_for_target(connection, root_row, reviews_job_id)
+                   if role == "review" else None)
+    if paid_review is not None:
+        if (requested_authorities != ["READ"] or validation_commands or allowed_write_paths
+                or cost_class != paid_review["cost_class"]):
+            raise StateConflict("paid-subject review must use its declared READ-only root recipe")
+        constraints = paid_review
     if role in {"work", "aggregation"} and placement is not None:
         constraints = _project_work_placement(
             constraints,
@@ -11537,6 +11843,8 @@ def _insert_cycle_child(
     constraints = _normalise_constraints(
         constraints, host_admitted_placement_union=role == "aggregation"
     )
+    if role == "aggregation" and constraints.get("execution_profile_id") == "fabric.paid.glm.sealed-input.v1":
+        raise StateConflict("paid model-only profile cannot become a coordinator")
     try:
         authority = ExecutiveAuthorityPolicy.load().authorize(
             requested_authorities,
@@ -11816,6 +12124,13 @@ def _reconcile_cycle_child_creation(
     )
     expected_constraints = dict(root_constraints)
     expected_constraints["cost_class"] = cost_class
+    paid_review = (_paid_review_constraints_for_target(connection, root_row, reviews_job_id)
+                   if role == "review" else None)
+    if paid_review is not None:
+        if (requested_authorities != ["READ"] or validation_commands or allowed_write_paths
+                or cost_class != paid_review["cost_class"]):
+            raise StateConflict("paid-subject review replay differs from its root recipe")
+        expected_constraints = paid_review
     if role in {"work", "aggregation"} and placement is not None:
         expected_constraints = _project_work_placement(
             expected_constraints,
@@ -12130,6 +12445,10 @@ def finite_host_binding_digest(constraints: Mapping[str, Any]) -> str:
         if has_union
         else V2_HOST_EXECUTION_BINDING_KEYS
     )
+    if "paid_subject_review_binding" in raw:
+        if not has_union:
+            raise StateConflict("paid-subject review recipe requires the v3 host binding")
+        keys = keys | {"paid_subject_review_binding"}
     binding: dict[str, Any] = {}
     for key in sorted(keys):
         if key not in raw:
@@ -12137,7 +12456,8 @@ def finite_host_binding_digest(constraints: Mapping[str, Any]) -> str:
         binding[key] = (
             _normalise_work_placement_union(raw[key])
             if key == "work_placement_union"
-            else raw[key]
+            else normalize_paid_subject_review_binding(raw[key])
+            if key == "paid_subject_review_binding" else raw[key]
         )
     binding[HOST_EXECUTION_BINDING_VERSION_KEY] = version
     return orchestration_digest(binding)
@@ -14046,7 +14366,12 @@ class JobRegistry:
             )
             if step is None:
                 raise StateConflict("review target is absent from the admitted plan")
+            paid_review = _paid_review_constraints_for_target(connection, root, reviewed_job_id)
+            review_cost_class = (paid_review["cost_class"] if paid_review is not None
+                                 else str(step["cost_class"]))
             has_tests = "RUN_TESTS" in step["requested_authorities"]
+            if paid_review is not None and has_tests:
+                raise StateConflict("paid-subject review recipe does not admit RUN_TESTS")
             review_authorities = ["READ", *(["RUN_TESTS"] if has_tests else [])]
             root_validations = _strict_canonical_json_loads(
                 str(root["validation_commands_json"]), name="root validations"
@@ -14105,7 +14430,7 @@ class JobRegistry:
                     requested_authorities=review_authorities,
                     allowed_write_paths=[],
                     validation_commands=review_validations,
-                    cost_class=str(step["cost_class"]),
+                    cost_class=review_cost_class,
                     attempt_limit=policy.review_job_attempt_limit,
                     review_required=False,
                     command_id=command_id,
@@ -14178,7 +14503,7 @@ class JobRegistry:
                 requested_authorities=review_authorities,
                 allowed_write_paths=[],
                 validation_commands=review_validations,
-                cost_class=str(step["cost_class"]),
+                cost_class=review_cost_class,
                 attempt_limit=policy.review_job_attempt_limit,
                 review_required=False,
                 command_id=command_id,
@@ -16476,6 +16801,26 @@ class AttemptRegistry:
 
         if exact_target is not None:
             _validate_exact_worker_target_selection(connection, exact_target, job_row, capacity, authority_policy_hash)
+        # A readonly review quota is another view of the existing Worker,
+        # never another physical slot. The common transactional claim seam
+        # makes this symmetric for every quota/path on that same Worker.
+        worker_quotas = connection.execute(
+            "SELECT metadata_json,held_attempt_id FROM worker_quota_classes WHERE worker_id=?",
+            (capacity["worker_id"],),
+        ).fetchall()
+        single_worker_capacity = False
+        for worker_quota in worker_quotas:
+            quota_metadata = _strict_canonical_json_loads(
+                str(worker_quota["metadata_json"]), name="shared Worker capacity metadata"
+            )
+            if "single_worker_capacity" in quota_metadata:
+                if quota_metadata["single_worker_capacity"] is not True:
+                    raise StateConflict("shared Worker capacity declaration must be exactly true")
+                single_worker_capacity = True
+        if single_worker_capacity and any(row["held_attempt_id"] is not None for row in worker_quotas):
+            if is_c2:
+                raise StateConflict("C2_SELECTED_CAPACITY_NOT_CURRENT")
+            return None
         if orchestration_role == "work":
             _assert_dependency_manifest_current(
                 connection,
@@ -16628,6 +16973,10 @@ class AttemptRegistry:
                     carrier_claim.carrier_authority_fingerprint
                 ),
             }
+        from control_plane.executive_paid_runtime import paid_claim_binding
+        paid_binding = paid_claim_binding(capacity, constraints)
+        if paid_binding is not None:
+            claim_payload["paid_capacity_binding"] = paid_binding
         if _initial_capacity_evidence is not None:
             claim_payload["capacity_evidence"] = dict(_initial_capacity_evidence)
         if exact_target is not None:
@@ -16920,6 +17269,18 @@ class AttemptRegistry:
             eligible_classes = set(constraints["eligible_quota_classes"])
             candidates: list[sqlite3.Row] = []
             for row in candidate_rows:
+                if review_exclusions is not None and len(review_exclusions) == 3:
+                    # This first cross-kind profile permits only an existing
+                    # qualified sealed Codex reviewer of a paid subject.
+                    review_metadata = _json_loads(row["metadata_json"], fallback={})
+                    if (row["provider"] != "codex"
+                            or row["worker_provider"] != "codex"
+                            or review_metadata.get("adapter_id") != "codex-cli"
+                            or review_metadata.get("model_alias") != "standard.review"
+                            or review_metadata.get("single_worker_capacity") is not True
+                            or review_metadata.get("execution_profile_id")
+                            != "sealed.worker.readonly.no-extensions.v1"):
+                        continue
                 if review_exclusions is not None and (
                     row["worker_id"] == review_exclusions[0]
                     or row["account_label"] == review_exclusions[1]
@@ -17691,7 +18052,16 @@ class AttemptRegistry:
                 event_type="ATTEMPT_REMOTE_LAUNCH_PINNED", actor="supervisor",
                 job_id=str(row["job_id"]), attempt_id=attempt_id,
                 worker_id=str(row["worker_id"]), quota_class=str(row["quota_class"]),
-                payload={"identity_digest": identity_digest}, timestamp_ms=timestamp,
+                payload={"identity_digest": identity_digest, **(
+                    {
+                        "paid_runtime_pin_version": int(row["version"]) + 1,
+                        "paid_runtime_fence_generation": int(row["fence_generation"]),
+                    }
+                    if _json_loads(connection.execute(
+                        "SELECT constraints_json FROM jobs WHERE job_id=?", (row["job_id"],)
+                    ).fetchone()[0], fallback={}).get("execution_profile_id")
+                    == "fabric.paid.glm.sealed-input.v1" else {}
+                )}, timestamp_ms=timestamp,
             )
         value = self.get_attempt(attempt_id)
         assert value is not None
@@ -17884,17 +18254,29 @@ class AttemptRegistry:
                 raise PersistenceError(f"attempt {attempt_id} lost its Job")
             orchestration_principal: dict[str, Any] | None = None
             orchestration_principal_digest: str | None = None
+            from control_plane.executive_paid_runtime import is_paid_attempt
+            paid_attempt = is_paid_attempt(connection, row)
+            if paid_attempt and required_launch_attestation_schema != (
+                "mastermind.executive_paid_model_launch_attestation/v1"
+            ):
+                raise StateConflict("paid Attempt requires its exact launch schema")
+            if not paid_attempt and required_launch_attestation_schema == (
+                "mastermind.executive_paid_model_launch_attestation/v1"
+            ):
+                raise StateConflict("paid launch schema differs from immutable Job profile")
             if job_row["orchestration_role"] is not None:
-                if required_launch_attestation_schema not in {
-                    None,
-                    "mastermind.executive_launch_attestation/v1",
-                }:
+                if required_launch_attestation_schema not in (
+                    {"mastermind.executive_paid_model_launch_attestation/v1"}
+                    if paid_attempt else {
+                        None, "mastermind.executive_launch_attestation/v1",
+                    }
+                ):
                     raise StateConflict(
                         f"attempt {attempt_id} launch attestation schema is not accepted"
                     )
                 _attestation, orchestration_principal, _placement, _grant = (
                     _validated_sealed_worker_launch_material(
-                        row, allow_unsealed_principal=True
+                        row, allow_unsealed_principal=True, connection=connection
                     )
                 )
                 if (
@@ -28900,4 +29282,6 @@ __all__ = [
     "WorkerRegistry",
     "WorkerStatus",
     "normalize_executive_dialogue_source",
+    "normalize_paid_subject_review_binding",
+    "paid_subject_review_constraints",
 ]

@@ -23,6 +23,7 @@ def _service_with_alias(alias_name: str) -> ExecutiveControlService:
         operator_harness_version="fixture-v1",
         coo_operator_harness_armed=False,
         coo_attended_work_placements=(),
+        coo_paid_work_placements=(),
     )
     return service
 

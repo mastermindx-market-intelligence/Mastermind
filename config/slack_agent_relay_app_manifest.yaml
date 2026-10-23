@@ -1,3 +1,6 @@
+# Historical standalone Mastermind Relay app: compatibility reference only.
+# Normal A2 transport uses the existing Mastermind Executive Relay instead.
+# Passing the manifest checker is NOT permission to install, enroll or retire.
 _metadata:
   major_version: 2
   minor_version: 1

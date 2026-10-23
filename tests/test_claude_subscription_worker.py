@@ -8,6 +8,7 @@ import json
 import os
 import stat
 import subprocess
+from datetime import datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -684,7 +685,13 @@ def test_adapter_refuses_missing_capacity_or_realm_proof_and_changed_catalog(tmp
     bindings, profiles = _documents()
     admission = _owner_seal(bindings=bindings, profiles=profiles)
     changed = json.loads(json.dumps(bindings))
-    changed["verified_at"] = "2026-09-13T23:59:59Z"
+    # A digest-drift test must supply a *valid* profile-fresh review timestamp.
+    # A stale one is now rejected earlier by the BytePlus review provenance
+    # guard, so it cannot exercise the intended canary digest mismatch.
+    reviewed = datetime.strptime(bindings["verified_at"], "%Y-%m-%dT%H:%M:%SZ")
+    changed["verified_at"] = (reviewed + timedelta(seconds=1)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
     with pytest.raises((CanaryAdmissionError, ClaudeSubscriptionWorkerError), match="catalog digest"):
         ClaudeSubscriptionWorkerAdapter(
             binary,
