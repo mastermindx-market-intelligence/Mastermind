@@ -5,7 +5,7 @@ from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmiss
 from test_github_review_runtime_adapter import decision
 
 
-def completed_pair(tmp_path, *, identical_worker=False, review_verdict="approve", builder_repository="example/repo", builder_sha="a" * 40):
+def completed_pair(tmp_path, *, identical_worker=False, review_verdict="approve", builder_repository="example/repo", builder_sha="a" * 40, builder_pull_number=42):
     runtime = Runtime.at(tmp_path)
     runtime.workers.register_worker(
         "builder-01", provider="claude", account_label="builder",
@@ -24,7 +24,7 @@ def completed_pair(tmp_path, *, identical_worker=False, review_verdict="approve"
         provenance={
             "schema": "mastermind.github_review_builder_source.v1",
             "repository": builder_repository,
-            "pull_number": 42,
+            "pull_number": builder_pull_number,
             "frozen_head_sha": builder_sha,
         },
     )
@@ -169,5 +169,28 @@ def test_external_reader_refuses_when_authenticated_source_is_unavailable(tmp_pa
     reader = ExecutiveVerifiedReviewResults(
         runtime=runtime, external_source=source,
         publisher_login="reviewer-bot[bot]",
+    )
+    assert reader.load_verified_result(job_id=reviewer) is None
+
+
+def test_same_repository_and_same_commit_wrong_pull_number_is_not_builder_proof(tmp_path):
+    """A completed builder on PR 43 cannot independently prove PR 42."""
+    runtime, builder, reviewer = completed_pair(
+        tmp_path, builder_repository="example/repo",
+        builder_pull_number=43, builder_sha="a" * 40,
+    )
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, builder_job_id_for_review=lambda _: builder,
+    )
+    assert reader.load_verified_result(job_id=reviewer) is None
+
+
+def test_different_commit_on_same_pr_with_valid_terminal_builder_refuses(tmp_path):
+    """Do not equate same PR with same SHA across two builds."""
+    runtime, builder, reviewer = completed_pair(
+        tmp_path, builder_pull_number=42, builder_sha="b" * 40,
+    )
+    reader = ExecutiveVerifiedReviewResults(
+        runtime=runtime, builder_job_id_for_review=lambda _: builder,
     )
     assert reader.load_verified_result(job_id=reviewer) is None

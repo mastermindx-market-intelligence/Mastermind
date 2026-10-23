@@ -894,3 +894,28 @@ class TestParsingFences:
             gri.extract_intent_signal(
                 body=parsed, event=envelope.event, action=envelope.action
             )
+
+@pytest.mark.parametrize("minimum", ["write", "maintain", "admin"])
+@pytest.mark.parametrize("signed_channel", ["label", "review_requested"])
+def test_github_enforced_channel_cannot_bypass_higher_permission_floor(
+    minimum, signed_channel
+):
+    """GitHub event acceptance is no proof of an elevated host role."""
+    signed = _label_body() if signed_channel == "label" else _review_requested_body()
+    strict = _policy(minimum_permission=minimum)
+    without_read = _decide(signed, event="pull_request", policy=strict)
+    assert without_read.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+    lowered = _decide(
+        signed, event="pull_request", policy=strict, current=_permission("triage")
+    )
+    assert lowered.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_INSUFFICIENT
+
+
+@pytest.mark.parametrize("minimum", ["maintain", "admin"])
+def test_static_allowlist_never_proves_elevated_permission_floor(minimum):
+    permissive = _policy(
+        minimum_permission=minimum, allow_static_actor_authority=True,
+    )
+    assert _decide(
+        _label_body(), event="pull_request", policy=permissive
+    ).refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED

@@ -556,6 +556,13 @@ class ReviewIntentPolicy:
             return ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED
 
         if current is None:
+            # GitHub's enforcement proves at most the channel's baseline
+            # triage/write capability, never a higher configured policy floor
+            # such as MAINTAIN or ADMIN. An unread permission cannot satisfy
+            # those stronger host controls, even with the optional static
+            # allowlist fallback enabled.
+            if PERMISSION_RANK[self.minimum_permission] > PERMISSION_RANK["triage"]:
+                return ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
             if signal.permission_basis is not ActorPermissionBasis.REPORTED_AUTHOR_ASSOCIATION:
                 if not self.require_current_permission_for_all_channels:
                     # GitHub refused this delivery outright unless the actor

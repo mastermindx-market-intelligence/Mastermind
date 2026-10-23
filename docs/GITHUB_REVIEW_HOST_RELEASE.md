@@ -329,3 +329,47 @@ service handler remains previously platform safety-denied and **unmodified**;
 its original dormant local worktree diff remains excluded. Neither advisory
 GitHub submitter identity nor a PASS narrative attests a real builder worker,
 live GitHub App/webhook deployment, formal review acceptance, or Slack return.
+
+
+## Security03/05 REQUEST_CHANGES final source reconciliation (2026-10-23)
+
+The historic security03/security05 REQUEST_CHANGES findings were assessed
+against current PR source, not replayed by accepting an old head:
+
+- **Native builder proof:** `ExecutiveVerifiedReviewResults` demands a
+  genuinely distinct, terminal builder Job. Its original immutable
+  `JOB_CREATED.provenance` MUST match the review Job's same repository,
+  same pull number and exact frozen commit SHA. Tests now independently
+  vary pull number while keeping repo/SHA fixed and vary SHA on the same PR;
+  neither is an independently verified native review. An ordinary external
+  PR is not assigned a fictitious builder Job: it remains expressly
+  `EXTERNAL_GITHUB_SUBMITTER`, advisory COMMENT only.
+- **Permission floor:** the enrolled host already requires a fresh GitHub
+  permission on all supported channels with a minimum `write` policy and
+  preserves GitHub's exact `maintain`/`triage` role semantics. The pure
+  policy now additionally refuses all current-unverified
+  admissions whose requested minimum exceeds GitHub's triage baseline,
+  even for signed GitHub-enforced events or an optional static-actor
+  fallback. A stale allowlist alone cannot grant `write`/`maintain`/
+  `admin` authority. Explicit elevated-floor tests cover both
+  `labeled` and `review_requested`.
+- **Ingress and publication:** signed HMAC exact-repository PR identity,
+  frozen head, closed source/actor policy, and the default-off ASGI
+  receiver remain intact. Existing tests exercise malformed/forged
+  deliveries and duplicate events. The Executive EventStore reservation
+  arbitrates only one GitHub review POST; a lost ACK or unavailable
+  authoritative readback is `EFFECT_UNKNOWN`, never a second POST.
+  Adversarial readback-outage and concurrent publisher regression tests
+  are retained, not replaced with another queue/ledger.
+
+This slice has no `ExecutiveControlService` frame-handler edits. The
+original local 21-line dormant binding remains explicitly **excluded**:
+a previous platform policy denial is not resolved by source tests or
+reassigning the same mutation to Fabric/Codex.
+
+The independent security09 return on parent `a5528a56` reported nonblocking
+source findings but terminated `rc=1` for provider permission /
+`unrecognized_model MiniMax-M3`; it was not eligible for acceptance.
+A fresh exact-head independent review requires a genuine provider
+configuration/authorization change and new evidence. Do not blind-retry
+through another carrier or provider to disguise that denial.
