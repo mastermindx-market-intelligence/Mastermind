@@ -22,12 +22,8 @@ from control_plane.github_review_runtime_adapter import (
 
 from control_plane.github_review_socket_contract import (
     FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES,
+    REVIEW_SLACK_CHANNEL_ID, SlackParentMessage, review_parent_body,
 )
-from integrations.github_review_slack_thread import (
-    CHANNEL_ID, ExecutiveSlackReviewThreads, SlackReviewThreadUnavailable,
-    review_parent_body,
-)
-from integrations.slack_agent_dialogue.engine import SlackMessage
 _SUPPORTED_ACTIONS = frozenset({"status", "admit", "record_parent"})
 _DECISION_KEYS = frozenset({
     "schema", "admitted", "refusal", "intent_source", "intent_id",
@@ -98,7 +94,8 @@ class ExecutiveGitHubReviewSocketOwner:
         repositories: frozenset[str],
         relay_bot_user_id: str | None = None,
         worker_constraints: Mapping[str, object] | None = None,
-        parent_message_reader: Callable[[ReviewIntentDecision, str, str], SlackMessage] | None = None,
+        parent_message_reader: Callable[[ReviewIntentDecision, str, str], SlackParentMessage] | None = None,
+        parent_recorder: Callable[..., None] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("canonical Executive Runtime required")
@@ -127,6 +124,11 @@ class ExecutiveGitHubReviewSocketOwner:
         # This MUST be implemented by the installed host using authenticated
         # Relay Slack readback, never a receipt fabricated from socket fields.
         self._parent_message_reader = parent_message_reader
+        if parent_recorder is not None and not callable(parent_recorder):
+            raise ValueError("trusted canonical parent recorder must be callable")
+        # Host injects EXISTING ExecutiveSlackReviewThreads.record_parent;
+        # a public frame cannot select a different Runtime/EventStore writer.
+        self._parent_recorder = parent_recorder
         # Only the installed Executive host selects existing worker quota
         # classes. Never accept worker placement or account/model hints from
         # a public webhook/Unix frame. Empty keeps source tests QUEUED-only.
@@ -191,14 +193,15 @@ class ExecutiveGitHubReviewSocketOwner:
             }:
                 raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID")
             if (self._relay_bot_user_id is None
-                    or self._parent_message_reader is None):
+                    or self._parent_message_reader is None
+                    or self._parent_recorder is None):
                 raise GitHubReviewSocketRefused("REVIEW_SLACK_PROVENANCE_UNBOUND")
             chosen = _closed_decision(frame.get("decision"))
             job_id = frame.get("job_id")
             if (chosen.repository not in self._repositories
                     or type(job_id) is not str
                     or re.fullmatch(r"JOB-[0-9]+", job_id) is None
-                    or frame.get("channel_id") != CHANNEL_ID
+                    or frame.get("channel_id") != REVIEW_SLACK_CHANNEL_ID
                     or frame.get("author_user_id") != self._relay_bot_user_id):
                 raise GitHubReviewSocketRefused("REVIEW_SLACK_PARENT_IDENTITY_REFUSED")
             # The public webhook cannot name an arbitrary Job/thread: capture
@@ -236,7 +239,7 @@ class ExecutiveGitHubReviewSocketOwner:
                     "REVIEW_SLACK_PARENT_SOURCE_UNVERIFIED"
                 ) from None
             if (
-                type(receipt) is not SlackMessage
+                not isinstance(receipt, SlackParentMessage)
                 or receipt.ts != ts
                 or receipt.author_user_id != self._relay_bot_user_id
                 or receipt.thread_ts is not None or receipt.edited or receipt.deleted
@@ -255,10 +258,10 @@ class ExecutiveGitHubReviewSocketOwner:
                     "REVIEW_SLACK_PARENT_SOURCE_UNVERIFIED"
                 )
             try:
-                ExecutiveSlackReviewThreads(
-                    runtime=self._runtime
-                ).record_parent(decision=chosen, job_id=job_id, message=receipt)
-            except (ValueError, SlackReviewThreadUnavailable):
+                self._parent_recorder(
+                    decision=chosen, job_id=job_id, message=receipt
+                )
+            except Exception:
                 raise GitHubReviewSocketRefused(
                     "REVIEW_SLACK_PARENT_INVALID_OR_CONFLICT"
                 ) from None

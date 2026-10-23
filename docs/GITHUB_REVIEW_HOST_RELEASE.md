@@ -163,6 +163,13 @@ Without it, the owner refuses the frame before EventStore mutation.
 The returned real `SlackMessage` must match that exact timestamp, enrolled
 bot author, unedited/un-deleted top-level state and deterministic parent
 body for the immutable PR/head/command/Job; a nonmatching message is refused.
+The installed host must ALSO inject `parent_recorder`, bound to the existing
+`ExecutiveSlackReviewThreads(runtime=runtime).record_parent`; without both
+callbacks the frame is refused. The pure shared Slack receipt protocol and
+parent-body formatter live in `control_plane/github_review_socket_contract.py`,
+while the integrations module reexports them for existing clients. This
+preserves the enforced `control_plane -> integrations` dependency boundary
+without adding a new Slack ledger or transport.
 Both the fresh source guard and trusted Slack lookup run **outside** the
 existing EventStore transaction. No webhook, model or socket caller may supply
 the authoritative readback object; fixture callbacks are not installed

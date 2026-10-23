@@ -59,6 +59,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             repositories=frozenset({REPO}),
             relay_bot_user_id="U0BT71H4FQE",
             parent_message_reader=trusted_parent_reader,
+            parent_recorder=ExecutiveSlackReviewThreads(runtime=runtime).record_parent,
             worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )
         socket_path = str(tmp_path / "ceo-ingress.sock")
