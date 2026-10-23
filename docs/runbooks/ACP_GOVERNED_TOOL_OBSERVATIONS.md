@@ -212,7 +212,11 @@ It creates an isolated copy-on-write donor snapshot (not another Git writer),
 applies the exact reviewed R4 patch, typechecks and compiles the patched ACP
 entrypoint, observes the **actual** stdio MCP tools, derives a read/search-only
 `production_armed:false` projection through the original typed helper,
-and bundles AgentLoop with the pinned grant profile. The final
+and bundles AgentLoop with the pinned grant profile. Before accepting the
+projection, the preparer independently binds its exact read_file/search_files
+tool identities and observed input schemas, stdio command/server, synthetic
+profile, and approval contract; two arbitrary tools never qualify.
+The final
 `preparation-receipt.json` has `SUPPLY_PINNED_NOT_YET_TESTED`: building
 alone never asserts a successful worker result. No dependency download,
 production installation, provider call, or Job/Attempt is performed.

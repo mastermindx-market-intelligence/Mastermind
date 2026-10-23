@@ -100,6 +100,52 @@ def put(path: Path, data: str) -> None:
         output.write(data)
 
 
+def require_read_search_projection(
+    projection: dict, config: dict, catalog: dict,
+) -> None:
+    """Validate the exact observed, disarmed grant rather than just its size.
+
+    This is an independent boundary after the typed projection helper returns:
+    two arbitrary tools (including write_file) must not qualify as read/search.
+    """
+    if not isinstance(projection, dict) or projection.get("schema") != (
+        "mastermind.dsh_mcp_tool_projection.v1"
+    ) or projection.get("production_armed") is not False:
+        raise Refused("MCP projection must be typed and disarmed")
+    if projection.get("required") is not True or projection.get("approvalMode") != "approve":
+        raise Refused("MCP projection approval/required contract mismatch")
+    if projection.get("serverInfo") != catalog.get("serverInfo"):
+        raise Refused("MCP projection server identity differs from observed stdio server")
+    if projection.get("target") != {
+        "transport": "stdio",
+        "serverName": config.get("serverName"),
+        "command": config.get("command"),
+        "args": config.get("args"),
+    }:
+        raise Refused("MCP projection command/server binding mismatch")
+    source = projection.get("source")
+    if not isinstance(source, dict) or source.get("capability_id") != (
+        "fixture.dsh.read"
+    ) or source.get("profile_id") != "fixture.dsh.projection":
+        raise Refused("MCP projection must use the exact synthetic read grant")
+    tools = projection.get("tools")
+    if not isinstance(tools, list) or len(tools) != 2:
+        raise Refused("MCP projection must contain exactly two tools")
+    observed = catalog.get("tools")
+    if not isinstance(observed, list):
+        raise Refused("MCP observed stdio tool catalog is invalid")
+    allowed = {"read_file", "search_files"}
+    selected = {t.get("name"): t for t in observed if isinstance(t, dict)
+                and t.get("name") in allowed}
+    if set(selected) != allowed or {t.get("name") for t in tools
+                                    if isinstance(t, dict)} != allowed:
+        raise Refused("MCP projection includes an ungranted or missing tool")
+    if any(not isinstance(t, dict) or t.get("inputSchema") != (
+        selected[t["name"]].get("inputSchema")
+    ) for t in tools):
+        raise Refused("MCP projection tool schema differs from observed stdio catalog")
+
+
 def build(args: argparse.Namespace) -> int:
     if sys.platform != "darwin" or platform.machine() != "arm64":
         raise Refused("frozen Node binary requires macOS arm64")
@@ -198,8 +244,7 @@ esbuild.buildSync({entryPoints:[root+'/packages/acp/acp/src/index.ts'],
                   log=logdir / "canonical-projection.log",
                   stdin=(output / "projection-request.json").read_text())
     projection = json.loads(project)
-    if projection.get("production_armed") is not False or len(projection.get("tools", ())) != 2:
-        raise Refused("canonical projection is not disarmed/read-search-only")
+    require_read_search_projection(projection, config, snapshot_tools)
     put(output / "projection.json", json.dumps(projection, sort_keys=True,
                                                  separators=(",", ":")) + "\n")
     files = [

@@ -81,3 +81,69 @@ def test_missing_args_has_no_execution_effect(tmp_path):
     assert result.returncode != 0
     assert "--donor" in result.stderr and "--output" in result.stderr
     assert {p.name for p in tmp_path.iterdir()} == before
+
+
+def _read_search_projection_example():
+    config = {
+        "transport": "stdio", "serverName": "granted",
+        "command": "/example/pinned-node", "args": ["/example/server.mjs"],
+    }
+    tools = [
+        {"name": "read_file", "inputSchema": {"type": "object", "properties": {"file": {"enum": ["memo.txt"]}}}},
+        {"name": "search_files", "inputSchema": {"type": "object", "properties": {"query": {"maxLength": 64}}}},
+    ]
+    catalog = {"serverInfo": {"name": "mmx-stdio-fixture", "version": "1"},
+               "tools": tools + [{"name": "write_file", "inputSchema": {"type": "object"}}]}
+    projection = {
+        "schema": "mastermind.dsh_mcp_tool_projection.v1",
+        "production_armed": False,
+        "required": True,
+        "approvalMode": "approve",
+        "source": {"capability_id": "fixture.dsh.read", "profile_id": "fixture.dsh.projection"},
+        "serverInfo": catalog["serverInfo"],
+        "target": {"transport": "stdio", "serverName": "granted",
+                   "command": config["command"], "args": config["args"]},
+        "tools": [dict(t) for t in tools],
+    }
+    return projection, config, catalog
+
+
+def test_canonical_two_tool_projection_is_accepted():
+    mod = module()
+    projection, config, catalog = _read_search_projection_example()
+    mod.require_read_search_projection(projection, config, catalog)
+
+
+@pytest.mark.parametrize("mutation", [
+    "ungranted_write",
+    "duplicate_read",
+    "schema_widened",
+    "production_armed",
+    "spoofed_server",
+    "different_executable",
+    "different_grant",
+    "approval_downgrade",
+])
+def test_malformed_two_tool_projection_is_rejected(mutation):
+    # Every malicious projection has the same tool count as the real grant.
+    mod = module()
+    projection, config, catalog = _read_search_projection_example()
+    if mutation == "ungranted_write":
+        projection["tools"][1]["name"] = "write_file"
+    elif mutation == "duplicate_read":
+        projection["tools"][1]["name"] = "read_file"
+    elif mutation == "schema_widened":
+        projection["tools"][0]["inputSchema"] = {"type": "object"}
+    elif mutation == "production_armed":
+        projection["production_armed"] = True
+    elif mutation == "spoofed_server":
+        projection["serverInfo"] = {"name": "untrusted-server", "version": "1"}
+    elif mutation == "different_executable":
+        projection["target"]["command"] = "/usr/bin/other-node"
+    elif mutation == "different_grant":
+        projection["source"]["capability_id"] = "fixture.dsh.write"
+    elif mutation == "approval_downgrade":
+        projection["approvalMode"] = "never"
+    assert len(projection["tools"]) == 2
+    with pytest.raises(mod.Refused, match="MCP projection"):
+        mod.require_read_search_projection(projection, config, catalog)
