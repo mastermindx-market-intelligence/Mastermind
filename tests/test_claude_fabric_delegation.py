@@ -44,6 +44,22 @@ def test_claude_fabric_skill_is_exact_source_blob() -> None:
         assert required in text
 
 
+
+def test_claude_fresh_session_login_and_trust_are_explicit_gates() -> None:
+    skill = (ROOT / "skills/mastermind-claude-fabric-delegation/SKILL.md").read_text()
+    for token in (
+        "claude auth status",
+        "loggedIn=false",
+        "CLAUDE_LOGIN_REQUIRED",
+        "OAuth session expired",
+        "workspace trust",
+        "FABRIC_IDENTITY_UNVERIFIED",
+        "FABRIC_ADAPTER_SANDBOX_DENIED",
+    ):
+        assert token in skill
+    assert "Do not edit" in skill
+    assert "dispatch nothing" in skill
+
 def test_scoped_claude_install_preserves_codex_and_verifies_drift(tmp_path: Path) -> None:
     home = tmp_path / "home"
     home.mkdir()
