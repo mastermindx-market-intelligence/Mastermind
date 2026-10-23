@@ -38,6 +38,8 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
 
+from control_plane.executive_readback_contract import valid_lost_reason, valid_runtime_instant
+
 from common.commission_ref import (
     CommissionRef,
     CommissionRefError,
@@ -612,9 +614,12 @@ def _load_canonical_digest_pair(
 def _iso(timestamp_ms: int | None) -> str:
     if timestamp_ms is None:
         return ""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(
+    value = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(
         timespec="seconds"
     )
+    if not valid_runtime_instant(value):
+        raise PersistenceError("Runtime timestamp exceeds shared readback future skew")
+    return value
 
 
 def _enum_value(value: str | Enum, enum_type: type[Enum]) -> str:
@@ -18755,8 +18760,8 @@ class AttemptRegistry:
         lease-expiry reconciliation and cannot prematurely free or fence work.
         """
         reason = str(reason).strip()
-        if not reason:
-            raise StateConflict("mark_lost requires a reason")
+        if not valid_lost_reason(reason):
+            raise StateConflict("mark_lost requires a bounded printable reason")
         if verified_process_absent is not True:
             raise StateConflict("mark_lost requires verified_process_absent=True")
         timestamp = self.store.now_ms()

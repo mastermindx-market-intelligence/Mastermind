@@ -809,3 +809,39 @@ def test_installed_job_readback_capture_gate_rejects_backend_unavailable(
     monkeypatch.setenv("MMX_EXECUTIVE_LIVE_READBACK_DIR", str(tmp_path))
     with pytest.raises(AssertionError, match="backend_unavailable"):
         test_installed_job_readback_regression_when_captured(job_id)
+
+
+def test_shared_lost_reason_contract_legacy_compatible(tmp_path):
+    from control_plane.executive_readback_contract import valid_lost_reason
+    from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+    runtime, job, _ = _lost_requeued_runtime(tmp_path)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert _accepted(document)
+    assert valid_lost_reason("process identity absent during supervisor restart")
+    assert not valid_lost_reason("reason\nwith control character")
+    assert not valid_lost_reason("x" * 1025)
+    assert not valid_lost_reason("  misformatted")
+    for row in (document["data"]["attempts"][-1], document["data"]["latest_attempt"]):
+        row["error"]["reason"] = "x" * 1025
+    assert not _accepted(document)
+
+
+def test_future_timestamp_ceiling_shared_reader(tmp_path):
+    from datetime import datetime, timedelta, timezone
+    from control_plane.executive_readback_contract import (
+        MAX_FUTURE_CLOCK_SKEW, valid_runtime_instant,
+    )
+    from tests.test_remote_attempt_transport import _claimed_runtime
+
+    runtime, job, _ = _claimed_runtime(tmp_path, attempt_limit=2)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert _accepted(document)
+    now = datetime.now(timezone.utc)
+    valid = (now + MAX_FUTURE_CLOCK_SKEW - timedelta(minutes=1)).isoformat()
+    invalid = (now + MAX_FUTURE_CLOCK_SKEW + timedelta(minutes=1)).isoformat()
+    assert valid_runtime_instant(valid, now=now)
+    assert not valid_runtime_instant(invalid, now=now)
+    assert valid_runtime_instant("2026-10-11T00:00:00+00:00", now=now)
+    document["data"]["job"]["updated_at"] = invalid
+    assert not _accepted(document)
