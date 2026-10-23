@@ -35,6 +35,9 @@ def host(monkeypatch, tmp_path):
     plists = tmp_path / 'Library' / 'LaunchDaemons'
     for directory in (config, locks, plists):
         directory.mkdir(parents=True, exist_ok=True)
+        # macOS temporary roots may assign the wheel group to newly created
+        # directories; the native CAS requires the exact test principal group.
+        os.chown(directory, -1, os.getgid())
         directory.chmod(0o700 if directory == locks else 0o755)
     # Own the complete fixture namespace under either 002 or 022 umask.
     for directory in (root.parent.parent, root.parent, root):
@@ -568,3 +571,156 @@ def test_existing_relay_enable_cli_uses_same_owned_transaction(host):
     assert result == 0, output.getvalue()
     assert json.loads(output.getvalue())['action'] == 'rebound'
     assert json.loads(a2.CONFIG_PATH.read_bytes())['w3c_enabled'] is True
+
+
+def _reverse_witness(legacy_pair, *, previous=OLD, current=NEW):
+    import hashlib
+    return dict(
+        bot_user_id=BOT,
+        expected_current_release_sha=current,
+        expected_previous_release_sha=previous,
+        expected_previous_tree_sha='a' * 40,
+        expected_previous_config_sha256=hashlib.sha256(legacy_pair[1]).hexdigest(),
+        expected_previous_plist_sha256=hashlib.sha256(legacy_pair[0]).hexdigest(),
+    )
+
+
+def _prepare_reverse(host, monkeypatch):
+    from ops.executive_os import release_manifest
+    host()
+    seed_legacy_socket_pair()
+    old_pair = pair()
+    assert rebind()['action'] == 'rebound'
+    new_pair = pair()
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', lambda: None)
+
+    def verify_previous(*, root, commit_sha, tree_sha):
+        assert commit_sha == OLD
+        assert tree_sha == 'a' * 40
+        assert root == a2.SYSTEM_RELEASE_ROOT / OLD
+        return {'ok': True}
+
+    monkeypatch.setattr(release_manifest, 'verify', verify_previous)
+    return old_pair, new_pair
+
+
+def test_reverse_parser_requires_explicit_old_generation_and_disallows_w3c():
+    parser = a2.build_parser()
+    args = ['reverse-rebind-release', '--expected-bot-user-id', BOT,
+            '--expected-current-release-sha', NEW,
+            '--expected-previous-release-sha', OLD,
+            '--expected-previous-tree-sha', 'a' * 40,
+            '--expected-previous-config-sha256', 'b' * 64,
+            '--expected-previous-plist-sha256', 'c' * 64]
+    assert parser.parse_args(args).command == 'reverse-rebind-release'
+    with pytest.raises(a2.A2EnrollmentError):
+        parser.parse_args(args + ['--enable-w3c'])
+    with pytest.raises(a2.A2EnrollmentError):
+        parser.parse_args(args[:-2])
+
+
+def test_reverse_exact_historical_pair_and_token_inode_preserved(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    before_token = a2.TOKEN_PATH.stat()
+    kwargs = _reverse_witness(old_pair)
+    result = asyncio.run(a2._reverse_rebind(**kwargs))
+    assert result['action'] == 'reversed'
+    assert result['release_sha'] == OLD
+    assert pair() == old_pair
+    assert pair() != new_pair
+    assert a2.TOKEN_PATH.stat() == before_token
+    assert asyncio.run(a2._reverse_rebind(**kwargs))['action'] == 'already-reversed'
+    assert a2.TOKEN_PATH.stat() == before_token
+
+
+@pytest.mark.parametrize('which', ['config', 'plist', 'current_sha', 'previous_tree', 'previous_sha'])
+def test_reverse_rejects_incorrect_witness_without_mutation(host, monkeypatch, which):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    kwargs = _reverse_witness(old_pair)
+    changes = {
+        'config': ('expected_previous_config_sha256', '0' * 64),
+        'plist': ('expected_previous_plist_sha256', '0' * 64),
+        'current_sha': ('expected_current_release_sha', '4' * 40),
+        'previous_tree': ('expected_previous_tree_sha', 'f' * 40),
+        'previous_sha': ('expected_previous_release_sha', 'e' * 40),
+    }
+    key, value = changes[which]
+    kwargs[key] = value
+    with pytest.raises(a2.A2EnrollmentError):
+        asyncio.run(a2._reverse_rebind(**kwargs))
+    assert pair() == new_pair
+
+
+def test_reverse_rejects_armed_w3c_without_downgrading(host, monkeypatch):
+    from ops.executive_os import release_manifest
+    host()
+    assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))['action'] == 'rebound'
+    current_pair = pair()
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', lambda: None)
+    monkeypatch.setattr(release_manifest, 'verify', lambda **kw: {'ok': True})
+    kwargs = _reverse_witness(current_pair)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**kwargs))
+    assert err.value.code == 'A2_REBIND_STATE_REFUSED'
+    assert pair() == current_pair
+
+
+def test_reverse_refuses_if_control_return_is_armed(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed',
+                        lambda: (_ for _ in ()).throw(a2.A2EnrollmentError('A2_REBIND_STATE_REFUSED')))
+    with pytest.raises(a2.A2EnrollmentError):
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert pair() == new_pair
+
+
+def test_reverse_refuses_failed_previous_release_seal(host, monkeypatch):
+    from ops.executive_os import release_manifest
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    def refused(**kwargs):
+        raise release_manifest.ReleaseManifestError('invalid fixture release')
+    monkeypatch.setattr(release_manifest, 'verify', refused)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert err.value.code == 'A2_REBIND_STATE_REFUSED'
+    assert pair() == new_pair
+
+
+def test_reverse_acknowledged_second_rename_failure_restores_new_pair(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    original_replace = os.replace
+    calls = 0
+    def fail_second(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError('second CAS publication denied')
+        return original_replace(*args, **kwargs)
+    monkeypatch.setattr(os, 'replace', fail_second)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert err.value.code == 'A2_REBIND_WRITE_REFUSED'
+    assert pair() == new_pair
+    assert a2.TOKEN_PATH.read_bytes() == b'INERT-TEST-ONLY-NOT-A-CREDENTIAL'
+
+
+def test_reverse_changed_control_after_first_publication_freezes_effect(host, monkeypatch):
+    old_pair, new_pair = _prepare_reverse(host, monkeypatch)
+    before_token = a2.TOKEN_PATH.stat()
+    observations = 0
+
+    def check_return():
+        nonlocal observations
+        observations += 1
+        if observations == 3:
+            raise a2.A2EnrollmentError('A2_REBIND_STATE_REFUSED')
+
+    monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', check_return)
+    with pytest.raises(a2.A2EnrollmentError) as err:
+        asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
+    assert err.value.code == 'A2_REBIND_EFFECT_UNCERTAIN'
+    # Acknowledged first publication is operation-owned but mixed; no
+    # automatic rollback is allowed after original controller arming drift.
+    assert a2.PLIST_PATH.read_bytes() == old_pair[0]
+    assert a2.CONFIG_PATH.read_bytes() == new_pair[1]
+    assert a2.TOKEN_PATH.stat() == before_token

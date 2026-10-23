@@ -69,9 +69,27 @@ a failed or ambiguous create must be reconciled on the same host/command owner.
 7. If any gate fails, leave acceptance open and reconcile the specific
    installed generation/effect. Do not force-install an older release
    over a successful new A2 generation: old renderers cannot certify the
-   new config/plist pair. A rollback needs its own reviewed exact-release
-   reverse migration and root/service lifecycle transaction. Rolling
-   forward with a reviewed fix is preferred over an unreviewed overwrite.
+   new config/plist pair. The installed successor's separately reviewed
+   **reverse-rebind-release** command can restore an exact historical
+   volatile-socket enrollment pair, but only when the native A2 service
+   is unloaded/disabled, the controller return path is disarmed, the
+   previous sealed release manifest verifies, and the previous config/plist
+   hashes are supplied from a previously captured owner-only backup.
+   It uses the existing A2 token-metadata-only lock/CAS transaction;
+   it never reads, rewrites or re-enrolls the token. It requires:
+   --expected-bot-user-id, --expected-current-release-sha,
+   --expected-previous-release-sha, --expected-previous-tree-sha,
+   --expected-previous-config-sha256, and
+   --expected-previous-plist-sha256. The previous generation must
+   correspond to the exact reconstructed historical /var/run A2 pair,
+   with the shared scope set and W3C disabled. It is NOT a generic
+   downgrade, does NOT select a release, and cannot reverse an armed W3C
+   generation. A service start or other control/identity drift freezes
+   publication for same-carrier reconciliation; do not retry blindly.
+   The full Executive/C1/control restart and any release selection remain
+   governed by their separate original owners and admission receipts.
+   Rolling forward with a reviewed fix is preferred over an unreviewed
+   overwrite. Reboot and app retirement remain separate effects.
 
 This migration does not activate `terminal_return_armed`, W3C, a Job/Attempt,
 new broker, watcher or transport plane. A passing source test or green CI

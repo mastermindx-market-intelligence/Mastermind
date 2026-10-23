@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import fcntl
+import hashlib
 import grp
 import io
 import json
@@ -157,6 +158,15 @@ def build_parser() -> argparse.ArgumentParser:
     child = commands.add_parser("rebind-release")
     child.add_argument("--expected-bot-user-id", required=True)
     child.add_argument("--enable-w3c", action="store_true")
+    reverse = commands.add_parser("reverse-rebind-release")
+    reverse.add_argument("--expected-bot-user-id", required=True)
+    reverse.add_argument("--expected-current-release-sha", required=True)
+    reverse.add_argument("--expected-previous-release-sha", required=True)
+    reverse.add_argument("--expected-previous-tree-sha", required=True)
+    reverse.add_argument("--expected-previous-config-sha256", required=True)
+    reverse.add_argument("--expected-previous-plist-sha256", required=True)
+    # W3C cannot be downgraded in this recovery; explicit native return
+    # arming requires an independent admitted operation.
     return parser
 
 
@@ -1500,6 +1510,164 @@ async def _rebind(*, bot_user_id: str, enable_w3c: bool = False) -> dict[str, ob
         os.close(binding.descriptor)
 
 
+def _assert_terminal_return_disarmed() -> None:
+    """Never migrate a release backward while return delivery is armed."""
+    try:
+        raw = _read_exact(
+            SYSTEM_ROOT / "config" / "control.json",
+            uid=0, gid=EXEC_GID, mode=0o440,
+        )
+        config = json.loads(raw)
+        if type(config) is not dict or config.get("terminal_return_armed") is not False:
+            raise ValueError("return is armed or absent")
+    except Exception:
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
+
+
+def _legacy_pair_for_release(
+    *, bot_user_id: str, previous_release_sha: str, scopes: tuple[str, ...],
+) -> tuple[bytes, bytes]:
+    """Re-render exact historical volatile-socket pair; never read a token."""
+    if scopes != SHARED_A2_SCOPES:
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+    doc = build_config_document(
+        bot_user_id=bot_user_id, release_sha=previous_release_sha,
+        scopes=scopes, w3c_enabled=False,
+    )
+    if doc.get("relay_socket_path") != os.fspath(SOCKET_PATH):
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+    doc["relay_socket_path"] = os.fspath(LEGACY_SOCKET_PATH)
+    result_config = _canonical_json_bytes(doc)
+    legacy_plist = plistlib.loads(render_plist(
+        bot_user_id=bot_user_id, release_sha=previous_release_sha,
+        w3c_enabled=False,
+    ))
+    args = legacy_plist["ProgramArguments"]
+    idx = args.index("--socket-path") + 1
+    if args[idx] != os.fspath(SOCKET_PATH):
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+    args[idx] = os.fspath(LEGACY_SOCKET_PATH)
+    result_plist = plistlib.dumps(
+        legacy_plist, fmt=plistlib.FMT_XML, sort_keys=False,
+    )
+    return result_config, result_plist
+
+
+async def _reverse_rebind(
+    *, bot_user_id: str, expected_current_release_sha: str,
+    expected_previous_release_sha: str, expected_previous_tree_sha: str,
+    expected_previous_config_sha256: str, expected_previous_plist_sha256: str,
+) -> dict[str, object]:
+    """Explicit existing-enrollment reverse, using the SAME A2 CAS owner.
+
+    Only one exact reviewed previous release/preimage is admitted. No token
+    payload, new enrollment, W3C disable, generic file restoration or service
+    lifecycle effect occurs. This is not executable from a source checkout.
+    """
+    sha_pat = re.compile(r"[0-9a-f]{40}")
+    digest_pat = re.compile(r"[0-9a-f]{64}")
+    if (any(sha_pat.fullmatch(value) is None for value in (
+            expected_current_release_sha, expected_previous_release_sha,
+            expected_previous_tree_sha))
+            or any(digest_pat.fullmatch(value) is None for value in (
+                expected_previous_config_sha256, expected_previous_plist_sha256))
+            or expected_current_release_sha == expected_previous_release_sha):
+        raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+
+    installed_sha = _assert_host_prepared()
+    if installed_sha != expected_current_release_sha:
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED")
+    _assert_terminal_return_disarmed()
+
+    # Qualify the exact old RELEASE, not merely an operator-provided SHA or a
+    # backup directory. On missing/mixed/unsealed/ACL-unsafe bytes refuse before
+    # opening the CAS writer. The sealed old release is not overwritten.
+    try:
+        from ops.executive_os import release_manifest
+        manifest = release_manifest.verify(
+            root=SYSTEM_RELEASE_ROOT / expected_previous_release_sha,
+            commit_sha=expected_previous_release_sha,
+            tree_sha=expected_previous_tree_sha,
+        )
+        if manifest.get("ok") is not True:
+            raise ValueError("previous release invalid")
+    except Exception:
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
+
+    binding = _open_bound_config_directory()
+    try:
+        with _A2Rebind(binding) as tx:
+            try:
+                config = json.loads(tx.preimages[CONFIG_PATH].payload)
+                scopes = tuple(config["slack_scopes"])
+                if scopes != SHARED_A2_SCOPES or config["w3c_enabled"] is not False:
+                    raise ValueError("reverse does not change scoped/W3C admission")
+                old_config, old_plist = _legacy_pair_for_release(
+                    bot_user_id=bot_user_id,
+                    previous_release_sha=expected_previous_release_sha,
+                    scopes=scopes,
+                )
+                if (hashlib.sha256(old_config).hexdigest()
+                        != expected_previous_config_sha256
+                        or hashlib.sha256(old_plist).hexdigest()
+                        != expected_previous_plist_sha256):
+                    raise ValueError("historical preimage mismatch")
+                current_config = _canonical_json_bytes(build_config_document(
+                    bot_user_id=bot_user_id, release_sha=installed_sha,
+                    scopes=scopes, w3c_enabled=False,
+                ))
+                current_plist = render_plist(
+                    bot_user_id=bot_user_id, release_sha=installed_sha,
+                    w3c_enabled=False,
+                )
+                source_pair = (
+                    tx.preimages[CONFIG_PATH].payload,
+                    tx.preimages[PLIST_PATH].payload,
+                )
+                if source_pair == (old_config, old_plist):
+                    tx.check()
+                    _assert_terminal_return_disarmed()
+                    return {
+                        "action": "already-reversed",
+                        "release_sha": expected_previous_release_sha,
+                    }
+                if source_pair != (current_config, current_plist):
+                    raise ValueError("not exact current generation")
+            except A2EnrollmentError:
+                raise
+            except Exception:
+                raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
+
+            tx.check()
+            _assert_terminal_return_disarmed()
+            try:
+                for path, payload in (
+                    (PLIST_PATH, old_plist),
+                    (CONFIG_PATH, old_config),
+                ):
+                    tx.replace(path, payload)
+                    try:
+                        _assert_terminal_return_disarmed()
+                    except A2EnrollmentError as exc:
+                        # Acknowledged publication with changed arming revokes
+                        # rollback permission. Freeze original transaction.
+                        raise A2EnrollmentError("A2_REBIND_EFFECT_UNCERTAIN") from exc
+                tx.check()
+            except Exception as exc:
+                tx.restore(exc)
+            return {
+                "action": "reversed",
+                "previous_release_sha": installed_sha,
+                "release_sha": expected_previous_release_sha,
+            }
+    except A2EnrollmentError:
+        raise
+    except Exception:
+        raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None
+    finally:
+        os.close(binding.descriptor)
+
+
 def _fixed_error(code: str) -> dict[str, object]:
     return {
         "error": code,
@@ -1550,6 +1718,15 @@ def _run_invocation(
             if args.enable_w3c:
                 rebind_kwargs["enable_w3c"] = True
             receipt = asyncio.run(_rebind(**rebind_kwargs))
+        elif args.command == "reverse-rebind-release":
+            receipt = asyncio.run(_reverse_rebind(
+                bot_user_id=args.expected_bot_user_id,
+                expected_current_release_sha=args.expected_current_release_sha,
+                expected_previous_release_sha=args.expected_previous_release_sha,
+                expected_previous_tree_sha=args.expected_previous_tree_sha,
+                expected_previous_config_sha256=args.expected_previous_config_sha256,
+                expected_previous_plist_sha256=args.expected_previous_plist_sha256,
+            ))
         elif args.command == "verify":
             verify_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
