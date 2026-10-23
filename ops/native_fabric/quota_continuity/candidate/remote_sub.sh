@@ -377,7 +377,13 @@ commission_refresh_runtime() {
     fi
     MAX_SECS="$seconds"
   fi
-  if [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
+  # Leave two complete poll intervals for remote child startup, bounded
+  # cleanup/RC publication and a final in-deadline controller observation.
+  # This narrows the worker only; it never extends the MAX_SECS fuse, broker
+  # lease, provider budget, or commission deadline.
+  if [ "$MAX_SECS" -gt $((2 * POLL_SECS)) ]; then
+    CHILD_TIMEOUT=$((MAX_SECS - 2 * POLL_SECS))
+  elif [ "$MAX_SECS" -gt "$POLL_SECS" ]; then
     CHILD_TIMEOUT=$((MAX_SECS - POLL_SECS))
   else
     CHILD_TIMEOUT=$MAX_SECS

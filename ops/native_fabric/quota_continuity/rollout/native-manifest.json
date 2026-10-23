@@ -83,7 +83,7 @@
   "ext/quota_remote.py": "3c1484864848b5cdf4daeecde092f7c407ab313a9f0d94a7f0fd204dbcf813b8",
   "ext/qwen_exec.sh": "033bf388c4b3ea4cd5e4161c3c558b39a3a9d9bc80a5d7bce85b8b85a29ec1dd",
   "ext/recovery_artifacts.py": "c67db5c395403b34b2095380fd5f68dcc547c01fcce1ae85c6e78accbd8ad28f",
-  "ext/remote_sub.sh": "aa0039662530bb077e3b89a191aa7d87b4443510bae8fb533cf5cbb316f3eea6",
+  "ext/remote_sub.sh": "fc4c44d62eb22ca44930841a125a13c945d5589a8e1c60ef417688712ba13b65",
   "ext/remote_sub_exec.py": "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7",
   "ext/remote_sub_helpers.py": "534476a401d2f0318211c83cf68cf11423df603203443b6841cd3bc152d7b82b",
   "ext/run_observation.py": "0984a7a221e7d79e30e3c0c0a7cb7425e9f762d73f2946df1d28283f36f85809",

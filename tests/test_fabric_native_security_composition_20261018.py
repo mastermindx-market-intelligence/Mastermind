@@ -37,7 +37,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # qualification/operator overlays. Historical donor, quota, deadline and root
 # transformations remain pinned before the explicit paid patch.
 EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "d0a34534528f9b949880ecc68a1944fbec230fa3d0b72b0ce3beb3a87a68ff70"
+NATIVE_MANIFEST_SHA = "8f7b41a83efcb2a1b022efc7ca9a0f97b8e19bdc41b1ece2843f12404a245cb9"
 
 
 def _sha(raw):

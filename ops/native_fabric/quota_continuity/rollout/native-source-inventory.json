@@ -528,9 +528,9 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 101560,
+      "bytes": 101936,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "aa0039662530bb077e3b89a191aa7d87b4443510bae8fb533cf5cbb316f3eea6",
+      "sha256": "fc4c44d62eb22ca44930841a125a13c945d5589a8e1c60ef417688712ba13b65",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
