@@ -33,9 +33,23 @@
       "adapter_id": "openai-compatible",
       "enabled": false,
       "autonomous_allowed": false
+    },
+    "byteplus": {
+      "adapter_id": "attended-fabric",
+      "enabled": false,
+      "autonomous_allowed": false
     }
   },
   "model_aliases": {
+    "byteplus.attended": {
+      "provider_alias": "byteplus",
+      "execution_profile_id": "fabric.attended.claude.bounded.v1",
+      "model": "glm-5.3-flash",
+      "effort": "medium",
+      "cost_class": "small",
+      "capabilities": ["research"],
+      "worker_eligible": false
+    },
     "minimax.attended": {
       "provider_alias": "minimax",
       "execution_profile_id": "fabric.attended.claude.bounded.v1",

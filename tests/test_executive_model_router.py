@@ -814,3 +814,28 @@ def test_v2_review_exclusions_survive_structured_tiers_and_claim_projection():
     assert review.excluded_worker_ids == ("builder-01",)
     assert review.to_dict()["excluded_worker_ids"] == ["builder-01"]
     assert review.job_constraints()["excluded_worker_ids"] == ["builder-01"]
+
+
+
+def test_byteplus_plan_remains_unroutable_without_private_realm():
+    router = ModelRouter.load()
+    assert router.providers["byteplus"] == ProviderAlias(
+        "byteplus", "attended-fabric", False, False
+    )
+    alias = router.model_aliases["byteplus.attended"]
+    assert alias.model == "glm-5.3-flash"
+    assert not alias.worker_eligible
+    assert not adapter_descriptor("attended-fabric").implemented
+    for tiers in router.routes.values():
+        for risk in ("routine", "elevated"):
+            assert all(
+                "byteplus.attended" not in tier.model_aliases
+                for tier in tiers[risk]
+            )
+    with pytest.raises(RoutingPolicyError, match="not worker eligible"):
+        router.resolve_model_alias("byteplus.attended")
+    with pytest.raises(RoutingPolicyError, match="attended model alias refused"):
+        router.resolve_attended_model_alias(
+            "byteplus.attended",
+            "byteplus-coding-plan-personal.claude-code-anthropic",
+        )
