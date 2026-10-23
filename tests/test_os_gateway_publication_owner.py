@@ -62,6 +62,9 @@ def digest(payload: bytes) -> str:
 _TRUE_FSTAT = os.fstat
 _TRUE_LSTAT = os.lstat
 _TRUE_STAT = os.stat
+# Production-origin tests change shared sys.platform; descriptor lookup must
+# continue to use the physical host API, including during fixture teardown.
+_TRUE_PLATFORM = sys.platform
 
 
 # ---------------------------------------------------------------------------
@@ -472,7 +475,7 @@ def _mixed_identity(home: Path, audit_leaf: Path):
     prefix = {os.fspath(path) for path in home.parents}
 
     def descriptor_path(descriptor):
-        if sys.platform == "darwin":
+        if _TRUE_PLATFORM == "darwin":
             raw = fcntl.fcntl(int(descriptor), 50, b"\0" * 1024)
             return os.fsdecode(raw.split(b"\0", 1)[0])
         return os.readlink(f"/proc/self/fd/{int(descriptor)}")
@@ -2508,6 +2511,20 @@ def test_origin_joins_actual_release_verifier_before_protected_state(gateway, mo
     assert seen == [(s.release, SHA, TREE_SHA)]
     assert not control.AUTONOMY_TRANSACTION.exists()
     assert not control.OS_GATEWAY_RECEIPT.exists()
+
+
+def test_fixture_descriptor_mapping_ignores_simulated_platform(gateway, monkeypatch):
+    descriptor = os.open(gateway.home, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        before = os.fstat(descriptor)
+        with monkeypatch.context() as context:
+            context.setattr(sys, "platform", "linux" if _TRUE_PLATFORM == "darwin" else "darwin")
+            after = os.fstat(descriptor)
+            assert (after.st_dev, after.st_ino, after.st_uid, after.st_gid) == (
+                before.st_dev, before.st_ino, STUDIO_UID, STUDIO_GID
+            )
+    finally:
+        os.close(descriptor)
 
 
 def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch):
