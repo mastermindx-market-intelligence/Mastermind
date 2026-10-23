@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import hashlib
 import os
+import pwd
 from pathlib import Path
 import sys
 from unittest import mock
@@ -11,8 +12,9 @@ _unexpected = []
 _expected = None
 _patches = []
 _child_scripts = set()
+_syntax_commands = set()
 _protected = set()
-_HOME = Path.home()
+_HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
 _CREDENTIAL_ROOTS = tuple(str(_HOME / name) + os.sep for name in
     ('.glm', '.minimax', '.bailian', '.qwen', '.anthropic'))
 _CREDENTIAL_FILES = {str(_HOME / '.codex/auth.json'),
@@ -38,6 +40,8 @@ def _audit(event, args):
         _deny('network')
     if event == 'subprocess.Popen':
         executable, argv = args[:2]
+        if tuple(argv) in _syntax_commands:
+            return
         if not (isinstance(argv, (list, tuple)) and len(argv) >= 3
                 and argv[0] == sys.executable and argv[1] == '-c'
                 and hashlib.sha256(argv[2].encode()).hexdigest() in _child_scripts):
@@ -116,8 +120,23 @@ def guarded_python_child(code):
     """Keep the existing real restart test, with the same boundary in its child."""
     helper = str(Path(__file__).resolve().parent)
     wrapped = ('import sys\nsys.path.insert(0, ' + repr(helper) + ')\n'
+               'sys.path[:0] = ' + repr([str(Path(helper).parent / 'candidate'), str(Path(helper).parent / 'source')]) + '\n'
                'from _offline_boundary import acquire, release\nacquire()\n'
                'try:\n    exec(compile(' + repr(code) + ', "<broker-fixture>", "exec"))\n'
                'finally:\n    release()\n')
     _child_scripts.add(hashlib.sha256(wrapped.encode()).hexdigest())
     return wrapped
+
+
+def guarded_python_file(path, args):
+    """Execute one exact local fixture CLI with the child boundary installed."""
+    code = ('import runpy, sys\nsys.argv = ' + repr([str(path), *map(str, args)])
+            + '\nrunpy.run_path(' + repr(str(path)) + ', run_name="__main__")\n')
+    return [sys.executable, '-c', guarded_python_child(code)]
+
+
+def guarded_bash_syntax(path):
+    """Allow syntax parsing only; this command cannot execute shell statements."""
+    argv = ('/bin/bash', '-n', str(path))
+    _syntax_commands.add(argv)
+    return list(argv)

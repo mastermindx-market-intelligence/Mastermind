@@ -120,6 +120,7 @@ RAW_FILE="$WORKDIR/raw.jsonl"
 ERR_FILE="$WORKDIR/err.txt"
 TEXT_FILE="$WORKDIR/text.txt"
 SCAN_FILE="$WORKDIR/scan.txt"
+FEEDBACK_FILE="$WORKDIR/qwen_429_feedback.json"
 # This credential-free helper is part of the immutable wrapper, copied only
 # into the existing private run directory. No support/dispatch surface changes.
 FINAL_STREAM_FILE="$WORKDIR/final_response_stream.py"
@@ -746,7 +747,20 @@ while [ "$ATTEMPT" -lt "$MAX_KEYS" ]; do
         ;;
     esac
     log "failover key=$NAME kind=$KIND cooldown=${SECS}s rc=$RC"
-    python3 "$KEYS" cooldown "$NAME" "$SECS" "$REASON" >/dev/null
+    # Ask the SAME helper process to commit the cooldown AND write the actual
+    # adaptive-429 policy receipt into this run's private WORKDIR. The wrapper
+    # classifier drove this decision, so its inference stays labeled as such;
+    # the receipt never upgrades prose into typed or HTTP proof. If the helper
+    # cannot take the combined request, the incumbent protective cooldown runs
+    # exactly as before and only the receipt is absent.
+    if [ "$KIND" = "429" ]; then
+      if ! python3 "$KEYS" cooldown-receipt "$NAME" "$SECS" "$REASON" "$FEEDBACK_FILE" qwen_wrapper_inference > /dev/null 2>"$WORKDIR/receipt.err"; then
+        log "qwen_429_receipt unavailable cooldown_recommitted helper=$(head -n 1 "$WORKDIR/receipt.err" 2>/dev/null || true)"
+        python3 "$KEYS" cooldown "$NAME" "$SECS" "$REASON" >/dev/null
+      fi
+    else
+      python3 "$KEYS" cooldown "$NAME" "$SECS" "$REASON" >/dev/null
+    fi
     if [ "$ATTEMPT" -ge "$MAX_KEYS" ]; then
       FINAL_RC=$RC
       break
@@ -802,6 +816,24 @@ if [ "$FINAL_RC" -eq 0 ]; then
   cat "$TEXT_FILE" || exit 77
 elif [ -s "$ERR_FILE" ]; then
   cat "$ERR_FILE" >&2
+fi
+
+# Prospective final outcome production, BEFORE this run's cleanup removes the
+# private WORKDIR. It binds the exact actual final stdout bytes (EMPTY on any
+# failure, matching the owned process receipt) to the original private
+# one-session Codex capture of this leased run. provider_outcome.py writes
+# O_EXCL and withholds the whole outcome when the original scope binding is
+# unavailable; this wrapper then only leaves that diagnostic, never a
+# synthetic identity. No cooldown receipt exists unless the helper wrote one.
+if [ -n "${CODEX_RUN_HOME:-}" ] && [ -n "${POOL_OUTCOME_FILE:-}" ] && [ -f "$HERE/provider_outcome.py" ]; then
+  if [ "$FINAL_RC" -eq 0 ] && [ -f "$TEXT_FILE" ]; then
+    FINAL_STDOUT_FILE="$TEXT_FILE"
+  else
+    : > "$WORKDIR/final_stdout_empty"
+    FINAL_STDOUT_FILE="$WORKDIR/final_stdout_empty"
+  fi
+  python3 "$HERE/provider_outcome.py" codex "$CODEX_RUN_HOME" "$FINAL_RC" bailian "$MODEL" "$FINAL_STDOUT_FILE" "$FEEDBACK_FILE" ||
+    log "PROVIDER_OUTCOME_INVOCATION_FAILED rc=$FINAL_RC"
 fi
 
 exit "$FINAL_RC"

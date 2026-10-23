@@ -12,6 +12,7 @@ Usage:
   bailian_keys.py exec-codex <name> -- <codex exec arguments...>
   bailian_keys.py release <name> <pid>
   bailian_keys.py cooldown <name> <seconds> <reason>
+  bailian_keys.py cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]
   bailian_keys.py status
   bailian_keys.py total_cap
   bailian_keys.py next_usable_in
@@ -684,18 +685,76 @@ def release(name: str, pid: int) -> None:
         pass
 
 
+_QWEN_FEEDBACK_SCHEMA = "mastermind.qwen_adaptive429_feedback.v1"
+_QWEN_FEEDBACK_POLICY_SOURCE = "bailian_keys.adaptive_http_429"
+_QWEN_FEEDBACK_SOURCES = ("qwen_wrapper_inference", "codex_error_enum")
+
+
+def _write_private_json(path: str, value: Dict[str, Any]) -> bool:
+    """Atomically create one bounded private receipt file; never overwrite."""
+    tmp = path + ".tmp"
+    try:
+        if not os.path.isabs(path) or os.path.lexists(path):
+            return False
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(value, fh, sort_keys=True)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            # link is atomic and refuses an incumbent destination; replace
+            # would overwrite one created after the initial existence check.
+            os.link(tmp, path, follow_symlinks=False)
+            os.unlink(tmp)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def cooldown(name: str, seconds: int, reason: str) -> int:
     """Write ext/slots/bailian/<name>.cooldown. Returns expiry epoch.
 
     For reason='http_429', uses adaptive cooldown and records the 429 event.
     """
+    expiry, _receipt = cooldown_feedback(name, seconds, reason)
+    return expiry
+
+
+def cooldown_feedback(
+    name: str,
+    seconds: int,
+    reason: str,
+    classification_source: str = "qwen_wrapper_inference",
+    receipt_path: Optional[str] = None,
+) -> Tuple[int, Optional[Dict[str, Any]]]:
+    """Record one cooldown and, for reason='http_429', its actual policy receipt.
+
+    The receipt is captured under the SAME lock and from the SAME adaptive 429
+    computation that persists the cooldown file: the observation epoch, the
+    actual adaptive duration, the expiry, the effective soft cap the pool will
+    then see, and the policy flag. No guessed expiry is recomputed and no other
+    event's after-lock result is read. The destination stays a private caller
+    file; a failed write only skips that file, never the protective cooldown,
+    and the returned receipt describes this event whether or not a destination
+    was supplied. `classification_source` is supplied by the caller and states
+    truthfully who classified the 429; this helper never upgrades a wrapper
+    inference into typed or HTTP evidence.
+    """
     if name not in key_names():
         _die(f"unknown key name {name!r}", 2)
+    if classification_source not in _QWEN_FEEDBACK_SOURCES:
+        raise ValueError("classification_source_unqualified")
     reason = " ".join(str(reason).split()) or "unspecified"
-    now_epoch = int(time.time())
-
     lock = _with_lock()
     try:
+        now_epoch = int(time.time())
         if reason == "http_429":
             # Compute adaptive duration BEFORE writing the new epoch so the count
             # reflects only prior events (not this one yet).
@@ -725,7 +784,25 @@ def cooldown(name: str, seconds: int, reason: str) -> int:
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(f"{expiry} {reason}\n")
         os.replace(tmp, path)
-        return expiry
+        receipt = None
+        if reason == "http_429":
+            # Same event, same lock: the effective cap is read from the exact
+            # state this call just persisted, with the pool's own helper.
+            receipt = {
+                "schema": _QWEN_FEEDBACK_SCHEMA,
+                "account": name,
+                "classification_source": classification_source,
+                "classification": "429",
+                "policy_source": _QWEN_FEEDBACK_POLICY_SOURCE,
+                "observed_at": now_epoch,
+                "until_ts": expiry,
+                "duration_seconds": seconds,
+                "soft_cap": _effective_cap_for_key(name),
+                "soft_cap_enabled": bool(load_policy().get("soft_cap_on_429", False)),
+            }
+            if receipt_path is not None:
+                _write_private_json(receipt_path, receipt)
+        return expiry, receipt
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
@@ -1003,6 +1080,41 @@ def cmd_cooldown(argv: List[str]) -> int:
     return 0
 
 
+def cmd_cooldown_receipt(argv: List[str]) -> int:
+    """Cooldown the account AND have THIS helper write its actual adaptive-429
+    policy receipt into a private caller file, under the helper's own lock."""
+    if len(argv) not in (4, 5):
+        _die("usage: cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]", 2)
+    name, seconds, reason, receipt_path = argv[0], argv[1], argv[2], argv[3]
+    classification_source = argv[4] if len(argv) == 5 else "qwen_wrapper_inference"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        _die("BAILIAN_RECEIPT_ACCOUNT_INVALID", 2)
+    if not os.path.isabs(receipt_path) or os.path.lexists(receipt_path):
+        _die("BAILIAN_RECEIPT_DESTINATION_UNQUALIFIED", 2)
+    # The receipt binds the exact outer lease. Without the original binding
+    # there is no outcome: refuse before any state change, diagnostic only.
+    if os.environ.get("LANE_LEASED") == "1":
+        pool = os.environ.get("POOL_ACCOUNT") or ""
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", pool) or pool != name:
+            _die("BAILIAN_RECEIPT_OUTER_ACCOUNT_MISMATCH", 78)
+    try:
+        seconds_i = int(seconds)
+    except ValueError:
+        _die("BAILIAN_RECEIPT_SECONDS_INVALID", 2)
+    reason = " ".join(reason.split()) or "unspecified"
+    try:
+        expiry, receipt = cooldown_feedback(
+            name, seconds_i, reason, classification_source, receipt_path)
+    except ValueError:
+        _die("BAILIAN_RECEIPT_SOURCE_UNQUALIFIED", 2)
+    print(f"cooldown name={name} seconds={seconds_i} expiry={expiry} reason={reason}")
+    if receipt is not None and os.path.lexists(receipt_path):
+        print("qwen_429_receipt written", file=sys.stderr)
+    else:
+        print("qwen_429_receipt withheld", file=sys.stderr)
+    return 0
+
+
 def cmd_status(argv: List[str]) -> int:
     for line in status_lines():
         print(line)
@@ -1046,6 +1158,7 @@ COMMANDS = {
     "exec-codex": cmd_exec_codex,
     "release": cmd_release,
     "cooldown": cmd_cooldown,
+    "cooldown-receipt": cmd_cooldown_receipt,
     "status": cmd_status,
     "total_cap": cmd_total_cap,
     "next_usable_in": cmd_next_usable_in,
