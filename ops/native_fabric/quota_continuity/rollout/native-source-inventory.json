@@ -258,16 +258,16 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 4929,
+      "bytes": 5846,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "source": "source/host_pull.sh"
+      "sha256": "4671e6e3094ad4fdafa77f373648de66fabc866a8e6ec2f76da17215cdedb7cc",
+      "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
-      "bytes": 19726,
+      "bytes": 20673,
       "installed_preimage_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-      "sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-      "source": "source/host_pull_backend.py"
+      "sha256": "b8629cee082334319391bf48285668c727150a7d20d5ae831497cbb10336b073",
+      "source": "candidate/host_pull_backend.py"
     },
     "ext/host_pull_probe.template": {
       "bytes": 10919,
@@ -276,9 +276,9 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/lane_runtime.py": {
-      "bytes": 87084,
+      "bytes": 87916,
       "installed_preimage_sha256": "966869a4137545203faa2269faeed15cd0a096b5611161d242e2fb13b7c27937",
-      "sha256": "f70deb4161362c39ec37a1b8f6d68b63b75706318c417d1518f5163989529115",
+      "sha256": "61350902dcf90ac65800f81e20acf473092c45738bbbef9b582548777e4e0329",
       "source": "candidate/lane_runtime.py"
     },
     "ext/lease_broker.py": {
@@ -286,6 +286,12 @@
       "installed_preimage_sha256": "d2eb24f6a87c006f6b65098cb1336ae749481745e8bc8ff3e31f7c964d88aa3a",
       "sha256": "58916ce301ad588238ef0c848321114f4ecdc52d7bb59b612285822f8ae211d0",
       "source": "candidate/lease_broker.py"
+    },
+    "ext/linux_process_identity.py": {
+      "bytes": 26859,
+      "installed_preimage_sha256": null,
+      "sha256": "e2cbe24d453116c09af8b25bb936a1e00c9e6999014bc5ea5276edb84b8dcca2",
+      "source": "candidate/linux_process_identity.py"
     },
     "ext/mac_policy_return.py": {
       "bytes": 15811,
@@ -413,6 +419,60 @@
       "sha256": "31836841e7043c81ff175a737227e50b6d41fd2f4a2202ceb44a560410bb3371",
       "source": "source/original_result_read.py"
     },
+    "ext/paid_controller_channel.py": {
+      "bytes": 9380,
+      "installed_preimage_sha256": null,
+      "sha256": "4aaf9710b1c98573a442fa92893ce7ef2deb726b0c07af8f3eb537357e94a501",
+      "source": "candidate/paid_controller_channel.py"
+    },
+    "ext/paid_controller_spawn.py": {
+      "bytes": 1040,
+      "installed_preimage_sha256": null,
+      "sha256": "fe5e4a80ea5aeb158f68bbcb167f4f877765b72c04726ed6649839767c208b0d",
+      "source": "candidate/paid_controller_spawn.py"
+    },
+    "ext/paid_glm_model_client.py": {
+      "bytes": 7502,
+      "installed_preimage_sha256": null,
+      "sha256": "ea2d98c4360f981872b3b0b081447a70a969f42792675bf54f9e12557e24a773",
+      "source": "candidate/paid_glm_model_client.py"
+    },
+    "ext/paid_host_qualification.py": {
+      "bytes": 25456,
+      "installed_preimage_sha256": null,
+      "sha256": "d2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad",
+      "source": "candidate/paid_host_qualification.py"
+    },
+    "ext/paid_incumbent_state.py": {
+      "bytes": 7438,
+      "installed_preimage_sha256": null,
+      "sha256": "2fd23881b84ca8ee32a93b5e15267de117f40b37dd53fe095cb1d3dee658454d",
+      "source": "candidate/paid_incumbent_state.py"
+    },
+    "ext/paid_model_owner.py": {
+      "bytes": 15953,
+      "installed_preimage_sha256": null,
+      "sha256": "a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c",
+      "source": "candidate/paid_model_owner.py"
+    },
+    "ext/paid_pyyaml_6_0_3.zip": {
+      "bytes": 222968,
+      "installed_preimage_sha256": null,
+      "sha256": "1d6b5f7c42bc620557966d5cc6ca1933a7a12670658a7604676f0aebc26a3131",
+      "source": "candidate/paid_pyyaml_6_0_3.zip"
+    },
+    "ext/paid_pyyaml_provenance.json": {
+      "bytes": 3309,
+      "installed_preimage_sha256": null,
+      "sha256": "7883d48401f41d9470660bfd6114e6199002da8e142c1e7d196d9da4e4e17f64",
+      "source": "candidate/paid_pyyaml_provenance.json"
+    },
+    "ext/paid_yaml_runtime.py": {
+      "bytes": 4376,
+      "installed_preimage_sha256": null,
+      "sha256": "ea16d60373ccb50a93d85ed3f1557aad765174b7ddef81fb65622648b0c02f07",
+      "source": "candidate/paid_yaml_runtime.py"
+    },
     "ext/pick.py": {
       "bytes": 114869,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
@@ -468,21 +528,21 @@
       "source": "candidate/recovery_artifacts.py"
     },
     "ext/remote_sub.sh": {
-      "bytes": 95921,
+      "bytes": 101936,
       "installed_preimage_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17",
-      "sha256": "cd1fc44f27b4ed21ef3a5e31bcb25b390e45e2a0258cac754a1f3427bab75669",
+      "sha256": "fc4c44d62eb22ca44930841a125a13c945d5589a8e1c60ef417688712ba13b65",
       "source": "candidate/remote_sub.sh"
     },
     "ext/remote_sub_exec.py": {
-      "bytes": 53697,
+      "bytes": 56778,
       "installed_preimage_sha256": "a29798abb84294b1d8a67c53ef2b45137db4517f960598e51c8da21796d6cf61",
-      "sha256": "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef",
+      "sha256": "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7",
       "source": "candidate/remote_sub_exec.py"
     },
     "ext/remote_sub_helpers.py": {
-      "bytes": 73735,
+      "bytes": 74053,
       "installed_preimage_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b",
-      "sha256": "1fb1d9c637dc5f7f763ff8df073245653c64757200a9116bb1036aff05771b9c",
+      "sha256": "6218c63f7a4c4342b58e4d3b3333f04969b02b6f73d7ed5b35e8e464ed064ff9",
       "source": "candidate/remote_sub_helpers.py"
     },
     "ext/run_observation.py": {
@@ -516,9 +576,9 @@
       "source": "candidate/sub.sh"
     },
     "ext/support_bundle.py": {
-      "bytes": 18029,
+      "bytes": 18306,
       "installed_preimage_sha256": "e054b05fece124c6918f12dc1ce3962e6f20b5d74dea5e26630524be9b20295a",
-      "sha256": "5614c13e6c37c0b3dbaf1a2ec86ac2b098011bf1654ded47229f2ab8e6f26447",
+      "sha256": "4c1741eb2593aefb73e9c0b5a5348f631ab0c7bd0953794a3a799cc40e68759c",
       "source": "candidate/support_bundle.py"
     },
     "ext/yes": {
@@ -534,19 +594,119 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 85,
+  "native_code_files": 95,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
     "current_source_observation.py",
     "fabric_continuation.py",
+    "linux_process_identity.py",
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",
     "native_runtime_bindings.py",
+    "paid_controller_channel.py",
+    "paid_controller_spawn.py",
+    "paid_glm_model_client.py",
+    "paid_host_qualification.py",
+    "paid_incumbent_state.py",
+    "paid_model_owner.py",
+    "paid_pyyaml_6_0_3.zip",
+    "paid_pyyaml_provenance.json",
+    "paid_yaml_runtime.py",
     "provider_outcome.py",
     "quota_circuit.py",
     "recovery_artifacts.py"
   ],
+  "qualified_pure_yaml": {
+    "artifact_filename": "pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl",
+    "artifact_sha256": "fc09d0aa354569bc501d4e787133afc08552722d3ab34836a80547331bb5d4a0",
+    "artifact_url": "https://files.pythonhosted.org/packages/89/a0/6cf41a19a1f2f3feab0e9c0b74134aa2ce6849093d5517a0c550fe37a648/pyyaml-6.0.3-cp312-cp312-macosx_11_0_arm64.whl",
+    "excluded_binary_extensions": true,
+    "files": {
+      "LICENSE": {
+        "bytes": 1101,
+        "sha256": "8d3928f9dc4490fd635707cb88eb26bd764102a7282954307d3e5167a577e8a4"
+      },
+      "METADATA": {
+        "bytes": 2351,
+        "sha256": "03c3b415ed38d09faedc49360e930769b40c58f68585e6de00e2e4916a858d34"
+      },
+      "yaml/__init__.py": {
+        "bytes": 12311,
+        "sha256": "b19dfcc333d6a75dfd73073901164507252f271b41d3b5f7d85510033a0547a7"
+      },
+      "yaml/composer.py": {
+        "bytes": 4883,
+        "sha256": "fcaa37d16afa783594794a5ab94193dcb720f503c19ce3d59539c8311189f453"
+      },
+      "yaml/constructor.py": {
+        "bytes": 28639,
+        "sha256": "90d8247da78b524c10618fd0e857f54f3d97570fe91b5c5513d024ef3faf88b0"
+      },
+      "yaml/cyaml.py": {
+        "bytes": 3851,
+        "sha256": "e99ac01bd7c062f7557b614aff0d21997a06ed962ca185306a91bc0a20bbd87d"
+      },
+      "yaml/dumper.py": {
+        "bytes": 2837,
+        "sha256": "3cb72d66563064ba7b5e679477046ebf89d8399d940670c8532f3e94a7cb17ea"
+      },
+      "yaml/emitter.py": {
+        "bytes": 43006,
+        "sha256": "8e086d694ede170837d5b1b407b45979aff6f40762f422a65eafd08e04290a44"
+      },
+      "yaml/error.py": {
+        "bytes": 2533,
+        "sha256": "021f73fada072546c4f63f8cf18a7181244ce4280b09cc15cc980b2d1176171a"
+      },
+      "yaml/events.py": {
+        "bytes": 2445,
+        "sha256": "e74fd392c810884e2ea7e94aa3f57e9c1cbeb402319083d0c58e6a0e1282787c"
+      },
+      "yaml/loader.py": {
+        "bytes": 2061,
+        "sha256": "5156becc8aa6905482218abf3e04869b835226db4763645fff3438fdbd5f1cdd"
+      },
+      "yaml/nodes.py": {
+        "bytes": 1440,
+        "sha256": "80f28d8fca4a09d87677882bde021820d9cf39a3b11a12405226211919cf13ce"
+      },
+      "yaml/parser.py": {
+        "bytes": 25495,
+        "sha256": "8a55a9e6fbe0a07146cef3990c8b45a068c3e83e369e1959ad9ca30306b4a09a"
+      },
+      "yaml/reader.py": {
+        "bytes": 6794,
+        "sha256": "d1d9b38ab3a20c6e17a38d519ee412ecaf6b918df18c78956ac7c330d4ea08dc"
+      },
+      "yaml/representer.py": {
+        "bytes": 14190,
+        "sha256": "22e58ff9c016f6c1ca1274b4802a926bcf78935060e1c813c5a0f021c6d143e6"
+      },
+      "yaml/resolver.py": {
+        "bytes": 9004,
+        "sha256": "f4bf9561f9b89961f1503d558385fbae30d12bfed565de9bf76c33abb63620a6"
+      },
+      "yaml/scanner.py": {
+        "bytes": 51279,
+        "sha256": "60433788b652690c17710460da5d91e0c753d3318fd85f5e1e42862a71f25906"
+      },
+      "yaml/serializer.py": {
+        "bytes": 4165,
+        "sha256": "0a1b85826854d35863e31808f0668abfabdf33606e8f06bd8bb7761401e3edc0"
+      },
+      "yaml/tokens.py": {
+        "bytes": 2573,
+        "sha256": "953408cd2570f0c83dc2fe39f7e4e388e41eeb05738aa69196a5f6ffcf6ba79e"
+      }
+    },
+    "lock_path": "requirements/research-producer-macos-arm64-py312.lock",
+    "lock_sha256": "0c43d2132a6afaba75e5b5720c234d1b565679b650d7c04c024a1a12d711206a",
+    "package": "PyYAML",
+    "schema": "mastermind.paid_pure_yaml_source/v1",
+    "version": "6.0.3",
+    "zip_sha256": "1d6b5f7c42bc620557966d5cc6ca1933a7a12670658a7604676f0aebc26a3131"
+  },
   "schema": "native-code-source-inventory.v1",
   "source_status": "SOURCE_INVENTORY_REQUIRES_PROTECTED_RELEASE_AND_INSTALLATION_EVIDENCE",
   "stable_ext": "/Users/chriswong/.claude/projects/-Users-chriswong-Documents-Cluade-Macro-Dashboard/handoff_kits/meta-ceo-b-2026-09-08/ext"

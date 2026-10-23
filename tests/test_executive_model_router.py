@@ -127,7 +127,7 @@ def test_economical_workers_handle_bounded_work_and_frontier_keeps_judgment():
             decision.job_constraints()
 
 
-def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible():
+def test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity():
     router = ModelRouter.load()
 
     assert router.providers["codex"].enabled
@@ -138,10 +138,37 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
         False,
         False,
     )
-    for provider in ("qwen", "glm", "xai"):
+    for provider in ("qwen", "xai"):
         assert not router.providers[provider].enabled
         assert not router.providers[provider].autonomous_allowed
         assert router.providers[provider].adapter_id == "openai-compatible"
+
+    # Canonical paid glm catalogue identity (PR1794). enabled/autonomous_allowed
+    # and the worker_eligible paid alias below are closed-catalogue policy facts
+    # only: this pin does NOT assert live eligibility, runtime activation, or
+    # any R1/live receipt. canonical-paid-fabric is source-implemented
+    # (CanonicalPaidFabricWorkerAdapter) and stays BUILT_NOT_PROVEN.
+    assert router.providers["glm"] == ProviderAlias(
+        "glm",
+        "canonical-paid-fabric",
+        True,
+        True,
+    )
+    glm_paid_aliases = [
+        alias
+        for alias in router.model_aliases.values()
+        if alias.execution_profile_id == "fabric.paid.glm.sealed-input.v1"
+    ]
+    assert len(glm_paid_aliases) == 1
+    glm_paid = glm_paid_aliases[0]
+    assert glm_paid.model_alias == "glm.paid.sealed-input"
+    assert glm_paid.provider_alias == "glm"
+    assert glm_paid.adapter_id == "canonical-paid-fabric"
+    assert glm_paid.model == "glm-5.3-flash"
+    assert glm_paid.effort == "medium"
+    assert glm_paid.cost_class == "small"
+    assert list(glm_paid.capabilities) == ["research"]
+    assert glm_paid.worker_eligible
 
     luna = router.resolve_model_alias("fast.engineering")
     assert luna.model == "gpt-5.6-luna"
@@ -152,6 +179,7 @@ def test_policy_has_unarmed_provider_seams_and_only_codex_is_currently_eligible(
     assert terra.execution_profile_id == "sealed.worker.readonly.no-extensions.v1"
 
     assert adapter_descriptor("codex-cli").implemented
+    assert adapter_descriptor("canonical-paid-fabric").implemented
     assert not adapter_descriptor("claude-code").implemented
     assert not adapter_descriptor("openai-compatible").implemented
 
@@ -246,7 +274,10 @@ def test_heterogeneous_pair_does_not_arm_general_routing_or_bypass_capacity(tmp_
     with pytest.raises(RoutingPolicyError, match="not worker eligible"):
         fixture.resolve_model_alias("hf1q.claude.fixture")
 
-    for provider in ("qwen", "glm", "xai"):
+    # glm is now the enabled canonical-paid-fabric provider (identity pinned in
+    # test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity);
+    # only qwen/xai remain disabled openai-compatible seams.
+    for provider in ("qwen", "xai"):
         assert not checked_in.providers[provider].enabled
         assert not checked_in.providers[provider].autonomous_allowed
 

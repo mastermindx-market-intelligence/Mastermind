@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -37,13 +38,25 @@ def snapshot(path):
 def stage(tmp_path, bundle, source):
     mod, assets, sha, tree = bundle
     repo = source[0]
-    # Include the ordinary release surface in the fixture's actual Git archive.
+    # The fixture's actual Git archive carries the real reviewed release
+    # surface and the actual native closure records the unchanged archived
+    # builder materializes inside the release; only root ownership/ACLs stay
+    # simulated, and runtime caches/generated stages are never copied.
     for name in ("autonomy-control.sh", "autonomy_control.py", "credential_rotation_interlock.py"):
         p = repo / "ops/executive_os" / name
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("# inert fixture\n")
+        p.write_bytes((ROOT / "ops/executive_os" / name).read_bytes())
         if name.endswith(".sh"):
             p.chmod(0o755)
+    shutil.copytree(ROOT / "ops/native_fabric/quota_continuity",
+                    repo / "ops/native_fabric/quota_continuity",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
+                                                  "native-code-stage", ".DS_Store"))
+    provenance = json.loads((ROOT / "ops/native_fabric/quota_continuity/candidate/"
+                              "paid_pyyaml_provenance.json").read_bytes())
+    lock = repo / provenance["lock_path"]
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / provenance["lock_path"], lock)
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c",
                     "user.email=t@example.invalid", "commit", "-qm", "surface"], check=True)
@@ -134,6 +147,27 @@ def unchanged(s):
     assert snapshot(s["protected"]) == s["before"]
 
 
+# Archive fault injection: deterministic loss of the fixture's ENTIRE disposable
+# object store through one atomic rename to a fixed, first-checked-absent
+# sibling inside .git. The former rm of the loose fan-out path assumed loose
+# storage; a packed store archives fine without that file, so the rm itself
+# failed with ENOENT. Inserted as `extra`, this runs after the real
+# source-policy read and before the stage-only dispatch performs the shared
+# actual git archive of "$EXPECTED_SHA".
+ARCHIVE_FAULT = (
+    'archive_fault_lost="$SOURCE_REPO/.git/objects.archive-fault-lost"\n'
+    'if [ -e "$archive_fault_lost" ]; then\n'
+    '  echo "archive fault sibling already exists: $archive_fault_lost" >&2\n'
+    '  exit 65\n'
+    'fi\n'
+    'mv "$SOURCE_REPO/.git/objects" "$archive_fault_lost"\n'
+    'if [ -e "$SOURCE_REPO/.git/objects" ]; then\n'
+    '  echo "fixture object store survived the archive fault" >&2\n'
+    '  exit 65\n'
+    'fi\n'
+)
+
+
 def test_cli_recognizes_mode_before_preserving_nonroot_denial():
     if os.getuid() == 0:
         pytest.skip("this test specifically observes an unprivileged invocation")
@@ -213,9 +247,10 @@ def test_failure_retains_stage_without_other_effects(stage, failure):
         extra = ('real_rename() {' + original +
                  'rename_codex_path_exclusive() { mkdir "$2"; echo concurrent > "$2/other"; real_rename "$1" "$2"; }\n')
     if failure == "archive":
-        # A valid admitted tree can still fail archive (e.g. I/O).
-        # Remove the object *after* the actual policy read, before shared archive.
-        extra = 'rm "$SOURCE_REPO/.git/objects/${EXPECTED_SHA:0:2}/${EXPECTED_SHA:2}"\n'
+        # A valid admitted tree can still fail archive (e.g. I/O). Lose the
+        # whole disposable object store *after* the actual policy read, before
+        # shared archive, whatever object layout the fixture repo has.
+        extra = ARCHIVE_FAULT
     r = stage["run"](extra=extra, FAIL=failure)
     assert r.returncode == 65, r.stderr
     assert stage["stage"].is_dir()
@@ -223,6 +258,25 @@ def test_failure_retains_stage_without_other_effects(stage, failure):
         assert (stage["release"] / "other").read_text().strip() == "concurrent"
         assert not (stage["release"] / stage["stage"].name).exists()
     else: assert not stage["release"].exists()
+    unchanged(stage)
+
+
+def test_packed_source_still_fails_archive_and_retains_stage(stage):
+    # CI fixture repos can hold packed objects: Git reads the same commit
+    # without any loose file, which is why removing the loose fan-out path
+    # could not fault the archive. Prove the packed layout, exercise the same
+    # archive fault, and require the same stage retention with no other
+    # effects.
+    repo = stage["repo"]
+    sha = stage["env"]["EXPECTED_SHA"]
+    subprocess.run(["git", "-C", str(repo), "repack", "-ad"], check=True)
+    assert not (repo / ".git/objects" / sha[:2] / sha[2:]).exists()
+    assert list((repo / ".git/objects/pack").glob("*.pack"))
+    subprocess.run(["git", "-C", str(repo), "cat-file", "-e", sha], check=True)
+    r = stage["run"](extra=ARCHIVE_FAULT)
+    assert r.returncode == 65, r.stderr
+    assert stage["stage"].is_dir()
+    assert not stage["release"].exists()
     unchanged(stage)
 
 
