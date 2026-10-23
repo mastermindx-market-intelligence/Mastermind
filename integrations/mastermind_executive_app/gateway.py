@@ -1709,7 +1709,9 @@ class CeoIngressReadGateway:
         receipts: Mapping[str, Mapping[str, Any]],
         consumed: set[str],
     ) -> bool:
-        from control_plane.executive_runtime import AttemptStatus
+        from control_plane.executive_runtime import (
+            AttemptStatus, _TERMINAL_ATTEMPT_STATUSES,
+        )
         from control_plane.operator_harness_contract import AttemptExecutionMode
 
         if not (
@@ -1784,6 +1786,14 @@ class CeoIngressReadGateway:
                 or attempt["execution_mode"]
                 in {member.value for member in AttemptExecutionMode}
             )
+        ):
+            return False
+
+        # Mirror Runtime's persisted status/finished_at_ms CHECK in both
+        # directions. Active OHF expiry fences write an error, not a finish.
+        if (
+            (AttemptStatus(attempt["status"]) in _TERMINAL_ATTEMPT_STATUSES)
+            != bool(attempt["finished_at"])
         ):
             return False
 

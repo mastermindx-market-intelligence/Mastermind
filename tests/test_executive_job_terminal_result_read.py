@@ -680,6 +680,52 @@ def test_completed_job_or_attempt_cannot_omit_persisted_result(
     assert not _accepted(document)
 
 
+@pytest.mark.parametrize("source", ["real_lost_requeue", "real_completed"])
+def test_terminal_attempt_without_finished_at_is_not_certified(
+    tmp_path, operator_job, source,
+):
+    """Mirror Runtime's terminal status <=> finished_at_ms storage CHECK."""
+    if source == "real_lost_requeue":
+        from tests.test_remote_attempt_transport import _lost_requeued_runtime
+
+        runtime, job, _lost = _lost_requeued_runtime(tmp_path)
+        document = _produced_job(runtime, job.job_id, tmp_path)
+        assert document["data"]["latest_attempt"]["status"] == "LOST"
+    else:
+        document = copy.deepcopy(operator_job)
+        assert document["data"]["latest_attempt"]["status"] == "COMPLETED"
+
+    assert _accepted(document)
+    assert document["data"]["latest_attempt"]["finished_at"]
+
+    # Mirror the same forged omission in both of the independently projected
+    # rows so aggregate parity cannot mask the Runtime status invariant.
+    for row in (
+        document["data"]["attempts"][-1],
+        document["data"]["latest_attempt"],
+    ):
+        row["finished_at"] = ""
+    assert not _accepted(document)
+
+
+def test_active_attempt_with_forged_finished_at_is_not_certified(tmp_path):
+    """Runtime refuses a completed timestamp while an Attempt is nonterminal."""
+    from tests.test_remote_attempt_transport import _claimed_runtime
+
+    runtime, job, _lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert document["data"]["latest_attempt"]["status"] == "CLAIMED"
+    assert document["data"]["latest_attempt"]["finished_at"] == ""
+    assert _accepted(document)
+
+    for row in (
+        document["data"]["attempts"][-1],
+        document["data"]["latest_attempt"],
+    ):
+        row["finished_at"] = row["started_at"] or "2026-10-22T00:00:00+00:00"
+    assert not _accepted(document)
+
+
 @pytest.mark.parametrize("field", [
     "lease_expires_at", "heartbeat_at", "started_at", "finished_at",
 ])
