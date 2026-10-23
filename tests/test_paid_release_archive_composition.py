@@ -92,7 +92,12 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
         # Deliberately non-root fixture. Keep real mode/type/hash/ACL behavior.
         assert info.st_uid == os.geteuid()
         assert info.st_gid == os.getegid()
-        assert not stat.S_IMODE(info.st_mode) & 0o022
+        # Linux reports immutable symlink mode0777 and cannot lchmod it;
+        # this is the explicit cross-platform ownership fixture, not a change
+        # to the Darwin production qualifier. Real link target confinement,
+        # content/type checks and ordinary file/directory modes stay active.
+        if not (sys.platform.startswith("linux") and stat.S_ISLNK(info.st_mode)):
+            assert not stat.S_IMODE(info.st_mode) & 0o022
 
     monkeypatch.setattr(seal, "_validate_owned_info", local_fixture_owner)
     seal.create(root, commit, tree)
