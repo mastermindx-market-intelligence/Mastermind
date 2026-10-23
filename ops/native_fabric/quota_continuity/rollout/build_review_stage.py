@@ -59,6 +59,15 @@ GROK47_MERGED_SOURCE_DIGESTS = {
     'sub.sh': '7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2',
 }
 
+# Three exact forward compositions preserve protected Qwen fresh-usage and
+# caller UTC narrowing. Qualify their accepted Grok bases above as well as the
+# closed composed candidate bytes; neither source may silently replace the other.
+GROK47_CANDIDATE_COMPOSITION_DIGESTS = {
+    'pick.py': 'a3c3a9822779e244f4140dc1223c4a2617243ed35c12c0358527d637fc1fc1ee',
+    'remote_sub.sh': 'ccd49590f1a8e8b5b337c6581aabd1671791f4e7b339b041112c8aadd99b5351',
+    'remote_sub_helpers.py': '0d5f5c38b60eeef70cc7cefe37ee64bd69d56d3e3bdd32644871279fc0e88556',
+}
+
 EXTRA_PREIMAGES = {
     "yes": "b4f5e5353392e8ff4adc4158e1064243d0d7241333e9a891e05c1866b421813a",
     "host_pull_probe.template": "10ff206fb7050210e502d03c6916c092b2d82a2b8929d4b54b9cfe5b97bbea72",
@@ -96,6 +105,13 @@ def main():
             raw = source.read_bytes()
             if sha(raw) != GROK47_MERGED_SOURCE_DIGESTS[name]:
                 raise ValueError("accepted Grok 4.7 source digest mismatch: " + name)
+            if name in GROK47_CANDIDATE_COMPOSITION_DIGESTS:
+                source = root / "candidate" / name
+                if source.is_symlink() or not source.is_file():
+                    raise ValueError("accepted Grok forward composition mismatch: " + name)
+                raw = source.read_bytes()
+                if sha(raw) != GROK47_CANDIDATE_COMPOSITION_DIGESTS[name]:
+                    raise ValueError("accepted Grok forward composition mismatch: " + name)
         else:
             choices = (root / "candidate" / name,)
             if name not in PREIMAGE_ONLY:
@@ -114,6 +130,7 @@ def main():
         (stage / relative).write_bytes(raw)
         manifest[relative] = sha(raw)
         source_ref = ("../grok47/overlay/" + name if name in GROK47_MERGED_SOURCE_DIGESTS
+                      and name not in GROK47_CANDIDATE_COMPOSITION_DIGESTS
                       else str(source.relative_to(root)))
         files[relative] = {"source": source_ref, "sha256": sha(raw),
                            "installed_preimage_sha256": preimage, "bytes": len(raw)}

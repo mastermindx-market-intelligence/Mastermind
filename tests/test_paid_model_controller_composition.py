@@ -40,7 +40,7 @@ print('staged_model_only_selection_pass')
     assert checked.stdout == 'staged_model_only_selection_pass\n'
     inventory=json.loads((tmp_path/'native-source-inventory.json').read_text())
     expected_sources = {
-        'remote_sub.sh': '../grok47/overlay/remote_sub.sh',
+        'remote_sub.sh': 'candidate/remote_sub.sh',
         'remote_sub_exec.py': '../grok47/overlay/remote_sub_exec.py',
         'support_bundle.py': 'candidate/support_bundle.py',
         'paid_glm_model_client.py': 'candidate/paid_glm_model_client.py',
