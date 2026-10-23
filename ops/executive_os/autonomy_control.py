@@ -6427,11 +6427,18 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         current = release
         while True:
             info = current.lstat()
+            # Match the normal installer's exact canonical macOS ancestor.
+            # No other admin-group directory acquires release custody.
+            group_valid = info.st_gid == 0 or (
+                current == Path("/Library/Application Support")
+                and info.st_gid == 80
+                and stat.S_IMODE(info.st_mode) == 0o755
+            )
             if (
                 stat.S_ISLNK(info.st_mode)
                 or not stat.S_ISDIR(info.st_mode)
                 or info.st_uid != 0
-                or info.st_gid != 0
+                or not group_valid
                 or stat.S_IMODE(info.st_mode) & 0o022
                 or _has_acl(current)
             ):

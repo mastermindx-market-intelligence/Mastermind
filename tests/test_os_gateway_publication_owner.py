@@ -2546,7 +2546,7 @@ def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch)
 
 
 @pytest.mark.parametrize("name,expected_count", [
-    ("ops/executive_os/autonomy_control.py", 2),
+    ("ops/executive_os/autonomy_control.py", 4),
     ("ops/executive_os/os_gateway_studio_reader.py", 1),
 ])
 def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(
@@ -2572,7 +2572,7 @@ def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(
     drifted_sources = [source + "\n# unrelated source drift\n"]
     for line, start, end, _kind, spelling in entry["sites"]:
         lines = source.splitlines(keepends=True)
-        replacement = {"501": "502", "0o644": "0o666"}[spelling]
+        replacement = {"501": "502", "80": "81", "0o755": "0o775", "0o644": "0o666"}[spelling]
         lines[line - 1] = lines[line - 1][:start] + replacement + lines[line - 1][end:]
         drifted_sources.append("".join(lines))
     for drifted in drifted_sources:

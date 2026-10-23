@@ -838,8 +838,8 @@ fi
 if [ "$DRY_RUN" -ne 1 ]; then
   case "$MODE" in
     glm|glm-codex|grok|cursor|go|go-codex|qwen|bailian|codex-native|claude-native|oc-free)
-      ECONOMIC_POLICY_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
-      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$ECONOMIC_POLICY_DIR/pick.py" launch-policy \
+      ECONOMIC_SOURCE_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"
+      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$ECONOMIC_SOURCE_DIR/pick.py" launch-policy \
           --mode "$MODE" --class "${POOL_TASK_CLASS:-}" --model "$MODEL" \
           --task-complexity "${POOL_TASK_COMPLEXITY:-}" \
           --escalation-reason "${POOL_ESCALATION_REASON:-}"); then
