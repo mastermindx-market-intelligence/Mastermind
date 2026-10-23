@@ -10,6 +10,8 @@ The installed native adapter's existing reconcile verbs are scoped to other fixe
 
 ## Qualified source
 
+The reviewed source was subsequently hardened after an independent MiniMax Fabric source review reported two concrete issues: descriptor-open directory-chain validation now guards both M2 original artifacts/receipt publication and the Ubuntu1 remote read, and one-time receipt publication converges by validating a concurrently published O_EXCL winner. The expanded fixture-backed suite covers source_snapshot(), observe_original_host(), CLI, ancestry symlinks and concurrent publication. This source review is not a Terminal code-review verdict.
+
 The fixed-run module `source/native_watchlist_review03_reconcile.py` checks all of the following through incumbent owners, using source-pinned SHA-256 facts:
 
 - M2 controller log, request, request-return, launch, transport, continuation, controller/routing processes, and one exact original outcome ledger row.
@@ -23,7 +25,7 @@ The fixed-run module `source/native_watchlist_review03_reconcile.py` checks all 
 ## Actual qualification and tests
 
 - Live read-only qualification against the original **M2 + Ubuntu1 + broker**: **PASS**; proof SHA-256 `6e22cfa3c2f1c147bbd2f79d3d0c08fc0d9aeac0446709df490cc6b33f22e47e` (source-preview only; not a durable production terminal receipt).
-- Hermetic `pytest -q ops/native_fabric/quota_continuity/tests/test_original_review03_reconciliation.py`: **15 passed**. Covers wrong identity, stale digest, pre/post drift, tampered/symlink receipt, file custody, idempotent publication, host-report falsification and no acceptance.
+- Hermetic `pytest -q ops/native_fabric/quota_continuity/tests/test_original_review03_reconciliation.py`: **24 passed**. Covers wrong identity, stale digest, pre/post drift, tampered/symlink receipt, file custody, idempotent publication, host-report falsification and no acceptance.
 - No provider request, native lease write, original run write, installed source change, checkin, PR approval or merge has occurred.
 
 ## Integration / release fences
@@ -33,3 +35,7 @@ The fixed-run module `source/native_watchlist_review03_reconcile.py` checks all 
 Only after the installed facade returns a **root-verified terminal failure** for the exact original -03 run and lease evidence is read back may an independently admitted **new** PR #1127 reviewer commission proceed. The currently connected Fabric MCP has no explicit provider/model override: preserve the requested **non-Qwen** requirement using a lawfully qualified placement route, not `subject_pool` spoofing or task-class inflation. The separate direct semantic PASS is already accepted by the PR owner; this candidate cannot generate a reviewer verdict.
 
 **DO_NOT_REDO:** decoder source implementation, accepted direct PASS, original review-03 request, original lease, or historical Qwen call. Terminal PR stays Draft/HOLD and normal approval/merge gates remain reserved.
+
+## Independent Fabric source review and bounded repairs
+
+A separate MiniMax Fabric integration worker completed a root-verified terminal return under run `terminal-colw-pr1127-nativehook-integration-20261022-01`. It found that the earlier 15 tests omitted original-owner source/remote CLI paths, intermediate symlinks were not guarded, and O_EXCL winner races were misclassified. The module now delegates local ancestry custody to the **existing** `artifact_delivery.DirectoryChain`, holds remote ancestry descriptors in a source-fixed read-only ssh probe, and safely re-reads a concurrently published immutable receipt. **24 local focused tests now pass**, including owner fixtures for the eight original inputs, broker/ledger negative controls, the CLI and SSH response, symlink attacks and publication race. The read-only original M2/Ubuntu1/broker proof remains `6e22cfa3c2f1c147bbd2f79d3d0c08fc0d9aeac0446709df490cc6b33f22e47e`. No live receipt has been written.

@@ -67,20 +67,30 @@ def strict_json(data):
     return json.loads(data,object_pairs_hook=pairs,parse_constant=finite_fail)
 
 def read_owned(path,limit=1048576):
-    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
-    try:
-        before=os.fstat(fd)
-        require(stat.S_ISREG(before.st_mode) and before.st_uid==os.getuid()
-                and not before.st_mode & 0o022 and before.st_nlink==1
-                and 0<=before.st_size<=limit,"source_custody")
-        data=os.read(fd,limit+1)
-        after=os.fstat(fd);visible=path.lstat()
-        ident=lambda x:(x.st_dev,x.st_ino,x.st_size,x.st_mtime_ns,x.st_ctime_ns)
-        require(ident(before)==ident(after)==ident(visible)
-                and len(data)==before.st_size,"source_changed")
-        return data
-    finally:
-        os.close(fd)
+    # Reuse the installed artifact owner's existing descriptor-held directory
+    # chain, not a second file custody implementation. Every directory edge
+    # (including state/remote_sub) must remain non-symlinked and unchanged.
+    import artifact_delivery as delivery
+
+    path=Path(path)
+    with delivery.DirectoryChain(path.parent) as chain:
+        chain.verify()
+        fd=os.open(path.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=chain.fd)
+        try:
+            before=os.fstat(fd)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid==os.getuid()
+                    and not before.st_mode & 0o022 and before.st_nlink==1
+                    and 0<=before.st_size<=limit,"source_custody")
+            data=os.read(fd,limit+1)
+            after=os.fstat(fd)
+            visible=os.stat(path.name,dir_fd=chain.fd,follow_symlinks=False)
+            ident=lambda x:(x.st_dev,x.st_ino,x.st_size,x.st_mtime_ns,x.st_ctime_ns)
+            require(ident(before)==ident(after)==ident(visible)
+                    and len(data)==before.st_size,"source_changed")
+            chain.verify()
+            return data
+        finally:
+            os.close(fd)
 
 def read_bound(path,expected,limit=1048576):
     data=read_owned(path,limit)
@@ -173,16 +183,48 @@ def check(condition):
  if not condition:
   raise ValueError("original_host_proof_invalid")
 def file(path):
- fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+ # Inspect every ancestor through retained directory descriptors. No symlink
+ # in /home/.../lanes may substitute a valid leaf file.
+ components=[x for x in path.split("/") if x]
+ check(path.startswith("/") and components and "." not in components and ".." not in components)
+ fds=[os.open("/",os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)]
+ edges=[]
+ def identity(info):
+  return (info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid)
+ def verify():
+  for i,held in enumerate(fds):
+   now=os.fstat(held)
+   check(stat.S_ISDIR(now.st_mode) and now.st_uid in (0,os.getuid()) and not now.st_mode & 0o022)
+   if i:
+    visible=os.stat(edges[i-1],dir_fd=fds[i-1],follow_symlinks=False)
+    check(identity(now)==identity(visible))
  try:
-  s=os.fstat(fd);v=os.stat(path,follow_symlinks=False)
-  ident=lambda x:(x.st_dev,x.st_ino,x.st_size,x.st_mtime_ns,x.st_ctime_ns)
-  check(stat.S_ISREG(s.st_mode) and s.st_uid==os.getuid() and not s.st_mode&0o022 and s.st_nlink==1)
-  check(ident(s)==ident(v) and 0<=s.st_size<=1048576)
-  b=os.read(fd,1048577)
-  check(len(b)==s.st_size and ident(os.fstat(fd))==ident(s))
-  return b
- finally:os.close(fd)
+  verify()
+  for component in components[:-1]:
+   fd=os.open(component,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW,dir_fd=fds[-1])
+   fds.append(fd)
+   edges.append(component)
+   verify()
+  name=components[-1]
+  fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=fds[-1])
+  try:
+   verify()
+   before=os.fstat(fd)
+   visible=os.stat(name,dir_fd=fds[-1],follow_symlinks=False)
+   check(stat.S_ISREG(before.st_mode) and before.st_uid==os.getuid()
+         and not before.st_mode&0o022 and before.st_nlink==1)
+   check(identity(before)==identity(visible) and before.st_size==visible.st_size
+         and 0<=before.st_size<=1048576)
+   data=os.read(fd,1048577)
+   after=os.fstat(fd)
+   check(len(data)==before.st_size and identity(after)==identity(before)
+         and after.st_size==before.st_size and after.st_mtime_ns==before.st_mtime_ns)
+   verify()
+   return data
+  finally:os.close(fd)
+ finally:
+  for held in reversed(fds):
+   os.close(held)
 raw={k:file(p) for k,p in paths.items()}
 d={k:hashlib.sha256(v).hexdigest() for k,v in raw.items()}
 check(d==wanted)
@@ -266,19 +308,31 @@ def reconcile_original(run_id,root_id,expected_proof_sha256):
     if existing is None:
         material={"schema":SCHEMA,"proof":proof,"created_at":time.time()}
         material["receipt_sha256"]=digest(canonical(material))
+        raw=canonical(material)+b"\n"
         path=receipt_path()
-        fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600)
-        try:
-            with os.fdopen(fd,"wb") as stream:
-                stream.write(canonical(material)+b"\n")
-                stream.flush()
-                os.fsync(stream.fileno())
-            pfd=os.open(path.parent,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
-            try:os.fsync(pfd)
-            finally:os.close(pfd)
-        except BaseException:
-            # Uncertain effect stays on original carrier. Never delete or retry.
-            raise
+        import artifact_delivery as delivery
+        with delivery.DirectoryChain(path.parent) as chain:
+            chain.verify()
+            # Another already-running original owner may win O_EXCL between
+            # inspection and open. That is a readback condition, NOT failure
+            # and NEVER permission to overwrite/erase the other receipt.
+            try:
+                fd=os.open(path.name,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,
+                           0o600,dir_fd=chain.fd)
+            except FileExistsError:
+                chain.verify()
+            else:
+                try:
+                    with os.fdopen(fd,"wb") as stream:
+                        require(stream.write(raw)==len(raw),"receipt_short_write")
+                        stream.flush()
+                        os.fsync(stream.fileno())
+                    chain.verify()
+                    os.fsync(chain.fd)
+                    chain.verify()
+                except BaseException:
+                    # An effect may exist; never unlink or attempt replacement.
+                    raise
         existing=_saved()
     require(existing is not None and existing["proof"]==proof,
             "original_reconciliation_conflict")
