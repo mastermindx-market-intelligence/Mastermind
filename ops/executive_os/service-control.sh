@@ -23,7 +23,7 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|start-restored-a2-readside|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
   exit 64
@@ -695,6 +695,68 @@ case "$1" in
     stop_one "$CONTROL_LABEL"
     stop_one "$RELAY_LABEL"
     readside_postflight
+    ;;
+  start-restored-a2-readside)
+    # Same fixed-label service owner; A2 CAS and Control restore settled first.
+    [ "$#" -eq 15 ] \
+      && [ "$2" = "--expected-sha" ] \
+      && [ "$4" = "--expected-control-sha256" ] \
+      && [ "$6" = "--expected-previous-release-sha" ] \
+      && [ "$8" = "--expected-previous-tree-sha" ] \
+      && [ "${10}" = "--expected-previous-config-sha256" ] \
+      && [ "${12}" = "--expected-previous-plist-sha256" ] \
+      && [ "${14}" = "--expected-bot-user-id" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$5" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "$7" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "$9" =~ ^[0-9a-f]{40}$ ]] \
+      && [[ "${11}" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "${13}" =~ ^[0-9a-f]{64}$ ]] \
+      && [[ "${15}" =~ ^U[0-9A-Z]{9,}$ ]] || usage
+    require_root
+    local_release_root="$(builtin cd -P "$SCRIPT_DIR/../.." && /bin/pwd)"
+    [ "${local_release_root##*/}" = "$3" ] || {
+      /bin/echo "installed recovery source differs from expected release" >&2
+      exit 65
+    }
+    validate_plist "$AGENT_RELAY_PLIST"
+    validate_plist "$RELAY_PLIST"
+    validate_plist "$CONTROL_PLIST"
+    readside_preflight
+    require_absent "$AGENT_RELAY_LABEL"
+    require_absent "$RELAY_LABEL"
+    require_absent "$CONTROL_LABEL"
+    [ "$(agent_relay_disabled_state)" = "disabled" ] || {
+      /bin/echo "A2 must be unloaded and disabled before restoration" >&2
+      exit 65
+    }
+    "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B - "$local_release_root" "$@" <<'PY_RESTORED_A2'
+import sys
+sys.path.insert(0, sys.argv[1])
+from ops.executive_os.autonomy_control import main
+raise SystemExit(main(["a2-restored-readside-preflight", *sys.argv[3:]]))
+PY_RESTORED_A2
+    if ! start_agent_relay; then
+      /bin/echo "a2_restore_effect_unknown stage=agent-relay-start" >&2
+      exit 75
+    fi
+    if ! require_running "$AGENT_RELAY_LABEL"; then
+      /bin/echo "a2_restore_effect_unknown stage=agent-relay-running" >&2
+      exit 75
+    fi
+    if ! ensure_running "$RELAY_LABEL" "$RELAY_PLIST"; then
+      /bin/echo "a2_restore_effect_unknown stage=c1-start" >&2
+      exit 75
+    fi
+    if ! ensure_running "$CONTROL_LABEL" "$CONTROL_PLIST"; then
+      /bin/echo "a2_restore_effect_unknown stage=control-start" >&2
+      exit 75
+    fi
+    if ! readside_postflight; then
+      /bin/echo "a2_restore_effect_unknown stage=readside-postflight" >&2
+      exit 75
+    fi
+    /bin/echo "a2_restored_readside=running release=$3 previous_a2_release=$7 live_slack_return=unverified"
     ;;
   start-agent-relay)
     require_root
