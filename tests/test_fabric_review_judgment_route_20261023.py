@@ -27,7 +27,7 @@ def native_pick(monkeypatch):
 def install_inert_route(monkeypatch, pick, *, eligible=("glm",)):
     """Isolate class/precedence and R33 logic from physical provider gates."""
     doc = {"routing": {
-        "execute_classes": ["execute", "review", "audit", "mechanical"],
+        "execute_classes": ["execute", "review", "audit", "verify", "mechanical"],
         "judgment_order": ["glm-5.3", "grok", "cursor", "fable"],
         "reviewer_not_author": True,
     }, "pools": {"glm": {}, "bailian": {}}}
@@ -50,29 +50,32 @@ def install_inert_route(monkeypatch, pick, *, eligible=("glm",)):
     return doc
 
 
-def test_review_routes_to_glm_judgment_even_when_execute_classes_contains_review(native_pick, monkeypatch):
+@pytest.mark.parametrize("review_class", ["review", "audit"])
+def test_review_routes_to_glm_judgment_even_when_execute_classes_contains_review(native_pick, monkeypatch, review_class):
     doc = install_inert_route(monkeypatch, native_pick, eligible=("glm", "bailian"))
-    assert native_pick.is_execute_class("review", doc)
-    assert native_pick.is_judgment_class("review", doc)
-    route = native_pick._format_pick("review", subject_pool="minimax")
+    assert native_pick.is_execute_class(review_class, doc)
+    assert native_pick.is_judgment_class(review_class, doc)
+    route = native_pick._format_pick(review_class, subject_pool="minimax")
     assert route == "POOL=glm MODEL=fixture REASON=judgment_order_glm"
 
 
-def test_review_never_falls_back_to_qwen_scored_executor_when_glm_unavailable(native_pick, monkeypatch):
+@pytest.mark.parametrize("review_class", ["review", "audit"])
+def test_review_never_falls_back_to_qwen_scored_executor_when_glm_unavailable(native_pick, monkeypatch, review_class):
     install_inert_route(monkeypatch, native_pick, eligible=("bailian",))
-    route = native_pick._format_pick("review", subject_pool="minimax")
+    route = native_pick._format_pick(review_class, subject_pool="minimax")
     assert route == "NONE reason=no_operator_available"
 
 
-def test_reviewer_not_author_still_refuses_same_glm_family(native_pick, monkeypatch):
+@pytest.mark.parametrize("review_class", ["review", "audit"])
+def test_reviewer_not_author_still_refuses_same_glm_family(native_pick, monkeypatch, review_class):
     install_inert_route(monkeypatch, native_pick, eligible=("glm", "bailian"))
-    assert native_pick._subject_ok("glm", "review", "remote-glm-codex")[0] is False
-    route = native_pick._format_pick("review", subject_pool="remote-glm-codex")
+    assert native_pick._subject_ok("glm", review_class, "remote-glm-codex")[0] is False
+    route = native_pick._format_pick(review_class, subject_pool="remote-glm-codex")
     assert route == "NONE reason=no_operator_available"
 
 
-@pytest.mark.parametrize("other_class", ["audit", "mechanical"])
-def test_existing_non_review_execute_classes_not_reclassified(native_pick, monkeypatch, other_class):
+@pytest.mark.parametrize("other_class", ["mechanical", "verify"])
+def test_existing_non_judgment_execute_classes_not_reclassified(native_pick, monkeypatch, other_class):
     install_inert_route(monkeypatch, native_pick, eligible=("glm", "bailian"))
     route = native_pick._format_pick(other_class)
     assert route == "POOL=bailian MODEL=qwen3.8-max REASON=legacy_wrong_route"

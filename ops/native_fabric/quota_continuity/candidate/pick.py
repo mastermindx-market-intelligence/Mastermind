@@ -2058,9 +2058,9 @@ def _format_pick(task_class: str, prefer: Optional[str] = None,
             host_modes=host_modes, task_complexity=complexity, escalation_reason=escalation_reason
         )
 
-    # Review is independent judgment even when legacy execute_classes includes it.
-    # Preserve explicit-pool gates above; never score a generic review into Qwen.
-    if tc != "review" and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
+    # Independent review/audit remain judgment even when legacy execute_classes includes them.
+    # Preserve explicit-pool gates above; do not score implicit reviewers into Qwen.
+    if tc not in {"review", "audit"} and (is_execute_class(tc, doc) or tc in LABOR_CLASSES_R30):
         return _pick_execute(tc, prefer_c, doc, needs=needs, subject_pool=subject_pool, host_modes=host_modes,
                              task_complexity=complexity, escalation_reason=escalation_reason,
                              route_key=route_key)
