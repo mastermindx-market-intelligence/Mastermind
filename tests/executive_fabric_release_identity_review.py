@@ -279,11 +279,11 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
 # token sites are unchanged in kind, spelling, and count.
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
+# Re-pinned for the explicit unstarted PREPROOF successor mode; same three
+# guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "3c45fc1c851576e5260f4544c3329915b4b3ce0efdaadf8d3ad002546acd4bc6",
-    "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (903, 46, 49, "int", "400"),
-              (903, 66, 69, "int", "500")),
+    "sha256": '6726f29928405a4eddf6079be4c43528570ec57f1d19cacedebd6e73262cde1e',
+    "sites": ((78, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (920, 46, 49, 'int', '400'), (920, 66, 69, 'int', '500')),
 }
 
 
