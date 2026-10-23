@@ -1,0 +1,82 @@
+name: DSH ACP Attempt Overlay
+
+# Complementary to the generic DSH governed-MCP tests in #1790: exercise
+# the real pinned ToolRuntime and MCP SDK with the closed ACP Attempt overlay.
+on:
+  pull_request:
+    paths:
+      - .github/workflows/dsh-acp-attempt-overlay.yml
+      - integrations/acp_worker/dsh_*.mjs
+      - integrations/acp_worker/installed.py
+      - experiments/harness_convergence/dispatch_binding/build-profile.mjs
+      - experiments/harness_convergence/dispatch_binding/attempt-overlay-native-canary.mjs
+      - experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs
+      - tests/test_dsh_attempt_overlay.py
+      - tests/harness_convergence/test_dsh_attempt_overlay.mjs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dsh-acp-attempt-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  real-attempt-overlay:
+    name: real DSH MCP Attempt discovery and revocation
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.0"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify bounded Attempt overlay and ambient-secret refusal
+        run: node --test --test-reporter=tap tests/harness_convergence/test_dsh_attempt_overlay.mjs
+
+      - name: Recover only pinned public DSH ToolRuntime/MCP sources
+        working-directory: experiments/harness_convergence/dispatch_binding
+        run: |
+          python prepare.py --download
+          python prepare_mcp.py --download
+
+      - name: Install exact locked donor without lifecycle scripts
+        working-directory: experiments/harness_convergence/dispatch_binding
+        run: |
+          env -i PATH="$PATH" HOME="$PWD/.cache/home" \
+            NPM_CONFIG_USERCONFIG="$PWD/.cache/empty-user.npmrc" \
+            NPM_CONFIG_GLOBALCONFIG="$PWD/.cache/empty-global.npmrc" \
+            NPM_CONFIG_CACHE="$PWD/.cache/npm-cache" \
+            NPM_CONFIG_REGISTRY="https://registry.npmjs.org/" \
+            npm ci --ignore-scripts --legacy-peer-deps --no-audit --no-fund
+
+      - name: Compile one exact DSH ToolRuntime and AgentLoop closure
+        working-directory: experiments/harness_convergence/dispatch_binding
+        run: node build-profile.mjs
+
+      - name: Exercise actual MCP child with Attempt and negative controls
+        working-directory: experiments/harness_convergence/dispatch_binding
+        run: |
+          node attempt-overlay-native-canary.mjs normal
+          node attempt-overlay-native-canary.mjs host-revoked
+          node attempt-overlay-native-canary.mjs foreign-env
+          node attempt-overlay-native-canary.mjs pre-aborted
+
+      - uses: actions/upload-artifact@v4
+        if: success()
+        with:
+          name: acp-attempt-mcp-provider-free
+          path: |
+            experiments/harness_convergence/dispatch_binding/.cache/profile-build-result.json
+            experiments/harness_convergence/dispatch_binding/.cache/attempt-overlay-*.json
+          if-no-files-found: error
+          retention-days: 14

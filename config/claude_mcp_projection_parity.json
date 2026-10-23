@@ -451,6 +451,28 @@
           "status": "unsupported"
         }
       }
+    },
+    "worker.acp.providerfree.readonly.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "f2fa8bd627f3e5f28a341744b59d29596d1c3ecfb8456dc82de7051a62681942",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "ACP AgentLoop is not Claude Agent SDK. Its native Attempt tool grant and process are separately admitted.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "ACP is an isolated provider-free DSH worker, not Claude CLI. No Claude MCP grant or provider credential may be borrowed.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "ACP native workspace-read tools are not enrolled in Claude Desktop Local or any desktop MCP surface.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "ACP is not a Claude inline subagent. No context, delegated permission or tool namespace may be inherited.",
+          "status": "unsupported"
+        }
+      }
     }
   },
   "projection_source_sha256": "84c9ac5dc61d1db0af3469fda326a045364ebb0c51ea0a016cad0be4bd615455",

@@ -60,3 +60,34 @@ Release requires accepted framing dependency, independent review and current-bas
 CI. Then the existing native owner must bind a qualified resource factory before
 registration or a real provider canary. All current HF/PF/Capacity/provider-auth
 gates remain intact; source integration does not waive them.
+
+
+## DSH per-Attempt MCP tool-profile binding
+
+`createDshGrantedToolProfile` now requires `attemptOverlay` for the closed ACP
+`worker.acp.providerfree.readonly.v1` profile. The value is the immutable
+`cwd + six MMX_ACP_* environment keys` produced by the **existing**
+`AcpInstalledHostPacket.mcp_runtime_overlay(spec, now_ms)`. Its transport
+configuration is constructed before the donor MCP client can discover tools.
+The transport receives only those six Attempt values plus an explicit fixed
+`PATH=/usr/bin:/bin` and `HOME`/`TMPDIR` bound to the same admitted
+workspace. The latter two override the pinned SDK's inherited defaults so
+it cannot receive the host's credential-bearing home/temp directories.
+Ambient provider credentials, `NODE_OPTIONS`, arbitrary environment entries,
+config-selected cwd and automatic reconnection are all rejected. The original fixed server
+command/argv, MCP schema grant, dispatch guard, AbortSignal and process
+lifecycle retain their incumbent owners.
+
+The trusted host's **existing** `isCurrentBinding` callback receives the
+frozen `request.attempt` claim at startup, after async preflight, at discovery
+and on every tool dispatch. That host must compare it against the live
+Executive Attempt/worker/source and revoke on drift; a caller-selected claim
+never authenticates itself. The ACP grant cannot start without an overlay.
+Other execution surfaces cannot borrow it.
+
+The portable `tests/test_dsh_attempt_overlay.py` invokes the provider-free
+Node acceptance tests with no bundled donor packages. Real DSH ToolRuntime
+and MCP SDK integration, installed Seatbelt UID/GID/artifact attestation,
+native WorkerResult and parent-consumption must be qualified separately:
+passing the overlay consumer does **not** set ACP `implemented:true` or
+authorize an Executive or production release.
