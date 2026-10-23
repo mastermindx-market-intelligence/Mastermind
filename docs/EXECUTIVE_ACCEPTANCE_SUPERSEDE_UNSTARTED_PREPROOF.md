@@ -95,8 +95,9 @@ disposable preparation flow.
 `tests/test_executive_acceptance_supersede_unstarted_preproof.py` drives the
 real owner end to end:
 
-- the walk descends newtype -> started pre-proof prefix -> accepted V2 and
-  leaves every selected byte untouched;
+- the walk descends newtype -> unstarted original PREPROOF -> its started
+  V2 pre-proof prefix, while the unchanged prior-carry validation binds the
+  accepted ancestor, and leaves every selected byte untouched;
 - the descriptor key set stays closed and the incumbent
   `supersede_unstarted_v1` refusal of this shape is preserved;
 - the full negative matrix: shared binding drift, sealed baseline/inventory/
@@ -130,7 +131,9 @@ JSON readers retain their existing 16 MiB limit.
 
 The new guard anchors traversal from `/`, refuses symlink traversal, and retains
 the actual parent descriptor for the absent selected acceptance leaf. Only the
-already admitted Runtime `/var` alias is mapped to its explicit physical target;
+already admitted Runtime `/var` alias is mapped to its explicit physical target
+for the exact acceptance-leaf shape and the fixed
+`control/canaries/secret-canary.json` path;
 its original link identity and target remain pinned. It also retains the actual
 live canary file identity. Ancestor inode/type/owner/mode checks allow the
 operation's own creation of a sibling private preparation, while full identities
@@ -162,3 +165,11 @@ assignment and host identity/stopped boundaries are synthetic fixture inputs;
 they are source-composition proof, not live historical authority, installed
 acceptance or permission to execute maintenance. Separate existing substantive
 tests cover the preserved terminal assignment and prior-carry validators.
+
+
+Descriptor dispatch is bound to the caller's expected digest before choosing the
+new-mode guard, and the later descriptor read must still match that digest and
+the chosen schema/guard branch. A header change across the reads cannot route a
+new-mode descriptor through the legacy unguarded branch. The ordinary logical
+canary spelling remains unchanged in configuration; no arbitrary `/var` file or
+unqualified alias is admitted by the narrow guard mapping.

@@ -1421,7 +1421,7 @@ class _UnstartedPreproofGuard:
         return fd
 
     def file(self, path: Path):
-        self._hold(path, directory=False, exact=True)
+        self._hold(self._runtime_path(path), directory=False, exact=True)
 
     def tree(self, path: Path):
         """Hold only immediate admitted entries; never read backup/sidecar bytes."""
@@ -1436,8 +1436,11 @@ class _UnstartedPreproofGuard:
 
     def _runtime_path(self, logical: Path):
         expected_parent = _MACOS_VAR_ALIAS / 'db/mastermind-executive/control/acceptance'
-        if (sys.platform == 'darwin' and logical.parent == expected_parent
-                and _SHA.fullmatch(logical.name) is not None):
+        expected_canary = (_MACOS_VAR_ALIAS /
+                           'db/mastermind-executive/control/canaries/secret-canary.json')
+        if (sys.platform == 'darwin' and (
+                (logical.parent == expected_parent and _SHA.fullmatch(logical.name) is not None)
+                or logical == expected_canary)):
             info = _MACOS_VAR_ALIAS.lstat()
             target = os.readlink(_MACOS_VAR_ALIAS)
             if (not stat.S_ISLNK(info.st_mode) or info.st_uid != _TRUSTED_UID
@@ -1708,7 +1711,9 @@ def _prepare(args: argparse.Namespace, *, guard=None) -> Path:
 class Maintenance:
     def __init__(self, sha: str, expected_digest: str, config: dict):
         selected = descriptor_for(sha)
-        if selected is not None and selected['schema_version'] == SCHEMA_UNSTARTED_PREPROOF:
+        if selected is None or digest(selected) != expected_digest:
+            raise MaintenanceError("maintenance descriptor digest mismatch")
+        if selected['schema_version'] == SCHEMA_UNSTARTED_PREPROOF:
             with _UnstartedPreproofGuard() as guard:
                 guard.tree(bundle_path(sha))
                 guard.file(Path(config['secret_canary_receipt_path']))
@@ -1722,6 +1727,9 @@ class Maintenance:
         self.descriptor = descriptor_for(sha)
         if self.descriptor is None or digest(self.descriptor) != expected_digest:
             raise MaintenanceError("maintenance descriptor digest mismatch")
+        if ((self.descriptor['schema_version'] == SCHEMA_UNSTARTED_PREPROOF)
+                != (guard is not None)):
+            raise MaintenanceError("maintenance descriptor schema dispatch changed")
         validate_prior_carry_binding(self.descriptor)
         require_disarmed(config)
         require_stopped()

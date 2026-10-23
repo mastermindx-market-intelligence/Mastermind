@@ -460,9 +460,11 @@ def _prepare_fixture(tmp_path, monkeypatch):
         runtime_root=runtime_root)
 
 
-def _prepared(tmp_path, monkeypatch):
+def _prepared(tmp_path, monkeypatch, *, logical_canary=False):
     """Drive the actual prepare() and prove the published newtype descriptor."""
     f = _prepare_fixture(tmp_path, monkeypatch)
+    if logical_canary:
+        _use_logical_canary(f, tmp_path, monkeypatch)
     middle_originals = {p.name: p.read_bytes() for p in f.middle_bundle.iterdir()}
     deeper_originals = {p.name: p.read_bytes() for p in f.deeper_bundle.iterdir()}
     args = argparse.Namespace(predecessor_sha=ACCEPTED, successor_sha=SUCCESSOR,
@@ -866,3 +868,74 @@ def test_prepare_does_not_replace_a_final_namespace_created_during_sealing(tmp_p
         m.prepare(_new_args(f))
     assert final.is_dir() and not list(final.iterdir())
     assert list(final.parent.glob('.preparing-'+SUCCESSOR+'-*'))
+
+
+
+def _use_logical_canary(f, tmp_path, monkeypatch):
+    """Normal production spelling through a disposable explicit /var alias."""
+    physical = tmp_path/'physical-var'
+    physical_canary = physical/'db/mastermind-executive/control/canaries/secret-canary.json'
+    physical_canary.parent.mkdir(parents=True)
+    f.canary_path.rename(physical_canary)
+    alias = tmp_path/'var'
+    alias.symlink_to(physical, target_is_directory=True)
+    monkeypatch.setattr(m, '_MACOS_VAR_ALIAS', alias)
+    monkeypatch.setattr(m, '_MACOS_VAR_PHYSICAL', physical)
+    logical_canary = alias/'db/mastermind-executive/control/canaries/secret-canary.json'
+    f.canary_path = logical_canary
+    f.config['secret_canary_receipt_path'] = str(logical_canary)
+    (m.SYSTEM_ROOT/'config/control.json').write_text(json.dumps(f.config))
+    return alias, physical, physical_canary
+
+
+def test_normal_logical_canary_path_reaches_real_prepare_and_maintenance(tmp_path, monkeypatch):
+    f, descriptor, bundle = _prepared(tmp_path, monkeypatch, logical_canary=True)
+    assert str(f.canary_path).endswith('/var/db/mastermind-executive/control/canaries/secret-canary.json')
+    original = f.canary_path.read_bytes()
+    m.Maintenance(SUCCESSOR, m.digest(descriptor), f.config)
+    assert m.sealed_json(bundle/'run-started.json')['descriptor_sha256'] == m.digest(descriptor)
+    assert f.canary_path.read_bytes() == original
+
+
+@pytest.mark.parametrize('fault', ['alias-replaced', 'leaf-symlink', 'other-canary-path'])
+def test_canary_mapping_is_fixed_and_alias_identity_retained(tmp_path, monkeypatch, fault):
+    f = _prepare_fixture(tmp_path, monkeypatch)
+    alias, physical, canary = _use_logical_canary(f, tmp_path, monkeypatch)
+    foreign = tmp_path/'foreign'
+    foreign.write_bytes(b'never read')
+    if fault == 'leaf-symlink':
+        canary.unlink()
+        canary.symlink_to(foreign)
+    path = f.canary_path if fault != 'other-canary-path' else f.canary_path.with_name('other.json')
+    with pytest.raises((m.MaintenanceError, OSError)):
+        with m._UnstartedPreproofGuard() as guard:
+            guard.file(path)
+            if fault == 'alias-replaced':
+                alias.unlink()
+                alias.symlink_to(tmp_path/'foreign-var', target_is_directory=True)
+            guard.check()
+
+
+def test_descriptor_schema_dispatch_drift_cannot_skip_newmode_guard(tmp_path, monkeypatch):
+    f, descriptor, bundle = _prepared(tmp_path, monkeypatch)
+    actual = m.descriptor_for
+    first = True
+    def old_header_then_current(sha):
+        nonlocal first
+        value = actual(sha)
+        if sha == SUCCESSOR and first:
+            first = False
+            return {key: value[key] for key in m._DESCRIPTOR_V2_KEYS} | {
+                'schema_version': m.SCHEMA_V2}
+        return value
+    monkeypatch.setattr(m, 'descriptor_for', old_header_then_current)
+    requalified = []
+    original = m._requalify_unstarted_preproof
+    def actual_requalification(*args, **kwargs):
+        requalified.append(True)
+        return original(*args, **kwargs)
+    monkeypatch.setattr(m, '_requalify_unstarted_preproof', actual_requalification)
+    with pytest.raises(m.MaintenanceError):
+        m.Maintenance(SUCCESSOR, m.digest(descriptor), f.config)
+    assert not (bundle/'run-started.json').exists()
+    assert not requalified  # refused dispatch drift, not a replacement validator
