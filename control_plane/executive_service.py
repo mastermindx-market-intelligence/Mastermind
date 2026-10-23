@@ -30,6 +30,7 @@ import stat
 import struct
 import subprocess
 import sys
+import time
 from contextlib import AsyncExitStack, asynccontextmanager, nullcontext
 from datetime import datetime, timezone
 from http import HTTPStatus
@@ -1566,6 +1567,8 @@ class ServiceConfig:
     # Exact host-reviewed attended members; empty in every installed profile.
     # No caller payload may supply these or turn them into Worker admission.
     coo_attended_work_placements: tuple = ()
+    # Root-installed, freshly qualified PAID source; no finite policy reuse.
+    coo_paid_work_placements: tuple = ()
     terminal_return_armed: bool = False
     terminal_return_socket_path: Path | None = None
     operator_harness_binary_digest: str = "0" * 64
@@ -1670,6 +1673,15 @@ class ServiceConfig:
             raise ValueError("attended work placements require bounded host configuration")
         if qualification_for(self.coo_attended_work_placements) is not None and not self.coo_foreground_only:
             raise ValueError("finite qualification requires foreground-only host configuration")
+        from control_plane.executive_paid_fabric_composition import PaidWorkPlacement
+        if (type(self.coo_paid_work_placements) is not tuple
+                or len(self.coo_paid_work_placements)>3
+                or any(type(item) is not PaidWorkPlacement
+                       or item.model_alias!="glm.paid.sealed-input"
+                       or _ID_RE.fullmatch(item.quota_class) is None
+                       for item in self.coo_paid_work_placements)
+                or (self.coo_paid_work_placements and self.coo_attended_work_placements)):
+            raise ValueError("paid work placements require a distinct bounded installed source")
         quota_names = {
             self.quota_class,
             self.coo_quota_class,
@@ -2236,11 +2248,20 @@ class ExecutiveControlService:
             Callable[[Runtime], "ReleaseControlConsumer"] | None
         ) = None,
         attended_worker_registration: Callable[[Runtime], Any] | None = None,
+        paid_worker_binding_source=None,
     ) -> None:
         self.config = config
         if attended_worker_registration is not None and not callable(attended_worker_registration):
             raise ValueError('attended registration requires fixed host composition')
         self._attended_worker_registration = attended_worker_registration
+        if paid_worker_binding_source is not None:
+            from control_plane.executive_paid_fabric_composition import PaidBindingSource
+            if type(paid_worker_binding_source) is not PaidBindingSource:
+                raise ValueError('paid source requires the installed root reader')
+            paid_worker_binding_source._current()
+            if not config.coo_paid_work_placements or attended_worker_registration is not None:
+                raise ValueError('paid source placement composition differs')
+        self._paid_worker_binding_source=paid_worker_binding_source
         self._runtime_factory = runtime_factory
         self._workspace_control_room = workspace_control_room
         self._supervisor_factory = supervisor_factory
@@ -2662,6 +2683,74 @@ class ExecutiveControlService:
             else None
         )
 
+    def _paid_capacity_available(self,observation):
+        from control_plane.paid_fabric_capacity import validate_paid_capacity_observation
+        value=validate_paid_capacity_observation(observation)
+        now=time.time()
+        if (not self.config.coo_autonomy_armed or self._service_state!='READY'
+                or value['observation_state']!='OBSERVED'
+                or not value['observed_at']<=now<value['expires_at']):return False
+        try:
+            self._require_current_autonomy()
+            self._require_coo_worker_composed()
+            if self._canary_loader is None:return False
+            from control_plane.codex_worker import validate_secret_canary_verdict
+            validate_secret_canary_verdict(self._canary_loader(),require_passed=True)
+        except Exception:
+            return False
+        account=value['account'];broker=value['broker']
+        # This first single-route vertical conservatively requires no incumbent
+        # occupied capacity at any relevant pool/account/model/host boundary.
+        # The actual original lease broker still performs final acquisition.
+        return (account['membership']=='PRESENT' and account['freshness']=='FRESH'
+            and account['cooldown']=='NO' and account['canonical_status_state']=='OBSERVED'
+            and all(type(account[k]) in (int,float) and 0<=account[k]<100 for k in ('pct_5h','pct_week'))
+            and broker['freshness']=='OBSERVED'
+            and all(broker[k]==0 for k in ('held_pool','held_account','held_model','held_host','held_route',
+                                          'legacy_model_count','expired_retained_count')))
+
+    async def _paid_capacity_action(self,mode):
+        if self._paid_worker_binding_source is None:
+            raise StateConflict('installed paid source is unavailable')
+        from control_plane.paid_fabric_admission import paid_capacity_action
+        return await paid_capacity_action(self._require_runtime(),self._paid_worker_binding_source,
+            mode=mode,availability_guard=self._paid_capacity_available)
+
+    def _paid_subject_review_registration(self, router):
+        """One READ-only view of the existing Codex Worker, never a new slot."""
+        if not self.config.coo_paid_work_placements:
+            return None
+        from control_plane.executive_runtime import normalize_paid_subject_review_binding
+        alias = router.resolve_model_alias("standard.review")
+        profile = router.capability_registry.resolve(alias.execution_profile_id)
+        if (not alias.worker_eligible or alias.adapter_id != "codex-cli"
+                or profile.profile_id != "sealed.worker.readonly.no-extensions.v1"
+                or profile.write_capable or profile.sandbox_policy != "read-only"
+                or profile.auth_realm != "dedicated-worker-account"
+                or profile.approval_policy != "never" or profile.network_policy != "disabled"
+                or profile.native_helper_policy.value != "DISABLED"
+                or profile.skills or profile.mcp_servers or profile.plugins):
+            raise StateConflict("paid subject requires the existing sealed readonly reviewer")
+        quota = self.config.coo_default_quota_class + ".review"
+        recipe = normalize_paid_subject_review_binding(dict(
+            schema_version="mastermind.paid_subject_review_binding/v1",
+            model_alias="standard.review", eligible_quota_classes=[quota],
+            provider=alias.provider_alias, model=alias.model, effort=alias.effort,
+            cost_class="default", routing_policy_version=router.policy_version,
+            execution_profile_id=alias.execution_profile_id,
+            execution_profile_digest=alias.execution_profile_digest,
+            capability_policy_version=alias.capability_policy_version,
+            capability_policy_digest=alias.capability_policy_digest,
+            authorities=["READ"]))
+        metadata = {key: recipe[key] for key in (
+            "model_alias", "routing_policy_version", "execution_profile_id",
+            "execution_profile_digest", "capability_policy_version", "capability_policy_digest")}
+        metadata.update(service_managed=True, purpose="paid-subject-readonly-review",
+                        adapter_id="codex-cli", single_worker_capacity=True)
+        return quota, dict(provider=recipe["provider"], model=recipe["model"],
+            effort=recipe["effort"], cost_class="default", capabilities=["read"],
+            metadata=metadata), recipe
+
     def _load_coo_execution_binding(self) -> dict[str, Any]:
         """Resolve one reviewed sealed-COO alias into host-owned Job identity."""
 
@@ -2784,7 +2873,24 @@ class ExecutiveControlService:
             binding["work_placement_union"] = _normalise_work_placement_union(
                 binding["work_placement_union"]
             )
-        if set(binding) != set(V3_HOST_EXECUTION_BINDING_KEYS):
+        if self.config.coo_paid_work_placements:
+            from control_plane.executive_paid_fabric_composition import placement_member as paid_member
+            binding["work_placement_union"].extend(
+                paid_member(router,member) for member in self.config.coo_paid_work_placements)
+            binding["work_placement_union"]=_normalise_work_placement_union(binding["work_placement_union"])
+        expected_keys = set(V3_HOST_EXECUTION_BINDING_KEYS)
+        if self.config.coo_paid_work_placements:
+            # This declares an honest ceiling on a future root. Existing Jobs
+            # are never rewritten; the exact default quota is already composed
+            # on this same Worker and uses the same sealed planner capability.
+            # Preserve both genuine registered classes: a small planner still
+            # uses the small quota after child projection, while this root's
+            # declared ceiling and readonly review use actual default capacity.
+            binding["cost_class"] = "default"
+            review = self._paid_subject_review_registration(router)
+            binding["paid_subject_review_binding"] = review[2]
+            expected_keys.add("paid_subject_review_binding")
+        if set(binding) != expected_keys:
             raise ValueError("configured COO host binding fields drifted")
         binding[HOST_EXECUTION_BINDING_VERSION_KEY] = HOST_EXECUTION_BINDING_V3
         return binding
@@ -5854,6 +5960,7 @@ class ExecutiveControlService:
             "harness_version": binding["operator_harness_version"],
         }
         proof_capabilities = ["code", "research", "tests"]
+        paid_review = self._paid_subject_review_registration(router)
         existing = runtime.workers.get_worker(self.config.worker_id)
         if existing is not None:
             quota = runtime.workers.get_quota_class(
@@ -5903,6 +6010,9 @@ class ExecutiveControlService:
                         capabilities=operator_capabilities,
                         metadata=operator_metadata,
                     )
+            if self.config.coo_autonomy_armed and paid_review is not None:
+                runtime.workers.register_quota_class(
+                    self.config.worker_id, paid_review[0], **paid_review[1])
             refreshed = runtime.workers.get_worker(self.config.worker_id)
             assert refreshed is not None
             return refreshed
@@ -5944,6 +6054,7 @@ class ExecutiveControlService:
                     "capabilities": coo_capabilities,
                     "metadata": coo_default_metadata,
                 },
+                **({paid_review[0]: paid_review[1]} if paid_review is not None else {}),
                 **(
                     {
                         self.config.coo_operator_quota_class: {
@@ -6564,7 +6675,7 @@ class ExecutiveControlService:
     def _coo_binding_for_root(self, root: Job) -> dict[str, Any]:
         from ops.executive_os.acceptance_maintenance import MaintenanceError, frozen_binding
         raw = self._require_current_coo_binding()
-        normalized = _normalise_constraints(raw)
+        normalized = _normalise_constraints(raw, host_admitted_placement_union=True)
         normalized["work_placement_union"] = _normalise_work_placement_union(raw["work_placement_union"])
         creator = self._coo_root_creator(root)
         if creator is None:
@@ -6620,7 +6731,7 @@ class ExecutiveControlService:
         if not self._has_strict_coo_root_identity(root):
             return False
         raw_binding = self._coo_binding_for_root(root)
-        binding = _normalise_constraints(raw_binding)
+        binding = _normalise_constraints(raw_binding, host_admitted_placement_union=True)
         binding["work_placement_union"] = _normalise_work_placement_union(raw_binding["work_placement_union"])
         return self._has_strict_coo_root_identity(root) and all(
             root.constraints.get(key) == value for key, value in binding.items()
@@ -6752,6 +6863,13 @@ class ExecutiveControlService:
                 raise StateConflict(
                     "COO Job cost class has no reviewed serialized capacity"
                 )
+        if job.orchestration_role == "review" and job.reviews_job_id is not None:
+            subject = runtime.jobs.get_job(job.reviews_job_id)
+            from control_plane.paid_model_execution_contract import PROFILE_ID
+            if (subject is not None and subject.root_job_id == root.job_id
+                    and subject.constraints.get("execution_profile_id") == PROFILE_ID):
+                from control_plane.executive_runtime import paid_subject_review_constraints
+                expected = paid_subject_review_constraints(coordinator.constraints)
         if job.orchestration_role in {"work", "aggregation"} and job.job_id != root.job_id:
             with runtime.store.read() as connection:
                 row = connection.execute(
@@ -8756,11 +8874,16 @@ class ExecutiveControlService:
             if attempt is None:
                 raise StateConflict(f"attempt {attempt_id!r} does not exist")
             return _jsonable(attempt)
+        if command in {"paid-capacity-observe","paid-capacity-bootstrap"}:
+            self._exact_args(args,set())
+            return await self._paid_capacity_action('bootstrap' if command.endswith('bootstrap') else 'observe')
         if command == "register-worker":
             self._exact_args(args, set())
             primary = self._register_worker()
             if self._attended_worker_registration is not None:
                 self._attended_worker_registration(runtime)
+            if self._paid_worker_binding_source is not None:
+                await self._paid_capacity_action('observe')
             return _jsonable(primary)
         if command == "create-proof-job":
             self._exact_args(args, set())
