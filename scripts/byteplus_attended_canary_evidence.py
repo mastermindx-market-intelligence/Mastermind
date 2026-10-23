@@ -139,14 +139,36 @@ def inspect_attended_evidence(document: Any) -> dict[str, Any]:
     if b is not None and row["ended_at_unix"] is not None and b < row["ended_at_unix"]:
         needs.append("post_attempt_management_snapshot")
 
-    same_window = True
-    for name in WINDOWS:
+    # The official BytePlus Ark usage snapshot may omit the five-hour
+    # session reset entirely, even when both long-window resets are known.
+    # This is a non-authoritative evidence candidate: permit structurally
+    # complete long-window observations, but mark session comparability
+    # UNKNOWN rather than pretending they prove a model-specific debit.
+    long_windows_comparable = True
+    for name in ("weekly", "monthly"):
         reset_before, reset_after = before["reset_at"][name], after["reset_at"][name]
         pct_before, pct_after = before["used_percent_rounded"][name], after["used_percent_rounded"][name]
         if reset_before is None or reset_after is None or reset_before != reset_after or pct_before is None or pct_after is None:
-            same_window = False
-    if not same_window:
+            long_windows_comparable = False
+    if not long_windows_comparable:
         needs.append("comparable_management_windows")
+    session_values_present = all(
+        snapshot["used_percent_rounded"]["session"] is not None
+        for snapshot in (before, after)
+    )
+    if not session_values_present:
+        needs.append("session_window_percentages")
+    session_before, session_after = before["reset_at"]["session"], after["reset_at"]["session"]
+    session_comparable = (
+        session_values_present and session_before is not None
+        and session_before == session_after
+    )
+    caveats: list[str] = []
+    if session_before is None and session_after is None:
+        caveats.append("session_reset_not_reported")
+    elif not session_comparable:
+        needs.append("session_window_reset_discontinuity")
+    same_window = long_windows_comparable and session_comparable
     if row["requested_model"] is not None and row["served_model"] is not None and row["requested_model"] != row["served_model"]:
         needs.append("requested_served_model_match")
     # A source-independent provider receipt checksum is only an operator's
@@ -158,6 +180,9 @@ def inspect_attended_evidence(document: Any) -> dict[str, Any]:
         "candidate_fields_complete": not needs,
         "missing_or_inconclusive": sorted(set(needs)),
         "quota_snapshot_windows_comparable": same_window,
+        "weekly_monthly_windows_comparable": long_windows_comparable,
+        "session_window_comparable": session_comparable,
+        "inconclusive_caveats": caveats,
         "provider_receipt_digest_supplied": d["provider_receipt_sha256"] is not None,
         "served_model_proven_by_issuer": False,
         "individual_request_debit_proven": False,

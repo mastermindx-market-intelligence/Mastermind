@@ -48,8 +48,13 @@ scheduler, admission plane, account registry, or subscription watcher exists.
    terminal result and tested artifact SHA-256. Never replay an uncertain
    effect merely to force a pass.
 4. Obtain a matching **after** management snapshot; compare the same
-   plan/window. Integer percentages (including 0% to 0% or 0% to 1%)
-   do not independently establish a single request's debit or its model.
+   plan/window. The vendor may omit the session reset in BOTH before/after
+   snapshots; in that case, the validator permits a syntactically complete
+   operator candidate when weekly/monthly windows match, but reports
+   session_window_comparable=false and session_reset_not_reported as an
+   explicit caveat. A single missing or inconsistent session reset is
+   inconclusive and fails completeness. Integer percentages (including
+   0% to 0% or 0% to 1%) never establish a single request's debit/model.
 5. Existing ProviderRealm/Capacity/Executive owners, not this script,
    decide whether issuer-bound account/realm, model, use-rights,
    Capacity and audited production lifecycle proofs exist. Coding Plan

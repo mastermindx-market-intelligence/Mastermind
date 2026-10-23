@@ -90,6 +90,49 @@ def test_missing_or_changed_reset_blocks_comparable_snapshot():
         assert "comparable_management_windows" in v["missing_or_inconclusive"]
 
 
+def test_real_cli_session_reset_missing_both_still_reports_inconclusive():
+    d = complete_example()
+    for position in ("before", "after"):
+        d[position]["reset_at"]["session"] = None
+    report = inspect_attended_evidence(d)
+    assert report["candidate_fields_complete"] is True
+    assert report["weekly_monthly_windows_comparable"] is True
+    assert report["session_window_comparable"] is False
+    assert report["quota_snapshot_windows_comparable"] is False
+    assert report["inconclusive_caveats"] == ["session_reset_not_reported"]
+    assert report["individual_request_debit_proven"] is False
+    assert report["provider_origin_attested"] is False
+    assert report["capacity_fact_issued"] is False
+
+
+@pytest.mark.parametrize("which", ["before", "after"])
+def test_one_sided_missing_session_reset_refuses_completeness(which):
+    d = complete_example()
+    d[which]["reset_at"]["session"] = None
+    report = inspect_attended_evidence(d)
+    assert report["candidate_fields_complete"] is False
+    assert "session_window_reset_discontinuity" in report["missing_or_inconclusive"]
+
+
+def test_changed_session_reset_refuses_completeness():
+    d = complete_example()
+    d["after"]["reset_at"]["session"] = "2026-10-24T00:00:00+08:00"
+    report = inspect_attended_evidence(d)
+    assert report["candidate_fields_complete"] is False
+    assert report["session_window_comparable"] is False
+    assert "session_window_reset_discontinuity" in report["missing_or_inconclusive"]
+
+
+def test_missing_session_percentage_refuses_completeness_even_when_reset_unknown():
+    d = complete_example()
+    d["before"]["reset_at"]["session"] = None
+    d["after"]["reset_at"]["session"] = None
+    d["after"]["used_percent_rounded"]["session"] = None
+    report = inspect_attended_evidence(d)
+    assert report["candidate_fields_complete"] is False
+    assert "session_window_percentages" in report["missing_or_inconclusive"]
+
+
 def test_requested_served_model_mismatch_never_passes_completeness():
     d = complete_example()
     d["attempt"]["served_model"] = "dola-seed-2.0-lite"
