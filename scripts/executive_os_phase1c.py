@@ -241,6 +241,11 @@ CONTROL_ENVIRONMENT_PROBE_SCHEMA_VERSION = (
 _CANONICAL_AGENT_RELAY_SOCKET = Path(
     "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
 )
+# Explicit stopped/disarmed recovery of an already-enrolled historical A2
+# generation. Never a candidate for an armed return or ordinary install.
+_LEGACY_A2_RECOVERY_SOCKET = Path(
+    "/var/run/mastermind-agent-relay/agent-relay.sock"
+)
 _CANONICAL_DIALOGUE_OBSERVATION_SOCKET = Path(
     "/var/run/mastermind-dialogue-observation/dialogue-observation.sock"
 )
@@ -1083,10 +1088,20 @@ def load_control_config(
             terminal_return_socket,
             "terminal_return_socket_path",
         )
-        if terminal_return_socket != os.fspath(_CANONICAL_AGENT_RELAY_SOCKET):
+        is_current = terminal_return_socket == os.fspath(_CANONICAL_AGENT_RELAY_SOCKET)
+        legacy_disarmed = (
+            terminal_return_socket == os.fspath(_LEGACY_A2_RECOVERY_SOCKET)
+            and config.get("terminal_return_armed") is False
+            and config.get("ceo_submit_armed") is False
+            and config.get("coo_autonomy_armed") is False
+            and config.get("coo_operator_harness_armed") is False
+            and config.get("coo_foreground_only", False) is False
+            and config.get("fabric_bridge_armed", False) is False
+        )
+        if not is_current and not legacy_disarmed:
             raise ServiceError(
-                "control config terminal_return_socket_path must be exactly "
-                f"{_CANONICAL_AGENT_RELAY_SOCKET}"
+                "control config terminal_return_socket_path must be the "
+                "persistent path, or the exact disarmed legacy A2 recovery path"
             )
     if observation_present:
         observation_socket = config["dialogue_observation_socket_path"]

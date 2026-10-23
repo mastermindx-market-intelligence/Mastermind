@@ -9482,6 +9482,37 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
             terminal_unarmed_path
         )
 
+        # The only alternate terminal socket admitted by the installed
+        # Control loader is historical A2 recovery while ALL return arms are
+        # disabled; arbitrary sockets and armed legacy routes remain refused.
+        legacy_path = tmp_path / "control-old-a2-recovery.json"
+        legacy_raw = {
+            **raw,
+            "terminal_return_armed": False,
+            "terminal_return_socket_path":
+                "/var/run/mastermind-agent-relay/agent-relay.sock",
+            "ceo_submit_armed": False,
+            "coo_autonomy_armed": False,
+            "coo_operator_harness_armed": False,
+            "coo_foreground_only": False,
+        }
+        legacy_path.write_text(json.dumps(legacy_raw))
+        legacy_path.chmod(0o400)
+        old_loaded = service_cli.load_control_config(legacy_path)
+        assert old_loaded["terminal_return_socket_path"] == Path(
+            "/var/run/mastermind-agent-relay/agent-relay.sock"
+        ).resolve(strict=False)
+        for unsafe in (
+            {**legacy_raw, "terminal_return_armed": True},
+            {**legacy_raw, "ceo_submit_armed": True},
+            {**legacy_raw, "terminal_return_socket_path": "/tmp/foreign.sock"},
+        ):
+            legacy_path.chmod(0o600)
+            legacy_path.write_text(json.dumps(unsafe))
+            legacy_path.chmod(0o400)
+            with pytest.raises(ServiceError, match="legacy A2 recovery path"):
+                service_cli.load_control_config(legacy_path)
+
         stale_policy_path = tmp_path / "control-stale-policy.json"
         stale_policy_path.write_text(
             json.dumps(
