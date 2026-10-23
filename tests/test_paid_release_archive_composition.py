@@ -70,7 +70,7 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     result = _materialize(root)
     assert result.returncode == 0, result.stderr
     manifest = json.loads(records["native-manifest.json"])
-    assert len(manifest) == 92
+    assert len(manifest) == 95
     expected_new = {(RELATIVE_ROLLOUT / "native-code-stage" / name).as_posix()
                     for name in manifest}
     after = {p.relative_to(root).as_posix() for p in root.rglob("*") if p.is_file()}
@@ -149,3 +149,23 @@ def test_builder_drift_refuses_before_seal_and_stage_only_has_no_selection(archi
                                          'configs_changed":false', 'receipt_changed":false'))
     assert "launchctl" not in stage
     assert source.index(MARKER) < source.index('"$SCRIPT_DIR/release_manifest.py" create')
+
+
+def test_actual_archive_private_runtime_closure(archived,tmp_path):
+    # Consume the actual git archive and installer-generated closure under the
+    # production isolated interpreter flags, not this pytest process's yaml.
+    from test_paid_cold_source_closure import (
+        test_private_wrapper_actual_broker_host_filter_and_ledger_data as broker_case,
+        test_default_remote_support_uses_only_verified_physical_owner as remote_case,
+        test_exact_locked_pure_yaml_no_ambient_extension_or_package_fallback as yaml_case,
+    )
+    _,root,_,_=archived
+    assert _materialize(root).returncode==0
+    source=root/RELATIVE_ROLLOUT
+    stage_root=tmp_path/'cold'
+    shutil.copytree(source/'native-code-stage',stage_root/'native-code-stage')
+    shutil.copyfile(source/'native-manifest.json',stage_root/'native-manifest.json')
+    stage=stage_root/'native-code-stage/ext'
+    broker_case(stage,tmp_path/'broker-data')
+    remote_case(stage,tmp_path/'remote-data')
+    yaml_case(stage)

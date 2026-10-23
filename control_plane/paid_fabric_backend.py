@@ -560,9 +560,14 @@ class CanonicalPaidBackend:
         for name, sha in support.items():
             if Path(name).name != name:
                 _refuse()
-            path = (self._startup.native_ext.parent/'orch/fabric/pools.yaml'
-                    if name == 'pools.yaml' else self._startup.native_ext/name)
-            if hashlib.sha256(_root_source(path)).hexdigest() != sha:
+            if name == 'pools.yaml':
+                import paid_incumbent_state
+                if (Path(paid_incumbent_state.__file__).resolve()
+                        !=self._startup.native_ext/'paid_incumbent_state.py'):_refuse()
+                raw=paid_incumbent_state.read_policy()
+            else:
+                raw=_root_source(self._startup.native_ext/name)
+            if hashlib.sha256(raw).hexdigest() != sha:
                 _refuse()
         support_sha = hashlib.sha256(json.dumps(
             {'schema':'remote-support-code.v1','files':support},
@@ -661,6 +666,7 @@ class CanonicalPaidBackend:
                 POOL_ACCOUNTS_YAML=str(self._startup.owner_ext.parent/'orch/fabric/accounts.yaml'),
                 POOL_STATUS_JSON=str(self._startup.owner_ext.parent/'orch/fabric/status.json'),
                 POOL_LEDGER_PATH=str(self._startup.owner_ext.parent/'orch/fabric/ledger.jsonl'),
+                POOL_POLICY_YAML=str(self._startup.owner_ext.parent/'orch/fabric/pools.yaml'),
                 POOL_TASK_CLASS='research', POOL_TASK_COMPLEXITY='C2_COMPLEX_BOUNDED',
                 REMOTE_SUB_PYTHON=sys.executable,
                 FABRIC_CANONICAL_PAID_MODE='sealed-model-only-v1',

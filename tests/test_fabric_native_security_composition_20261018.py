@@ -24,8 +24,8 @@ ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PRE_PAID_MODEL_COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
 PAID_MODEL_PATCH = ROOT / "tests/fixtures/fabric-native-paid-model-20261022.patch"
-PAID_MODEL_PATCH_SHA = "586ecf8646d33f295cb866a33ecf517874eb3b89f4ad29adc4e62ccc6e18c37a"
-COMPOSED_SHA = "47c74d056a92d61d9a05516f4200d419634fbb755bac8400a0b2fc927d985251"
+PAID_MODEL_PATCH_SHA = "e0d937b9afdcc864592a7ba44a65ed121fa9c983f53de7109b1628e2141314f1"
+COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -33,11 +33,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 92-file closure adds the closed paid model-only path to protected
+# The 95-file closure adds the closed paid model-only path to protected
 # qualification/operator overlays. Historical donor, quota, deadline and root
 # transformations remain pinned before the explicit paid patch.
-EXPECTED_NATIVE_FILES = 92
-NATIVE_MANIFEST_SHA = "d333cbdb361deef0bb9c84a49515edac2df1e76bbe1d518b15142beb8c85ddfb"
+EXPECTED_NATIVE_FILES = 95
+NATIVE_MANIFEST_SHA = "d0a34534528f9b949880ecc68a1944fbec230fa3d0b72b0ce3beb3a87a68ff70"
 
 
 def _sha(raw):

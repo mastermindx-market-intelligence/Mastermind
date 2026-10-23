@@ -23,6 +23,21 @@ from control_plane.paid_model_execution_contract import paid_host_reference, PAI
 from control_plane.executive_capacity_join import CapacityJoin, PROVIDER_CAPACITY_SCHEMA
 
 
+def _source_overlay(root):
+    # The custody/preimage inventory is not an execution descriptor. Derive
+    # this closed DATA document from the selected release's actual policy
+    # owners; neither a caller digest nor catalogue presence grants admission.
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+    from control_plane.paid_model_execution_contract import PROFILE_ID, POLICY, digest, canonical
+    registry=ExecutionCapabilityRegistry.load(root/'config/executive_agent_capabilities.json',source_root=root)
+    profile=registry.resolve(PROFILE_ID)
+    return canonical(dict(schema_version=definition.OVERLAY_SCHEMA,
+        adapter_id=definition.ADAPTER_ID,provider=definition.PAID_PROVIDER,
+        model='glm-5.3-flash',http_endpoint=definition.PAID_HTTP_ENDPOINT,
+        execution_profile_sha256=profile.profile_digest,
+        permission_profile_sha256=digest(POLICY)))
+
+
 def prepare_paid(release_sha,control_sha,*,transport_host,capacity_id):
     host=owner.ProductionCeoSubmitHost()
     host.require_exact_install(release_sha)
@@ -35,8 +50,8 @@ def prepare_paid(release_sha,control_sha,*,transport_host,capacity_id):
     root=definition._RELEASES_ROOT/release_sha
     external={name:owner._read_root_file(root/path,
         modes=definition._RELEASE_SOURCE_MODES,uid=0,gid=0)[0]
-        for name,path in dict(definition.BOUND_SOURCE_PATHS,
-            overlay='ops/native_fabric/paid_canonical_glm/external-preimages.json').items()}
+        for name,path in definition.BOUND_SOURCE_PATHS.items()}
+    external['overlay']=_source_overlay(root)
     from ops.native_fabric.quota_continuity.candidate.paid_host_qualification import _read_owned
     registry_raw,_=_read_owned(Path(PAID_REGISTRY_NAMESPACE),owners={0,501},maximum=131072)
     registry=json.loads(registry_raw)

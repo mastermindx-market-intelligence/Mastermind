@@ -131,6 +131,7 @@ REMOTE_SUB_BROKER_CMD=${REMOTE_SUB_BROKER_CMD:-}
 REMOTE_SUB_LEDGER_CMD=${REMOTE_SUB_LEDGER_CMD:-}
 STATE_HERE="$HERE"
 HOSTS_SOURCE="$HERE/hosts.json"
+POLICY_SOURCE="$HERE/../orch/fabric/pools.yaml"
 if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
   # Fixed incumbent state owner; root-sealed source must not create a second
   # broker/state tree. This location itself grants nothing.
@@ -141,6 +142,7 @@ if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
   }
   STATE_HERE="$PAID_FIXED_STATE"
   HOSTS_SOURCE="$STATE_HERE/hosts.json"
+  POLICY_SOURCE="${STATE_HERE%/*}/orch/fabric/pools.yaml"
 fi
 if [ -n "$RUN_ID_ARG" ]; then
   if [[ ! "$RUN_ID_ARG" =~ ^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$ ]]; then
@@ -310,7 +312,11 @@ ledger() {
   if [ -n "$REMOTE_SUB_LEDGER_CMD" ]; then
     "$REMOTE_SUB_LEDGER_CMD" "$@"
   else
-    "$REMOTE_SUB_PYTHON" "$HERE/pool_ledger.py" "$@"
+    if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ]; then
+      "$REMOTE_SUB_PYTHON" -I -S -B "$HERE/paid_incumbent_state.py" pool_ledger "$@"
+    else
+      "$REMOTE_SUB_PYTHON" "$HERE/pool_ledger.py" "$@"
+    fi
   fi
 }
 run() {
@@ -1260,7 +1266,7 @@ run_scp() {
   for _f in "${SUPPORT_FILES[@]}"; do [ "$_f" = pools.yaml ] || _src+=("$HERE/$_f"); done
   commission_run support-upload "$SCP_CMD" -q "${_src[@]}" "$HERE/support_bundle.py" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/" || return $?
   commission_run manifest-upload "$SCP_CMD" -q "$SUPPORT_MANIFEST" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/manifest.json" || return $?
-  commission_run policy-upload "$SCP_CMD" -q "$HERE/../orch/fabric/pools.yaml" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/pools.yaml" || return $?
+  commission_run policy-upload "$SCP_CMD" -q "$POLICY_SOURCE" "$SSH_ALIAS:$REMOTE_SUPPORT_SOURCE/pools.yaml" || return $?
   # New generation carries hash-bound advisory policy. Publication checks
   # exact semantic compatibility without replacing policy under active workers.
   # Physical admission rechecks under the original lock before marker creation.

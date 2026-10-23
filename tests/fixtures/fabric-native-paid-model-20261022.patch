@@ -33,7 +33,20 @@
  def _execute(argv: list[str], state: dict) -> int:
      if len(argv) != 6:
          return _fail(
-@@ -795,6 +821,17 @@
+@@ -758,6 +784,12 @@
+     install_signal_cleanup()
+     state_ext = (Path(bound_packet[0]["binding"]["path"]) / "ext"
+                  if bound_packet is not None else here)
++    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') == 'sealed-model-only-v1' and bound_packet is None:
++        try:
++            from paid_model_owner import canonical_state_ext
++            state_ext = canonical_state_ext(here, os.environ)
++        except (OSError, ValueError, TypeError, KeyError):
++            return _fail("CANONICAL_PAID_SUPPORT_REFUSED before_worker=1", 78)
+     active_dir = state_ext / "active"
+     try:
+         lease = LaneLease.acquire(
+@@ -795,6 +827,17 @@
          command.append(model)
      if mode in native_remote.MODES:
          command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
@@ -51,7 +64,7 @@
      lanes_dir = state_ext / "lanes"
      child_env = dict(os.environ)
      if 'commission_deadline_ns' in state:
-@@ -817,6 +854,9 @@
+@@ -817,6 +860,9 @@
          if timeout <= 0:
              lease.release()
              return _fail("native_remote_lease_expired", 78)
@@ -61,7 +74,7 @@
      receipt = lanes_dir / f"{key}.process.jsonl"
      diagnostic_reader = None
      if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
-@@ -909,6 +949,9 @@
+@@ -909,6 +955,9 @@
                      receipt_path=receipt,
                      timeout_returncode=124,
                      receipt_diagnostics=diagnostic_reader,
@@ -71,7 +84,7 @@
                  )
              except OwnedProcessStartError as exc:
                  state["started"] = False
-@@ -980,6 +1023,16 @@
+@@ -980,6 +1029,16 @@
              return _fail("REMOTE_CLEANUP_UNPROVEN " + type(exc).__name__, 76)
          return _fail("REMOTE_SUB_RUNTIME_ERROR " + type(exc).__name__, 78)
  

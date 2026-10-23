@@ -26,6 +26,91 @@ def canonical(value):
                       ensure_ascii=True, allow_nan=False).encode('ascii')
 
 
+_PAID_SUPPORT_FILES = frozenset(['artifact_production.py', 'artifact_reader.py', 'bailian_keys.py', 'capacity_preflight.py', 'codex_usage.py', 'commission_deadline.py', 'fabric_client_projection.py', 'fabric_cpu_scope.py', 'fabric_operator_client.py', 'fabric_operator_diagnostics.py', 'fabric_operator_stop.py', 'fabric_policy_snapshot.py', 'glm_bound_claude.py', 'glm_codex_exec.sh', 'glm_keys.py', 'go_codex_exec.sh', 'go_remote_capsule.py', 'go_remote_codex.py', 'lane_runtime.py', 'lease_broker.py', 'linux_process_identity.py', 'mm_codex_exec.sh', 'mm_feeder_lib.py', 'model_tier.py', 'native_remote.py', 'native_runtime_bindings.py', 'paid_glm_model_client.py', 'paid_model_owner.py', 'pick.py', 'pool_ledger.py', 'pools.yaml', 'provider_outcome.py', 'quota_circuit.py', 'qwen_exec.sh', 'recovery_artifacts.py', 'remote_sub_exec.py', 'slot.py', 'studio_mcp_projection.sh', 'sub.sh', 'yes'])
+_SUPPORT_EXT_LINKS = frozenset(['GROK_EXHAUSTED', 'active', 'bailian_policy.json', 'bailian_usage.json', 'broker', 'codex_glm', 'codex_go', 'codex_minimax', 'glm_shim', 'glm_window_state.json', 'go_shim', 'hosts.json', 'lane_bin', 'lanes', 'slots', 'state'])
+_SUPPORT_ROOT_LINKS = frozenset(['codex_bailian', 'glm_claude_home', 'go_claude_home', 'minimax_claude_home', 'orch'])
+
+def canonical_state_ext(here, env):
+    """Authenticate the default support aliases, then use their physical owner.
+
+    No arbitrary symlink is followed into capture/admission directories. This
+    repeats the incumbent support publication contract in the remote closure;
+    the publisher itself is deliberately not uploaded as executable support.
+    """
+    here = Path(here)
+    lanes = Path(env['REMOTE_SUB_LANES'])
+    digest = env['SUPPORT_DIGEST']
+    if (not lanes.is_absolute() or lanes.resolve(strict=True) != lanes
+            or re.fullmatch(r'[0-9a-f]{64}',digest) is None
+            or here != lanes/'support-releases'/digest/'ext'):
+        raise ValueError('paid_support_owner_refused')
+    root=here.parent
+    stable=lanes/'ext'
+    identity=lambda i:(i.st_dev,i.st_ino,i.st_mode,i.st_uid,i.st_gid,
+                        i.st_nlink,i.st_size,i.st_mtime_ns,i.st_ctime_ns)
+    def directory(path,mode=None):
+        if path.resolve(strict=True)!=path:raise ValueError('paid_support_owner_refused')
+        info=path.lstat()
+        if (not stat.S_ISDIR(info.st_mode) or info.st_uid!=os.geteuid()
+                or info.st_mode&0o022 or (mode is not None and stat.S_IMODE(info.st_mode)!=mode)):
+            raise ValueError('paid_support_owner_refused')
+        return identity(info)
+    def read(path,mode,maximum):
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        try:
+            before=os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
+                    or stat.S_IMODE(before.st_mode)!=mode or before.st_nlink!=1
+                    or not 0<before.st_size<=maximum):raise ValueError('paid_support_owner_refused')
+            data=bytearray()
+            while len(data)<=before.st_size:
+                part=os.read(fd,min(65536,before.st_size+1-len(data)))
+                if not part:break
+                data.extend(part)
+            if (len(data)!=before.st_size or identity(before)!=identity(os.fstat(fd))
+                    or identity(before)!=identity(path.lstat())):raise ValueError('paid_support_owner_refused')
+            return bytes(data)
+        finally:os.close(fd)
+    before={path:directory(path,mode) for path,mode in
+            ((root,0o555),(here,0o555),(stable,None),(stable/'active',None),(stable/'lanes',None))}
+    raw=read(root/'RELEASE.json',0o444,65536)
+    def unique(pairs):
+        result={}
+        for key,value in pairs:
+            if key in result:raise ValueError('paid_support_owner_refused')
+            result[key]=value
+        return result
+    meta=json.loads(raw,object_pairs_hook=unique)
+    if (type(meta) is not dict or set(meta)!={'schema','files','digest','links'}
+            or meta['schema']!='remote-support-code.v1' or meta['digest']!=digest
+            or type(meta['files']) is not dict or set(meta['files'])!=_PAID_SUPPORT_FILES
+            or hashlib.sha256(canonical({'schema':meta['schema'],'files':meta['files']})).hexdigest()!=digest
+            or {p.name for p in root.iterdir()}!={'ext','RELEASE.json',*_SUPPORT_ROOT_LINKS}
+            or {p.name for p in here.iterdir()}!=_PAID_SUPPORT_FILES|_SUPPORT_EXT_LINKS):
+        raise ValueError('paid_support_owner_refused')
+    links={'ext/'+name:str(stable/name) for name in _SUPPORT_EXT_LINKS}
+    links.update({name:str(stable.parent/name) for name in _SUPPORT_ROOT_LINKS})
+    if meta['links']!=links:raise ValueError('paid_support_owner_refused')
+    link_ids={}
+    for name,target in links.items():
+        path=root/name;info=path.lstat()
+        if not stat.S_ISLNK(info.st_mode) or info.st_uid!=os.geteuid() or os.readlink(path)!=target:
+            raise ValueError('paid_support_owner_refused')
+        link_ids[path]=(identity(info),target)
+    for name,wanted in meta['files'].items():
+        if type(wanted) is not str or re.fullmatch(r'[0-9a-f]{64}',wanted) is None:
+            raise ValueError('paid_support_owner_refused')
+        if hashlib.sha256(read(here/name,0o555,2*1024*1024)).hexdigest()!=wanted:
+            raise ValueError('paid_support_owner_refused')
+    for path,(info,target) in link_ids.items():
+        if identity(path.lstat())!=info or os.readlink(path)!=target:
+            raise ValueError('paid_support_owner_refused')
+    for path,info in before.items():
+        if identity(path.lstat())!=info:raise ValueError('paid_support_owner_refused')
+    if read(root/'RELEASE.json',0o444,65536)!=raw:raise ValueError('paid_support_owner_refused')
+    return stable
+
+
 def launch_observer(here, packet_path, key, model, receipt):
     if not _ID.fullmatch(key) or model not in {'glm-5.3', 'glm-5.3-flash'}:
         raise ValueError('paid_owned_launch_refused')

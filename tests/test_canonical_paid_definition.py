@@ -9,6 +9,7 @@ unpatched pin-map test asserts the real production raw3 contract directly;
 the synthetic fixtures never claim production qualification.
 """
 import os
+import json
 import plistlib
 import stat
 from pathlib import Path
@@ -1218,3 +1219,40 @@ def test_source_digest_candidate_cannot_bypass_installed_source_by_rebinding_joi
                                 capacity_join=altered_join,
                                 external_sources=paid_env.sources)
     assert locked_publisher.writes == []
+
+
+def test_actual_prepare_action_derives_overlay_from_selected_policy_and_renders(harness,monkeypatch):
+    from ops.executive_os import canonical_paid_actions as actions
+    from control_plane import paid_model_execution_contract as contract
+    from control_plane.executive_agent_capabilities import ExecutionCapabilityRegistry
+    from pathlib import Path
+    from ops.native_fabric.quota_continuity.candidate import paid_host_qualification as qualifier
+    root=Path(__file__).resolve().parents[1]
+    actual=actions._source_overlay
+    overlay=actual(root)
+    document=json.loads(overlay)
+    registry=ExecutionCapabilityRegistry.load(root/'config/executive_agent_capabilities.json',source_root=root)
+    assert document['execution_profile_sha256']==registry.resolve(contract.PROFILE_ID).profile_digest
+    assert document['permission_profile_sha256']==contract.digest(contract.POLICY)
+    class SourceHost:
+        def __getattr__(self,name):
+            if name.startswith('require_'):return lambda *args:None
+            raise AttributeError(name)
+        def load_unarmed_configs(self,sha):assert sha==SHA;return harness.prior
+    monkeypatch.setattr(actions.owner,'ProductionCeoSubmitHost',SourceHost)
+    monkeypatch.setattr(actions,'_source_overlay',lambda release:overlay)
+    monkeypatch.setattr(qualifier,'_read_owned',lambda *a,**k:(json.dumps({'raw':{'ssh_alias':'alias'}}).encode(),None))
+    published=[]
+    def publish(sha,control,artifacts,**kwargs):
+        assert sha==SHA and control==CONTROL_SHA
+        paid.verify_candidate(artifacts)
+        profile=json.loads(artifacts['profile.json'])
+        assert profile['execution_profile_sha256']==document['execution_profile_sha256']
+        assert profile['permission_profile_sha256']==document['permission_profile_sha256']
+        assert profile['bridge_armed'] is False and profile['expected_remote_binary'] is None
+        assert kwargs['external_sources']['overlay']==overlay
+        published.append(artifacts)
+        return {'source_only':True}
+    monkeypatch.setattr(paid,'publish_definition',publish)
+    assert actions.prepare_paid(SHA,CONTROL_SHA,transport_host='raw',capacity_id=CAPABILITY)=={'source_only':True}
+    assert len(published)==1

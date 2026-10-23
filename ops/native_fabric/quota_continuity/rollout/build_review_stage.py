@@ -8,6 +8,8 @@ No directory scan decides what to transport; this fixed list is the inventory.
 import argparse
 import hashlib
 import json
+import io
+import zipfile
 from pathlib import Path
 
 BASE_FILES = frozenset("""
@@ -35,7 +37,7 @@ sub.sh support_bundle.py host_pull_probe.template yes
 ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
                       "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
-                      "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py",
+                      "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
                       "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
@@ -97,7 +99,24 @@ def main():
                      "installed_preimage_sha256": rows['pool_launcher.sh'], "bytes": len(raw)}
     if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS:
         raise ValueError("unexpected staged native file")
-    record = {"schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),
+    pure_yaml = json.loads((root/"candidate/paid_pyyaml_provenance.json").read_bytes())
+    pure_archive=(root/"candidate/paid_pyyaml_6_0_3.zip").read_bytes()
+    if sha(pure_archive) != pure_yaml["zip_sha256"]:
+        raise ValueError("qualified pure YAML archive differs")
+    lock=(root.parents[2]/pure_yaml['lock_path']).read_bytes()
+    if (sha(lock)!=pure_yaml['lock_sha256'] or pure_yaml['package']!='PyYAML'
+            or pure_yaml['version']!='6.0.3'
+            or ('PyYAML==6.0.3 --hash=sha256:'+pure_yaml['artifact_sha256']).encode() not in lock):
+        raise ValueError('qualified pure YAML lock differs')
+    with zipfile.ZipFile(io.BytesIO(pure_archive)) as archive:
+        if len(archive.namelist())!=len(set(archive.namelist())) or set(archive.namelist())!=set(pure_yaml['files']):
+            raise ValueError('qualified pure YAML closure differs')
+        for name,item in pure_yaml['files'].items():
+            raw=archive.read(name)
+            if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
+                    or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
+                raise ValueError('qualified pure YAML member differs')
+    record = {"qualified_pure_yaml": pure_yaml, "schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),
         "baseline_code_files": len(BASE_FILES) + 1, "new_code_files": sorted(ADDITIONS),
         "source_status": "SOURCE_INVENTORY_REQUIRES_PROTECTED_RELEASE_AND_INSTALLATION_EVIDENCE",
         "stable_ext": inventory["stable_ext"], "files": files,

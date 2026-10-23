@@ -784,6 +784,12 @@ def _execute(argv: list[str], state: dict) -> int:
     install_signal_cleanup()
     state_ext = (Path(bound_packet[0]["binding"]["path"]) / "ext"
                  if bound_packet is not None else here)
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') == 'sealed-model-only-v1' and bound_packet is None:
+        try:
+            from paid_model_owner import canonical_state_ext
+            state_ext = canonical_state_ext(here, os.environ)
+        except (OSError, ValueError, TypeError, KeyError):
+            return _fail("CANONICAL_PAID_SUPPORT_REFUSED before_worker=1", 78)
     active_dir = state_ext / "active"
     try:
         lease = LaneLease.acquire(
