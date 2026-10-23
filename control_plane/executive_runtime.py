@@ -231,9 +231,13 @@ def _assert_planner_producer_result(
                     "operator.appserver.readonly.docs-mcp.native-helper.v1",
                     "operator.browser.local-review.v1", "operator.claude.readonly.v1",
                 }
-            and plan.get("schema_version") != "mastermind.execution_plan/v1"):
-        # Identify the historical one-shot producer by its retained profile.
-        # OHF also serves interactive and other reviewed versioned-plan paths.
+            and plan.get("schema_version") not in {
+                "mastermind.execution_plan/v1",
+                "mastermind.execution_plan/v2",
+            }):
+        # Original V1 and work-placement V2 are both historical unbound
+        # contracts. V2 still passes the native placement and sealed-result
+        # checks downstream; only V3+ require an explicit producer binding.
         raise StateConflict("legacy operator planner result must remain V1")
 
 
@@ -13844,6 +13848,27 @@ class JobRegistry:
             row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (job_id,)).fetchone()
             if row is None:
                 raise StateConflict("planner producer Job does not exist")
+            if row["orchestration_role"] != "plan":
+                # This accessor also serves the claim-aware operator transport,
+                # which may execute non-planner Jobs. Never require a planner
+                # binding for such a Job, but refuse any illicit producer claim
+                # in its immutable creation receipt.
+                created = connection.execute(
+                    "SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=?",
+                    (job_id,),
+                ).fetchall()
+                if len(created) != 1:
+                    raise StateConflict("non-planner creation receipt is unavailable")
+                payload = _strict_canonical_json_loads(
+                    str(created[0]["payload_json"]), name="non-planner JOB_CREATED payload"
+                )
+                if (type(payload) is not dict
+                        or payload.get("orchestration_role") != row["orchestration_role"]
+                        or any(key in payload for key in (
+                            "planner_producer_binding", "planner_producer_binding_digest"
+                        ))):
+                    raise StateConflict("non-planner Job cannot carry producer binding")
+                return None
             return _validated_planner_producer_binding(connection, row)
 
     def assert_frontier_planner_execution(self, job_id: str) -> dict[str, Any] | None:
