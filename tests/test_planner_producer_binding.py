@@ -294,11 +294,12 @@ class _CrashAfterSeal(BaseException):
     """Simulate process loss, outside the ordinary Exception cleanup path."""
 
 
-def _seed_bound_sealed(tmp_path, monkeypatch, version=PLAN_SCHEMA_V3):
+def _seed_bound_sealed(tmp_path, monkeypatch, version=PLAN_SCHEMA_V3, *, frontier_selection=None):
     clock = _Clock()
     runtime, root, planner = _seed_dispatchable_operator_planner(
         tmp_path, clock=clock, plan_schema_version=version, routing_capacity=True,
         commission_content=b"# Retained planner commission\nProduce one bounded plan.\n",
+        frontier_selection=frontier_selection,
     )
     adapters, retained = [], {}
     def factory(_attempt, _requested, loader, *, recovery):

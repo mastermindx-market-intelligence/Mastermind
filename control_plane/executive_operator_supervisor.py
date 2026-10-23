@@ -214,6 +214,8 @@ class ExecutiveOperatorSupervisor:
         containment = recovery and (
             lease.attempt.status is AttemptStatus.CANCEL_REQUESTED or retained_seal is not None
         )
+        if not containment:
+            self.runtime.jobs.assert_frontier_planner_execution(initial_job.job_id)
         producer = (None if containment else
                     self.runtime.jobs.get_planner_producer_binding(initial_job.job_id))
         if factory is None and producer is not None:
@@ -253,6 +255,8 @@ class ExecutiveOperatorSupervisor:
                         job, AttemptLease(current, lease.lease_token)
                     ) != retained_seal):
                 raise ExecutiveOperatorSupervisorError("retained role-result seal moved during containment")
+            if not containment:
+                self.runtime.jobs.assert_frontier_planner_execution(job.job_id)
             current_producer = (None if containment else
                 self.runtime.jobs.get_planner_producer_binding(job.job_id))
             if current_producer != producer:
