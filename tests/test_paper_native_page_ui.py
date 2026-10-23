@@ -75,6 +75,7 @@ class FakePeekaboo:
         self.right_clicks = 0
         self.drift_second_menu_to_keep = False
         self.drift_final_menu_to_keep = False
+        self.tamper_final_menu_clipboard = False
         self.move_final_menu = False
         self.source_native_drift_after_delete = False
 
@@ -94,6 +95,9 @@ class FakePeekaboo:
         if self.move_final_menu and self.right_clicks >= 3:
             for item in elements:
                 item["bounds"]["y"] += 40
+        if self.tamper_final_menu_clipboard and self.right_clicks == 3:
+            self.clipboard["value"] = (
+                "https://app.paper.design/file/" + CLONE + "/p-1-0")
         return {
             "window_title": "Young harmony" if self.wrong_title else "Young harmony (copy)",
             "is_dialog": False,
@@ -251,12 +255,38 @@ class NativePageUITests(unittest.TestCase):
         self.assertEqual(result["removed_page_id"], "p-3-0")
         self.assertTrue(result["source_page_list_unchanged"])
         self.assertTrue(result["retained_native_structure_reverified"])
+        self.assertEqual(result["ui_copy_link_fresh_verification_count"], 2)
+        self.assertTrue(result["ui_copy_link_evidence_preserved_before_delete"])
+        self.assertTrue(result["ui_visible_page_prefixes_distinct"])
         self.assertNotIn("source_unchanged", result)
         self.assertFalse(result["original_deletion_authorized"])
         self.assertFalse(result["retry_allowed"])
         self.assertEqual([p["id"] for p in client.files[SRC]["pages"]], ["p-1-0", "p-3-0"])
         self.assertEqual([p["id"] for p in client.files[CLONE]["pages"]], ["p-1-0"])
         self.assertEqual(sum(1 for x in ui.calls if x[0] == "click" and x[3] == 257), 1)
+
+    def test_first_copy_link_must_refresh_unique_clipboard_marker(self):
+        client, clipboard, ui = scenario()
+        ui.no_clipboard_change = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "STALE_CLIPBOARD")
+        self.assertEqual(clipboard["value"],
+                         "paper-native-copy-1:paper-scratch-ui-20261022")
+        self.assertEqual(ui.right_clicks, 1)
+        self.assertEqual(sum(1 for x in ui.calls
+                             if x[0] == "click" and x[3] == 257), 0)
+
+    def test_first_copy_link_missing_marker_refuses_without_delete(self):
+        client, clipboard, ui = scenario()
+        result = ui_module.prune_one(
+            fixture_plan(), "p-3-0", "paper-scratch-ui-20261022",
+            313, 100, 165, client=client, ui=ui,
+            clipboard=lambda: clipboard["value"],
+            clipboard_set=lambda value: None)
+        self.assertEqual(result["state"], "UI_CLIPBOARD_MARKER_NOT_SET")
+        self.assertEqual(ui.right_clicks, 1)
+        self.assertEqual(sum(1 for x in ui.calls
+                             if x[0] == "click" and x[3] == 257), 0)
 
     def test_second_copy_link_must_refresh_unique_clipboard_marker(self):
         client, clipboard, ui = scenario()
@@ -336,6 +366,42 @@ class NativePageUITests(unittest.TestCase):
             ui_module._menu_target(
                 snapshot, "Young harmony (copy)", "Delete page", 313,
                 row_x=100, row_y=165)
+
+    def test_final_clipboard_wrong_page_refuses_without_delete(self):
+        client, clipboard, ui = scenario()
+        ui.tamper_final_menu_clipboard = True
+        result, *_ = perform(client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "UI_COPY_LINK_EVIDENCE_CHANGED")
+        self.assertEqual(ui.right_clicks, 3)
+        self.assertEqual(sum(1 for x in ui.calls
+                             if x[0] == "click" and x[3] == 257), 0)
+        self.assertEqual(len(client.files[CLONE]["pages"]), 2)
+
+    def test_visible_prefix_refuses_same_clipped_label_before_any_ui(self):
+        client, clipboard, ui = scenario()
+        plan = fixture_plan()
+        # Different complete names but Paper's narrow screenshot crop
+        # would show the same initial six ASCII characters.
+        for index, name in enumerate(("Ticker Apple", "Ticker Alphabet")):
+            for fid in (SRC, CLONE):
+                client.files[fid]["pages"][index]["name"] = name
+            plan["original_pages"][index]["name"] = name
+        plan["remove_pages"][0]["name"] = "Ticker Alphabet"
+        plan["source_page_list_sha256"] = ui_module.bridge.digest(
+            plan["original_pages"])
+        plan["clone_page_list_sha256"] = plan["source_page_list_sha256"]
+        result, *_ = perform(plan, client=client, clipboard=clipboard, ui=ui)
+        self.assertEqual(result["state"], "UI_VISIBLE_PAGE_LABEL_AMBIGUOUS")
+        self.assertEqual(ui.calls, [])
+        self.assertEqual(len(client.files[CLONE]["pages"]), 2)
+
+    def test_visible_prefix_rejects_control_bidi_and_short_names(self):
+        for names in [("Hello\n", "Page 2"), ("Abc", "Page 2"),
+                      ("E2E \u2067abc", "Page 2")]:
+            with self.subTest(names=names), self.assertRaises(
+                    ui_module.bridge.Refusal):
+                ui_module._require_distinct_visible_prefixes([
+                    {"name": x} for x in names])
 
     def test_final_menu_relocation_refuses_before_destructive_dispatch(self):
         client, clipboard, ui = scenario()

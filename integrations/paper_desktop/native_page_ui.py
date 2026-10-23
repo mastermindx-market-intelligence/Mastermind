@@ -40,6 +40,37 @@ def native_page_identity(link: str) -> tuple[str, str]:
     return matched.group(1), matched.group(2)
 
 
+def _verify_copied_target(link: str, clone_file_id: str, page_id: str) -> None:
+    """Authoritative target for a menu Copy link is Paper's file/page URL.
+
+    Screenshots identify a row visually, never substitute for the fileId and
+    pageId in a fresh provider Copy link. This does NOT make UI deletion atomic.
+    """
+    actual_file, actual_page = native_page_identity(link)
+    if actual_file != clone_file_id or actual_page != page_id:
+        raise bridge.Refusal("UI_PAGE_ID_MISMATCH")
+
+
+def _require_distinct_visible_prefixes(pages: list[dict]) -> None:
+    """Refuse same-looking clipped sidebar labels before opening any menu.
+
+    The native row screenshot currently contains only its leftmost 75-ish
+    pixels. This check is intentionally stricter than unique full names.
+    Only attended disposable-clone deletion is within the candidate scope.
+    """
+    prefixes: set[str] = set()
+    for page in pages:
+        name = page.get("name") if isinstance(page, dict) else None
+        if (not isinstance(name, str) or len(name) < 6
+                or any(not (" " <= char <= "~") for char in name[:6])
+                or sum(char.isalnum() for char in name[:6]) < 3):
+            raise bridge.Refusal("UI_VISIBLE_PAGE_LABEL_UNVERIFIED")
+        prefix = name[:6].casefold()
+        if prefix in prefixes:
+            raise bridge.Refusal("UI_VISIBLE_PAGE_LABEL_AMBIGUOUS")
+        prefixes.add(prefix)
+
+
 def _reviewed_read(client, tool: str, arguments: dict) -> dict:
     """Use the canonical bridge read allowlist inside main's existing mutex.
 
@@ -194,6 +225,9 @@ def _validate_plan_and_current(plan: dict, client, page_id: str) -> tuple[dict, 
         raise bridge.Refusal("CLONE_KEEP_PAGE_MISSING")
     if page_id not in present:
         raise bridge.Refusal("TARGET_ALREADY_REMOVED")
+    # Two different page IDs can have visually indistinguishable row labels
+    # when Paper truncates them. Refuse those clones before the first UI click.
+    _require_distinct_visible_prefixes(current)
     _retained_native_proof(plan, client, originals)
     foreground = _basic(client)
     if foreground["fileId"] != clone_id:
@@ -427,7 +461,7 @@ def read_clipboard() -> str:
 
 
 def write_clipboard(value: str) -> None:
-    """Mark pasteboard before second Copy link; stale text is not proof."""
+    """Mark pasteboard before EACH Copy link; stale text is not proof."""
     if type(value) is not str or not value or len(value) > MAX_CLIPBOARD:
         raise bridge.Refusal("UI_CLIPBOARD_MARKER_INVALID")
     try:
@@ -452,7 +486,6 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
     delete_dispatched = False
     try:
         source, clone, current = _validate_plan_and_current(plan, client, page_id)
-        before_clip = clipboard()
         with tempfile.TemporaryDirectory(prefix="paper-clone-ui-", dir=str(bridge.state_root())) as tmp:
             private_dir = Path(tmp)
             ui.click(window_id, row_x, row_y, right=True)
@@ -461,13 +494,17 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
                                    row_x=row_x, row_y=row_y)
             _menu_target(opened, plan["clone_file_name"], "Delete page", window_id,
                          row_x=row_x, row_y=row_y)
+            # A unique marker proves this Copy link action overwrote the
+            # pasteboard; reusing an old correct URL is not fresh identity.
+            first_marker = "paper-native-copy-1:" + operation_id
+            clipboard_set(first_marker)
+            if clipboard() != first_marker:
+                raise bridge.Refusal("UI_CLIPBOARD_MARKER_NOT_SET")
             ui.click(window_id, *copy_xy)
             copied = clipboard()
-            if before_clip == copied:
+            if copied == first_marker:
                 raise bridge.Refusal("STALE_CLIPBOARD")
-            link_file, link_page = native_page_identity(copied)
-            if link_file != plan["clone_file_id"] or link_page != page_id:
-                raise bridge.Refusal("UI_PAGE_ID_MISMATCH")
+            _verify_copied_target(copied, plan["clone_file_id"], page_id)
             _validate_plan_and_current(plan, client, page_id)
             # First menu identity is not enough: sidebar scrolling or focus
             # changes can make the next right-click target a different page.
@@ -479,7 +516,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
                                           row_x=row_x, row_y=row_y)
             second_delete_xy = _menu_target(reopened, plan["clone_file_name"], "Delete page", window_id,
                                             row_x=row_x, row_y=row_y)
-            marker = "paper-native-copy-check:" + operation_id
+            marker = "paper-native-copy-2:" + operation_id
             clipboard_set(marker)
             if clipboard() != marker:
                 raise bridge.Refusal("UI_CLIPBOARD_MARKER_NOT_SET")
@@ -487,9 +524,7 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             second_link = clipboard()
             if second_link == marker:
                 raise bridge.Refusal("STALE_CLIPBOARD")
-            second_file, second_page = native_page_identity(second_link)
-            if second_file != plan["clone_file_id"] or second_page != page_id:
-                raise bridge.Refusal("UI_PAGE_ID_MISMATCH")
+            _verify_copied_target(second_link, plan["clone_file_id"], page_id)
             _validate_plan_and_current(plan, client, page_id)
 
             # Finish all Paper RPCs BEFORE opening the destructive menu.
@@ -506,7 +541,14 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
             if (abs(delete_xy[0] - second_delete_xy[0]) > 12
                     or abs(delete_xy[1] - second_delete_xy[1]) > 12):
                 raise bridge.Refusal("UI_MENU_RELOCATED")
-            # No Paper RPC between exact-row visual proof and Delete.
+            # A changed clipboard invalidates the latest exact Copy link.
+            # This is a final preservation check of the *second* menu's
+            # verified fileId/pageId, NOT an identity claim for menu three.
+            if clipboard() != second_link:
+                raise bridge.Refusal("UI_COPY_LINK_EVIDENCE_CHANGED")
+            _verify_copied_target(second_link, plan["clone_file_id"], page_id)
+            # No Paper RPC between final visual proof and Delete. There is
+            # still no provider-atomic UI target binding: no unattended use.
             delete_dispatched = True
             try:
                 ui.click(window_id, *delete_xy)
@@ -538,6 +580,9 @@ def prune_one(plan: dict, page_id: str, operation_id: str,
                 "source_page_list_unchanged": True,
                 "retained_native_structure_reverified": True,
                 "ui_copy_link_exact_target_verified": True,
+                "ui_copy_link_fresh_verification_count": 2,
+                "ui_visible_page_prefixes_distinct": True,
+                "ui_copy_link_evidence_preserved_before_delete": True,
                 "retry_allowed": False,
                 "production_migration_accepted": False,
                 "original_deletion_authorized": False,
