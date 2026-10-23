@@ -73,6 +73,94 @@ def request(o):
     return observation.request_for(o['rid'],o['root'],original_parent=o['parent'])
 
 
+def write_v2_artifact_binding(o):
+    o["events"][4] = "LAUNCH_BINDING " + reader.canonical(o["binding"]).decode()
+    o["log"].write_bytes(o["log_bytes"]())
+
+
+@pytest.fixture
+def original_v2(original):
+    o = original
+    binding = o["binding"]
+    binding.update(schema="mastermind.fabric_launch_binding.v2",
+        requested_model="glm-5.3", acquisition_pool="glm-frontier")
+    acquired = (f'LEASE={binding["lease_id"]} ACCOUNT={binding["account"]}\n').encode("ascii")
+    binding["acquire_response_sha256"] = digest(acquired)
+    o["lease"]["model"] = "glm-5.3"
+    # This fixture's broker row reports glm; the comparison stays exact.
+    assert binding["pool"] == o["lease"]["pool"] == "glm"
+    o["events"][1] = "LEASE_OK pool=glm-frontier"
+    write_v2_artifact_binding(o)
+    return o
+
+
+@pytest.mark.parametrize("acquisition_pool", ["glm-frontier", "glm"])
+def test_v2_active_lineage_and_original_observation(original_v2, acquisition_pool):
+    o = original_v2
+    o["binding"]["acquisition_pool"] = acquisition_pool
+    o["events"][1] = "LEASE_OK pool=" + acquisition_pool
+    write_v2_artifact_binding(o)
+    lineage = fabric_task._active_lineage_projection(
+        o["rid"], o["log"].read_bytes())["controller_lineage"]
+    assert lineage == {
+        "root_id": o["root"], "parent_run_id": o["parent"],
+        "state": "RECORDED_PRE_LAUNCH",
+        "source": "controller_original_acquire_return", "is_authentication": False,
+    }
+    req = request(o)
+    assert req["kind"] == "ordinary_artifact" and req["parent"] == o["parent"]
+    assert req["observe_pid"] is False
+    assert "lease_id" not in req and "account" not in req
+    assert req["artifact"]["packet_sha256"] == digest(o["packet"])
+    evidence = observation.qualify(req)
+    assert evidence["account_binding"] == "retained_original_broker_row"
+    assert o["binding"]["pool"] == o["lease"]["pool"] == "glm"
+
+
+@pytest.mark.parametrize("pool", ["glm-frontier", "bailian"])
+def test_v2_observation_keeps_exact_broker_pool_comparison(original_v2, pool):
+    o = original_v2
+    o["lease"]["pool"] = pool
+    with pytest.raises((ValueError, observation.ObservationScopeNotAdmitted)):
+        request(o)
+
+
+@pytest.mark.parametrize("fault", [
+    "missing_tag", "extra_field", "unknown_schema", "downgrade_with_tag",
+    "duplicate_key", "acquire_digest", "wrong_order", "duplicate_binding",
+    "wrong_lease_event",
+])
+def test_v2_observation_and_lineage_reject_invalid_binding(original_v2, fault):
+    o = original_v2
+    binding = o["binding"]
+    if fault == "missing_tag":
+        del binding["acquisition_pool"]
+    elif fault == "extra_field":
+        binding["unexpected"] = "field"
+    elif fault == "unknown_schema":
+        binding["schema"] = "mastermind.fabric_launch_binding.v9"
+    elif fault == "downgrade_with_tag":
+        binding["schema"] = "mastermind.fabric_launch_binding.v1"
+    elif fault == "acquire_digest":
+        binding["acquire_response_sha256"] = "e" * 64
+    write_v2_artifact_binding(o)
+    if fault == "duplicate_key":
+        payload = reader.canonical(binding).decode()
+        o["events"][4] = ("LAUNCH_BINDING " + payload[:-1]
+                         + ',"acquisition_pool":"glm-frontier"}')
+    elif fault == "wrong_order":
+        o["events"][1], o["events"][3] = o["events"][3], o["events"][1]
+    elif fault == "duplicate_binding":
+        o["events"].insert(4, o["events"][4])
+    elif fault == "wrong_lease_event":
+        o["events"][1] = "LEASE_OK pool=glm"
+    o["log"].write_bytes(o["log_bytes"]())
+    assert fabric_task._active_lineage_projection(
+        o["rid"], o["log"].read_bytes()) == {"controller_lineage": {"state": "UNVERIFIED"}}
+    with pytest.raises((ValueError, observation.ObservationScopeNotAdmitted)):
+        request(o)
+
+
 def test_general_original_parent_without_per_run_allowlist(original):
     o=original; req=request(o)
     assert o['rid'] not in observation.SCOPES

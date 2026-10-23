@@ -22,9 +22,13 @@ import artifact_reader as reader
 import artifact_production as production
 
 DirectoryChain = delivery.DirectoryChain
+validate_remote_lane_layout = delivery.validate_remote_lane_layout
+observe_remote_lane_layout = delivery.observe_remote_lane_layout
+verify_remote_lane_release = delivery.verify_remote_lane_release
 HERE = Path(__file__).resolve().parent
 SCHEMA = 'mastermind.original_delivery_read.v1'
 PLAIN_SCHEMA = 'mastermind.original_plain_result_contract.v1'
+PLAIN_SCHEMA_V2 = 'mastermind.original_plain_result_contract.v2'
 PLAIN_SCOPES = {'fabric-manifest-framing-review-01a11e90-v1': {'root': '01a11e90-4b5d-7f53-b966-8aaaad38701f',
                                                 'parent': '01a11e90-4b5d-7f53-b966-8aaaad38701f',
                                                 'host': 'mb',
@@ -120,6 +124,8 @@ PLAIN_SCOPES.update({'mm-l0-price-metadata-review-20261015-01a1333c-v1': {'desti
                                                       'support_digest': '8172955c737b6f55f83aaebcdea5c22566f06a14320bd3fd967054da0fd6c51c'}})
 BINDING_SCHEMA = 'mastermind.original_delivery_binding.v1'
 PLAIN_BINDING_SCHEMA = 'mastermind.fabric_plain_launch_binding.v1'
+PLAIN_BINDING_SCHEMA_V2 = 'mastermind.fabric_plain_launch_binding.v2'
+PLAIN_BINDING_SCHEMA_V3 = 'mastermind.fabric_plain_launch_binding.v3'
 RECEIPT_SCHEMA = 'mastermind.original_delivery_receipt.v1'
 MAX_STDOUT = 8 * 1024 * 1024
 MAX_RESPONSE = 14 * 1024 * 1024
@@ -206,10 +212,42 @@ def tracked_control_events(events):
     return tracked
 
 
+def plain_acquisition_pool(record, *, collected=False):
+    """Read an explicitly versioned observation; never upgrade legacy evidence."""
+    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
+            'lease_id','account','packet_sha256','support_digest',
+            'acquire_response_sha256','source','phase','transport'}
+    if type(record) is not dict:
+        raise ValueError('plain_launch_binding_invalid')
+    if record.get('schema') == PLAIN_BINDING_SCHEMA_V3:
+        fields.add('acquisition_pool')
+    elif record.get('schema') not in {PLAIN_BINDING_SCHEMA, PLAIN_BINDING_SCHEMA_V2}:
+        raise ValueError('plain_launch_binding_invalid')
+    if collected:
+        fields.add('binding_sha256')
+    if set(record) != fields:
+        raise ValueError('plain_launch_binding_invalid')
+    if record['schema'] in {PLAIN_BINDING_SCHEMA, PLAIN_BINDING_SCHEMA_V2}:
+        return record['pool']
+    from remote_sub_helpers import validate_acquisition_pool
+    return validate_acquisition_pool(record['mode'], record['requested_model'],
+                                     record['acquisition_pool'])
+
+
 def validate_plain_transport(record):
     """Strict bounded shape and cross-binding of the transport receipt view."""
     transport=record.get('transport') if type(record) is dict else None
-    if (type(transport) is not dict or set(transport)!=PLAIN_TRANSPORT_FIELDS
+    fields=set(PLAIN_TRANSPORT_FIELDS)
+    schema=record.get('schema') if type(record) is dict else None
+    if schema == PLAIN_BINDING_SCHEMA_V2:
+        fields.add('lane_root')
+    elif schema == PLAIN_BINDING_SCHEMA_V3:
+        fields.update({'acquisition_pool', 'lane_root'})
+    elif schema != PLAIN_BINDING_SCHEMA:
+        raise ValueError('plain_launch_binding_invalid')
+    if (type(transport) is not dict or set(transport)!=fields
+            or (schema == PLAIN_BINDING_SCHEMA_V3
+                and transport['acquisition_pool'] != record['acquisition_pool'])
             or transport['packet_sha256']!=record['packet_sha256']
             or transport['support_digest']!=record['support_digest']
             or transport['lease_id']!=record['lease_id']
@@ -224,6 +262,11 @@ def validate_plain_transport(record):
                    or type(v) is not str or not HEX.fullmatch(v)
                    for n,v in transport['files'].items())):
         raise ValueError('plain_launch_binding_invalid')
+    if schema == PLAIN_BINDING_SCHEMA_V2 or (
+            schema == PLAIN_BINDING_SCHEMA_V3 and transport['lane_root'] is not None):
+        layout = validate_remote_lane_layout(transport['lane_root'])
+        if layout['binding']['host'] != record['host']:
+            raise ValueError('plain_launch_binding_lane_root_invalid')
     return transport
 
 
@@ -266,12 +309,8 @@ def retained_plain_binding(events, value, source):
             raise ValueError('plain_launch_binding_event_sequence_invalid')
         return None
     record=reader.strict_json(records[0].encode('utf-8'))
-    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
-            'lease_id','account','packet_sha256','support_digest',
-            'acquire_response_sha256','source','phase','transport'}
-    if (type(record) is not dict or set(record)!=fields
-            or record['schema']!=PLAIN_BINDING_SCHEMA
-            or record['source']!='controller_original_acquire_return'
+    acquisition_pool=plain_acquisition_pool(record)
+    if (record['source']!='controller_original_acquire_return'
             or record['phase']!='PRE_LAUNCH'
             or any(record[k]!=value[k] for k in ('run_id','root','parent','host','mode','requested_model'))
             or record['mode'] not in production.ORDINARY_MODES
@@ -291,7 +330,7 @@ def retained_plain_binding(events, value, source):
         raise ValueError('plain_launch_binding_acquire_unverified')
     expected=[
         'RUN_RESERVED explicit=1',
-        'LEASE_OK pool='+record['pool'],
+        'LEASE_OK pool='+acquisition_pool,
         'SUPPORT_VERSION_READY digest='+record['support_digest']
             +' policy='+transport['policy_sha256'],
         'TRANSPORT_VERIFIED packet='+record['packet_sha256']
@@ -299,7 +338,9 @@ def retained_plain_binding(events, value, source):
             +' policy='+transport['policy_sha256']
             +' lease='+record['lease_id']
             +' account='+record['account']
-            +' acquire='+record['acquire_response_sha256'],
+            +' acquire='+record['acquire_response_sha256']
+            +(' lane_root='+transport['lane_root']['sha256']
+              if transport.get('lane_root') is not None else ''),
         'LAUNCH_BINDING '+records[0],
         f"LAUNCH stdout=lanes_{record['run_id']}.stdout"
             +f" rc_file=ext/lanes_{record['run_id']}.rc cwd=~",
@@ -309,6 +350,76 @@ def retained_plain_binding(events, value, source):
         raise ValueError('plain_launch_binding_event_sequence_invalid')
     record['binding_sha256']=sha(records[0].encode('utf-8'))
     return record
+
+
+def retained_artifact_acquisition_pool(events, value, source, contract):
+    """Use a v2 tag only after validating its original artifact binding.
+
+    Untagged v1/no-binding evidence keeps the incumbent logical-pool rule.
+    This is controller correlation, not broker, acceptance or retry authority.
+    """
+    v1='mastermind.fabric_launch_binding.v1'
+    v2='mastermind.fabric_launch_binding.v2'
+    payloads=[event[len('LAUNCH_BINDING '):] for event in events
+              if event.startswith('LAUNCH_BINDING ')]
+    if not payloads:
+        return None
+    records=[reader.strict_json(payload.encode('utf-8')) for payload in payloads]
+    if all(type(record) is dict and record.get('schema') == v1
+           and 'acquisition_pool' not in record for record in records):
+        return None
+    if len(records) != 1:
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    record=records[0]
+    fields={'schema','run_id','root','parent','host','mode','requested_model','pool',
+            'acquisition_pool','lease_id','account','packet_sha256','support_digest',
+            'acquire_response_sha256','source','phase'}
+    if (type(record) is not dict or set(record) != fields
+            or any(type(item) is not str for item in record.values())
+            or record['schema'] != v2
+            or record['source'] != 'controller_original_acquire_return'
+            or record['phase'] != 'PRE_LAUNCH'
+            or record['mode'] not in {'glm','qwen'}
+            or record['pool'] != {'glm':'glm','qwen':'bailian'}[record['mode']]
+            or any(record[key] != value[key] for key in
+                   ('run_id','root','parent','host','mode','requested_model'))
+            or any(not IDENT.fullmatch(record[key]) for key in
+                   ('run_id','root','parent','host','requested_model'))
+            or not re.fullmatch(r'[a-f0-9]{12}',record['lease_id'])
+            or not re.fullmatch(r'[A-Za-z0-9_.:-]{1,128}',record['account'])
+            or any(not HEX.fullmatch(record[key]) for key in
+                   ('packet_sha256','support_digest','acquire_response_sha256'))):
+        raise ValueError('artifact_launch_binding_invalid')
+    from remote_sub_helpers import validate_acquisition_pool
+    validate_acquisition_pool(record['mode'],record['requested_model'],
+                              record['acquisition_pool'])
+    if record['packet_sha256'] != sha(source['packet']):
+        raise ValueError('artifact_launch_binding_packet_mismatch')
+    if record['support_digest'] != contract['support_digest']:
+        raise ValueError('artifact_launch_binding_support_mismatch')
+    acquired=(f'LEASE={record["lease_id"]} ACCOUNT={record["account"]}').encode('ascii')
+    if record['acquire_response_sha256'] not in {sha(acquired),sha(acquired+b'\n')}:
+        raise ValueError('artifact_launch_binding_acquire_unverified')
+    if (not source['log'].endswith(b'\n')
+            or len(source['log'].decode('utf-8').splitlines()) != len(events)):
+        raise ValueError('artifact_launch_binding_log_truncated_or_foreign')
+    support=[event for event in events if event.startswith('SUPPORT_VERSION_READY ')]
+    if (len(support) != 1 or not re.fullmatch('SUPPORT_VERSION_READY digest='
+            + record['support_digest'] + r' policy=[a-f0-9]{64}',support[0])):
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    expected=['RUN_RESERVED explicit=1','LEASE_OK pool='+record['acquisition_pool'],
+              support[0],'LAUNCH_BINDING '+payloads[0],
+              f"LAUNCH stdout=lanes_{record['run_id']}.stdout"
+              + f" rc_file=ext/lanes_{record['run_id']}.rc cwd=~",
+              'LAUNCH_ATTEMPT attempt=1']
+    if [event for _,event in tracked_control_events(events)] != expected:
+        raise ValueError('artifact_launch_binding_event_sequence_invalid')
+    before_launch=events[:events.index(expected[4])]
+    if (any(marker in event for event in before_launch for marker in FORBIDDEN_LOG_MARKERS)
+            or any(event.startswith(('DONE','REMOTE_DONE','LEASE_PRESERVED'))
+                   for event in before_launch)):
+        raise ValueError('artifact_launch_binding_forbidden_event')
+    return record['acquisition_pool']
 
 
 def load_binding(path, *, run_id, root, parent):
@@ -400,6 +511,9 @@ def load_binding(path, *, run_id, root, parent):
             support_digest=plain_binding['support_digest'],
             binding_sha256=plain_binding['binding_sha256'],
             acquire_response_sha256=plain_binding['acquire_response_sha256'])
+        if plain_binding['transport'].get('lane_root') is not None:
+            contract['schema'] = PLAIN_SCHEMA_V2
+            contract['lane_root'] = plain_binding['transport']['lane_root']
     if (any(contract[k] != value[k] for k in ('run_id','root','parent'))
             or contract['names'] != value['artifact_names']):
         raise ValueError('original_packet_scope_mismatch')
@@ -415,12 +529,19 @@ def load_binding(path, *, run_id, root, parent):
         # Historical scopes keep their exact evidence set; a retained prelaunch
         # binding never qualifies older missing evidence.
         raise ValueError('plain_launch_binding_unexpected')
+    expected_acquisition_pool={'glm':'glm','qwen':'bailian','minimax':'minimax'}[value['mode']]
+    if plain_binding is not None:
+        expected_acquisition_pool=plain_acquisition_pool(plain_binding, collected=True)
+    elif plain is None and contract.get('schema') != PLAIN_SCHEMA:
+        observed=retained_artifact_acquisition_pool(events,value,source,contract)
+        if observed is not None:
+            expected_acquisition_pool=observed
     launches=[e for e in events if e.startswith('LAUNCH ')]
     support=[e for e in events if e.startswith('SUPPORT_VERSION_READY ')]
     if (launches != [f'LAUNCH stdout=lanes_{run_id}.stdout rc_file=ext/lanes_{run_id}.rc cwd=~']
             or [e for e in events if e.startswith('LAUNCH_ATTEMPT ')] != ['LAUNCH_ATTEMPT attempt=1']
             or len(support)!=1 or not re.fullmatch('SUPPORT_VERSION_READY digest='+contract['support_digest']+r' policy=[a-f0-9]{64}',support[0])
-            or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool='+{'glm':'glm','qwen':'bailian','minimax':'minimax'}[value['mode']]]):
+            or [e for e in events if e.startswith('LEASE_OK ')] != ['LEASE_OK pool='+expected_acquisition_pool]):
         raise ValueError('original_launch_evidence_unqualified')
     delivery.assert_capsule_family(run_id)
     registry_raw=delivery.local_file(HERE/'hosts.json')
@@ -430,6 +551,11 @@ def load_binding(path, *, run_id, root, parent):
             or type(host.get('ssh_alias')) is not str
             or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_.-]{0,127}',host['ssh_alias'])):
         raise ValueError('original_host_registry_unavailable')
+    if contract.get('schema') == PLAIN_SCHEMA_V2:
+        layout = validate_remote_lane_layout(contract['lane_root'])
+        current = delivery.configured_remote_lane_root(value['host'], host)
+        if current != layout['binding']:
+            raise ValueError('original_lane_root_registry_changed')
     return value, raw, source, contract, host['ssh_alias'], registry_raw, original_validator, plain_binding
 
 
@@ -441,7 +567,8 @@ def remote_read(request, *, home=None):
                    for k in ('run_id','root','parent','host'))):
         raise ValueError('read_request_invalid')
     contract=request['contract']
-    plain = contract.get('schema') == PLAIN_SCHEMA if type(contract) is dict else False
+    plain = contract.get('schema') in {PLAIN_SCHEMA, PLAIN_SCHEMA_V2} if type(contract) is dict else False
+    bound = plain and contract['schema'] == PLAIN_SCHEMA_V2
     if request['run_id'] in PLAIN_SCOPES and not plain:
         raise ValueError('read_contract_invalid')
     if plain:
@@ -458,8 +585,11 @@ def remote_read(request, *, home=None):
             # transported packet digest below, and that the contract is bound
             # to a retained prelaunch binding digest and to the host's actual
             # published support generation.
-            if (set(contract) != {'schema','run_id','root','parent','names','packet_sha256',
-                                  'support_digest','binding_sha256','acquire_response_sha256'}
+            fields = {'schema','run_id','root','parent','names','packet_sha256',
+                      'support_digest','binding_sha256','acquire_response_sha256'}
+            if bound:
+                fields.add('lane_root')
+            if (set(contract) != fields
                     or any(contract[k] != request[k] for k in ('run_id','root','parent'))
                     or contract['names'] != []
                     or any(type(contract[k]) is not str or not HEX.fullmatch(contract[k])
@@ -476,15 +606,23 @@ def remote_read(request, *, home=None):
             or any(type(n) is not str or not reader.COMPONENT.fullmatch(n) or n in {'request.json','receipt.json'} for n in contract['names'])
             or any(type(contract[k]) is not str or not HEX.fullmatch(contract[k]) for k in ('body_sha256','support_digest'))):
         raise ValueError('read_contract_invalid')
-    root=Path(home if home is not None else pwd.getpwuid(os.geteuid()).pw_dir)
+    lane_root=Path(home if home is not None else pwd.getpwuid(os.geteuid()).pw_dir)/'lanes'
+    lane_layout = None
+    if bound:
+        lane_layout = validate_remote_lane_layout(contract['lane_root'])
+        if lane_layout['binding']['host'] != request['host']:
+            raise ValueError('read_contract_lane_root_invalid')
+        observe_remote_lane_layout(lane_layout['binding'], lane_layout)
+        lane_root = Path(lane_layout['binding']['path'])
     rid=request['run_id']; held=[]
-    def read(chain,name,limit):
+    def read(chain,name,limit,*,allow_empty=False):
         chain.verify()
         fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=chain.fd)
         held.append((chain,name,fd,None))
         before=os.fstat(fd)
         if (not stat.S_ISREG(before.st_mode) or before.st_uid!=os.geteuid()
-                or before.st_nlink!=1 or before.st_mode&0o022 or not 0<before.st_size<=limit):
+                or before.st_nlink!=1 or before.st_mode&0o022
+                or not (0 if allow_empty else 1)<=before.st_size<=limit):
             raise ValueError('original_file_owner_mode_type_or_size')
         data=b''
         while len(data)<=limit:
@@ -500,12 +638,17 @@ def remote_read(request, *, home=None):
             chain.verify()
             if ident is None or ident!=reader.identity(os.fstat(fd)) or ident!=reader.identity(os.stat(name,dir_fd=chain.fd,follow_symlinks=False)):
                 raise ValueError('original_file_changed')
+        if lane_layout is not None:
+            observe_remote_lane_layout(lane_layout['binding'], lane_layout)
+            if release_meta is not None:
+                verify_remote_lane_release(lane_layout, contract['support_digest'], release_meta)
     result={'schema':SCHEMA,'request_sha256':sha(canonical(request)),'state':'PENDING','files':{},'artifacts':[]}
     packet_dir = None
     release_chains = []
+    release_meta = None
     try:
         if plain:
-            packet_dir = DirectoryChain(root/'lanes/tmp')
+            packet_dir = DirectoryChain(lane_root/'tmp')
             packet = read(packet_dir, rid+'.txt', 2*1024*1024)
             if packet['sha256'] != contract['packet_sha256']:
                 raise ValueError('read_contract_invalid')
@@ -518,9 +661,9 @@ def remote_read(request, *, home=None):
                 # still hash to its manifest entry — not just a nonempty
                 # remote_sub_exec file.
                 try:
-                    release_base=DirectoryChain(root/'lanes/support-releases'
+                    release_base=DirectoryChain(lane_root/'support-releases'
                                                 /contract['support_digest'])
-                    release_ext=DirectoryChain(root/'lanes/support-releases'
+                    release_ext=DirectoryChain(lane_root/'support-releases'
                                                /contract['support_digest']/'ext')
                 except (FileNotFoundError,NotADirectoryError):
                     raise ValueError('read_contract_invalid')
@@ -539,6 +682,8 @@ def remote_read(request, *, home=None):
                                or type(v) is not str or not HEX.fullmatch(v)
                                for n,v in files.items())):
                     raise ValueError('read_contract_invalid')
+                if lane_layout is not None:
+                    verify_remote_lane_release(lane_layout, contract['support_digest'], release_meta)
                 for name,want in files.items():
                     release_ext.verify()
                     support_fd=os.open(name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=release_ext.fd)
@@ -558,17 +703,21 @@ def remote_read(request, *, home=None):
                         raise ValueError('read_contract_invalid')
                 release_ext.verify()
             verify()
-        with DirectoryChain(root/'lanes/ext') as ext:
-            try: rc=read(ext,'lanes_'+rid+'.rc',32)
+        with DirectoryChain(lane_root/'ext') as ext:
+            try: rc=read(ext,'lanes_'+rid+'.rc',32,allow_empty=bound)
             except FileNotFoundError:
                 ext.verify();return result
             rcraw=base64.b64decode(rc['data_base64'],validate=True)
+            if bound and rcraw == b'':
+                # The v2 launch holds an exclusively created RC descriptor.
+                # Empty is its running reservation, never terminal evidence.
+                verify();return result
             if not re.fullmatch(rb'(0|[1-9][0-9]{0,2})\n?',rcraw) or int(rcraw)>255:
                 raise ValueError('original_rc_invalid')
             result['files']['rc']=rc
             if int(rcraw)!=0:
                 verify();result['state']='NONZERO';return result
-            with DirectoryChain(root/'lanes/ext/lanes') as lanes:
+            with DirectoryChain(lane_root/'ext/lanes') as lanes:
                 result['files']['process']=read(lanes,rid+'.process.jsonl',65536)
                 result['files']['stdout']=read(ext,'lanes_'+rid+'.stdout',MAX_STDOUT)
                 scope={k:request[k] for k in ('root','parent','run_id')}
@@ -607,9 +756,9 @@ def code_for_request(request):
     remote_scopes = {key: {field: scope[field] for field in (
         'root', 'parent', 'host', 'packet_sha256', 'support_digest')}
         for key, scope in PLAIN_SCOPES.items()}
-    code+='PLAIN_SCHEMA='+repr(PLAIN_SCHEMA)+'\nPLAIN_SCOPES='+repr(remote_scopes)+'\n'
+    code+='PLAIN_SCHEMA='+repr(PLAIN_SCHEMA)+'\nPLAIN_SCHEMA_V2='+repr(PLAIN_SCHEMA_V2)+'\nPLAIN_SCOPES='+repr(remote_scopes)+'\n'
     code+='SCHEMA='+repr(SCHEMA)+'\nMAX_STDOUT='+str(MAX_STDOUT)+'\nIDENT=re.compile('+repr(IDENT.pattern)+')\nHEX=re.compile('+repr(HEX.pattern)+')\n'
-    code+=delivery.remote_directory_chain_source()+'\n'+inspect.getsource(canonical)+'\n'+inspect.getsource(sha)+'\n'+inspect.getsource(remote_read)+'\n'+inspect.getsource(remote_envelope)
+    code+=delivery.remote_lane_root_source()+'\n'+inspect.getsource(canonical)+'\n'+inspect.getsource(sha)+'\n'+inspect.getsource(remote_read)+'\n'+inspect.getsource(remote_envelope)
     code+="\ntry:\n raw=sys.stdin.buffer.read(65537)\n if len(raw)>65536:raise ValueError('request_limit')\n request=reader.strict_json(raw)\n result=remote_envelope(request)\n sys.stdout.buffer.write(canonical(result))\nexcept (OSError,ValueError,TypeError,KeyError):\n raise SystemExit(76)\n"
     return code
 
@@ -636,7 +785,7 @@ def validate_response(raw,request,mode,*,original_validator=None):
             raise ValueError('collection_file_integrity')
         blobs[name]=data
     if blobs['rc'] not in (b'0',b'0\n'):raise ValueError('collection_rc_mismatch')
-    if request['contract'].get('schema') == PLAIN_SCHEMA:
+    if request['contract'].get('schema') in {PLAIN_SCHEMA, PLAIN_SCHEMA_V2}:
         contract=request['contract']
         bound=type(contract) is dict and type(contract.get('binding_sha256')) is str
         plain=None if bound else PLAIN_SCOPES.get(request['run_id'])
@@ -774,8 +923,8 @@ def read_collection(path,*,expected_sha256,run_id,root,parent):
         # New producer-bound plain group. Scope comes from the receipt's
         # retained record plus the caller's verified root/parent; no local
         # PLAIN_SCOPES entry is consulted.
-        if (record.get('schema')!=PLAIN_BINDING_SCHEMA
-                or record.get('source')!='controller_original_acquire_return'
+        plain_acquisition_pool(record, collected=True)
+        if (record.get('source')!='controller_original_acquire_return'
                 or record.get('phase')!='PRE_LAUNCH'
                 or any(record.get(k)!=v for k,v in {
                     'run_id':run_id,'root':root,'parent':parent,

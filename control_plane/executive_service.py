@@ -64,6 +64,8 @@ from control_plane.executive_runtime import (
     ValidatedRoleCompletion,
     V3_HOST_EXECUTION_BINDING_KEYS,
     _normalise_constraints,
+    _hierarchy_material,
+    _current_orchestration_tree_material_for_dispatch,
     _normalise_work_placement_union,
     _orchestration_root_creator,
     _validated_plan_admission,
@@ -6669,65 +6671,125 @@ class ExecutiveControlService:
             root.constraints.get(key) == value for key, value in binding.items()
         )
 
+    def _coo_scope_for_job(self, job: Job, original_root: Job) -> Job:
+        """Revalidate retained ancestry without imposing a fresh-claim phase.
+
+        Runtime still owns claim eligibility, handoffs, leases and retries.
+        This read binds service custody to the original root while deriving
+        nested execution identity from each immediate coordinator's plan.
+        """
+        from control_plane.executive_coo_hierarchy import (
+            HierarchyError, ancestors, descendant_ids, inherited_grant,
+            validate_grant,
+        )
+
+        runtime = self._require_runtime()
+        with runtime.store.read() as connection:
+            root_row = connection.execute(
+                "SELECT * FROM jobs WHERE job_id=?", (original_root.job_id,)
+            ).fetchone()
+            if root_row is None:
+                raise StateConflict("COO original root disappeared")
+            rows, grants = _hierarchy_material(connection, root_row)
+            retained_row = rows.get(job.job_id)
+            if retained_row is None:
+                raise StateConflict("COO dispatch target is outside its original root")
+            retained = _job_from_row(retained_row)
+            for field in (
+                "parent_job_id", "root_job_id", "depth", "orchestration_role",
+                "orchestration_provenance", "orchestration_provenance_digest",
+                "plan_attempt_id", "plan_digest", "plan_step_id", "repair_round",
+                "reviews_job_id", "supersedes_job_id", "constraints", "worktree",
+                "branch", "requested_authorities", "allowed_write_paths",
+                "validation_commands", "authority_level", "authority_policy_hash", "attempt_limit",
+                "business_impact", "review_required", "owner_seat", "escalation_target",
+            ):
+                if getattr(job, field) != getattr(retained, field):
+                    raise StateConflict(f"COO Job host binding drifted at retained {field}")
+            if retained.orchestration_role not in {
+                "aggregation", "plan", "work", "review", "repair"
+            }:
+                raise StateConflict("COO dispatch target is not an orchestration Job")
+            try:
+                lineage = ancestors(rows, retained.job_id)
+                for row in reversed(lineage):
+                    if row["orchestration_role"] != "aggregation":
+                        continue
+                    coordinator = _job_from_row(row)
+                    grant = validate_grant(grants[coordinator.job_id])
+                    descendants = descendant_ids(rows, coordinator.job_id)
+                    if (
+                        len(descendants) > grant["descendant_limit"]
+                        or any(rows[key]["depth"] > grant["max_depth"] for key in descendants)
+                    ):
+                        raise StateConflict("COO coordinator exceeds its retained grant")
+                    if coordinator.parent_job_id is None:
+                        continue
+                    parent_row = rows[coordinator.parent_job_id]
+                    parent = _job_from_row(parent_row)
+                    admission, plan = _validated_plan_admission(connection, parent_row)
+                    current = _current_orchestration_tree_material_for_dispatch(
+                        connection, parent_row, admission, plan
+                    )
+                    step = next(
+                        (item for item in plan["steps"]
+                         if item["step_id"] == coordinator.plan_step_id), None
+                    )
+                    if (
+                        step is None or step.get("delegation") is None
+                        or coordinator.plan_attempt_id != admission["plan_attempt_id"]
+                        or coordinator.plan_digest != admission["plan_digest"]
+                        or not any(
+                            item["plan_step_id"] == coordinator.plan_step_id
+                            and item["current_job_id"] == coordinator.job_id
+                            for item in current
+                        )
+                    ):
+                        raise StateConflict("COO coordinator is outside its admitted parent plan")
+                    if grant != inherited_grant(
+                        parent.depth, grants[parent.job_id], step["delegation"]
+                    ):
+                        raise StateConflict("COO coordinator inherited grant drifted")
+                    # Legacy coordinators without the v3 union remain without
+                    # pool delegation. Never infer or write a missing grant.
+                    carries_union = "work_placement_union" in coordinator.constraints
+                    expected = _normalise_constraints(
+                        parent.constraints, host_admitted_placement_union=carries_union
+                    )
+                    expected["cost_class"] = step["cost_class"]
+                    if "placement" in step:
+                        expected = _project_work_placement(
+                            expected, parent.constraints, step["placement"],
+                            raw_root_constraints=parent.constraints,
+                            plan_schema_version=str(plan["schema_version"]),
+                        )
+                    expected = _normalise_constraints(
+                        expected, host_admitted_placement_union=carries_union
+                    )
+                    if coordinator.constraints != expected:
+                        raise StateConflict("COO coordinator host binding drifted from its parent")
+            except HierarchyError as exc:
+                raise StateConflict(str(exc)) from exc
+            return _job_from_row(
+                rows[retained.parent_job_id]
+                if retained.parent_job_id is not None else root_row
+            )
+
     def _require_bound_coo_job(self, job: Job) -> Job:
         runtime = self._require_runtime()
         root = runtime.jobs.get_job(job.root_job_id)
         if root is None or not self._is_bound_coo_root(root):
             raise StateConflict("COO dispatch root is not bound to the current host profile")
-        if job.job_id != root.job_id and (
-            job.parent_job_id != root.job_id
-            or job.root_job_id != root.job_id
-            or job.depth != 1
-            or job.orchestration_role not in {"plan", "work", "review", "repair"}
-        ):
-            raise StateConflict("COO dispatch target is outside the direct strict-v2 subtree")
-        binding = self._coo_binding_for_root(root)
-        if (
-            job.orchestration_role == "plan"
-            and binding["operator_harness_armed"] is True
-        ):
-            expected = {
-                "eligible_quota_classes": binding[
-                    "operator_eligible_quota_classes"
-                ],
-                "provider": binding["operator_provider"],
-                "model": binding["operator_model"],
-                "effort": binding["operator_effort"],
-                "cost_class": binding["operator_cost_class"],
-                "base_sha": binding["base_sha"],
-                "routing_policy_version": binding[
-                    "operator_routing_policy_version"
-                ],
-                "execution_profile_id": binding[
-                    "operator_execution_profile_id"
-                ],
-                "execution_profile_digest": binding[
-                    "operator_execution_profile_digest"
-                ],
-                "capability_policy_version": binding[
-                    "operator_capability_policy_version"
-                ],
-                "capability_policy_digest": binding[
-                    "operator_capability_policy_digest"
-                ],
-                "harness_binary_digest": binding[
-                    "operator_harness_binary_digest"
-                ],
-                "harness_version": binding["operator_harness_version"],
-            }
+        coordinator = self._coo_scope_for_job(job, root)
+        if job.orchestration_role == "plan":
+            expected = runtime.jobs._operator_child_constraints(coordinator)
         else:
             expected = {
-                key: binding[key]
+                key: coordinator.constraints[key]
                 for key in (
-                    "eligible_quota_classes",
-                    "provider",
-                    "model",
-                    "effort",
-                    "base_sha",
-                    "routing_policy_version",
-                    "execution_profile_id",
-                    "execution_profile_digest",
-                    "capability_policy_version",
+                    "eligible_quota_classes", "provider", "model", "effort",
+                    "base_sha", "routing_policy_version", "execution_profile_id",
+                    "execution_profile_digest", "capability_policy_version",
                     "capability_policy_digest",
                 )
             }
@@ -6735,19 +6797,27 @@ class ExecutiveControlService:
                 raise StateConflict(
                     "COO Job cost class has no reviewed serialized capacity"
                 )
-        if job.orchestration_role == "work":
+        if job.orchestration_role in {"work", "aggregation"} and job.job_id != root.job_id:
             with runtime.store.read() as connection:
-                row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root.job_id,)).fetchone()
+                row = connection.execute(
+                    "SELECT * FROM jobs WHERE job_id=?", (coordinator.job_id,)
+                ).fetchone()
                 if row is None:
-                    raise StateConflict("COO root disappeared before placement validation")
+                    raise StateConflict("COO coordinator disappeared before placement validation")
                 _admission, plan = _validated_plan_admission(connection, row)
-            step = next((item for item in plan["steps"] if item["step_id"] == job.plan_step_id), None)
-            if step is None or job.plan_attempt_id != plan["plan_attempt_id"]:
+            step = next(
+                (item for item in plan["steps"] if item["step_id"] == job.plan_step_id),
+                None,
+            )
+            if (
+                step is None or job.plan_attempt_id != plan["plan_attempt_id"]
+                or job.plan_digest != _admission["plan_digest"]
+            ):
                 raise StateConflict("COO work placement is not in its admitted plan")
             if "placement" in step:
                 expected = _project_work_placement(
-                    expected, root.constraints, step["placement"],
-                    raw_root_constraints=root.constraints,
+                    expected, coordinator.constraints, step["placement"],
+                    raw_root_constraints=coordinator.constraints,
                     plan_schema_version=str(plan["schema_version"]),
                 )
         for key, value in expected.items():
@@ -6772,6 +6842,7 @@ class ExecutiveControlService:
             raise ServiceError("COO workspace must remain branch-bound and credentialless")
         if (
             job.orchestration_role == "plan"
+            and job.parent_job_id == root.job_id
             and job.attempt_count == 0
             and (
                 observation["head"] != self._coo_binding_for_root(root)["base_sha"]
@@ -7572,6 +7643,17 @@ class ExecutiveControlService:
                 or self._require_attended_qualification() != self._foreground_cycle_qualification):
             raise StateConflict("foreground qualification changed")
 
+    def _require_coo_coordinator_source(self, original_root_id: str, coordinator_id: str) -> None:
+        """Keep recursive cycle admission on the original foreground request."""
+        coordinator = self._require_runtime().jobs.get_job(coordinator_id)
+        if (
+            coordinator is None or coordinator.orchestration_role != "aggregation"
+            or coordinator.root_job_id != original_root_id
+            or self._require_bound_coo_job(coordinator).job_id != original_root_id
+        ):
+            raise StateConflict("COO coordinator is outside the original foreground root")
+        self._require_foreground_only_source(original_root_id)
+
     async def _run_coo_cycle_once(self, root_job_id: str) -> CooCycleOutcome:
         if self._closing:
             raise StateConflict("Executive control service is closing")
@@ -7624,11 +7706,14 @@ class ExecutiveControlService:
                 )
                 return future.result()
 
+            def require_cycle_admission(coordinator_id):
+                self._require_coo_coordinator_source(root_id, coordinator_id)
+
             def run_current_cycle():
                 # The executor thread may begin after its originating request closes.
                 self._require_foreground_only_source(root_id)
                 return CooCycle(self._require_runtime(), dispatcher=dispatch,
-                    before_admission=(self._require_foreground_only_source
+                    before_admission=(require_cycle_admission
                                       if self.config.coo_foreground_only or self._foreground_cycle_owner is not None
                                       else None)).run_once(root_id)
             outcome = await self._run_physical(run_current_cycle)

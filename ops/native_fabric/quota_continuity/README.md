@@ -265,3 +265,106 @@ One origin monotonic deadline governs routing, provider-lease acquisition, contr
 Deadline routing excludes only the local `m2` slot transport, whose slot wait and child lifetime do not yet consume this commission deadline. Remote Darwin hosts remain eligible through all ordinary economic, readiness, and placement gates. Direct deadline-bearing `m2` calls refuse before slot acquisition or task creation. Local calls without commission metadata retain their incumbent behavior.
 
 Automatic continuation applies to eligible ordinary C3 commissions and explicitly opted-in native CLI requests. It does not add a background scheduler, wake an ended native parent conversation, replay uncertain task effects, or bypass context, output, turn, resource, or time limits. Exhausting all authorized routes or the commission budget still returns retained evidence for the existing owner. A healthy canary validates normal dispatch and settlement; it does not establish that a real provider returned HTTP 429 or that quota failover occurred.
+
+## Registry-bound physical roots for new ordinary runs
+
+The optional `physical_lane_root` field belongs to the existing host entry in
+the original `ext/hosts.json` registry. This source capability does not enroll a
+host. When the field is present, that original registry owns path selection;
+publisher output may confirm the frozen path but cannot replace it. Task text,
+environment overrides and a resolved home-directory alias cannot select this
+configured root. No live registry value is changed by this source repair.
+Installing the protected release and admitting a real host root remain separate
+owner actions.
+
+The first supported shape is one **new explicit-ID ordinary plain GLM or Qwen
+remote run**, with an original root and assigning parent, `cwd=~`, no artifact
+contract, no operator child/budget or continuation, and no Macro workspace or
+CPU-scope extension. Configured unsupported shapes refuse before a provider
+lease or remote transfer; local reservation and packet retention may already
+exist. The local m2 shortcut also refuses a configured field before worker
+invocation. When the field is absent, eligible ordinary plain runs retain the
+separate publisher-owned transport repair: the strictly parsed publication
+return freezes the physical owner for readback, launch, polling, collection and
+cleanup. That path carries no registry-origin layout attestation and does not
+inherit the configured-root protocol's exclusive leaves or recovery guarantees.
+Configured-root failure or publisher disagreement never selects this fallback.
+Other run shapes retain their incumbent transport contract.
+
+On both eligible ordinary branches, host initialization may prepend its own
+home-relative or host CLI paths. After sourcing the physical owner's HOST_ENV,
+the controller prepends only that frozen owner's venv/bin again before GLM
+account readiness and launch. Other host PATH entries keep their relative order.
+Legacy/nonplain initialization is unchanged. This guarantees the intended path
+precedence, not authenticated virtual-environment bytes or arbitrary host setup.
+
+The field must name an absolute physical path using ASCII letters, digits,
+`_`, `-`, `.`, and `/`, with no empty, dot, or dot-dot components. The owner must
+already provide the root plus `tmp`, `ext`, `ext/active`, `ext/lanes`, `orch`,
+`orch/fabric`, and `support-releases`. The unchanged `DirectoryChain` checks
+every ancestor for permitted ownership, directory type, safe mode and no-follow
+custody. A pre-upload observation pins device, inode, UID and mode for this
+fixed layout. Later checks compare with that observation; replacement at the
+same pathname does not refresh the pin. These checks use the existing commission
+supervisor and deadline.
+
+Only this shape adds `artifact_delivery.py` to the exact remote support closure
+(38 files); default and historical 37-file or earlier generations retain their
+existing membership. The publisher still checks closed file sets. Transport,
+executor and collector check the immutable code manifest and the publisher's
+fixed state-link map against the same physical root. Bound executor reads
+require owned regular files, one link, no group/other write, stable identities,
+and exact sealed modes for code and release metadata. The generic legacy file
+reader and `DirectoryChain` body are unchanged.
+
+Bound packet transfer uses the existing SSH channel with a bounded stdin
+receiver and exclusive no-follow creation. Existing packet, output or receipt
+leaves refuse; they are never adopted, overwritten or removed. The bound launch
+reserves stdout and RC with exclusive opens and keeps their descriptors through
+the original executor entry. A strictly qualified empty reserved RC is pending
+only under the physical result contract v2; malformed nonempty content remains
+refused. It makes exactly one
+launch attempt, including when physical admission refuses. This avoids inventing a second attempt outside
+the retained evidence contract.
+
+The current producer combines acquisition evidence and optional physical-layout
+evidence in strict v3 receipts and plain launch bindings. Versions have one
+closed meaning each:
+
+| Record family | Preserved history | Current producer |
+| --- | --- | --- |
+| Transport observation | v1 unbound; v2 with validated non-null layout | Same v1/v2 shapes |
+| Transport verification | v1 original; protected v2 with layout and no acquisition field | v3 requires acquisition tag and explicit layout value |
+| Plain launch binding | v1 original; protected v2 retains original top-level fields and nested layout | v3 requires top-level and matching nested acquisition tag plus explicit nested layout |
+| Plain result contract | v1 unbound; v2 with validated layout | Selected from validated layout, not launch-binding version |
+| Artifact launch binding | v1 original; v2 acquisition-aware | Unchanged; no physical-root artifact extension |
+
+For v3, `lane_root` is either a validated layout or explicit `null`; omission is
+invalid. The configured branch emits a layout, while the unconfigured publisher
+branch emits `null`. A v3/null binding retains result-contract v1 and cannot
+interpret an empty RC as a physical reservation. New plain producers require
+their exact v3 transport receipt; they cannot promote historical receipts by
+inferring missing evidence. Mixed historical shapes and unknown fields refuse.
+
+`pool` remains the canonical accounting family (`glm` or `bailian`). The separate
+`acquisition_pool` records the successful controller acquisition and must match
+the unique original lease event. It permits `glm-frontier` only with exact
+`glm-5.3`; ordinary GLM and Qwen keep their finite existing tuples. Historical
+v1 and protected v2 retain their original logical-pool interpretation and cannot
+acquire frontier qualification from a model name or current routing metadata.
+
+Physical collection checks current original registry agreement and reads the
+retained physical path. Old v1 records and historical scopes cannot acquire a
+root retrospectively. Authentication, producer packet-consumption attestation,
+served-model/physical-host authentication, and business acceptance remain
+unproven by these records.
+
+`rollout/test_remote_lane_root.py` exercises the actual publisher, portable
+transport reader, retained binding, generated collector, exclusive packet and
+launch entries, and executor boundaries with inert fixtures. It covers alias
+retargeting, same-path directory substitution, link/mode/hash changes, existing
+leaf preservation, incompatible schemas, unsupported carriers, single-attempt
+admission and supervised deadline expiry. No test starts a provider worker or
+alters a live host/configuration owner. Passing these tests is source
+qualification, not live installation, worker START, result acceptance, or
+permission to replay any held operation.

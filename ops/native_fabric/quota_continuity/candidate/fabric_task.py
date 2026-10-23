@@ -123,6 +123,25 @@ def _paths(run_id: str) -> tuple[Path, Path]:
 
 
 
+
+def _result_snapshot(rid: str, limit: int, original_log: bytes | None = None) -> bytes:
+    """Read one coherent result observation under the current run's protocol."""
+    from remote_sub_helpers import read_macro_result
+    log_path, result_path = _paths(rid)
+    log = _bounded_regular(log_path, MAX_LOG_BYTES) if original_log is None else original_log
+    verified = read_macro_result(HERE, log_path, rid, limit, log)
+    if verified is not None:
+        return verified
+    # Intact legacy logs keep their bounded result reads.  An orphan or a
+    # partial log cannot establish which publication protocol owns the file.
+    # Recheck after the result read so a newly appended policy cannot race a
+    # legacy observation into exposing an unqualified canonical file.
+    data = _bounded_regular(result_path, limit)
+    if _bounded_regular(log_path, MAX_LOG_BYTES) != log:
+        raise FabricTaskError("result log changed during read")
+    return data
+
+
 def _acceptance_unknown(reason: str) -> dict[str, Any]:
     return {"accepted": None, "accepted_by": None, "acceptance_state": "UNVERIFIED",
             "acceptance_reason": reason, "root_id": None, "parent_run_id": None}
@@ -156,7 +175,8 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         hosts = set()
         prefix = (r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
                   r"\[remote_sub id=" + re.escape(rid) + r" host=([A-Za-z0-9_.-]+)\] (.*)")
-        for line in original_log.decode("utf-8").splitlines():
+        from remote_sub_helpers import macro_result_status_text
+        for line in macro_result_status_text(original_log, rid).splitlines():
             match = re.fullmatch(prefix, line)
             if match is None:
                 return unknown
@@ -180,9 +200,11 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
         keys = {"schema", "run_id", "root", "parent", "host", "mode", "requested_model",
                 "pool", "lease_id", "account", "packet_sha256", "support_digest",
                 "acquire_response_sha256", "source", "phase"}
+        if type(binding) is dict and binding.get("schema") == "mastermind.fabric_launch_binding.v2":
+            keys.add("acquisition_pool")
         if type(binding) is not dict or set(binding) != keys:
             return unknown
-        if (binding["schema"] != "mastermind.fabric_launch_binding.v1"
+        if (binding["schema"] not in {"mastermind.fabric_launch_binding.v1", "mastermind.fabric_launch_binding.v2"}
                 or binding["run_id"] != rid or binding["host"] not in hosts
                 or binding["source"] != "controller_original_acquire_return"
                 or binding["phase"] != "PRE_LAUNCH"
@@ -197,17 +219,27 @@ def _active_lineage_projection(rid: str, original_log: bytes) -> dict[str, Any]:
                 return unknown
         if type(binding["lease_id"]) is not str or not re.fullmatch("[a-f0-9]{12}", binding["lease_id"]):
             return unknown
+        if binding["schema"] == "mastermind.fabric_launch_binding.v2":
+            from remote_sub_helpers import validate_acquisition_pool
+            acquisition_pool = validate_acquisition_pool(
+                binding["mode"], binding["requested_model"], binding["acquisition_pool"])
+            acquired = (f'LEASE={binding["lease_id"]} ACCOUNT={binding["account"]}').encode("ascii")
+            if binding["acquire_response_sha256"] not in {
+                    delivery.digest(acquired), delivery.digest(acquired + b"\n")}:
+                return unknown
+        else:
+            acquisition_pool = binding["pool"]
         before = events[:index]
         support = "SUPPORT_VERSION_READY digest=" + binding["support_digest"] + r" policy=[a-f0-9]{64}"
         if (sum(event == "RUN_RESERVED explicit=1" for event in before) != 1
-                or [event for event in before if event.startswith("LEASE_OK ")] != ["LEASE_OK pool=" + binding["pool"]]
+                or [event for event in before if event.startswith("LEASE_OK ")] != ["LEASE_OK pool=" + acquisition_pool]
                 or len([event for event in before if event.startswith("SUPPORT_VERSION_READY ")]) != 1
                 or not any(re.fullmatch(support, event) for event in before)
                 or any(event.startswith(("LAUNCH", "DONE", "REMOTE_DONE", "LEASE_PRESERVED")) for event in before)
                 or any(token in event for event in before for token in ("REFUSED", "FAILED", "EFFECT_UNKNOWN"))):
             return unknown
         if not (before.index("RUN_RESERVED explicit=1")
-                < before.index("LEASE_OK pool=" + binding["pool"])
+                < before.index("LEASE_OK pool=" + acquisition_pool)
                 < next(i for i, event in enumerate(before) if event.startswith("SUPPORT_VERSION_READY "))):
             return unknown
         if delivery.local_file(log_path, MAX_LOG_BYTES) != original_log:
@@ -391,8 +423,9 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         if metadata_error is not None:
             raise metadata_error
         original_log = _bounded_regular(log_path, MAX_LOG_BYTES)
-        text = original_log.decode("utf-8", errors="replace")
-    except (OSError, FabricTaskError):
+        from remote_sub_helpers import macro_result_status_text
+        text = macro_result_status_text(original_log, rid)
+    except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
         return {
             "schema": "mastermind.fabric_task_status.v1",
             "run_id": rid,
@@ -479,6 +512,19 @@ def inspect_run(run_id: str) -> dict[str, Any]:
         elif _REMOTE_DONE_RE.search(text):
             state = "SETTLING"
 
+    if (state == "TERMINAL_FAILURE" and rc == 78 and signal == "prelaunch_failure"
+            and rid == "news-9612-exact-3a663-release-review-20261021"):
+        import native_plain_packet_reconcile as packet_reconcile
+        try:
+            verified = packet_reconcile.status_from_receipt()
+            if verified is not None:
+                return {**_acceptance_unknown("EXECUTION_NOT_ELIGIBLE"), **verified}
+        except (OSError, ValueError, TypeError, KeyError):
+            return {"schema": "mastermind.fabric_task_status.v1", "run_id": rid,
+                "state": "STATUS_UNREADABLE", "rc": None, "signal": None,
+                "result_available": False, "result_bytes": None,
+                **_acceptance_unknown("ARTIFACT_UNVERIFIED")}
+
     if state == "EFFECT_UNKNOWN" and rid == prestart_reconcile.RUN_ID:
         verified = prestart_reconcile.status_from_receipt()
         if verified is not None:
@@ -508,12 +554,10 @@ def inspect_run(run_id: str) -> dict[str, Any]:
     result_available = False
     result_bytes = None
     try:
-        info = result_path.lstat()
-        result_available = stat.S_ISREG(info.st_mode) and not stat.S_ISLNK(info.st_mode)
-        result_bytes = info.st_size if result_available else None
-    except FileNotFoundError:
-        pass
-    except OSError:
+        snapshot = _result_snapshot(rid, MAX_RESULT_BYTES, original_log)
+        result_available = True
+        result_bytes = len(snapshot)
+    except (OSError, ValueError, TypeError, KeyError, FabricTaskError):
         pass
 
     status = {
@@ -561,10 +605,9 @@ def read_result(run_id: str, *, max_bytes: int = DEFAULT_RESULT_BYTES) -> bytes:
     rid = validate_run_id(run_id)
     if not isinstance(max_bytes, int) or isinstance(max_bytes, bool) or not 1 <= max_bytes <= MAX_RESULT_BYTES:
         raise ValueError("invalid result byte limit")
-    _, result_path = _paths(rid)
     try:
-        return _bounded_regular(result_path, max_bytes)
-    except FileNotFoundError as exc:
+        return _result_snapshot(rid, max_bytes)
+    except (OSError, ValueError, TypeError, KeyError) as exc:
         raise FabricTaskError("RESULT_NOT_AVAILABLE") from exc
 
 
@@ -717,11 +760,11 @@ def request(
         if artifact_names:
             import artifact_production
         if qualification_host:
-            if pool != "grok" or artifact_names or native_return or requested_model or prefer:
+            if pool not in ("grok", "minimax") or artifact_names or native_return or requested_model or prefer:
                 raise FabricTaskError("QUALIFICATION_OPTIONS_REFUSED")
             import fabric_host_qualification
             route = _parse_route(fabric_host_qualification.qualification_route(
-                qualification_host, task_class=task_class, complexity=complexity,
+                qualification_host, pool=pool, task_class=task_class, complexity=complexity,
                 reason=reason, subject_pool=subject_pool,
                 root=observed_root, parent=parent_run_id,
             ))
@@ -1019,8 +1062,10 @@ def plan_accepted_macro_worktree_release(
     log_path, _ = _paths(rid)
     try:
         original = _bounded_regular(log_path, MAX_LOG_BYTES)
-        text = original.decode("utf-8", errors="strict")
-    except (OSError, UnicodeError, FabricTaskError) as exc:
+        original.decode("utf-8", errors="strict")
+        from remote_sub_helpers import macro_result_status_text
+        text = macro_result_status_text(original, rid)
+    except (OSError, ValueError, TypeError, KeyError, FabricTaskError) as exc:
         raise FabricTaskError("FABRIC_RECLAIM_ORIGINAL_LOG_UNVERIFIED") from exc
     pattern = re.compile(
         r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}Z "
@@ -1087,9 +1132,53 @@ def _json(value: object) -> None:
     print(json.dumps(value, sort_keys=True, separators=(",", ":")))
 
 
+def _discard_failed_stdout() -> None:
+    """Prevent a failed acknowledgment from flushing again to its old channel."""
+    target_fd = null_fd = None
+    try:
+        target_fd = sys.stdout.fileno()
+        null_fd = os.open(os.devnull, os.O_WRONLY)
+        os.dup2(null_fd, target_fd)
+    except (AttributeError, OSError, TypeError, ValueError):
+        # Embedded/test streams may have no descriptor. Never assume fd 1 or
+        # sys.__stdout__ belongs to that stream, and do not close the caller's
+        # retained object merely to disarm this CLI response.
+        sys.stdout = None
+    finally:
+        if null_fd is not None and null_fd != target_fd:
+            try:
+                os.close(null_fd)
+            except OSError:
+                pass
+
+
+def _plain_packet_reconciliation_response(value: object, effect_state: str) -> bool:
+    """Deliver either response without losing the operation's effect state."""
+    try:
+        _json(value)
+        sys.stdout.flush()
+    except (OSError, ValueError, TypeError) as exc:
+        _discard_failed_stdout()
+        print("PLAIN_PACKET_RECONCILIATION_RETURN_UNDELIVERED: "
+              + effect_state + ": " + type(exc).__name__ + ": " + str(exc),
+              file=sys.stderr, flush=True)
+        return False
+    return True
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     sub = parser.add_subparsers(dest="cmd", required=True)
+
+    p_packet_check = sub.add_parser("check-plain-packet-retention", help="Read-only fixed original News retention proof; no reconciliation or retry")
+    p_packet_check.add_argument("run_id")
+    p_packet_check.add_argument("--root", required=True)
+
+    p_packet_reconcile = sub.add_parser("reconcile-plain-packet-retention",
+        help="Record the exact original historical failure disposition; never replay or accept")
+    p_packet_reconcile.add_argument("run_id")
+    p_packet_reconcile.add_argument("--root", required=True)
+    p_packet_reconcile.add_argument("--expected-proof-sha256", required=True)
 
     p_request = sub.add_parser("request")
     p_request.add_argument("--id", required=True)
@@ -1289,6 +1378,32 @@ def main(argv: list[str] | None = None) -> int:
             command.extend(["--path", path])
         return subprocess.run(command).returncode
     try:
+        if args.cmd == "reconcile-plain-packet-retention":
+            import native_plain_packet_reconcile as packet_reconcile
+            try:
+                response = packet_reconcile.reconcile_original(
+                    args.run_id, args.root, args.expected_proof_sha256)
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                effect_state = getattr(exc, "effect_state", "NOT_APPLIED")
+                _plain_packet_reconciliation_response(
+                    {"schema": packet_reconcile.SCHEMA, "action": "UNQUALIFIED",
+                     "run_id": args.run_id, "expected_root_id": args.root,
+                     "effect_state": effect_state, "retry_allowed": False,
+                     "worker_dispatch_performed": False}, effect_state)
+                print("PLAIN_PACKET_RECONCILIATION_UNQUALIFIED: " + effect_state
+                      + ": " + type(exc).__name__ + ": " + str(exc),
+                      file=sys.stderr, flush=True)
+                return 78
+            # A returned operation may already have published the receipt.
+            return 0 if _plain_packet_reconciliation_response(response, "EFFECT_UNKNOWN") else 78
+        if args.cmd == "check-plain-packet-retention":
+            import native_plain_packet_check as packet_check
+            try:
+                _json(packet_check.check_original(args.run_id, args.root))
+                return 0
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                print("PLAIN_PACKET_CHECK_UNQUALIFIED: " + type(exc).__name__ + ": " + str(exc), file=sys.stderr)
+                return 78
         if args.cmd == "reconcile-completed":
             try:
                 _json(completion_reconcile.reconcile(args.run_id, args.root, apply=args.apply))

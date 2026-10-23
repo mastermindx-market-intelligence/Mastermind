@@ -42,24 +42,45 @@ def source(tmp_path):
     return repo, sha, git(repo, "rev-parse", "HEAD^{tree}")
 
 
-def built_dist(app):
+NOTICE_BYTES = {
+    "third-party/deepseek-client-dependency-NOTICES.txt": b"Dependency copyright notices\n",
+    "third-party/deepseek-harness-LICENSE.txt": b"Harness license and copyright\n",
+}
+
+
+def built_dist(app, *, noir_notices=False):
     dist = app / "dist"
     (dist / "assets").mkdir(parents=True)
     (dist / "index.html").write_text('<script src="/os/assets/index-a.js"></script><link href="/os/assets/index-a.css">')
     (dist / "assets/index-a.js").write_text("committed app bytes")
     (dist / "assets/index-a.css").write_text("body{}")
+    if noir_notices:
+        extra = {
+            "assets/atelier-office-a.jpg": b"office image",
+            "assets/Manrope-Variable-a.ttf": b"Manrope font",
+            "assets/Inter-Variable-a.woff2": b"Inter font",
+            "licenses/fonts/Inter-OFL.txt": b"Inter license",
+            "licenses/fonts/Manrope-OFL.txt": b"Manrope license",
+            "licenses/fonts/Manrope-FONTLOG.txt": b"Manrope font log",
+            **NOTICE_BYTES,
+        }
+        for name, data in extra.items():
+            path = dist / name
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
     return {"operator_uid": 501, "tools": {"/test/node": "a" * 64, "/test/npm-cli.js": "b" * 64}}
 
 
 @pytest.fixture
-def bundle(tmp_path, source, monkeypatch):
+def bundle(tmp_path, source, monkeypatch, request):
     mod = helper()
     # Production requires root-sealed paths and a root preparer; ordinary unit
     # temporary directories only replace those OS ownership checks. Archive,
     # source policy, receipts, byte validation and import remain the real code.
     monkeypatch.setattr(mod, "require_sealed_path", lambda *a, **k: None)
     monkeypatch.setattr(mod, "_require_root", lambda: None)
-    monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(app))
+    monkeypatch.setattr(mod, "_build", lambda app, **kwargs: built_dist(
+        app, noir_notices=getattr(request, "param", False)))
     repo, sha, tree = source
     out = tmp_path / "bundle"
     mod.prepare(source_repo=repo, expected_sha=sha, web_client_id="test-public-client-id", output=out,
@@ -180,6 +201,70 @@ def test_prepared_bytes_import_before_seal_and_same_release_is_verify_only(bundl
     with pytest.raises(ValueError):
         mod.import_assets(checked, stage)
     assert before == {str(p.relative_to(stage)): p.read_bytes() for p in stage.rglob("*") if p.is_file()}
+
+
+@pytest.mark.parametrize("bundle", [True], indirect=True)
+def test_noir_notices_survive_capture_manifest_qualification_and_import(bundle, tmp_path):
+    mod, out, sha, tree = bundle
+    manifest = json.loads((out / mod.DIST / "asset-manifest.json").read_bytes())
+    rows = {item["path"]: item for item in manifest["files"]}
+    assert len(rows) == 11
+    checked = mod.qualify(out, expected_sha=sha, tree_sha=tree, source_repo=out.parent / "source")
+    stage = tmp_path / "notice-stage"
+    stage.mkdir()
+    mod.import_assets(checked, stage)
+    for name, data in NOTICE_BYTES.items():
+        assert rows[name] == {"path": name, "byte_count": len(data),
+                              "sha256": hashlib.sha256(data).hexdigest(),
+                              "mime": "text/plain; charset=utf-8"}
+        assert checked.files[name] == data
+        assert (stage / mod.DIST / name).read_bytes() == data
+    mod.compare_existing(checked, stage)
+
+
+@pytest.mark.parametrize("bundle", [True], indirect=True)
+def test_noir_notices_load_and_serve_with_optional_mcp_sdk(bundle, monkeypatch):
+    pytest.importorskip("mcp", reason="real HTTP loading belongs to the optional MCP network test environment")
+    _, out, _, _ = bundle
+    from ops.executive_os import executive_mcp_entry as entry
+    # Only sealed host ownership is replaced for the temporary fixture. The
+    # manifest, hashes, file loading, route admission and response bytes are real.
+    monkeypatch.setattr(entry, "require_sealed_path", lambda *a, **k: None)
+    app = entry.load_os_app(out)
+    import asyncio
+    async def request(path):
+        messages = []
+        async def receive():
+            return {"type": "http.request", "body": b"", "more_body": False}
+        async def send(message):
+            messages.append(message)
+        await app({"type": "http", "method": "GET", "path": path,
+                   "raw_path": path.encode("ascii"), "query_string": b""}, receive, send)
+        return messages
+    for name, data in NOTICE_BYTES.items():
+        messages = asyncio.run(request("/os/" + name))
+        assert messages[0]["status"] == 200
+        assert dict(messages[0]["headers"])[b"content-type"] == b"text/plain; charset=utf-8"
+        assert messages[-1]["body"] == data
+    assert asyncio.run(request("/os/third-party/unknown.txt"))[0]["status"] == 404
+
+
+@pytest.mark.parametrize("bundle", [True], indirect=True)
+@pytest.mark.parametrize("damage", ["missing", "renamed", "extra", "extra_directory"])
+def test_noir_notice_capture_keeps_file_and_directory_sets_closed(bundle, damage):
+    mod, out, _, _ = bundle
+    dist = out / mod.DIST
+    notice = dist / "third-party/deepseek-harness-LICENSE.txt"
+    if damage == "missing":
+        notice.unlink()
+    elif damage == "renamed":
+        notice.rename(notice.with_name("other-LICENSE.txt"))
+    elif damage == "extra":
+        (dist / "third-party/extra.txt").write_text("unapproved")
+    else:
+        (dist / "third-party/extra").mkdir()
+    with pytest.raises(ValueError):
+        mod._capture_dist(out, sealed=False)
 
 
 @pytest.mark.parametrize("damage", ["wrong_sha", "wrong_tree", "asset_changed", "manifest_changed", "missing_manifest", "extra", "symlink", "hardlink", "fifo", "traversal"])

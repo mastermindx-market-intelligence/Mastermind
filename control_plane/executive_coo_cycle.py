@@ -20,6 +20,7 @@ from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
     EXPECTED_POLICY_SHA256,
+    HIERARCHY_POLICY_SHA256,
 )
 from control_plane.executive_runtime import (
     COO_CYCLE_BLOCK_REASONS,
@@ -37,6 +38,8 @@ from control_plane.executive_runtime import (
     WorkerStatus,
     _accepted_orchestration_root_provenance,
     _current_orchestration_tree_material,
+    _hierarchy_material,
+    _job_coo_policy,
     _current_orchestration_tree_material_for_dispatch,
     _review_attempt_is_independent,
     _validated_aggregation_handoff,
@@ -190,7 +193,12 @@ class CooCycle:
             receipt = dataclasses.asdict(receipt)
         elif not isinstance(receipt, dict):
             receipt = {"value": receipt}
-        return CooCycleOutcome(root, action, selected, command, dict(receipt))
+        receipt = dict(receipt)
+        coordinator = self.runtime.jobs.get_job(root)
+        if coordinator is not None and coordinator.parent_job_id is not None:
+            receipt["coordinator_job_id"] = root
+            root = coordinator.root_job_id
+        return CooCycleOutcome(root, action, selected, command, receipt)
 
     def _dispatch_none_was_preclaim(self, before: Job) -> bool:
         """True only when a ``None`` dispatcher result left the Job untouched."""
@@ -262,6 +270,57 @@ class CooCycle:
             and row["lease_token"] is not None
             and int(row["lease_expires_at_ms"]) > self.runtime.store.now_ms()
         )
+
+    def _ready_coordinator_branches(
+        self, active: list[Job], queued: list[Job],
+        current_by_step: Mapping[str, Mapping[str, Any]],
+    ) -> list[Job]:
+        """Find independent reserved branches before revisiting an incumbent.
+
+        A coordinator stays QUEUED while its descendants execute. Ordering only
+        its own status would therefore let the first branch monopolize the
+        root cycle. This read-only projection leaves every incumbent and its
+        unknown-effect marker with its existing owner.
+        """
+        peers = [*active, *queued]
+        if len(peers) < 2 or not queued:
+            return []
+        for job in peers:
+            if (
+                job.orchestration_role != "aggregation"
+                or job.requested_authorities != ["READ"]
+                or job.allowed_write_paths or job.validation_commands
+                or not job.plan_attempt_id or not job.plan_digest or not job.plan_step_id
+                or job.plan_attempt_id != peers[0].plan_attempt_id
+                or job.plan_digest != peers[0].plan_digest
+                or current_by_step.get(job.plan_step_id, {}).get("current_job_id") != job.job_id
+            ):
+                return []
+        tree = [job for job in self.runtime.jobs.list_jobs()
+                if job.root_job_id == peers[0].root_job_id]
+        branches: dict[str, list[Job]] = {}
+        for peer in peers:
+            ids = {peer.job_id}
+            while True:
+                descendants = {job.job_id for job in tree if job.parent_job_id in ids}
+                if descendants <= ids:
+                    break
+                ids.update(descendants)
+            branch = [job for job in tree if job.job_id in ids]
+            # Coupled review/repair, validation or write authority retains the
+            # existing reconciliation-first order for the entire frontier.
+            if any(job.orchestration_role not in {"aggregation", "plan", "work"}
+                   or job.requested_authorities != ["READ"]
+                   or job.allowed_write_paths or job.validation_commands
+                   for job in branch):
+                return []
+            branches[peer.job_id] = branch
+        return [peer for peer in queued if not any(
+            job.status in {JobStatus.RUNNING, JobStatus.CHECKPOINTED}
+            or (job.orchestration_role == "aggregation"
+                and self.runtime.jobs.pending_cycle_dispatch_effect_unknown(job.job_id) is not None)
+            for job in branches[peer.job_id]
+        )]
 
     @classmethod
     def _ready_frontier_open(
@@ -488,6 +547,23 @@ class CooCycle:
             root_id, "DISPATCHED", selected.job_id, command, receipt
         )
 
+    def _policy_hash_for_block(self, coordinator_id: str) -> str:
+        # A malformed live policy still needs a durable block. Select its pinned
+        # identity without loading or accepting that policy's current bytes.
+        events = self.runtime.events.list_events(job_id=coordinator_id)
+        for event in events:
+            if event.event_type == "COO_PLAN_ADMITTED":
+                digest = event.payload.get("policy_sha")
+                if digest in {EXPECTED_POLICY_SHA256, HIERARCHY_POLICY_SHA256}:
+                    return str(digest)
+        job = self.runtime.jobs.get_job(coordinator_id)
+        if job is not None and job.parent_job_id is not None:
+            provenance = job.orchestration_provenance or {}
+            grant = provenance.get("hierarchy_grant", {})
+            if isinstance(grant, dict) and grant.get("policy_sha256") == HIERARCHY_POLICY_SHA256:
+                return HIERARCHY_POLICY_SHA256
+        return EXPECTED_POLICY_SHA256
+
     def _block(
         self,
         root: str,
@@ -505,7 +581,7 @@ class CooCycle:
             reason=reason,
             command_id=command,
             evidence=evidence,
-            policy_sha=EXPECTED_POLICY_SHA256,
+            policy_sha=self._policy_hash_for_block(root),
         )
         return self._outcome(root, "BLOCKED", selected, command, receipt)
 
@@ -842,8 +918,9 @@ class CooCycle:
                 decisions.append(decision)
             if not allowed:
                 continue
+            scope_id = selected.job_id if selected.orchestration_role == "aggregation" else selected.parent_job_id
             command = (
-                f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
+                f"coo-cycle:{scope_id}:dispatch:{selected.job_id}:attempt:"
                 f"{selected.attempt_count}"
             )
             receipt = self.dispatcher(selected.job_id, command)
@@ -919,15 +996,20 @@ class CooCycle:
         # NO_NEW_WORK, and every fresh, requeue, block, repair, review,
         # planner, plan, handoff, queued and root-fresh path below is
         # unreachable once this gate reports a halt.
-        gate = self._finite_control_gate(root_id, root)
+        original_root_id = root.root_job_id
+        original_root = self.runtime.jobs.get_job(original_root_id)
+        if original_root is None:
+            raise StateConflict("coordinator lost its original root")
+        gate = self._finite_control_gate(original_root_id, original_root)
         if gate is not None and gate.halt:
             return self._finite_halt_outcome(
-                root_id, gate, self._finite_halt_policy_sha(gate)
+                original_root_id, gate, self._finite_halt_policy_sha(gate)
             )
 
         try:
-            policy = CooCyclePolicy.load()
-        except CooCyclePolicyError as exc:
+            with self.runtime.store.read() as connection:
+                policy = _job_coo_policy(connection, root_id)
+        except (CooCyclePolicyError, StateConflict) as exc:
             return self._block(
                 root_id,
                 root_id,
@@ -946,24 +1028,52 @@ class CooCycle:
                 payload,
             )
 
-        provenance = root.orchestration_provenance
+        provenance = original_root.orchestration_provenance
         if (
-            root.parent_job_id is not None
-            or root.root_job_id != root.job_id
-            or root.depth != 0
-            or root.orchestration_role != "aggregation"
+            original_root.parent_job_id is not None
+            or original_root.root_job_id != original_root.job_id
+            or original_root.depth != 0
+            or original_root.orchestration_role != "aggregation"
             or not isinstance(provenance, dict)
             or provenance.get("schema_version")
             != "mastermind.executive_orchestration_provenance/v1"
             or not _accepted_orchestration_root_provenance(provenance)
             or provenance.get("role") != "aggregation"
-            or provenance.get("job_id") != root.job_id
-            or provenance.get("root_job_id") != root.job_id
+            or provenance.get("job_id") != original_root.job_id
+            or provenance.get("root_job_id") != original_root.job_id
             or provenance.get("parent_job_id") is not None
             or not provenance.get("source_id")
             or not provenance.get("source_digest")
         ):
             return self._block(root_id, root_id, "invalid_root")
+
+        if root.parent_job_id is not None:
+            provenance = root.orchestration_provenance
+            if (
+                root.orchestration_role != "aggregation"
+                or not isinstance(provenance, dict)
+                or provenance.get("schema_version") != "mastermind.executive_orchestration_provenance/v2"
+                or provenance.get("creator") != "coo_cycle"
+                or provenance.get("role") != "aggregation"
+                or provenance.get("job_id") != root_id
+                or provenance.get("root_job_id") != original_root_id
+                or provenance.get("parent_job_id") != root.parent_job_id
+            ):
+                return self._block(root_id, root_id, "invalid_root")
+            try:
+                with self.runtime.store.read() as connection:
+                    row = connection.execute("SELECT * FROM jobs WHERE job_id=?", (root_id,)).fetchone()
+                    _hierarchy_material(connection, row)
+                    parent_row = connection.execute(
+                        "SELECT * FROM jobs WHERE job_id=?", (root.parent_job_id,)
+                    ).fetchone()
+                    parent_admission, parent_plan = _validated_plan_admission(connection, parent_row)
+                    members = _current_orchestration_tree_material_for_dispatch(
+                        connection, parent_row, parent_admission, parent_plan)
+                    if not any(item["current_job_id"] == root_id for item in members):
+                        raise StateConflict("coordinator is not a current admitted member")
+            except (StateConflict, CooCyclePolicyError) as exc:
+                return self._block(root_id, root_id, _classify_invalid(exc))
 
         pending_dispatch = (
             self.runtime.jobs.pending_cycle_dispatch_effect_unknown(root_id)
@@ -989,9 +1099,10 @@ class CooCycle:
         all_jobs = [
             job
             for job in self.runtime.jobs.list_jobs()
-            if job.root_job_id == root_id
+            if job.root_job_id == original_root_id
+            and (job.job_id == root_id or job.parent_job_id == root_id)
         ]
-        children = [job for job in all_jobs if job.job_id != root_id]
+        children = [job for job in all_jobs if job.parent_job_id == root_id]
         events = self.runtime.events.list_events(job_id=root_id)
         admission_events = [event for event in events if event.event_type == "COO_PLAN_ADMITTED"]
         handoff_events = [
@@ -1057,8 +1168,8 @@ class CooCycle:
             if (
                 planner.orchestration_role != "plan"
                 or planner.parent_job_id != root_id
-                or planner.root_job_id != root_id
-                or planner.depth != 1
+                or planner.root_job_id != original_root_id
+                or planner.depth != root.depth + 1
                 or planner.plan_attempt_id is not None
                 or planner.plan_digest is not None
                 or planner.plan_step_id is not None
@@ -1070,7 +1181,7 @@ class CooCycle:
                 or planner_provenance.get("command_id") != expected_create_command
                 or planner_provenance.get("job_id") != planner.job_id
                 or planner_provenance.get("parent_job_id") != root_id
-                or planner_provenance.get("root_job_id") != root_id
+                or planner_provenance.get("root_job_id") != original_root_id
                 or planner_provenance.get("role") != "plan"
                 or planner_provenance.get("source_id") != root_id
                 or planner_provenance.get("source_digest")
@@ -1109,7 +1220,7 @@ class CooCycle:
                     root_id,
                     selected_job_id=selected.job_id,
                     expectation=expectation,
-                    policy_sha=EXPECTED_POLICY_SHA256,
+                    policy_sha=policy.policy_sha256,
                 )
             except StateConflict as exc:
                 return self._outcome(
@@ -1158,7 +1269,7 @@ class CooCycle:
                 rows = {
                     str(row["job_id"]): row
                     for row in connection.execute(
-                        "SELECT * FROM jobs WHERE root_job_id=?", (root_id,)
+                        "SELECT * FROM jobs WHERE root_job_id=?", (original_root_id,)
                     )
                 }
                 review_groups: dict[str, list[Job]] = {}
@@ -1197,7 +1308,7 @@ class CooCycle:
                                     connection,
                                     job_row=rows[review.job_id],
                                     expected_role="review",
-                                    root_job_id=root_id,
+                                    root_job_id=original_root_id,
                                 )
                             )
                             body = seal["result_envelope"]["role_result"]
@@ -1330,13 +1441,13 @@ class CooCycle:
             not review_pressure_reconciliation
             and admission is not None
             and plan_body is not None
-            and admission.get("schema_version") == "mastermind.coo_plan_admission/v2"
-            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+            and admission.get("schema_version") in {"mastermind.coo_plan_admission/v2", "mastermind.coo_plan_admission/v3"}
+            and plan_body.get("schema_version") in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
         ):
             materialized_steps = {
                 str(job.plan_step_id)
                 for job in children
-                if job.orchestration_role in {"work", "repair"}
+                if job.orchestration_role in {"work", "repair", "aggregation"}
                 and job.plan_step_id is not None
             }
             for step in plan_body["steps"]:
@@ -1408,11 +1519,18 @@ class CooCycle:
             [job for job in children if job.status == JobStatus.QUEUED],
             key=lambda job: _job_sort_key(job, ordinals),
         )
+        serviced_coordinators: set[str] = set()
+        if plan_body is not None and plan_body["schema_version"] == "mastermind.execution_plan/v5":
+            for candidate in self._ready_coordinator_branches(active, queued, current_by_step):
+                outcome = self.run_once(candidate.job_id)
+                if outcome.action != "NO_ACTION":
+                    return outcome
+                serviced_coordinators.add(candidate.job_id)
         if (
             active
             and queued
             and plan_body is not None
-            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+            and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
             and self._ready_frontier_open(active, queued, current_by_step)
         ):
             for candidate in queued:
@@ -1427,13 +1545,15 @@ class CooCycle:
         # it never claims a replacement or another Job.
         if active:
             selected = active[0]
+            if selected.orchestration_role == "aggregation":
+                return self.run_once(selected.job_id)
             if selected.attempt_count < 1 or not selected.current_attempt_id:
                 return self._block(root_id, selected.job_id, "state_conflict")
-            allowed, decision = self._finite_incumbent_allowed(gate, root_id, selected)
+            allowed, decision = self._finite_incumbent_allowed(gate, original_root_id, selected)
             if not allowed:
                 assert gate is not None
                 return self._finite_outcome(
-                    root_id, policy.policy_sha256, gate, [decision]
+                    original_root_id, policy.policy_sha256, gate, [decision]
                 )
             command = (
                 f"coo-cycle:{root_id}:dispatch:{selected.job_id}:attempt:"
@@ -1452,13 +1572,24 @@ class CooCycle:
         if queued:
             unavailable: list[str] = []
             for candidate in queued:
+                if candidate.job_id in serviced_coordinators:
+                    unavailable.append(candidate.job_id)
+                    continue
+                if candidate.orchestration_role == "aggregation":
+                    # The same bounded cycle owns each coordinator. Its own
+                    # immutable handoff must precede provider dispatch.
+                    outcome = self.run_once(candidate.job_id)
+                    if outcome.action != "NO_ACTION":
+                        return outcome
+                    unavailable.append(candidate.job_id)
+                    continue
                 outcome = self._dispatch_queued(root_id, candidate)
                 if outcome is not None:
                     return outcome
                 unavailable.append(candidate.job_id)
                 if not (
                     plan_body is not None
-                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4"}
+                    and plan_body["schema_version"] in {"mastermind.execution_plan/v3", "mastermind.execution_plan/v4", "mastermind.execution_plan/v5"}
                     and all(self._is_read_only_frontier_work(job) for job in queued)
                 ):
                     break
@@ -1557,11 +1688,11 @@ class CooCycle:
         }:
             if root.attempt_count < 1 or not root.current_attempt_id:
                 return self._block(root_id, root_id, "state_conflict")
-            allowed, decision = self._finite_incumbent_allowed(gate, root_id, root)
+            allowed, decision = self._finite_incumbent_allowed(gate, original_root_id, root)
             if not allowed:
                 assert gate is not None
                 return self._finite_outcome(
-                    root_id, policy.policy_sha256, gate, [decision]
+                    original_root_id, policy.policy_sha256, gate, [decision]
                 )
             command = (
                 f"coo-cycle:{root_id}:dispatch:{root_id}:attempt:"

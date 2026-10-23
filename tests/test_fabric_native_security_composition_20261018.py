@@ -22,15 +22,21 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
-COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
+COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
+PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
+PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
 PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f77591ebc4eb66c43d"
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# Observer, portable reader and original-state collector changes compose here.
-# Executor, donor, support and deadline identities remain independently pinned.
-# Same-path retention changes only remote_sub.sh in the declared 83-file closure.
-NATIVE_MANIFEST_SHA = "e327073b35955ae88d6c78514f6d097c77a4356c4719e9fa9e7a8226b9d56bdf"
+# The 85-file closure composes protected physical-root admission and canonical
+# slot diagnostics with retention recovery and explicit acquisition correlation.
+# Historical executor, donor, quota, deadline and root transformations stay pinned.
+EXPECTED_NATIVE_FILES = 85
+# Integrated protected Fabric qualification and task/host overlays with
+# PR #1694 operator instructions, retaining all installed code preimages.
+NATIVE_MANIFEST_SHA = "78741512fd92cff5e5cbf2f21760ca458b8c99ed1d2d9551de11019c12b0e269"
 
 
 def _sha(raw):
@@ -63,6 +69,12 @@ def _composition(directory):
     assert _sha(DEADLINE_PATCH.read_bytes()) == DEADLINE_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(DEADLINE_PATCH))
     donor_contract._git(directory, "apply", str(DEADLINE_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PHYSICAL_ROOT_COMPOSED_SHA
+    # Extend the exact deadline-qualified executor with the independently
+    # reviewed physical-root change; do not repin the historical transformations.
+    assert _sha(PHYSICAL_ROOT_PATCH.read_bytes()) == PHYSICAL_ROOT_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PHYSICAL_ROOT_PATCH))
+    donor_contract._git(directory, "apply", str(PHYSICAL_ROOT_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed
@@ -114,7 +126,7 @@ def native_stage(tmp_path_factory):
     assert (output / "native-source-inventory.json").read_bytes() == (
         NATIVE / "rollout/native-source-inventory.json").read_bytes()
     manifest = json.loads(expected)
-    assert len(manifest) == 83
+    assert len(manifest) == EXPECTED_NATIVE_FILES
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
     assert manifest["ext/remote_sub_exec.py"] == COMPOSED_SHA
@@ -143,7 +155,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == 83 and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
@@ -304,7 +316,7 @@ print("benign fixture workspace ready")
         assert lease.exited and lease.holds == ["worker_cleanup_unproven"]
         assert (fixture.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
         assert os.environ.get("HOME") == initial_home
-    return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": 82,
+    return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": len(files),
             "support_files": 37, "executor_sha256": COMPOSED_SHA,
             "fixture_native_digest": generation.name, "fixture_support_digest": support_digest,
             "mint_receipt_sha256": _sha(receipt.read_bytes()), "provider_started": False,
@@ -319,7 +331,7 @@ def test_selected_native_support_executor_preserves_mint_and_outcome_binding(nat
     proof = json.loads(result.stdout)
     assert proof["status"] == "OFFLINE_COMPOSITION_SEAM_PASS"
     assert proof["executor_sha256"] == COMPOSED_SHA
-    assert proof["native_files"] == 82 and proof["support_files"] == 37
+    assert proof["native_files"] == EXPECTED_NATIVE_FILES and proof["support_files"] == 37
     assert proof["provider_started"] is False
     assert proof["physical_lease_acquired"] is False
     assert proof["production_macro_helper_tested"] is False

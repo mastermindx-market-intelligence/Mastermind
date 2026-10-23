@@ -54,7 +54,8 @@ def exclusive(path, data, mode=0o600):
 class Fixture:
     """One inert controller install plus its account-home and destination."""
 
-    def __init__(self, stack):
+    def __init__(self, stack, *, mode='glm', model=MODEL, acquisition_pool='glm-frontier'):
+        self.mode, self.model, self.acquisition_pool = mode, model, acquisition_pool
         self.home = Path(tempfile.mkdtemp(prefix="plain-home-", dir=str(stack)))
         self.ctl = Path(tempfile.mkdtemp(prefix="plain-ctl-", dir=str(stack)))
         self.dest_root = self.home / "evidence"
@@ -73,7 +74,7 @@ class Fixture:
                   b"    value = Path(path)\n"
                   b"    return value if value.is_absolute() else Path(here) / value\n")
         exclusive(self.ctl / "hosts.json", json.dumps(
-            {HOST: {"allowed_modes": ["glm"], "ssh_alias": ALIAS}}).encode())
+            {HOST: {"allowed_modes": [self.mode], "ssh_alias": ALIAS}}).encode())
         (self.ctl / "state" / "remote_sub").mkdir(parents=True, mode=0o700)
         for name in ("lanes/tmp", "lanes/ext/lanes",
                      "lanes/support-releases"):
@@ -142,8 +143,8 @@ class Fixture:
                         "sha256": sha(self.support_pin.read_bytes())}}
         exclusive(self.binding_path(), json.dumps({
             "schema": "mastermind.original_delivery_binding.v1", "run_id": RUN_ID,
-            "root": ROOT, "parent": PARENT, "host": HOST, "mode": "glm",
-            "requested_model": MODEL, "cwd": "~", "artifact_names": [],
+            "root": ROOT, "parent": PARENT, "host": HOST, "mode": self.mode,
+            "requested_model": self.model, "cwd": "~", "artifact_names": [],
             "sources": sources}, sort_keys=True, separators=(",", ":")).encode())
 
     def refresh_binding(self):
@@ -155,7 +156,7 @@ class Fixture:
         head = f"{stamp} [remote_sub id={RUN_ID} host={HOST}] "
         return "".join(line + "\n" for line in (
             head + "RUN_RESERVED explicit=1",
-            head + "LEASE_OK pool=glm",
+            head + "LEASE_OK pool=" + self.acquisition_pool,
             head + f"SUPPORT_VERSION_READY digest={self.support_digest} policy={POLICY}"))
 
     def observation(self, *, packet=None, files=None):
@@ -175,6 +176,27 @@ class Fixture:
             [sys.executable, str(self.ctl / "remote_sub_helpers.py"), *args],
             capture_output=True, text=True, timeout=60, env=merge, cwd=str(self.ctl))
 
+    def transport_arguments(self, seen, **overrides):
+        values=dict(mode=self.mode, model=self.model, lease_id="0123456789ab",
+                    account=ALIAS, acquisition_pool=self.acquisition_pool)
+        assert set(overrides) <= set(values)
+        values.update(overrides)
+        return ["transport-verify", str(self.log_path), str(self.receipt_path),
+                str(self.packet_pin), str(self.lease_path), str(seen), RUN_ID, HOST,
+                values["mode"], values["model"], self.support_digest, POLICY,
+                values["lease_id"], values["account"], values["acquisition_pool"], "-"]
+
+    def launch_arguments(self, **overrides):
+        values=dict(mode=self.mode, model=self.model, lease_id="0123456789ab",
+                    account=ALIAS, acquisition_pool=self.acquisition_pool)
+        assert set(overrides) <= set(values)
+        values.update(overrides)
+        return ["launch-binding", str(self.log_path), str(self.packet_pin),
+                str(self.lease_path), RUN_ID, ROOT, PARENT, HOST,
+                values["mode"], values["model"], self.support_digest,
+                values["lease_id"], values["account"], str(self.receipt_path),
+                values["acquisition_pool"]]
+
     def verify_transport(self, *, observation=None):
         """Run the real transport verification end-to-end (receipt + log line)."""
         if not self.log_path.exists():
@@ -184,21 +206,14 @@ class Fixture:
         if seen.exists():
             seen.unlink()
         exclusive(seen, observed)
-        result = self.run_helper(
-            ["transport-verify", str(self.log_path), str(self.receipt_path),
-             str(self.packet_pin), str(self.lease_path), str(seen), RUN_ID, HOST,
-             "glm", MODEL, self.support_digest, POLICY, "0123456789ab", ALIAS])
+        result = self.run_helper(self.transport_arguments(seen))
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(self.receipt_path.read_text())
 
     def retain_binding(self, env=None):
         """Run the real controller helpers end-to-end and return the binding row."""
         receipt = self.verify_transport()
-        result = self.run_helper(
-            ["launch-binding", str(self.log_path), str(self.packet_pin),
-             str(self.lease_path), RUN_ID, ROOT, PARENT, HOST, "glm", MODEL,
-             self.support_digest, "0123456789ab", ALIAS, str(self.receipt_path)],
-            env=env)
+        result = self.run_helper(self.launch_arguments(), env=env)
         assert result.returncode == 0, result.stdout + result.stderr
         return json.loads(result.stdout)
 
@@ -243,7 +258,7 @@ sys.exit(subprocess.run([sys.executable, "-I", "-S", "-c", wrapper]).returncode)
         import importlib
         sys.path.insert(0, str(self.ctl))
         for name in ("artifact_reader", "artifact_production", "native_runtime_bindings",
-                     "artifact_delivery", "original_delivery_collector"):
+                     "artifact_delivery", "remote_sub_helpers", "original_delivery_collector"):
             if name in sys.modules:
                 del sys.modules[name]
         module = importlib.import_module("original_delivery_collector")
@@ -256,6 +271,155 @@ def stack(prefix):
     # fixture roots live under the account home (or NATIVE_ROLLOUT_TEST_ROOT).
     base = os.environ.get("NATIVE_ROLLOUT_TEST_ROOT", str(Path.home()))
     return tempfile.TemporaryDirectory(prefix=prefix, dir=base)
+
+
+class AcquisitionProducerCase(unittest.TestCase):
+    """Actual producer helpers, with independent acquisition/log identities."""
+
+    def setUp(self):
+        self._stack = stack("acquisition-proof-")
+        self.addCleanup(self._stack.cleanup)
+
+    def fixture(self, **kwargs):
+        return Fixture(Path(self._stack.name), **kwargs)
+
+    def transport_args(self, fx, **overrides):
+        exclusive(fx.log_path, fx.prelaunch_log().encode())
+        seen = fx.ctl / f"state/remote_sub/{RUN_ID}.observation.json"
+        exclusive(seen, fx.observation())
+        return fx.transport_arguments(seen, **overrides)
+
+    def test_v3_producers_preserve_all_selected_pool_controls(self):
+        for mode, model, pool in (
+                ("glm", "glm-5.3", "glm-frontier"),
+                ("glm", "glm-5.3", "glm"),
+                ("glm", "glm-5.3-flash", "glm"),
+                ("qwen", "qwen3.8-flash", "bailian")):
+            with self.subTest(mode=mode, model=model, pool=pool):
+                fx = self.fixture(mode=mode, model=model, acquisition_pool=pool)
+                result = fx.retain_binding()
+                self.assertEqual(result["state"], "RETAINED_PRE_LAUNCH")
+                receipt = json.loads(fx.receipt_path.read_text())
+                line = next(line for line in fx.log_path.read_text().splitlines()
+                            if "LAUNCH_BINDING " in line)
+                binding = json.loads(line.split("LAUNCH_BINDING ", 1)[1])
+                self.assertEqual(receipt["schema"], "mastermind.transport_verification.v3")
+                self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v3")
+                self.assertEqual(binding["pool"], "glm" if mode == "glm" else "bailian")
+                self.assertEqual((receipt["acquisition_pool"], binding["acquisition_pool"],
+                                  binding["transport"]["acquisition_pool"]), (pool, pool, pool))
+                self.assertIsNone(receipt["lane_root"])
+                self.assertIsNone(binding["transport"]["lane_root"])
+                self.assertEqual(binding["acquire_response_sha256"], sha(fx.acquire))
+                self.assertIn("LEASE_OK pool=" + pool + "\n", fx.log_path.read_text())
+
+    def test_transport_cli_requires_separate_acquisition_and_layout_arguments(self):
+        control = self.fixture()
+        self.assertEqual(control.run_helper(self.transport_args(control)).returncode, 0)
+        for operation in ("missing_layout", "missing_acquisition", "extra", "swapped"):
+            with self.subTest(operation=operation):
+                fx = self.fixture()
+                args = self.transport_args(fx)
+                if operation == "missing_layout":
+                    args.pop()
+                elif operation == "missing_acquisition":
+                    args.pop(-2)
+                elif operation == "extra":
+                    args.append("-")
+                else:
+                    args[-2], args[-1] = args[-1], args[-2]
+                result = fx.run_helper(args)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertFalse(fx.receipt_path.exists())
+                self.assertNotIn("TRANSPORT_VERIFIED ", fx.log_path.read_text())
+
+    def test_artifact_producer_emits_selected_tag_without_plain_receipt(self):
+        for pool in ("glm-frontier", "glm"):
+            with self.subTest(acquisition_pool=pool):
+                fx = self.fixture(acquisition_pool=pool)
+                production = fx.collector_module().production
+                packet = production.encode_packet(
+                    "Inert artifact producer acquisition fixture.",
+                    root=ROOT, parent=PARENT, run_id=RUN_ID,
+                    names=["proof.txt"], support_digest=fx.support_digest).encode()
+                fx.packet_pin.write_bytes(packet)
+                exclusive(fx.log_path, fx.prelaunch_log().encode())
+                args = fx.launch_arguments()
+                args[-2] = "-"
+                result = fx.run_helper(args)
+                self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+                self.assertEqual(json.loads(result.stdout)["state"], "RETAINED_PRE_LAUNCH")
+                rows = [line.split("LAUNCH_BINDING ", 1)[1]
+                        for line in fx.log_path.read_text().splitlines()
+                        if "LAUNCH_BINDING " in line]
+                self.assertEqual(len(rows), 1)
+                binding = json.loads(rows[0])
+                self.assertEqual(binding["schema"], "mastermind.fabric_launch_binding.v2")
+                self.assertEqual((binding["pool"], binding["acquisition_pool"]),
+                                 ("glm", pool))
+                self.assertEqual(binding["packet_sha256"], sha(packet))
+                self.assertEqual(binding["support_digest"], fx.support_digest)
+                self.assertEqual(binding["acquire_response_sha256"], sha(fx.acquire))
+                self.assertNotIn("transport", binding)
+                self.assertFalse(fx.receipt_path.exists())
+
+    def test_transport_rejects_wrong_tuple_log_lease_or_account(self):
+        control = self.fixture()
+        self.assertEqual(control.run_helper(self.transport_args(control)).returncode, 0)
+        cases = [
+            ({"mode": "qwen"}, "acquisition_pool_scope"),
+            ({"model": "glm-5.3-flash"}, "acquisition_pool_scope"),
+            ({"acquisition_pool": "glm"}, "transport_verification_log_not_prelaunch"),
+            ({"acquisition_pool": "bailian"}, "acquisition_pool_scope"),
+            ({"acquisition_pool": "unknown"}, "acquisition_pool_scope"),
+            ({"lease_id": "abcdefabcdef"}, "transport_verification_acquire_mismatch"),
+            ({"account": "other-account"}, "transport_verification_acquire_mismatch"),
+        ]
+        for changed, reason in cases:
+            with self.subTest(changed=changed):
+                fx = self.fixture()
+                result = fx.run_helper(self.transport_args(fx, **changed))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(reason, result.stderr)
+                self.assertFalse(fx.receipt_path.exists())
+                self.assertNotIn("TRANSPORT_VERIFIED", fx.log_path.read_text())
+
+    def test_launch_rejects_wrong_tuple_receipt_lease_or_account(self):
+        self.assertEqual(self.fixture().retain_binding()["state"], "RETAINED_PRE_LAUNCH")
+        cases = [
+            ({"mode": "qwen"}, "acquisition_pool_scope"),
+            ({"model": "glm-5.3-flash"}, "acquisition_pool_scope"),
+            ({"acquisition_pool": "glm"}, "launch_binding_transport_unconfirmed"),
+            ({"acquisition_pool": "bailian"}, "acquisition_pool_scope"),
+            ({"acquisition_pool": "unknown"}, "acquisition_pool_scope"),
+            ({"lease_id": "abcdefabcdef"}, "launch_binding_launch_mismatch"),
+            ({"account": "other-account"}, "launch_binding_launch_mismatch"),
+        ]
+        for changed, reason in cases:
+            with self.subTest(changed=changed):
+                fx = self.fixture()
+                fx.verify_transport()
+                result = fx.run_helper(fx.launch_arguments(**changed))
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn(reason, result.stderr)
+                self.assertNotIn("LAUNCH_BINDING", fx.log_path.read_text())
+
+    def test_launch_rejects_changed_receipt_tag_and_missing_cli_tag(self):
+        self.assertEqual(self.fixture().retain_binding()["state"], "RETAINED_PRE_LAUNCH")
+        fx = self.fixture()
+        receipt = fx.verify_transport()
+        receipt["acquisition_pool"] = "glm"
+        fx.receipt_path.write_text(json.dumps(receipt))
+        result = fx.run_helper(fx.launch_arguments())
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("launch_binding_transport_unconfirmed", result.stderr)
+        self.assertNotIn("LAUNCH_BINDING", fx.log_path.read_text())
+        other = self.fixture()
+        args = self.transport_args(other)
+        result = other.run_helper(args[:-1])
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(other.receipt_path.exists())
+        self.assertNotIn("TRANSPORT_VERIFIED", other.log_path.read_text())
 
 
 class PlainRepairCase(unittest.TestCase):
@@ -328,7 +492,10 @@ class PlainRepairCase(unittest.TestCase):
         self.assertEqual(receipt["acceptance"], "NOT_RECORDED")
         self.assertFalse(receipt["original_operation_mutated"])
         binding = receipt["plain_launch_binding"]
-        self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v1")
+        self.assertEqual(binding["schema"], "mastermind.fabric_plain_launch_binding.v3")
+        self.assertEqual(binding["pool"], "glm")
+        self.assertEqual(binding["acquisition_pool"], self.fx.acquisition_pool)
+        self.assertEqual(binding["transport"]["acquisition_pool"], self.fx.acquisition_pool)
         self.assertEqual(binding["phase"], "PRE_LAUNCH")
         self.assertEqual(binding["packet_sha256"], sha(PACKET))
         self.assertEqual(binding["support_digest"], self.fx.support_digest)
@@ -352,6 +519,82 @@ class PlainRepairCase(unittest.TestCase):
         self.assertEqual(receipt["artifacts"], [])
         self.assertIsNone(receipt.get("artifact_manifest"))
 
+    def rewrite_retained_binding(self, transform, *, ordinary_log=False):
+        log = self.fx.log_path.read_text()
+        marker = "LAUNCH_BINDING "
+        line = next(line for line in log.splitlines() if marker in line)
+        record = json.loads(line.split(marker, 1)[1])
+        transform(record)
+        changed = line.split(marker, 1)[0] + marker + json.dumps(
+            record, sort_keys=True, separators=(",", ":"))
+        log = log.replace(line, changed)
+        if ordinary_log:
+            log = log.replace("LEASE_OK pool=glm-frontier\n", "LEASE_OK pool=glm\n")
+        self.fx.log_path.write_text(log)
+        self.fx.refresh_binding()
+
+    def test_unbound_v3_keeps_v1_collection_and_refuses_empty_rc(self):
+        self.qualified()
+        loaded = self.collector.load_binding(self.fx.binding_path(), run_id=RUN_ID,
+                                              root=ROOT, parent=PARENT)
+        self.assertEqual(loaded[3]["schema"], "mastermind.original_plain_result_contract.v1")
+        self.assertNotIn("lane_root", loaded[3])
+        rc = self.fx.home / "lanes/ext" / ("lanes_" + RUN_ID + ".rc")
+        rc.write_bytes(b"")
+        with self.assertRaisesRegex(ValueError, "original_file_owner_mode_type_or_size"):
+            self.collect()
+
+    def test_original_v1_plain_record_still_collects_under_its_original_rule(self):
+        self.qualified()
+        def legacy(record):
+            record["schema"] = "mastermind.fabric_plain_launch_binding.v1"
+            record.pop("acquisition_pool")
+            record["transport"].pop("acquisition_pool")
+            record["transport"].pop("lane_root")
+        self.rewrite_retained_binding(legacy, ordinary_log=True)
+        receipt = self.collect()
+        self.assertEqual(receipt["plain_launch_binding"]["schema"],
+                         "mastermind.fabric_plain_launch_binding.v1")
+        self.assertEqual(self.receipt_on_disk()[1], STDOUT)
+        self.assertEqual(receipt["lease_settlement"], "UNKNOWN")
+        self.assertEqual(receipt["acceptance"], "NOT_RECORDED")
+
+    def test_v1_does_not_gain_frontier_qualification(self):
+        self.qualified()
+        def legacy(record):
+            record["schema"] = "mastermind.fabric_plain_launch_binding.v1"
+            record.pop("acquisition_pool")
+            record["transport"].pop("acquisition_pool")
+            record["transport"].pop("lane_root")
+        self.rewrite_retained_binding(legacy)
+        with self.assertRaisesRegex(ValueError, "plain_launch_binding_event_sequence_invalid"):
+            self.collect()
+
+    def test_collector_rejects_v3_missing_unknown_or_inconsistent_tags(self):
+        self.qualified()
+        self.collector.load_binding(self.fx.binding_path(), run_id=RUN_ID,
+                                    root=ROOT, parent=PARENT)
+        original = self.fx.log_path.read_text()
+        mutations = (
+            lambda r: r.pop("acquisition_pool"),
+            lambda r: r["transport"].pop("acquisition_pool"),
+            lambda r: r["transport"].pop("lane_root"),
+            lambda r: r["transport"].update(lane_root={}),
+            lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v2"),
+            lambda r: r["transport"].update(acquisition_pool="glm"),
+            lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v99"),
+            lambda r: r.update(schema="mastermind.fabric_plain_launch_binding.v1"),
+            lambda r: (r.update(acquisition_pool="glm"),
+                       r["transport"].update(acquisition_pool="glm")),
+        )
+        for number, mutate in enumerate(mutations):
+            with self.subTest(number=number):
+                self.fx.log_path.write_text(original)
+                self.rewrite_retained_binding(mutate)
+                with self.assertRaises(ValueError):
+                    self.collect()
+                self.assertFalse(Path(self.fx.destination).exists())
+
     def test_retained_binding_requires_confirmed_prelaunch_transport(self):
         # Missing SUPPORT_VERSION_READY readback: the real helper refuses to
         # append anything, so no future collection can qualify this run.
@@ -364,7 +607,7 @@ class PlainRepairCase(unittest.TestCase):
              str(self.fx.packet_pin), str(self.fx.lease_path),
              str(self.fx.ctl / f"state/remote_sub/{RUN_ID}.observation.json"),
              RUN_ID, HOST, "glm", MODEL, self.fx.support_digest, POLICY,
-             "0123456789ab", ALIAS])
+             "0123456789ab", ALIAS, self.fx.acquisition_pool, "-"])
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("TRANSPORT_VERIFIED", self.fx.log_path.read_text())
         with self.assertRaises(ValueError) as caught:
@@ -381,7 +624,7 @@ class PlainRepairCase(unittest.TestCase):
         result = self.fx.run_helper(
             ["launch-binding", str(self.fx.log_path), str(self.fx.packet_pin),
              str(self.fx.lease_path), RUN_ID, ROOT, PARENT, HOST, "glm", MODEL,
-             self.fx.support_digest, "0123456789ab", ALIAS, "-"])
+             self.fx.support_digest, "0123456789ab", ALIAS, "-", self.fx.acquisition_pool])
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("LAUNCH_BINDING", self.fx.log_path.read_text())
         with self.assertRaises(ValueError) as caught:
@@ -400,7 +643,7 @@ class PlainRepairCase(unittest.TestCase):
             ["transport-verify", str(self.fx.log_path), str(self.fx.receipt_path),
              str(self.fx.packet_pin), str(self.fx.lease_path), str(seen), RUN_ID,
              HOST, "glm", MODEL, self.fx.support_digest, POLICY,
-             "0123456789ab", ALIAS])
+             "0123456789ab", ALIAS, self.fx.acquisition_pool, "-"])
         self.assertNotEqual(result.returncode, 0)
         log = self.fx.log_path.read_text()
         self.assertNotIn("TRANSPORT_VERIFIED", log)
@@ -421,7 +664,7 @@ class PlainRepairCase(unittest.TestCase):
             ["transport-verify", str(self.fx.log_path), str(self.fx.receipt_path),
              str(self.fx.packet_pin), str(self.fx.lease_path), str(seen), RUN_ID,
              HOST, "glm", MODEL, self.fx.support_digest, POLICY,
-             "0123456789ab", ALIAS])
+             "0123456789ab", ALIAS, self.fx.acquisition_pool, "-"])
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("TRANSPORT_VERIFIED", self.fx.log_path.read_text())
 
@@ -621,9 +864,11 @@ class PlainRepairCase(unittest.TestCase):
             '\nPY_VERIFY_PLAIN_TRANSPORT', 1)[0]
         source = source.replace('$PLAIN_TRANSPORT_CHAIN_SOURCE',
                                 self.collector.delivery.remote_directory_chain_source())
-        prefix = ('import pwd, types, sys\n'
-                  f'pwd.getpwuid=lambda uid: types.SimpleNamespace(pw_dir={str(self.fx.home)!r})\n'
-                  f'sys.argv={["reader", RUN_ID, self.fx.support_digest, POLICY]!r}\n')
+        # The bound reader receives the publisher's physical lanes root.
+        arguments = ["reader", RUN_ID, self.fx.support_digest, POLICY, "-",
+                     str(self.fx.home / "lanes")]
+        prefix = ('import sys\n'
+                  f'sys.argv={arguments!r}\n')
         return subprocess.run([sys.executable, '-I', '-S', '-c', prefix + source],
                               capture_output=True, text=True, timeout=10)
 
@@ -635,6 +880,8 @@ class PlainRepairCase(unittest.TestCase):
         self.assertEqual(row['files'], self.fx.support_manifest)
 
     def test_actual_transport_reader_refuses_symlink_ancestor(self):
+        before = self.transport_reader()
+        self.assertEqual(before.returncode, 0, before.stderr)
         packet_directory = self.fx.home / 'lanes/tmp'
         packet_directory.rename(self.fx.home / 'lanes/real-tmp')
         packet_directory.symlink_to('real-tmp', target_is_directory=True)
@@ -685,7 +932,8 @@ class PlainRepairCase(unittest.TestCase):
         result = self.fx.run_helper(
             ["launch-binding", str(self.fx.log_path), str(self.fx.packet_pin),
              str(self.fx.lease_path), RUN_ID, ROOT, PARENT, HOST, "glm", MODEL,
-             self.fx.support_digest, "0123456789ab", ALIAS, str(self.fx.receipt_path)])
+             self.fx.support_digest, "0123456789ab", ALIAS, str(self.fx.receipt_path),
+             self.fx.acquisition_pool])
         self.assertNotEqual(result.returncode, 0)
         self.assertNotIn("LAUNCH_BINDING", self.fx.log_path.read_text())
 
@@ -798,6 +1046,8 @@ class PlainRepairCase(unittest.TestCase):
         self.assertFalse((Path(self.fx.destination) / "receipt.json").exists())
 
     def test_historical_scope_keeps_exact_qualification(self):
+        # Historical evidence retains its original logical-pool event exactly.
+        self.fx.acquisition_pool = "glm"
         self.fx.retain_binding()
         self.fx.refresh_binding()
         self.collector.PLAIN_SCOPES[RUN_ID] = {

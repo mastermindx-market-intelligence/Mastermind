@@ -29,6 +29,7 @@ import yaml
 
 import bot  # noqa: F401
 
+from brain import provider_failure  # pure typing module — no brain/bot/app imports
 from common.redaction import sanitize_external_text
 
 _ROOT = Path(__file__).resolve().parent.parent
@@ -316,6 +317,89 @@ def _subscription_env(env_name: str | None = None) -> dict:
     return e
 
 
+def _new_sdk_diagnostic(run_id, book, role, candidate_ordinal):
+    """Build one passive candidate collector before SDK option/provider work."""
+    if not run_id:
+        return None
+    state = {"collector": None, "observation_failed": False}
+    try:
+        from brain.sdk_diagnostics import SDKInvocationDiagnostics
+        sdk_version = cli_version = None
+        try:
+            from importlib.metadata import version
+            sdk_version = version("claude-agent-sdk")
+        except Exception:
+            pass
+        try:
+            from claude_agent_sdk._cli_version import __cli_version__
+            cli_version = __cli_version__
+        except Exception:
+            pass
+        state["collector"] = SDKInvocationDiagnostics(
+            run_id=run_id, book=book, role=role, candidate_ordinal=candidate_ordinal,
+            sdk_version=sdk_version, cli_version=cli_version,
+        )
+    except Exception:
+        pass
+    return state
+
+
+def _observe_sdk_diagnostic(state, *, message=None, query_entered=False):
+    """Observe without changing the original SDK handler or its scalar result."""
+    if state is None or state["collector"] is None:
+        return
+    try:
+        if query_entered:
+            state["collector"].mark_query_entered()
+        else:
+            state["collector"].observe_message(message)
+    except Exception:
+        state["observation_failed"] = True
+
+
+def _record_sdk_diagnostic(state, run_id, end_state, exception=None):
+    """Best-effort nested event; never a classifier input or success verdict.
+
+    The collector caps its canonical UTF-8 envelope at 16 KiB. The existing
+    logger ASCII-escapes that envelope; its complete row has a different byte
+    size. Missing appends cannot be represented as successful capture.
+    """
+    if not run_id:
+        return
+    try:
+        from brain import runlog
+        if state is None or state["collector"] is None:
+            runlog.log_step(
+                run_id, "provider_diagnostic", "SDK diagnostic unavailable",
+                "The diagnostic collector could not be initialized; execution effects remain unverified.",
+                provider_diagnostic_capture={"status": "unavailable", "reason": "collector_unavailable"},
+            )
+            return
+        try:
+            envelope = state["collector"].finish(end_state, exception)
+        except Exception:
+            runlog.log_step(
+                run_id, "provider_diagnostic", "SDK diagnostic unavailable",
+                "Diagnostic finalization failed; execution effects remain unverified.",
+                provider_diagnostic_capture={"status": "unavailable", "reason": "finalization_failed"},
+            )
+            return
+        partial = state["observation_failed"]
+        runlog.log_step(
+            run_id, "provider_diagnostic",
+            "SDK diagnostic capture partial" if partial else "SDK invocation diagnostics",
+            ("Some diagnostic observations failed. " if partial else "") +
+            "Counts cover observed SDK messages only; execution effects have not been reconciled.",
+            provider_diagnostic=envelope,
+            provider_diagnostic_capture={
+                "status": "partial" if partial else "available",
+                "reason": "observer_call_failed" if partial else "collector_projection_available",
+            },
+        )
+    except Exception:
+        pass
+
+
 async def reason(prompt: str, *, role: str = "pm", model: str | None = None,
                  system: str | None = None, append_system: str | None = None,
                  allowed_tools: list[str] | None = None, add_dirs: list[str] | None = None,
@@ -555,27 +639,40 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
     # candidate's reasoning trace; cleared per candidate so a failed-over key's
     # partial thinking is discarded with its result (same rule as the macro lanes).
     _think_box: list = []
+    # LOG/EVIDENCE side channel (see _via_sdk docstring): the failed candidate's
+    # typed provider-failure evidence; cleared per candidate like _think_box.
+    _failure_box: dict = {}
 
-    for _cand in _cands_to_try:
+    for _candidate_ordinal, _cand in enumerate(_cands_to_try):
         _key_id: str | None = _cand["key_id"] if _cand is not None else None
         _env_name: str | None = _cand["env_name"] if _cand is not None else None
 
         _sdk_exc_repr: str | None = None
         _think_box.clear()
+        _failure_box.clear()
 
         if _SDK:
+            _sdk_diagnostic = _new_sdk_diagnostic(_run_id, book, role, _candidate_ordinal)
+            _sdk_call_finished = False
             try:
                 result = await _via_sdk(
                     prompt, mdl, role, system, append_system, tools, dirs, turns, workdir,
                     _HEADLESS_PERMISSION_MODE, mcp_servers, resume, arm,
                     run_id=_run_id, env_name=_env_name, thinking_out=_think_box,
+                    failure_out=_failure_box,
+                    **({"_diagnostic": _sdk_diagnostic}
+                       if _sdk_diagnostic is not None else {}),
                     **_veto_kw,
                 )
+                _sdk_call_finished = True
+                _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "exhausted")
                 # The SDK observed an error terminal. A tool-capable attempt may
                 # already have effects; its answer text cannot authorize another
                 # credential attempt, including when it resembles auth/quota text.
                 if result.get("error") == _SDK_TERMINAL_ERROR:
                     used_key_id = _key_id
+                    # Evidence-only attachment: never read by the break/failover logic.
+                    result["provider_failure_evidence"] = dict(_failure_box)
                     break
                 # THE CRUX: classify the result TEXT — org-disabled banners arrive as
                 # ok-looking results whose text contains the subscription-disabled message.
@@ -609,6 +706,13 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
 
             except ProviderStartRefused as _refusal:
                 _bind_provider_refusal_run(_refusal, _run_id, book, role)
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "raised", _refusal)
+                    except BaseException:
+                        # Diagnostic failure cannot replace the original local refusal.
+                        pass
                 # This veto stops the next provider entry; an earlier invocation
                 # may already have effects. Never classify it as auth/quota,
                 # rotate keys, fall back, or infer that the whole turn was unapplied.
@@ -638,6 +742,16 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     try:
                         _classified = _kr.classify_failure(_sdk_exc_classify)
                     except Exception:
+                        pass
+
+                # Freeze the existing exception strings and classification first.
+                # Rich diagnostic fields never become cooling/fallback inputs.
+                if not _sdk_call_finished:
+                    _sdk_call_finished = True
+                    try:
+                        _record_sdk_diagnostic(_sdk_diagnostic, _run_id, "raised", e)
+                    except BaseException:
+                        # Preserve the already pending SDK failure and its legacy fallback.
                         pass
 
                 if _classified and _pool and _key_id is not None:
@@ -672,7 +786,9 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                     if arm:
                         # Armed requires SDK; no subprocess fallback
                         result = {**base, "ok": False, "backend": "none", "text": None,
-                                  "error": _sdk_exc_repr or "armed research needs the Agent SDK + a subscription credential"}
+                                  "error": _sdk_exc_repr or "armed research needs the Agent SDK + a subscription credential",
+                                  # Evidence-only attachment from the handler's box.
+                                  "provider_failure_evidence": dict(_failure_box)}
                         used_key_id = _key_id
                         break
 
@@ -715,6 +831,17 @@ async def _reason(prompt: str, *, role: str = "pm", model: str | None = None,
                         continue
                     used_key_id = _key_id
                     break
+
+            except BaseException as _sdk_interruption:
+                if not _sdk_call_finished:
+                    try:
+                        _record_sdk_diagnostic(
+                            _sdk_diagnostic, _run_id, "interrupted", _sdk_interruption,
+                        )
+                    except BaseException:
+                        # A diagnostic failure must not replace the original interruption.
+                        pass
+                raise
 
         elif not _SDK:
             # No SDK at all — subprocess only
@@ -878,12 +1005,19 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
                    mcp_servers, resume, arm, run_id: str | None = None,
                    env_name: str | None = None,
                    thinking_out: list | None = None,
-                   before_provider_start: Callable[[], None] | None = None) -> dict:
+                   failure_out: dict | None = None,
+                   before_provider_start: Callable[[], None] | None = None,
+                   _diagnostic: dict | None = None) -> dict:
     """thinking_out: optional side-channel list; when provided, the turn's reasoning
     trace (a list of `mastermind.response_log.v1` thinking segments) is appended as ONE
     element. LEAK LAW (mirrors macro brain_gateway): thinking is LOG-ONLY — it rides
     this side channel to brain/thinking_log and is NEVER placed in the returned result
-    dict, so no caller (decision paths included) can consume it."""
+    dict, so no caller (decision paths included) can consume it.
+    failure_out: optional side-channel dict, same LOG/EVIDENCE discipline as thinking_out:
+    the handler fills it INCREMENTALLY with the bounded evidence that types a provider
+    failure (brain/provider_failure.v1) while the SDK stream is still alive, so an
+    exception after the evidence still leaves the box filled.  Evidence-only — never a
+    retry/failover/cooling input — and it never carries response or prompt text."""
     # Claude Agent SDK intentionally loads no filesystem settings by default.  The regional PMs
     # may delegate only through this repository's reviewed, read-only `.claude/agents` profiles,
     # so opt into the project source explicitly (never user/local settings from the VPS account).
@@ -915,67 +1049,113 @@ async def _via_sdk(prompt, mdl, role, system, append_system, tools, dirs, turns,
     # Evaluate the source owner's veto AFTER SDK/MCP option preparation and
     # immediately BEFORE handing it to the original SDK owner.
     _require_provider_start(before_provider_start)
+    if failure_out is not None:
+        try:
+            failure_out["tool_activity_observed"] = False
+        except Exception:
+            pass
+    _observe_sdk_diagnostic(_diagnostic, query_entered=True)
     async for msg in _sdk_query(prompt=prompt, options=opts):
-        if hasattr(msg, "result"):                         # ResultMessage
-            # Preserve an explicit error even if a later terminal says success.
-            # A subtype named "success" and nonempty text cannot override it.
-            terminal_error = terminal_error or getattr(msg, "is_error", None) is True
-            text = getattr(msg, "result", None) or text
-            cost = getattr(msg, "total_cost_usd", None)
-            sid = getattr(msg, "session_id", None)
-            usage = getattr(msg, "usage", None)
-        elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
-            _round += 1
-            for b in (getattr(msg, "content", []) or []):
-                bt = _block_kind(b)
-                if bt == "thinking":
-                    # Reasoning block — capture for the response ledger only.
-                    _txt = getattr(b, "thinking", "")
-                    if not _txt and isinstance(b, dict):
-                        _txt = b.get("thinking") or ""
-                    _txt = str(_txt or "")
-                    if _txt.strip():
+        try:
+            if hasattr(msg, "result"):                         # ResultMessage
+                # Preserve an explicit error even if a later terminal says success.
+                # A subtype named "success" and nonempty text cannot override it.
+                terminal_error = terminal_error or getattr(msg, "is_error", None) is True
+                text = getattr(msg, "result", None) or text
+                cost = getattr(msg, "total_cost_usd", None)
+                sid = getattr(msg, "session_id", None)
+                usage = getattr(msg, "usage", None)
+                if failure_out is not None:
+                    try:
+                        _f_is_error = getattr(msg, "is_error", None)
+                        if isinstance(_f_is_error, bool):
+                            failure_out["result_is_error"] = _f_is_error
+                        _f_subtype = getattr(msg, "subtype", None)
+                        if isinstance(_f_subtype, str) and provider_failure._RESULT_SUBTYPE_RE.fullmatch(_f_subtype):
+                            failure_out["result_subtype"] = _f_subtype
+                        _f_status = getattr(msg, "api_error_status", None)
+                        if isinstance(_f_status, int) and not isinstance(_f_status, bool):
+                            failure_out["api_error_status"] = _f_status
+                    except Exception:
+                        pass
+            elif hasattr(msg, "content"):                      # AssistantMessage: collect text + tool calls
+                _round += 1
+                if failure_out is not None:
+                    try:
+                        _f_lit = provider_failure.sdk_assistant_error_literal(
+                            getattr(msg, "error", None))
+                        if _f_lit:
+                            failure_out["assistant_error"] = _f_lit   # latest wins
+                    except Exception:
+                        pass
+                for b in (getattr(msg, "content", []) or []):
+                    bt = _block_kind(b)
+                    if bt == "thinking":
+                        # Reasoning block — capture for the response ledger only.
+                        _txt = getattr(b, "thinking", "")
+                        if not _txt and isinstance(b, dict):
+                            _txt = b.get("thinking") or ""
+                        _txt = str(_txt or "")
+                        if _txt.strip():
+                            _think.append({"round": _round, "phase": "tool",
+                                           "model": mdl, "text": _txt})
+                    elif bt == "redacted_thinking":
+                        # Text unavailable by design; the segment still records that the
+                        # model reasoned here, so the trace doesn't silently look shorter.
                         _think.append({"round": _round, "phase": "tool",
-                                       "model": mdl, "text": _txt})
-                elif bt == "redacted_thinking":
-                    # Text unavailable by design; the segment still records that the
-                    # model reasoned here, so the trace doesn't silently look shorter.
-                    _think.append({"round": _round, "phase": "tool",
-                                   "model": mdl, "text": "", "redacted": True})
-                elif bt == "text" and getattr(b, "text", ""):
-                    chunk = b.text
-                    text = (text or "") + chunk if text is None else chunk
-                    # log reasoning chunk
-                    if run_id and _log:
-                        try:
-                            _log(run_id, "reasoning", "assistant text",
-                                 chunk[:2000])
-                        except Exception:
-                            pass
-                elif bt == "tool_use":
-                    name = getattr(b, "name", "?")
-                    used.append(name)
-                    # log tool call
-                    if run_id and _log:
-                        try:
-                            inp = getattr(b, "input", {}) or {}
-                            _log(run_id, "tool_call", f"call {name}",
-                                 json.dumps(inp, default=str)[:2000],
-                                 tool=name, args=inp)
-                        except Exception:
-                            pass
-        # ToolResult messages (some SDK versions)
-        elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
-            if run_id and _log:
-                try:
-                    content = getattr(msg, "content", "") or ""
-                    if isinstance(content, list):
-                        content = " ".join(
-                            getattr(c, "text", str(c)) for c in content)
-                    _log(run_id, "tool_result", "tool result",
-                         str(content)[:2000], result=str(content)[:2000])
-                except Exception:
-                    pass
+                                       "model": mdl, "text": "", "redacted": True})
+                    elif bt == "text" and getattr(b, "text", ""):
+                        chunk = b.text
+                        text = (text or "") + chunk if text is None else chunk
+                        # log reasoning chunk
+                        if run_id and _log:
+                            try:
+                                _log(run_id, "reasoning", "assistant text",
+                                     chunk[:2000])
+                            except Exception:
+                                pass
+                    elif bt == "tool_use":
+                        if failure_out is not None:
+                            try:
+                                failure_out["tool_activity_observed"] = True
+                            except Exception:
+                                pass
+                        name = getattr(b, "name", "?")
+                        used.append(name)
+                        # log tool call
+                        if run_id and _log:
+                            try:
+                                inp = getattr(b, "input", {}) or {}
+                                _log(run_id, "tool_call", f"call {name}",
+                                     json.dumps(inp, default=str)[:2000],
+                                     tool=name, args=inp)
+                            except Exception:
+                                pass
+            # ToolResult messages (some SDK versions)
+            elif hasattr(msg, "tool_use_id") or (getattr(msg, "type", "") == "tool_result"):
+                if failure_out is not None:
+                    try:
+                        failure_out["tool_activity_observed"] = True
+                    except Exception:
+                        pass
+                if run_id and _log:
+                    try:
+                        content = getattr(msg, "content", "") or ""
+                        if isinstance(content, list):
+                            content = " ".join(
+                                getattr(c, "text", str(c)) for c in content)
+                        _log(run_id, "tool_result", "tool result",
+                             str(content)[:2000], result=str(content)[:2000])
+                    except Exception:
+                        pass
+        except BaseException:
+            try:
+                _observe_sdk_diagnostic(_diagnostic, message=msg)
+            except BaseException:
+                pass
+            raise
+        else:
+            _observe_sdk_diagnostic(_diagnostic, message=msg)
 
     # The last assistant message is the synthesis — retag its segments so the
     # upstream FIRST-(N-1)+LAST truncation keeps the decision segment and the

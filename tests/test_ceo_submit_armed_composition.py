@@ -1544,6 +1544,10 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
+    # PR #1743 requalification: scripts/executive_os_phase1c.py changed
+    # exactly one static A2 socket-path literal. Its installed event-loop AST
+    # remains byte-for-byte the reviewed 060525... anchor below. Retain a
+    # *full-source* SHA pin; never dynamically derive its allowed digest.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
     # Return plus attention composition changes the module; the installed entry
@@ -1553,7 +1557,10 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            'a50221356b7e0d0c6f955087c855fcba7cca9e8f36be9cd1297e654c7d5c4e0d'):
+            # Exact static hash of the combined Bridge + protected relay
+            # composition; the reviewed serve_installed_control AST above
+            # remains byte-identical and is independently checked below.
+            'dd2906a1a05885b8081d906f1011ac7443881c4a72ba93d03dfc43e46230b1ac'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

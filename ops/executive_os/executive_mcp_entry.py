@@ -383,7 +383,10 @@ def build_os_asset_manifest(source):
             directories.add(path.relative_to(root).as_posix())
     from integrations.mastermind_executive_app.os_assets import os_asset_mimes
     mimes = os_asset_mimes(names)
-    expected_directories = {'assets'} | ({'licenses', 'licenses/fonts'} if len(names) == 9 else set())
+    # The closed names/MIME owner also determines the exact parent topology;
+    # no independent size switch may drop required font or third-party notices.
+    expected_directories = {parent.as_posix() for name in mimes for parent in Path(name).parents
+                            if parent.as_posix() != '.'}
     if directories != expected_directories:
         raise ValueError('OS asset directory differs')
     css = [name for name, mime in mimes.items() if mime == 'text/css; charset=utf-8']
