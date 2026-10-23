@@ -70,14 +70,19 @@ export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, art
     || typeof activate !== 'function') throw refuse()
   signal.throwIfAborted()
   const socket = new Socket({ fd, readable: true, writable: true })
-  let held = '', pending, error
+  let held = '', pending, error, rejectActivation, expiryTimer
   const queue = []
   const deliver = () => {
     if (!pending) return
     if (error) { const p = pending; pending = null; p.reject(error) }
     else if (queue.length) { const p = pending; pending = null; p.resolve(queue.shift()) }
   }
-  const fail = () => { error = refuse(); deliver() }
+  const fail = () => {
+    if (error) return
+    error = refuse()
+    deliver()
+    rejectActivation?.(error)
+  }
   const onData = chunk => {
     held += chunk.toString('utf8')
     if (Buffer.byteLength(held) > FRAME * 2) return fail()
@@ -99,11 +104,35 @@ export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, art
   try {
     const seed = JSON.parse(await line())
     const verified = validateNativeDshAttemptSeed(seed, projectionDigest, artifactDigest)
+    const deadline = Number(verified.attemptOverlay.env.MMX_ACP_DEADLINE_MS)
+    // The native parent owns admission. The child must not wait indefinitely
+    // on a stalled SDK discovery, an abandoned socket or a revoked Attempt.
+    expiryTimer = setTimeout(fail, Math.max(1, deadline - Date.now()))
     signal.throwIfAborted()
     // Only an attested installed factory may supply this callback. It must
     // resolve AFTER real governed MCP discovery, never at profile allocation.
-    opened = await activate(verified.attemptOverlay, seed.admitted_tools)
-    if (opened?.ready !== true) throw refuse()
+    let activationPending = true
+    const startup = Promise.resolve().then(() => {
+      if (error || signal.aborted || Date.now() >= deadline) throw refuse()
+      return activate(verified.attemptOverlay, seed.admitted_tools, signal)
+    })
+    // An uncooperative callback can finish *after* an abort. Its late MCP
+    // resources cannot be adopted and must be disposed without another ACK.
+    startup.then(value => {
+      if (activationPending || typeof value?.dispose !== 'function') return
+      Promise.resolve().then(() => value.dispose()).catch(() => {})
+    }).catch(() => {})
+    const interrupted = new Promise((_, reject) => {
+      rejectActivation = reject
+      if (error || signal.aborted || Date.now() >= deadline) reject(refuse())
+    })
+    try {
+      opened = await Promise.race([startup, interrupted])
+    } finally {
+      activationPending = false
+      rejectActivation = undefined
+    }
+    if (error || opened?.ready !== true) throw refuse()
     signal.throwIfAborted()
     // No parent early ACK, duplicate seed or second command may be queued.
     if (queue.length || held.length) throw refuse()
@@ -121,6 +150,8 @@ export async function acceptNativeDshAttempt({ fd, signal, projectionDigest, art
     try { await opened?.dispose?.() } catch { /* incumbent settles child */ }
     throw refuse()
   } finally {
+    if (expiryTimer !== undefined) clearTimeout(expiryTimer)
+    rejectActivation = undefined
     signal.removeEventListener('abort', onAbort)
     socket.off('data', onData)
     socket.off('end', fail)
