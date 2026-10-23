@@ -1283,6 +1283,32 @@ class CeoIngressReadGateway:
         return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
     @staticmethod
+    def _valid_runtime_utc_timestamp(value: object, *, optional: bool = False) -> bool:
+        # Runtime serializes absent Attempt timestamps as "", and present
+        # ones as UTC ISO-8601. Never certify arbitrary text as lease evidence.
+        return (
+            type(value) is str
+            and ((optional and value == "") or CeoIngressReadGateway._valid_generated_at(value))
+        )
+
+    @staticmethod
+    def _valid_runtime_timestamp_order(earlier: object, later: object) -> bool:
+        from datetime import datetime
+
+        if not (
+            CeoIngressReadGateway._valid_runtime_utc_timestamp(earlier, optional=True)
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(later, optional=True)
+        ):
+            return False
+        if not earlier or not later:
+            return True
+        def parse(value: str):
+            return datetime.fromisoformat(
+                value[:-1] + "+00:00" if value.endswith("Z") else value
+            )
+        return parse(earlier) <= parse(later)
+
+    @staticmethod
     def _valid_job_constraints(value: object, *, orchestration_role: object) -> bool:
         from control_plane.executive_runtime import StateConflict, _normalise_constraints
 
@@ -1703,12 +1729,23 @@ class CeoIngressReadGateway:
             and attempt["fence_generation"] >= 0
             and type(attempt.get("lease_owner")) is str
             and bool(attempt["lease_owner"])
-            and type(attempt.get("lease_expires_at")) is str
-            and type(attempt.get("heartbeat_at")) is str
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("lease_expires_at"), optional=True
+            )
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("heartbeat_at"), optional=True
+            )
             and type(attempt.get("checkpoint_sequence")) is int
             and attempt["checkpoint_sequence"] >= 0
-            and type(attempt.get("started_at")) is str
-            and type(attempt.get("finished_at")) is str
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("started_at"), optional=True
+            )
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(
+                attempt.get("finished_at"), optional=True
+            )
+            and CeoIngressReadGateway._valid_runtime_timestamp_order(
+                attempt.get("started_at"), attempt.get("finished_at")
+            )
             and type(attempt.get("version")) is int
             and attempt["version"] >= 0
             and CeoIngressReadGateway._valid_sha256(
@@ -1750,6 +1787,10 @@ class CeoIngressReadGateway:
         ):
             return False
 
+        # Runtime terminal completions always have a non-null result. Do not
+        # certify a missing payload through the optional JobPayload fallback.
+        if attempt.get("status") == "COMPLETED" and attempt.get("result") is None:
+            return False
         for field in ("checkpoint", "result", "error"):
             if field == "result" and CeoIngressReadGateway._valid_terminal_result(
                 attempt.get(field), job=job, attempt=attempt,
@@ -1757,9 +1798,26 @@ class CeoIngressReadGateway:
                 continue
             if (
                 field == "error"
-                and attempt.get("status") == "LOST"
                 and CeoIngressReadGateway._valid_requeued_lost_error(
                     attempt.get("error")
+                )
+                and (
+                    attempt.get("status") == "LOST"
+                    or (
+                        # The OPERATOR_HARNESS expiry fence is deliberately
+                        # written before the Runtime transitions this active
+                        # Attempt to LOST. It must keep its original pointer.
+                        attempt.get("execution_mode") == "OPERATOR_HARNESS"
+                        and attempt.get("error", {}).get("reason")
+                        == "ohf_lease_expired_fenced"
+                        and job.get("current_attempt_id") == attempt.get("attempt_id")
+                        and job.get("status") == {
+                            "CLAIMED": "RUNNING",
+                            "RUNNING": "RUNNING",
+                            "CHECKPOINTED": "CHECKPOINTED",
+                            "CANCEL_REQUESTED": "CANCEL_REQUESTED",
+                        }.get(attempt.get("status"))
+                    )
                 )
             ):
                 continue
@@ -1826,7 +1884,7 @@ class CeoIngressReadGateway:
         import dataclasses
         import re
         from control_plane.executive_runtime import (
-            Attempt, Job, JobStatus, _LEASE_ACTIVE_ATTEMPT_STATUSES,
+            Attempt, Job, JobStatus,
         )
 
         if (
@@ -1875,8 +1933,11 @@ class CeoIngressReadGateway:
             and re.fullmatch(r"A[0-7]", job["authority_level"]) is not None
             and (job.get("branch") is None or type(job["branch"]) is str)
             and (job.get("worktree") is None or type(job["worktree"]) is str)
-            and type(job.get("created_at")) is str
-            and type(job.get("updated_at")) is str
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(job.get("created_at"))
+            and CeoIngressReadGateway._valid_runtime_utc_timestamp(job.get("updated_at"))
+            and CeoIngressReadGateway._valid_runtime_timestamp_order(
+                job.get("created_at"), job.get("updated_at")
+            )
             and type(job.get("attempt_count")) is int
             and job["attempt_count"] >= 0
             and type(job.get("attempt_limit")) is int
@@ -1942,6 +2003,8 @@ class CeoIngressReadGateway:
         ):
             return False
 
+        if job.get("status") == "COMPLETED" and job.get("result") is None:
+            return False
         for field in ("checkpoint", "result"):
             if (
                 field == "result"
@@ -2013,15 +2076,11 @@ class CeoIngressReadGateway:
                         "LOST", "FAILED", "RATE_LIMITED"
                     }
                     and job["attempt_count"] < job["attempt_limit"]
-                    # A successful Attempt must not be re-presented as QUEUED.
+                    # Requeue admits exactly these terminal predecessor states.
+                    # CANCELLED, COMPLETED and live leases cannot occur anywhere
+                    # in a producer-reachable QUEUED history.
                     and all(
-                        row.get("status") not in {"COMPLETED"}
-                        for row in attempts
-                    )
-                    and all(
-                        row.get("status") not in {
-                            status.value for status in _LEASE_ACTIVE_ATTEMPT_STATUSES
-                        }
+                        row.get("status") in {"LOST", "FAILED", "RATE_LIMITED"}
                         for row in attempts
                     )
                 )
