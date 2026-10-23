@@ -214,6 +214,38 @@ Already-pinned controllers continue through their original immutable paths;
 their operations, roots, leases and retained results are unchanged. Fresh
 upgraded entrypoints must verify the intended selected generation.
 
+### Closed 8bc to d044 transition
+
+The existing installer now has `prepare-upgrade` and `upgrade` commands. This
+transition accepts only the authentic retained phase-one bootstrap bundle,
+its exact owned receipt, the pinned 8bc launcher and derived paired bridges,
+and the reviewed 95-member manifest
+`7efa1160eda556d89b0ec70cbafd9082b69365a06f41b565292941ad7ac8f0d7`.
+The new sealed d044 launcher differs only by the two reviewed PyYAML artifact
+allowlist names. Neither the original bootstrap plan nor the flat remote entry
+is rewritten.
+
+After publishing and verifying that protected closure, run the protected
+installer's `prepare-upgrade --original-bundle <retained-bootstrap-bundle>
+--target-generation <published-digest> --output <fresh-external-bundle>`.
+Review its exact captured selection and ingress preimages, then invoke
+`upgrade --bundle <same-external-bundle>`. These are source command forms,
+not evidence of an installed upgrade. `prepare` remains inappropriate for an
+already bridged installation.
+
+The original publication lock serializes the finite operation. A durable
+intent inside the existing bootstrap artifact directory binds the exact
+upgrade plan before any bridge write. Each replacement requires the original
+or this transaction's exact new bytes; foreign bytes refuse. Both bridges
+must read back successfully before CURRENT advances from the full captured
+selection. Six tested interruption edges recover only this same retained
+transaction, including a committed pointer with a missing completion receipt;
+a completed invocation performs no writes. A changed selection, foreign
+intent, conflicting receipt or unrecognized partial state cannot be repaired
+or reactivated by this command. There is no automatic replacement or retry
+of a refused business operation. No quiescence, legacy drain, provider
+readiness or absence of unknown work is inferred.
+
 ## Rollback and failure handling
 
 Rollback restores only the exact original ingress bytes, child ingress first;
