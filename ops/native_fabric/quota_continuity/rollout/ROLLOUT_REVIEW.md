@@ -187,6 +187,33 @@ Direct raw flat helpers such as `sub.sh` and `lease_broker.py` remain legacy API
 The upgraded pool routes to their new generation counterparts. The rollout does
 not claim that every raw helper path is upgraded.
 
+## Paired launcher upgrade boundary
+
+An already installed pool/task bridge is not another first installation.
+`prepare` must continue to refuse an already bridged pool. Upgrading the sealed
+launcher requires the retained original installation bundle and its exact
+phase-one receipt, current paired ingress preimages, and a qualified target
+closure. Do not edit the original plan, roll back and rebootstrap, overwrite a
+sealed launcher, or infer a legacy-producer drain. The flat remote entry and
+all flat helpers retain their existing bytes and owners.
+
+During paired replacement, the existing selection must remain a generation
+that both old and new launchers verify. Selection of a generation requiring
+the new verifier follows successful readback of both upgraded bridges, through
+the original publication lock and selection compare-and-swap. Interrupted
+installation is reconciled using its exact retained upgrade identity and
+observed bytes; it does not authorize a replacement operation or blind replay.
+
+There is a bounded ingress availability limitation. A process that captured
+the old bridge before replacement can reach its old immutable launcher after
+the new selection. If that verifier cannot accept the new generation, it must
+return a truthful refusal before executing the selected business entrypoint or
+admitting work. Do not claim uninterrupted ingress, alter the old launcher,
+invent an ingress census/fence, or trigger an automatic replacement/retry.
+Already-pinned controllers continue through their original immutable paths;
+their operations, roots, leases and retained results are unchanged. Fresh
+upgraded entrypoints must verify the intended selected generation.
+
 ## Rollback and failure handling
 
 Rollback restores only the exact original ingress bytes, child ingress first;
