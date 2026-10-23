@@ -106,7 +106,7 @@ def test_parser_has_only_expected_bot_identity_and_no_secret_or_path_overrides()
             for action in subparser._actions
             for option in getattr(action, "option_strings", ())
         }
-    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release"}
+    assert set(parser._subparsers._group_actions[0].choices) == {"enroll", "enroll-shared", "verify", "rebind-release", "reverse-rebind-release"}
     assert "--expected-bot-user-id" in options
     assert "--acknowledge-legacy-dedicated-app" not in options
     assert {"--token", "--workspace", "--channel", "--config", "--plist"}.isdisjoint(
