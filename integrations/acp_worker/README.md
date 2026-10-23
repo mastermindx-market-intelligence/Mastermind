@@ -91,3 +91,34 @@ and MCP SDK integration, installed Seatbelt UID/GID/artifact attestation,
 native WorkerResult and parent-consumption must be qualified separately:
 passing the overlay consumer does **not** set ACP `implemented:true` or
 authorize an Executive or production release.
+
+
+## Native Attempt handoff via existing readiness socket
+
+The original `InstalledAcpWorkerAdapter` and `AcpNativeProcessOwner`
+now carry the packet's exact per-Attempt `mcp_runtime_overlay` over the
+**existing single inherited `MMX_ACP_ATTEST_FD`** socket, never ambient
+environment, stdout, user argv, Job payload or a new transport owner.
+Before the native subprocess is created, the incumbent owner verifies
+workspace/base SHA, Job/run/worker IDs, bounded deadline and read-only
+authority against its actual `WorkerLaunchSpec`. An expired or foreign
+snapshot refuses launch; source/tool/artifact/UID ownership is unchanged.
+
+Runs with this additional payload use
+`mastermind.acp_tools_ready/v2` (old no-overlay source remains v1). The
+parent's one-shot seed includes `attempt_overlay: {cwd, env}` alongside
+its original process nonce, PID, base SHA and tool/artifact digests. A
+v2-aware installed child must validate the seed and send the **existing**
+ready echo plus `attempt_overlay_sha256`, computed from its parsed
+overlay using sorted, compact canonical JSON. A v1-only child cannot
+qualify an ACP Attempt. Parent ACK and `prepare_prompt` stay behind the
+existing exact nonce/identity/attested-artifact fence, and no new grants
+are minted from the echo.
+
+The real pinned DSH MCP profile consumer accepts the exact
+`attemptOverlay` object before discovery (as separately qualified in
+`dsh_attempt_overlay.mjs`). The private socket and donor SDK tests
+prove the two interfaces individually. **Installed bootstrap wiring from
+that v2 socket reader to the live native DSH AgentLoop and WorkerResult
+is not yet proven**; no profile flip, live chat target, sealed OS release
+or product claim follows from these fixtures.

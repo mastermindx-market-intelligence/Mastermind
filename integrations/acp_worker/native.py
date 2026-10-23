@@ -50,6 +50,7 @@ _PIPE_LIMIT = 64 * 1024
 
 EnvironmentLoader = Callable[[], Mapping[str, str]]
 LaunchArgvBuilder = Callable[[WorkerLaunchSpec, Path, Path], Sequence[str]]
+AttemptOverlayBuilder = Callable[[WorkerLaunchSpec, Path, Path], Mapping[str, Any]]
 
 
 class AcpNativeProcessError(RuntimeError):
@@ -133,11 +134,18 @@ class AcpNativeProcessOwner:
         inspector: ProcessInspector | None = None,
         tool_gate: AcpNativeToolGate | None = None,
         launch_argv_builder: LaunchArgvBuilder | None = None,
+        attempt_overlay_builder: AttemptOverlayBuilder | None = None,
     ) -> None:
         if not callable(environment_loader):
             raise ValueError("ACP environment loader is required")
         if launch_argv_builder is not None and not callable(launch_argv_builder):
             raise ValueError("ACP launch argv builder must be callable")
+        if attempt_overlay_builder is not None and (
+            not callable(attempt_overlay_builder)
+            or tool_gate is None or not profile.private_startup
+            or launch_argv_builder is None
+        ):
+            raise ValueError("ACP Attempt overlay requires fixed private governed startup")
         if tool_gate is not None:
             if not isinstance(tool_gate, AcpNativeToolGate) or not profile.private_startup:
                 raise ValueError("ACP tool gate requires reviewed private startup")
@@ -153,6 +161,7 @@ class AcpNativeProcessOwner:
         self.profile = profile
         self.environment_loader = environment_loader
         self.launch_argv_builder = launch_argv_builder
+        self.attempt_overlay_builder = attempt_overlay_builder
         self.inspector = inspector or LocalProcessInspector()
         self._runs: dict[str, _NativeRun] = {}
         self._active: str | None = None
@@ -358,7 +367,17 @@ class AcpNativeProcessOwner:
                 raise AcpNativeProcessError("ACP attestation descriptor is owner-reserved")
             if self.tool_gate is not None:
                 self.tool_gate.verify_artifacts()
-                admission_channel = AcpAdmissionChannel(self.tool_gate)
+                overlay = (
+                    self.attempt_overlay_builder(spec, workspace, run_dir)
+                    if self.attempt_overlay_builder is not None else None
+                )
+                # The one-shot admission channel rejects a foreign/widened
+                # snapshot BEFORE any subprocess exists.
+                admission_channel = AcpAdmissionChannel(
+                    self.tool_gate,
+                    spec=spec if overlay is not None else None,
+                    attempt_overlay=overlay,
+                )
                 pass_fds = (admission_channel.child.fileno(),)
                 env[FD_ENV] = str(pass_fds[0])
                 env = self._environment(lambda: env)

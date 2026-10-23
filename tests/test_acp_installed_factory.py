@@ -695,3 +695,48 @@ def test_runtime_overlay_refuses_policy_drift(tmp_path, monkeypatch):
     )
     with pytest.raises(ValueError, match="ACP installed capability policy changed"):
         packet.mcp_runtime_overlay(spec, now_ms=1_800_000_000_000)
+
+
+def test_installed_owner_prepares_v2_attempt_overlay_for_existing_socket(tmp_path):
+    """No process: the original installed owner supplies the exact sealed packet."""
+    import time
+    from integrations.acp_worker.tool_admission import AcpAdmissionChannel
+
+    packet = _confined_packet(tmp_path)
+    adapter = _installed().InstalledAcpWorkerAdapter(packet)
+    spec = _confined_spec(packet, tmp_path)
+    workspace = spec.workspace_path.resolve(strict=True)
+    run_dir = spec.run_dir.resolve(strict=True)
+    overlay = adapter._native_owner.attempt_overlay_builder(spec, workspace, run_dir)
+    assert overlay["cwd"] == str(workspace)
+    assert overlay["env"]["MMX_ACP_RUN_ID"] == spec.run_id
+    assert overlay["env"]["MMX_ACP_JOB_ID"] == spec.job_id
+    assert overlay["env"]["MMX_ACP_WORKER_ID"] == spec.worker_id
+    assert set(overlay["env"]) == {
+        "MMX_ACP_WORKSPACE_PATH", "MMX_ACP_WORKSPACE_BASE_SHA",
+        "MMX_ACP_RUN_ID", "MMX_ACP_JOB_ID", "MMX_ACP_WORKER_ID",
+        "MMX_ACP_DEADLINE_MS",
+    }
+    assert int(overlay["env"]["MMX_ACP_DEADLINE_MS"]) > int(time.time() * 1000)
+    channel = AcpAdmissionChannel(packet.tool_gate, spec=spec, attempt_overlay=overlay)
+    try:
+        assert channel.attempt_overlay == {
+            "cwd": str(workspace), "env": dict(overlay["env"])
+        }
+    finally:
+        channel.close_unstarted()
+    assert "HOME" not in overlay["env"]
+    assert "OPENAI_API_KEY" not in overlay["env"]
+
+
+def test_installed_owner_cannot_send_foreign_attempt_to_existing_socket(tmp_path):
+    packet = _confined_packet(tmp_path)
+    adapter = _installed().InstalledAcpWorkerAdapter(packet)
+    spec = _confined_spec(packet, tmp_path)
+    from dataclasses import replace
+    invalid = replace(spec, worker_id="foreign-worker")
+    with pytest.raises(ValueError, match="runtime overlay"):
+        adapter._native_owner.attempt_overlay_builder(
+            invalid, invalid.workspace_path.resolve(strict=True),
+            invalid.run_dir.resolve(strict=True),
+        )

@@ -521,11 +521,23 @@ class InstalledAcpWorkerAdapter(AcpWorkerAdapter):
                 packet.policy.provider_home,
             )
 
+        def render_attempt_overlay(spec, workspace, run_dir):
+            _require_credentialless_provider_home(packet.policy.provider_home)
+            overlay = packet.mcp_runtime_overlay(
+                spec, now_ms=int(time.time() * 1000)
+            )
+            if overlay["cwd"] != str(Path(workspace).resolve(strict=True)):
+                raise ValueError("ACP native Attempt workspace changed")
+            if Path(run_dir).resolve(strict=True) != Path(spec.run_dir).resolve(strict=True):
+                raise ValueError("ACP native Attempt run identity changed")
+            return overlay
+
         owner = AcpNativeProcessOwner(
             packet.native_profile,
             environment_loader=lambda: dict(packet.environment),
             tool_gate=packet.tool_gate,
             launch_argv_builder=render_launch_argv,
+            attempt_overlay_builder=render_attempt_overlay,
         )
         self._installed_packet = packet
         self._native_owner = owner
