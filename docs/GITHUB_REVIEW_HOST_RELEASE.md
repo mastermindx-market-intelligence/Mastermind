@@ -207,16 +207,20 @@ The earlier independent review identified that an ordinary GitHub PR can have
 refused formal publication rather than inventing that Job. That stricter
 contract **remains intact** for `EXECUTIVE_BUILDER` source.
 
-A separately selected `EXTERNAL_GITHUB_SUBMITTER` mode now allows a bounded
-**advisory COMMENT** after:
+The trusted return-owner factory selects `ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY`
+(the verified source receipt uses `EXTERNAL_GITHUB_SUBMITTER`). This allows a
+bounded **advisory COMMENT**, including on an authorized draft PR, only after:
 1. A real terminal, read-only Executive reviewer Job and immutable original
    `JOB_CREATED` source receipt are verified.
 2. The host explicitly provides its installation-scoped
    `GitHubReviewAPI.read_external_source` port and configured publisher login.
    Mixed external/native builder sources are refused.
-3. An authenticated GitHub GET verifies the actual PR, head SHA, non-draft,
-   same-repository source and stable GitHub submitter login/account ID.
-   Submitter matching the publisher bot is refused.
+3. An authenticated GitHub GET verifies the exact open PR/head SHA,
+   same-repository source, exact boolean draft state, and stable GitHub
+   submitter login/account ID. Draft PRs must already have passed signed,
+   explicit label/comment admission with fresh requester permission;
+   draft `review_requested` remains refused. Submitter matching the publisher
+   bot is refused.
 4. The source ID/login are freshly **re-read** at the publication boundary
    and checked against the result and frozen head. A changed submitter or
    head refuses without a review POST.
