@@ -30,7 +30,7 @@ def install_inert_route(monkeypatch, pick, *, eligible=("glm",)):
         "execute_classes": ["execute", "review", "audit", "mechanical"],
         "judgment_order": ["glm-5.3", "grok", "cursor", "fable"],
         "reviewer_not_author": True,
-    }, "pools": {}}
+    }, "pools": {"glm": {}, "bailian": {}}}
     monkeypatch.setattr(pick, "load_pools", lambda: doc)
     monkeypatch.setattr(pick, "_promo_balance_glm", lambda order, *a, **kw: list(order))
     monkeypatch.setattr(pick, "_promote_urgent", lambda order, *a, **kw: list(order))
