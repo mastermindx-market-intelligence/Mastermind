@@ -3948,6 +3948,8 @@ class _PreCensusContinuation:
     def _transaction_sidecars(self) -> set[str]:
         present = {self.database.name + suffix for suffix in _SIDECAR_SUFFIXES
                    if os.path.lexists(_sidecar(self.database, suffix))}
+        if set(self.sidecar_fds) - present:
+            raise ExecutiveSchemaUpgradeError("pre-census active transaction sidecar lost its name")
         if not present:
             return set()
         if (self.phase != "DDL" or self.connection is None
@@ -4709,7 +4711,7 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
                     or row["pid"] != census["upgrader_pid"] or type(row["pid"]) is not int
                     or row["uid"] != uid or type(row["uid"]) is not int
                     or not isinstance(row["fd"], str) or re.fullmatch(r"[0-9]+", row["fd"]) is None for row in rows)
-                or len({row["fd"] for row in rows}) != 3
+                or len({int(row["fd"]) for row in rows}) != 3
                 or rows != sorted(rows, key=lambda row: int(row["fd"]))
                 or {row["path"] for row in rows} != {str(database), expected_paths[-2], expected_paths[-1]}
                 or p["quiesce_writer_census_digest"] != _upgrade_digest(census)

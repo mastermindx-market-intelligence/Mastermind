@@ -313,9 +313,9 @@ def test_ordinary67_refuses_incomplete_or_drifted_recovered_completion(control_r
     assert not (s.database.parent/b._UPGRADE_V6_TO_V7_PREFLIGHT_NAME).exists()
     assert not s.fd_paths
 
-@pytest.mark.parametrize('adverse',['writable_fd','foreign_sidecar','replaced_journal'])
+@pytest.mark.parametrize('adverse',['writable_fd','foreign_sidecar','replaced_journal','missing_journal'])
 def test_transaction_owned_scope_never_admits_foreign_or_writable_artifacts(control_recovery,monkeypatch,adverse):
-    s=control_recovery
+    s=control_recovery;observed_phases=[]
     if adverse=='writable_fd':
         import fcntl
         proxy=SimpleNamespace(**{name:getattr(fcntl,name) for name in dir(fcntl)})
@@ -326,18 +326,22 @@ def test_transaction_owned_scope_never_admits_foreign_or_writable_artifacts(cont
         proxy.fcntl=flags;monkeypatch.setattr(b,'fcntl',proxy)
     else:
         def mutate(phase):
+            observed_phases.append(phase)
             if phase=='after_m6_statement:01':
                 if adverse=='foreign_sidecar':
                     path=Path(str(s.database)+'-shm');path.write_bytes(b'inert foreign');path.chmod(0o600)
                 else:
                     path=Path(str(s.database)+'-journal')
                     assert path.exists(), 'real DELETE transaction must own a journal'
-                    replacement=path.with_name('replacement')
-                    replacement.write_bytes(path.read_bytes());replacement.chmod(0o600)
-                    replacement.replace(path)
+                    if adverse=='missing_journal':path.unlink()
+                    else:
+                        replacement=path.with_name('replacement')
+                        replacement.write_bytes(path.read_bytes());replacement.chmod(0o600)
+                        replacement.replace(path)
         monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',mutate)
     with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent retained'):_resume(s)
     assert s.barrier.exists() and (s.database.parent/b.PRE_CENSUS_CONTINUATION_NAME).exists()
+    assert 'after_m6_statement:02' not in observed_phases
     assert not s.fd_paths
 
 
@@ -355,3 +359,19 @@ def test_original_tool_is_verified_at_retained_root_not_as_executing_release(tmp
     assert calls==[(releases/sha,sha,tree)]
     with pytest.raises(b.ExecutiveSchemaUpgradeError):
         b._pre_census_prove_original_tool({**tool,'sha':'e'*40,'root':str(releases/('e'*40))})
+
+
+def test_completed_gate_requires_numerically_distinct_retained_fds(control_recovery):
+    s=control_recovery;_resume(s)
+    ppath=s.database.parent/b._UPGRADE_V5_TO_V6_PREFLIGHT_NAME
+    cpath=s.database.parent/b._UPGRADE_V5_TO_V6_COMPLETION_NAME
+    p=json.loads(ppath.read_bytes());c=json.loads(cpath.read_bytes())
+    for row,fd in zip(p['quiesce_writer_census']['open_files'],('01','1','2')):row['fd']=fd
+    p['quiesce_writer_census_digest']=b._upgrade_digest(p['quiesce_writer_census'])
+    c['quiesce_writer_census_digest']=p['quiesce_writer_census_digest']
+    c['preflight_receipt_digest']=b._upgrade_digest(p)
+    ppath.write_bytes(b._upgrade_receipt_bytes(p));cpath.write_bytes(b._upgrade_receipt_bytes(c))
+    with pytest.raises(b.ExecutiveSchemaUpgradeError):
+        with b._completed_pre_census_recovery(s.database,s.backups,b._prove_upgrade_release(s.release)):
+            pass
+    assert not s.fd_paths
