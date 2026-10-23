@@ -38,7 +38,7 @@ EXPECTED_NATIVE_FILES = 85
 # PR #1694 operator instructions, retaining all installed code preimages.
 # Include the reviewed historical-denial outcome correction; executor and donor
 # transformation pins above remain unchanged.
-NATIVE_MANIFEST_SHA = "627b7828a234eee12082d8529b8c9bc0ca4959f85ee91f68c07b23882157b3bd"
+NATIVE_MANIFEST_SHA = "12aab984f36bfb33fad7e47d50dd9874004416ad3eb7a0805f19eada421eb146"
 
 
 def _sha(raw):

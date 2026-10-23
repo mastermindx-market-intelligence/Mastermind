@@ -414,9 +414,9 @@
       "source": "source/original_result_read.py"
     },
     "ext/pick.py": {
-      "bytes": 114869,
+      "bytes": 114893,
       "installed_preimage_sha256": "0f5cbc32504680e09055b77cffdea81adea734388b7b061fcf77d017b7715cb2",
-      "sha256": "74bd656884739d61e7a1892735fdcf7844e030fa55b2dc51ecaad1b4c8560286",
+      "sha256": "032e8c905572b9c00bdc6dc4a047111ef4e4f0a0c59862fb6969e01244d66c22",
       "source": "candidate/pick.py"
     },
     "ext/placement_view.py": {
