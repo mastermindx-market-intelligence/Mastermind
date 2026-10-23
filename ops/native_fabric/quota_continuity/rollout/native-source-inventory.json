@@ -498,9 +498,9 @@
       "source": "source/pool_status.py"
     },
     "ext/provider_outcome.py": {
-      "bytes": 24662,
+      "bytes": 25120,
       "installed_preimage_sha256": null,
-      "sha256": "3b1a01cead96791bef0253b65008954e17ad0e546b00e68fbfbf0f56576cdb3c",
+      "sha256": "aae20d61a9b17dfc7fc5ca1c7507dcf4eca5972f83eaf923379b6e758ab8dd7e",
       "source": "candidate/provider_outcome.py"
     },
     "ext/quota_circuit.py": {
@@ -516,9 +516,9 @@
       "source": "candidate/quota_remote.py"
     },
     "ext/qwen_exec.sh": {
-      "bytes": 34064,
+      "bytes": 34285,
       "installed_preimage_sha256": "9173abf57c81e1b53cb555f92fc01a0942396b744ae10f3a652014e5b69306c1",
-      "sha256": "9afb7ee80eee269e32ecccc524db167283707df9a1b7d59b8df842cff2e7a5c8",
+      "sha256": "acb5477907820c9c29908f6675a785e5b8999dbfd21aba8d60ca972213b4fa58",
       "source": "candidate/qwen_exec.sh"
     },
     "ext/recovery_artifacts.py": {

@@ -37,7 +37,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # and request UTC narrowing. This candidate pin is a changed-risk review input,
 # not reuse of an earlier review. Executor/donor/preimage pins stay exact.
 EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "845f14bc031cdaaad350bcd223ca56e3ed7fdc841a0d1fd1db916e99c98d5adf"
+NATIVE_MANIFEST_SHA = "12769e22c14893cf781cc96c393c5cd4a7678389dd5bfcd5734c54923ef4335a"
 
 
 def _sha(raw):

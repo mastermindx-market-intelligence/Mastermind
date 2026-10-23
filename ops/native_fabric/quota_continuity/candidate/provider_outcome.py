@@ -390,6 +390,12 @@ def codex_main(args: list[str]) -> int:
                     receipt, reason = None, "typed_auth_contradicts_inferred_429"
                 elif cli_kind == "quota_exhausted":
                     receipt, reason = None, "typed_quota_contradicts_inferred_429"
+                elif cli_kind not in {"unknown", "rate_limit"}:
+                    # Only an unknown cause or the matching rate-limit enum
+                    # is compatible with inferred429 policy. A known context,
+                    # budget, permission, request or provider failure remains
+                    # the actual terminal cause and cannot mint a SOFT cap.
+                    receipt, reason = None, "typed_terminal_contradicts_inferred_429"
                 elif (receipt is not None
                       and receipt["classification_source"] == "codex_error_enum"
                       and cli_kind != "rate_limit"):

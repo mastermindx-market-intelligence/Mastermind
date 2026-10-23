@@ -16,7 +16,7 @@ from unittest import mock
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'candidate'), str(ROOT / 'source'), str(ROOT / 'tests')]
 from _offline_boundary import (acquire, release, guarded_python_file,
-                               guarded_prelaunch_shell)
+                               guarded_prelaunch_shell, guarded_qwen_key_reentry)
 
 def setUpModule():
     acquire()
@@ -159,6 +159,28 @@ class BrokerContract(unittest.TestCase):
 
 
 class ControllerContract(unittest.TestCase):
+    def test_qwen_key_wait_and_selection_rollback_never_enter_credential_helper(self):
+        # Exact production functions, inert selected-credential/time stand-ins.
+        # The actual UTC clock/parser contract is tested in ClockContract.
+        for mode, code, waited in (('wait_rollback', 75, 1),
+                                   ('wait_invalid', 2, 1),
+                                   ('pick_rollback', 75, 0)):
+            with self.subTest(mode=mode), tempfile.TemporaryDirectory() as tmp:
+                result = subprocess.run(guarded_qwen_key_reentry(mode), cwd=tmp,
+                    env={'PATH': '/fixture/no-commands', 'HOME': tmp},
+                    capture_output=True, text=True, timeout=10)
+                self.assertEqual(code, result.returncode, result.stderr)
+                self.assertIn('PICKS=1 CREDENTIALS=0', result.stdout)
+                self.assertIn('WAITED=' + str(waited), result.stdout)
+
+    def test_qwen_key_wait_without_witness_preserves_existing_credential_entry(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            result = subprocess.run(guarded_qwen_key_reentry('absent'), cwd=tmp,
+                env={'PATH': '/fixture/no-commands', 'HOME': tmp},
+                capture_output=True, text=True, timeout=10)
+        self.assertEqual(0, result.returncode, result.stderr)
+        self.assertIn('PICKS=2 CREDENTIALS=1 CLOCKS=0 WAITED=1', result.stdout)
+
     def test_routing_projection_omits_absence_and_preserves_exact_present_bound(self):
         with mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(io.StringIO()) as out:
             remote_sub_helpers.routing_env()

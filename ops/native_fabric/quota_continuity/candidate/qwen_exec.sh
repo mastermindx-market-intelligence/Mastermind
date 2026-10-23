@@ -436,6 +436,9 @@ release_current() {
 # Called from a condition context, so errexit is
 # already off here -- every failure has to be checked explicitly.
 pick_and_check() {
+  # A wait/rotation can outlive the initial admission or a UTC rollback.
+  # Pending/invalid narrowing witnesses terminate, rather than re-enter wait.
+  qwen_not_before_check || exit $?
   NAME=""
   PICK_ERR=""
   unset BAILIAN_API_KEY 2>/dev/null || true
@@ -476,6 +479,7 @@ pick_and_check() {
   fi
   # Preserve the existing wait/release behavior without a credential-bearing
   # stdout payload. The helper reports only success or a credential-free error.
+  qwen_not_before_check || exit $?
   if ! python3 "$KEYS" check-key "$NAME" > /dev/null 2>"$WORKDIR/pick.err"; then
     PICK_ERR="$(head -n 1 "$WORKDIR/pick.err" 2>/dev/null || true)"
     if [ -z "$PICK_ERR" ]; then

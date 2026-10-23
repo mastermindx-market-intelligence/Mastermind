@@ -728,6 +728,66 @@ class QwenOutcomeFeedback(FixtureRoot):
         self.assertNotIn('qwen_policy_feedback', value)
         self.assertIn('typed_rate_limit_unconfirmed', diagnostic)
 
+    def test_known_noncapacity_terminal_cannot_create_soft_or_hard_broker_hold(self):
+        # Actual helper/exporter/Broker/SQLite, with inert capture/process DATA.
+        # The helper's existing local policy event is retained; exporter and
+        # Broker must not turn incompatible inferred prose into another hold.
+        import fcntl
+        import lease_broker
+        import quota_circuit
+        cases = {name: kind for name, kind in po.CODEX_ERRORS.items()
+                 if kind in {'context_limit', 'budget_limit', 'provider_error',
+                             'invalid_request', 'permission'}}
+        self.assertTrue({'ContextWindowExceeded', 'SessionBudgetExceeded'} <= cases.keys())
+        for enum, kind in cases.items():
+            with self.subTest(enum=enum), tempfile.TemporaryDirectory() as tmp:
+                work = Path(tmp)
+                config = work / 'accounts.json'
+                config.write_text(json.dumps({'providers': {'bailian': {
+                    'enabled': True, 'concurrency_cap': 8,
+                    'accounts': [{'name': 'acct-a', 'per_account_cap': 8}]}}}))
+                br = lease_broker.Broker(db_path=str(work / 'broker.sqlite'),
+                    lock_path=str(work / 'broker.lock'), accounts_path=str(config),
+                    now_fn=lambda: 1000., check_pid=False, external_gates=False,
+                    grok_marker=str(work / 'no-marker'), this_host='fixture-host')
+                lease = br.acquire('root-fixture-0001', 'bailian', account='acct-a',
+                    model='qwen3.8-flash', host='fixture-host', task_class='fixture', wait=0)
+                self.assertTrue(lease.ok)
+                self.target.unlink(missing_ok=True)
+                receipt_path = self.root / 'receipt-acct-a.json'
+                receipt_path.unlink(missing_ok=True)
+                with unittest.mock.patch.object(bk.time, 'time', return_value=1000):
+                    self.make_receipt()
+                local_before = self.cooldown_line('acct-a')
+                receipt_before = receipt_path.read_bytes()
+                with unittest.mock.patch.object(po.time, 'time', return_value=1000):
+                    value, diagnostic = self.run_codex_main(
+                        POOL_LEASE_ID=lease.lease_id,
+                        session_events=[meta_event(), typed_error(enum)])
+                self.assertEqual(kind, value['kind'])
+                self.assertNotIn('qwen_policy_feedback', value)
+                self.assertIn('typed_terminal_contradicts_inferred_429', diagnostic)
+                self.assertIsNone(value['api_status'])
+                process = dict(schema='mastermind.local_owned_process_receipt.v1',
+                    label=value['run_id'], returncode=3, stdout_sha256=po.digest(b''),
+                    stdout_truncated=False, stderr_truncated=False, timed_out=False,
+                    cleanup=dict(census_proven=True, identity_verified=True,
+                        residual_count=0, status='not_needed'))
+                pp = work / 'process.json'; pp.write_text(json.dumps(process))
+                lock = br._lock()
+                try:
+                    conn = br._conn()
+                    try:
+                        quota_circuit.observe_locked(br, conn, lease.lease_id,
+                            lease.orchestrator_id, value['run_id'], self.target, pp)
+                        self.assertEqual([], list(conn.execute('SELECT * FROM quota_cooldowns')))
+                    finally:
+                        conn.close()
+                finally:
+                    fcntl.flock(lock, fcntl.LOCK_UN); lock.close()
+                self.assertEqual(local_before, self.cooldown_line('acct-a'))
+                self.assertEqual(receipt_before, receipt_path.read_bytes())
+
     def test_other_provider_codex_capacity_projection_is_unchanged(self):
         self.write_session([meta_event(), typed_error('rate_limit_exceeded')])
         self.last.write_bytes(b'')

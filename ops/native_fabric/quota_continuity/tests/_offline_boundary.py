@@ -156,3 +156,69 @@ def guarded_prelaunch_shell(path, args):
     argv = ('/bin/bash', str(path), *map(str, args))
     _prelaunch_shell_commands.add(argv)
     return list(argv)
+
+
+def guarded_qwen_key_reentry(mode):
+    """Real source functions with builtin-only stand-ins and no command PATH.
+
+    The selected credential and time-helper entries are counters, not Python
+    invocations. Actual UTC parsing/clock behavior is qualified separately.
+    Only these closed rollback/absence scenarios can register this command.
+    """
+    assert mode in {'wait_rollback', 'pick_rollback', 'wait_invalid', 'absent'}
+    source = (Path(__file__).resolve().parents[1] / 'candidate/qwen_exec.sh').read_text()
+    functions = []
+    for name in ('qwen_not_before_check', 'pick_and_check', 'acquire_key'):
+        start = source.index(name + '() {\n')
+        end = source.index('\n}\n', start) + 3
+        functions.append(source[start:end])
+    # No external command is available: all commands in the extracted path
+    # are Bash builtins or these explicit stand-ins. Unexpected helper entry
+    # terminates with97, and no full wrapper/provider entry is sourced.
+    fixture = r'''
+set -eu
+MODE="$1"
+WORKDIR="$PWD"
+KEYS=fixture-keys
+POOL_ACCOUNT=fixture-account
+LANE_LEASED=0
+KEY_WAIT=2 KEY_WAITED=0 KEY_POLL=1 KEY_SLEEP_MAX=1
+NAME='' PICK_ERR='' ROLLED=0 PICKS=0 CREDENTIALS=0 CLOCKS=0
+export POOL_CALLER_NOT_BEFORE=2026-10-23T00:47:19.721Z
+if [ "$MODE" = absent ]; then unset POOL_CALLER_NOT_BEFORE; fi
+dirname() { printf '%s\n' "${1%/*}"; }
+head() { local line=''; IFS= read -r line < "$3" || :; printf '%s\n' "$line"; }
+tr() { local line=''; IFS= read -r line || :; printf '%s' "$line"; }
+log() { :; }
+sleep() { ROLLED=1; }
+python3() {
+  case "${1##*/}:$2" in
+    commission_deadline.py:not-before)
+      CLOCKS=$((CLOCKS + 1))
+      [ "$POOL_CALLER_NOT_BEFORE" = 2026-10-23T00:47:19.721Z ] || exit 97
+      if [ "$ROLLED" = 1 ]; then
+        if [ "$MODE" = wait_invalid ]; then return 2; fi
+        return 75
+      fi
+      return 0 ;;
+    fixture-keys:pick)
+      PICKS=$((PICKS + 1))
+      if [ "$MODE" = pick_rollback ]; then
+        ROLLED=1
+      elif [ "$PICKS" = 1 ]; then
+        return 1
+      fi
+      printf '%s\n' fixture-account; return 0 ;;
+    fixture-keys:check-key) CREDENTIALS=$((CREDENTIALS + 1)); return 0 ;;
+    fixture-keys:next_usable_in) printf '%s\n' 1; return 0 ;;
+    fixture-keys:release) return 0 ;;
+    *) exit 97 ;;
+  esac
+}
+trap 'printf "PICKS=%s CREDENTIALS=%s CLOCKS=%s WAITED=%s\n" "$PICKS" "$CREDENTIALS" "$CLOCKS" "$KEY_WAITED"' EXIT
+'''
+    program = fixture + '\n'.join(functions) + '\nacquire_key\n'
+    argv = ('/bin/bash', '-c', program,
+            str(Path(__file__).resolve().parents[1] / 'candidate/qwen_exec.sh'), mode)
+    _prelaunch_shell_commands.add(argv)
+    return list(argv)
