@@ -99,6 +99,26 @@ class PairedLauncherUpgrade(unittest.TestCase):
                 raise AssertionError('historical fixture controller preimage differs')
             controller.write_bytes(original)
             cls.manifest['ext/remote_sub.sh'] = original_sha
+            # Restore the *historical* fabric_task bytes as well; this suite
+            # qualifies the original 8bc -> d044 pair, not the current CLI.
+            task = cls.built / 'native-code-stage/ext/fabric_task.py'
+            current_task = task.read_bytes()
+            current_line = (
+                b'    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), '
+                b'help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")\n'
+            )
+            original_line = (
+                b'    p_request.add_argument("--qualification-host", choices=("mb", "m1"), '
+                b'help="Explicit first Grok worker on a pending qualified Mac; no enrollment")\n'
+            )
+            if current_task.count(current_line) != 1:
+                raise AssertionError('historical task fixture new CLI preimage differs')
+            prior_task = current_task.replace(current_line, original_line)
+            prior_task_sha = '0ed7b286dc1d51ecd6349d34d9342fa144097ec3a74257bce6186aa15b8b65de'
+            if g.digest(prior_task) != prior_task_sha:
+                raise AssertionError('historical task fixture reverse transform differs')
+            task.write_bytes(prior_task)
+            cls.manifest['ext/fabric_task.py'] = prior_task_sha
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
