@@ -117,17 +117,10 @@ class FixtureRoot(unittest.TestCase):
             'LANE_REMOTE_HOST': 'fixture-host',
         })
         env.update(over)
-        saved = {}
-        for key in [k for k in os.environ
-                    if k.startswith(('POOL_', 'REMOTE_SUB_', 'LANE_'))]:
-            saved[key] = os.environ.pop(key)
-        os.environ.update(env)
-        try:
+        # Restore every ambient key, not only the scope labels. Removing the
+        # inherited PATH here leaks into later unittest-discovered modules.
+        with unittest.mock.patch.dict(os.environ, env, clear=True):
             yield env
-        finally:
-            for key in env:
-                os.environ.pop(key, None)
-            os.environ.update(saved)
 
 
 class AdaptiveReceiptCustody(FixtureRoot):
@@ -392,6 +385,17 @@ class QwenOutcomeFeedback(FixtureRoot):
         self.home = self.root / 'codex_home'
         self.last = self.root / 'text.txt'
         self.target = self.root / 'outcome.provider.json'
+
+    def test_bound_fixture_restores_all_ambient_environment(self):
+        with unittest.mock.patch.dict(os.environ, {
+                'PATH': '/fixture/path', 'NON_SCOPE_FIXTURE': 'preserved',
+                'POOL_ACCOUNT': 'original-account'}):
+            before = dict(os.environ)
+            with self.bound_environ(POOL_ACCOUNT='acct-a'):
+                self.assertEqual('acct-a', os.environ['POOL_ACCOUNT'])
+                self.assertEqual('/fixture/path', os.environ['PATH'])
+                os.environ['ONLY_IN_BOUND_FIXTURE'] = 'temporary'
+            self.assertEqual(before, dict(os.environ))
 
     def write_session(self, events, name='rollout-fixture.jsonl'):
         sessions = self.home / 'sessions'
