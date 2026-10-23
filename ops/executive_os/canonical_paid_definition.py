@@ -633,9 +633,7 @@ def render_definition(prior, expected_release_sha: str, *, host_ref: str,
     _require_qualified_prior(prior, expected_release_sha)
     sources = _require_external_sources(external_sources)
     try:
-        manifest_bytes, _info = owner._read_root_file(
-            _RELEASES_ROOT / expected_release_sha / _MANIFEST_NAME,
-            modes=frozenset({0o444}), uid=0, gid=0)
+        manifest_bytes = owner._release_manifest_bytes(expected_release_sha)
         manifest = _document(manifest_bytes)
     except CanonicalPaidPublicationRefused:
         raise

@@ -2582,6 +2582,74 @@ def _root_json(
     return value, raw
 
 
+def _release_manifest_bytes(expected_sha: str) -> bytes:
+    """Capture only the fixed whole-release manifest, within its 4 MiB budget.
+
+    The normal source inventory is larger than a configuration document.  This
+    separate fixed-path reader does not enlarge the generic config JSON limit
+    or replace the caller's subsequent full release_manifest.verify operation.
+    """
+    if type(expected_sha) is not str or _SHA_RE.fullmatch(expected_sha) is None:
+        raise HostControlError("installed_identity_mismatch")
+    path = SYSTEM_ROOT / "releases" / expected_sha / release_manifest.MANIFEST_NAME
+    descriptor = -1
+    identity = lambda info: (
+        info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+        info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+    )
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0 or before.st_gid != 0
+            or stat.S_IMODE(before.st_mode) != 0o444 or before.st_nlink != 1
+            or not 0 < before.st_size <= _GATEWAY_ROOT_FILE_MAX_BYTES
+            or has_macos_acl(path, expected_identity=before, descriptor=descriptor)
+        ):
+            raise HostControlError("config_identity_unavailable")
+        chunks, size = [], 0
+        while size <= _GATEWAY_ROOT_FILE_MAX_BYTES:
+            part = os.read(
+                descriptor, min(65536, _GATEWAY_ROOT_FILE_MAX_BYTES + 1 - size)
+            )
+            if not part:
+                break
+            chunks.append(part)
+            size += len(part)
+        after = os.fstat(descriptor)
+        if (
+            size != before.st_size or size > _GATEWAY_ROOT_FILE_MAX_BYTES
+            or identity(before) != identity(after)
+            or identity(after) != identity(path.lstat())
+            or has_macos_acl(path, expected_identity=after, descriptor=descriptor)
+            or identity(after) != identity(os.fstat(descriptor))
+            or identity(after) != identity(path.lstat())
+        ):
+            raise HostControlError("config_identity_unavailable")
+        raw = b"".join(chunks)
+    except (OSError, FilesystemSecurityError) as exc:
+        raise HostControlError("config_identity_unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return raw
+
+
+def _release_manifest_json(expected_sha: str) -> dict[str, Any]:
+    """Decode the same bounded original bytes without changing their identity."""
+    raw = _release_manifest_bytes(expected_sha)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HostControlError("config_schema_drift") from exc
+    if not isinstance(value, dict):
+        raise HostControlError("config_schema_drift")
+    return value
+
+
 def _receipt_metadata(path: Path) -> ReceiptMetadata:
     try:
         info = path.lstat()
@@ -2619,11 +2687,7 @@ class ProductionStatusHost:
     def _release_identity(self, expected_sha: str) -> str:
         root = SYSTEM_ROOT / "releases" / expected_sha
         try:
-            manifest_value, _raw = _root_json(
-                root / release_manifest.MANIFEST_NAME,
-                modes=frozenset({0o444}),
-                gid=0,
-            )
+            manifest_value = _release_manifest_json(expected_sha)
             if manifest_value.get("commit_sha") != expected_sha:
                 raise HostControlError("installed_identity_mismatch")
             tree_sha = manifest_value.get("tree_sha")
@@ -5702,13 +5766,8 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
     # ------------------------------------------------------------------
 
     def _gateway_release_tree(self, expected_sha: str) -> str:
-        root = SYSTEM_ROOT / "releases" / expected_sha
         try:
-            value, _raw = _root_json(
-                root / release_manifest.MANIFEST_NAME,
-                modes=frozenset({0o444}),
-                gid=0,
-            )
+            value = _release_manifest_json(expected_sha)
         except HostControlError as exc:
             raise GatewayPublicationError("gateway_release_tree_invalid") from exc
         tree = value.get("tree_sha")
