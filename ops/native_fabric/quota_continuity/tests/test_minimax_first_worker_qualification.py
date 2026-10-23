@@ -133,6 +133,24 @@ class MiniMaxFirstWorkerQualification(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "QUALIFICATION_PROVIDER_REFUSED"):
             self.route("m1", response="POOL=glm MODEL=glm-5.3-flash REASON=fallback")
 
+    def test_request_cli_reaches_ubuntu4_but_keeps_normal_host_gates(self):
+        # Parse the real CLI call site without dispatching a worker or reading credentials.
+        import ast
+        source = (ROOT / "candidate/fabric_task.py").read_text()
+        parser = ast.parse(source)
+        calls = [n for n in ast.walk(parser) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Attribute) and n.func.attr == "add_argument"
+                 and n.args and isinstance(n.args[0], ast.Constant)
+                 and n.args[0].value == "--qualification-host"]
+        self.assertEqual(len(calls), 1)
+        opts = {k.arg: ast.literal_eval(k.value) for k in calls[0].keywords
+                if k.arg in ("choices", "help")}
+        self.assertEqual(opts["choices"], ("mb", "m1", "ubuntu4"))
+        self.assertIn("MiniMax", opts["help"])
+        self.assertIn("Ubuntu4", opts["help"])
+        # Admission remains in qualification_route, not in the parser choices.
+        self.assertIn("qualification_host, pool=pool", source)
+
     def test_candidate_task_entrypoint_routes_minimax_without_mutating_source_preimage(self):
         candidate = (ROOT / "candidate/fabric_task.py").read_text()
         source = (ROOT / "source/fabric_task.py").read_text()
