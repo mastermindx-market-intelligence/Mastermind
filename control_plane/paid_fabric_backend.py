@@ -251,7 +251,7 @@ class CanonicalPaidBackend:
         if any(not o.terminal_ready.is_set() or o.proc.poll() is None for o in self._operations.values()):_refuse()
         connection=self._gateway._connection()
         try:
-            count=connection.execute("SELECT COUNT(*) FROM leases WHERE pool='glm' AND state IN ('held','rented')").fetchone()[0]
+            count=connection.execute("SELECT COUNT(*) FROM leases WHERE pool IN ('glm','glm-frontier') AND state IN ('held','rented')").fetchone()[0]
             if type(count) is not int or count!=0:_refuse()
         finally:connection.close()
         with self._context.account_table._lock:
