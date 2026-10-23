@@ -147,3 +147,37 @@ status, cancellation and cleanup. Next prove complete Executive launch/cleanup
 composition, admitted routing, confinement and original parent consumption through
 existing owners. Provider canary remains conditional on current provider/Capacity
 authority. Do not redo #825's accepted semantics or acquire #1060's source carrier.
+
+## Explicit real AgentLoop/WorkerResult acceptance (no silent skip)
+
+The ordinary repository test suite skips `test_dsh_acp_governed_worker.py` when
+`MMX_DSH_GOVERNED_ACP_SUPPLY` is absent. **Those skips never qualify the
+AgentLoop-to-ACP WorkerResult journey.** The DSH Governed MCP CI job establishes
+stdio grant, revocation and cancellation behavior only.
+
+Use the separate fail-closed qualification runner **only after** the external
+supply above exists with its frozen donor, profile, patch, manifest, fixture
+inputs and exact Node executable:
+
+```sh
+python3.12 scripts/qualify_dsh_governed_worker.py \
+  --supply /absolute/external/governed-dsh-supply \
+  --evidence-dir /absolute/new/private/evidence-directory
+```
+
+The evidence directory must not already exist or reside under the source
+checkout. The runner verifies all supplied file hashes and the exact
+`4878cdab` donor, `4159c403` profile source,
+`c7781490` profile binary and `243ec445` R4 patch identities *before*
+launch. It runs the actual existing 11 provider-free pytest cases with
+auto-loaded plugins and ambient provider credentials absent, and writes
+`tests.xml`, captured test output and `qualification.json` outside Git.
+Only 11 passed, zero failed/error/skipped and exit code zero produce
+`REAL_PROVIDER_FREE_WORKERRESULT_PASS`. Missing/mismatched supply,
+timeouts, lost JUnit, skipped cases or conflicting evidence fail closed.
+An existing evidence directory is never overwritten.
+
+Even this successful source/fixture receipt is **not** an Executive-host
+installation, dedicated UID/Seatbelt/UID-sweep proof, production-routed
+Attempt, provider call, authenticated donor UI, or the actual original
+company parent consuming a WorkerResult. Those remain separate gates.
