@@ -218,7 +218,10 @@ def _client(
     settings = AppSettings(
         policies=policies,
         mastermind_root=mastermind_root,
-        macro_root_flag=None,
+        # The reused read gateway consults os.environ independently of
+        # AppSettings.environ. An explicit absent root prevents ambient
+        # Macro discovery without replacing the real read path.
+        macro_root_flag=str(mastermind_root / "__absent_test_macro__"),
         environ={},
         ceo_ingress_socket_path=ceo_ingress_socket_path,
         jwks_cache=_FakeJwksCache(rsa_key),
@@ -870,7 +873,7 @@ def test_oversized_body_refuses_413(rsa_key, tmp_path):
 # ===========================================================================
 
 
-def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path):
+def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path, monkeypatch):
     # A real (throwaway) git repo so ExecutiveMcpGateway's boot-packet read
     # has a real HEAD sha to report, exercising the ACTUAL reused read path
     # rather than a fake.
@@ -881,6 +884,14 @@ def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path)
     subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True)
     subprocess.run(["git", "-C", str(tmp_path), "commit", "-q", "-m", "fixture"], check=True)
 
+    # A usable ambient Macro checkout must not escape this read fixture's
+    # explicit Macro selection, even though the reader consults os.environ.
+    ambient_macro = tmp_path / "ambient-macro"
+    (ambient_macro / "scripts").mkdir(parents=True)
+    (ambient_macro / "scripts" / "agentos.py").write_text('print("{}")\n')
+    (ambient_macro / "agentos").mkdir()
+    monkeypatch.setenv(ceo_boot_packet.ENV_MACRO_ROOT, str(ambient_macro))
+
     client, _ = _client(rsa_key, mastermind_root=tmp_path)
     token = _read_token(rsa_key)
     response = client.post(
@@ -888,9 +899,11 @@ def test_authenticated_read_call_reaches_the_existing_gateway(rsa_key, tmp_path)
     )
     assert response.status_code == 200
     body = response.json()
-    assert body["ok"] is True
+    assert body["ok"] is True, body
     assert body["tool"] == "executive_state"
     assert body["schema"] == mcp_schemas.RESULT_SCHEMA
+
+    assert body["data"]["macro"] == {"root": None, "sha": None, "resolved_via": None}
 
 
 def test_all_five_tools_present_with_frozen_schema_digest():

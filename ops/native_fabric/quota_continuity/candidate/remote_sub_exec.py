@@ -55,6 +55,11 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         return ("", None) if raw.lstrip().startswith(("{", "[")) else (raw, None)
     if not isinstance(parsed, dict):
         return "", None
+    # Model conflict must be checked before any optional or malformed final
+    # fields, not only after usage/session parsing or visible text extraction.
+    reported_model = parsed.get("model")
+    if reported_model is not None and reported_model != model:
+        raise ValueError("grok_final_model_conflict")
     text = parsed.get("text")
     if not isinstance(text, str):
         return "", None
@@ -72,8 +77,11 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
     full_input = noncached + cached + extra
     if full_input > 2**53 or full_input + output != observed_total:
         return text, None
+    # A CLI pin is a requested model, not a witnessed served-model identity.
+    # Some native JSON finals omit a model entirely. Do not invent one.
+    has_reported_model = type(reported_model) is str and reported_model == model
     return text, {
-        "schema": "mastermind.grok_usage.v1",
+        "schema": "mastermind.grok_usage.v2",
         "status": "observed",
         "reason": "native_headless_final",
         "session_ids": [sid],
@@ -82,16 +90,19 @@ def grok_plaintext_and_usage(raw: str, run_id: str, model: str):
         "output_tokens": output,
         "total_tokens": observed_total,
         "source": "grok_native_headless",
-        "served_model": model,
+        "served_model": reported_model if has_reported_model else None,
+        "requested_model": model,
+        "model_identity_source": ("native_headless_final_model_field"
+                                  if has_reported_model else "requested_cli_only"),
         "run_id": run_id,
     }
 
 
 
-def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout, env):
+def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout, env, model):
     """Original producer binds normalized output; never backfills an old run."""
     import artifact_production
-    if grok_plaintext_and_usage(raw_stdout, contract['run_id'], 'grok-4.6')[0] != display_stdout:
+    if grok_plaintext_and_usage(raw_stdout, contract['run_id'], model)[0] != display_stdout:
         raise ValueError('grok_output_transform_mismatch')
     row = json.loads(Path(receipt).read_text().splitlines()[-1])
     raw = raw_stdout.encode('utf-8');normalized = display_stdout.encode('utf-8')
@@ -111,7 +122,7 @@ def grok_output_binding(receipt, contract, manifest, raw_stdout, display_stdout,
     if not all(native_remote.IDENT.fullmatch(scope[k]) for k in ('root','parent','run_id','host','lease_id','account')):
         raise ValueError('grok_output_scope')
     return dict(schema='mastermind.grok_normalized_output.v1', algorithm='grok_plaintext_and_usage_v1',
-        **scope, mode='grok', model='grok-4.6', raw_bytes=len(raw),raw_sha256=hashlib.sha256(raw).hexdigest(),
+        **scope, mode='grok', model=model, raw_bytes=len(raw),raw_sha256=hashlib.sha256(raw).hexdigest(),
         normalized_bytes=len(normalized),normalized_sha256=hashlib.sha256(normalized).hexdigest(),
         contract=contract,manifest=manifest)
 
@@ -686,6 +697,32 @@ def _bound_lane_packet(key, mode, packet_path, cwd, here, env):
     return layout, packet
 
 
+def _canonical_model_command(here, packet_path, key, mode, model, env):
+    """Closed trusted program selection; an environment flag grants nothing.
+
+    The actual model client and controller gateway verify the signed capsule
+    and exact body. No CLI, prompt-to-shell, home hooks or model tools execute.
+    """
+    selected = env.get('FABRIC_CANONICAL_PAID_MODE')
+    if selected is None:
+        return None
+    if (selected != 'sealed-model-only-v1' or mode != 'glm'
+            or model not in {'glm-5.3', 'glm-5.3-flash'}
+            or env.get('FABRIC_OPERATOR_CAPSULE')
+            or env.get('FABRIC_OPERATOR_CAPABILITY')
+            or env.get('FABRIC_NEW_MACRO_COMMIT')):
+        raise ValueError('CANONICAL_PAID_MODE_REFUSED')
+    lanes = Path(env.get('REMOTE_SUB_LANES', ''))
+    capsule = Path(env.get('GLM_REMOTE_CAPABILITY_FILE', ''))
+    if (not lanes.is_absolute() or capsule != lanes / 'tmp' / (key + '.glm-cap.json')
+            or packet_path != lanes / 'tmp' / (key + '.txt')):
+        raise ValueError('CANONICAL_PAID_INPUT_REFUSED')
+    client = here / 'paid_glm_model_client.py'
+    if not client.is_file() or client.is_symlink():
+        raise ValueError('CANONICAL_PAID_CLIENT_REFUSED')
+    return [sys.executable, '-I', '-S', '-B', str(client), str(packet_path), str(capsule), model]
+
+
 def _execute(argv: list[str], state: dict) -> int:
     if len(argv) != 6:
         return _fail(
@@ -758,6 +795,12 @@ def _execute(argv: list[str], state: dict) -> int:
     install_signal_cleanup()
     state_ext = (Path(bound_packet[0]["binding"]["path"]) / "ext"
                  if bound_packet is not None else here)
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') == 'sealed-model-only-v1' and bound_packet is None:
+        try:
+            from paid_model_owner import canonical_state_ext
+            state_ext = canonical_state_ext(here, os.environ)
+        except (OSError, ValueError, TypeError, KeyError):
+            return _fail("CANONICAL_PAID_SUPPORT_REFUSED before_worker=1", 78)
     active_dir = state_ext / "active"
     try:
         lease = LaneLease.acquire(
@@ -795,6 +838,17 @@ def _execute(argv: list[str], state: dict) -> int:
         command.append(model)
     if mode in native_remote.MODES:
         command = native_remote.command(mode, model, prompt, cwd, packet_path=packet_path.resolve())
+    canonical_command = None
+    try:
+        canonical_command = _canonical_model_command(here, packet_path, key, mode, model, os.environ)
+    except (ValueError, OSError):
+        lease.release()
+        return _fail('CANONICAL_PAID_PREFLIGHT_REFUSED before_worker=1', 78)
+    if canonical_command is not None:
+        if artifact_contract is not None:
+            lease.release()
+            return _fail('CANONICAL_PAID_ARTIFACT_REFUSED before_worker=1', 78)
+        command = canonical_command
     lanes_dir = state_ext / "lanes"
     child_env = dict(os.environ)
     if 'commission_deadline_ns' in state:
@@ -817,6 +871,9 @@ def _execute(argv: list[str], state: dict) -> int:
         if timeout <= 0:
             lease.release()
             return _fail("native_remote_lease_expired", 78)
+    if canonical_command is not None:
+        child_env = {'PATH': '/usr/bin:/bin', 'LANG': 'C.UTF-8',
+                     'PYTHONDONTWRITEBYTECODE': '1'}
     receipt = lanes_dir / f"{key}.process.jsonl"
     diagnostic_reader = None
     if child_env.get('FABRIC_OPERATOR_CAPABILITY'):
@@ -909,6 +966,9 @@ def _execute(argv: list[str], state: dict) -> int:
                     receipt_path=receipt,
                     timeout_returncode=124,
                     receipt_diagnostics=diagnostic_reader,
+                    launch_observer=(None if canonical_command is None else
+                        __import__('paid_model_owner').launch_observer(
+                            here, packet_path, key, model, receipt)),
                 )
             except OwnedProcessStartError as exc:
                 state["started"] = False
@@ -944,7 +1004,17 @@ def _execute(argv: list[str], state: dict) -> int:
             if mode == "grok":
                 # Normalize even when the provider rc is nonzero. Never
                 # echo structured JSON including its private thought field.
-                display_stdout, usage_record = grok_plaintext_and_usage(result.stdout, key, model)
+                try:
+                    display_stdout, usage_record = grok_plaintext_and_usage(result.stdout, key, model)
+                except ValueError as exc:
+                    # No private JSON fields should reach the parent on an
+                    # observed native-final model conflict. The original
+                    # child already ran; never retry it to resolve identity.
+                    if str(exc) != "grok_final_model_conflict":
+                        raise
+                    if not result.cleanup_proven:
+                        return _fail("REMOTE_CLEANUP_UNPROVEN", 76)
+                    return _fail("GROK_NATIVE_FINAL_MODEL_CONFLICT", 76)
                 if (usage_record is not None and result.returncode == 0
                         and result.cleanup_proven
                         and not result.stdout_truncated and not result.stderr_truncated):
@@ -968,7 +1038,7 @@ def _execute(argv: list[str], state: dict) -> int:
                         artifact_contract, artifact_owner, display_stdout, child_env["LANE_REMOTE_HOST"])
                     if mode == "grok":
                         state['output_binding'] = grok_output_binding(
-                            receipt, artifact_contract, manifest, result.stdout, display_stdout, child_env)
+                            receipt, artifact_contract, manifest, result.stdout, display_stdout, child_env, model)
                     if mode in artifact_production.ORDINARY_MODES:
                         artifact_production.record_ordinary_completion(
                             receipt, artifact_contract, manifest, result.stdout, mode=mode)
@@ -980,6 +1050,16 @@ def _execute(argv: list[str], state: dict) -> int:
             return _fail("REMOTE_CLEANUP_UNPROVEN " + type(exc).__name__, 76)
         return _fail("REMOTE_SUB_RUNTIME_ERROR " + type(exc).__name__, 78)
 
+    if canonical_command is not None and int(result.returncode) == 0:
+        try:
+            __import__('paid_model_owner').retain_result(receipt,key,result)
+        except (OSError,ValueError,KeyError,UnicodeError):
+            return _fail('CANONICAL_PAID_RESULT_RETENTION_UNCONFIRMED same_run=1',76)
+
+    if canonical_command is not None and (
+            int(result.returncode) != 0 or not result.cleanup_proven
+            or result.stdout_truncated or result.stderr_truncated):
+        display_stdout = ''
     if display_stdout:
         sys.stdout.write(display_stdout)
         sys.stdout.flush()

@@ -11,6 +11,7 @@ from control_plane.executive_orchestration_result import (
     PLAN_SCHEMA_V1,
     PLAN_SCHEMA_V3,
     PLAN_SCHEMA_V4,
+    PLAN_SCHEMA_V5,
     OrchestrationResultError,
     RESULT_SCHEMA,
     GOLDEN_ROLE_SCHEMA_DIGESTS,
@@ -153,8 +154,13 @@ def test_supervisor_export_matches_selected_native_producer(version):
     assert not Draft202012Validator(selected).is_valid(_envelope(PLAN_SCHEMA_V1))
 
 
-@pytest.mark.parametrize("version", [PLAN_SCHEMA_V3, PLAN_SCHEMA_V4])
+@pytest.mark.parametrize(
+    "version",
+    [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5],
+)
 def test_supervisor_requires_claimed_adapter_factory_for_opt_in(tmp_path, version):
+    # Any explicit native version, including V1, is an opt-in that must arrive
+    # through a claim-aware factory. Factory presence alone never opts in.
     runtime = Runtime.at(tmp_path)
     with pytest.raises(ExecutiveOperatorSupervisorError, match="claim"):
         ExecutiveOperatorSupervisor(
@@ -164,7 +170,7 @@ def test_supervisor_requires_claimed_adapter_factory_for_opt_in(tmp_path, versio
         )
 
 
-@pytest.mark.parametrize("version", ["", "v3", "mastermind.execution_plan/v2", None, True])
+@pytest.mark.parametrize("version", ["", "v3", "mastermind.execution_plan/v2", True])
 def test_supervisor_refuses_unqualified_plan_version(tmp_path, version):
     runtime = Runtime.at(tmp_path)
     with pytest.raises((ExecutiveOperatorSupervisorError, ValueError)):
@@ -173,6 +179,46 @@ def test_supervisor_refuses_unqualified_plan_version(tmp_path, version):
             prompt_source=object(),
             plan_schema_version=version,
         )
+
+
+def test_supervisor_omitted_and_explicit_none_are_the_same_legacy_opt_out(tmp_path):
+    # ``None`` is legacy omission, never a versioned producer. It reaches the
+    # supervisor identically whether the keyword is absent or explicitly None.
+    omitted = ExecutiveOperatorSupervisor(
+        Runtime.at(tmp_path / "omitted"),
+        claimed_adapter_factory=lambda *a, **kw: object(),
+        prompt_source=object(),
+    )
+    explicit = ExecutiveOperatorSupervisor(
+        Runtime.at(tmp_path / "explicit"),
+        claimed_adapter_factory=lambda *a, **kw: object(),
+        prompt_source=object(),
+        plan_schema_version=None,
+    )
+    assert omitted.plan_schema_version == PLAN_SCHEMA_V1
+    assert explicit.plan_schema_version == PLAN_SCHEMA_V1
+    # A claim-aware factory is present in both, yet no native producer is bound.
+    assert omitted._claimed_adapter_factory is not None
+    assert explicit._claimed_adapter_factory is not None
+    assert omitted.fresh_planner_schema_version is None
+    assert explicit.fresh_planner_schema_version is None
+
+
+@pytest.mark.parametrize("version", [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5])
+def test_supervisor_explicit_native_version_is_preferred_for_fresh_planners(tmp_path, version):
+    # Explicit opt-in survives the composition; omission never becomes native
+    # merely because a claim-aware factory was supplied.
+    opted_in = ExecutiveOperatorSupervisor(
+        Runtime.at(tmp_path / "in"), claimed_adapter_factory=lambda *a, **kw: object(),
+        prompt_source=object(), plan_schema_version=version,
+    )
+    assert opted_in.plan_schema_version == version
+    assert opted_in.fresh_planner_schema_version == version
+    legacy = ExecutiveOperatorSupervisor(
+        Runtime.at(tmp_path / "out"), claimed_adapter_factory=lambda *a, **kw: object(),
+        prompt_source=object(),
+    )
+    assert legacy.fresh_planner_schema_version is None
 
 def test_trusted_control_composition_selects_v3_only_with_claimed_adapter(
     tmp_path, monkeypatch
@@ -201,13 +247,19 @@ def test_trusted_control_composition_selects_v3_only_with_claimed_adapter(
         Runtime.at(tmp_path / "runtime"), object()
     )
     assert operator.plan_schema_version == PLAN_SCHEMA_V3
+    assert operator.fresh_planner_schema_version == PLAN_SCHEMA_V3
     assert service.config.ceo_submit_armed is False
 
 
-@pytest.mark.parametrize("version", [PLAN_SCHEMA_V3, PLAN_SCHEMA_V4])
+@pytest.mark.parametrize(
+    "version",
+    [PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5],
+)
 def test_trusted_control_refuses_unbound_versioned_producer_before_socket(
     monkeypatch, version
 ):
+    # The trusted Control entrypoint refuses every explicit version without an
+    # explicitly supplied claim-bound adapter, including native V1.
     from scripts import executive_os_phase1c as cli
     from control_plane import executive_worker_broker as broker
 
@@ -220,7 +272,7 @@ def test_trusted_control_refuses_unbound_versioned_producer_before_socket(
         cli._service_from_config({}, plan_schema_version=version)
 
 
-@pytest.mark.parametrize("version", ["", "v3", True, None])
+@pytest.mark.parametrize("version", ["", "v3", True])
 def test_trusted_control_refuses_unsupported_plan_version_before_socket(
     monkeypatch, version
 ):
@@ -282,7 +334,6 @@ def test_current_runtime_attempt_refuses_claimed_adapter_contract_mismatch(
 
 
 def test_v5_native_producer_binds_immediate_coordinator():
-    from control_plane.executive_orchestration_result import PLAN_SCHEMA_V5
     envelope = _envelope(PLAN_SCHEMA_V4, placement=False)
     body = envelope["role_result"]
     body["schema_version"] = PLAN_SCHEMA_V5

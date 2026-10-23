@@ -18,6 +18,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import hashlib
+import inspect
 import json
 import os
 import re
@@ -45,11 +46,13 @@ from control_plane.worker_execution_contract import (
     ValidationReceipt,
     WorkerLaunchSpec,
     WorkerProcessRef,
+    PaidModelProcessRef,
     WorkerRecoveryBinding,
     WorkerRecoveryContractError,
     WorkerRunStatus,
 )
 from control_plane.worker_adapter import WorkerExecutionAdapter
+from control_plane import executive_paid_supervisor as paid_supervisor
 from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
@@ -1248,13 +1251,25 @@ class ExecutiveSupervisor:
         if cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
             from control_plane.executive_fabric_adapter import AttendedFabricWorkerAdapter
 
-            if (type(adapter) is not AttendedFabricWorkerAdapter
+            if (not (type(adapter) is AttendedFabricWorkerAdapter
+                         or paid_supervisor.is_paid_adapter(adapter))
                     or adapter.runtime is not runtime
                     or require_complete_launch_attestation is not True
                     or (process_controller is not None and process_controller is not adapter)):
                 raise SupervisorError(
                     "Fabric cleanup requires the exact reviewed adapter, Runtime, "
                     "complete launch attestation and original remote process owner"
+                )
+        if paid_supervisor.is_paid_adapter(adapter):
+            if (cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
+                    or shared_run_gid is not None or secret_canary_verdict is not None
+                    or subscription_canary_claim_provider is not None
+                    or subscription_canary_binding_id is not None
+                    or type(worker_user) is not str or not worker_user.strip()
+                    or type(worker_uid) is not int or worker_uid < 0
+                    or type(worker_gid) is not int or worker_gid < 0):
+                raise SupervisorError(
+                    "paid Supervisor requires actual remote identity and private local Control inputs"
                 )
         self.cleanup_policy = cleanup_policy
         if exact_target_provider is not None and not callable(exact_target_provider):
@@ -1661,6 +1676,19 @@ class ExecutiveSupervisor:
         selected = read_retained_product_review_input(self.runtime, job=job, attempt=attempt)
         return "" if selected is None else selected.prompt_suffix()
 
+    def _reviewed_role_prompt_suffix(self, job: Job, attempt: Attempt) -> str:
+        if job.orchestration_role != "review":
+            return ""
+        from control_plane.reviewed_role_input import (
+            ReviewedRoleInputError, reviewed_role_prompt_suffix,
+        )
+        # The helper qualifies the actual paid SUBJECT, never the Codex
+        # reviewer's profile, and preserves non-paid legacy prompts unchanged.
+        try:
+            return reviewed_role_prompt_suffix(self.runtime, job=job, attempt=attempt)
+        except ReviewedRoleInputError as exc:
+            raise SupervisorError("reviewed subject input is not qualified") from exc
+
     def _prompt(
         self,
         job: Job,
@@ -1770,14 +1798,25 @@ class ExecutiveSupervisor:
                     self.runtime.jobs.get_cycle_handoff(job.job_id)
                 )
         return (
-            "You are the one-shot Mastermind Executive worker for the JSON job packet below.\n"
-            "Treat every authority and path as an exact allow-list. Do not push, open a PR, "
-            "merge, deploy, access credentials, call the network, or mutate financial/runtime "
-            "state. You may use read-only repository inspection and bounded edit operations "
-            "needed to write the declared paths. Do not execute or self-attest validation "
-            "commands; set validations=[] exactly. The supervisor will run every persisted "
-            "argv directly after your process exits. "
-            "Return only one JSON object matching the provided output schema. "
+            (
+                "You are the paid model-only Mastermind worker for the sealed JSON packet below.\n"
+                "Analyze only the supplied text. No filesystem, repository, network, command, "
+                "tool, credential, subagent, provider-session or lifecycle capability is granted. "
+                "Paths and source commit identities are Control-owned input context, not evidence "
+                "of a remote checkout or file access. Do not claim inspection, tests, Git changes, "
+                "deployment, enrollment or external acquisition. Set validations=[] and artifacts=[]; "
+                "return only one JSON object matching the supplied result schema. "
+                if paid_supervisor.is_paid_adapter(self.adapter) else (
+                    "You are the one-shot Mastermind Executive worker for the JSON job packet below.\n"
+                    "Treat every authority and path as an exact allow-list. Do not push, open a PR, "
+                    "merge, deploy, access credentials, call the network, or mutate financial/runtime "
+                    "state. You may use read-only repository inspection and bounded edit operations "
+                    "needed to write the declared paths. Do not execute or self-attest validation "
+                    "commands; set validations=[] exactly. The supervisor will run every persisted "
+                    "argv directly after your process exits. "
+                    "Return only one JSON object matching the provided output schema. "
+                )
+            )
             + (
                 "For this orchestration role, only the closed COMPLETED typed envelope is "
                 "accepted; process or protocol failure must terminate through the supervisor, "
@@ -1788,6 +1827,7 @@ class ExecutiveSupervisor:
             + json.dumps(packet, sort_keys=True, ensure_ascii=False, indent=2)
             + self._commission_prompt_suffix(commission, inline_commission)
             + self._product_acceptance_review_suffix(job, attempt)
+            + self._reviewed_role_prompt_suffix(job, attempt)
         )
 
     def _launch_spec(
@@ -1870,7 +1910,8 @@ class ExecutiveSupervisor:
             expected_worker_gid=self.worker_gid,
             shared_run_gid=self.shared_run_gid,
             secret_canary_verdict=self.secret_canary_verdict,
-            require_secret_canary=self.require_complete_launch_attestation,
+            require_secret_canary=(self.require_complete_launch_attestation
+                                   and not paid_supervisor.is_paid_adapter(self.adapter)),
             **spec_kwargs,
         )
 
@@ -1944,6 +1985,9 @@ class ExecutiveSupervisor:
         """
 
         profile_id = str(job.constraints.get("execution_profile_id") or "")
+        paid = paid_supervisor.is_paid_adapter(self.adapter)
+        if paid and profile_id != "fabric.paid.glm.sealed-input.v1":
+            raise SupervisorError("paid adapter requires its exact execution profile")
         if not profile_id:
             worker = self.runtime.workers.get_worker(lease.attempt.worker_id)
             if worker is not None and str(worker.worker_type).strip().lower() == "attended-fabric":
@@ -1993,7 +2037,9 @@ class ExecutiveSupervisor:
             or not adapter_supports_execution_surface(
                 adapter_id, profile.execution_surface
             )
-            or profile.auth_realm != "dedicated-worker-account"
+            or profile.auth_realm != (
+                "paid-lease-bound-account" if paid else "dedicated-worker-account"
+            )
             or profile.approval_policy != "never"
             or profile.network_policy != "disabled"
             or profile.native_helper_policy.value != "DISABLED"
@@ -2009,6 +2055,19 @@ class ExecutiveSupervisor:
             if effective_grant is not None
             else job.requested_authorities
         )
+        if paid and (
+            adapter_id != "canonical-paid-fabric"
+            or self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
+            or effective_grant is None
+            or set(authorities) not in ({"READ"}, {"READ", "RESEARCH"})
+            or effective_grant["write_paths"] != []
+            or effective_grant["validation_argv"] != []
+            or job.orchestration_role not in {"work", "repair"}
+            or profile.execution_surface != "glm-model-only"
+            or profile.sandbox_policy != "read-only" or profile.write_capable
+            or profile.resource_grants or profile.skill_grants
+        ):
+            raise SupervisorError("paid adapter requires its exact sealed-input grant")
         if adapter_id == "attended-fabric" and (
             profile_id != "fabric.attended.claude.bounded.v1"
             or self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP
@@ -2047,6 +2106,11 @@ class ExecutiveSupervisor:
         effective_grant: Mapping[str, Any] | None = None,
         recovery_prompt_path: Path | None = None,
     ) -> dict[str, Any]:
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            return paid_supervisor.launch_metadata(
+                self, job=job, lease=lease, spec=spec, process_ref=process_ref,
+                effective_grant=effective_grant, recovery_prompt_path=recovery_prompt_path,
+            )
         quota = self.runtime.workers.get_quota_class(
             lease.attempt.worker_id, lease.attempt.quota_class
         )
@@ -2254,7 +2318,9 @@ class ExecutiveSupervisor:
                 ),
             )
             spec = self._enrich_spec_with_canary_claim(spec, job)
-            if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+            if paid_supervisor.is_paid_adapter(self.adapter):
+                spec = await self.adapter.prepare_paid_launch_spec(spec, lease=lease)
+            elif self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
                 spec = await self.adapter.prepare_attended_launch_spec(spec, lease=lease)
             recovery_prompt_path = schema_path.parent / "worker-prompt.txt"
             _write_private_recovery_prompt(recovery_prompt_path, spec.prompt)
@@ -2265,8 +2331,16 @@ class ExecutiveSupervisor:
                 job=job, attempt=lease.attempt, effective_grant=effective_grant,
                 schema_path=schema_path,
             )
+            review_input_suffix = self._reviewed_role_prompt_suffix(job, lease.attempt)
+            if review_input_suffix and not spec.prompt.endswith(review_input_suffix):
+                raise SupervisorError("review subject changed after input sealing")
             start_invoked = True
-            if getattr(self.adapter, "requires_attempt_lease", False) is True:
+            if paid_supervisor.is_paid_adapter(self.adapter):
+                process_ref = await self.adapter.start(spec, lease=lease, control_recovery={
+                    "input_root": str(schema_path.parent.resolve(strict=True)),
+                    "source_workspace": str(workspace),
+                })
+            elif getattr(self.adapter, "requires_attempt_lease", False) is True:
                 process_ref = await self.adapter.start(spec, lease=lease)
             else:
                 process_ref = await self.adapter.start(spec)
@@ -2286,7 +2360,8 @@ class ExecutiveSupervisor:
                 pgid=process_ref.pgid,
                 process_start_identity=process_ref.process_start_identity,
                 boot_id=process_ref.boot_session_id,
-                provider_session_id=process_ref.provider_session_id,
+                provider_session_id=(None if paid_supervisor.is_paid_adapter(self.adapter)
+                                     else process_ref.provider_session_id),
                 stdout_path=process_ref.stdout_path,
                 stderr_path=process_ref.stderr_path,
                 result_path=process_ref.result_path,
@@ -2297,9 +2372,11 @@ class ExecutiveSupervisor:
                 fence_generation=lease.attempt.fence_generation,
                 lease_token=lease.lease_token,
                 required_launch_attestation_schema=(
-                    LAUNCH_ATTESTATION_SCHEMA_VERSION
-                    if self.require_complete_launch_attestation
-                    else None
+                    "mastermind.executive_paid_model_launch_attestation/v1"
+                    if paid_supervisor.is_paid_adapter(self.adapter) else (
+                        LAUNCH_ATTESTATION_SCHEMA_VERSION
+                        if self.require_complete_launch_attestation else None
+                    )
                 ),
             )
             # Persist a useful recovery point while the worker is still live.
@@ -2574,7 +2651,12 @@ class ExecutiveSupervisor:
             "assignment_seal_receipt": assignment,
             "assignment_seal_receipt_digest": canonical_digest(assignment),
         }
-        if self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            evidence = paid_supervisor.terminal_evidence(
+                self, active, collection=collection, validations=validations,
+                assignment=assignment, envelope=envelope,
+            )
+        elif self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
             retained = self._read_private_receipt(
                 assignment_path.with_name("remote-assignment-observation.json"),
                 name="original remote assignment observation",
@@ -3029,6 +3111,9 @@ class ExecutiveSupervisor:
         """
         if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
             return
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            paid_supervisor.owned_terminal_cleanup(self, active.process_ref)
+            return
         floor = datetime.fromisoformat(active.process_ref.started_at.replace("Z", "+00:00")).timestamp()
         task = asyncio.create_task(self.adapter.prepare_fabric_cleanup(
             active.process_ref, operation=operation, observed_after=floor))
@@ -3061,6 +3146,16 @@ class ExecutiveSupervisor:
         this exact observation request. The second read returns the same retained
         package, not a freshly restamped or newly synthesized absence receipt.
         """
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            if operation == "unbound_absence":
+                raise SupervisorError(
+                    "paid unbound claim requires same-owner reconciliation; no absence or refund is proven"
+                )
+            from control_plane.paid_model_recovery import PaidModelRecoveryBinding
+            ref = (PaidModelRecoveryBinding.from_dict(
+                subject.launch_metadata["paid_recovery_binding"]
+            ).validate_wire().process_ref if isinstance(subject, Attempt) else subject)
+            return paid_supervisor.owned_terminal_cleanup(self, ref)
         from control_plane.fabric_cleanup_contract import validate_fabric_cleanup_receipt
 
         if self.cleanup_policy is not CleanupPolicy.FABRIC_PROCESS_GROUP:
@@ -3302,6 +3397,17 @@ class ExecutiveSupervisor:
 
         async def ensure_sealed() -> Path:
             nonlocal seal_path
+            if seal_path is None and paid_supervisor.is_paid_adapter(self.adapter):
+                # Only Control input/result retention; remote cleanup is a
+                # separate original-owned paid receipt, never a fake UID sweep.
+                try:
+                    seal_path = paid_supervisor.retain_control_assignment(self, active)
+                except TerminalAssignmentSealError:
+                    raise
+                except Exception as exc:
+                    raise TerminalAssignmentSealError(
+                        "paid original cleanup or Control retention remains unproven"
+                    ) from exc
             if seal_path is None and self.cleanup_policy is CleanupPolicy.FABRIC_PROCESS_GROUP:
                 try:
                     seal_path = await self.retain_and_acknowledge_remote_assignment(active)
@@ -3589,7 +3695,8 @@ class ExecutiveSupervisor:
             and ref.pgid == attempt.pgid
             and ref.process_start_identity == attempt.process_start_identity
             and ref.boot_session_id == attempt.boot_id
-            and ref.provider_session_id == attempt.provider_session_id
+            and (None if type(ref) is PaidModelProcessRef else ref.provider_session_id)
+            == attempt.provider_session_id
             and ref.stdout_path == attempt.stdout_path
             and ref.stderr_path == attempt.stderr_path
             and ref.result_path == attempt.result_path
@@ -3618,6 +3725,8 @@ class ExecutiveSupervisor:
         WorkerLaunchSpec,
         Mapping[str, Any] | None,
     ]:
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            return paid_supervisor.validated_recovery_binding(self, attempt)
         raw = attempt.launch_metadata.get("worker_recovery_binding")
         if not isinstance(raw, Mapping):
             raise SupervisorError(
@@ -3766,9 +3875,12 @@ class ExecutiveSupervisor:
                     )
                     or body[end:] != (self._commission_prompt_suffix(
                         commission.ref_dict(), commission.content.decode("utf-8")
-                    ) + self._product_acceptance_review_suffix(job, attempt))
+                    ) + self._product_acceptance_review_suffix(job, attempt)
+                      + self._reviewed_role_prompt_suffix(job, attempt))
                     or not isinstance(attestation, Mapping)
-                    or attestation.get("prompt_sha256") != hashlib.sha256(
+                    or (attestation.get("evidence", {}).get("prompt_sha256")
+                        if paid_supervisor.is_paid_adapter(self.adapter)
+                        else attestation.get("prompt_sha256")) != hashlib.sha256(
                         spec.prompt.encode("utf-8")
                     ).hexdigest()
                 ):
@@ -3851,9 +3963,11 @@ class ExecutiveSupervisor:
                 fence_generation=attempt.fence_generation,
                 lease_token=lease.lease_token,
                 required_launch_attestation_schema=(
-                    _codex_worker_contract()[1]
-                    if self.require_complete_launch_attestation
-                    else None
+                    "mastermind.executive_paid_model_launch_attestation/v1"
+                    if paid_supervisor.is_paid_adapter(self.adapter) else (
+                        _codex_worker_contract()[1]
+                        if self.require_complete_launch_attestation else None
+                    )
                 ),
             )
             current = self.runtime.attempts.get_attempt(attempt.attempt_id)
@@ -3898,6 +4012,18 @@ class ExecutiveSupervisor:
         presence: ProcessPresence,
     ) -> ReconcileReceipt:
         process_was_live = presence is ProcessPresence.LIVE
+        if paid_supervisor.is_paid_adapter(self.adapter):
+            try:
+                asyncio.get_running_loop()
+            except RuntimeError:
+                pass
+            else:
+                return ReconcileReceipt(
+                    attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                    status=ReconcileStatus.LIVE_QUARANTINED,
+                    process_was_live=process_was_live,
+                    error="paid synchronous reconciliation requires its existing off-loop service path",
+                )
         if attempt.attempt_id in self._recovered_attempt_ids:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
@@ -3985,11 +4111,22 @@ class ExecutiveSupervisor:
                 error=str(exc)[:1000],
             )
         try:
-            adopted = self._normalise_recovered_lease(adopted)
-            if getattr(self.adapter, "requires_recovery_lease", False) is True:
-                ref = reattach(spec, binding, lease=adopted)
+            if paid_supervisor.is_paid_adapter(self.adapter):
+                pending = reattach(spec, binding, lease=adopted)
+                if not inspect.isawaitable(pending):
+                    raise SupervisorError("paid recovery requires its actual async owner status result")
+                ref = asyncio.run(pending)
+                if type(ref) is not PaidModelProcessRef:
+                    raise SupervisorError("paid recovery did not return its exact process reference")
+                # Status and source readback settle before recovered state is
+                # projected. No restart, new launch or original pin is minted.
+                adopted = self._normalise_recovered_lease(adopted)
             else:
-                ref = reattach(spec, binding)
+                adopted = self._normalise_recovered_lease(adopted)
+                if getattr(self.adapter, "requires_recovery_lease", False) is True:
+                    ref = reattach(spec, binding, lease=adopted)
+                else:
+                    ref = reattach(spec, binding)
         except Exception as exc:
             return ReconcileReceipt(
                 attempt_id=attempt.attempt_id,
@@ -4179,11 +4316,23 @@ class ExecutiveSupervisor:
                 # Rich-session generations have their own writer/epoch law;
                 # sealed-worker LOST reconciliation must never fence them.
                 continue
+            if (paid_supervisor.is_paid_adapter(self.adapter)
+                    and not isinstance(attempt.launch_metadata.get("paid_recovery_binding"), Mapping)):
+                # A missing original start result is not absence. Never route
+                # this paid claim through v1 UID cleanup, termination or refund.
+                outcomes.append(ReconcileReceipt(
+                    attempt_id=attempt.attempt_id, job_id=attempt.job_id,
+                    status=ReconcileStatus.IDENTITY_AMBIGUOUS,
+                    process_was_live=False,
+                    error="paid claim has no retained start binding; same-owner reconciliation required",
+                ))
+                continue
             presence = self.process_controller.presence(attempt)
             process_was_live = presence is ProcessPresence.LIVE
             uid_sweep: Mapping[str, Any] | None = None
             recovery_raw = attempt.launch_metadata.get(
-                "worker_recovery_binding"
+                "paid_recovery_binding" if paid_supervisor.is_paid_adapter(self.adapter)
+                else "worker_recovery_binding"
             )
             if (
                 presence

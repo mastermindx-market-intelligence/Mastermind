@@ -24,7 +24,6 @@ a status failure is never settlement and never mints a new operation.
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import json
 import math
 from collections.abc import Awaitable, Callable, Mapping
@@ -48,6 +47,9 @@ from integrations.mastermind_executive_app.admission import (
     AdmissionOutcome,
     STATUS_EFFECT_UNKNOWN,
 )
+from integrations.mastermind_executive_app.principal_namespace import (
+    principal_scope_from_identity,
+)
 
 
 #: All responses from the OS Executive transport carry this fixed set of
@@ -61,8 +63,6 @@ _OS_HTTP_HEADERS = {
 #: Closed owner-context schema.  Server version is carried by the v3 profile
 #: qualifier, not by this schema's identifier.
 _CONTEXT_SCHEMA = "mastermind.os.executive.owner_context.v1"
-#: Domain separation prefix for the documented, stable owner namespace.
-_NAMESPACE_SCOPE = b"mastermind.os.executive.principal_scope.v1"
 
 #: Receive deadline for one bounded body.  Mirrors e1_http for symmetry.
 RECEIVE_DEADLINE_SECONDS = 5.0
@@ -205,14 +205,12 @@ def _bearer_token(header_value: bytes) -> str:
 def principal_scope(principal: VerifiedPrincipal) -> str:
     """Derive the one documented, stable, opaque owner namespace."""
 
-    material = b"\0".join((
-        _NAMESPACE_SCOPE,
-        principal.issuer_digest.encode("ascii"),
-        principal.subject_digest.encode("ascii"),
-        principal.client_ref.encode("utf-8"),
-        principal.resource.encode("utf-8"),
-    ))
-    return hashlib.sha256(material).hexdigest()
+    return principal_scope_from_identity(
+        issuer_digest=principal.issuer_digest,
+        subject_digest=principal.subject_digest,
+        client_ref=principal.client_ref,
+        resource=principal.resource,
+    )
 
 
 def _access_matches_principal(

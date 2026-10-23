@@ -136,7 +136,7 @@ class ExecutiveOperatorSupervisor:
         instance_id: str = "executive-coo-operator",
         claimed_adapter_factory: ClaimedOperatorAdapterFactory | None = None,
         workspace_identity_source: ClaimedWorkspaceIdentitySource | None = None,
-        plan_schema_version: str = PLAN_SCHEMA_V1,
+        plan_schema_version: str | None = None,
         foreground_only: bool = False,
     ) -> None:
         if ((adapter_factory is None) == (claimed_adapter_factory is None)
@@ -149,20 +149,27 @@ class ExecutiveOperatorSupervisor:
             raise ExecutiveOperatorSupervisorError(
                 "selected-host workspace identity requires a claim-aware factory"
             )
-        if type(plan_schema_version) is not str or plan_schema_version not in {
-            PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
-        }:
+        # ``None`` is legacy omission: the retained planner receipt alone decides
+        # the contract. Any explicit value is a native-producer opt-in, including
+        # V1, so it must arrive through a claim-aware adapter factory.
+        if plan_schema_version is not None and (
+            type(plan_schema_version) is not str
+            or plan_schema_version not in {
+                PLAN_SCHEMA_V1, PLAN_SCHEMA_V3, PLAN_SCHEMA_V4, PLAN_SCHEMA_V5,
+            }
+        ):
             raise ExecutiveOperatorSupervisorError("operator plan schema is not admitted")
-        if plan_schema_version != PLAN_SCHEMA_V1 and claimed_adapter_factory is None:
+        if plan_schema_version is not None and claimed_adapter_factory is None:
             raise ExecutiveOperatorSupervisorError(
                 "versioned producer requires a claim-aware adapter factory"
             )
         # This is a fresh-creation preference only. Execution and recovery read
-        # the immutable planner receipt, including historical V1 absence.
-        self.plan_schema_version = plan_schema_version
-        self.fresh_planner_schema_version = (
-            plan_schema_version if claimed_adapter_factory is not None else None
+        # the immutable planner receipt, including historical V1 absence. Native
+        # producer support is never inferred from claimed factory presence.
+        self.plan_schema_version = (
+            PLAN_SCHEMA_V1 if plan_schema_version is None else plan_schema_version
         )
+        self.fresh_planner_schema_version = plan_schema_version
         if type(foreground_only) is not bool:
             raise ExecutiveOperatorSupervisorError("foreground_only must be boolean")
         self.foreground_only = foreground_only
