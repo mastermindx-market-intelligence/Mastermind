@@ -124,7 +124,15 @@ def test_one_startable_job_remains_an_advisory_preference_not_a_claim():
     [("byteplus", "byteplus.attended"), ("xai", "byteplus.attended"),
      ("byteplus", "fast.engineering"), ("BytePlus", "fast.engineering"),
      ("BYTEPLUS", "fast.engineering"), ("xai", "BYTEPLUS.ATTENDED"),
-     ("xai", "BytePlus.Attended")],
+     ("xai", "BytePlus.Attended"),
+     ("BytePlusTrusted", "fast.engineering"),
+     ("byteplus-coding-plan-personal", "fast.engineering"),
+     ("xai", "byteplus.attended.back"),
+     ("xai", "byteplus.attendedX"),
+     ("xai", "mybyteplus.attended"),
+     ("xai", "byte.plus.attended"),
+     ("byte_plus", "fast.engineering"),
+     ("byte.plus", "fast.engineering")],
 )
 def test_rejects_byteplus_personal_plan_even_if_preview_forces_positive_capacity(provider, alias):
     # A quota-preview producer can never mint use rights or account-backed
@@ -141,4 +149,17 @@ def test_rejects_byteplus_personal_plan_even_if_preview_forces_positive_capacity
     frozen = copy.deepcopy(doc)
     with pytest.raises(CapacityEconomicsProjectionError, match="personal BytePlus Coding Plan"):
         project_quota_preference(tiers, doc)
+    assert doc == frozen
+
+
+
+@pytest.mark.parametrize("ordinary_provider", ["xai", "codex", "glm", "qwen", "minimax", "alibaba"])
+def test_byteplus_label_guard_does_not_reject_unrelated_first_tier(ordinary_provider):
+    doc = preview()
+    doc["options"][0]["provider"] = ordinary_provider
+    frozen = copy.deepcopy(doc)
+    result = project_quota_preference(TIERS, doc)
+    assert result.provider == ordinary_provider
+    assert result.selection_is_commitment is False
+    assert result.claim_time_revalidation_required is True
     assert doc == frozen

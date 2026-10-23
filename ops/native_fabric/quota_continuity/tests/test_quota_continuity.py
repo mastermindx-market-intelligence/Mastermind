@@ -11,6 +11,15 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path[:0] = [str(ROOT / 'candidate'), str(ROOT / 'source')]
+sys.path.insert(0, os.path.dirname(__file__))
+from _offline_boundary import acquire as _offline_acquire, release as _offline_release
+
+def setUpModule():
+    _offline_acquire()
+
+def tearDownModule():
+    _offline_release()
+
 import lease_broker
 import provider_outcome as outcome
 import quota_circuit as circuit
@@ -188,6 +197,8 @@ r=b.acquire('restarted-root','minimax',model='fixture-model',host='fixture',task
 print(json.dumps({'ok':r.ok,'reason':r.reason}))
 '''
         env=dict(os.environ,PYTHONPATH=os.pathsep.join((str(ROOT/'candidate'),str(ROOT/'source'))))
+        from _offline_boundary import guarded_python_child
+        code = guarded_python_child(code)
         child=subprocess.run([sys.executable,'-c',code,str(self.root)],env=env,
                              text=True,capture_output=True,timeout=10,check=True)
         self.assertFalse(json.loads(child.stdout)['ok'])

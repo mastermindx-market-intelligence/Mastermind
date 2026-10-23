@@ -33,11 +33,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The reviewed95-file paid model-only closure composes protected #1720
-# outcome classification and #1729 request turn-ceiling attenuation.
-# Executor/donor transformations and installed preimages remain pinned.
+# The95-file closure composes protected #1720/#1729 with Qwen source feedback
+# and request UTC narrowing. This candidate pin is a changed-risk review input,
+# not reuse of an earlier review. Executor/donor/preimage pins stay exact.
 EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "8e6417f2fb42a199bad8f6bd9fe4b67536411286c4b9487ebef2cc265eba8956"
+NATIVE_MANIFEST_SHA = "cc75df7e258bd3d0c270e45f673c5c678d070463ee21d127160db0e50646bb56"
 
 
 def _sha(raw):
