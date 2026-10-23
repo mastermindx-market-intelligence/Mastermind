@@ -15,6 +15,7 @@ PICK_PATH = ROOT / "ops/native_fabric/quota_continuity/candidate/pick.py"
 
 @pytest.fixture
 def native_pick(monkeypatch):
+    monkeypatch.syspath_prepend(str(PICK_PATH.parent.parent / "source"))
     monkeypatch.syspath_prepend(str(PICK_PATH.parent))
     spec = importlib.util.spec_from_file_location("fabric_review_judgment_pick_under_test", PICK_PATH)
     assert spec is not None and spec.loader is not None
