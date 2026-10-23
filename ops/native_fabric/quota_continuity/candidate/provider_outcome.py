@@ -316,8 +316,57 @@ def parse_codex(home: Path, command_rc: int, last_message: bytes) -> dict:
         "stdout_sha256": digest(last_message)}
 
 
+QWEN_FEEDBACK_SCHEMA = "mastermind.qwen_adaptive429_feedback.v1"
+QWEN_FEEDBACK_POLICY_SOURCE = "bailian_keys.adaptive_http_429"
+QWEN_FEEDBACK_KEYS = frozenset({
+    "schema", "account", "classification_source", "classification",
+    "policy_source", "observed_at", "until_ts", "duration_seconds",
+    "soft_cap", "soft_cap_enabled"})
+QWEN_FEEDBACK_SOURCES = frozenset({"qwen_wrapper_inference", "codex_error_enum"})
+
+
+def load_qwen_feedback(path: Path, account: str) -> tuple[dict | None, str]:
+    """Load one real helper adaptive-429 receipt, or withhold it with a reason.
+
+    Only a plain bounded file written by the cooldown helper under its own lock
+    qualifies: the exact closed key set, closed classification sources and
+    policy identity, the leased account, integer times with
+    until_ts == observed_at + duration_seconds. Malformed, foreign or missing
+    receipts are withheld here; they are never repaired or synthesized, and a
+    receipt is diagnostic policy feedback, never a numeric HTTP proof.
+    """
+    try:
+        raw = regular_bytes(path, 4096)
+    except (OSError, ValueError):
+        return None, "receipt_unreadable"
+    try:
+        value = json.loads(raw)
+    except (ValueError, RecursionError):
+        return None, "receipt_unparseable"
+    if not isinstance(value, dict) or set(value) != QWEN_FEEDBACK_KEYS:
+        return None, "receipt_fields_unqualified"
+    if (value.get("schema") != QWEN_FEEDBACK_SCHEMA
+            or value.get("policy_source") != QWEN_FEEDBACK_POLICY_SOURCE
+            or value.get("classification") != "429"
+            or value.get("classification_source") not in QWEN_FEEDBACK_SOURCES):
+        return None, "receipt_identity_unqualified"
+    if not isinstance(account, str) or not IDENT.fullmatch(account) \
+            or value.get("account") != account:
+        return None, "receipt_account_unqualified"
+    for key in ("observed_at", "until_ts", "duration_seconds", "soft_cap"):
+        if type(value.get(key)) is not int:
+            return None, "receipt_types_unqualified"
+    if not isinstance(value.get("soft_cap_enabled"), bool):
+        return None, "receipt_types_unqualified"
+    if value["observed_at"] <= 0 or value["duration_seconds"] < 1 \
+            or value["until_ts"] != value["observed_at"] + value["duration_seconds"]:
+        return None, "receipt_times_unqualified"
+    return value, "receipt_qualified"
+
+
 def codex_main(args: list[str]) -> int:
-    home, rc, provider, model, last = args
+    home, rc, provider, model, last = args[:5]
+    feedback_path = args[5] if len(args) > 5 else ""
     target = os.environ.get("POOL_OUTCOME_FILE")
     if not target:
         return 0
@@ -325,6 +374,47 @@ def codex_main(args: list[str]) -> int:
         path = Path(last)
         display = regular_bytes(path, 8388608) if path.exists() else b""
         fields = parse_codex(Path(home), int(rc), display)
+        if provider in {"qwen", "bailian"} and fields.get("command_rc") != 0:
+            cli_kind = fields.get("kind")
+            if cli_kind in CAPACITY:
+                # Preserve the actual closed CLI diagnostic without turning an
+                # unqualified Qwen capacity event into the generic HARD policy.
+                fields["qwen_cli_kind"] = cli_kind
+                fields["qwen_cli_initial_rejection"] = fields["initial_rejection"]
+                fields["kind"] = "unknown"
+                fields["initial_rejection"] = False
+            if feedback_path and os.path.lexists(feedback_path):
+                receipt, reason = load_qwen_feedback(
+                    Path(feedback_path), os.environ.get("POOL_ACCOUNT", ""))
+                if cli_kind == "authentication":
+                    receipt, reason = None, "typed_auth_contradicts_inferred_429"
+                elif cli_kind == "quota_exhausted":
+                    receipt, reason = None, "typed_quota_contradicts_inferred_429"
+                elif cli_kind not in {"unknown", "rate_limit"}:
+                    # Only an unknown cause or the matching rate-limit enum
+                    # is compatible with inferred429 policy. A known context,
+                    # budget, permission, request or provider failure remains
+                    # the actual terminal cause and cannot mint a SOFT cap.
+                    receipt, reason = None, "typed_terminal_contradicts_inferred_429"
+                elif (receipt is not None
+                      and receipt["classification_source"] == "codex_error_enum"
+                      and cli_kind != "rate_limit"):
+                    receipt, reason = None, "typed_rate_limit_unconfirmed"
+                if receipt is not None:
+                    # A wrapper-classified policy event remains inferred even
+                    # when the private capture independently reports a CLI
+                    # rate-limit enum. Neither source proves provider HTTP429.
+                    if receipt["classification_source"] == "codex_error_enum":
+                        fields["kind"] = "rate_limit"
+                        fields["initial_rejection"] = fields.get(
+                            "qwen_cli_initial_rejection", False)
+                    else:
+                        fields["kind"] = "unknown"
+                        fields["initial_rejection"] = False
+                    fields["qwen_policy_feedback"] = receipt
+                else:
+                    print("PROVIDER_FEEDBACK_WITHHELD reason=" + reason,
+                          file=sys.stderr)
         write_new(Path(target), bound_outcome(fields, os.environ, provider, model))
     except (OSError, ValueError, RecursionError):
         print("PROVIDER_OUTCOME_UNAVAILABLE", file=sys.stderr)
@@ -412,6 +502,8 @@ def claude_main(args: list[str]) -> int:
 
 if __name__ == "__main__":
     if len(sys.argv) == 7 and sys.argv[1] == "codex":
+        raise SystemExit(codex_main(sys.argv[2:]))
+    if len(sys.argv) == 8 and sys.argv[1] == "codex":
         raise SystemExit(codex_main(sys.argv[2:]))
     if len(sys.argv) == 6 and sys.argv[1] == "claude":
         raise SystemExit(claude_main(sys.argv[2:]))

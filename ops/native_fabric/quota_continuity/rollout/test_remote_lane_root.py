@@ -689,6 +689,7 @@ class PhysicalRootCase(unittest.TestCase):
         self.assertIn("INERT_LOCAL_BOUNDARY", result.stdout)
 
     def test_actual_launch_loop_does_not_repeat_busy_bound_admission(self):
+        not_before = shell_function(self.shell, "caller_not_before_check")
         retry = self.shell.split("RETRYABLE_ADMISSION_MODE=0\n", 1)[1].split(
             "\ncommission_refresh_runtime prelease", 1)[0]
         loop = self.shell.split('ADMISSION_FILE="$STATE_HERE/lanes/', 1)[1].split(
@@ -716,6 +717,9 @@ class PhysicalRootCase(unittest.TestCase):
             "REMOTE_OUTPUT_REDIRECT": ">/dev/null 2>&1"}
         setup = "\n".join(k + "=" + shlex.quote(v) for k, v in vals.items())
         script = ("set -u\n" + setup + "\ndeclare -a SCRATCH_PATHS=()\n"
+                  + not_before +
+                  # Read the fixture poll only; no external program is on PATH.
+                  "cat() { local line=''; while IFS= read -r line || [ -n \"$line\" ]; do printf '%s\\n' \"$line\"; done <\"$1\"; }\n"
                   "log() { printf '%s\\n' \"$*\"; }\n"
                   "commission_refresh_runtime() { CHILD_TIMEOUT=9; return 0; }\n"
                   "require_bound_lane_layout_after_launch() { return 0; }\n"
@@ -725,7 +729,11 @@ class PhysicalRootCase(unittest.TestCase):
                   " *) printf 'UNEXPECTED_STAGE %s\\n' \"$1\" >&2; return 99;;\n"
                   " esac\n}\nRETRYABLE_ADMISSION_MODE=0\n" + retry + "\n" + loop +
                   '\nprintf "FINAL_RC=%s ATTEMPTS=%s\\n" "$RC" "$launch_attempt"\n')
-        result = subprocess.run(["bash", "-c", script], capture_output=True, text=True, timeout=10)
+        # No inherited narrowing witness, provider/transport CLI or BASH_ENV.
+        # The actual absent-option helper is included, rather than stubbed.
+        env = {"PATH": str(self.fx.ctl / "no-programs"), "HOME": str(self.fx.home)}
+        result = subprocess.run(["/bin/bash", "-c", script], capture_output=True,
+                                text=True, timeout=10, env=env)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertEqual(result.stdout.count("INERT_LAUNCH"), 1)
         self.assertIn("FINAL_RC=75 ATTEMPTS=1", result.stdout)

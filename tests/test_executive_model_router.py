@@ -182,6 +182,9 @@ def test_policy_preserves_closed_provider_seams_and_pins_paid_source_identity():
     assert adapter_descriptor("canonical-paid-fabric").implemented
     assert not adapter_descriptor("claude-code").implemented
     assert not adapter_descriptor("openai-compatible").implemented
+    assert not adapter_descriptor("acp").implemented
+    assert all(provider.adapter_id != "acp" for provider in router.providers.values())
+    assert all(alias.adapter_id != "acp" for alias in router.model_aliases.values())
 
 
 def test_policy_refuses_production_arming_or_an_unimplemented_live_provider(tmp_path):
