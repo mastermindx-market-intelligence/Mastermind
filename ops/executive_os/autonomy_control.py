@@ -94,6 +94,12 @@ _COEXISTENCE_MANIFEST_FIELDS = frozenset({
     "prior_ceo_receipt_present", "prior_ceo_receipt_sha256",
     "target_ceo_receipt_sha256",
 })
+_A2_RESTORE_RECEIPT_ARCHIVE = "prior-a2-control-restore-disarmed-receipt.json"
+_A2_RESTORE_RECEIPT_FIELDS = frozenset({
+    "a2_prior_receipt_present", "a2_prior_receipt_sha256",
+    "a2_target_receipt_sha256",
+})
+
 _FINITE_RECEIPT_ARCHIVE = "prior-finite-disarmed-receipt.json"
 _FINITE_RECEIPT_FIELDS = frozenset({
     "finite_prior_receipt_present", "finite_prior_receipt_sha256",
@@ -207,6 +213,13 @@ _TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", 
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
+# Extend the incumbent operation set without replacing its expression:
+# protected source may admit unrelated operations (for example OS Gateway).
+A2_CONTROL_RESTORATION_COMMANDS = frozenset({
+    "a2-restore-controller-socket", "a2-restore-controller-socket-reconcile",
+    "a2-restored-readside-preflight",
+})
+_TRANSACTION_OPERATIONS |= frozenset({"A2_RETURN_SOCKET_RESTORE"})
 _CEO_SUBMIT_ADMISSION_CODES = frozenset(
     {
         "release_identity_mismatch",
@@ -944,6 +957,12 @@ def _absolute_path(value: str) -> Path:
     return path
 
 
+def _a2_restore_digest(value: str) -> str:
+    if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise argparse.ArgumentTypeError("exact lower-case SHA-256 witness required")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Operate the receipt-gated Executive autonomy boundary."
@@ -1034,6 +1053,15 @@ def _parser() -> argparse.ArgumentParser:
     for command in sorted(A2_DISABLE_COMMANDS):
         a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
         a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    for command in sorted(A2_CONTROL_RESTORATION_COMMANDS):
+        a2 = sub.add_parser(command, help="Restore one already-reversed A2 return socket while disarmed.")
+        a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-control-sha256", type=_a2_restore_digest, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-release-sha", type=_exact_sha, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-tree-sha", type=_exact_sha, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-config-sha256", type=_a2_restore_digest, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-plist-sha256", type=_a2_restore_digest, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-bot-user-id", action=_StoreOnce, required=True)
     finite_stage = sub.add_parser('finite-control-stage', help='Stage the fixed finite definition while stopped and disarmed.')
     finite_stage.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
     finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
@@ -3455,6 +3483,15 @@ class ProductionTransactionHost(ProductionArmHost):
                            for field in _COEXISTENCE_MANIFEST_FIELDS - {"prior_ceo_receipt_present"})):
                 raise TransactionEffectUnknown()
             required |= _COEXISTENCE_MANIFEST_FIELDS
+        if set(value) & _A2_RESTORE_RECEIPT_FIELDS:
+            if (value.get("operation") != "A2_RETURN_SOCKET_RESTORE"
+                    or type(value.get("a2_prior_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _A2_RESTORE_RECEIPT_FIELDS - {"a2_prior_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _A2_RESTORE_RECEIPT_FIELDS
+        elif value.get("operation") == "A2_RETURN_SOCKET_RESTORE":
+            raise TransactionEffectUnknown()
         if set(value) & _FINITE_RECEIPT_FIELDS:
             if (value.get("operation") != "FINITE_CONTROL_STAGE"
                     or type(value.get("finite_prior_receipt_present")) is not bool
@@ -3579,6 +3616,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
         if current is not None and set(current) & _COEXISTENCE_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _COEXISTENCE_MANIFEST_FIELDS})
+        if current is not None and set(current) & _A2_RESTORE_RECEIPT_FIELDS:
+            value.update({key: current[key] for key in _A2_RESTORE_RECEIPT_FIELDS})
         if current is not None and set(current) & _FINITE_RECEIPT_FIELDS:
             value.update({key: current[key] for key in _FINITE_RECEIPT_FIELDS})
         if current is not None and set(current) & _PAID_RECEIPT_FIELDS:
@@ -4243,6 +4282,9 @@ class ProductionTransactionHost(ProductionArmHost):
         if set(manifest) & _COEXISTENCE_MANIFEST_FIELDS:
             expected.update(_COEXISTENCE_ARCHIVES)
             archives.extend(AUTONOMY_TRANSACTION / name for name in _COEXISTENCE_ARCHIVES)
+        if set(manifest) & _A2_RESTORE_RECEIPT_FIELDS:
+            expected.add(_A2_RESTORE_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _A2_RESTORE_RECEIPT_ARCHIVE)
         if set(manifest) & _FINITE_RECEIPT_FIELDS:
             expected.add(_FINITE_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _FINITE_RECEIPT_ARCHIVE)
@@ -7909,6 +7951,10 @@ def main(
 
     if args.command in A2_DISABLE_COMMANDS:
         from ops.executive_os.a2_disable_preparation_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in A2_CONTROL_RESTORATION_COMMANDS:
+        from ops.executive_os.a2_control_restoration import run_command
         return run_command(args, host=host)
 
     if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:
