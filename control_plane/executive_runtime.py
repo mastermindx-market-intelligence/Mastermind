@@ -38,7 +38,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
 
-from control_plane.executive_readback_contract import valid_lost_reason, valid_runtime_instant
+from control_plane.executive_readback_contract import valid_lost_reason
 
 from common.commission_ref import (
     CommissionRef,
@@ -614,12 +614,9 @@ def _load_canonical_digest_pair(
 def _iso(timestamp_ms: int | None) -> str:
     if timestamp_ms is None:
         return ""
-    value = datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(
+    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(
         timespec="seconds"
     )
-    if not valid_runtime_instant(value):
-        raise PersistenceError("Runtime timestamp exceeds shared readback future skew")
-    return value
 
 
 def _enum_value(value: str | Enum, enum_type: type[Enum]) -> str:
