@@ -590,16 +590,16 @@ case "$1" in
     [ "$#" -ge 3 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
     ;;
+  start-restored-a2-readside)
+    [ "$#" -eq 15 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
   start-finite|stop-finite|status-finite)
     [ "$#" -eq 5 ] && [ "$2" = "--expected-sha" ] && [ "$4" = "--expected-manifest-sha256" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{64}$ ]] || usage
     ;;
   restart-gateway)
     [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
-    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
-    ;;
-  start-restored-a2-readside)
-    [ "$#" -eq 15 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
     ;;
   *) [ "$#" -eq 1 ] || usage ;;
