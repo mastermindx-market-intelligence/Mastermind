@@ -3408,6 +3408,305 @@ def _upgrade_v5_retained_state(database: Path, *, version: int) -> dict[str, Any
     return state
 
 
+# Closed, fixed-original-operation recovery wire. Ordinary upgrades do not
+# consume these receipts and retain their existing barrier-refusal behavior.
+PRE_CENSUS_QUALIFICATION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_qualification/v1"
+PRE_CENSUS_CONTINUATION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_continuation/v1"
+PRE_CENSUS_PREFLIGHT_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_preflight/v1"
+PRE_CENSUS_INSPECTION_SCHEMA = "mastermind.executive_schema_upgrade_pre_census_inspection/v1"
+PRE_CENSUS_QUALIFICATION_NAME = "executive-schema-upgrade.v5-to-v6.pre-census-qualification.json"
+PRE_CENSUS_CONTINUATION_NAME = "executive-schema-upgrade.v5-to-v6.pre-census-continuation.json"
+_PRE_CENSUS_DATABASE = Path("/private/var/db/mastermind-executive/control/db/data/control_plane/executive.sqlite3")
+_PRE_CENSUS_RELEASES = Path("/Library/Application Support/MastermindExecutive/releases")
+_PRE_CENSUS_LIMIT = 64 * 1024
+_PRE_CENSUS_BARRIER_KEYS = frozenset({
+    "schema_version", "operation_id", "database_path", "tool_release_root",
+    "tool_release_tree_sha", "tool_release_manifest_sha256", "release_sha",
+    "control_uid", "created_at",
+})
+_PRE_CENSUS_QUALIFICATION_KEYS = frozenset({
+    "schema_version", "operation_id", "original_barrier", "original_tool",
+    "recovery_tool", "database", "normalized_schema_digest",
+    "full_v5_content_digest", "migration_vector", "selected_source",
+    "source_control_config", "host", "created_at",
+})
+_PRE_CENSUS_IDENTITY_KEYS = frozenset({"path", "device", "inode", "size", "sha256", "payload_digest"})
+_PRE_CENSUS_ORIGIN_KEYS = frozenset({
+    "path", "device", "inode", "uid", "gid", "mode", "nlink", "size",
+    "mtime_ns", "ctime_ns", "sha256",
+})
+
+
+def _pre_census_closed(value: Any, keys: frozenset[str], label: str) -> dict[str, Any]:
+    if not isinstance(value, Mapping) or set(value) != keys:
+        raise ExecutiveSchemaUpgradeError(f"pre-census {label} has an unsupported shape")
+    return dict(value)
+
+
+def _pre_census_hash(value: Any, *, length: int = 64) -> str:
+    if not isinstance(value, str) or re.fullmatch(r"[0-9a-f]{" + str(length) + "}", value) is None:
+        raise ExecutiveSchemaUpgradeError("pre-census digest or identity is malformed")
+    return value
+
+
+def _pre_census_time(value: Any) -> str:
+    if not isinstance(value, str):
+        raise ExecutiveSchemaUpgradeError("pre-census timestamp is malformed")
+    try:
+        parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise ExecutiveSchemaUpgradeError("pre-census timestamp is malformed") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() != UTC.utcoffset(parsed):
+        raise ExecutiveSchemaUpgradeError("pre-census timestamp is not explicit UTC")
+    return value
+
+
+def _pre_census_control_identity() -> tuple[int, int]:
+    import pwd
+    import grp
+    from ops.executive_os.autonomy_control import CONTROL_USER, CONTROL_GROUP
+    user, group = pwd.getpwnam(CONTROL_USER), grp.getgrnam(CONTROL_GROUP)
+    if (user.pw_name != CONTROL_USER or group.gr_name != CONTROL_GROUP
+            or type(user.pw_uid) is not int or user.pw_uid <= 0
+            or type(group.gr_gid) is not int or group.gr_gid <= 0
+            or user.pw_gid != group.gr_gid):
+        raise ExecutiveSchemaUpgradeError("pre-census fixed Control identity is ambiguous")
+    return user.pw_uid, group.gr_gid
+
+
+def _pre_census_stat(info: os.stat_result) -> tuple[int, ...]:
+    return (info.st_dev, info.st_ino, info.st_uid, info.st_gid, info.st_mode,
+            info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+
+
+def _pre_census_ancestors(path: Path, uid: int, gid: int) -> tuple:
+    """Known-ancestor metadata only: never directory READ, enumeration or ACL open."""
+    if path.parent != _PRE_CENSUS_DATABASE.parent:
+        raise ExecutiveSchemaUpgradeError("pre-census leaf is outside the fixed namespace")
+    top = _PRE_CENSUS_DATABASE.parents[4]
+    result = []
+    for ancestor in reversed(path.parents):
+        info = os.lstat(ancestor)
+        if ancestor == top:
+            owner, group, mode = 0, 0, 0o711
+        elif top in ancestor.parents:
+            owner, group, mode = uid, gid, 0o700
+        else:
+            owner, group, mode = 0, 0, 0o755
+        if (not stat.S_ISDIR(info.st_mode) or stat.S_ISLNK(info.st_mode)
+                or info.st_uid != owner or info.st_gid != group
+                or stat.S_IMODE(info.st_mode) != mode):
+            raise ExecutiveSchemaUpgradeError("pre-census ancestor metadata is unqualified")
+        result.append((str(ancestor), info.st_dev, info.st_ino, info.st_uid,
+                       info.st_gid, info.st_mode))
+    return tuple(result)
+
+
+def _pre_census_leaf(path: Path, fd: int, *, uid: int, gid: int, mode: int) -> os.stat_result:
+    from control_plane.fs_security import has_macos_acl
+    info, named = os.fstat(fd), os.lstat(path)
+    if (not stat.S_ISREG(info.st_mode) or info.st_uid != uid or info.st_gid != gid
+            or stat.S_IMODE(info.st_mode) != mode or info.st_nlink != 1
+            or not 0 < info.st_size <= _PRE_CENSUS_LIMIT
+            or _pre_census_stat(named) != _pre_census_stat(info)
+            or has_macos_acl(path, descriptor=fd, expected_identity=info)):
+        raise ExecutiveSchemaUpgradeError("pre-census leaf custody is unqualified")
+    return info
+
+
+def _pre_census_read(path: Path, fd: int, *, uid: int, gid: int, mode: int) -> tuple[bytes, os.stat_result]:
+    before = _pre_census_leaf(path, fd, uid=uid, gid=gid, mode=mode)
+    chunks, total = [], 0
+    while True:
+        chunk = os.read(fd, min(64 * 1024, _PRE_CENSUS_LIMIT + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+        if total > _PRE_CENSUS_LIMIT:
+            raise ExecutiveSchemaUpgradeError("pre-census artifact exceeds its bound")
+    raw = b"".join(chunks)
+    after = _pre_census_leaf(path, fd, uid=uid, gid=gid, mode=mode)
+    if len(raw) != before.st_size or _pre_census_stat(after) != _pre_census_stat(before):
+        raise ExecutiveSchemaUpgradeError("pre-census leaf changed during read")
+    return raw, after
+
+
+def _pre_census_artifact_identity(path: Path, *, uid: int, gid: int, mode: int) -> dict[str, Any]:
+    """Descriptor-qualified finite receipt identity; never pathname-hash fallback."""
+    path = Path(path)
+    ancestors = _pre_census_ancestors(path, *_pre_census_control_identity())
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+    try:
+        raw, info = _pre_census_read(path, fd, uid=uid, gid=gid, mode=mode)
+        value = _strict_json(raw)
+        if not isinstance(value, dict) or _upgrade_receipt_bytes(value) != raw:
+            raise ExecutiveSchemaUpgradeError("pre-census receipt is not canonical JSON")
+        result = {"path": str(path), "device": info.st_dev, "inode": info.st_ino,
+                  "size": info.st_size, "sha256": hashlib.sha256(raw).hexdigest(),
+                  "payload_digest": _upgrade_digest(value)}
+        if ancestors != _pre_census_ancestors(path, *_pre_census_control_identity()):
+            raise ExecutiveSchemaUpgradeError("pre-census artifact ancestry changed")
+        _pre_census_leaf(path, fd, uid=uid, gid=gid, mode=mode)
+        return result
+    finally:
+        os.close(fd)
+
+
+def _pre_census_tool(value: Any) -> dict[str, str]:
+    tool = _pre_census_closed(value, frozenset({"root", "sha", "tree_sha", "manifest_sha256"}), "tool")
+    _pre_census_hash(tool["sha"], length=40)
+    _pre_census_hash(tool["tree_sha"], length=40)
+    _pre_census_hash(tool["manifest_sha256"])
+    if tool["root"] != str(_PRE_CENSUS_RELEASES / tool["sha"]):
+        raise ExecutiveSchemaUpgradeError("pre-census tool root is not the fixed sealed release")
+    return tool
+
+
+def _validate_pre_census_barrier(value: Any, uid: int) -> dict[str, Any]:
+    payload = _pre_census_closed(value, _PRE_CENSUS_BARRIER_KEYS, "original barrier")
+    if (payload["schema_version"] != UPGRADE_BARRIER_SCHEMA
+            or payload["database_path"] != str(_PRE_CENSUS_DATABASE)
+            or type(payload["control_uid"]) is not int or payload["control_uid"] != uid):
+        raise ExecutiveSchemaUpgradeError("pre-census original barrier binding differs")
+    _pre_census_hash(payload["operation_id"], length=32)
+    _pre_census_time(payload["created_at"])
+    _pre_census_tool({"root": payload["tool_release_root"], "sha": payload["release_sha"],
+                      "tree_sha": payload["tool_release_tree_sha"],
+                      "manifest_sha256": payload["tool_release_manifest_sha256"]})
+    return payload
+
+
+class _PreCensusBarrierObservation:
+    """Held leaf plus metadata-bracketed ancestry, not an ancestor-FD lock."""
+    def __init__(self):
+        self.uid, self.gid = _pre_census_control_identity()
+        self.path = _PRE_CENSUS_DATABASE.parent / _UPGRADE_BARRIER_NAME
+        self.ancestors = _pre_census_ancestors(self.path, self.uid, self.gid)
+        self.fd = os.open(self.path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | getattr(os, "O_CLOEXEC", 0))
+        try:
+            self.raw, info = _pre_census_read(self.path, self.fd, uid=self.uid, gid=self.gid, mode=0o600)
+            self.initial = _pre_census_stat(info)
+            self.payload = _validate_pre_census_barrier(_strict_json(self.raw), self.uid)
+            if self.raw != _upgrade_receipt_bytes(self.payload):
+                raise ExecutiveSchemaUpgradeError("pre-census original barrier is not canonical")
+            self.identity = {"path": str(self.path), "device": info.st_dev, "inode": info.st_ino,
+                             "size": info.st_size, "sha256": hashlib.sha256(self.raw).hexdigest(),
+                             "payload_digest": _upgrade_digest(self.payload)}
+            self.check()
+        except BaseException:
+            os.close(self.fd)
+            self.fd = -1
+            raise
+
+    def check(self) -> None:
+        info = _pre_census_leaf(self.path, self.fd, uid=self.uid, gid=self.gid, mode=0o600)
+        if (_pre_census_stat(info) != self.initial
+                or self.ancestors != _pre_census_ancestors(self.path, self.uid, self.gid)):
+            raise ExecutiveSchemaUpgradeError("pre-census original barrier identity changed")
+        if os.geteuid() == self.uid:
+            actual = _artifact_identity(self.path, expected_payload=self.payload, expected=self.identity)
+        else:
+            actual = _pre_census_artifact_identity(self.path, uid=self.uid, gid=self.gid, mode=0o600)
+        if actual != self.identity:
+            raise ExecutiveSchemaUpgradeError("pre-census original barrier bytes changed")
+        if (_pre_census_stat(_pre_census_leaf(self.path, self.fd, uid=self.uid, gid=self.gid, mode=0o600)) != self.initial
+                or self.ancestors != _pre_census_ancestors(self.path, self.uid, self.gid)):
+            raise ExecutiveSchemaUpgradeError("pre-census original barrier changed at return")
+
+    def close(self) -> None:
+        if self.fd >= 0:
+            os.close(self.fd)
+            self.fd = -1
+
+
+@contextmanager
+def _open_pre_census_barrier_for_root_issuer(database_path: Path) -> Iterator[_PreCensusBarrierObservation]:
+    if os.geteuid() != 0 or Path(database_path) != _PRE_CENSUS_DATABASE:
+        raise ExecutiveSchemaUpgradeError("pre-census issuer requires Root at the fixed database")
+    value = _PreCensusBarrierObservation()
+    try:
+        yield value
+        value.check()
+    finally:
+        value.close()
+
+
+def inspect_v5_to_v6_pre_census_barrier() -> dict[str, Any]:
+    """Read-only fixed-leaf DATA; no database, service, lock or migration access."""
+    uid, gid = _pre_census_control_identity()
+    if os.geteuid() != uid or os.getegid() != gid:
+        raise ExecutiveSchemaUpgradeError("pre-census inspection requires the fixed Control caller")
+    value = _PreCensusBarrierObservation()
+    try:
+        result = {"schema_version": PRE_CENSUS_INSPECTION_SCHEMA,
+                  "original_barrier": {"payload": dict(value.payload), "identity": dict(value.identity)},
+                  "custody": {"uid": uid, "gid": gid, "mode": 0o600, "nlink": 1}}
+        value.check()
+        return result
+    finally:
+        value.close()
+
+
+def _validate_pre_census_qualification(value: Any) -> dict[str, Any]:
+    """Pure closed-wire DATA validation; this is not Root authority or a reader."""
+    payload = _pre_census_closed(value, _PRE_CENSUS_QUALIFICATION_KEYS, "qualification")
+    if payload["schema_version"] != PRE_CENSUS_QUALIFICATION_SCHEMA:
+        raise ExecutiveSchemaUpgradeError("pre-census qualification schema differs")
+    host = _pre_census_closed(payload["host"], frozenset({"runtime_root", "backup_root", "control_uid", "control_gid"}), "host")
+    for name in ("control_uid", "control_gid"):
+        if type(host[name]) is not int or host[name] <= 0:
+            raise ExecutiveSchemaUpgradeError("pre-census qualification principal is malformed")
+    if host["runtime_root"] != str(_PRE_CENSUS_DATABASE.parents[2]) or host["backup_root"] != str(_PRE_CENSUS_DATABASE.parents[3] / "backups"):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification roots differ")
+    original = _pre_census_closed(payload["original_barrier"], frozenset({"payload", "identity"}), "barrier observation")
+    barrier = _validate_pre_census_barrier(original["payload"], host["control_uid"])
+    identity = _pre_census_closed(original["identity"], _PRE_CENSUS_IDENTITY_KEYS, "barrier identity")
+    raw = _upgrade_receipt_bytes(barrier)
+    if (identity["path"] != str(_PRE_CENSUS_DATABASE.parent / _UPGRADE_BARRIER_NAME)
+            or identity["size"] != len(raw) or identity["sha256"] != hashlib.sha256(raw).hexdigest()
+            or identity["payload_digest"] != _upgrade_digest(barrier)
+            or payload["operation_id"] != barrier["operation_id"]):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification original barrier differs")
+    for name in ("device", "inode"):
+        if type(identity[name]) is not int or identity[name] < 0:
+            raise ExecutiveSchemaUpgradeError("pre-census barrier identity is malformed")
+    old = _pre_census_tool(payload["original_tool"])
+    if old != {"root": barrier["tool_release_root"], "sha": barrier["release_sha"], "tree_sha": barrier["tool_release_tree_sha"], "manifest_sha256": barrier["tool_release_manifest_sha256"]}:
+        raise ExecutiveSchemaUpgradeError("pre-census qualification original tool differs")
+    new = _pre_census_tool(payload["recovery_tool"])
+    if old["sha"] == new["sha"]:
+        raise ExecutiveSchemaUpgradeError("pre-census corrected executor must be a distinct sealed release")
+    database = _pre_census_closed(payload["database"], _PRE_CENSUS_ORIGIN_KEYS, "database origin")
+    if (database["path"] != str(_PRE_CENSUS_DATABASE) or database["uid"] != host["control_uid"]
+            or database["gid"] != host["control_gid"] or database["mode"] != 0o600 or database["nlink"] != 1):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification database custody differs")
+    for name in _PRE_CENSUS_ORIGIN_KEYS - {"path", "sha256"}:
+        if type(database[name]) is not int or database[name] < 0:
+            raise ExecutiveSchemaUpgradeError("pre-census database identity is malformed")
+    for name in ("normalized_schema_digest", "full_v5_content_digest"):
+        _pre_census_hash(payload[name])
+    _pre_census_hash(database["sha256"])
+    if not isinstance(payload["migration_vector"], list) or len(payload["migration_vector"]) != 5:
+        raise ExecutiveSchemaUpgradeError("pre-census qualification migration vector is malformed")
+    for version, item in enumerate(payload["migration_vector"], start=1):
+        record = _pre_census_closed(item, frozenset({"version", "name", "checksum", "applied_at_ms"}), "migration")
+        if (type(record["version"]) is not int or record["version"] != version
+                or not isinstance(record["name"], str) or not record["name"]
+                or type(record["applied_at_ms"]) is not int):
+            raise ExecutiveSchemaUpgradeError("pre-census qualification migration vector differs")
+        _pre_census_hash(record["checksum"])
+    selected = _pre_census_closed(payload["selected_source"], frozenset({"sha", "descriptor_raw_sha256", "descriptor_sha256", "source_backup_sha256", "baseline_sha256", "inventory_sha256", "prior_canary_sha256"}), "selected source")
+    for name, item in selected.items():
+        _pre_census_hash(item, length=40 if name == "sha" else 64)
+    config = _pre_census_closed(payload["source_control_config"], frozenset({"path", "sha256"}), "source config")
+    if config["path"] != str(_PRE_CENSUS_RELEASES.parent / "config" / "control.json"):
+        raise ExecutiveSchemaUpgradeError("pre-census qualification source config differs")
+    _pre_census_hash(config["sha256"])
+    _pre_census_time(payload["created_at"])
+    return json.loads(json.dumps(payload))
+
+
 def upgrade_v5_to_v6(
     database_path: str | Path,
     backup_directory: str | Path,
