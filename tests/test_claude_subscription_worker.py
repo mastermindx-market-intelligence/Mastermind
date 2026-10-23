@@ -441,6 +441,32 @@ def test_turn_refuses_catalog_canary_and_autonomous_blockers(tmp_path: Path):
         )
 
 
+def test_byteplus_canary_rejects_even_hermetic_owner_sealed_positive_facts():
+    """Test-only HMAC facts do not override actual BytePlus SPEC_ONLY policy.
+
+    Keys/enrollment are test-injected by the existing fixture; no provider
+    account, worker principal or live Capacity source is touched.
+    """
+    byteplus_id = "byteplus-coding-plan-personal.claude-code-anthropic"
+    profiles = json.loads(DEFAULT_PROFILES_PATH.read_text(encoding="utf-8"))
+    bindings = load_bindings(profiles_document=profiles)
+    receipt = issue_provider_realm_enrollment_receipt(
+        binding_id=byteplus_id,
+        bindings_document=bindings,
+        profiles_document=profiles,
+        generation=_REALM_GENERATION,
+    )
+    assert receipt.binding_id == byteplus_id
+    assert receipt.enrollment_state == "enrolled"  # fixture only, not runtime
+    with pytest.raises(CanaryAdmissionError, match="SPEC_ONLY"):
+        seal_subscription_canary_admission(
+            capacity_fact=_capacity_fact(),
+            realm_receipt=receipt,
+            bindings_document=bindings,
+            profiles_document=profiles,
+        )
+
+
 def test_seal_refuses_raw_boolean_activation_inputs():
     for key in (
         "adapter_implemented",

@@ -30,6 +30,18 @@ def _token(value: Any, *, field: str) -> str:
     return value
 
 
+def _mentions_byteplus(value: str) -> bool:
+    """Conservatively refuse BytePlus-looking identities in untrusted previews.
+
+    Provider Control's preview is not an authoritative binding. Identifiers
+    can add prefixes, suffixes, or ASCII separators; none may convert a
+    personal Coding Plan into an autonomous worker. A separately licensed
+    commercial route needs its own reviewed owner, not a preview rename.
+    """
+    compact = re.sub(r"[-._:]", "", value.casefold())
+    return "byteplus" in compact
+
+
 def _validate_tiers(value: Any) -> tuple[tuple[str, tuple[str, ...]], ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise CapacityEconomicsProjectionError("suitability_tiers must be a non-empty sequence")
@@ -167,9 +179,10 @@ def project_quota_preference(
     # coding tools for its individual subscriber. A provider-economics PREVIEW
     # does not attest that execution surface, consent or a plan-funded worker.
     # Never turn a forged positive Capacity estimate into an autonomous worker.
-    # A separately licensed BytePlus PAYG/enterprise API must use its own
-    # independently reviewed provider and model aliases.
-    if provider.casefold() == "byteplus" or model_alias.casefold() == "byteplus.attended":
+    # Neither the exact personal alias nor a near-miss label supplied by the
+    # untrusted preview can assert license/Capacity facts. A commercial
+    # BytePlus grant requires an explicit independently reviewed owner path.
+    if _mentions_byteplus(provider) or _mentions_byteplus(model_alias):
         raise CapacityEconomicsProjectionError(
             "personal BytePlus Coding Plan cannot enter autonomous Capacity preference"
         )
