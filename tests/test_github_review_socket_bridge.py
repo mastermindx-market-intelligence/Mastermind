@@ -225,6 +225,7 @@ def test_socket_parent_requires_enrolled_relay_and_original_job(tmp_path):
         relay_bot_user_id="U0BT71H4FQE",
         parent_message_reader=trusted_parent_reader,
         parent_recorder=ExecutiveSlackReviewThreads(runtime=runtime).record_parent,
+        parent_body_renderer=review_parent_body,
     )
     bad = [
         parent_frame(subject, "JOB-999"),
@@ -366,6 +367,7 @@ def test_socket_parent_requires_real_host_authenticated_message_readback(
         relay_bot_user_id="U0BT71H4FQE",
         parent_message_reader=host_message_reader,
         parent_recorder=ExecutiveSlackReviewThreads(runtime=runtime).record_parent,
+        parent_body_renderer=review_parent_body,
     )
     with pytest.raises(GitHubReviewSocketRefused, match="SOURCE_UNVERIFIED"):
         owner.handle_frame(parent_frame(subject, job_id))
@@ -377,7 +379,9 @@ def test_socket_parent_requires_real_host_authenticated_message_readback(
 
 
 def test_socket_parent_rechecks_revoked_github_source_before_slack_read(tmp_path):
-    from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+    from integrations.github_review_slack_thread import (
+        ExecutiveSlackReviewThreads, review_parent_body,
+    )
     runtime = Runtime.at(tmp_path / "runtime")
     chosen = decision()
     create = ExecutiveGitHubReviewSocketOwner(
@@ -397,13 +401,15 @@ def test_socket_parent_rechecks_revoked_github_source_before_slack_read(tmp_path
         relay_bot_user_id="U0BT71H4FQE",
         parent_message_reader=no_slack_read,
         parent_recorder=ExecutiveSlackReviewThreads(runtime=runtime).record_parent,
+        parent_body_renderer=review_parent_body,
     )
     with pytest.raises(GitHubReviewSocketRefused, match="SOURCE_UNVERIFIED"):
         owner.handle_frame(parent_frame(chosen, job))
     assert reads == []
 
-def test_socket_parent_cannot_write_without_host_owned_recorder(tmp_path):
-    """A trusted Slack GET alone cannot create a second canonical event writer."""
+@pytest.mark.parametrize("missing", ["recorder", "renderer"])
+def test_socket_parent_cannot_write_without_host_owned_dependencies(tmp_path, missing):
+    """An authenticated Slack GET cannot bypass a missing host-owned callback."""
     from integrations.github_review_slack_thread import (
         ExecutiveSlackReviewThreads, review_parent_body,
     )
@@ -423,15 +429,22 @@ def test_socket_parent_cannot_write_without_host_owned_recorder(tmp_path):
             ts=ts, author_user_id="U0BT71H4FQE",
             text=review_parent_body(decision=chosen, job_id=job),
         )
-    no_recorder = ExecutiveGitHubReviewSocketOwner(
+    blocked = ExecutiveGitHubReviewSocketOwner(
         runtime=runtime, admission_guard=lambda: None,
         source_guard=lambda _: None,
         repositories=frozenset({"example/repo"}),
         relay_bot_user_id="U0BT71H4FQE",
         parent_message_reader=reader,
+        parent_recorder=(
+            None if missing == "recorder"
+            else ExecutiveSlackReviewThreads(runtime=runtime).record_parent
+        ),
+        parent_body_renderer=(
+            None if missing == "renderer" else review_parent_body
+        ),
     )
     with pytest.raises(GitHubReviewSocketRefused, match="PROVENANCE_UNBOUND"):
-        no_recorder.handle_frame(parent_frame(subject, job_id))
+        blocked.handle_frame(parent_frame(subject, job_id))
     assert reader_calls == []
     assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
         decision=subject, job_id=job_id,

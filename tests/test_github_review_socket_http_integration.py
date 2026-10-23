@@ -18,7 +18,7 @@ from integrations.github_review_host_composition import compose_github_review_ho
 from integrations.github_review_return import GitHubReviewReturn, ReviewReturnSourceMode
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 from integrations.github_review_slack_thread import (
-    ExecutiveSlackReviewThreads, SlackReviewResultNotifier,
+    ExecutiveSlackReviewThreads, SlackReviewResultNotifier, review_parent_body,
 )
 from test_github_review_publish_workflow import git_api
 from test_github_review_runtime_adapter import decision
@@ -60,6 +60,7 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             relay_bot_user_id="U0BT71H4FQE",
             parent_message_reader=trusted_parent_reader,
             parent_recorder=ExecutiveSlackReviewThreads(runtime=runtime).record_parent,
+            parent_body_renderer=review_parent_body,
             worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )
         socket_path = str(tmp_path / "ceo-ingress.sock")

@@ -22,7 +22,7 @@ from control_plane.github_review_runtime_adapter import (
 
 from control_plane.github_review_socket_contract import (
     FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES,
-    REVIEW_SLACK_CHANNEL_ID, SlackParentMessage, review_parent_body,
+    REVIEW_SLACK_CHANNEL_ID, SlackParentMessage,
 )
 _SUPPORTED_ACTIONS = frozenset({"status", "admit", "record_parent"})
 _DECISION_KEYS = frozenset({
@@ -96,6 +96,7 @@ class ExecutiveGitHubReviewSocketOwner:
         worker_constraints: Mapping[str, object] | None = None,
         parent_message_reader: Callable[[ReviewIntentDecision, str, str], SlackParentMessage] | None = None,
         parent_recorder: Callable[..., None] | None = None,
+        parent_body_renderer: Callable[..., str] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("canonical Executive Runtime required")
@@ -129,6 +130,9 @@ class ExecutiveGitHubReviewSocketOwner:
         # Host injects EXISTING ExecutiveSlackReviewThreads.record_parent;
         # a public frame cannot select a different Runtime/EventStore writer.
         self._parent_recorder = parent_recorder
+        if parent_body_renderer is not None and not callable(parent_body_renderer):
+            raise ValueError("trusted Slack parent renderer must be callable")
+        self._parent_body_renderer = parent_body_renderer
         # Only the installed Executive host selects existing worker quota
         # classes. Never accept worker placement or account/model hints from
         # a public webhook/Unix frame. Empty keeps source tests QUEUED-only.
@@ -194,7 +198,8 @@ class ExecutiveGitHubReviewSocketOwner:
                 raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID")
             if (self._relay_bot_user_id is None
                     or self._parent_message_reader is None
-                    or self._parent_recorder is None):
+                    or self._parent_recorder is None
+                    or self._parent_body_renderer is None):
                 raise GitHubReviewSocketRefused("REVIEW_SLACK_PROVENANCE_UNBOUND")
             chosen = _closed_decision(frame.get("decision"))
             job_id = frame.get("job_id")
@@ -234,6 +239,15 @@ class ExecutiveGitHubReviewSocketOwner:
                 if self._source_guard(chosen) is not None:
                     raise ValueError("review source no longer current")
                 receipt = self._parent_message_reader(chosen, job_id, ts)
+                expected_bodies = {
+                    self._parent_body_renderer(
+                        decision=chosen, job_id=job_id,
+                        public_repository_names_authorized=authorized,
+                    )
+                    for authorized in (False, True)
+                }
+                if any(type(body) is not str for body in expected_bodies):
+                    raise ValueError("trusted parent renderer invalid")
             except Exception:
                 raise GitHubReviewSocketRefused(
                     "REVIEW_SLACK_PARENT_SOURCE_UNVERIFIED"
@@ -243,16 +257,7 @@ class ExecutiveGitHubReviewSocketOwner:
                 or receipt.ts != ts
                 or receipt.author_user_id != self._relay_bot_user_id
                 or receipt.thread_ts is not None or receipt.edited or receipt.deleted
-                or receipt.text not in {
-                    review_parent_body(
-                        decision=chosen, job_id=job_id,
-                        public_repository_names_authorized=False,
-                    ),
-                    review_parent_body(
-                        decision=chosen, job_id=job_id,
-                        public_repository_names_authorized=True,
-                    ),
-                }
+                or receipt.text not in expected_bodies
             ):
                 raise GitHubReviewSocketRefused(
                     "REVIEW_SLACK_PARENT_SOURCE_UNVERIFIED"

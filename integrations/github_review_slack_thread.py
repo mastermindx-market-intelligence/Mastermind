@@ -13,8 +13,7 @@ import re
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_intent import ReviewIntentDecision
 from control_plane.github_review_socket_contract import (
-    REVIEW_SLACK_CHANNEL_ID as CHANNEL_ID,
-    MAX_PARENT_NOTICE_CHARS, SlackReviewThreadUnavailable, review_parent_body,
+    REVIEW_SLACK_CHANNEL_ID as CHANNEL_ID, SlackReviewThreadUnavailable,
 )
 from integrations.slack_agent_dialogue.engine import SlackMessage
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
@@ -24,6 +23,35 @@ _REPLY = "GITHUB_REVIEW_SLACK_REPLY_RESERVED"
 _SCHEMA = "mastermind.github_review_slack_visibility.v1"
 _TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
 _ID_RE = re.compile(r"\A[A-Za-z0-9:._-]{1,128}\Z")
+MAX_PARENT_NOTICE_CHARS = 700
+
+
+def review_parent_body(
+    *, decision: ReviewIntentDecision, job_id: str,
+    public_repository_names_authorized: bool = False,
+) -> str:
+    """Existing Slack-owned deterministic parent text, used by host readback.
+
+    The control plane binds this pure function through an explicit injected
+    callback; there is no forbidden control_plane -> integrations import.
+    """
+    if (not isinstance(decision, ReviewIntentDecision)
+            or decision.admitted is not True
+            or type(job_id) is not str
+            or _ID_RE.fullmatch(job_id) is None
+            or type(public_repository_names_authorized) is not bool):
+        raise SlackReviewThreadUnavailable("SLACK_PARENT_IDENTITY_INVALID")
+    subject = (
+        f"{decision.repository}#{decision.pull_number}"
+        if public_repository_names_authorized else "authorized GitHub pull request"
+    )
+    return (
+        "Independent review admitted through Executive/Fabric: "
+        + subject + "\n"
+        + f"Executive Job: {job_id}\n"
+        + f"Review command: {decision.command_id}\n"
+        + "Status: QUEUED (not worker START; no verdict yet)"
+    )[:MAX_PARENT_NOTICE_CHARS]
 
 
 class ExecutiveSlackReviewThreads:
