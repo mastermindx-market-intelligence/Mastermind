@@ -158,7 +158,7 @@ def routing_env():
     import os, shlex
     names = ("POOL_CAPACITY_PREFLIGHT", "POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS", "POOL_TASK_COMPLEXITY", "POOL_ESCALATION_REASON", "POOL_MAX_CONTEXT_TOKENS", "POOL_AUTO_COMPACT_WINDOW_TOKENS", "POOL_MAX_TURNS")
     if "POOL_CALLER_NOT_BEFORE" in os.environ:
-        from caller_not_before import validate_not_before
+        from commission_deadline import validate_not_before
         validate_not_before(os.environ["POOL_CALLER_NOT_BEFORE"])
         names += ("POOL_CALLER_NOT_BEFORE",)
     print(" ".join(shlex.quote(name + "=" + os.environ.get(name, "")) for name in names))

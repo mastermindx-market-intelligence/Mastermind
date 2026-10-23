@@ -687,7 +687,7 @@ def request(
     # An inherited transport label cannot silently constrain or authorize a new request.
     env.pop("POOL_CALLER_NOT_BEFORE", None)
     if not_before is not None:
-        from caller_not_before import validate_not_before
+        from commission_deadline import validate_not_before
         not_before = validate_not_before(not_before)
         env["POOL_CALLER_NOT_BEFORE"] = not_before
     env.pop("POOL_CAPACITY_PREFLIGHT",None)
@@ -710,7 +710,7 @@ def request(
         env[DEADLINE_ENV] = str(request_deadline_ns)
     def check_deadline():
         if not_before is not None:
-            from caller_not_before import require_not_before
+            from commission_deadline import require_not_before
             require_not_before(not_before)
         if request_deadline_ns is not None:
             remaining = int(require_remaining(request_deadline_ns, minimum_seconds=1))

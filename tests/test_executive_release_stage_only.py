@@ -11,6 +11,7 @@ import json
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 
@@ -37,13 +38,25 @@ def snapshot(path):
 def stage(tmp_path, bundle, source):
     mod, assets, sha, tree = bundle
     repo = source[0]
-    # Include the ordinary release surface in the fixture's actual Git archive.
+    # The fixture's actual Git archive carries the real reviewed release
+    # surface and the actual native closure records the unchanged archived
+    # builder materializes inside the release; only root ownership/ACLs stay
+    # simulated, and runtime caches/generated stages are never copied.
     for name in ("autonomy-control.sh", "autonomy_control.py", "credential_rotation_interlock.py"):
         p = repo / "ops/executive_os" / name
         p.parent.mkdir(parents=True, exist_ok=True)
-        p.write_text("# inert fixture\n")
+        p.write_bytes((ROOT / "ops/executive_os" / name).read_bytes())
         if name.endswith(".sh"):
             p.chmod(0o755)
+    shutil.copytree(ROOT / "ops/native_fabric/quota_continuity",
+                    repo / "ops/native_fabric/quota_continuity",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
+                                                  "native-code-stage", ".DS_Store"))
+    provenance = json.loads((ROOT / "ops/native_fabric/quota_continuity/candidate/"
+                              "paid_pyyaml_provenance.json").read_bytes())
+    lock = repo / provenance["lock_path"]
+    lock.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copyfile(ROOT / provenance["lock_path"], lock)
     subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
     subprocess.run(["git", "-C", str(repo), "-c", "user.name=Test", "-c",
                     "user.email=t@example.invalid", "commit", "-qm", "surface"], check=True)

@@ -10,6 +10,12 @@ MCP server/plugin/skill therefore cannot become ambient authority merely because
 it exists in a provider home: it must belong to the exact reviewed profile that
 both the Job and claimed capacity name.  The operator-harness attestation layer
 remains responsible for proving the provider process actually matches the grant.
+
+The paid model-only sealed-input profile (``fabric.paid.glm.sealed-input.v1``)
+is a closed configuration-only extension: one exact surface/realm tuple, the
+sealed-worker fences, and no inference transport, permission or authority of
+any kind.  A live paid-model admission remains separately authorized by the
+actual adapter and its paid lease, never by this registry.
 """
 from __future__ import annotations
 
@@ -70,16 +76,34 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+# Paid model-only sealed-input extension: exactly one reviewed surface/realm/
+# profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
+# sealed-worker fence below, so it can never carry MCP servers, plugins,
+# resources, skills, V4 skill capabilities, native helpers or a writable
+# sandbox.  The paid realm and the model-only surface are refused on every
+# other profile, and only the canonical paid Fabric adapter maps the surface;
+# no arbitrary alias, second registry or generation rename exists.  This is
+# configuration naming only: it grants no permission, token, provider
+# admission or authority, and live model transport stays separately authorized
+# by the actual adapter and its paid lease.
+PAID_FABRIC_ADAPTER_ID = "canonical-paid-fabric"
+PAID_GLM_SEALED_PROFILE_ID = "fabric.paid.glm.sealed-input.v1"
+PAID_GLM_EXECUTION_SURFACE = "glm-model-only"
+PAID_GLM_AUTH_REALM = "paid-lease-bound-account"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    PAID_GLM_EXECUTION_SURFACE,
 })
-_AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_AUTH_REALMS = frozenset({"dedicated-worker-account", PAID_GLM_AUTH_REALM})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
     "attended-fabric": frozenset({"claude-code"}),
+    PAID_FABRIC_ADAPTER_ID: frozenset({PAID_GLM_EXECUTION_SURFACE}),
 }
-_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "claude-code", PAID_GLM_EXECUTION_SURFACE,
+})
 
 
 def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
@@ -2021,6 +2045,45 @@ class ExecutionCapabilityRegistry:
                     raise CapabilityPolicyError(
                         "pending fabric browser profile requires disabled, inert owner admission"
                     )
+            # Paid model-only sealed-input fence: the paid auth realm and the
+            # model-only surface exist for exactly one closed profile tuple and
+            # are refused everywhere else.  No alias profile, no legacy-profile
+            # adoption, no mixed surface/realm combination and no field widening
+            # is accepted, and the sealed-worker fences above already deny MCP,
+            # plugins, resources, skills, skill capabilities and helpers.
+            is_paid_glm_profile = profile_id == PAID_GLM_SEALED_PROFILE_ID
+            if auth_realm == PAID_GLM_AUTH_REALM and not is_paid_glm_profile:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot use the paid lease-bound auth realm"
+                )
+            if (
+                execution_surface == PAID_GLM_EXECUTION_SURFACE
+                and not is_paid_glm_profile
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot use the paid model-only execution surface"
+                )
+            if is_paid_glm_profile and (
+                not enabled
+                or execution_surface != PAID_GLM_EXECUTION_SURFACE
+                or auth_realm != PAID_GLM_AUTH_REALM
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or skill_capability_ids
+                or skill_grants
+                or mcp_server_ids
+                or resource_ids
+                or plugins
+                or forbidden
+            ):
+                raise CapabilityPolicyError(
+                    "paid GLM sealed-input profile differs from its exact reviewed ceiling"
+                )
             if write_capable and sandbox_policy != "workspace-write":
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} write capability requires workspace-write"
@@ -2185,6 +2248,10 @@ __all__ = [
     "NativeHelperGrant",
     "ResourceGrant",
     "PendingBrowserResource",
+    "PAID_FABRIC_ADAPTER_ID",
+    "PAID_GLM_AUTH_REALM",
+    "PAID_GLM_EXECUTION_SURFACE",
+    "PAID_GLM_SEALED_PROFILE_ID",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
     "build_company_consultation_grant_profile",

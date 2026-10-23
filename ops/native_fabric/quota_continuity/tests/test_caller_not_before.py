@@ -24,7 +24,7 @@ def setUpModule():
 def tearDownModule():
     release()
 
-import caller_not_before as bound
+import commission_deadline as bound
 import fabric_task
 import lease_broker
 import remote_sub_helpers
@@ -97,7 +97,7 @@ class RequestContract(unittest.TestCase):
             self.assertEqual(0, self.request('fixture-past', not_before=PAST))
         argv = run.call_args.args[0]
         self.assertEqual(PAST, argv[argv.index('--not-before') + 1])
-        self.assertEqual(PAST, run.call_args.kwargs['env'][bound.ENV])
+        self.assertEqual(PAST, run.call_args.kwargs['env'][bound.NOT_BEFORE_ENV])
         directory = self.root / 'state/remote_sub'
         raw = (directory / 'fixture-past.request.json').read_bytes()
         launch = json.loads((directory / 'fixture-past.request-launch.json').read_text())
@@ -105,12 +105,12 @@ class RequestContract(unittest.TestCase):
         self.assertEqual(hashlib.sha256(raw).hexdigest(), launch['request_sha256'])
 
     def test_omitted_option_clears_inherited_label_and_preserves_old_shapes(self):
-        with (mock.patch.dict(os.environ, {bound.ENV: FUTURE}),
+        with (mock.patch.dict(os.environ, {bound.NOT_BEFORE_ENV: FUTURE}),
              mock.patch.object(fabric_task.pick, 'format_pick', return_value='POOL=glm HOST=ubuntu2 MODE=glm MODEL=glm-5.3-flash'),
              mock.patch.object(fabric_task.pick, 'launch_policy', return_value={'allowed': True}),
              mock.patch.object(fabric_task.subprocess, 'run', return_value=SimpleNamespace(returncode=0)) as run):
             self.assertEqual(0, self.request('fixture-old'))
-        self.assertNotIn(bound.ENV, run.call_args.kwargs['env'])
+        self.assertNotIn(bound.NOT_BEFORE_ENV, run.call_args.kwargs['env'])
         self.assertNotIn('--not-before', run.call_args.args[0])
         directory = self.root / 'state/remote_sub'
         for suffix in ('request.json', 'request-launch.json'):
@@ -160,10 +160,10 @@ class ControllerContract(unittest.TestCase):
     def test_routing_projection_omits_absence_and_preserves_exact_present_bound(self):
         with mock.patch.dict(os.environ, {}, clear=True), contextlib.redirect_stdout(io.StringIO()) as out:
             remote_sub_helpers.routing_env()
-        self.assertNotIn(bound.ENV, out.getvalue())
-        with mock.patch.dict(os.environ, {bound.ENV: WITNESS}, clear=True), contextlib.redirect_stdout(io.StringIO()) as out:
+        self.assertNotIn(bound.NOT_BEFORE_ENV, out.getvalue())
+        with mock.patch.dict(os.environ, {bound.NOT_BEFORE_ENV: WITNESS}, clear=True), contextlib.redirect_stdout(io.StringIO()) as out:
             remote_sub_helpers.routing_env()
-        self.assertIn(bound.ENV + '=' + WITNESS, out.getvalue())
+        self.assertIn(bound.NOT_BEFORE_ENV + '=' + WITNESS, out.getvalue())
 
     def test_real_shell_prelaunch_refuses_with_transport_and_credentials_unavailable(self):
         for name, args in (('remote_sub.sh', ['ubuntu2', 'qwen', 'fixture-packet', '~', 'qwen3.8-flash']),
@@ -172,7 +172,7 @@ class ControllerContract(unittest.TestCase):
                 root = Path(tmp)
                 script = root / name
                 shutil.copyfile(ROOT / 'candidate' / name, script)
-                shutil.copyfile(ROOT / 'candidate/caller_not_before.py', root / 'caller_not_before.py')
+                shutil.copyfile(ROOT / 'candidate/commission_deadline.py', root / 'commission_deadline.py')
                 bin_dir = root / 'bin'; bin_dir.mkdir()
                 # No ssh/scp/rsync/provider/status CLI exists on this PATH.
                 # Every Python helper enters the existing audit boundary first.
@@ -183,12 +183,12 @@ class ControllerContract(unittest.TestCase):
                     + ' sys.argv=sys.argv[1:]\n runpy.run_path(sys.argv[0],run_name="__main__")\nfinally:\n release()\n')
                 launcher.chmod(0o700)
                 (bin_dir / 'dirname').symlink_to('/usr/bin/dirname')
-                env = {'PATH': str(bin_dir), 'HOME': str(root / 'home'), bound.ENV: FUTURE}
+                env = {'PATH': str(bin_dir), 'HOME': str(root / 'home'), bound.NOT_BEFORE_ENV: FUTURE}
                 result = subprocess.run(guarded_prelaunch_shell(script, args), env=env,
                                         capture_output=True, text=True, timeout=10)
                 self.assertEqual(75, result.returncode, result.stderr)
                 self.assertIn('caller_not_before eligible_at=' + FUTURE, result.stderr)
-                self.assertEqual({'bin', name, 'caller_not_before.py'}, {p.name for p in root.iterdir()})
+                self.assertEqual({'bin', name, 'commission_deadline.py'}, {p.name for p in root.iterdir()})
 
 
 if __name__ == '__main__':

@@ -701,7 +701,7 @@ class Broker:
         not_before: Optional[str] = None,
     ) -> AcquireResult:
         if not_before is not None:
-            from caller_not_before import require_not_before
+            from commission_deadline import require_not_before
             require_not_before(not_before)
         if deadline_ns is not None:
             deadline_ns = validate_deadline_ns(deadline_ns)
@@ -740,7 +740,7 @@ class Broker:
         # Successful acquire deletes the waiter row inside _try_acquire.
         while True:
             if not_before is not None:
-                from caller_not_before import require_not_before
+                from commission_deadline import require_not_before
                 require_not_before(not_before)
             lock = self._lock()
             try:
@@ -1097,7 +1097,7 @@ class Broker:
                                           pool=pool, orchestrator_id=orch),
                             waiter_id, "operator_authorization_refused")
             if not_before is not None:
-                from caller_not_before import require_not_before
+                from commission_deadline import require_not_before
                 require_not_before(not_before)
             conn.execute(
                 "INSERT INTO leases "
@@ -1623,7 +1623,7 @@ def main(argv: Optional[List[str]] = None) -> int:
 
     args = p.parse_args(argv)
     if args.cmd == "acquire" and args.not_before is not None:
-        from caller_not_before import (require_not_before, CallerNotBeforePending, CallerNotBeforeInvalid)
+        from commission_deadline import (require_not_before, CallerNotBeforePending, CallerNotBeforeInvalid)
         try:
             require_not_before(args.not_before)
         except CallerNotBeforePending as exc:

@@ -70,7 +70,7 @@ fi
 # each actual Codex entry if the wall clock moved while the run was waiting.
 qwen_not_before_check() {
   if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
-    python3 "$(cd "$(dirname "$0")" && pwd)/caller_not_before.py" || return $?
+    python3 "$(cd "$(dirname "$0")" && pwd)/commission_deadline.py" not-before || return $?
   fi
 }
 qwen_not_before_check || exit $?

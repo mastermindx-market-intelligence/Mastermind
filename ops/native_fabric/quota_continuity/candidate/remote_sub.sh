@@ -140,7 +140,7 @@ if [ "$CALLER_NOT_BEFORE_SET" -eq 1 ]; then
 fi
 caller_not_before_check() {
   if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
-    "$REMOTE_SUB_PYTHON" "$HERE/caller_not_before.py" || return $?
+    "$REMOTE_SUB_PYTHON" "$HERE/commission_deadline.py" not-before || return $?
   fi
 }
 caller_not_before_check || exit $?
