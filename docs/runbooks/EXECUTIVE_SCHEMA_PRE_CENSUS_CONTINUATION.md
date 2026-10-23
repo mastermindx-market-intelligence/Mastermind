@@ -21,8 +21,8 @@ actual account/custody/native ACL and canonical closed JSON, and brackets its
 named/FD identity and ancestors' permitted metadata. It does not open or list
 ancestor directories, read the database, acquire the service lock, invoke a
 census, write any receipt, or authorize continuation. Unavailable metadata is
-a refusal. Optional UUID/hash selectors compare the observed leaf; they are
-not externally supplied authority.
+a refusal. The Root issuer below may optionally compare the inspected UUID/hash as CAS
+selectors; those values are DATA, not externally supplied authority.
 
 An earlier directory READ denial remains a denial of that action. This fixed
 leaf interface does not retry or grant the denied directory READ. Root's later
