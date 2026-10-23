@@ -899,28 +899,44 @@ def publish_verified_review(
         pull_number=decision.pull_number,
     )
 
-    # --- the current head, read here, immediately before the effect ---------
+    # Obtain *new* installation-scoped facts at the effect boundary, never
+    # reuse a caller's admission-time snapshot or trust an unchanged SHA to
+    # prove that draft/state/PR text has not changed.
     current = pull_read.read_pull_request(
         repository=decision.repository, pull_number=decision.pull_number
     )
     if not isinstance(current, PullRequestFacts):
         raise ReviewVerificationRefused("PullRequestReadPort returned a non-exact fact shape")
-    if current.repository != decision.repository or current.number != decision.pull_number:
-        # The read answered about a different pull request than the admitted
-        # decision froze; publishing here would aim the review at the wrong one.
+
+    def refused(reason: ReviewIntentRefusal) -> ReviewPublishOutcome:
         return ReviewPublishOutcome(
             state=PublishState.REFUSED,
             publication_command_id=command,
-            refusal=ReviewIntentRefusal.PULL_NUMBER_MISMATCH.value,
+            refusal=reason.value,
         )
+
+    if current.repository != decision.repository or current.number != decision.pull_number:
+        return refused(ReviewIntentRefusal.PULL_NUMBER_MISMATCH)
     try:
         verify_frozen_head(decision=decision, pull_request=current)
     except ReviewIntentError:
-        return ReviewPublishOutcome(
-            state=PublishState.REFUSED,
-            publication_command_id=command,
-            refusal=ReviewIntentRefusal.HEAD_MOVED.value,
+        return refused(ReviewIntentRefusal.HEAD_MOVED)
+    if current.state != "open":
+        return refused(ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN)
+    if current.draft:
+        return refused(ReviewIntentRefusal.PULL_REQUEST_DRAFT)
+    if (current.base_repository != decision.repository
+            or current.head_repository != current.base_repository):
+        return refused(ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH)
+    if decision.intent_source is None:
+        raise ReviewVerificationRefused("admitted decision lacks an intent source")
+    try:
+        # This also checks secret/fence forms and the *combined* objective bound.
+        build_review_objective(
+            pull_request=current, intent_source=decision.intent_source
         )
+    except ReviewIntentError:
+        return refused(ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED)
 
     try:
         review_id = publication_port.publish_review(
