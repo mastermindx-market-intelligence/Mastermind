@@ -181,3 +181,56 @@ Even this successful source/fixture receipt is **not** an Executive-host
 installation, dedicated UID/Seatbelt/UID-sweep proof, production-routed
 Attempt, provider call, authenticated donor UI, or the actual original
 company parent consuming a WorkerResult. Those remain separate gates.
+
+## Reproduce the exact real provider-free supply (macOS ARM64)
+
+The complete original fixture is now reproducible from immutable local
+inputs, without hand assembling the MCP projection or patching the donor
+source checkout. The original provider-free 11-case suite ran successfully
+both on the first isolated M2 supply and on a *fresh second* supply produced
+by the checked-in preparer. The latter is a source-only test, not an
+installed/armed Executive Job.
+
+Prerequisites: a **clean** checkout of upstream `4878cdab` with frozen
+pnpm dependencies already present (no implicit install); the authentic R4
+patch `243ec445...` from the original contributor evidence; the exact
+`c7781490...` compiled #1060 grant-profile artifact; and executable Node
+22.22.0 darwin-arm64 `913b144f...` from official distribution. The
+preparer validates donor lockfile, checkout state and all frozen artifact
+hashes before creating a **new** external output directory.
+
+```sh
+python3.12 scripts/prepare_dsh_governed_supply.py \
+  --donor /absolute/clean/deepseek-harness-4878 \
+  --r4-patch /absolute/authentic/governed-acp-mount.patch \
+  --profile /absolute/verified/profile1060.mjs \
+  --node /absolute/verified/node-v22.22.0-darwin-arm64/bin/node \
+  --output /absolute/new/deepseek-governed-supply
+```
+
+It creates an isolated copy-on-write donor snapshot (not another Git writer),
+applies the exact reviewed R4 patch, typechecks and compiles the patched ACP
+entrypoint, observes the **actual** stdio MCP tools, derives a read/search-only
+`production_armed:false` projection through the original typed helper,
+and bundles AgentLoop with the pinned grant profile. The final
+`preparation-receipt.json` has `SUPPLY_PINNED_NOT_YET_TESTED`: building
+alone never asserts a successful worker result. No dependency download,
+production installation, provider call, or Job/Attempt is performed.
+
+Then use the existing *separate* fail-closed qualification runner with a
+second new evidence directory:
+
+```sh
+python3.12 scripts/qualify_dsh_governed_worker.py \
+  --supply /absolute/new/deepseek-governed-supply \
+  --evidence-dir /absolute/new/deepseek-governed-supply/qualification-r1
+```
+
+Only `REAL_PROVIDER_FREE_WORKERRESULT_PASS` with **11 executed passes,
+zero failures/errors/skips**, a JUnit receipt and all immutable hashes
+verified qualifies this source-only WorkerResult experiment. An absent
+input, donor drift, changed compiled profile, old/wrong Node, malicious
+mount patch, accidental skipped test or replay of an evidence destination
+must refuse. Neither success promotes `acp.implemented` or grants real
+provider, original Executive parent, company credentials, runtime UID/
+Seatbelt installation, browser login or production deployment authority.
