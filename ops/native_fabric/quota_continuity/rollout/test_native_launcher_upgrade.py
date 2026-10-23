@@ -187,6 +187,55 @@ class PairedLauncherUpgrade(unittest.TestCase):
     def test_recover_selected_pointer_without_second_cas(self):
         self.interrupt_after(self.store / 'CURRENT.json')
 
+    def stop_after_selection(self):
+        atomic = g.atomic_bytes
+        def interrupt(path, *args):
+            atomic(path, *args)
+            if Path(path) == self.store / 'CURRENT.json':
+                raise OSError('selection committed fixture')
+        with mock.patch.object(g, 'atomic_bytes', side_effect=interrupt):
+            with self.assertRaisesRegex(OSError, 'selection committed'):
+                installer.upgrade(self.bundle)
+
+    def test_selected_recovery_only_writes_missing_completion_receipt(self):
+        self.stop_after_selection()
+        atomic = g.atomic_bytes
+        writes = []
+        def track(path, *args):
+            writes.append(Path(path))
+            atomic(path, *args)
+        with mock.patch.object(g, 'atomic_bytes', side_effect=track):
+            installer.upgrade(self.bundle)
+        self.assertEqual(writes, [self.store / 'bootstrap' / (self.plan['digest'] + '.upgrade.json')])
+        self.assert_complete()
+
+    def test_lost_issued_receipt_recovers_identical_original_identity_only(self):
+        self.assert_complete()
+        path = self.store / 'bootstrap' / (self.plan['digest'] + '.upgrade.json')
+        issued = path.read_bytes()
+        path.unlink()
+        before = (self.store / 'CURRENT.json').stat().st_ino
+        atomic = g.atomic_bytes
+        writes = []
+        def track(target, *args):
+            writes.append(Path(target))
+            atomic(target, *args)
+        with mock.patch.object(g, 'atomic_bytes', side_effect=track):
+            installer.upgrade(self.bundle)
+        self.assertEqual(writes, [path])
+        self.assertEqual(path.read_bytes(), issued)
+        self.assertEqual((self.store / 'CURRENT.json').stat().st_ino, before)
+
+    def test_selected_missing_launcher_refuses_without_any_write(self):
+        self.stop_after_selection()
+        launcher = self.store / 'launchers' / (installer.UPGRADE_TO + '.py')
+        launcher.unlink()
+        with mock.patch.object(g, 'atomic_bytes', side_effect=AssertionError('selected repair wrote')):
+            with self.assertRaises(FileNotFoundError):
+                installer.upgrade(self.bundle)
+        self.assertFalse(launcher.exists())
+        self.assertFalse((self.store / 'bootstrap' / (self.plan['digest'] + '.upgrade.json')).exists())
+
     def test_recover_completion_receipt_without_replay(self):
         self.interrupt_after(self.store / 'bootstrap' / (self.plan['digest'] + '.upgrade.json'))
 

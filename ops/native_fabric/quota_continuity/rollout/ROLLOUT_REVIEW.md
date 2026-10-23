@@ -239,8 +239,15 @@ upgrade plan before any bridge write. Each replacement requires the original
 or this transaction's exact new bytes; foreign bytes refuse. Both bridges
 must read back successfully before CURRENT advances from the full captured
 selection. Six tested interruption edges recover only this same retained
-transaction, including a committed pointer with a missing completion receipt;
-a completed invocation performs no writes. A changed selection, foreign
+transaction, including a committed pointer with a missing completion receipt.
+At that selected edge the exact sealed launcher and both bridges must already
+exist; only the missing receipt may be written. Their loss or alteration is an
+inconsistent state that refuses without repair. A completed invocation performs
+no writes. The receipt has no clock, nonce, fresh authority or external issuance:
+its full bytes derive from the retained plan digest, original bootstrap digest,
+exact previous/selected pointer and fixed bridged/legacy disposition. Thus loss
+after issuance can restore only that identical original receipt, never a new
+terminal identity or target effect. A changed selection, foreign
 intent, conflicting receipt or unrecognized partial state cannot be repaired
 or reactivated by this command. There is no automatic replacement or retry
 of a refused business operation. No quiescence, legacy drain, provider

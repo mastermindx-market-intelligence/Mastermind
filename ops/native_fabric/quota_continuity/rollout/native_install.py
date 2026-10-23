@@ -227,7 +227,17 @@ def upgrade(bundle):
             return receipt
         if current != previous and not (exists and current == selected):
             raise ValueError("upgrade selection compare-and-swap refused")
-        _upgrade_entries(plan, partial=exists, complete=current == selected)
+        if current == selected:
+            # Selection follows verified launcher and both bridges. Their loss
+            # cannot be an interruption of this transaction; never repair it.
+            _upgrade_entries(plan, complete=True)
+            launcher = store / "launchers" / (UPGRADE_TO + ".py")
+            generation.require(launcher, stat.S_ISREG, 0o555)
+            if generation.regular_bytes(launcher) != payloads["native_generation.py"]:
+                raise ValueError("selected launcher differs")
+            _record_once(receipt_path, receipt)
+            return receipt
+        _upgrade_entries(plan, partial=exists)
         if not exists:
             _record_once(intent_path, intent)  # durable BEFORE any ingress mutation
         directory = store / "launchers"
