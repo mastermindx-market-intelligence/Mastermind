@@ -216,3 +216,67 @@ def test_owner_added_environment_counts_toward_existing_limit(launch, monkeypatc
     with pytest.raises(AcpNativeProcessError, match="environment is invalid"):
         asyncio.run(owner.open_run(spec))
     assert not (spec.run_dir / "startup").exists()
+
+
+def test_trusted_launch_argv_builder_controls_effective_argv_and_attestation(launch):
+    profile, spec = launch
+    probe = Path(profile.argv[2])
+    probe.write_text(
+        "import json,sys; print(json.dumps({'argv':sys.argv[1:]}), flush=True); sys.stdin.read()\n"
+    )
+    calls = []
+
+    def builder(bound_spec, workspace, run_dir):
+        calls.append((bound_spec, workspace, run_dir))
+        return (*profile.argv, "builder-marker")
+
+    owner = AcpNativeProcessOwner(
+        profile,
+        environment_loader=lambda: {},
+        launch_argv_builder=builder,
+    )
+
+    async def exercise():
+        resources = await owner.open_run(spec)
+        observed = json.loads(await asyncio.wait_for(resources.reader.readline(), timeout=3))
+        completion = await resources.finish(None)
+        return resources, observed, completion
+
+    resources, observed, completion = asyncio.run(exercise())
+    assert observed["argv"] == ["builder-marker"]
+    assert calls == [(spec, spec.workspace_path.resolve(), spec.run_dir.resolve())]
+    rendered = (*profile.argv, "builder-marker")
+    assert resources.launch_attestation["argv_sha256"] == hashlib.sha256(
+        json.dumps(rendered, separators=(",", ":"), ensure_ascii=True).encode()
+    ).hexdigest()
+    assert resources.launch_attestation["rendered_argv"] == list(rendered)
+    assert completion.settled
+
+
+@pytest.mark.parametrize(
+    "rendered",
+    [
+        ("/bin/false",),
+        (),
+        ("bad\x00binary",),
+    ],
+)
+def test_launch_argv_builder_refuses_unattested_or_invalid_exec_before_spawn(
+    launch, monkeypatch, rendered
+):
+    profile, spec = launch
+    calls = []
+
+    async def forbidden_spawn(*args, **kwargs):
+        calls.append((args, kwargs))
+        pytest.fail("invalid rendered argv reached native spawn")
+
+    monkeypatch.setattr(asyncio, "create_subprocess_exec", forbidden_spawn)
+    owner = AcpNativeProcessOwner(
+        profile,
+        environment_loader=lambda: {},
+        launch_argv_builder=lambda _spec, _workspace, _run_dir: rendered,
+    )
+    with pytest.raises(AcpNativeProcessError, match="launch argv"):
+        asyncio.run(owner.open_run(spec))
+    assert calls == []

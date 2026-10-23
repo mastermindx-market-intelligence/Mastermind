@@ -5321,3 +5321,33 @@ __all__ = [
     "validate_secret_canary_verdict",
     "validate_json_schema",
 ]
+
+
+def render_worker_sandbox_permission_overrides(
+    spec: LaunchSpec,
+    workspace: Path,
+    run_dir: Path,
+    provider_home: Path,
+) -> list[str]:
+    """Render the existing Codex Seatbelt worker policy without an adapter.
+
+    This is a policy-only reuse seam for provider-neutral native workers.  It
+    deliberately does not run ``CodexWorkerAdapter.__init__`` and therefore
+    creates no Codex/provider lifecycle, provider realm, credential loader, or
+    constructed-adapter identity.  The underlying renderer is unchanged and
+    receives an explicit validated private home, so every method on this path
+    is configuration/stateless policy logic.  If that assumption ever drifts,
+    attribute access fails closed rather than constructing a provider adapter.
+    """
+
+    workspace = Path(workspace).resolve(strict=True)
+    expected_run = Path(spec.run_dir).resolve(strict=True)
+    if Path(run_dir).resolve(strict=True) != expected_run:
+        raise LaunchValidationError("sandbox renderer run directory drifted")
+    home = _validate_codex_home_directory(Path(provider_home))
+    renderer = CodexWorkerAdapter.__new__(CodexWorkerAdapter)
+    return renderer._permission_overrides(
+        spec,
+        workspace,
+        codex_home=home,
+    )
