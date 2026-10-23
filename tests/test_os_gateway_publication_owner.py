@@ -27,6 +27,7 @@ import plistlib
 import stat
 import subprocess
 import sys
+import tempfile
 import types
 from datetime import datetime, timezone
 from pathlib import Path
@@ -60,6 +61,7 @@ def digest(payload: bytes) -> str:
 # mixed-identity adapter below observes one real identity and only rebinds it.
 _TRUE_FSTAT = os.fstat
 _TRUE_LSTAT = os.lstat
+_TRUE_STAT = os.stat
 
 
 # ---------------------------------------------------------------------------
@@ -463,24 +465,48 @@ def _mixed_identity(home: Path, audit_leaf: Path):
             },
         )
 
+    # TESTDATA only: the disposable pytest prefix is not a production Root
+    # home chain. Normalize ONLY those ancestor metadata observations, while
+    # preserving real types/dev/inode/timestamps, relative opens and FD ACLs.
+    # This is not installed-custody proof and never changes production policy.
+    prefix = {os.fspath(path) for path in home.parents}
+
+    def descriptor_path(descriptor):
+        if sys.platform == "darwin":
+            raw = fcntl.fcntl(int(descriptor), 50, b"\0" * 1024)
+            return os.fsdecode(raw.split(b"\0", 1)[0])
+        return os.readlink(f"/proc/self/fd/{int(descriptor)}")
+
+    def observed(info, text):
+        info = rebind(info, *identity_for(text))
+        if text in prefix and stat.S_ISDIR(info.st_mode):
+            fields = list(info)
+            fields[0] = stat.S_IFDIR | 0o755
+            info = os.stat_result(fields, {
+                "st_atime_ns": info.st_atime_ns,
+                "st_mtime_ns": info.st_mtime_ns,
+                "st_ctime_ns": info.st_ctime_ns,
+            })
+        return info
+
     def bound_lstat(path):
-        return rebind(real_lstat(path), *identity_for(os.fspath(path)))
+        return observed(real_lstat(path), os.fspath(path))
+
+    def bound_stat(path, *, dir_fd=None, follow_symlinks=True):
+        info = _TRUE_STAT(path, dir_fd=dir_fd, follow_symlinks=follow_symlinks)
+        if isinstance(path, int):
+            text = descriptor_path(path)
+        else:
+            text = os.fspath(path)
+            if dir_fd is not None:
+                text = os.path.join(descriptor_path(dir_fd), text)
+        return observed(info, text)
 
     def bound_fstat(descriptor):
-        info = real_fstat(descriptor)
-        try:
-            if sys.platform == "darwin":
-                # Actual local FD path observation for the disposable fixture;
-                # Linux /proc does not exist on the native acceptance host.
-                target = fcntl.fcntl(int(descriptor), 50, b"\0" * 1024)
-                target = os.fsdecode(target.split(b"\0", 1)[0])
-            else:
-                target = os.readlink(f"/proc/self/fd/{int(descriptor)}")
-        except OSError:
-            target = ""
-        return rebind(info, *identity_for(target))
+        return observed(real_fstat(descriptor), descriptor_path(descriptor))
 
-    return bound_lstat, bound_fstat
+    return bound_lstat, bound_stat, bound_fstat
+
 
 
 def _harness_chown(path, uid, gid):
@@ -610,7 +636,21 @@ def _install_host_boundaries(monkeypatch, host) -> None:
 
 
 @pytest.fixture
-def gateway(monkeypatch, tmp_path):
+def gateway_tmp_path():
+    # The reader deliberately observes mutation timestamps for the complete
+    # ancestor chain. macOS's shared /var/folders/.../T changes as unrelated
+    # applications create temp files; it is not a stable fixture namespace.
+    # Keep this inert tree in our own admitted carrier instead of weakening
+    # the real reader's ancestor checks or ignoring observed mutations.
+    with tempfile.TemporaryDirectory(
+        prefix=".gateway-owner-fixture-", dir=Path(__file__).resolve().parents[1]
+    ) as directory:
+        yield Path(directory)
+
+
+@pytest.fixture
+def gateway(monkeypatch, gateway_tmp_path):
+    tmp_path = gateway_tmp_path
     config_root = _marker_workspace(tmp_path)
     _install_marker_adapters(monkeypatch, config_root)
     root = tmp_path / SERVICE_ROOT
@@ -652,8 +692,9 @@ def gateway(monkeypatch, tmp_path):
         (control, "_GATEWAY_AUDIT_DIRECTORY", audit_leaf),
     ):
         monkeypatch.setattr(target, name, value)
-    bound_lstat, bound_fstat = _mixed_identity(home, audit_leaf)
+    bound_lstat, bound_stat, bound_fstat = _mixed_identity(home, audit_leaf)
     monkeypatch.setattr(Path, "lstat", bound_lstat)
+    monkeypatch.setattr(control.os, "stat", bound_stat)
     monkeypatch.setattr(control.os, "fstat", bound_fstat)
     monkeypatch.setattr(control.os, "chown", _harness_chown)
     monkeypatch.setattr(control.os, "fchown", _harness_chown)
@@ -1133,44 +1174,65 @@ def test_studio_dependency_seal_drift_refuses(gateway):
     assert excinfo.value.code == "gateway_studio_invalid"
 
 
-def test_root_owned_payload_target_refuses_before_any_protected_io(gateway, monkeypatch):
-    """A manifest can never aim Root at its own protected bytes as a tool."""
+@pytest.mark.parametrize("field", ["configHash", "plistHash"])
+def test_studio_observed_bytes_match_the_actual_manifest_seal(gateway, field):
+    _break_studio(gateway, lambda manifest: manifest.update({field: "f" * 64}))
+    with pytest.raises(control.GatewayPublicationError) as excinfo:
+        gateway.publish()
+    assert excinfo.value.code == "gateway_studio_invalid"
+    assert not control.AUTONOMY_TRANSACTION.exists()
 
-    s = gateway
-    node = s.studio["node"]
-    bound_lstat = Path.lstat
-    real_lstat = os.lstat
 
-    def root_node_lstat(path):
-        if os.fspath(path) == os.fspath(node):
-            info = real_lstat(path)
-            return os.stat_result(
-                (
-                    info.st_mode,
-                    info.st_ino,
-                    info.st_dev,
-                    info.st_nlink,
-                    0,
-                    0,
-                    info.st_size,
-                    info.st_atime,
-                    info.st_mtime,
-                    info.st_ctime,
-                )
-            )
-        return bound_lstat(path)
-
-    monkeypatch.setattr(Path, "lstat", root_node_lstat)
-
-    def refuse(*args, **kwargs):
-        raise AssertionError("protected IO must never start")
-
+def test_studio_observation_does_not_use_legacy_pathname_payload_readers(
+    gateway, monkeypatch
+):
+    """The real owner consumes the closed reader, not checked-then-open paths."""
     from integrations.studio_direct_mcp import private_service
 
-    monkeypatch.setattr(private_service, "_stable_regular_file_hash", refuse)
+    def forbidden(*args, **kwargs):
+        raise AssertionError("legacy Studio pathname payload reader invoked")
+
+    for name in ("_installed_file_hashes", "_stable_regular_file_hash",
+                 "_dependency_tree_hash"):
+        monkeypatch.setattr(private_service, name, forbidden)
+    observed = gateway.host.observe_studio(SHA)
+    assert observed.node_sha256 == digest(gateway.studio["node"].read_bytes())
+    assert observed.definition_sha256
+
+
+def test_root_owned_payload_target_refuses_before_any_protected_io(gateway, monkeypatch):
+    """A manifest cannot aim Root at a nonpublic Root-owned tool payload."""
+    node = gateway.studio["node"]
+    inode = _TRUE_LSTAT(node).st_ino
+    bound_stat, bound_fstat, real_read = os.stat, os.fstat, os.read
+    reads = []
+
+    def root_node(info):
+        if info.st_ino != inode:
+            return info
+        fields = list(info)
+        fields[4:6] = [0, 0]
+        return os.stat_result(fields, {
+            "st_atime_ns": info.st_atime_ns,
+            "st_mtime_ns": info.st_mtime_ns,
+            "st_ctime_ns": info.st_ctime_ns,
+        })
+
+    # TESTDATA identity mapping is consistent on the parent-relative stat AND
+    # the actual opened FD. The real leaf mode is 0500, not public-readable.
+    monkeypatch.setattr(os, "stat", lambda *a, **kw: root_node(bound_stat(*a, **kw)))
+    monkeypatch.setattr(os, "fstat", lambda fd: root_node(bound_fstat(fd)))
+    def guarded_read(fd, size):
+        if _TRUE_FSTAT(fd).st_ino == inode:
+            reads.append(fd)
+            raise AssertionError("protected payload read must never start")
+        return real_read(fd, size)
+    monkeypatch.setattr(os, "read", guarded_read)
     with pytest.raises(control.GatewayPublicationError) as excinfo:
-        s.publish()
+        gateway.host.observe_studio(SHA)
     assert excinfo.value.code == "gateway_studio_invalid"
+    assert reads == []
+    assert not control.AUTONOMY_TRANSACTION.exists()
 
 
 def test_foreign_tool_ancestor_refuses(gateway):
@@ -1670,23 +1732,37 @@ def test_interruption_at_the_config_write_marks_the_grant_phase(gateway, monkeyp
         replacement.teardown()
 
 
-def test_interrupted_publication_reconciles_only_exact_postimages(gateway, monkeypatch):
+@pytest.mark.parametrize("phase_acknowledged", [False, True])
+def test_interrupted_publication_reconciles_only_exact_postimages(
+    gateway, monkeypatch, phase_acknowledged
+):
     s = gateway
 
-    def refuse(transaction, receipt):
-        raise RuntimeError("lost before terminal receipt")
+    def refuse(transaction):
+        raise RuntimeError("interrupted after retained terminal receipt")
 
-    monkeypatch.setattr(s.host, "write_gateway_receipt", refuse)
+    if phase_acknowledged:
+        monkeypatch.setattr(s.host, "complete_transaction", refuse)
+    else:
+        real_persist = s.host._persist_phase
+        def refuse_phase(transaction, phase, **kwargs):
+            if phase == "GATEWAY_RECEIPT_REPLACED":
+                raise RuntimeError("terminal phase acknowledgement lost")
+            return real_persist(transaction, phase, **kwargs)
+        monkeypatch.setattr(s.host, "_persist_phase", refuse_phase)
     with pytest.raises(control.TransactionEffectUnknown):
         s.publish()
     transaction_id = json.loads(
         (control.AUTONOMY_TRANSACTION / "transaction.json").read_bytes()
     )["transaction_id"]
-    assert control.OS_GATEWAY_RECEIPT.exists() is False
+    original_receipt = control.OS_GATEWAY_RECEIPT.read_bytes()
     manifest = json.loads(
         (control.AUTONOMY_TRANSACTION / "transaction.json").read_bytes()
     )
-    assert manifest["phase"] == "GATEWAY_PLIST_REPLACED"
+    assert manifest["phase"] == (
+        "GATEWAY_RECEIPT_REPLACED" if phase_acknowledged
+        else "GATEWAY_PLIST_REPLACED"
+    )
     target_config = control.OS_GATEWAY_MCP_CONFIG.read_bytes()
     s.teardown()
     recovery = s.fresh_host(monkeypatch)
@@ -1695,6 +1771,7 @@ def test_interrupted_publication_reconciles_only_exact_postimages(gateway, monke
     assert not control.AUTONOMY_TRANSACTION.exists()
     receipt = json.loads(control.OS_GATEWAY_RECEIPT.read_bytes())
     assert receipt["transaction_id"] == transaction_id
+    assert control.OS_GATEWAY_RECEIPT.read_bytes() == original_receipt
     assert control.OS_GATEWAY_MCP_CONFIG.read_bytes() == target_config
 
     # The completed terminal receipt refuses any further publication, and a
@@ -1828,31 +1905,54 @@ def test_second_publisher_with_stale_preimages_never_adopts_or_clobbers(
             second._release_transaction_owner()
 
 
-def test_lost_terminal_receipt_with_retained_marker_reconciles(gateway, monkeypatch):
+@pytest.mark.parametrize("interruption", ["before_write", "before_phase_ack", "after_phase_ack"])
+def test_missing_terminal_receipt_stays_unknown_without_regeneration(
+    gateway, monkeypatch, interruption
+):
     s = gateway
 
     real_write = control.ProductionGatewayPublicationHost.write_gateway_receipt
 
     def lose_after_write(transaction, receipt):
+        if interruption == "before_write":
+            raise RuntimeError("interrupted before terminal write")
         real_write(s.host, transaction, receipt)
         control.OS_GATEWAY_RECEIPT.chmod(0o644)
         control.OS_GATEWAY_RECEIPT.unlink()
+        if interruption == "before_phase_ack":
+            raise RuntimeError("lost terminal write acknowledgement")
 
     monkeypatch.setattr(s.host, "write_gateway_receipt", lose_after_write)
     with pytest.raises(control.TransactionEffectUnknown):
         s.publish()
-    transaction_id = json.loads(
-        (control.AUTONOMY_TRANSACTION / "transaction.json").read_bytes()
-    )["transaction_id"]
+    marker_path = control.AUTONOMY_TRANSACTION / "transaction.json"
+    original_marker = marker_path.read_bytes()
+    manifest = json.loads(original_marker)
+    transaction_id = manifest["transaction_id"]
+    assert manifest["phase"] == (
+        "GATEWAY_RECEIPT_REPLACED" if interruption == "after_phase_ack"
+        else "GATEWAY_PLIST_REPLACED"
+    )
+    target_bytes = {
+        path: path.read_bytes() for path in (
+            control.OS_GATEWAY_MCP_CONFIG, control.OS_GATEWAY_MCP_PLIST,
+            control.OS_GATEWAY_COMMISSION_GRANT,
+        )
+    }
+    audit_identity = s.audit_leaf.stat()
     assert not control.OS_GATEWAY_RECEIPT.exists()
     s.teardown()
     recovery = s.fresh_host(monkeypatch)
     try:
-        assert s.reconcile(host=recovery, transaction_id=transaction_id) == transaction_id
-        receipt = json.loads(control.OS_GATEWAY_RECEIPT.read_bytes())
-        assert receipt["transaction_id"] == transaction_id
-        assert receipt["state"] == "PUBLISHED"
-        assert not control.AUTONOMY_TRANSACTION.exists()
+        def no_reissue(*args, **kwargs):
+            raise AssertionError("reconciliation must not issue terminal proof")
+        monkeypatch.setattr(recovery, "write_gateway_receipt", no_reissue)
+        with pytest.raises(control.TransactionEffectUnknown):
+            s.reconcile(host=recovery, transaction_id=transaction_id)
+        assert not control.OS_GATEWAY_RECEIPT.exists()
+        assert marker_path.read_bytes() == original_marker
+        assert all(path.read_bytes() == raw for path, raw in target_bytes.items())
+        assert s.audit_leaf.stat().st_ino == audit_identity.st_ino
     finally:
         if recovery._transaction_owner_fd is not None:
             recovery._release_transaction_owner()
@@ -2426,3 +2526,39 @@ def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch)
         with pytest.raises(control.GatewayPublicationError):
             s.host._studio_account_identity()
     monkeypatch.setattr(control.pwd, "getpwnam", actual_getpwnam)
+
+
+@pytest.mark.parametrize("name,expected_count", [
+    ("ops/executive_os/autonomy_control.py", 2),
+    ("ops/executive_os/os_gateway_studio_reader.py", 1),
+])
+def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(
+    name, expected_count
+):
+    from tests.executive_fabric_release_identity_review import REVIEWED_FILES
+    from tests.executive_identity_review import mask_reviewed_identity_literals
+    import ast
+
+    source = (Path(__file__).resolve().parents[1] / name).read_text()
+    entry = REVIEWED_FILES[name]
+    assert digest(source.encode()) == entry["sha256"]
+    constants = {
+        (node.lineno, node.col_offset, node.end_col_offset): node
+        for node in ast.walk(ast.parse(source)) if isinstance(node, ast.Constant)
+    }
+    for line, start, end, kind, spelling in entry["sites"]:
+        constant = constants[(line, start, end)]
+        assert type(constant.value).__name__ == kind
+        assert ast.get_source_segment(source, constant) == spelling
+    assert len(entry["sites"]) == expected_count
+    assert mask_reviewed_identity_literals(name, source) != source
+    drifted_sources = [source + "\n# unrelated source drift\n"]
+    for line, start, end, _kind, spelling in entry["sites"]:
+        lines = source.splitlines(keepends=True)
+        replacement = {"501": "502", "0o644": "0o666"}[spelling]
+        lines[line - 1] = lines[line - 1][:start] + replacement + lines[line - 1][end:]
+        drifted_sources.append("".join(lines))
+    for drifted in drifted_sources:
+        assert drifted != source
+        assert mask_reviewed_identity_literals(name, drifted) == drifted
+    assert mask_reviewed_identity_literals("unreviewed/" + name, source) == source

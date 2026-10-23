@@ -391,7 +391,6 @@ _GATEWAY_PHASES = frozenset(
     }
 )
 _GATEWAY_ROOT_FILE_MAX_BYTES = 4 * 1024 * 1024
-_GATEWAY_STUDIO_FILE_MAX_BYTES = 1024 * 1024
 # The one canonical audit leaf and its closed producer law.  The leaf is the
 # only node this owner may create; the fixed parent chain is qualified, never
 # fabricated.
@@ -6113,132 +6112,6 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             return False
         raise GatewayPublicationError("gateway_studio_invalid")
 
-    def _studio_file_bytes(
-        self, path: Path, studio_uid: int, studio_gid: int
-    ) -> bytes:
-        try:
-            before = path.lstat()
-        except OSError as exc:
-            raise GatewayPublicationError("gateway_studio_invalid") from exc
-        if (
-            stat.S_ISLNK(before.st_mode)
-            or not stat.S_ISREG(before.st_mode)
-            or before.st_uid != studio_uid
-            or before.st_gid != studio_gid
-            or stat.S_IMODE(before.st_mode) & 0o022
-            or before.st_nlink != 1
-            or before.st_size <= 0
-            or before.st_size > _GATEWAY_STUDIO_FILE_MAX_BYTES
-            or _has_acl(path)
-        ):
-            raise GatewayPublicationError("gateway_studio_invalid")
-        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0) | getattr(os, "O_NONBLOCK", 0)
-        descriptor = -1
-        try:
-            descriptor = os.open(path, flags)
-            opened = os.fstat(descriptor)
-            if (
-                not stat.S_ISREG(opened.st_mode)
-                or (opened.st_dev, opened.st_ino) != (before.st_dev, before.st_ino)
-                or opened.st_size != before.st_size
-            ):
-                raise GatewayPublicationError("gateway_studio_invalid")
-            raw = os.read(descriptor, _GATEWAY_STUDIO_FILE_MAX_BYTES + 1)
-            if len(raw) != before.st_size or os.read(descriptor, 1):
-                raise GatewayPublicationError("gateway_studio_invalid")
-            after = os.fstat(descriptor)
-            if (
-                not stat.S_ISREG(after.st_mode)
-                or (after.st_dev, after.st_ino, after.st_mode, after.st_size, after.st_nlink)
-                != (opened.st_dev, opened.st_ino, opened.st_mode, opened.st_size, opened.st_nlink)
-            ):
-                raise GatewayPublicationError("gateway_studio_invalid")
-        except GatewayPublicationError:
-            raise
-        except OSError as exc:
-            raise GatewayPublicationError("gateway_studio_invalid") from exc
-        finally:
-            if descriptor >= 0:
-                os.close(descriptor)
-        identity = lambda info: (
-            info.st_dev,
-            info.st_ino,
-            info.st_mode,
-            info.st_uid,
-            info.st_gid,
-            info.st_nlink,
-            info.st_size,
-            info.st_mtime_ns,
-            info.st_ctime_ns,
-        )
-        try:
-            current = path.lstat()
-        except OSError as exc:
-            raise GatewayPublicationError("gateway_studio_invalid") from exc
-        if identity(before) != identity(current):
-            raise GatewayPublicationError("gateway_studio_invalid")
-        return raw
-
-    @staticmethod
-    def _studio_tool_custody(
-        tool: Path,
-        home: Path,
-        studio_uid: int,
-        studio_gid: int,
-        *,
-        executable: bool,
-    ) -> None:
-        """Actual Studio custody over the tool AND every ancestor, pre-open.
-
-        The whole chain from the fixed Studio home down to the tool must be
-        real, UID-501/GID-exact, non-symlinked, ACL-free directories that the
-        Studio identity can actually traverse, and the leaf must be a single-
-        link bounded regular file the Studio identity can actually read (and
-        execute for the interpreter).  Nothing is opened before this holds, so
-        a manifest can never aim Root at protected foreign bytes.
-        """
-
-        current = tool.parent
-        while True:
-            try:
-                info = current.lstat()
-            except OSError as exc:
-                raise GatewayPublicationError("gateway_studio_invalid") from exc
-            if (
-                stat.S_ISLNK(info.st_mode)
-                or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid != studio_uid
-                or info.st_gid != studio_gid
-                or stat.S_IMODE(info.st_mode) & 0o022
-                or not stat.S_IMODE(info.st_mode) & 0o500
-                or _has_acl(current)
-            ):
-                raise GatewayPublicationError("gateway_studio_invalid")
-            if current == home:
-                break
-            parent = current.parent
-            if parent == current:
-                raise GatewayPublicationError("gateway_studio_invalid")
-            current = parent
-        try:
-            info = tool.lstat()
-        except OSError as exc:
-            raise GatewayPublicationError("gateway_studio_invalid") from exc
-        mode = stat.S_IMODE(info.st_mode)
-        if (
-            stat.S_ISLNK(info.st_mode)
-            or not stat.S_ISREG(info.st_mode)
-            or info.st_uid != studio_uid
-            or info.st_gid != studio_gid
-            or mode & 0o022
-            or info.st_nlink != 1
-            or not 0 < info.st_size <= _GATEWAY_STUDIO_FILE_MAX_BYTES
-            or not mode & stat.S_IRUSR
-            or (executable and not mode & stat.S_IXUSR)
-            or _has_acl(tool)
-        ):
-            raise GatewayPublicationError("gateway_studio_invalid")
-
     def observe_studio(self, expected_sha: str) -> GatewayStudioEvidence:
         from integrations.studio_direct_mcp import private_service
 
@@ -6248,37 +6121,32 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         plist_path = home / _GATEWAY_STUDIO_PLIST_REL
         release = SYSTEM_ROOT / "releases" / expected_sha
         source = release / "integrations/studio_direct_mcp"
-        manifest_path = base / "manifest.json"
         config_path = base / "config.json"
 
-        # Fixed-tree custody: every directory from the base through the derived
-        # home is a real, expected-identity, non-symlinked, ACL-free,
-        # foreign-write-free directory.
-        current = base
-        while True:
-            try:
-                info = current.lstat()
-            except OSError as exc:
-                raise GatewayPublicationError("gateway_studio_invalid") from exc
-            if (
-                stat.S_ISLNK(info.st_mode)
-                or not stat.S_ISDIR(info.st_mode)
-                or info.st_uid != studio_uid
-                or info.st_gid != studio_gid
-                or stat.S_IMODE(info.st_mode) & 0o022
-                or _has_acl(current)
-            ):
-                raise GatewayPublicationError("gateway_studio_invalid")
-            if current == home:
-                break
-            parent = current.parent
-            if parent == current:
-                raise GatewayPublicationError("gateway_studio_invalid")
-            current = parent
-
-        manifest_raw = self._studio_file_bytes(manifest_path, studio_uid, studio_gid)
-        config_raw = self._studio_file_bytes(config_path, studio_uid, studio_gid)
-        agent_plist_raw = self._studio_file_bytes(plist_path, studio_uid, studio_gid)
+        # Source basenames derive only from this already qualified Root
+        # release. All Studio-owned bytes below are observed through held
+        # descriptors by the single closed reader, never pathname hashing.
+        from ops.executive_os.os_gateway_studio_reader import (
+            StudioObservationError,
+            observe_studio_files,
+        )
+        try:
+            source_files = private_service._check_source_files(source)
+            incoming = {
+                item.name: private_service._sha256_file(item) for item in source_files
+            }
+            self._require_studio_stopped()
+            observed = observe_studio_files(
+                home=home,
+                uid=studio_uid,
+                gid=studio_gid,
+                source_file_names=tuple(item.name for item in source_files),
+            )
+        except (StudioObservationError, SystemExit) as exc:
+            raise GatewayPublicationError("gateway_studio_invalid") from exc
+        manifest_raw = observed.manifest_bytes
+        config_raw = observed.config_bytes
+        agent_plist_raw = observed.plist_bytes
         try:
             manifest = json.loads(manifest_raw)
             config = json.loads(config_raw)
@@ -6299,10 +6167,6 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
                 manifest, OS_GATEWAY_STUDIO_ACCOUNT, OS_GATEWAY_STUDIO_LABEL
             ):
                 raise GatewayPublicationError("gateway_studio_invalid")
-            source_files = private_service._check_source_files(source)
-            incoming = {
-                item.name: private_service._sha256_file(item) for item in source_files
-            }
         except GatewayPublicationError:
             raise
         except SystemExit as exc:
@@ -6317,6 +6181,8 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or not node.is_absolute()
             or not backend.is_absolute()
             or incoming != files
+            or sha256_bytes(config_raw) != manifest["configHash"]
+            or sha256_bytes(agent_plist_raw) != manifest["plistHash"]
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
         # The staged config is the one closed repository-workspace profile,
@@ -6338,52 +6204,16 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
 
-        # STOPPED identity proof before the expensive byte qualification.
-        self._require_studio_stopped()
-
-        try:
-            for name in files:
-                staged = base / name
-                info = staged.lstat()
-                if (
-                    stat.S_ISLNK(info.st_mode)
-                    or not stat.S_ISREG(info.st_mode)
-                    or info.st_uid != studio_uid
-                    or info.st_gid != studio_gid
-                    or stat.S_IMODE(info.st_mode) & 0o022
-                    or info.st_nlink != 1
-                    or _has_acl(staged)
-                ):
-                    raise GatewayPublicationError("gateway_studio_invalid")
-            installed_files = private_service._installed_file_hashes(
-                base, tuple(files)
-            )
-            if installed_files != files:
-                raise GatewayPublicationError("gateway_studio_invalid")
-            # The observed manifest never redirects Root into protected
-            # arbitrary files: node and backend are qualified to actual
-            # Studio custody over EVERY ancestor, with real owner
-            # readability/traversal, before this owner opens or hashes a
-            # single byte.  A root-owned or otherwise foreign payload target
-            # refuses here, whatever self-hashes the manifest carries.
-            for tool, executable in ((node, True), (backend, False)):
-                self._studio_tool_custody(
-                    tool, home, studio_uid, studio_gid, executable=executable
-                )
-            node_hash = private_service._stable_regular_file_hash(node, label="studio node")
-            backend_hash = private_service._stable_regular_file_hash(
-                backend, label="studio backend"
-            )
-            if node_hash != manifest["nodeHash"] or backend_hash != manifest["backendHash"]:
-                raise GatewayPublicationError("gateway_studio_invalid")
-            if private_service._dependency_tree_hash(
-                base / "node_modules"
-            ) != dependency:
-                raise GatewayPublicationError("gateway_studio_invalid")
-        except GatewayPublicationError:
-            raise
-        except SystemExit as exc:
-            raise GatewayPublicationError("gateway_studio_invalid") from exc
+        if observed.installed_file_hashes != files:
+            raise GatewayPublicationError("gateway_studio_invalid")
+        node_hash = observed.node_sha256
+        backend_hash = observed.backend_sha256
+        if (
+            node_hash != manifest["nodeHash"]
+            or backend_hash != manifest["backendHash"]
+            or observed.dependency_tree_sha256 != dependency
+        ):
+            raise GatewayPublicationError("gateway_studio_invalid")
 
         # STOPPED identity proof again, after the expensive qualification.
         self._require_studio_stopped()
@@ -7674,8 +7504,8 @@ def reconcile_gateway_publication(
     """Prove one interrupted publication to its exact retained postimages.
 
     Reconciliation NEVER republishes: it requalifies the retained source and
-    provenance, proves every target postimage, and completes the terminal
-    receipt and marker only when all of them hold exactly.
+    provenance, proves every target postimage and the retained terminal
+    receipt, and completes the marker only when all of them hold exactly.
     """
 
     host.effective_uid()
@@ -7765,22 +7595,12 @@ def reconcile_gateway_publication(
     )
     host._active_transaction = transaction
     receipt_present = OS_GATEWAY_RECEIPT.exists() or OS_GATEWAY_RECEIPT.is_symlink()
-    # A lost receipt with the retained marker reconciles: the terminal
-    # document is re-derived from the sealed manifest fields, never from a
-    # new request.  A missing marker is never reconciled into one.
+    # The manifest does not retain the original terminal bytes or prove that
+    # issuance never began. Missing receipt bytes therefore remain UNKNOWN,
+    # including a write whose phase acknowledgement was lost. Reconciliation
+    # cannot manufacture replacement proof from postimages or a fresh time.
     if not receipt_present:
-        receipt = _gateway_receipt_document(
-            transaction_id=manifest["transaction_id"],
-            expected_sha=request.expected_sha,
-            bundle_digest=manifest["gateway_release_bundle_digest"],
-            mcp_config_sha256=manifest["gateway_target_mcp_config_sha256"],
-            mcp_plist_sha256=manifest["gateway_target_mcp_plist_sha256"],
-            grant_sha256=manifest["gateway_target_grant_sha256"],
-            prior_grant_present=manifest["gateway_prior_grant_present"],
-            now=now,
-        )
-        host.write_gateway_receipt(transaction, receipt)
-        host._persist_phase(transaction, "GATEWAY_RECEIPT_REPLACED")
+        raise TransactionEffectUnknown()
     else:
         payload, _raw = _root_json(
             OS_GATEWAY_RECEIPT, modes=frozenset({0o444}), uid=0, gid=0
