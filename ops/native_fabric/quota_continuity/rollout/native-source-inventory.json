@@ -258,15 +258,15 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 6363,
+      "bytes": 7583,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "1ec7acfb138ac31d4bb06fea3a78bec92321387790e7f30915a44ea6132c49e2",
+      "sha256": "0275b381fff436c4b70180fbdcef39b7f8cd88696bdd7d82d72d9978c974c538",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
-      "bytes": 23957,
+      "bytes": 30910,
       "installed_preimage_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
-      "sha256": "8de36ba36fc356d653b04eaf4829aa733c4b7af1ae67fed2ae3af2c047a05faa",
+      "sha256": "a49fdb717d0365cfcae0bb08bd469d0f0cb42eee8a7dfc3ccf7fd500c12d71eb",
       "source": "candidate/host_pull_backend.py"
     },
     "ext/host_pull_probe.template": {

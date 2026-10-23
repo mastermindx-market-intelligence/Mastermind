@@ -54,6 +54,146 @@ def probe_diagnostic(output, returncode):
     return result
 
 
+def classify_host_env(raw):
+    """Tiny literal grammar, never a shell evaluator or permission decision."""
+    import re
+    try:
+        text = raw.decode("ascii")
+    except (UnicodeError, AttributeError):
+        return "UNKNOWN"
+    seen = False
+    for line in text.split("\n"):
+        if not line.strip() or line.lstrip(" \t").startswith("#"):
+            continue
+        # Only this config selector is actually consumed by the pinned GLM
+        # validator. Qwen's config path is fixed; no other env name is needed.
+        if seen or not re.fullmatch(
+                r"[ \t]*(?:export )?GLM_CONFIG=(?:/home/ubuntu0/\.glm/config\.json|"
+                r"'/home/ubuntu0/\.glm/config\.json'|\"/home/ubuntu0/\.glm/config\.json\")[ \t]*", line):
+            return "UNKNOWN"
+        seen = True
+    return "LITERAL_CONFIG_ONLY"
+
+
+def inspect_host_env():
+    """Read exactly one fixed hook. Only digest/finite states leave this call."""
+    import hashlib
+    import os
+    import stat
+    result = {"schema": "mastermind.host_env_inspection.v1", "status": "UNAVAILABLE",
+              "custody": "UNKNOWN", "syntax": "UNKNOWN", "sha256": None}
+    fds = []
+    edges = []
+    try:
+        uid = os.geteuid()
+        if uid == 0:
+            raise ValueError()
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        def identity(info):
+            return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                    info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        fd = os.open("/", flags | os.O_DIRECTORY)
+        fds.append(fd)
+        for name in ("home", "ubuntu0", "lanes", "ext"):
+            child = os.open(name, flags | os.O_DIRECTORY, dir_fd=fd)
+            fds.append(child)
+            info = os.fstat(child)
+            if info.st_uid not in (0, uid) or info.st_mode & 0o022:
+                raise ValueError()
+            edges.append((fd, name, child, identity(info)))
+            fd = child
+        leaf = os.open("HOST_ENV.sh", flags, dir_fd=fd)
+        fds.append(leaf)
+        before = os.fstat(leaf)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != uid
+                or before.st_mode & 0o022 or before.st_nlink != 1
+                or not 0 <= before.st_size <= 65536):
+            raise ValueError()
+        chunks = []
+        length = 0
+        while length <= 65536:
+            chunk = os.read(leaf, min(4096, 65537-length))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            length += len(chunk)
+        raw = b"".join(chunks)
+        if (len(raw) != before.st_size or len(raw) > 65536
+                or identity(before) != identity(os.fstat(leaf))
+                or identity(before) != identity(os.stat("HOST_ENV.sh", dir_fd=fd, follow_symlinks=False))):
+            raise ValueError()
+        for parent, name, child, expected in edges:
+            if (identity(os.fstat(child)) != expected
+                    or identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != expected):
+                raise ValueError()
+        result.update(status="OBSERVED", custody="QUALIFIED",
+                      syntax=classify_host_env(raw), sha256=hashlib.sha256(raw).hexdigest())
+    except (OSError, ValueError):
+        result.update(status="UNQUALIFIED", custody="UNQUALIFIED")
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+    return result
+
+
+def prepare_host_env_inspection(registry_path, host):
+    """Fixed selected owner, no caller command/path or normal observation."""
+    import inspect
+    import json
+    import shlex
+    from glm_host_account_source import owned_bytes
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+    if host != "ubuntu0":
+        raise ValueError()
+    registry = json.loads(owned_bytes(registry_path), object_pairs_hook=pairs)
+    entry = registry.get(host) if type(registry) is dict else None
+    if (type(entry) is not dict or entry.get("ssh_alias") != "mmx-ubuntu0"
+            or entry.get("local") is not None and entry.get("local") is not False
+            or entry.get("platform") != "linux"
+            or entry.get("worktree_root") != "/home/ubuntu0/.mastermind/worktrees"
+            or type(entry.get("roles")) is not list or "lanes" not in entry["roles"]):
+        raise ValueError()
+    program = (inspect.getsource(classify_host_env) + "\n" + inspect.getsource(inspect_host_env)
+               + "\nimport json\nprint(json.dumps(inspect_host_env(),sort_keys=True,separators=(',',':')))\n")
+    return "mmx-ubuntu0", "/usr/bin/python3 -I -S -B -c " + shlex.quote(program)
+
+
+def host_env_inspection_result(output, returncode):
+    """Reject arbitrary/duplicate/mixed output; no raw transport data retained."""
+    import json
+    import re
+    result = {"schema": "mastermind.host_env_inspection.v1", "status": "UNAVAILABLE",
+              "custody": "UNKNOWN", "syntax": "UNKNOWN", "sha256": None}
+    if type(returncode) is not int or returncode != 0 or len(output) > 1024:
+        return result
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError()
+            value[key] = item
+        return value
+    try:
+        value = json.loads(output, object_pairs_hook=pairs)
+        if type(value) is not dict or set(value) != set(result) or value["schema"] != result["schema"]:
+            raise ValueError()
+        if value["status"] == "OBSERVED":
+            if (value["custody"] != "QUALIFIED" or value["syntax"] not in ("UNKNOWN", "LITERAL_CONFIG_ONLY")
+                    or type(value["sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])):
+                raise ValueError()
+        elif value != dict(result, status="UNQUALIFIED", custody="UNQUALIFIED"):
+            raise ValueError()
+        return value
+    except (ValueError, TypeError):
+        return result
+
+
 def read_hosts():
     import json, re, sys
     try:
@@ -464,6 +604,23 @@ if __name__ == "__main__":
         except (OSError, ValueError, TypeError, KeyError):
             sys.stderr.write("host_pull: paid qualification refused\n")
             raise SystemExit(78)
+    elif command == "inspect-host-env-prepare":
+        try:
+            if len(sys.argv) != 3:
+                raise ValueError()
+            alias, probe = prepare_host_env_inspection(sys.argv[1], sys.argv[2])
+            print(alias)
+            print(probe)
+        except (OSError, ValueError, TypeError, KeyError):
+            sys.stderr.write("host_pull: fixed inspection refused\n")
+            raise SystemExit(78)
+    elif command == "inspect-host-env-result":
+        import json
+        raw_code = sys.argv[1] if len(sys.argv) == 2 else ""
+        code = int(raw_code) if raw_code.isascii() and raw_code.isdecimal() and len(raw_code) <= 3 else None
+        result = host_env_inspection_result(sys.stdin.read(1025), code)
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        raise SystemExit(0 if result["status"] == "OBSERVED" else 78)
     elif command == "write-state":
         write_state()
     else:

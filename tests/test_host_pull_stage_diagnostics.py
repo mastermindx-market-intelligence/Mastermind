@@ -163,3 +163,170 @@ def test_own_return_retains_diagnostic_without_shared_state_reread(backend,tmp_p
     # bound to its invocation and never claims current Capacity or file custody.
     write(backend,tmp_path,monkeypatch,'',1)
     assert json.loads(encoded)['framing']=='COMPLETE'
+
+
+@pytest.mark.parametrize('raw',[
+    b'', b'# inert comment\n',
+    b"export GLM_CONFIG='/home/ubuntu0/.glm/config.json'\n",
+    b'GLM_CONFIG=/home/ubuntu0/.glm/config.json\n',
+    b'GLM_CONFIG="/home/ubuntu0/.glm/config.json"\n',
+])
+def test_hook_grammar_only_literal_required_config(backend,raw):
+    assert backend.classify_host_env(raw)=='LITERAL_CONFIG_ONLY'
+
+
+@pytest.mark.parametrize('raw',[
+    b'export GLM_CONFIG=$HOME/.glm/config.json\n',
+    b'GLM_CONFIG=$(touch /tmp/NEVER_EXECUTE)\n',
+    b'GLM_CONFIG=`id`\n',b'PATH=/tmp/evil\n',b'BASH_ENV=/tmp/evil\n',
+    b'PYTHONPATH=/tmp/evil\n',b'LD_PRELOAD=/tmp/evil\n',
+    b'GLM_CONFIG=/home/ubuntu0/.glm/config.json; true\n',
+    b'f(){ true; }; f\n', b'source /tmp/evil\n',
+    b'export GLM_CONFIG=/tmp/other\n',b'BAILIAN_CONFIG=/tmp/other\n',
+    b'GLM_CONFIG=/home/ubuntu0/.glm/config.json\nGLM_CONFIG=/home/ubuntu0/.glm/config.json\n',
+    b'\xff',b'\0',b'echo '+SECRET.encode()+b'\n',
+])
+def test_hook_dynamic_security_or_unknown_syntax_stays_unknown(backend,raw):
+    assert backend.classify_host_env(raw)=='UNKNOWN'
+
+
+def inspect_fixture(backend,tmp_path,monkeypatch,raw,*,symlink=False,mode=0o600):
+    import os
+    base=tmp_path/'remote-root';ext=base/'home/ubuntu0/lanes/ext';ext.mkdir(parents=True,mode=0o700)
+    target=ext/'HOST_ENV.sh';target.write_bytes(raw);target.chmod(mode)
+    if symlink:
+        target.rename(ext/'other');target.symlink_to('other')
+    original=os.open
+    def rooted(path,flags,*args,**kwargs):
+        # Explicit synthetic OS seam: fixed '/' anchor only; all subsequent
+        # nofollow dirFD/leaf opens and stat/identity checks are actual syscalls.
+        return original(base if path=='/' else path,flags,*args,**kwargs)
+    with monkeypatch.context() as m:
+        m.setattr(os,'open',rooted)
+        m.setattr(os,'geteuid',lambda:target.lstat().st_uid)
+        return backend.inspect_host_env()
+
+
+def test_hook_actual_fd_reads_malicious_bytes_never_executes_or_discloses(backend,tmp_path,monkeypatch):
+    marker=tmp_path/'MUST_NOT_EXIST'
+    raw=('touch '+str(marker)+'\necho '+SECRET+'\n').encode()
+    result=inspect_fixture(backend,tmp_path,monkeypatch,raw)
+    assert result==dict(schema='mastermind.host_env_inspection.v1',status='OBSERVED',
+                       custody='QUALIFIED',syntax='UNKNOWN',sha256=hashlib.sha256(raw).hexdigest())
+    assert not marker.exists() and SECRET not in json.dumps(result)
+    assert 'touch' not in json.dumps(result)
+
+
+@pytest.mark.parametrize('kind',['symlink','writable','oversize','changed','foreign','hardlink'])
+def test_hook_custody_refuses_without_hash_or_raw_data(backend,tmp_path,monkeypatch,kind):
+    import os
+    raw=b'# '+SECRET.encode()+b'\n'
+    if kind=='oversize':raw=b'x'*65537
+    original_read=os.read
+    if kind=='changed':
+        def changed(fd,size):
+            value=original_read(fd,size)
+            if value:os.utime(fd,ns=(1,1))
+            return value
+        monkeypatch.setattr(os,'read',changed)
+    if kind in ('foreign','hardlink'):
+        original_fstat=os.fstat
+        def altered(fd):
+            value=original_fstat(fd)
+            if __import__('stat').S_ISREG(value.st_mode):
+                fields={name:getattr(value,name) for name in ('st_dev','st_ino','st_mode','st_uid','st_gid','st_nlink','st_size','st_mtime_ns','st_ctime_ns')}
+                fields['st_uid' if kind=='foreign' else 'st_nlink']=value.st_uid+1 if kind=='foreign' else 2
+                return SimpleNamespace(**fields)
+            return value
+        monkeypatch.setattr(os,'fstat',altered)
+    result=inspect_fixture(backend,tmp_path,monkeypatch,raw,symlink=kind=='symlink',mode=0o666 if kind=='writable' else 0o600)
+    assert result['status']=='UNQUALIFIED' and result['sha256'] is None
+    assert result['syntax']=='UNKNOWN' and SECRET not in json.dumps(result)
+
+
+def test_hook_result_closed_transport_binding(backend):
+    good=dict(schema='mastermind.host_env_inspection.v1',status='OBSERVED',custody='QUALIFIED',
+              syntax='UNKNOWN',sha256='a'*64)
+    assert backend.host_env_inspection_result(json.dumps(good),0)==good
+    for value in (json.dumps(good)+json.dumps(good),json.dumps(dict(good,raw=SECRET)),
+                  json.dumps(good).replace('"status": "OBSERVED"','"status":"OBSERVED","status":"OBSERVED"'),
+                  json.dumps(dict(good,syntax=SECRET)),json.dumps(dict(good,sha256=SECRET)),'x'*1025):
+        result=backend.host_env_inspection_result(value,0)
+        assert result['status']=='UNAVAILABLE' and result['sha256'] is None
+        assert SECRET not in json.dumps(result)
+    assert backend.host_env_inspection_result(json.dumps(good),255)['status']=='UNAVAILABLE'
+
+
+def test_inspection_command_fixed_isolated_and_not_shell_hook(backend,monkeypatch):
+    registry={'ubuntu0':dict(ssh_alias='mmx-ubuntu0',platform='linux',roles=['lanes'],worktree_root='/home/ubuntu0/.mastermind/worktrees')}
+    monkeypatch.setitem(sys.modules,'glm_host_account_source',SimpleNamespace(owned_bytes=lambda path:json.dumps(registry).encode()))
+    alias,command=backend.prepare_host_env_inspection('fixture','ubuntu0')
+    assert alias=='mmx-ubuntu0'
+    argv=shlex.split(command)
+    assert argv[:5]==['/usr/bin/python3','-I','-S','-B','-c'] and len(argv)==6
+    assert 'source ' not in argv[5] and 'subprocess' not in argv[5]
+    assert 'exec(' not in argv[5] and 'eval(' not in argv[5]
+    with pytest.raises(ValueError):backend.prepare_host_env_inspection('fixture','ubuntu1')
+    registry['ubuntu0']['ssh_alias']='other'
+    with pytest.raises(ValueError):backend.prepare_host_env_inspection('fixture','ubuntu0')
+
+
+def test_inspection_shell_mode_exclusive_before_telemetry_or_daemon():
+    text=(SOURCE/'host_pull.sh').read_text()
+    body=text[text.index('if [ -n "$INSPECT_HOST" ]; then'):text.index('if [ "$PAID_REQUESTED" -eq 1 ]; then')]
+    assert 'run_probe 0 "$INSPECT_ALIAS" "$INSPECT_PROBE" fixed-hook-inspection' in body
+    assert 'inspect-host-env-result' in body and 'exit $?' in body
+    assert 'write_state' not in body and 'glm_probe' not in body and 'pass_once' not in body.replace('# never enters pass_once, shared telemetry writes, or daemon startup.','')
+    assert text.index('if [ -n "$INSPECT_HOST" ]; then')<text.index('if [ "$ONCE" -eq 0 ]; then')
+
+
+@pytest.mark.parametrize('args',[['--inspect-host-env','ubuntu0','--once'],['--inspect-host-env','ubuntu1'],['--once','--inspect-host-env','ubuntu0'],['--inspect-host-env','ubuntu0','--paid-qualification','ubuntu0']])
+def test_inspection_mixed_cli_refuses_before_dependencies(args,tmp_path):
+    text=(SOURCE/'host_pull.sh').read_text()
+    parser=text[text.index('ONCE=0'):text.index('# One probe snippet')]
+    result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',parser,'inert-parser',*args],
+                          env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
+    assert result.returncode in (2,78)
+    assert 'HOST_PULL_STAGE_V1' not in result.stdout
+
+
+def test_hook_parent_symlink_refuses(backend,tmp_path,monkeypatch):
+    import os
+    base=tmp_path/'root';base.mkdir();(base/'real').mkdir();(base/'home').symlink_to('real')
+    original=os.open
+    monkeypatch.setattr(os,'open',lambda path,flags,*a,**k:original(base if path=='/' else path,flags,*a,**k))
+    result=backend.inspect_host_env()
+    assert result['status']=='UNQUALIFIED' and result['sha256'] is None
+
+
+def test_hook_held_namespace_rename_refuses(backend,tmp_path,monkeypatch):
+    import os
+    original_read=os.read
+    changed=[]
+    def rename(fd,size):
+        raw=original_read(fd,size)
+        if raw and not changed:
+            ext=tmp_path/'remote-root/home/ubuntu0/lanes/ext'
+            ext.rename(ext.with_name('moved'))
+            ext.mkdir()
+            changed.append(True)
+        return raw
+    monkeypatch.setattr(os,'read',rename)
+    result=inspect_fixture(backend,tmp_path,monkeypatch,b'# inert\n')
+    assert result['status']=='UNQUALIFIED' and result['sha256'] is None
+
+
+def test_inspection_transport_no_key_mutation_normal_transport_unchanged(tmp_path):
+    text=(SOURCE/'host_pull.sh').read_text()
+    function=text[text.index('run_probe() {'):text.index('if [ -n "$INSPECT_HOST" ]; then')]
+    # Bash functions stand in for transport executables; no SSH/perl is run.
+    stub='perl(){ printf "ARG:%s\\n" "$@"; }; sh(){ return 98; };\n'
+    for flag in ('','fixed-hook-inspection'):
+        script=stub+function+'\nrun_probe 0 mmx-ubuntu0 INERT '+flag
+        result=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script],
+                              env={'PATH':'','HOME':str(tmp_path)},capture_output=True,text=True)
+        assert result.returncode==0
+        assert 'ARG:BatchMode=yes' in result.stdout and 'ARG:ConnectTimeout=8' in result.stdout
+        assert ('ARG:StrictHostKeyChecking=yes' in result.stdout)==bool(flag)
+        assert ('ARG:UpdateHostKeys=no' in result.stdout)==bool(flag)
+        assert result.stdout.endswith('ARG:mmx-ubuntu0\nARG:INERT\n')
