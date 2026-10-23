@@ -287,6 +287,15 @@ REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
 }
 
 
+# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# This exact token is the Root config-directory permission mode, not a UID.
+# Source, path, AST location and complete token must all match; scanner unchanged.
+REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
+    "sha256": '8c7f1584128a7e1834706bb7d3e02825e6263abba9eaf828d27a254e095b26d7',
+    "sites": ((332, 46, 51, 'int', '0o755'),),
+}
+
+
 # PR #1794 source-risk review 5a342984: exact paid source bytes and
 # literal sites (including two precise docstring account-name examples). No
 # caller identity, permission or runtime admission is granted; any source/token
