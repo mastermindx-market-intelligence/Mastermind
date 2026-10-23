@@ -41,11 +41,24 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert subject.pull_number == 42
             assert subject.frozen_head_sha == SHA
             source_checks.append(subject.command_id)
+        notifications = []
+        def trusted_parent_reader(subject, job_id, ts):
+            # This fixture stands in for the installed host's authenticated
+            # exact-channel Slack GET; no public socket body is trusted.
+            assert subject.command_id == decision().command_id
+            assert job_id == "JOB-001"
+            assert ts == "1792699000.000001"
+            assert notifications[0][0] == "C0CAUK8P8S3"
+            return SlackMessage(
+                ts=ts, author_user_id="U0BT71H4FQE",
+                text=notifications[0][1],
+            )
         owner = ExecutiveGitHubReviewSocketOwner(
             runtime=runtime, admission_guard=lambda: None,
             source_guard=source_guard,
             repositories=frozenset({REPO}),
             relay_bot_user_id="U0BT71H4FQE",
+            parent_message_reader=trusted_parent_reader,
             worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )
         socket_path = str(tmp_path / "ceo-ingress.sock")

@@ -154,6 +154,21 @@ may supply the existing `eligible_quota_classes` worker route; the public
 webhook host rejects worker constraints entirely. An unbound/default route
 cannot be treated as actual worker-START eligibility.
 
+**Slack parent provenance now defaults closed:** A public socket
+`record_parent` frame can assert a timestamp and enrolled Relay bot ID but
+cannot establish that the original Slack message actually exists. The
+Executive host must inject a `parent_message_reader` backed by a fresh,
+authenticated exact-channel Slack read of the enrolled Relay bot's parent.
+Without it, the owner refuses the frame before EventStore mutation.
+The returned real `SlackMessage` must match that exact timestamp, enrolled
+bot author, unedited/un-deleted top-level state and deterministic parent
+body for the immutable PR/head/command/Job; a nonmatching message is refused.
+Both the fresh source guard and trusted Slack lookup run **outside** the
+existing EventStore transaction. No webhook, model or socket caller may supply
+the authoritative readback object; fixture callbacks are not installed
+credentials or a production verification grant. An unknown Slack POST or
+lost socket receipt is held without an automatic second Slack write.
+
 **Critical missing production binding:** The existing
 `ExecutiveControlService` authenticated CEO socket handler has NOT gained
 an authorized `mastermind.github_review_socket_admission.v1` dispatch

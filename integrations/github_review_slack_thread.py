@@ -27,6 +27,37 @@ class SlackReviewThreadUnavailable(RuntimeError):
     """Opaque transport/correlation refusal with no channel secret or code."""
 
 
+MAX_PARENT_NOTICE_CHARS = 700
+
+
+def review_parent_body(
+    *, decision: ReviewIntentDecision, job_id: str,
+    public_repository_names_authorized: bool = False,
+) -> str:
+    """Exact deterministic Relay parent text, shared with installed verification.
+
+    Caller-controlled webhook text never becomes a publication template.
+    Public repo names require a separately trusted boolean host policy.
+    """
+    if (not isinstance(decision, ReviewIntentDecision)
+            or decision.admitted is not True
+            or type(job_id) is not str
+            or _ID_RE.fullmatch(job_id) is None
+            or type(public_repository_names_authorized) is not bool):
+        raise SlackReviewThreadUnavailable("SLACK_PARENT_IDENTITY_INVALID")
+    subject = (
+        f"{decision.repository}#{decision.pull_number}"
+        if public_repository_names_authorized else "authorized GitHub pull request"
+    )
+    return (
+        "Independent review admitted through Executive/Fabric: "
+        + subject + "\n"
+        + f"Executive Job: {job_id}\n"
+        + f"Review command: {decision.command_id}\n"
+        + "Status: QUEUED (not worker START; no verdict yet)"
+    )[:MAX_PARENT_NOTICE_CHARS]
+
+
 class ExecutiveSlackReviewThreads:
     """One parent and at most one reply attempt for an exact review Job."""
 

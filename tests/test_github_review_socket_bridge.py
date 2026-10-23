@@ -211,11 +211,19 @@ def test_socket_parent_requires_enrolled_relay_and_original_job(tmp_path):
         decision=subject, job_id=job_id,
     ) is None
 
+    from integrations.github_review_slack_thread import review_parent_body
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+    def trusted_parent_reader(subject, job, ts):
+        return SlackMessage(
+            ts=ts, author_user_id="U0BT71H4FQE",
+            text=review_parent_body(decision=subject, job_id=job),
+        )
     authorized = ExecutiveGitHubReviewSocketOwner(
         runtime=runtime, admission_guard=lambda: None,
         source_guard=lambda _: None,
         repositories=frozenset({"example/repo"}),
         relay_bot_user_id="U0BT71H4FQE",
+        parent_message_reader=trusted_parent_reader,
     )
     bad = [
         parent_frame(subject, "JOB-999"),
@@ -315,3 +323,77 @@ def test_owner_selected_existing_worker_quota_class_survives_socket_admission(tm
     assert admitted.requested_authorities == ["READ"]
     assert admitted.allowed_write_paths == []
     assert admitted.attempt_count == 0
+
+@pytest.mark.parametrize("bad", [
+    "unverified", "no_receipt", "wrong_timestamp", "wrong_bot",
+    "wrong_text", "edited", "deleted", "thread_reply",
+])
+def test_socket_parent_requires_real_host_authenticated_message_readback(
+    tmp_path, bad,
+):
+    from integrations.github_review_slack_thread import (
+        ExecutiveSlackReviewThreads, review_parent_body,
+    )
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+
+    subject = decision()
+    runtime = Runtime.at(tmp_path / "runtime")
+    create = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: None, repositories=frozenset({"example/repo"}),
+    )
+    job_id = create.handle_frame(admit_frame(subject))["job_id"]
+    looked_up = []
+    def host_message_reader(chosen, job, ts):
+        looked_up.append((chosen.command_id, job, ts))
+        if bad == "unverified":
+            raise OSError("trusted Relay Slack GET unavailable")
+        if bad == "no_receipt":
+            return None
+        body = review_parent_body(decision=chosen, job_id=job)
+        return SlackMessage(
+            ts="1792699000.000002" if bad == "wrong_timestamp" else ts,
+            author_user_id="U0WRONGBOT" if bad == "wrong_bot" else "U0BT71H4FQE",
+            text="unrelated Slack parent body" if bad == "wrong_text" else body,
+            edited=bad == "edited",
+            deleted=bad == "deleted",
+            thread_ts=ts if bad == "thread_reply" else None,
+        )
+    owner = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: None, repositories=frozenset({"example/repo"}),
+        relay_bot_user_id="U0BT71H4FQE",
+        parent_message_reader=host_message_reader,
+    )
+    with pytest.raises(GitHubReviewSocketRefused, match="SOURCE_UNVERIFIED"):
+        owner.handle_frame(parent_frame(subject, job_id))
+    assert len(looked_up) == 1
+    assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
+        decision=subject, job_id=job_id,
+    ) is None
+    assert runtime.store.list_events(command_id_prefix="gh-review-slack-parent:") == []
+
+
+def test_socket_parent_rechecks_revoked_github_source_before_slack_read(tmp_path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    chosen = decision()
+    create = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: None, repositories=frozenset({"example/repo"}),
+    )
+    job = create.handle_frame(admit_frame(chosen))["job_id"]
+    reads = []
+    def revoked(_chosen):
+        raise PermissionError("actor revoked after admission")
+    def no_slack_read(*args):
+        reads.append(args)
+        raise AssertionError("Slack lookup must not occur after revocation")
+    owner = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None, source_guard=revoked,
+        repositories=frozenset({"example/repo"}),
+        relay_bot_user_id="U0BT71H4FQE",
+        parent_message_reader=no_slack_read,
+    )
+    with pytest.raises(GitHubReviewSocketRefused, match="SOURCE_UNVERIFIED"):
+        owner.handle_frame(parent_frame(chosen, job))
+    assert reads == []

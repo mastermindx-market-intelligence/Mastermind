@@ -11,11 +11,13 @@ import asyncio
 
 from control_plane.github_review_intent import ReviewIntentDecision
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
-from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+from integrations.github_review_slack_thread import (
+    ExecutiveSlackReviewThreads, review_parent_body, MAX_PARENT_NOTICE_CHARS,
+)
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 
 REVIEW_CHANNEL_ID = "C0CAUK8P8S3"
-MAX_NOTICE_CHARS = 700
+MAX_NOTICE_CHARS = MAX_PARENT_NOTICE_CHARS
 
 
 class SlackReviewVisibility:
@@ -45,19 +47,12 @@ class SlackReviewVisibility:
     ) -> None:
         if not decision.admitted or not isinstance(job_id, str) or not job_id:
             raise ValueError("review must already be admitted by Executive OS")
-        # The user-controlled GitHub title/body and even the public repo name
-        # are intentionally excluded by default from a public Slack channel.
-        subject = (
-            f"{decision.repository}#{decision.pull_number}"
-            if self._publish_repo_names else "authorized GitHub pull request"
+        # The exact template is shared with installed Slack readback. Never
+        # echo webhook title/body or introduce a second renderer on the host.
+        message = review_parent_body(
+            decision=decision, job_id=job_id,
+            public_repository_names_authorized=self._publish_repo_names,
         )
-        message = (
-            "Independent review admitted through Executive/Fabric: "
-            + subject + "\n"
-            + f"Executive Job: {job_id}\n"
-            + f"Review command: {decision.command_id}\n"
-            + "Status: QUEUED (not worker START; no verdict yet)"
-        )[:MAX_NOTICE_CHARS]
         # Called inside the ingress' to_thread, not inside an existing event
         # loop. Reuse the real client's exact-channel, validated write receipt.
         receipt = asyncio.run(self._client.post_parent(channel_id=self._channel_id, text=message))
