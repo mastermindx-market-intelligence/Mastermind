@@ -279,11 +279,20 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
 # token sites are unchanged in kind, spelling, and count.
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
+# Re-pinned for the explicit unstarted PREPROOF successor mode; same three
+# guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "3c45fc1c851576e5260f4544c3329915b4b3ce0efdaadf8d3ad002546acd4bc6",
-    "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (903, 46, 49, "int", "400"),
-              (903, 66, 69, "int", "500")),
+    "sha256": '322708005acd49517f727feb49743433da7612d776e6afc222079c443f43f511',
+    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1655, 46, 49, 'int', '400'), (1655, 66, 69, 'int', '500')),
+}
+
+
+# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# This exact token is the Root config-directory permission mode, not a UID.
+# Source, path, AST location and complete token must all match; scanner unchanged.
+REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
+    "sha256": '8c7f1584128a7e1834706bb7d3e02825e6263abba9eaf828d27a254e095b26d7',
+    "sites": ((332, 46, 51, 'int', '0o755'),),
 }
 
 
