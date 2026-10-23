@@ -845,3 +845,85 @@ def test_future_timestamp_ceiling_shared_reader(tmp_path):
     assert valid_runtime_instant("2026-10-11T00:00:00+00:00", now=now)
     document["data"]["job"]["updated_at"] = invalid
     assert not _accepted(document)
+
+
+def test_shared_timestamp_contract_keeps_injected_producer_clock():
+    """Runtime does not use the reader's wall clock to veto a legal fake clock."""
+    from datetime import datetime, timezone
+    from control_plane.executive_readback_contract import (
+        format_runtime_utc_timestamp, valid_runtime_instant,
+    )
+    instant = datetime(2099, 6, 1, 12, tzinfo=timezone.utc)
+    produced = format_runtime_utc_timestamp(int(instant.timestamp() * 1000))
+    assert produced == "2099-06-01T12:00:00+00:00"
+    assert not valid_runtime_instant(produced)
+    assert valid_runtime_instant(produced, now=instant)
+    assert format_runtime_utc_timestamp(None) == ""
+
+
+def test_real_long_lease_remains_readable_under_event_clock_ceiling(tmp_path):
+    """A valid future deadline is not a forged future event observation."""
+    from datetime import datetime, timedelta, timezone
+    from control_plane.executive_readback_contract import valid_runtime_instant
+    from tests.test_remote_attempt_transport import WORKER, PROVIDER, QUOTA, HOST_A, _join
+
+    runtime = Runtime.at(tmp_path / "long-lease", lease_seconds=48 * 60 * 60)
+    runtime.workers.register_worker(
+        WORKER, provider=PROVIDER, account_label="fixture-remote",
+        worker_type="fixture", capabilities=["research"],
+        quota_classes={QUOTA: {"capabilities": ["research"],
+                               "metadata": {"capacity_join": _join(HOST_A)}}},
+    )
+    job = runtime.jobs.create_job(
+        "long lease without false reader quarantine",
+        requested_authorities=["READ"],
+        constraints={"eligible_quota_classes": [QUOTA]}, attempt_limit=2,
+    )
+    lease = runtime.attempts.claim_job(
+        job.job_id, worker_id=WORKER, quota_class=QUOTA,
+        lease_owner="remote-transport-test",
+    )
+    assert lease is not None
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    expires = document["data"]["latest_attempt"]["lease_expires_at"]
+    assert datetime.fromisoformat(expires) > datetime.now(timezone.utc) + timedelta(hours=24)
+    assert not valid_runtime_instant(expires)
+    assert valid_runtime_instant(expires, deadline=True)
+    assert _accepted(document)
+
+
+@pytest.mark.parametrize("reason", ["x" * 1025, "unprintable\nreason"])
+def test_runtime_mark_lost_rejects_nonreadable_reason_without_transition(tmp_path, reason):
+    """The writer itself enforces the historical reader's reason boundary."""
+    from tests.test_remote_attempt_transport import _claimed_runtime
+
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    with pytest.raises(StateConflict, match="bounded printable reason"):
+        runtime.attempts.mark_lost(
+            lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+            reason=reason, verified_process_absent=True,
+        )
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert document["data"]["latest_attempt"]["status"] == "CLAIMED"
+    assert _accepted(document)
+
+
+def test_event_clock_boundary_and_invalid_types_fail_closed():
+    from datetime import datetime, timedelta, timezone
+    from control_plane.executive_readback_contract import (
+        MAX_FUTURE_CLOCK_SKEW, valid_runtime_instant,
+    )
+
+    now = datetime(2026, 10, 23, 12, tzinfo=timezone.utc)
+    boundary = (now + MAX_FUTURE_CLOCK_SKEW).isoformat()
+    beyond = (now + MAX_FUTURE_CLOCK_SKEW + timedelta(seconds=1)).isoformat()
+    assert valid_runtime_instant(boundary, now=now)
+    assert not valid_runtime_instant(beyond, now=now)
+    assert valid_runtime_instant(beyond, now=now, deadline=True)
+    for malformed in (None, 123, True, ["timestamp"], "bad", "2026-10-23T12:00:00"):
+        assert not valid_runtime_instant(malformed, now=now)
+        assert not valid_runtime_instant(malformed, now=now, deadline=True)
+    assert not valid_runtime_instant("2026-10-23T12:00:00-05:00", now=now)
+    assert valid_runtime_instant("2020-01-01T00:00:00Z", now=now)

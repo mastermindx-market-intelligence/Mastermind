@@ -38,7 +38,9 @@ from pathlib import Path
 from typing import Any, Callable, Iterator, Mapping, Sequence
 from uuid import uuid4
 
-from control_plane.executive_readback_contract import valid_lost_reason
+from control_plane.executive_readback_contract import (
+    format_runtime_utc_timestamp, valid_lost_reason,
+)
 
 from common.commission_ref import (
     CommissionRef,
@@ -612,11 +614,9 @@ def _load_canonical_digest_pair(
 
 
 def _iso(timestamp_ms: int | None) -> str:
-    if timestamp_ms is None:
-        return ""
-    return datetime.fromtimestamp(timestamp_ms / 1000, tz=timezone.utc).isoformat(
-        timespec="seconds"
-    )
+    # The producer's injectable Runtime clock owns provenance. Never compare
+    # this trusted timestamp with the host wall clock while serializing.
+    return format_runtime_utc_timestamp(timestamp_ms)
 
 
 def _enum_value(value: str | Enum, enum_type: type[Enum]) -> str:
@@ -18756,6 +18756,8 @@ class AttemptRegistry:
         provider session) with the live process.  Unverified suspicions wait for
         lease-expiry reconciliation and cannot prematurely free or fence work.
         """
+        # Preserve historical caller coercion/normalization; the shared
+        # producer/reader bound then guards length and printable content.
         reason = str(reason).strip()
         if not valid_lost_reason(reason):
             raise StateConflict("mark_lost requires a bounded printable reason")
