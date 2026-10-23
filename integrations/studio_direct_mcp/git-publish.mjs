@@ -16,6 +16,11 @@ const MAX_COMMISSION_BYTES = 512 * 1024;
 const BRANCH_RE = /^sol\/web-[A-Za-z0-9._-]+$/;
 const ALLOWED_LANE = 'web';
 const CLOSED_REPOSITORY_ALIASES = Object.freeze(['mastermind', 'macro', 'terminal']);
+// The installed repository owner fixes these branches; callers select no ref.
+const PROTECTED_TRACKING_REFS = Object.freeze({
+  mastermind: 'refs/remotes/origin/master', macro: 'refs/remotes/origin/main',
+  terminal: 'refs/remotes/origin/master',
+});
 const NOT_REGISTERED = 'workspace is not registered to the source repository';
 const MAX_STDIO_BYTES = 1024 * 1024;
 const DEFAULT_COMMAND_TIMEOUT_MS = 15_000;
@@ -61,7 +66,9 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
     'Create exactly one local commit from all current committable changes in one existing Mastermind ' +
     'attended Web workspace. The host resolves the workspace and branch from canonical mmx-workspace ' +
     'registration. The caller supplies only the operation id, exact expected current HEAD and a bounded ' +
-    'single-line commit message. Ignored files stay uncommitted. A private temporary index prevents ' +
+    'single-line commit message, with an optional exact protected-base and prepared-tree merge fence. ' +
+    'Merge mode checks the host-fixed local tracking ref and preserves both ordered parents. ' +
+    'Ignored files stay uncommitted. A private temporary index prevents ' +
     'pre-commit staging side effects; after the fenced ref update is known applied, the real index is ' +
     'synchronized to that exact commit. Compare-and-swap ref update prevents stale-head publication. ' +
     'This operation is local-only; its schema has no capability to contact origin, push, accept paths, change remotes, or accept shell commands.',
@@ -82,6 +89,15 @@ export const STUDIO_GIT_COMMIT_CURRENT_CHANGES_TOOL = Object.freeze({
         type: 'string',
         minLength: 1,
         maxLength: 240,
+      },
+      merge: {
+        type: 'object',
+        properties: {
+          expected_protected_base_sha: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+          expected_tree_sha: { type: 'string', pattern: '^[0-9a-f]{40}$' },
+        },
+        required: ['expected_protected_base_sha', 'expected_tree_sha'],
+        additionalProperties: false,
       },
     },
     required: ['operation_id', 'expected_head_sha', 'message'],
@@ -285,6 +301,18 @@ function validateExpectedHead(value) {
   return value;
 }
 
+function validateMerge(args) {
+  if (!Object.hasOwn(args, 'merge')) return null;
+  const value = args.merge;
+  const keys = ['expected_protected_base_sha', 'expected_tree_sha'];
+  if (!value || typeof value !== 'object' || Array.isArray(value) ||
+      Object.keys(value).length !== keys.length ||
+      !keys.every((key) => Object.hasOwn(value, key) && typeof value[key] === 'string' && SHA_RE.test(value[key]))) {
+    throw new TypeError('merge requires only exact protected-base and tree SHA fences');
+  }
+  return Object.freeze(Object.fromEntries(keys.map((key) => [key, value[key]])));
+}
+
 function validateCommitMessage(value) {
   if (typeof value !== 'string') throw new TypeError('message is invalid');
   const text = value.trim();
@@ -317,12 +345,13 @@ function actionRef(operationId, branch, head) {
     .digest('hex');
 }
 
-function commitActionRef(operationId, branch, oldHead, tree, message) {
-  return createHash('sha256')
-    .update('mastermind.studio_git_commit_current_changes.v1\0')
-    .update(operationId).update('\0').update(branch).update('\0').update(oldHead)
-    .update('\0').update(tree).update('\0').update(message)
-    .digest('hex');
+function commitActionRef(operationId, branch, oldHead, tree, message, protectedBase = null) {
+  const hash = createHash('sha256')
+    .update(protectedBase === null ? 'mastermind.studio_git_commit_current_changes.v1\0'
+      : 'mastermind.studio_git_commit_current_changes.merge.v1\0')
+    .update(operationId).update('\0').update(branch).update('\0').update(oldHead);
+  if (protectedBase !== null) hash.update('\0').update(protectedBase);
+  return hash.update('\0').update(tree).update('\0').update(message).digest('hex');
 }
 
 function publicStatus(state) {
@@ -681,13 +710,25 @@ export function createGitPublisher(config, dependencies = {}) {
 
   async function commit(args) {
     if (!args || typeof args !== 'object' || Array.isArray(args) ||
-        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'message'].includes(key))) {
+        Object.keys(args).some((key) => !['operation_id', 'expected_head_sha', 'message', 'merge'].includes(key))) {
       throw new TypeError('studio_git_commit_current_changes arguments are invalid');
     }
     const operationId = validateOperationId(args.operation_id);
     const expectedHead = validateExpectedHead(args.expected_head_sha);
     const message = validateCommitMessage(args.message);
+    const merge = validateMerge(args);
     const before = await workspace(operationId, { observeRemote: false });
+    const refuseMerge = (code) => ({
+      schema: 'mastermind.studio_git_commit_result.v1', status: 'REFUSED', effect_state: 'NOT_APPLIED',
+      code, operation_id: operationId, branch: before.branch, local_head_sha: before.localHead,
+    });
+    const protectedRef = PROTECTED_TRACKING_REFS[cfg.repository ?? 'mastermind'];
+    async function protectedBaseMatches() {
+      try {
+        const { stdout } = await git(before.workspacePath, ['rev-parse', '--verify', `${protectedRef}^{commit}`]);
+        return oneLine(stdout, 'protected tracking commit') === merge.expected_protected_base_sha;
+      } catch { return false; }
+    }
     if (before.localHead !== expectedHead) {
       return {
         schema: 'mastermind.studio_git_commit_result.v1',
@@ -699,6 +740,21 @@ export function createGitPublisher(config, dependencies = {}) {
         expected_head_sha: expectedHead,
         local_head_sha: before.localHead,
       };
+    }
+
+    if (merge !== null) {
+      if (!(await protectedBaseMatches())) return refuseMerge('PROTECTED_BASE_MISMATCH_OR_UNAVAILABLE');
+      if (merge.expected_protected_base_sha === expectedHead) return refuseMerge('DUPLICATE_MERGE_PARENT');
+      try {
+        await git(before.workspacePath, ['merge-base', '--is-ancestor', merge.expected_protected_base_sha, expectedHead]);
+        return refuseMerge('PROTECTED_BASE_ALREADY_CONTAINED');
+      } catch (error) {
+        if (error.code !== 1) throw error;
+      }
+      try {
+        const { stdout } = await git(before.workspacePath, ['merge-base', expectedHead, merge.expected_protected_base_sha]);
+        if (!SHA_RE.test(oneLine(stdout, 'shared merge base'))) return refuseMerge('PROTECTED_BASE_NOT_RELATED');
+      } catch { return refuseMerge('PROTECTED_BASE_NOT_RELATED'); }
     }
 
     const scratch = await mkdtemp(path.join(tmpdir(), 'studio-git-commit-'));
@@ -730,8 +786,10 @@ export function createGitPublisher(config, dependencies = {}) {
       }
       const { stdout: baseTreeOut } = await git(before.workspacePath, ['rev-parse', `${expectedHead}^{tree}`]);
       const baseTree = oneLine(baseTreeOut, 'base tree');
-      const ref = commitActionRef(operationId, before.branch, expectedHead, tree, message);
-      if (tree === baseTree) {
+      if (merge !== null && tree !== merge.expected_tree_sha) return refuseMerge('EXPECTED_TREE_MISMATCH');
+      const ref = commitActionRef(operationId, before.branch, expectedHead, tree, message,
+        merge?.expected_protected_base_sha ?? null);
+      if (tree === baseTree && merge === null) {
         return {
           schema: 'mastermind.studio_git_commit_result.v1',
           status: 'REFUSED',
@@ -746,11 +804,22 @@ export function createGitPublisher(config, dependencies = {}) {
 
       const { stdout: commitOut } = await gitWithIndex(
         before.workspacePath,
-        ['commit-tree', tree, '-p', expectedHead, '-m', message],
+        ['commit-tree', tree, '-p', expectedHead,
+          ...(merge === null ? [] : ['-p', merge.expected_protected_base_sha]), '-m', message],
         indexPath,
       );
       const commitHead = oneLine(commitOut, 'commit HEAD');
       if (!SHA_RE.test(commitHead)) throw new Error('commit HEAD is invalid');
+      if (merge !== null) {
+        const { stdout } = await git(before.workspacePath, ['show', '-s', '--format=%T%n%P', commitHead]);
+        const identity = stdout.trim().split('\n');
+        if (identity.length !== 2 || identity[0] !== tree ||
+            identity[1] !== `${expectedHead} ${merge.expected_protected_base_sha}`) {
+          return refuseMerge('MERGE_COMMIT_IDENTITY_MISMATCH');
+        }
+        // A concurrent source refresh requires a new explicit reviewed fence.
+        if (!(await protectedBaseMatches())) return refuseMerge('PROTECTED_BASE_CHANGED_DURING_PREPARATION');
+      }
 
       async function finishKnownApplied(successCode) {
         let indexSynced = true;

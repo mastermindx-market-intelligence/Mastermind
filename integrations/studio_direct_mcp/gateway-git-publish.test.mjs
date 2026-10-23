@@ -160,7 +160,13 @@ test('configured gateway exposes typed Git tools with exact truthful annotations
     assert.equal(commit.annotations.destructiveHint, true);
     assert.equal(commit.annotations.idempotentHint, true);
     assert.equal(commit.annotations.openWorldHint, false);
-    assert.deepEqual(Object.keys(commit.inputSchema.properties).sort(), ['expected_head_sha', 'message', 'operation_id']);
+    assert.deepEqual(Object.keys(commit.inputSchema.properties).sort(), ['expected_head_sha', 'merge', 'message', 'operation_id']);
+    assert.equal(commit.inputSchema.required.includes('merge'), false);
+    assert.equal(commit.inputSchema.properties.merge.additionalProperties, false);
+    assert.deepEqual(commit.inputSchema.properties.merge.required,
+      ['expected_protected_base_sha', 'expected_tree_sha']);
+    assert.deepEqual(Object.keys(commit.inputSchema.properties.merge.properties),
+      ['expected_protected_base_sha', 'expected_tree_sha']);
     assert.equal(push.annotations.readOnlyHint, false);
     assert.equal(push.annotations.destructiveHint, true);
     assert.equal(push.annotations.idempotentHint, true);
@@ -323,4 +329,36 @@ test('enabled multi-repository gateway composes real owner acquisition and local
     }
     assert.equal(gw.stats().requests.backendOps, before, 'workspace tools do not escape to generic Desktop Commander');
   } finally { await closeAll([root, gatewayRoot, gw, c]); }
+});
+
+test('typed merge fences survive the actual MCP gateway and preserve both parents', async () => {
+  const f = await makePublisherFixture();
+  const { root, gw } = await boot({ stateDir: f.stateDir, gitPublish: f.gitPublish });
+  const c = await connect(gw);
+  try {
+    const tree = (await git(f.workspacePath, 'rev-parse', 'HEAD^{tree}')).stdout.trim();
+    const protectedBase = (await git(f.workspacePath, 'commit-tree', tree,
+      '-p', f.head, '-m', 'test: protected successor')).stdout.trim();
+    await git(f.workspacePath, 'update-ref', 'refs/remotes/origin/master', protectedBase);
+    await c.client.listTools();
+    const backendBefore = gw.stats().requests.backendOps;
+    const result = await c.client.callTool({
+      name: 'studio_git_commit_current_changes',
+      arguments: {
+        operation_id: f.operationId, expected_head_sha: f.head,
+        message: 'test: exact merge through MCP',
+        merge: { expected_protected_base_sha: protectedBase, expected_tree_sha: tree },
+      },
+    });
+    assert.equal(result.isError, undefined);
+    assert.equal(result.structuredContent.effect_state, 'APPLIED');
+    const head = result.structuredContent.commit_head_sha;
+    const identity = (await git(f.workspacePath, 'show', '-s', '--format=%T%n%P', head)).stdout.trim().split('\n');
+    assert.deepEqual(identity, [tree, `${f.head} ${protectedBase}`]);
+    assert.equal(gw.stats().requests.backendOps, backendBefore);
+    assert.equal((await git(f.workspacePath, 'status', '--porcelain')).stdout, '');
+    assert.equal((await git(f.workspacePath, 'ls-remote', '--heads', 'origin')).stdout, '');
+  } finally {
+    await closeAll([f.root, root, gw, c]);
+  }
 });

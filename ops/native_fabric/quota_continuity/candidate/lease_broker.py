@@ -359,7 +359,8 @@ class Broker:
         return os.path.exists(self.grok_marker)
 
     def _bailian_effective_cap(self, name: str, base: int) -> Optional[int]:
-        """None = not grantable (non-429 cooldown). Else effective cap."""
+        """None = not grantable (non-429 cooldown, or fresh known parked usage).
+        Else effective cap."""
         if not self.external_gates:
             return base
         try:
@@ -367,10 +368,15 @@ class Broker:
                 sys.path.insert(0, HERE)
             import bailian_keys
 
+            try:
+                info = bailian_keys.read_usage_eligibility(name, now=self.now())
+            except Exception:
+                info = bailian_keys._usage_unknown()
+            if info.get("state") == "CURRENT" and info.get("parked") is True:
+                return None
+            # A parked account is withheld even with healthy cooldown data;
+            # untrusted/unsafe cooldowns cannot be granted by unknown usage.
             effective = int(bailian_keys._effective_cap_for_key(name))
-            # Every capacity observation uses the same non-mutating reader
-            # as unpinned ordering. No grantable-account path may unlink an
-            # expired or concurrently replaced cooldown record.
             return min(base, effective) if effective > 0 else None
         except Exception:
             # Unavailable or corrupt source cannot establish provider room.
@@ -690,13 +696,17 @@ class Broker:
         operator_child_id: Optional[str] = None,
         capacity_handoff: bool = False,
         deadline_ns: Optional[int] = None,
+        not_before: Optional[str] = None,
     ) -> AcquireResult:
+        if not_before is not None:
+            from commission_deadline import require_not_before
+            require_not_before(not_before)
         if deadline_ns is not None:
             deadline_ns = validate_deadline_ns(deadline_ns)
         token = _ACQUIRE_DEADLINE_NS.set(deadline_ns)
         try:
             return self._acquire(orchestrator_id, pool, account, task_class, host,
-                pid, ttl, wait, poll, model, operator_child_id, capacity_handoff)
+                pid, ttl, wait, poll, model, operator_child_id, capacity_handoff, not_before)
         except CommissionDeadlineExpired:
             return AcquireResult(ok=False, reason="commission_time_exhausted",
                 orchestrator_id=orchestrator_id, pool=self.provider_name(pool))
@@ -711,7 +721,7 @@ class Broker:
             _ACQUIRE_DEADLINE_NS.reset(token)
 
     def _acquire(self, orchestrator_id, pool, account, task_class, host,
-                 pid, ttl, wait, poll, model, operator_child_id, capacity_handoff):
+                 pid, ttl, wait, poll, model, operator_child_id, capacity_handoff, not_before=None):
         pool = self.provider_name(pool)
         model = str(model or "").strip()
         host = host or self.this_host
@@ -727,8 +737,13 @@ class Broker:
         # for fair share (N1) and does not register competing demand.
         # Successful acquire deletes the waiter row inside _try_acquire.
         while True:
+            if not_before is not None:
+                from commission_deadline import require_not_before
+                require_not_before(not_before)
             lock = self._lock()
             try:
+                if not_before is not None:
+                    require_not_before(not_before)
                 self._gc_locked()
                 result, waiter_id, last_reason = self._try_acquire(
                     orchestrator_id,
@@ -742,6 +757,7 @@ class Broker:
                     model,
                     operator_child_id,
                     capacity_handoff,
+                    not_before,
                 )
                 if result.ok or last_reason in ("operator_authorization_refused", "host_account_unavailable", "quota_cooldown"):
                     return result
@@ -998,6 +1014,7 @@ class Broker:
         model: str = "",
         operator_child_id: Optional[str] = None,
         capacity_handoff: bool = False,
+        not_before: Optional[str] = None,
     ) -> Tuple[AcquireResult, Optional[str], str]:
         spec = self.provider(pool)
         if spec.get("enabled") is False:
@@ -1130,6 +1147,9 @@ class Broker:
                     return (AcquireResult(ok=False, reason="operator_authorization_refused",
                                           pool=pool, orchestrator_id=orch),
                             waiter_id, "operator_authorization_refused")
+            if not_before is not None:
+                from commission_deadline import require_not_before
+                require_not_before(not_before)
             conn.execute(
                 "INSERT INTO leases "
                 "(id, orchestrator_id, pool, account, task_class, model, host, pid, "
@@ -1624,6 +1644,7 @@ def main(argv: Optional[List[str]] = None) -> int:
     pa.add_argument("--wait", type=float, default=0)
     pa.add_argument("--poll", type=float, default=1.0)
     pa.add_argument("--deadline-ns", type=int, default=None)
+    pa.add_argument("--not-before", default=None)
     pa.add_argument("--prelease-receipt", default=None)
     pa.add_argument("--run-id", default=None)
     pa.add_argument("--parent-run-id", default=None)
@@ -1652,6 +1673,16 @@ def main(argv: Optional[List[str]] = None) -> int:
     sub.add_parser("gc")
 
     args = p.parse_args(argv)
+    if args.cmd == "acquire" and args.not_before is not None:
+        from commission_deadline import (require_not_before, CallerNotBeforePending, CallerNotBeforeInvalid)
+        try:
+            require_not_before(args.not_before)
+        except CallerNotBeforePending as exc:
+            print(str(exc))
+            return 75
+        except CallerNotBeforeInvalid as exc:
+            print(str(exc))
+            return 2
     deadline = None
     if args.cmd == "acquire" and args.deadline_ns is not None:
         deadline = validate_deadline_ns(args.deadline_ns)
@@ -1709,6 +1740,7 @@ def main(argv: Optional[List[str]] = None) -> int:
             operator_child_id=args.operator_child_id,
             capacity_handoff=args.prelease_receipt is not None,
             deadline_ns=deadline,
+            not_before=args.not_before,
         )
         if (res.reason == "quota_cooldown" and res.quota_blockade is not None
                 and not res.ok and not res.lease_id and args.prelease_receipt):

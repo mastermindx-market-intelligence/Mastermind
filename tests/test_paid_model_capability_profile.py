@@ -38,6 +38,7 @@ from control_plane.executive_agent_capabilities import (
     PAID_GLM_AUTH_REALM,
     PAID_GLM_EXECUTION_SURFACE,
     PAID_GLM_SEALED_PROFILE_ID,
+    ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
     adapter_supports_execution_surface,
     is_sealed_worker_execution_surface,
 )
@@ -161,7 +162,10 @@ def test_default_policy_stays_v3_unarmed_with_unchanged_legacy_fields(current_re
     assert current_registry.production_armed is False
     assert current_registry.capability_packages == {}
     assert set(current_registry.profiles) == (
-        set(LEGACY_PROFILE_DIGESTS) | {PAID_GLM_SEALED_PROFILE_ID}
+        set(LEGACY_PROFILE_DIGESTS) | {
+            PAID_GLM_SEALED_PROFILE_ID,
+            "worker.acp.providerfree.readonly.v1",
+        }
     )
 
 
@@ -247,7 +251,14 @@ def test_legacy_profile_values_are_identical_across_extension(
 ):
     for profile_id, legacy in legacy_registry.profiles.items():
         assert current_registry.profiles[profile_id] == legacy, profile_id
-    assert current_registry.mcp_servers == legacy_registry.mcp_servers
+    # The ACP provider-free extension adds one exact MCP identity. It must
+    # not modify any of the historical server grants or the paid-model grant.
+    assert set(current_registry.mcp_servers) == (
+        set(legacy_registry.mcp_servers) | {ACP_WORKSPACE_READ_MCP_CAPABILITY_ID}
+    )
+    for capability_id, legacy in legacy_registry.mcp_servers.items():
+        assert current_registry.mcp_servers[capability_id] == legacy
+    assert current_registry.resolve(PAID_GLM_SEALED_PROFILE_ID).mcp_server_grants == ()
     assert current_registry.resources == legacy_registry.resources
     assert current_registry.policy_version == legacy_registry.policy_version
     assert current_registry.lifecycle_authority == legacy_registry.lifecycle_authority
