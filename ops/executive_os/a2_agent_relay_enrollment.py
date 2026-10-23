@@ -1589,7 +1589,13 @@ async def _reverse_rebind(
             commit_sha=expected_previous_release_sha,
             tree_sha=expected_previous_tree_sha,
         )
-        if manifest.get("ok") is not True:
+        # verify() returns the authenticated persisted manifest, not the
+        # command-line verifier's {"ok": true} receipt. Independently bind
+        # this exact previous tree and commit to the verified document.
+        if (type(manifest) is not dict
+                or manifest.get("schema_version") != release_manifest.SCHEMA_VERSION
+                or manifest.get("commit_sha") != expected_previous_release_sha
+                or manifest.get("tree_sha") != expected_previous_tree_sha):
             raise ValueError("previous release invalid")
     except Exception:
         raise A2EnrollmentError("A2_REBIND_STATE_REFUSED") from None

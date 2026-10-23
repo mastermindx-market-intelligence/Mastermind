@@ -585,22 +585,53 @@ def _reverse_witness(legacy_pair, *, previous=OLD, current=NEW):
     )
 
 
-def _prepare_reverse(host, monkeypatch):
+def _seed_real_previous_release(monkeypatch):
+    """Build a real signed-shape manifest, including filesystem inventory.
+
+    Test UID/GID substitute for the installed root principal; the actual
+    create/verify, manifest schema and sealed-byte comparison run unmocked.
+    """
     from ops.executive_os import release_manifest
+    root = a2.SYSTEM_RELEASE_ROOT / OLD
+    root.mkdir(parents=True, exist_ok=True)
+    root.chmod(0o755)
+    sealed_file = root / 'historical-code.py'
+    sealed_file.write_bytes(b'# inert historical code fixture\n')
+    sealed_file.chmod(0o644)
+    original_owner_validator = release_manifest._validate_owned_info
+
+    def assert_fixture_owner(info, *, label):
+        assert info.st_uid == os.getuid(), label
+        # macOS temp namespaces can inherit gid=wheel even for uid=501.
+        # Only translate ownership for the fixture; the real seal and
+        # every manifest byte/inventory comparison remain exercised.
+        assert info.st_gid in (os.getgid(), 0), label
+        assert not info.st_mode & 0o022, label
+
+    monkeypatch.setattr(release_manifest, '_validate_owned_info',
+                        assert_fixture_owner)
+    try:
+        release_manifest.create(root, OLD, 'a' * 40)
+        persisted = release_manifest.verify(root, OLD, 'a' * 40)
+    except BaseException:
+        monkeypatch.setattr(release_manifest, '_validate_owned_info',
+                            original_owner_validator)
+        raise
+    assert persisted['schema_version'] == release_manifest.SCHEMA_VERSION
+    assert persisted['commit_sha'] == OLD
+    assert persisted['tree_sha'] == 'a' * 40
+    assert len(persisted['entries']) >= 1
+    return root
+
+
+def _prepare_reverse(host, monkeypatch):
     host()
     seed_legacy_socket_pair()
     old_pair = pair()
     assert rebind()['action'] == 'rebound'
     new_pair = pair()
     monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', lambda: None)
-
-    def verify_previous(*, root, commit_sha, tree_sha):
-        assert commit_sha == OLD
-        assert tree_sha == 'a' * 40
-        assert root == a2.SYSTEM_RELEASE_ROOT / OLD
-        return {'ok': True}
-
-    monkeypatch.setattr(release_manifest, 'verify', verify_previous)
+    _seed_real_previous_release(monkeypatch)
     return old_pair, new_pair
 
 
@@ -652,12 +683,11 @@ def test_reverse_rejects_incorrect_witness_without_mutation(host, monkeypatch, w
 
 
 def test_reverse_rejects_armed_w3c_without_downgrading(host, monkeypatch):
-    from ops.executive_os import release_manifest
     host()
     assert asyncio.run(a2._rebind(bot_user_id=BOT, enable_w3c=True))['action'] == 'rebound'
     current_pair = pair()
     monkeypatch.setattr(a2, '_assert_terminal_return_disarmed', lambda: None)
-    monkeypatch.setattr(release_manifest, 'verify', lambda **kw: {'ok': True})
+    _seed_real_previous_release(monkeypatch)
     kwargs = _reverse_witness(current_pair)
     with pytest.raises(a2.A2EnrollmentError) as err:
         asyncio.run(a2._reverse_rebind(**kwargs))
@@ -675,11 +705,10 @@ def test_reverse_refuses_if_control_return_is_armed(host, monkeypatch):
 
 
 def test_reverse_refuses_failed_previous_release_seal(host, monkeypatch):
-    from ops.executive_os import release_manifest
     old_pair, new_pair = _prepare_reverse(host, monkeypatch)
-    def refused(**kwargs):
-        raise release_manifest.ReleaseManifestError('invalid fixture release')
-    monkeypatch.setattr(release_manifest, 'verify', refused)
+    # Tamper AFTER create() with actual release bytes, not a fake verifier.
+    (a2.SYSTEM_RELEASE_ROOT / OLD / 'historical-code.py').write_bytes(
+        b'# tampered, does not match previous signed manifest\n')
     with pytest.raises(a2.A2EnrollmentError) as err:
         asyncio.run(a2._reverse_rebind(**_reverse_witness(old_pair)))
     assert err.value.code == 'A2_REBIND_STATE_REFUSED'
