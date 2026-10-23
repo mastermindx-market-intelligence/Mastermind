@@ -626,7 +626,7 @@ class PhysicalRootCase(unittest.TestCase):
     def scope_shell(self, changes):
         # Execute the actual loader/fence; the suffix is the first possible
         # lease/remote/operator stage and must remain unreachable on refusal.
-        values = dict(HERE=str(self.fx.ctl), REMOTE_SUB_PYTHON=sys.executable,
+        values = dict(HERE=str(self.fx.ctl), HOSTS_SOURCE=str(self.fx.ctl/"hosts.json"), REMOTE_SUB_PYTHON=sys.executable,
                       HOST_ARG=HOST, MODE="glm", RUN_ID_ARG=RUN_ID,
                       PLAIN_PACKET_RETAINED=str(self.fx.packet_pin),
                       POOL_ORCHESTRATOR_ID=ROOT, POOL_PARENT_RUN_ID=PARENT,
@@ -670,7 +670,7 @@ class PhysicalRootCase(unittest.TestCase):
         exclusive(self.fx.ctl / "sub.sh", b"#!/bin/bash\nprintf 'INERT_LOCAL_BOUNDARY\\n'\n", 0o700)
         branch = self.shell.split('if [ "$HOST_ARG" = m2 ]; then\n', 1)[1].split(
             "\n# The same canonical registry constraints", 1)[0]
-        setup = dict(HOST_ARG="m2", HERE=str(self.fx.ctl), REMOTE_SUB_PYTHON=sys.executable,
+        setup = dict(HOST_ARG="m2", HERE=str(self.fx.ctl), HOSTS_SOURCE=str(self.fx.ctl/"hosts.json"), REMOTE_SUB_PYTHON=sys.executable,
                      COMMISSION_ACTIVE="0", OPERATOR_CHILD_BUDGET="0", DRY_RUN="0",
                      PACKET=str(self.fx.packet_pin), PACKET_BASE="inert.packet",
                      REMOTE_CWD="~", MODEL=MODEL, MODE="glm")
@@ -691,11 +691,12 @@ class PhysicalRootCase(unittest.TestCase):
     def test_actual_launch_loop_does_not_repeat_busy_bound_admission(self):
         retry = self.shell.split("RETRYABLE_ADMISSION_MODE=0\n", 1)[1].split(
             "\ncommission_refresh_runtime prelease", 1)[0]
-        loop = self.shell.split('ADMISSION_FILE="$HERE/lanes/', 1)[1].split(
+        loop = self.shell.split('ADMISSION_FILE="$STATE_HERE/lanes/', 1)[1].split(
             "\n", 1)[1].split("\nrequire_bound_lane_layout_after_launch before_collection", 1)[0]
         vals = {
-            "HERE": str(self.fx.ctl), "MODE": "glm", "REMOTE_PHYSICAL_ROOT": str(self.physical),
+            "HERE": str(self.fx.ctl), "STATE_HERE":str(self.fx.ctl), "MODE": "glm", "REMOTE_PHYSICAL_ROOT": str(self.physical),
             "ADMISSION_WAIT_SECS": "20", "ADMISSION_RETRY_SECS": "2", "DRY_RUN": "0",
+            "CANONICAL_PAID_ACTIVE":"0",
             "ADMISSION_FILE": str(self.fx.ctl / "admission"), "COMMISSION_ACTIVE": "0",
             "RC_OBSERVED": "0", "NATIVE_MODE": "0", "ID": RUN_ID, "HOST_ARG": HOST,
             "REMOTE_LANES_Q": shlex.quote(str(self.physical)), "REMOTE_LANE_TRANSFER": str(self.physical),

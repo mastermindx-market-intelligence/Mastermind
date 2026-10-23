@@ -23,7 +23,7 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
   exit 64
@@ -586,6 +586,10 @@ readside_postflight() {
 
 [ "$#" -ge 1 ] || usage
 case "$1" in
+  prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid)
+    [ "$#" -ge 3 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
   start-finite|stop-finite|status-finite)
     [ "$#" -eq 5 ] && [ "$2" = "--expected-sha" ] && [ "$4" = "--expected-manifest-sha256" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] && [[ "$5" =~ ^[0-9a-f]{64}$ ]] || usage
@@ -597,6 +601,13 @@ case "$1" in
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
+  prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid)
+    require_root
+    paid_dir="$MCP_RELEASE_ROOT/$3/ops/executive_os"
+    [[ "$SCRIPT_SOURCE" == "$paid_dir/service-control.sh" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$paid_dir" ]] && [[ "$SCRIPT_PATH" == "$paid_dir/service-control.sh" ]] || exit 65
+    exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$paid_dir/canonical_paid_actions.py" "$@"
+    ;;
   stop-incident-broker)
     require_root
     exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$SCRIPT_DIR/../../scripts/executive_os_incident_maintenance.py"

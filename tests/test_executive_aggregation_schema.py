@@ -233,10 +233,19 @@ class _Handoffs:
 
 
 def _supervisor(tmp_path, handoff):
-    supervisor = ExecutiveSupervisor.__new__(ExecutiveSupervisor)
-    supervisor.runtime = SimpleNamespace(jobs=_Handoffs(handoff))
-    supervisor.shared_run_gid = None
-    supervisor.runs_root = tmp_path / "runs"
+    # Real constructor seam over the counted inert LEGACY aggregation boundary:
+    # _CountingAdapter is test-only, starts no provider on these seams, and is
+    # not a CanonicalPaidFabricWorkerAdapter, so no flag or adapter_id can
+    # select the paid route.
+    supervisor = ExecutiveSupervisor(
+        SimpleNamespace(jobs=_Handoffs(handoff),
+                        store=SimpleNamespace(lease_seconds=30.0)),
+        _CountingAdapter(),
+        runs_root=tmp_path / "runs",
+        shared_run_gid=None,
+        inspector=SimpleNamespace(),
+        require_complete_launch_attestation=False,
+    )
     # Illustrative contradictory attribute; this is not a service-config reader
     # or proof of real service reconfiguration. The controlled handoff is the
     # only runtime input available to this constructor seam.

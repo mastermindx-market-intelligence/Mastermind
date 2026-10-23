@@ -132,7 +132,7 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "expected_sha": SHA,
     }
 
-    # The command set is EXACTLY the closed fourteen: no generic recovery/debug verb
+    # The command set is closed: no generic recovery/debug verb
     # exists, and the three legacy autonomy verbs remain present.
     subparser_actions = [
         action
@@ -155,7 +155,15 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "a2-disable-prepare-reconcile",
         "finite-control-stage",
         "finite-control-stage-reconcile",
+        "paid-control-stage",
+        "paid-control-stage-reconcile",
     }
+    for command in ("paid-control-stage","paid-control-stage-reconcile"):
+        argv=[command,"--expected-sha",SHA,"--expected-definition-sha256","d"*64]
+        if command=="paid-control-stage":argv += ["--expected-control-sha256","c"*64]
+        assert parser.parse_args(argv).expected_definition_sha256=="d"*64
+        for extra in (["--service-label","foreign"],["--expected-definition-sha256","e"*64]):
+            with pytest.raises(SystemExit):parser.parse_args(argv+extra)
     for command in ("a2-disable-prepare", "a2-disable-prepare-reconcile"):
         assert vars(parser.parse_args([command, "--expected-sha", SHA])) == {
             "command": command, "expected_sha": SHA,

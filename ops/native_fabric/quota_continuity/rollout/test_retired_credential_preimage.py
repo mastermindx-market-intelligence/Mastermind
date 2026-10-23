@@ -21,7 +21,15 @@ class RetiredCredentialPreimageTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.root = Path(self.temp.name)
+        repository = Path(self.temp.name)
+        self.root = repository / "ops/native_fabric/quota_continuity"
+        self.root.mkdir(parents=True)
+        # The real builder qualifies its locked pure-YAML artifact from the
+        # repository root; preserve that production-relative layout in scratch.
+        lock = json.loads((ROOT / "candidate/paid_pyyaml_provenance.json").read_text())["lock_path"]
+        target = repository / lock
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(ROOT.parents[2] / lock, target)
         for directory in ("source", "candidate", "rollout"):
             (self.root / directory).mkdir()
         for name in builder.BASE_FILES | {"pool_launcher.sh"}:

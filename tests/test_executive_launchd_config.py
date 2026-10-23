@@ -328,7 +328,7 @@ def test_root_scripts_are_syntax_valid_and_service_control_is_fixed_scope() -> N
         assert completed.returncode == 0, f"{script.name}: {completed.stderr}"
 
     lifecycle = (OPS / "service-control.sh").read_text(encoding="utf-8")
-    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
+    assert "{start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" in lifecycle
     assert "com.mastermind.executive.control" in lifecycle
     assert "com.mastermind.executive.worker.codex" in lifecycle
     assert "--label" not in lifecycle and "eval " not in lifecycle
@@ -788,6 +788,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "fabric_bindings_path",
         "fabric_bindings_sha256",
         "fabric_attended_probe",
+        # Paid bindings are installed/qualified explicitly, never template admission.
+        "canonical_paid_fabric",
         "coo_foreground_only",
         "coo_principal_dialogue_armed",
         # Native V2 requires explicitly sealed source and remains absent by default.

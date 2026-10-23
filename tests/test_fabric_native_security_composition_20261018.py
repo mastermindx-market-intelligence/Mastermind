@@ -22,7 +22,10 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
-COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PRE_PAID_MODEL_COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PAID_MODEL_PATCH = ROOT / "tests/fixtures/fabric-native-paid-model-20261022.patch"
+PAID_MODEL_PATCH_SHA = "e0d937b9afdcc864592a7ba44a65ed121fa9c983f53de7109b1628e2141314f1"
+COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -30,15 +33,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 85-file closure composes protected physical-root admission and canonical
-# slot diagnostics with retention recovery and explicit acquisition correlation.
-# Historical executor, donor, quota, deadline and root transformations stay pinned.
-EXPECTED_NATIVE_FILES = 85
-# Integrated protected Fabric qualification and task/host overlays with
-# PR #1694 operator instructions, retaining all installed code preimages.
-# Include the reviewed historical-denial outcome correction; executor and donor
-# transformation pins above remain unchanged.
-NATIVE_MANIFEST_SHA = "627b7828a234eee12082d8529b8c9bc0ca4959f85ee91f68c07b23882157b3bd"
+# The reviewed95-file paid model-only closure composes protected #1720
+# outcome classification and #1729 request turn-ceiling attenuation.
+# Executor/donor transformations and installed preimages remain pinned.
+EXPECTED_NATIVE_FILES = 95
+NATIVE_MANIFEST_SHA = "8e6417f2fb42a199bad8f6bd9fe4b67536411286c4b9487ebef2cc265eba8956"
 
 
 def _sha(raw):
@@ -77,6 +76,10 @@ def _composition(directory):
     assert _sha(PHYSICAL_ROOT_PATCH.read_bytes()) == PHYSICAL_ROOT_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(PHYSICAL_ROOT_PATCH))
     donor_contract._git(directory, "apply", str(PHYSICAL_ROOT_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PAID_MODEL_COMPOSED_SHA
+    assert _sha(PAID_MODEL_PATCH.read_bytes()) == PAID_MODEL_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PAID_MODEL_PATCH))
+    donor_contract._git(directory, "apply", str(PAID_MODEL_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed
