@@ -201,7 +201,7 @@ def test_git_identity_gate_excludes_ambient_provider_and_git_settings(tmp_path, 
     observed = []
 
     def fake_run(*_args, **kwargs):
-        observed.append(kwargs)
+        observed.append({"arguments": _args[0], **kwargs})
         return SimpleNamespace(stdout="frozen-head\n")
 
     monkeypatch.setattr(mod.subprocess, "run", fake_run)
@@ -211,6 +211,9 @@ def test_git_identity_gate_excludes_ambient_provider_and_git_settings(tmp_path, 
     assert "GIT_DIR" not in observed[0]["env"]
     assert "OPENAI_API_KEY" not in observed[0]["env"]
     assert observed[0]["env"]["GIT_CONFIG_GLOBAL"] == "/dev/null"
+    assert observed[0]["env"]["GIT_NO_REPLACE_OBJECTS"] == "1"
+    assert "core.fsmonitor=false" in observed[0]["arguments"]
+    assert "core.hooksPath=/dev/null" in observed[0]["arguments"]
 
 
 def test_git_identity_gate_timeout_refuses(tmp_path, monkeypatch):
@@ -222,3 +225,28 @@ def test_git_identity_gate_timeout_refuses(tmp_path, monkeypatch):
     monkeypatch.setattr(mod.subprocess, "run", timeout)
     with pytest.raises(mod.Refused, match="git provenance preflight refused"):
         mod.safe_donor_git(tmp_path, "status", "--porcelain")
+
+
+def test_pnpm_symlink_retarget_and_executable_bit_change_are_detected(tmp_path):
+    import stat
+
+    mod = module()
+    qualifier = mod.load_qualifier()
+    donor = tmp_path / "donor"
+    pnpm = donor / "node_modules/.pnpm"
+    for name in ("pkg-a", "pkg-b"):
+        root = pnpm / name
+        root.mkdir(parents=True)
+        (root / "index.js").write_text("module.exports = 'same bytes';\n")
+    links = pnpm / "node_modules"
+    links.mkdir()
+    link = links / "selected"
+    link.symlink_to("../pkg-a", target_is_directory=True)
+    initial = qualifier.materialized_dependency_digest(donor)
+    link.unlink()
+    link.symlink_to("../pkg-b", target_is_directory=True)
+    retargeted = qualifier.materialized_dependency_digest(donor)
+    assert retargeted != initial  # link text is part of the frozen closure
+    code = pnpm / "pkg-a/index.js"
+    code.chmod(code.stat().st_mode | stat.S_IXUSR)
+    assert qualifier.materialized_dependency_digest(donor) != retargeted

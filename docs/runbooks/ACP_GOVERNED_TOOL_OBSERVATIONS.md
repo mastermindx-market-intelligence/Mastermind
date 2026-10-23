@@ -204,9 +204,13 @@ has an independently source-pinned macOS ARM64 content closure SHA256
 It covers sorted file paths and bytes, executable bits, directories and
 symlink destinations (rejecting escapes outside the donor). The original
 clean donor and the separately built earlier frozen supply were measured
-with the same result. Any changed installed package byte (including esbuild,
-TypeScript, MCP client or SDK) causes rejection **before it is executed**;
+with the same result. Any changed installed package byte **within this
+materialized .pnpm subtree** (including the pinned esbuild, TypeScript,
+MCP client and SDK packages) causes rejection **before it is executed**;
 the snapshot is checked again after copy, and qualification re-verifies it.
+The wider top-level `node_modules/` outside `.pnpm` is *not* attested:
+all current execution sites use explicit paths inside the pinned subtree.
+Adding another package resolution path requires a revised closure and review.
 This binds *this materialized installation* to its source-reviewed fixed
 donor/lock profile. It does not independently attest an upstream npm
 publisher or establish general portability to another package install.
