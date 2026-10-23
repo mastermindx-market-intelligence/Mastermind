@@ -96,3 +96,29 @@ test('actual facade shell transport carries the ceiling to an isolated CLI',asyn
     assert.equal(result.worker_start_proven,false);
   } finally {await rm(dir,{recursive:true,force:true});}
 });
+
+
+test('turn ceiling and fixed fabric_accept verification codes coexist on one facade',async()=>{
+  const request=FABRIC_TOOLS.find(t=>t.name==='fabric_request');
+  const accept=FABRIC_TOOLS.find(t=>t.name==='fabric_accept');
+  assert.equal(request.inputSchema.properties.max_turns.maximum,400);
+  assert.deepEqual(accept.inputSchema.properties.verification_summary.enum,[
+    'deterministic_test_evidence','artifact_digest_comparison',
+    'manual_result_review','independent_review_evidence']);
+  const e=engine([captured('--max-turns'),captured(JSON.stringify(absent)),pending]);
+  const f=facade(e);
+  const created=unwrap(await f.call('fabric_request',args));
+  assert.equal(created.requested_max_turns,25);
+  assert.equal(created.worker_start_proven,false);
+  for(const [by,verification_summary] of [
+    ['reviewer','deterministic_test_evidence'],
+    ['deterministic','independent_review_evidence'],
+    ['reviewer','Freeform reviewer instructions'],
+  ]) {
+    const result=unwrap(await f.call('fabric_accept',{
+      run_id:args.run_id,root_id:args.root_id,by,
+      expected_response_sha256:'a'.repeat(64),verification_summary}));
+    assert.equal(result.error,'INVALID_ARGUMENT');
+  }
+  assert.equal(e.calls.length,3,'invalid acceptance must not dispatch after capped request');
+});

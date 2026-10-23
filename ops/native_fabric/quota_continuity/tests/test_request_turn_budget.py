@@ -101,6 +101,32 @@ class RequestTurnBudget(unittest.TestCase):
                     'mechanical', '--stdin', '--max-turns', '25']), 0)
         self.assertEqual(requested.call_args.kwargs['max_turns'], 25)
 
+    def test_qualified_minimax_ceiling_survives_route_without_leaking_to_next_request(self):
+        from types import ModuleType
+        admitted = ModuleType('fabric_host_qualification')
+        routed = []
+        def qualified(host, **options):
+            routed.append((host, options))
+            return 'POOL=minimax MODEL=MiniMax-M3 HOST=m1 MODE=minimax'
+        admitted.qualification_route = qualified
+        os.environ['POOL_MAX_TURNS'] = '40'
+        with patch.dict(sys.modules, {'fabric_host_qualification': admitted}):
+            self.assertEqual(self.request(pool='minimax',
+                                          qualification_host='m1',
+                                          max_turns=7), 0)
+        self.assertEqual(routed[0][0], 'm1')
+        self.assertEqual(routed[0][1]['pool'], 'minimax')
+        self.assertEqual(self.calls[0][1]['POOL_REQUEST_MAX_TURNS'], '7')
+        self.assertEqual(self.calls[0][1]['POOL_MAX_TURNS'], '40')
+        self.assertEqual(api.request(
+            'fixture-second', 'mechanical', cwd='~', packet=None,
+            stdin_bytes=b'follow-up', root_id='fixture-root',
+            parent_run_id='fixture-parent',
+            task_complexity='C0_MECHANICAL'), 0)
+        self.assertNotIn('POOL_REQUEST_MAX_TURNS', self.calls[1][1])
+        self.assertEqual(self.calls[1][1]['POOL_MAX_TURNS'], '40')
+
+
 
 class ExistingShellProfile(unittest.TestCase):
     def profile(self, *, requested=None, incumbent=None, pool='glm', model='glm-5.3'):
