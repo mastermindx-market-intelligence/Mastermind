@@ -369,6 +369,31 @@ alters a live host/configuration owner. Passing these tests is source
 qualification, not live installation, worker START, result acceptance, or
 permission to replay any held operation.
 
+
+## Composed native-closure qualification
+
+After changing any file in the explicit native closure, rebuild the manifest and
+source inventory, compare the complete closure against the selected generation,
+and update the current `NATIVE_MANIFEST_SHA` binding in
+`tests/test_fabric_native_security_composition_20261018.py` to the reviewed
+manifest. Do not repin its historical executor, donor, quota, deadline or physical
+root transformations merely to clear a test. The current manifest pin is distinct
+from those preserved security preimages and transformations.
+
+Run the composed regression before publishing a PR, not only the isolated
+`ops/native_fabric` tests:
+
+```sh
+python3 -m pytest -q tests/test_fabric_native_security_composition_20261018.py
+```
+
+That test builds the exact closure, selects it through the existing publisher,
+and exercises the remote-support/executor/outcome-binding seam using an inert
+fixture. It does not contact a provider, acquire a host lease, or authorize a
+production selection. The OPT-007 outcome correction changes only
+`ext/provider_outcome.py` within the 85-file closure; its composed-manifest check
+must move with that reviewed change.
+
 ## Explicit per-request turn ceilings
 
 The native `fabric_task.py request --max-turns N` constrains one new commission
