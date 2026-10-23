@@ -4,6 +4,56 @@ here-document pipes. No new scheduler, credential authority or lease logic.
 """
 import sys
 
+_STAGE_PREFIX = "HOST_PULL_STAGE_V1"
+
+
+def probe_diagnostic(output, returncode):
+    """Closed secret-free projection; it cannot authorize observation success."""
+    import re
+    if type(returncode) is not int or not 0 <= returncode <= 255:
+        returncode = None
+    stages = [("PHYSICAL_BEGIN", None), ("PHYSICAL_EXIT", "physical"),
+              ("READINESS_BEGIN", None), ("READINESS_EXIT", "optional_readiness")]
+    result = {"schema": "mastermind.host_pull_probe_diagnostic.v1",
+              "transport": {"state": "RETURNED_ZERO" if returncode == 0 else
+                            "RETURNED_NONZERO" if type(returncode) is int and 0 <= returncode <= 255
+                            else "UNKNOWN", "exit_status": returncode},
+              "framing": "MISSING", "physical": {"state": "NOT_OBSERVED", "exit_status": None},
+              "optional_readiness": {"state": "NOT_OBSERVED", "exit_status": None}}
+    index = 0
+    for line in output.splitlines():
+        if not line.startswith(_STAGE_PREFIX):
+            continue
+        if index >= len(stages):
+            result["framing"] = "INVALID"
+            return result
+        name, target = stages[index]
+        expected = _STAGE_PREFIX + " " + name
+        if target is None:
+            valid = line == expected
+        else:
+            match = re.fullmatch(re.escape(expected) + r" ([0-9]|[1-9][0-9]{1,2})", line)
+            valid = match is not None and int(match[1]) <= 255
+        if not valid:
+            result["framing"] = "INVALID"
+            return result
+        if target is None:
+            key = "physical" if index == 0 else "optional_readiness"
+            result[key]["state"] = "STARTED_UNCONFIRMED"
+        else:
+            code = int(match[1])
+            result[target] = {"state": "RETURNED_ZERO" if code == 0 else "RETURNED_NONZERO",
+                              "exit_status": code}
+        index += 1
+    result["framing"] = "COMPLETE" if index == 4 else "INCOMPLETE" if index else "MISSING"
+    # A zero transport result must agree with the final command's status.
+    # A transport failure can happen after complete remote output; it remains
+    # unavailable regardless of framing and is never converted into success.
+    if index == 4 and returncode == 0 and result["optional_readiness"]["exit_status"] != 0:
+        result["framing"] = "INVALID"
+    return result
+
+
 def read_hosts():
     import json, re, sys
     try:
@@ -55,9 +105,16 @@ def read_hosts():
 
 def write_state():
     import json, os, sys, time, tempfile, stat, math, re
-    state_dir, host, rc, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+    state_dir, host, out = sys.argv[1], sys.argv[2], sys.argv[4]
+    raw_rc = sys.argv[3]
+    rc = int(raw_rc) if re.fullmatch(r"[0-9]|[1-9][0-9]{1,2}", raw_rc) else None
+    if rc is not None and rc > 255:
+        rc = None
     transport_alias = sys.argv[5] if len(sys.argv) > 5 else None
-    doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None}
+    diagnostic = probe_diagnostic(out, rc)
+    framing_valid = diagnostic["framing"] == "COMPLETE"
+    doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None,
+           "probe_diagnostic": diagnostic}
 
     def num(s):
         try:
@@ -67,7 +124,7 @@ def write_state():
 
     kv = {}
     duplicate = set()
-    if rc == 0:
+    if rc == 0 and framing_valid:
         for line in out.splitlines():
             line = line.strip()
             if line.startswith("#") or "=" not in line:
@@ -77,7 +134,7 @@ def write_state():
             if k and all(c.isalnum() or c == "_" for c in k):
                 if k in kv: duplicate.add(k)
                 kv[k] = v.strip()
-    if rc == 0 and kv.get("load1") not in (None, "") and kv.get("ncpu") not in (None, ""):
+    if rc == 0 and framing_valid and kv.get("load1") not in (None, "") and kv.get("ncpu") not in (None, ""):
         doc["reachable"] = True
         ts = num(kv.get("ts"))
         if ts and ts > 0:
@@ -334,6 +391,12 @@ def write_state():
                 summary += " sampled_top_cpu=" + ",".join(
                     f"{p['comm']}:{p['cpu_pct']:g}%/pid{p['pid']}"
                     for p in top[:3])
+    elif rc is None:
+        doc["error"] = "probe_status_invalid"
+        summary = "reachable=false error=probe_status_invalid"
+    elif rc == 0 and not framing_valid:
+        doc["error"] = "probe_diagnostic_invalid"
+        summary = "reachable=false error=probe_diagnostic_invalid"
     elif rc == 255:
         doc["error"] = "ssh_unreachable"
         summary = "reachable=false error=ssh_unreachable"
@@ -372,7 +435,10 @@ def write_state():
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
-    print(summary)
+    # Retain this invocation's closed diagnostic in the existing collector
+    # return/log as well as state: another normal producer may atomically
+    # replace the shared host snapshot before its caller reads it.
+    print(summary + " probe_diagnostic=" + json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
