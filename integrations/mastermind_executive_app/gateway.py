@@ -1253,29 +1253,9 @@ class CeoIngressReadGateway:
 
     @staticmethod
     def _valid_requeued_lost_error(value: object) -> bool:
-        """Admit only the Runtime's bounded, typed LOST reconciliation errors.
-
-        They are not JobPayload documents and do not relax sealed results.
-        """
-        if type(value) is not dict:
-            return False
-        reason = value.get("reason")
-        if not (
-            type(reason) is str
-            and 0 < len(reason) <= 1024
-            and reason == reason.strip()
-            and all(character.isprintable() for character in reason)
-        ):
-            return False
-        if set(value) == {"reason", "expired_at_ms"}:
-            return (
-                reason in {"lease_expired", "ohf_lease_expired_fenced"}
-                and type(value["expired_at_ms"]) is int
-                and 0 <= value["expired_at_ms"] < 2**63
-            )
-        if set(value) == {"reason", "verified_process_absent"}:
-            return value["verified_process_absent"] is True
-        return False
+        """The Runtime owns new typed causes; bounded legacy rows stay readable."""
+        from control_plane.executive_readback_contract import valid_requeued_lost_error
+        return valid_requeued_lost_error(value)
 
     @staticmethod
     def _valid_sha256(value: object) -> bool:
@@ -1283,12 +1263,24 @@ class CeoIngressReadGateway:
         return type(value) is str and re.fullmatch(r"[0-9a-f]{64}", value) is not None
 
     @staticmethod
-    def _valid_runtime_utc_timestamp(value: object, *, optional: bool = False) -> bool:
-        # Runtime serializes absent Attempt timestamps as "", and present
-        # ones as UTC ISO-8601. Never certify arbitrary text as lease evidence.
-        return (
-            type(value) is str
-            and ((optional and value == "") or CeoIngressReadGateway._valid_generated_at(value))
+    def _valid_runtime_utc_timestamp(
+        value: object, *, optional: bool = False, lease_schedule: bool = False,
+    ) -> bool:
+        from datetime import datetime, timezone
+        from control_plane.executive_readback_contract import (
+            event_timestamp_within_skew, parsed_utc_timestamp_ms,
+        )
+
+        # Empty means a Runtime nullable Attempt event, never a clock origin.
+        if optional and value == "":
+            return True
+        observed_ms = parsed_utc_timestamp_ms(value)
+        if observed_ms is None:
+            return False
+        return event_timestamp_within_skew(
+            observed_ms,
+            now_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+            lease_schedule=lease_schedule,
         )
 
     @staticmethod
@@ -1732,7 +1724,8 @@ class CeoIngressReadGateway:
             and type(attempt.get("lease_owner")) is str
             and bool(attempt["lease_owner"])
             and CeoIngressReadGateway._valid_runtime_utc_timestamp(
-                attempt.get("lease_expires_at"), optional=True
+                attempt.get("lease_expires_at"), optional=True,
+                lease_schedule=True,
             )
             and CeoIngressReadGateway._valid_runtime_utc_timestamp(
                 attempt.get("heartbeat_at"), optional=True

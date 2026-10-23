@@ -111,6 +111,7 @@ def test_real_runtime_lost_requeue_roundtrip(tmp_path):
     assert document["data"]["latest_attempt"]["error"] == {
         "reason": "process identity absent during supervisor restart",
         "verified_process_absent": True,
+        "reason_code": "supervisor_restart_absence",
     }
     assert _accepted(document)
 
