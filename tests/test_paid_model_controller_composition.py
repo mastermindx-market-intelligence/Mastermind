@@ -39,8 +39,19 @@ print('staged_model_only_selection_pass')
     assert checked.returncode == 0, checked.stderr
     assert checked.stdout == 'staged_model_only_selection_pass\n'
     inventory=json.loads((tmp_path/'native-source-inventory.json').read_text())
-    for name in ['remote_sub.sh','remote_sub_exec.py','support_bundle.py','paid_glm_model_client.py']:
-        assert inventory['files']['ext/'+name]['source']=='candidate/'+name
+    expected_sources = {
+        'remote_sub.sh': '../grok47/overlay/remote_sub.sh',
+        'remote_sub_exec.py': '../grok47/overlay/remote_sub_exec.py',
+        'support_bundle.py': 'candidate/support_bundle.py',
+        'paid_glm_model_client.py': 'candidate/paid_glm_model_client.py',
+    }
+    for name, expected in expected_sources.items():
+        assert inventory['files']['ext/'+name]['source'] == expected
+    # The selected overlay must retain protected paid-mode scope refusal
+    # as well as its separately reviewed Grok 4.7 safety controls.
+    selected_transport = (stage / 'remote_sub.sh').read_text()
+    assert 'CANONICAL_PAID_SCOPE_REFUSED before_lease=1' in selected_transport
+    assert 'CANONICAL_PAID_STATE_REFUSED before_lease=1' in selected_transport
 
 
 def test_private_scope_guard_refuses_before_reservation_or_acquire():

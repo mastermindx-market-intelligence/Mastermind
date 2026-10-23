@@ -52,6 +52,11 @@ def stage(tmp_path, bundle, source):
                     repo / "ops/native_fabric/quota_continuity",
                     ignore=shutil.ignore_patterns("__pycache__", "*.pyc",
                                                   "native-code-stage", ".DS_Store"))
+    # Exercise the full immutable publication source, including all nine
+    # approved Grok overlay files used by the native stage builder.
+    shutil.copytree(ROOT / "ops/native_fabric/grok47/overlay",
+                    repo / "ops/native_fabric/grok47/overlay",
+                    ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
     provenance = json.loads((ROOT / "ops/native_fabric/quota_continuity/candidate/"
                               "paid_pyyaml_provenance.json").read_bytes())
     lock = repo / provenance["lock_path"]

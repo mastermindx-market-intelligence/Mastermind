@@ -26,6 +26,7 @@ PRE_PAID_MODEL_COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7
 PAID_MODEL_PATCH = ROOT / "tests/fixtures/fabric-native-paid-model-20261022.patch"
 PAID_MODEL_PATCH_SHA = "e0d937b9afdcc864592a7ba44a65ed121fa9c983f53de7109b1628e2141314f1"
 COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7"
+GROK_PAID_RUNTIME_EXECUTOR_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -37,7 +38,7 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # and request UTC narrowing. This candidate pin is a changed-risk review input,
 # not reuse of an earlier review. Executor/donor/preimage pins stay exact.
 EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "12769e22c14893cf781cc96c393c5cd4a7678389dd5bfcd5734c54923ef4335a"
+NATIVE_MANIFEST_SHA = "3cf06cf3ff553674579a056223a9f00e5ab4867046261a96f2cc5b0b7706a0bb"
 
 
 def _sha(raw):
@@ -134,7 +135,7 @@ def native_stage(tmp_path_factory):
     assert len(manifest) == EXPECTED_NATIVE_FILES
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
-    assert manifest["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert manifest["ext/remote_sub_exec.py"] == GROK_PAID_RUNTIME_EXECUTOR_SHA
     return output
 
 
@@ -160,7 +161,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == COMPOSED_SHA
+    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == GROK_PAID_RUNTIME_EXECUTOR_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
@@ -201,7 +202,7 @@ def _seam(stage, base):
     for name in names:
         assert _sha((published / name).read_bytes()) == manifest[name]
         assert (published / name).stat().st_mode & 0o777 == 0o555
-    assert _sha((published / "remote_sub_exec.py").read_bytes()) == COMPOSED_SHA
+    assert _sha((published / "remote_sub_exec.py").read_bytes()) == GROK_PAID_RUNTIME_EXECUTOR_SHA
     assert (published / "lanes").resolve() == remote_ext / "lanes"
     assert (published / "active").resolve() == remote_ext / "active"
     assert published.stat().st_mode & 0o777 == 0o555
@@ -322,7 +323,7 @@ print("benign fixture workspace ready")
         assert (fixture.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
         assert os.environ.get("HOME") == initial_home
     return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": len(files),
-            "support_files": 37, "executor_sha256": COMPOSED_SHA,
+            "support_files": 37, "executor_sha256": GROK_PAID_RUNTIME_EXECUTOR_SHA,
             "fixture_native_digest": generation.name, "fixture_support_digest": support_digest,
             "mint_receipt_sha256": _sha(receipt.read_bytes()), "provider_started": False,
             "production_macro_helper_tested": False, "physical_lease_acquired": False}
@@ -335,7 +336,7 @@ def test_selected_native_support_executor_preserves_mint_and_outcome_binding(nat
     assert result.returncode == 0, result.stderr
     proof = json.loads(result.stdout)
     assert proof["status"] == "OFFLINE_COMPOSITION_SEAM_PASS"
-    assert proof["executor_sha256"] == COMPOSED_SHA
+    assert proof["executor_sha256"] == GROK_PAID_RUNTIME_EXECUTOR_SHA
     assert proof["native_files"] == EXPECTED_NATIVE_FILES and proof["support_files"] == 37
     assert proof["provider_started"] is False
     assert proof["physical_lease_acquired"] is False
