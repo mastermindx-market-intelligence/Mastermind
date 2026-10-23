@@ -290,10 +290,22 @@ class ReadUsageEligibility(unittest.TestCase):
         self.assertEqual(info["state"], "UNKNOWN")
 
 
+def _pin_synthetic_eligibility_clock(testcase):
+    """Keep source eligibility reads on the same clock as the fixed rows.
+
+    A fixture from 2026-10-22 should not silently expire as CI's wall clock
+    moves forward. The production freshness rule remains unmodified.
+    """
+    patcher = mock.patch.object(bailian_keys.time, "time", return_value=NOW)
+    patcher.start()
+    testcase.addCleanup(patcher.stop)
+
+
 class RouterUsableNames(unittest.TestCase):
     """Fresh park reaches pool routing; unknown usage keeps ordinary eligibility."""
 
     def setUp(self):
+        _pin_synthetic_eligibility_clock(self)
         self.tmp = tempfile.mkdtemp(prefix="qwen-elig-router-")
         self.usage_path = os.path.join(self.tmp, "bailian_usage.json")
 
@@ -397,6 +409,7 @@ class RouterUsableNames(unittest.TestCase):
 
 class PickParkedKeys(unittest.TestCase):
     def setUp(self):
+        _pin_synthetic_eligibility_clock(self)
         self.tmp = tempfile.mkdtemp(prefix="qwen-elig-pick-")
         self.usage_path = os.path.join(self.tmp, "bailian_usage.json")
 
@@ -590,6 +603,9 @@ class Http429SoftUnchanged(unittest.TestCase):
 
 
 class FakeUsageCannotMutatePolicyOrStores(unittest.TestCase):
+    def setUp(self):
+        _pin_synthetic_eligibility_clock(self)
+
     def test_hostile_usage_document_is_inert(self):
         tmp = tempfile.mkdtemp(prefix="qwen-elig-hostile-")
         usage = os.path.join(tmp, "bailian_usage.json")
