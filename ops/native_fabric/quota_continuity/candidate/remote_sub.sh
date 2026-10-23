@@ -18,7 +18,7 @@ usage() {
   cat >&2 <<'USAGE'
 usage: remote_sub.sh <host|auto> <mode> <packet_file> <remote_cwd> [model]
                      [--run-id <stable_id>] [--out <local_out>] [--dry-run]
-                     [--max-age <secs>] [--refresh]
+                     [--max-age <secs>] [--refresh] [--not-before <UTC-Z>]
                      [--new-macro-worktree <existing-commit-sha40>]
                      [--cpu-scope-quota <100|200|400>] (new qualified Linux lane only)
                      [--expect-output-token <literal-token>]
@@ -41,6 +41,8 @@ DRY_RUN=0
 MAX_AGE=600
 MAX_AGE_EXPLICIT=0
 REFRESH=0
+CALLER_NOT_BEFORE_ARG=""
+CALLER_NOT_BEFORE_SET=0
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --dry-run) DRY_RUN=1 ;;
@@ -48,6 +50,7 @@ while [ "$#" -gt 0 ]; do
     --out) [ "$#" -ge 2 ] || usage; LOCAL_OUT="$2"; shift ;;
     --max-age) [ "$#" -ge 2 ] || usage; MAX_AGE="$2"; MAX_AGE_EXPLICIT=1; shift ;;
     --refresh) REFRESH=1 ;;
+    --not-before) [ "$#" -ge 2 ] || usage; CALLER_NOT_BEFORE_ARG="$2"; CALLER_NOT_BEFORE_SET=1; shift ;;
     --new-macro-worktree) [ "$#" -ge 2 ] || usage; NEW_MACRO_COMMIT="$2"; shift ;;
     --cpu-scope-quota) [ "$#" -ge 2 ] || usage; CPU_SCOPE_QUOTA="$2"; shift ;;
     --expect-output-token)
@@ -127,6 +130,20 @@ SSH_CMD=${REMOTE_SUB_SSH_CMD:-ssh}
 SCP_CMD=${REMOTE_SUB_SCP_CMD:-scp}
 RSYNC_CMD=${REMOTE_SUB_RSYNC_CMD:-rsync}
 REMOTE_SUB_PYTHON=${REMOTE_SUB_PYTHON:-python3}
+# Narrowing UTC DATA only. A direct caller cannot silently weaken a separately
+# supplied bound, and no host/state/lease/credential work precedes this gate.
+if [ "$CALLER_NOT_BEFORE_SET" -eq 1 ]; then
+  if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ] && [ "$POOL_CALLER_NOT_BEFORE" != "$CALLER_NOT_BEFORE_ARG" ]; then
+    echo 'caller_not_before_conflict before_lease=1' >&2; exit 2
+  fi
+  export POOL_CALLER_NOT_BEFORE="$CALLER_NOT_BEFORE_ARG"
+fi
+caller_not_before_check() {
+  if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
+    "$REMOTE_SUB_PYTHON" "$HERE/commission_deadline.py" not-before || return $?
+  fi
+}
+caller_not_before_check || exit $?
 REMOTE_SUB_BROKER_CMD=${REMOTE_SUB_BROKER_CMD:-}
 REMOTE_SUB_LEDGER_CMD=${REMOTE_SUB_LEDGER_CMD:-}
 STATE_HERE="$HERE"
@@ -1060,7 +1077,12 @@ esac
 
 OPERATOR_CHILD_ARGS=()
 BROKER_DEADLINE_ARGS=()
+BROKER_NOT_BEFORE_ARGS=()
 PRELEASE_HANDOFF_ARGS=()
+if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
+  caller_not_before_check || { RC=$?; exit "$RC"; }
+  BROKER_NOT_BEFORE_ARGS=(--not-before "$POOL_CALLER_NOT_BEFORE")
+fi
 LEASE_WAIT_SECS="${REMOTE_SUB_LEASE_WAIT:-3600}"
 if [ "$COMMISSION_ACTIVE" -eq 1 ]; then
   LEASE_WAIT_SECS=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" deadline-seconds "$LEASE_WAIT_SECS") || {
@@ -1102,19 +1124,19 @@ if [ "$CANONICAL_PAID_ACTIVE" -eq 1 ] &&
 fi
 if [ -n "$ACQUIRE_POOL" ]; then
   if [ "$DRY_RUN" -eq 1 ]; then
-    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"}
+    show_args "<broker>" acquire --orchestrator-id "remote-sub-$ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${BROKER_NOT_BEFORE_ARGS[@]+"${BROKER_NOT_BEFORE_ARGS[@]}"}
     log "LEASE_WAIT pool=$ACQUIRE_POOL wait=$LEASE_WAIT_SECS"
   else
     log "LEASE_WAIT pool=$ACQUIRE_POOL wait=$LEASE_WAIT_SECS"
     ORCH_ID="${POOL_ORCHESTRATOR_ID:-${CLAUDE_SESSION_ID:-remote-sub-$ID}}"
     if [ "$NATIVE_MODE" -eq 1 ]; then
-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
+      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${BROKER_NOT_BEFORE_ARGS[@]+"${BROKER_NOT_BEFORE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
         RC=$?
         log "LEASE_REFUSED rc=$RC"
         exit "$RC"
       }
     else
-      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
+      broker acquire ${OPERATOR_CHILD_ARGS[@]+"${OPERATOR_CHILD_ARGS[@]}"} --host "$HOST_ARG" --orchestrator-id "$ORCH_ID" --pool "$ACQUIRE_POOL" --task-class "remote-$MODE" --model "$MODEL" --pid "$$" --ttl "$PROVIDER_LEASE_TTL" --wait "$LEASE_WAIT_SECS" ${BROKER_DEADLINE_ARGS[@]+"${BROKER_DEADLINE_ARGS[@]}"} ${BROKER_NOT_BEFORE_ARGS[@]+"${BROKER_NOT_BEFORE_ARGS[@]}"} ${PRELEASE_HANDOFF_ARGS[@]+"${PRELEASE_HANDOFF_ARGS[@]}"} > "$LEASE_OUTPUT_FILE" || {
         RC=$?
         log "LEASE_REFUSED rc=$RC"
         exit "$RC"
@@ -1709,6 +1731,7 @@ ADMISSION_WAIT_STARTED_SECONDS=""
 launch_attempt=0
 
 while true; do
+  caller_not_before_check || { RC=$?; exit "$RC"; }
   if ! commission_refresh_runtime launch; then
     # A terminal admission refusal remains settled when its retry budget ends.
     # Continue its original collection path instead of inventing a new effect.

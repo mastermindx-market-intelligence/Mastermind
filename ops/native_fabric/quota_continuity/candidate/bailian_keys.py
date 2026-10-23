@@ -12,6 +12,7 @@ Usage:
   bailian_keys.py exec-codex <name> -- <codex exec arguments...>
   bailian_keys.py release <name> <pid>
   bailian_keys.py cooldown <name> <seconds> <reason>
+  bailian_keys.py cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]
   bailian_keys.py status
   bailian_keys.py total_cap
   bailian_keys.py next_usable_in
@@ -370,18 +371,168 @@ def active_count(name: str) -> int:
     return prune_stale(name)
 
 
+# --- per-account usage eligibility (source job qwen-eligibility-source-01a15e3f-v1) ---
+
+_BAILIAN_USAGE_FILE = "bailian_usage.json"
+
+
+def _usage_unknown() -> dict:
+    """Explicit UNKNOWN closed DATA: no fabricated usage, no fabricated exhaustion."""
+    return {"state": "UNKNOWN", "parked": None, "observed_at": None, "reset_at": None}
+
+
+def _usage_row_for(name, usage):
+    """Select the applicable row for one account name from a usage payload.
+
+    Accepts either the existing document ({"keys": {name: row, ...}}) or the
+    account row itself; anything else maps to no applicable row.
+    """
+    if not isinstance(usage, dict):
+        return None
+    keys_map = usage.get("keys")
+    if isinstance(keys_map, dict):
+        row = keys_map.get(name)
+        return row if isinstance(row, dict) else None
+    return usage
+
+
+def _usage_parse_ts(value):
+    """Timezone-aware ISO-8601 string -> epoch seconds; naive/malformed -> None."""
+    import datetime as _dt
+
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        ts = _dt.datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
+        return None
+    try:
+        return ts.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def usage_eligibility(name, usage, now=None) -> dict:
+    """Pure per-account usage eligibility for one Bailian account.
+
+    Returns closed DATA with exactly the keys {"state", "parked", "observed_at",
+    "reset_at"}: state is "CURRENT" or "UNKNOWN", parked is a bool or None, and
+    observed_at/reset_at are epoch seconds or None. Only a fresh, applicable row
+    (literal parked bool, finite pct_7d in 0..100, timezone-aware observed_at and
+    resets_at with 0 <= now - observed_at <= 86400 and 0 < resets_at - now <= 8
+    days) yields CURRENT. Missing, malformed, stale, future or expired facts stay
+    explicit UNKNOWN. Never raises; unknown usage never fabricates exhaustion and
+    never parks an unrelated account.
+    """
+    import math as _math
+
+    if now is None:
+        import time as _time
+
+        now = _time.time()
+    if isinstance(now, bool):
+        return _usage_unknown()
+    try:
+        now = float(now)
+    except Exception:
+        return _usage_unknown()
+    if not _math.isfinite(now):
+        return _usage_unknown()
+    row = _usage_row_for(name, usage)
+    if row is None:
+        return _usage_unknown()
+    parked = row.get("parked")
+    if not isinstance(parked, bool):
+        return _usage_unknown()
+    pct = row.get("pct_7d")
+    if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+        return _usage_unknown()
+    try:
+        pct = float(pct)
+    except (OverflowError, ValueError):
+        return _usage_unknown()
+    if not _math.isfinite(pct) or pct < 0.0 or pct > 100.0:
+        return _usage_unknown()
+    observed = _usage_parse_ts(row.get("observed_at"))
+    reset = _usage_parse_ts(row.get("resets_at"))
+    if observed is None or reset is None:
+        return _usage_unknown()
+    age = now - observed
+    if age < 0.0 or age > 86400.0:
+        return _usage_unknown()
+    remaining = reset - now
+    if remaining <= 0.0 or remaining > 8.0 * 86400.0:
+        return _usage_unknown()
+    return {
+        "state": "CURRENT",
+        "parked": parked,
+        "observed_at": observed,
+        "reset_at": reset,
+    }
+
+
+def read_usage_eligibility(name, *, now=None, path=None) -> dict:
+    """Read one account's usage eligibility from the existing plain usage JSON.
+
+    Defaults to the existing HERE/bailian_usage.json document (same store the
+    pool already reads; no new store, credentials never input). The document is
+    bounded plain nonsecret JSON keyed by account name. Any read or parse
+    failure yields explicit UNKNOWN; this function never raises.
+    """
+    if path is None:
+        import os as _os
+
+        path = _os.path.join(HERE, _BAILIAN_USAGE_FILE)
+    try:
+        if now is None:
+            import time as _time
+
+            now = _time.time()
+        import json as _json
+
+        with open(path, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return _usage_unknown()
+        doc = _json.loads(raw)
+        # File-backed eligibility must bind the selected account in the
+        # existing document. A bare row is only pure validation DATA.
+        if not isinstance(doc, dict) or not isinstance(doc.get("keys"), dict):
+            return _usage_unknown()
+    except Exception:
+        return _usage_unknown()
+    return usage_eligibility(name, doc, now)
+# --- end per-account usage eligibility ---
+
+
 def usable_names() -> List[str]:
     """Configured keys. Keys in non-429 cooldown are excluded; 429 keys are included
-    (they can still handle reduced traffic at their soft cap)."""
+    (they can still handle reduced traffic at their soft cap). Keys whose fresh,
+    applicable usage row is literally parked=True are also excluded; stale,
+    future, expired, malformed or missing usage facts stay UNKNOWN and leave the
+    key eligible."""
+    import time as _time
+
+    now = _time.time()
     names = []
     for name in key_names():
         cd = cooldown_info(name)
-        if cd is None:
-            names.append(name)
-        else:
+        if cd is not None:
             reason = cd[1] if len(cd) > 1 else ""
-            if reason == "http_429":
-                names.append(name)
+            if reason != "http_429":
+                continue
+        try:
+            info = read_usage_eligibility(name, now=now)
+        except Exception:
+            info = _usage_unknown()
+        if info.get("state") == "CURRENT" and info.get("parked") is True:
+            continue
+        names.append(name)
     return names
 
 
@@ -534,18 +685,76 @@ def release(name: str, pid: int) -> None:
         pass
 
 
+_QWEN_FEEDBACK_SCHEMA = "mastermind.qwen_adaptive429_feedback.v1"
+_QWEN_FEEDBACK_POLICY_SOURCE = "bailian_keys.adaptive_http_429"
+_QWEN_FEEDBACK_SOURCES = ("qwen_wrapper_inference", "codex_error_enum")
+
+
+def _write_private_json(path: str, value: Dict[str, Any]) -> bool:
+    """Atomically create one bounded private receipt file; never overwrite."""
+    tmp = path + ".tmp"
+    try:
+        if not os.path.isabs(path) or os.path.lexists(path):
+            return False
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as fh:
+                json.dump(value, fh, sort_keys=True)
+                fh.write("\n")
+                fh.flush()
+                os.fsync(fh.fileno())
+            # link is atomic and refuses an incumbent destination; replace
+            # would overwrite one created after the initial existence check.
+            os.link(tmp, path, follow_symlinks=False)
+            os.unlink(tmp)
+        except BaseException:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            raise
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
 def cooldown(name: str, seconds: int, reason: str) -> int:
     """Write ext/slots/bailian/<name>.cooldown. Returns expiry epoch.
 
     For reason='http_429', uses adaptive cooldown and records the 429 event.
     """
+    expiry, _receipt = cooldown_feedback(name, seconds, reason)
+    return expiry
+
+
+def cooldown_feedback(
+    name: str,
+    seconds: int,
+    reason: str,
+    classification_source: str = "qwen_wrapper_inference",
+    receipt_path: Optional[str] = None,
+) -> Tuple[int, Optional[Dict[str, Any]]]:
+    """Record one cooldown and, for reason='http_429', its actual policy receipt.
+
+    The receipt is captured under the SAME lock and from the SAME adaptive 429
+    computation that persists the cooldown file: the observation epoch, the
+    actual adaptive duration, the expiry, the effective soft cap the pool will
+    then see, and the policy flag. No guessed expiry is recomputed and no other
+    event's after-lock result is read. The destination stays a private caller
+    file; a failed write only skips that file, never the protective cooldown,
+    and the returned receipt describes this event whether or not a destination
+    was supplied. `classification_source` is supplied by the caller and states
+    truthfully who classified the 429; this helper never upgrades a wrapper
+    inference into typed or HTTP evidence.
+    """
     if name not in key_names():
         _die(f"unknown key name {name!r}", 2)
+    if classification_source not in _QWEN_FEEDBACK_SOURCES:
+        raise ValueError("classification_source_unqualified")
     reason = " ".join(str(reason).split()) or "unspecified"
-    now_epoch = int(time.time())
-
     lock = _with_lock()
     try:
+        now_epoch = int(time.time())
         if reason == "http_429":
             # Compute adaptive duration BEFORE writing the new epoch so the count
             # reflects only prior events (not this one yet).
@@ -575,7 +784,25 @@ def cooldown(name: str, seconds: int, reason: str) -> int:
         with open(tmp, "w", encoding="utf-8") as fh:
             fh.write(f"{expiry} {reason}\n")
         os.replace(tmp, path)
-        return expiry
+        receipt = None
+        if reason == "http_429":
+            # Same event, same lock: the effective cap is read from the exact
+            # state this call just persisted, with the pool's own helper.
+            receipt = {
+                "schema": _QWEN_FEEDBACK_SCHEMA,
+                "account": name,
+                "classification_source": classification_source,
+                "classification": "429",
+                "policy_source": _QWEN_FEEDBACK_POLICY_SOURCE,
+                "observed_at": now_epoch,
+                "until_ts": expiry,
+                "duration_seconds": seconds,
+                "soft_cap": _effective_cap_for_key(name),
+                "soft_cap_enabled": bool(load_policy().get("soft_cap_on_429", False)),
+            }
+            if receipt_path is not None:
+                _write_private_json(receipt_path, receipt)
+        return expiry, receipt
     finally:
         fcntl.flock(lock, fcntl.LOCK_UN)
         lock.close()
@@ -853,6 +1080,41 @@ def cmd_cooldown(argv: List[str]) -> int:
     return 0
 
 
+def cmd_cooldown_receipt(argv: List[str]) -> int:
+    """Cooldown the account AND have THIS helper write its actual adaptive-429
+    policy receipt into a private caller file, under the helper's own lock."""
+    if len(argv) not in (4, 5):
+        _die("usage: cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]", 2)
+    name, seconds, reason, receipt_path = argv[0], argv[1], argv[2], argv[3]
+    classification_source = argv[4] if len(argv) == 5 else "qwen_wrapper_inference"
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", name):
+        _die("BAILIAN_RECEIPT_ACCOUNT_INVALID", 2)
+    if not os.path.isabs(receipt_path) or os.path.lexists(receipt_path):
+        _die("BAILIAN_RECEIPT_DESTINATION_UNQUALIFIED", 2)
+    # The receipt binds the exact outer lease. Without the original binding
+    # there is no outcome: refuse before any state change, diagnostic only.
+    if os.environ.get("LANE_LEASED") == "1":
+        pool = os.environ.get("POOL_ACCOUNT") or ""
+        if not re.fullmatch(r"[A-Za-z0-9._-]+", pool) or pool != name:
+            _die("BAILIAN_RECEIPT_OUTER_ACCOUNT_MISMATCH", 78)
+    try:
+        seconds_i = int(seconds)
+    except ValueError:
+        _die("BAILIAN_RECEIPT_SECONDS_INVALID", 2)
+    reason = " ".join(reason.split()) or "unspecified"
+    try:
+        expiry, receipt = cooldown_feedback(
+            name, seconds_i, reason, classification_source, receipt_path)
+    except ValueError:
+        _die("BAILIAN_RECEIPT_SOURCE_UNQUALIFIED", 2)
+    print(f"cooldown name={name} seconds={seconds_i} expiry={expiry} reason={reason}")
+    if receipt is not None and os.path.lexists(receipt_path):
+        print("qwen_429_receipt written", file=sys.stderr)
+    else:
+        print("qwen_429_receipt withheld", file=sys.stderr)
+    return 0
+
+
 def cmd_status(argv: List[str]) -> int:
     for line in status_lines():
         print(line)
@@ -896,6 +1158,7 @@ COMMANDS = {
     "exec-codex": cmd_exec_codex,
     "release": cmd_release,
     "cooldown": cmd_cooldown,
+    "cooldown-receipt": cmd_cooldown_receipt,
     "status": cmd_status,
     "total_cap": cmd_total_cap,
     "next_usable_in": cmd_next_usable_in,

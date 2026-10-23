@@ -686,6 +686,7 @@ def request(
     request_remaining_seconds: int | None = None,
     request_capacity_preflight: bool = False,
     request_deadline_ns: int | None = None,
+    not_before: str | None = None,
 ) -> int:
     rid = validate_run_id(run_id)
     if bool(packet) == bool(stdin_bytes is not None):
@@ -693,6 +694,12 @@ def request(
     if max_turns is not None:
         max_turns = validate_request_max_turns(max_turns)
     env = os.environ.copy()
+    # An inherited transport label cannot silently constrain or authorize a new request.
+    env.pop("POOL_CALLER_NOT_BEFORE", None)
+    if not_before is not None:
+        from commission_deadline import validate_not_before
+        not_before = validate_not_before(not_before)
+        env["POOL_CALLER_NOT_BEFORE"] = not_before
     # A parent request ceiling must not leak into unrelated child commissions.
     env.pop("POOL_REQUEST_MAX_TURNS", None)
     if max_turns is not None:
@@ -716,6 +723,9 @@ def request(
             raise FabricTaskError("REQUEST_DEADLINE_INVALID")
         env[DEADLINE_ENV] = str(request_deadline_ns)
     def check_deadline():
+        if not_before is not None:
+            from commission_deadline import require_not_before
+            require_not_before(not_before)
         if request_deadline_ns is not None:
             remaining = int(require_remaining(request_deadline_ns, minimum_seconds=1))
             if request_remaining_seconds is not None:
@@ -748,6 +758,7 @@ def request(
         "packet_sha256": hashlib.sha256(source).hexdigest(),
         "packet_bytes": len(source), "created_at": time.time(),
         "automatic_background_execution": False,
+        **({"not_before": not_before} if not_before is not None else {}),
         **({"max_turns": max_turns} if max_turns is not None else {}),
     })
     packet, stdin_bytes = retained_packet, None
@@ -889,6 +900,8 @@ def request(
                 "--run-id",
                 rid,
             ]
+            if not_before is not None:
+                argv.extend(["--not-before", not_before])
             if new_macro_worktree is not None:
                 argv.extend(["--new-macro-worktree", new_macro_worktree])
             if cpu_scope_percent is not None:
@@ -901,6 +914,7 @@ def request(
                 "packet_sha256": hashlib.sha256(source).hexdigest(),
                 "state": "LAUNCH_ATTEMPT_RESERVED", "created_at": time.time(),
                 "request_sha256": request_sha,
+                **({"not_before": not_before} if not_before is not None else {}),
             }
             if request_capacity_preflight is True:
                 import quota_circuit
@@ -949,6 +963,7 @@ def request(
                     "request_sha256": provider_outcome.digest(
                         provider_outcome.regular_bytes(request_file, 32768)),
                     "reason": "prelaunch_" + type(exc).__name__,
+                    **({"eligible_at": exc.eligible_at} if hasattr(exc, "eligible_at") else {}),
                     "launch_attempted": False, "created_at": time.time(),
                 })
             except (OSError, ValueError):
@@ -1225,6 +1240,7 @@ def main(argv: list[str] | None = None) -> int:
     p_request.add_argument("--task-complexity")
     p_request.add_argument("--escalation-reason")
     p_request.add_argument("--model", dest="requested_model")
+    p_request.add_argument("--not-before", help="Strict UTC Z lower bound for this new request; never queues or authorizes retry")
     p_request.add_argument("--max-turns", type=int,
                            help="Per-request Claude turn ceiling (1..400); only tightens the existing admitted wrapper limit")
     p_request.add_argument("--quota-fallback", action="store_true",
@@ -1491,6 +1507,7 @@ def main(argv: list[str] | None = None) -> int:
                 qualification_host=args.qualification_host,
                 new_macro_worktree=args.new_macro_worktree,
                 cpu_scope_percent=args.cpu_scope_percent,
+                **({"not_before": args.not_before} if args.not_before is not None else {}),
                 **({"max_turns": args.max_turns} if args.max_turns is not None else {}),
             )
         if args.cmd == "status":
