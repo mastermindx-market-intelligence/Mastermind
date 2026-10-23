@@ -19,9 +19,10 @@ proof/installation operations remain held and are not used as this patch's tests
 
 ## Candidate behavior
 
-* The current attempt emits bounded typed provider diagnostics from CLI-owned
-  fields. Assistant prose, stderr text, tool results and private reasoning are
-  not quota classification inputs.
+* Typed provider diagnostics come from CLI-owned fields. Assistant prose,
+  stderr, tool results and private reasoning never establish provider HTTP
+  status or measured usage. Qwen's existing local classifier is separately
+  labeled policy inference, as described below.
 * The existing broker stores account/shared-allowance cooldowns in its own SQLite
   database. Both picker exclusion and locked reservation consult those rows.
   Expiry allows one lease across the shared allowance to probe; its qualified
@@ -49,6 +50,38 @@ proof/installation operations remain held and are not used as this patch's tests
   reviews and accepts the actual successful successor.
 * A crash or missing final controller receipt is unconfirmed execution. Reading
   it never starts another worker. There is no new background scheduler or queue.
+
+## Qwen admission feedback
+
+The prospective Qwen path keeps two different kinds of evidence explicit. A
+structured Codex error enum is a CLI classification. The existing Qwen wrapper's
+scanner can also infer a limit and apply Bailian's local adaptive cooldown. That
+inference does not establish a provider HTTP status, measured usage, a provider
+reset, or permission to retry. Its terminal capacity state remains `unknown`;
+its separately labeled local-policy receipt carries only the actual locked
+policy observation, computed expiry and effective soft cap.
+
+A prospective receipt joins the original owned process result and exact lease,
+root, account, host and model through the existing controller outcome path.
+Duplicate feedback preserves the original expiry; conflicting feedback refuses.
+Bailian's adaptive 429 feedback uses an account-specific soft row in the existing
+quota table. It preserves the current minimum-three policy and does not replace
+an existing hard allowance hold or apply one account's local cap to another.
+Other providers retain their existing hard cooldown and half-open behavior.
+
+Usage-based exclusion requires a fresh, applicable observation for that exact
+account. Stale, future, malformed or expired observations remain `UNKNOWN` and
+cannot establish exhaustion. A caller's explicit not-before bound is a separate
+constraint on that request; it is neither a permanent account ban nor evidence
+that an earlier operation became eligible. Historical failed reviews and unknown
+usage are not backfilled by this source change.
+
+The broker fixtures replace optional live status enrichment and enter a
+process-local boundary before qualification. It denies provider transport,
+real credential-file access and unguarded child processes, including swallowed
+attempts. The real restart child inherits the same boundary. Negative cases
+use a synthetic endpoint and credential file, with transport and reads blocked
+before effects; broker, lease, receipt and SQLite behavior remain real.
 
 ## Pre-task capacity check
 

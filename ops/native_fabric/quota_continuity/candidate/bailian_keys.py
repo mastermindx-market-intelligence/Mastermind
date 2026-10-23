@@ -370,18 +370,168 @@ def active_count(name: str) -> int:
     return prune_stale(name)
 
 
+# --- per-account usage eligibility (source job qwen-eligibility-source-01a15e3f-v1) ---
+
+_BAILIAN_USAGE_FILE = "bailian_usage.json"
+
+
+def _usage_unknown() -> dict:
+    """Explicit UNKNOWN closed DATA: no fabricated usage, no fabricated exhaustion."""
+    return {"state": "UNKNOWN", "parked": None, "observed_at": None, "reset_at": None}
+
+
+def _usage_row_for(name, usage):
+    """Select the applicable row for one account name from a usage payload.
+
+    Accepts either the existing document ({"keys": {name: row, ...}}) or the
+    account row itself; anything else maps to no applicable row.
+    """
+    if not isinstance(usage, dict):
+        return None
+    keys_map = usage.get("keys")
+    if isinstance(keys_map, dict):
+        row = keys_map.get(name)
+        return row if isinstance(row, dict) else None
+    return usage
+
+
+def _usage_parse_ts(value):
+    """Timezone-aware ISO-8601 string -> epoch seconds; naive/malformed -> None."""
+    import datetime as _dt
+
+    if not isinstance(value, str) or not value:
+        return None
+    text = value.strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    try:
+        ts = _dt.datetime.fromisoformat(text)
+    except Exception:
+        return None
+    if ts.tzinfo is None or ts.tzinfo.utcoffset(ts) is None:
+        return None
+    try:
+        return ts.timestamp()
+    except (OSError, OverflowError, ValueError):
+        return None
+
+
+def usage_eligibility(name, usage, now=None) -> dict:
+    """Pure per-account usage eligibility for one Bailian account.
+
+    Returns closed DATA with exactly the keys {"state", "parked", "observed_at",
+    "reset_at"}: state is "CURRENT" or "UNKNOWN", parked is a bool or None, and
+    observed_at/reset_at are epoch seconds or None. Only a fresh, applicable row
+    (literal parked bool, finite pct_7d in 0..100, timezone-aware observed_at and
+    resets_at with 0 <= now - observed_at <= 86400 and 0 < resets_at - now <= 8
+    days) yields CURRENT. Missing, malformed, stale, future or expired facts stay
+    explicit UNKNOWN. Never raises; unknown usage never fabricates exhaustion and
+    never parks an unrelated account.
+    """
+    import math as _math
+
+    if now is None:
+        import time as _time
+
+        now = _time.time()
+    if isinstance(now, bool):
+        return _usage_unknown()
+    try:
+        now = float(now)
+    except Exception:
+        return _usage_unknown()
+    if not _math.isfinite(now):
+        return _usage_unknown()
+    row = _usage_row_for(name, usage)
+    if row is None:
+        return _usage_unknown()
+    parked = row.get("parked")
+    if not isinstance(parked, bool):
+        return _usage_unknown()
+    pct = row.get("pct_7d")
+    if isinstance(pct, bool) or not isinstance(pct, (int, float)):
+        return _usage_unknown()
+    try:
+        pct = float(pct)
+    except (OverflowError, ValueError):
+        return _usage_unknown()
+    if not _math.isfinite(pct) or pct < 0.0 or pct > 100.0:
+        return _usage_unknown()
+    observed = _usage_parse_ts(row.get("observed_at"))
+    reset = _usage_parse_ts(row.get("resets_at"))
+    if observed is None or reset is None:
+        return _usage_unknown()
+    age = now - observed
+    if age < 0.0 or age > 86400.0:
+        return _usage_unknown()
+    remaining = reset - now
+    if remaining <= 0.0 or remaining > 8.0 * 86400.0:
+        return _usage_unknown()
+    return {
+        "state": "CURRENT",
+        "parked": parked,
+        "observed_at": observed,
+        "reset_at": reset,
+    }
+
+
+def read_usage_eligibility(name, *, now=None, path=None) -> dict:
+    """Read one account's usage eligibility from the existing plain usage JSON.
+
+    Defaults to the existing HERE/bailian_usage.json document (same store the
+    pool already reads; no new store, credentials never input). The document is
+    bounded plain nonsecret JSON keyed by account name. Any read or parse
+    failure yields explicit UNKNOWN; this function never raises.
+    """
+    if path is None:
+        import os as _os
+
+        path = _os.path.join(HERE, _BAILIAN_USAGE_FILE)
+    try:
+        if now is None:
+            import time as _time
+
+            now = _time.time()
+        import json as _json
+
+        with open(path, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return _usage_unknown()
+        doc = _json.loads(raw)
+        # File-backed eligibility must bind the selected account in the
+        # existing document. A bare row is only pure validation DATA.
+        if not isinstance(doc, dict) or not isinstance(doc.get("keys"), dict):
+            return _usage_unknown()
+    except Exception:
+        return _usage_unknown()
+    return usage_eligibility(name, doc, now)
+# --- end per-account usage eligibility ---
+
+
 def usable_names() -> List[str]:
     """Configured keys. Keys in non-429 cooldown are excluded; 429 keys are included
-    (they can still handle reduced traffic at their soft cap)."""
+    (they can still handle reduced traffic at their soft cap). Keys whose fresh,
+    applicable usage row is literally parked=True are also excluded; stale,
+    future, expired, malformed or missing usage facts stay UNKNOWN and leave the
+    key eligible."""
+    import time as _time
+
+    now = _time.time()
     names = []
     for name in key_names():
         cd = cooldown_info(name)
-        if cd is None:
-            names.append(name)
-        else:
+        if cd is not None:
             reason = cd[1] if len(cd) > 1 else ""
-            if reason == "http_429":
-                names.append(name)
+            if reason != "http_429":
+                continue
+        try:
+            info = read_usage_eligibility(name, now=now)
+        except Exception:
+            info = _usage_unknown()
+        if info.get("state") == "CURRENT" and info.get("parked") is True:
+            continue
+        names.append(name)
     return names
 
 

@@ -1006,16 +1006,48 @@ def _glm_pick_model(task_class: Optional[str],
 
 
 def _parked_bailian_keys() -> set:
-    """Keys parked due to high usage."""
+    """Keys parked due to high usage.
+
+    Only a fresh, applicable usage row with a literal parked=True parks its
+    account; stale, future, expired, malformed or missing usage facts stay
+    UNKNOWN and leave the key eligible (unknown usage never fabricates
+    exhaustion). Reads the same existing BAILIAN_USAGE document through the
+    shared bailian_keys.read_usage_eligibility helper; an unreadable document
+    or an unavailable helper parks nothing (previous behavior).
+    """
     parked = set()
     try:
-        with open(BAILIAN_USAGE, encoding="utf-8") as fh:
-            data = json.load(fh)
-        for name, info in data.get("keys", {}).items():
-            if info.get("parked"):
-                parked.add(name)
+        with open(BAILIAN_USAGE, "rb") as fh:
+            raw = fh.read(1048577)
+        if len(raw) > 1048576:
+            return parked
+        data = json.loads(raw)
     except Exception:
-        pass
+        return parked
+    try:
+        import os as _os
+        import sys as _sys
+
+        _here = _os.path.dirname(_os.path.abspath(__file__))
+        if _here not in _sys.path:
+            _sys.path.insert(0, _here)
+        import bailian_keys
+
+        _reader = bailian_keys.read_usage_eligibility
+    except Exception:
+        return parked
+    if not isinstance(data, dict):
+        return parked
+    keys_map = data.get("keys")
+    if not isinstance(keys_map, dict):
+        return parked
+    for _name in list(keys_map):
+        try:
+            _info = _reader(_name, path=BAILIAN_USAGE)
+        except Exception:
+            continue
+        if _info.get("state") == "CURRENT" and _info.get("parked") is True:
+            parked.add(_name)
     return parked
 
 

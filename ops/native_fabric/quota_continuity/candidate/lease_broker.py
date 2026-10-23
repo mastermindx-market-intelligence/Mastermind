@@ -359,7 +359,8 @@ class Broker:
         return os.path.exists(self.grok_marker)
 
     def _bailian_effective_cap(self, name: str, base: int) -> Optional[int]:
-        """None = not grantable (non-429 cooldown). Else effective cap."""
+        """None = not grantable (non-429 cooldown, or fresh known parked usage).
+        Else effective cap."""
         if not self.external_gates:
             return base
         try:
@@ -367,6 +368,12 @@ class Broker:
                 sys.path.insert(0, HERE)
             import bailian_keys
 
+            try:
+                info = bailian_keys.read_usage_eligibility(name, now=self.now())
+            except Exception:
+                info = bailian_keys._usage_unknown()
+            if info.get("state") == "CURRENT" and info.get("parked") is True:
+                return None
             cd = bailian_keys.cooldown_info(name)
             if cd is None:
                 return min(base, int(bailian_keys.current_per_key_cap()))
