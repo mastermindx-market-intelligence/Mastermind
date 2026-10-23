@@ -53,6 +53,11 @@ from control_plane.executive_agent_capabilities import (
     CapabilityPolicyError,
     ExecutionCapabilityRegistry,
 )
+from control_plane.executive_readback_contract import (
+    MAX_LEASE_LOOKAHEAD_MS,
+    event_timestamp_within_skew,
+    process_absence_error,
+)
 from control_plane.executive_coo_policy import (
     CooCyclePolicy,
     CooCyclePolicyError,
@@ -4201,8 +4206,18 @@ class RuntimeStore:
         if isinstance(value, datetime):
             if value.tzinfo is None:
                 value = value.replace(tzinfo=timezone.utc)
-            return int(value.timestamp() * 1000)
-        return int(value)
+            timestamp_ms = int(value.timestamp() * 1000)
+        else:
+            timestamp_ms = int(value)
+        # Production event time and readback use the same maximum future
+        # skew. Explicit clocks are test/simulation time authorities and are
+        # checked against their own observation frame by their consumers.
+        if self.clock is None and not event_timestamp_within_skew(
+            timestamp_ms,
+            now_ms=int(datetime.now(timezone.utc).timestamp() * 1000),
+        ):
+            raise StateConflict("Runtime event clock exceeds shared skew ceiling")
+        return timestamp_ms
 
     def _assert_owned_snapshot_connection(self, connection: sqlite3.Connection) -> None:
         """Prove a supplied snapshot's ``main`` is this store's stable file."""
@@ -6533,8 +6548,9 @@ class WorkerRegistry:
                 (worker_id, quota_class)).fetchone()
             worker = conn.execute("SELECT * FROM workers WHERE worker_id=?",
                                   (worker_id,)).fetchone()
-            error = {"reason": "process identity absent during supervisor restart",
-                     "verified_process_absent": True}
+            error = process_absence_error(
+                "process identity absent during supervisor restart"
+            )
             if (job is None or attempt is None or quota is None or worker is None
                     or job["status"] != "QUEUED" or job["current_attempt_id"] is not None
                     or job["assigned_worker_id"] is not None
@@ -17024,6 +17040,8 @@ class AttemptRegistry:
         )
         if duration <= 0:
             raise StateConflict("lease_seconds must be positive")
+        if duration * 1000 > MAX_LEASE_LOOKAHEAD_MS:
+            raise StateConflict("claim lease exceeds shared lookahead ceiling")
         owner = str(lease_owner).strip()
         if not owner:
             raise StateConflict("lease_owner is required")
@@ -17698,6 +17716,8 @@ class AttemptRegistry:
         )
         if duration <= 0:
             raise StateConflict("lease_seconds must be positive")
+        if duration * 1000 > MAX_LEASE_LOOKAHEAD_MS:
+            raise StateConflict("adopted lease exceeds shared lookahead ceiling")
         timestamp = self.store.now_ms()
         replacement_token = secrets.token_urlsafe(32)
         with self.store.transaction() as connection:
@@ -17834,6 +17854,8 @@ class AttemptRegistry:
         )
         if duration <= 0:
             raise StateConflict("extend_seconds must be positive")
+        if duration * 1000 > MAX_LEASE_LOOKAHEAD_MS:
+            raise StateConflict("heartbeat lease exceeds shared lookahead ceiling")
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             row = self._leased_row(
@@ -18754,11 +18776,12 @@ class AttemptRegistry:
         provider session) with the live process.  Unverified suspicions wait for
         lease-expiry reconciliation and cannot prematurely free or fence work.
         """
-        reason = str(reason).strip()
-        if not reason:
-            raise StateConflict("mark_lost requires a reason")
         if verified_process_absent is not True:
             raise StateConflict("mark_lost requires verified_process_absent=True")
+        try:
+            error = process_absence_error(reason)
+        except ValueError as exc:
+            raise StateConflict("mark_lost requires a bounded verified-absence reason") from exc
         timestamp = self.store.now_ms()
         with self.store.transaction() as connection:
             row = self._leased_row(
@@ -18777,10 +18800,6 @@ class AttemptRegistry:
                 raise StateConflict(
                     "OPERATOR_HARNESS LOST transition is owned by harness reconciliation"
                 )
-            error = {
-                "reason": reason,
-                "verified_process_absent": True,
-            }
             _finite_existing_effect(self.store, connection, str(row["job_id"]))
             connection.execute(
                 """

@@ -683,6 +683,7 @@ def test_explicit_mark_lost_requires_verified_absence_and_current_lease(tmp_path
     assert lost_attempt.error == {
         "reason": "provider confirmed session missing",
         "verified_process_absent": True,
+        "reason_code": "provider_session_absence",
     }
     assert quota is not None and quota.status == WorkerStatus.ERROR
     with pytest.raises(StateConflict):
