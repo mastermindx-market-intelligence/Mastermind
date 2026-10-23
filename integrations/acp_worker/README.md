@@ -122,3 +122,30 @@ prove the two interfaces individually. **Installed bootstrap wiring from
 that v2 socket reader to the live native DSH AgentLoop and WorkerResult
 is not yet proven**; no profile flip, live chat target, sealed OS release
 or product claim follows from these fixtures.
+
+
+### Child-side v2 receiver
+
+The provider-free source helper
+`integrations/acp_worker/dsh_native_attempt.mjs` is an opt-in
+consumer of that **same inherited FD**. It validates the v2 frame
+against the current process PID, exact independently pinned parent
+projection/artifact digests, process nonce shape, Job/run/worker/base
+SHA, closed workspace/identity/deadline and one named tool catalog.
+Only an *attested installed host* may supply its `activate` callback.
+That callback must await the existing
+`createDshGrantedToolProfile` and its real MCP tool discovery before
+the helper echoes `ready:true` plus canonical overlay SHA256.
+The original parent must then return its exact `accepted:true` ACK.
+An aborted, expired, wrong-artifact or refused callback cannot produce
+a successful handoff; no credentials, source retargeting or Retry path
+is added.
+
+`tests/test_acp_native_dsh_child.py` exercises a REAL Node child and
+the existing Python `AcpNativeProcessOwner` through the inherited
+socket; it proves receive/ACK, withheld ambient keys, digest refusal
+and process cleanup. Its child activation is deliberately a fixed
+test-only no-provider stub. The installed trusted payload wiring of
+this helper into the compiled DSH profile, agent turn/WorkerResult,
+original parent consumption, UID/Seatbelt proof, authenticated chat
+and sealed production release remain **UNPROVEN**.
