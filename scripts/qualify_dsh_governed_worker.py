@@ -19,6 +19,7 @@ EXPECTED_DONOR = "4878cdabd87d4041bdaff61d04c966883b9fd07a"
 EXPECTED_PROFILE_SOURCE = "4159c403cf63bac8bd18138fa232911589afe06f"
 EXPECTED_PROFILE_SHA = "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c"
 EXPECTED_R4_SHA = "243ec445db513db3bb9ff0cad05bc70550df972a785b8af1546d89c055cadc1f"
+EXPECTED_NODE_SHA = "913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
 EXPECTED_TESTS = 11
 SOURCE_FILES = frozenset({
     "governed_acp_fixture.mjs", "scoped_profile.mjs",
@@ -69,9 +70,10 @@ def verify_supply(root: Path) -> dict:
         "profile_head": EXPECTED_PROFILE_SOURCE,
         "r4_patch": EXPECTED_R4_SHA,
         "profile_artifact": EXPECTED_PROFILE_SHA,
+        "node_sha256": EXPECTED_NODE_SHA,
     }
     if any(data.get(k) != v for k, v in frozen.items()):
-        raise QualificationRefused("PIN_MISMATCH", "donor/profile/patch pin mismatch")
+        raise QualificationRefused("PIN_MISMATCH", "donor/profile/patch/node pin mismatch")
     if set(data.get("fixture_sources", {})) != SOURCE_FILES:
         raise QualificationRefused("INVALID_MANIFEST", "fixture source set mismatch")
     for field, directory in (

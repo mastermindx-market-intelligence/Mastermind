@@ -111,3 +111,21 @@ def test_zero_exit_with_all_skipped_cases_is_not_acceptance(tmp_path, monkeypatc
     assert proof["status"] == "NOT_QUALIFIED"
     assert proof["junit"]["skipped"] == 11
     assert proof["provider_calls"] == 0
+
+
+def test_wrong_node_binary_pin_is_refused_before_any_test(tmp_path):
+    supply = tmp_path / "supply"
+    supply.mkdir()
+    (supply / "supply-manifest.json").write_text(json.dumps({
+        "donor": "4878cdabd87d4041bdaff61d04c966883b9fd07a",
+        "profile_head": "4159c403cf63bac8bd18138fa232911589afe06f",
+        "r4_patch": "243ec445db513db3bb9ff0cad05bc70550df972a785b8af1546d89c055cadc1f",
+        "profile_artifact": "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c",
+        "node_sha256": "0" * 64,
+    }))
+    receipt = tmp_path / "receipt"
+    result = launch(supply, receipt)
+    assert result.returncode == 2
+    report = json.loads((receipt / "qualification.json").read_text())
+    assert report["status"] == "PIN_MISMATCH"
+    assert not (receipt / "tests.xml").exists()
