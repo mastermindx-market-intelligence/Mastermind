@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 80785,
+      "bytes": 82512,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "0ed7b286dc1d51ecd6349d34d9342fa144097ec3a74257bce6186aa15b8b65de",
+      "sha256": "50bf0afa5172ca0481a513aa3c8d851c3a7e0f2e002258eece965c68125fdb5c",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -389,6 +389,12 @@
       "sha256": "2ce5e047ba76e17754c538c993a593787bc0dd5c541c1616e69bf183e7741cce",
       "source": "candidate/native_runtime_bindings.py"
     },
+    "ext/native_watchlist_review03_reconcile.py": {
+      "bytes": 19526,
+      "installed_preimage_sha256": null,
+      "sha256": "edb6478e4032b71f1746748100e2b0db78bca5e4f2ec9ac572d79d59de44c1a5",
+      "source": "source/native_watchlist_review03_reconcile.py"
+    },
     "ext/oc_free_exec.sh": {
       "bytes": 8121,
       "installed_preimage_sha256": "279842e54d6095276b087fd78eae9268026db3079add4b61e474119ce08d3783",
@@ -594,7 +600,7 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 95,
+  "native_code_files": 96,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
@@ -604,6 +610,7 @@
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",
     "native_runtime_bindings.py",
+    "native_watchlist_review03_reconcile.py",
     "paid_controller_channel.py",
     "paid_controller_spawn.py",
     "paid_glm_model_client.py",

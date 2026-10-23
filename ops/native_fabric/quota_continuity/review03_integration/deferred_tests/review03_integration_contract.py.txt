@@ -30,6 +30,7 @@ REPO_ROOT = next(
 )
 assert REPO_ROOT is not None, "original_review03_source_missing"
 SOURCE_DIR = REPO_ROOT / "ops" / "native_fabric" / "quota_continuity" / "source"
+CANDIDATE_DIR = REPO_ROOT / "ops" / "native_fabric" / "quota_continuity" / "candidate"
 sys.path.insert(0, str(SOURCE_DIR))
 
 import native_watchlist_review03_reconcile as r  # noqa: E402
@@ -78,8 +79,10 @@ def receipt(private_root, monkeypatch):
 # --- integration wiring -------------------------------------------------------
 
 def _fabric_task_source() -> str:
-    path = SOURCE_DIR / "fabric_task.py"
-    assert path.is_file(), f"integrated fabric_task.py missing at {path}"
+    # The active native generation selects the candidate overlay. Source is
+    # the immutable installed preimage and must NOT contain the new hook.
+    path = CANDIDATE_DIR / "fabric_task.py"
+    assert path.is_file(), f"integrated native candidate missing at {path}"
     return path.read_text()
 
 

@@ -36,8 +36,8 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # The95-file closure composes protected #1720/#1729 with Qwen source feedback
 # and request UTC narrowing. This candidate pin is a changed-risk review input,
 # not reuse of an earlier review. Executor/donor/preimage pins stay exact.
-EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "12769e22c14893cf781cc96c393c5cd4a7678389dd5bfcd5734c54923ef4335a"
+EXPECTED_NATIVE_FILES = 96
+NATIVE_MANIFEST_SHA = "d16b05629040c4fb2c7f887afb22327eb5e6f2c37d89dac45912234b2caae4ab"
 
 
 def _sha(raw):
