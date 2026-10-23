@@ -260,14 +260,14 @@ def execute(host, intent):
     host._a2_intent = intent
     host.check_intent()
     prior = host.checked_configs(intent.expected_sha)
-    if prior.control_sha256 != intent.control_hash:
-        raise owner.TransactionEffectUnknown()
     target = _candidate(prior)
     if prior.control.get("terminal_return_socket_path") == LEGACY_SOCKET:
         # Idempotency must also prove the paired receipt and A2 fixed consumer
         # configuration before reporting positive read-only replay.
         qualify_restored_readside(host, intent)
         return None
+    if prior.control_sha256 != intent.control_hash:
+        raise owner.TransactionEffectUnknown()
     tx = owner.TransactionContext(
         host.new_transaction_id(), intent.expected_sha, prior, target, None,
     )
@@ -303,6 +303,12 @@ def qualify_restored_readside(host, intent) -> None:
     if (current.control.get("terminal_return_armed") is not False
             or current.control.get("terminal_return_socket_path") != LEGACY_SOCKET
             or current.worker.get("operator_harness_armed") is not False):
+        raise owner.TransactionEffectUnknown()
+    # Reconstruct the one permitted preimage from the restored Control
+    # document. Binding the caller's original digest even AFTER transaction
+    # settlement prevents a foreign/incorrect witness from starting services.
+    original_control = dict(current.control, terminal_return_socket_path=PERSISTENT_SOCKET)
+    if owner.sha256_bytes(owner.encode_config(original_control)) != intent.control_hash:
         raise owner.TransactionEffectUnknown()
     prior = host._current_receipt()
     if prior:

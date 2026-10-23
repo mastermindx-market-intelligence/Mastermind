@@ -99,7 +99,7 @@ def test_one_native_owner_rebinds_controller_socket_without_other_writes(staged)
     assert result == {**before, "terminal_return_socket_path": restore.LEGACY_SOCKET}
     assert owner.WORKER_CONFIG.read_bytes() == s.worker
     assert (s.root / "unrelated-root-entry.json").read_bytes() == other
-    assert restore.execute(s.host, _intent(owner.sha256_bytes(s.control.read_bytes()))) is None
+    assert restore.execute(s.host, _intent(s.current_hash)) is None
     assert not s.marker.exists()
 
 
@@ -315,9 +315,24 @@ def test_fully_reverted_target_is_idempotent_only_if_preflight_passes(staged):
     intent = _intent(s.current_hash)
     restore.execute(s.host, intent)
     before = s.control.stat().st_ino
-    restore.execute(s.host, _intent(owner.sha256_bytes(s.control.read_bytes())))
+    restore.execute(s.host, intent)
     assert s.control.stat().st_ino == before
     s.a2_state["valid"] = False
     with pytest.raises(a2.A2EnrollmentError, match="A2_REBIND_STATE_REFUSED"):
-        restore.execute(s.host, _intent(owner.sha256_bytes(s.control.read_bytes())))
+        restore.execute(s.host, intent)
     assert s.control.stat().st_ino == before
+
+
+def test_settled_restored_readside_witness_binds_preimage_sha(staged):
+    s = staged
+    intent = _intent(s.current_hash)
+    restore.execute(s.host, intent)
+    assert json.loads(s.control.read_bytes())["terminal_return_socket_path"] == restore.LEGACY_SOCKET
+    # The terminal-reading carrier must not accept arbitrary user supplied
+    # "preimage" digests merely because the final config looks disarmed.
+    forged = _intent("0" * 64)
+    with pytest.raises(owner.TransactionEffectUnknown):
+        restore.qualify_restored_readside(s.host, forged)
+    with pytest.raises(owner.TransactionEffectUnknown):
+        restore.execute(s.host, forged)
+    restore.qualify_restored_readside(s.host, intent)
