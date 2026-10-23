@@ -209,14 +209,17 @@ _ARM_ADMISSION_CODES = frozenset(
 _MAX_JSON_BYTES = 1024 * 1024
 _TRANSACTION_SCHEMA = "mastermind.executive_autonomy_transaction/v1"
 A2_DISABLE_COMMANDS = frozenset({"a2-disable-prepare", "a2-disable-prepare-reconcile"})
+_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
+# One manifest name for the canonical marker and for the private generation it
+# is published from, so a renamed generation is always readable in place.
+_TRANSACTION_MANIFEST_NAME = "transaction.json"
+# Extend the incumbent operation set without replacing its expression:
+# protected source may admit unrelated operations (for example OS Gateway).
 A2_CONTROL_RESTORATION_COMMANDS = frozenset({
     "a2-restore-controller-socket", "a2-restore-controller-socket-reconcile",
     "a2-restored-readside-preflight",
 })
-_TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", "A2_RETURN_SOCKET_RESTORE", "FINITE_CONTROL_STAGE", "PAID_CONTROL_STAGE"}) | CONTROL_ONLY_TRANSACTION_OPERATIONS
-# One manifest name for the canonical marker and for the private generation it
-# is published from, so a renamed generation is always readable in place.
-_TRANSACTION_MANIFEST_NAME = "transaction.json"
+_TRANSACTION_OPERATIONS |= frozenset({"A2_RETURN_SOCKET_RESTORE"})
 _CEO_SUBMIT_ADMISSION_CODES = frozenset(
     {
         "release_identity_mismatch",
