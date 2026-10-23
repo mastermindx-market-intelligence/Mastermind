@@ -111,10 +111,19 @@ class TerminalPollBudgetTests(unittest.TestCase):
         preimages = json.loads((ROOT / 'rollout/native-preimages.json').read_text())['files']
         candidate = ROOT / 'candidate/remote_sub.sh'
         original = ROOT / 'source/remote_sub.sh'
-        self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'], 'candidate/remote_sub.sh')
-        self.assertEqual(hashlib.sha256(candidate.read_bytes()).hexdigest(), manifest['ext/remote_sub.sh'])
-        self.assertEqual(inventory['files']['ext/remote_sub.sh']['sha256'], manifest['ext/remote_sub.sh'])
-        self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(), preimages['remote_sub.sh'])
+        # The accepted Grok runtime overlay is the published native transport.
+        # The quota candidate is also margin-tested above, but is not selected
+        # over the reviewed Grok source solely because it exists in the tree.
+        selected = PATHS[1]
+        self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
+                         '../grok47/overlay/remote_sub.sh')
+        self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
+                         manifest['ext/remote_sub.sh'])
+        self.assertEqual(inventory['files']['ext/remote_sub.sh']['sha256'],
+                         manifest['ext/remote_sub.sh'])
+        self.assertTrue(candidate.is_file())
+        self.assertEqual(hashlib.sha256(original.read_bytes()).hexdigest(),
+                         preimages['remote_sub.sh'])
 
 
 if __name__ == '__main__':

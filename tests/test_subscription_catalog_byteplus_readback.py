@@ -15,9 +15,9 @@ def fixture():
     usage = {
         "viewer": {"user_id": "private-id-do-not-project",
                    "account_id": "another-private-identifier"},
-        "updated_at": 1792692726,
         "items": [{"product": "coding-plan", "edition": "personal",
-                   "subscribed": True, "periods": [
+                   "subscribed": True, "updated_at": 1792692726,
+                   "periods": [
                        {"label": "session", "percent": 0},
                        {"label": "weekly", "percent": 0,
                         "reset_at": "2026-10-26T00:00:00+08:00"},
@@ -88,7 +88,7 @@ def test_reject_missing_duplicate_window_missing_timestamp_and_partial_subscript
         elif mutation == "missing":
             u["items"][0]["periods"].pop()
         elif mutation == "missing_updated":
-            u.pop("updated_at")
+            u["items"][0].pop("updated_at")
         else:
             u["items"][0]["subscribed"] = False
         with pytest.raises(HarnessBindingError, match="BytePlus readback invalid"):
@@ -113,3 +113,65 @@ def test_mismatched_duplicate_or_other_products_do_not_mint_capacity():
     usage["items"][0]["product"] = "modelark-payg"
     with pytest.raises(HarnessBindingError):
         project_byteplus_plan_readback(holdings, usage)
+
+def test_existing_root_only_timestamp_format_remains_supported():
+    holdings, usage = fixture()
+    stamp = usage["items"][0].pop("updated_at")
+    usage["updated_at"] = stamp
+    before = copy.deepcopy(usage)
+    result = project_byteplus_plan_readback(holdings, usage)
+    assert result["usage_observed_at_unix"] == stamp
+    assert usage == before
+    assert result["actual_request_counts_available"] is False
+    assert result["estimated_startable_jobs"] is None
+
+
+def test_consistent_dual_timestamps_are_supported_without_admission():
+    holdings, usage = fixture()
+    usage["updated_at"] = usage["items"][0]["updated_at"]
+    result = project_byteplus_plan_readback(holdings, usage)
+    assert result["usage_observed_at_unix"] == 1792692726
+    assert result["live_admission"] is False
+    assert result["autonomous_allowed"] is False
+
+
+@pytest.mark.parametrize("delta", [-1, 1, 80000])
+def test_conflicting_root_and_item_timestamp_fail_closed(delta):
+    holdings, usage = fixture()
+    usage["updated_at"] = usage["items"][0]["updated_at"] + delta
+    with pytest.raises(HarnessBindingError, match="conflicting provider measurement timestamps"):
+        project_byteplus_plan_readback(holdings, usage)
+
+
+@pytest.mark.parametrize("bad_stamp", [None, False, True, 0, -1, 0.5, "1792692726", [], {}])
+@pytest.mark.parametrize("location", ["item", "root"])
+def test_malformed_any_timestamp_refuses_even_if_other_is_valid(bad_stamp, location):
+    holdings, usage = fixture()
+    stamp = usage["items"][0]["updated_at"]
+    usage["updated_at"] = stamp
+    if location == "item":
+        usage["items"][0]["updated_at"] = bad_stamp
+    else:
+        usage["updated_at"] = bad_stamp
+    with pytest.raises(HarnessBindingError, match="provider measurement timestamp required"):
+        project_byteplus_plan_readback(holdings, usage)
+
+
+def test_real_vendor_shape_does_not_copy_viewer_or_account_identity():
+    holdings, usage = fixture()
+    usage["viewer"]["tenant"] = "do-not-project-private-tenant"
+    usage["viewer"]["project_name"] = "do-not-project-private-project"
+    usage["items"][0]["account"] = "do-not-project-private-account"
+    frozen = copy.deepcopy((holdings, usage))
+    result = project_byteplus_plan_readback(holdings, usage)
+    assert (holdings, usage) == frozen
+    assert result["usage_observed_at_unix"] == 1792692726
+    assert result["account_identity_attested"] is False
+    assert result["provider_origin_attested"] is False
+    assert result["measurement_freshness_attested"] is False
+    assert result["actual_request_counts_available"] is False
+    assert result["actual_concurrency_limit_available"] is False
+    assert result["estimated_startable_jobs"] is None
+    assert result["suggested_parallelism"] is None
+    assert result["autonomous_allowed"] is False
+    assert "do-not-project-private" not in str(result)

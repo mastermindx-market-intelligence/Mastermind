@@ -220,7 +220,7 @@ The existing installer now has `prepare-upgrade` and `upgrade` commands. This
 transition accepts only the authentic retained phase-one bootstrap bundle,
 its exact owned receipt, the pinned 8bc launcher and derived paired bridges,
 and the reviewed 95-member manifest
-`7efa1160eda556d89b0ec70cbafd9082b69365a06f41b565292941ad7ac8f0d7`.
+`6ac208bbd80f706931b11e8147a879f6e3ced6fe704cde7b9f15e1c098e37ee4`.
 The new sealed d044 launcher differs only by the two reviewed PyYAML artifact
 allowlist names. Neither the original bootstrap plan nor the flat remote entry
 is rewritten.
@@ -410,3 +410,12 @@ not accept a caller-bound sequence comparison; this source does not claim a
 two-field CAS or add one. Never substitute a stale observed generation or force
 selection. Installation, installed-route/host qualification, current scoped
 permission and target proof remain separate owner operations; this PR performs none.
+
+
+Protected Qwen priority integration retains all four PR1731 candidate files byte-exact.
+The canonical builder still verifies all nine accepted Grok overlay bases; six are
+staged directly and exactly three closed forward candidate hashes preserve the
+previously reviewed fresh-usage reader and caller UTC narrowing. The other91
+member bytes equal the accepted7efa closure. The finite upgrade target now pins
+the resulting95-member manifest6ac208bb; launcher8bc-to-d044, original epoch,
+preimages, intent, lock, CAS and receipt-only recovery behavior are unchanged.

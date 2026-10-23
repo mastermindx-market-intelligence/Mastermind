@@ -334,3 +334,20 @@ test('unknown status transport failure never becomes fresh allocation permission
   } });
   await assert.rejects(gateway.inspect({ repository: 'mastermind', operation_id: OP }));
 });
+
+
+for (const repository of [undefined, 'mastermind', 'macro', 'terminal']) {
+  test(`repository wrapper retains closed merge fences for ${repository ?? 'legacy'}`, async () => {
+    const { gateway, publications } = setup();
+    const args = { operation_id: OP, expected_head_sha: HEAD, message: 'test: reviewed merge',
+      merge: { expected_protected_base_sha: 'b'.repeat(40), expected_tree_sha: 'c'.repeat(40) },
+      ...(repository === undefined ? {} : { repository }) };
+    const result = await gateway.commit(args);
+    assert.deepEqual(result.args.merge, args.merge);
+    assert.equal(result.args.repository, undefined);
+    assert.equal(publications.at(-1).repository, repository);
+    const schema = api.STUDIO_REPOSITORY_GIT_TOOLS.find((tool) => tool.name === 'studio_git_commit_current_changes').inputSchema;
+    assert.equal(schema.properties.merge.additionalProperties, false);
+    assert.deepEqual(Object.keys(schema.properties.merge.properties), ['expected_protected_base_sha', 'expected_tree_sha']);
+  });
+}

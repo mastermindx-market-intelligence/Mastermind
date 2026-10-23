@@ -374,15 +374,13 @@ class Broker:
                 info = bailian_keys._usage_unknown()
             if info.get("state") == "CURRENT" and info.get("parked") is True:
                 return None
-            cd = bailian_keys.cooldown_info(name)
-            if cd is None:
-                return min(base, int(bailian_keys.current_per_key_cap()))
-            reason = cd[1] if len(cd) > 1 else ""
-            if reason != "http_429":
-                return None
-            return min(base, int(bailian_keys._effective_cap_for_key(name)))
+            # A parked account is withheld even with healthy cooldown data;
+            # untrusted/unsafe cooldowns cannot be granted by unknown usage.
+            effective = int(bailian_keys._effective_cap_for_key(name))
+            return min(base, effective) if effective > 0 else None
         except Exception:
-            return base
+            # Unavailable or corrupt source cannot establish provider room.
+            return None
 
     def _host_lane_capacity(self, pool: str) -> int:
         """Physical fleet admission envelope, NOT a provider/account slot quota.
@@ -912,6 +910,15 @@ class Broker:
         if preferred:
             for a in grantable:
                 if a.get("name") == preferred:
+                    # Existing exact pin is sticky; a *known* hard local
+                    # denial is a refusal, never permission to substitute.
+                    if self.external_gates and self.provider_name(pool) == "bailian":
+                        try:
+                            import bailian_keys
+                            if bailian_keys.cooldown_rank_readonly(preferred) == 3:
+                                return None
+                        except Exception:
+                            pass  # unknown remains subject to incumbent gates
                     if (
                         self._account_held(conn, pool, preferred) < int(a["_eff_cap"])
                         and has_model_room(a, preferred)
@@ -943,7 +950,51 @@ class Broker:
                 )
                 if row["last_grant"] is not None
             }
+            # HTTP 429 soft caps preserve eligibility, but are a fallback for
+            # unpinned *new* grants if another qualified account is healthy.
+            # Exact-account pins above, model/host pairing, quota guards and
+            # the prior held/cap/history order inside each tier are unchanged.
+            # Host evidence is the already-verified, fresh account intersection.
+            # No second read, quota authority or host-scanning side channel.
+            host_rank = {
+                str(a["name"]): a.get("_host_qwen_429_rank", 1)
+                for a in grantable
+            } if grantable_override is not None else {}
+
+            local_ranks = {}
+            if self.external_gates:
+                try:
+                    import bailian_keys
+                    local_ranks = {
+                        name: bailian_keys.cooldown_rank_readonly(name)
+                        for _, _, name in scored
+                    }
+                except Exception:
+                    local_ranks = {name: 1 for _, _, name in scored}
+                # Known 401/403/402 hard denials must not be leased on an
+                # unpinned path even if all configured accounts are parked.
+                scored = [
+                    row for row in scored
+                    if local_ranks.get(row[2], 1) != 3
+                ]
+                if not scored:
+                    return None
+
+            def cooldown_priority(name: str) -> int:
+                if not self.external_gates:
+                    return 0
+                local_rank = local_ranks.get(name, 1)
+                if type(local_rank) is not int or local_rank not in (0, 1, 2, 3):
+                    local_rank = 1
+                observed = host_rank.get(
+                    name, 1 if grantable_override is not None else 0
+                )
+                if type(observed) is not int or observed not in (0, 1, 2):
+                    observed = 1
+                return max(local_rank, observed)
+
             scored.sort(key=lambda t: (
+                cooldown_priority(t[2]),
                 t[0], -t[1], recent.get(t[2], float("-inf")), t[2]
             ))
         else:
