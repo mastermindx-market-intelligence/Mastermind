@@ -63,6 +63,10 @@ def compose_github_review_host(
         raise GitHubReviewHostCompositionUnavailable("EXECUTIVE_PORT_BINDING_INVALID")
     if socket_client is not None and not over_socket:
         raise GitHubReviewHostCompositionUnavailable("MIXED_EXECUTIVE_PORTS_REFUSED")
+    if over_socket and worker_constraints is not None:
+        # The public webhook host must not choose worker quotas, providers or
+        # accounts. Only the authenticated Executive socket owner binds these.
+        raise GitHubReviewHostCompositionUnavailable("WORKER_ROUTE_OWNER_ONLY")
     if not isinstance(relay_client, SlackWebApiDialogueClient):
         raise GitHubReviewHostCompositionUnavailable("EXISTING_SLACK_CLIENT_UNBOUND")
 
@@ -87,8 +91,10 @@ def compose_github_review_host(
     visibility = SlackReviewVisibility(
         client=relay_client,
         public_repository_names_authorized=public_repository_names_authorized,
+        # Public process cannot open Runtime. Persist the verified Slack parent
+        # via the same authenticated Executive socket used for review admission.
         threads=(ExecutiveSlackReviewThreads(runtime=runtime)
-                 if in_process else None),
+                 if in_process else socket_client),
     )
     return GitHubReviewReceiver(
         settings=settings,

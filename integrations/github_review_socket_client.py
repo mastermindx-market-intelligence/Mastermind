@@ -18,6 +18,8 @@ from control_plane.github_review_intent_ingress import ReviewIngressUnavailable
 from control_plane.github_review_socket_contract import (
     FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES, MAX_RESPONSE_BYTES,
 )
+from integrations.github_review_slack_thread import CHANNEL_ID
+from integrations.slack_agent_dialogue.engine import SlackMessage
 
 class ReviewAdmissionUnavailable(ReviewIngressUnavailable):
     """Opaque socket failure; unknown effects cannot be retried blindly."""
@@ -120,3 +122,42 @@ class ExecutiveReviewSocketClient:
                 or set(result) != {"schema", "state", "job_id"}):
             raise ReviewAdmissionUnavailable("REVIEW_SOCKET_ADMISSION_RESULT_INVALID")
         return job_id
+
+    def record_parent(
+        self, *, decision: ReviewIntentDecision, job_id: str,
+        message: SlackMessage,
+    ) -> None:
+        """Bind one authenticated Relay parent receipt into the incumbent ledger.
+
+        The public webhook never receives Runtime access. A lost response after
+        sending this frame is not permission to post another Slack parent.
+        """
+        if (not isinstance(decision, ReviewIntentDecision) or not decision.admitted
+                or type(job_id) is not str
+                or re.fullmatch(r"JOB-[0-9]+", job_id) is None
+                or not isinstance(message, SlackMessage)
+                or message.thread_ts is not None
+                or message.edited or message.deleted):
+            raise ReviewAdmissionUnavailable("REVIEW_SLACK_PARENT_INVALID")
+        frame = {
+            "schema": FRAME_SCHEMA, "action": "record_parent",
+            "decision": decision.to_dict(), "job_id": job_id,
+            "channel_id": CHANNEL_ID, "thread_ts": message.ts,
+            "author_user_id": message.author_user_id,
+        }
+        try:
+            receipt = self._call(frame)
+        except ReviewAdmissionUnavailable:
+            # The Slack POST has *already occurred*. Even a transport failure
+            # cannot cause an extra Slack POST or unverified ledger write.
+            raise ReviewAdmissionUnavailable(
+                "REVIEW_SLACK_PARENT_EFFECT_UNKNOWN"
+            ) from None
+        if (
+            receipt.get("state") != "PARENT_RECORDED"
+            or receipt.get("job_id") != job_id
+            or set(receipt) != {"schema", "state", "job_id"}
+        ):
+            raise ReviewAdmissionUnavailable(
+                "REVIEW_SLACK_PARENT_EFFECT_UNKNOWN"
+            )

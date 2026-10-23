@@ -10,11 +10,18 @@ import time
 
 import httpx
 
-from control_plane.executive_runtime import Runtime
+from control_plane.executive_runtime import Runtime, JobPayload
 from control_plane.github_review_intent import sign_webhook_body
+from control_plane.github_review_intent_ingress import PublishState
 from control_plane.github_review_socket_owner import ExecutiveGitHubReviewSocketOwner
 from integrations.github_review_host_composition import compose_github_review_host
+from integrations.github_review_return import GitHubReviewReturn, ReviewReturnSourceMode
 from integrations.github_review_socket_client import ExecutiveReviewSocketClient
+from integrations.github_review_slack_thread import (
+    ExecutiveSlackReviewThreads, SlackReviewResultNotifier,
+)
+from test_github_review_publish_workflow import git_api
+from test_github_review_runtime_adapter import decision
 from integrations.slack_agent_dialogue.engine import SlackMessage
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
 from test_github_review_host_composition import Hook, _settings, credentials
@@ -38,6 +45,8 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             runtime=runtime, admission_guard=lambda: None,
             source_guard=source_guard,
             repositories=frozenset({REPO}),
+            relay_bot_user_id="U0BT71H4FQE",
+            worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )
         socket_path = str(tmp_path / "ceo-ingress.sock")
         async def handle(reader, writer):
@@ -162,6 +171,11 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert len(notifications) == 1
             assert notifications[0][0] == "C0CAUK8P8S3"
             assert REPO not in notifications[0][1]
+            # The public socket process must durably return the Slack thread
+            # to the existing Executive ledger, not just post a parent.
+            assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
+                decision=decision(), job_id=job.job_id,
+            ) == "1792699000.000001"
             before = len(requests)
             status, response = await deliver(
                 signature="sha256=" + "0" * 64
@@ -169,6 +183,55 @@ def test_signed_webhook_over_real_socket_admits_once_not_a_worker_start(tmp_path
             assert (status, response["status"]) == (401, "SIGNATURE_INVALID")
             assert len(requests) == before
             assert len(runtime.jobs.list_jobs()) == 1
+
+            # A real terminal Runtime Job/Attempt, rather than a synthetic
+            # webhook verdict, drives the same exact-head GitHub review and
+            # the originally captured Slack thread. This is still hermetic.
+            runtime.workers.register_worker(
+                "reviewer-01", provider="codex", account_label="reviewer",
+                worker_type="mock", capabilities=["code"],
+                quota_classes={"codex-native": ["code"]},
+            )
+            runtime.jobs.assign_job(job.job_id, "reviewer-01")
+            runtime.jobs.complete_job(job.job_id, JobPayload(
+                summary="Review found blocking changes; advisory only.",
+                verdict="reject",
+            ))
+            replies = []
+            async def post_reply(*, channel_id, thread_ts, text):
+                replies.append((channel_id, thread_ts, text))
+                return SlackMessage(
+                    ts="1792699001.000002",
+                    author_user_id="U0BT71H4FQE",
+                    text=text, thread_ts=thread_ts,
+                )
+            relay.post_reply = post_reply
+            github, history = git_api()
+            return_owner = GitHubReviewReturn.for_authorized_source(
+                runtime=runtime, github=github,
+                publication_guard=lambda: None,
+                source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+                slack=SlackReviewResultNotifier(
+                    client=relay,
+                    threads=ExecutiveSlackReviewThreads(runtime=runtime),
+                ),
+            )
+            first = await asyncio.to_thread(
+                return_owner.deliver, decision=decision(), job_id=job.job_id,
+            )
+            assert first.publication.state is PublishState.PUBLISHED
+            assert first.publication.review_id == "789"
+            assert first.slack_receipt == "POSTED"
+            assert len(history["posts"]) == len(replies) == 1
+            assert history["posts"][0]["event"] == "COMMENT"
+            assert "not attested" in history["posts"][0]["body"].lower()
+            assert replies[0][0:2] == ("C0CAUK8P8S3", "1792699000.000001")
+            assert "789" in replies[0][2] and REPO not in replies[0][2]
+            second = await asyncio.to_thread(
+                return_owner.deliver, decision=decision(), job_id=job.job_id,
+            )
+            assert second.publication.state is PublishState.ALREADY_PUBLISHED
+            assert len(history["posts"]) == len(replies) == 1
         finally:
             server.close()
             await server.wait_closed()

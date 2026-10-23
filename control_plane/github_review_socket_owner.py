@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 from control_plane.executive_runtime import Runtime
 from control_plane.github_review_intent import (
@@ -23,7 +23,11 @@ from control_plane.github_review_runtime_adapter import (
 from control_plane.github_review_socket_contract import (
     FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES,
 )
-_SUPPORTED_ACTIONS = frozenset({"status", "admit"})
+from integrations.github_review_slack_thread import (
+    CHANNEL_ID, ExecutiveSlackReviewThreads, SlackReviewThreadUnavailable,
+)
+from integrations.slack_agent_dialogue.engine import SlackMessage
+_SUPPORTED_ACTIONS = frozenset({"status", "admit", "record_parent"})
 _DECISION_KEYS = frozenset({
     "schema", "admitted", "refusal", "intent_source", "intent_id",
     "command_id", "delivery_command_id", "repository", "pull_number",
@@ -91,6 +95,8 @@ class ExecutiveGitHubReviewSocketOwner:
         admission_guard: Callable[[], None],
         source_guard: Callable[[ReviewIntentDecision], None],
         repositories: frozenset[str],
+        relay_bot_user_id: str | None = None,
+        worker_constraints: Mapping[str, object] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
             raise TypeError("canonical Executive Runtime required")
@@ -104,8 +110,34 @@ class ExecutiveGitHubReviewSocketOwner:
             raise ValueError("review repository allowlist required")
         self._runtime = runtime
         self._admission_guard = admission_guard
+        if relay_bot_user_id is not None and (
+            type(relay_bot_user_id) is not str
+            or re.fullmatch(r"[UW][A-Z0-9]{8,31}", relay_bot_user_id) is None
+        ):
+            raise ValueError("Relay bot identity must be host-verified")
         self._source_guard = source_guard
         self._repositories = repositories
+        # Parent capture remains default-off until the installed owner supplies
+        # its exact enrolled Relay bot identity; never trust the GitHub frame.
+        self._relay_bot_user_id = relay_bot_user_id
+        # Only the installed Executive host selects existing worker quota
+        # classes. Never accept worker placement or account/model hints from
+        # a public webhook/Unix frame. Empty keeps source tests QUEUED-only.
+        if worker_constraints is None:
+            self._worker_constraints = {}
+        else:
+            if (not isinstance(worker_constraints, Mapping)
+                    or set(worker_constraints) != {"eligible_quota_classes"}):
+                raise ValueError("review worker route must be host-selected")
+            classes = worker_constraints.get("eligible_quota_classes")
+            if (type(classes) not in {list, tuple}
+                    or not 1 <= len(classes) <= 8
+                    or any(type(q) is not str or re.fullmatch(
+                        r"[a-z0-9][a-z0-9_.-]{0,63}", q
+                    ) is None for q in classes)
+                    or len(set(classes)) != len(classes)):
+                raise ValueError("review worker quota classes invalid")
+            self._worker_constraints = {"eligible_quota_classes": list(classes)}
         # Admission is bound to an individual immutable request when handled;
         # never retain mutable per-request authority on this shared owner.
 
@@ -145,6 +177,57 @@ class ExecutiveGitHubReviewSocketOwner:
                     or provenance.get("repository") not in self._repositories):
                 raise GitHubReviewSocketRefused("REVIEW_SOCKET_COMMAND_CONFLICT")
             return {"schema": RESPONSE_SCHEMA, "state": "EXISTS", "job_id": event.job_id}
+        if action == "record_parent":
+            if set(frame) != {
+                "schema", "action", "decision", "job_id",
+                "channel_id", "thread_ts", "author_user_id",
+            }:
+                raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID")
+            if self._relay_bot_user_id is None:
+                raise GitHubReviewSocketRefused("REVIEW_SLACK_PROVENANCE_UNBOUND")
+            chosen = _closed_decision(frame.get("decision"))
+            job_id = frame.get("job_id")
+            if (chosen.repository not in self._repositories
+                    or type(job_id) is not str
+                    or re.fullmatch(r"JOB-[0-9]+", job_id) is None
+                    or frame.get("channel_id") != CHANNEL_ID
+                    or frame.get("author_user_id") != self._relay_bot_user_id):
+                raise GitHubReviewSocketRefused("REVIEW_SLACK_PARENT_IDENTITY_REFUSED")
+            # The public webhook cannot name an arbitrary Job/thread: capture
+            # only against the immutable canonical admission for this PR head.
+            event = self._runtime.store.get_event_by_command_id(
+                chosen.command_id
+            )
+            provenance = (event.payload.get("provenance")
+                          if event is not None else None)
+            if (
+                event is None or event.event_type != "JOB_CREATED"
+                or event.job_id != job_id or not isinstance(provenance, dict)
+                or provenance.get("schema") != "mastermind.github_review_runtime_admission.v1"
+                or provenance.get("command_id") != chosen.command_id
+                or provenance.get("repository") != chosen.repository
+                or provenance.get("pull_number") != chosen.pull_number
+                or provenance.get("frozen_head_sha") != chosen.frozen_head_sha
+                or provenance.get("actor") != chosen.actor
+            ):
+                raise GitHubReviewSocketRefused("REVIEW_SLACK_PARENT_JOB_MISMATCH")
+            try:
+                receipt = SlackMessage(
+                    ts=frame.get("thread_ts"),
+                    author_user_id=self._relay_bot_user_id,
+                    text="Verified enrolled Relay parent receipt",
+                )
+                ExecutiveSlackReviewThreads(
+                    runtime=self._runtime
+                ).record_parent(decision=chosen, job_id=job_id, message=receipt)
+            except (ValueError, SlackReviewThreadUnavailable):
+                raise GitHubReviewSocketRefused(
+                    "REVIEW_SLACK_PARENT_INVALID_OR_CONFLICT"
+                ) from None
+            return {
+                "schema": RESPONSE_SCHEMA, "state": "PARENT_RECORDED",
+                "job_id": job_id,
+            }
         if set(frame) != {"schema", "action", "decision", "objective"}:
             raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID")
         chosen = _closed_decision(frame.get("decision"))
@@ -172,6 +255,7 @@ class ExecutiveGitHubReviewSocketOwner:
             job = ExecutiveReviewJobAdmission(
                 runtime=self._runtime,
                 admission_guard=current_request_authority,
+                constraints=self._worker_constraints,
             ).admit_review_intent(decision=chosen, objective=objective)
         except ReviewAdmissionUnavailable:
             raise GitHubReviewSocketRefused("REVIEW_RUNTIME_ADMISSION_REFUSED") from None

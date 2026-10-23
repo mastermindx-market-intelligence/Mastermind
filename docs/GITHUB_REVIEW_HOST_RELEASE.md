@@ -142,13 +142,17 @@ Runtime/database access. The legacy in-process Runtime admission mode remains
 for the Executive owner and hermetic tests. The receiver and publication gates
 default disabled; assembling an object is not starting a listener.
 
-The socket client supports only exact review-command status lookup and one
-bounded review-admission submit frame. It does not enumerate Executive jobs,
+The socket client exposes exact review-command status, bounded review
+admission, and one source-bound Slack parent-receipt capture frame over the
+**same existing authenticated socket**. It does not enumerate Executive jobs,
 run a worker, retry a lost POST, hold a credential, or select a model. The
-`ExecutiveGitHubReviewSocketOwner` can validate and admit these frames against
-the incumbent JobRegistry and EventStore **when an authorized control host
-actually invokes it**. Its source_guard remains an explicitly injected trusted
-source-authorization dependency, not a satisfied production proof.
+`ExecutiveGitHubReviewSocketOwner` can apply those frames to the incumbent
+JobRegistry/EventStore **only when an authorized control host invokes it**.
+Its source_guard remains an explicitly injected trusted source-authorization
+dependency, not satisfied production proof. Only the trusted Executive host
+may supply the existing `eligible_quota_classes` worker route; the public
+webhook host rejects worker constraints entirely. An unbound/default route
+cannot be treated as actual worker-START eligibility.
 
 **Critical missing production binding:** The existing
 `ExecutiveControlService` authenticated CEO socket handler has NOT gained
@@ -190,12 +194,18 @@ read the original exact command from the existing canonical Executive ledger.
 The real host must supply a trusted, bounded source guard and keep slow GitHub
 network reads outside long-held database locks when integrating its endpoint.
 
-`tests/test_github_review_socket_http_integration.py` covers one signed
-GitHub webhook through the public socket-backed composition into an actual
-test Runtime/JobRegistry across a local Unix-socket transport, with signed
-redelivery dedupe, worker-START absence, sanitized Slack visibility and invalid
-signature refusal. This is **hermetic source-path proof only**, not evidence
-that the installed `ExecutiveControlService` accepts the new review frame.
+`tests/test_github_review_socket_http_integration.py` now covers one signed
+GitHub webhook through public socket-backed composition into an actual
+test Runtime/JobRegistry, with redelivery dedupe and an explicit no-false-START
+assertion. After the test worker's genuine fixture Attempt completes, the
+existing return owner publishes exactly one mock GitHub advisory `COMMENT`
+at the frozen head and sends exactly one sanitized result to the **same Slack
+thread captured through the socket**. Negative tests reject wrong Job/Relay
+bot/channel/timestamp, repeated conflicting thread capture, unbound worker
+route authority and uncertain partial socket writes. All work occurs in
+hermetic mocked GitHub/Slack transports and a test socket; this is **not**
+evidence that installed `ExecutiveControlService` accepts the new frame,
+that a production worker STARTed, or that a real GitHub/Slack write occurred.
 The legacy 21-line dormant Executive binding worktree diff remains excluded
 from this PR because the production handler modification was platform-denied.
 

@@ -38,7 +38,7 @@ def test_public_socket_composition_is_dormant_and_has_no_runtime_database(tmp_pa
         socket_client=socket,
     )
     assert app._fabric is socket
-    assert app._visibility._threads is None
+    assert app._visibility._threads is socket  # exact socket port, no Runtime
     sent = []
     async def receive():
         return {"type": "http.request", "body": b"", "more_body": False}
@@ -74,4 +74,18 @@ def test_no_runtime_or_socket_is_a_configuration_refusal():
             private_key_source=lambda: b"not-used",
             webhook_secret_source=Hook(), relay_client=slack(),
             publisher_login="reviewer-bot[bot]",
+        )
+
+def test_public_socket_host_cannot_select_executive_worker_route(tmp_path):
+    socket = ExecutiveReviewSocketClient(socket_path=str(tmp_path / "unarmed.sock"))
+    with pytest.raises(
+        GitHubReviewHostCompositionUnavailable, match="WORKER_ROUTE_OWNER_ONLY"
+    ):
+        compose_github_review_host(
+            settings=_settings(enabled=False), app_id=123,
+            private_key_source=lambda: b"unread",
+            webhook_secret_source=Hook(),
+            relay_client=slack(), publisher_login="reviewer-bot[bot]",
+            socket_client=socket,
+            worker_constraints={"eligible_quota_classes": ["codex-native"]},
         )

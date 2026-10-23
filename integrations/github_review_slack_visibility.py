@@ -12,6 +12,7 @@ import asyncio
 from control_plane.github_review_intent import ReviewIntentDecision
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
 from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+from integrations.github_review_socket_client import ExecutiveReviewSocketClient
 
 REVIEW_CHANNEL_ID = "C0CAUK8P8S3"
 MAX_NOTICE_CHARS = 700
@@ -24,10 +25,14 @@ class SlackReviewVisibility:
         client: SlackWebApiDialogueClient,
         channel_id: str = REVIEW_CHANNEL_ID,
         public_repository_names_authorized: bool = False,
-        threads: ExecutiveSlackReviewThreads | None = None,
+        threads: ExecutiveSlackReviewThreads | ExecutiveReviewSocketClient | None = None,
     ) -> None:
         if not isinstance(client, SlackWebApiDialogueClient):
             raise ValueError("existing Slack dialogue client must be bound")
+        if threads is not None and not isinstance(
+            threads, (ExecutiveSlackReviewThreads, ExecutiveReviewSocketClient)
+        ):
+            raise ValueError("canonical Executive Slack parent recorder required")
         if channel_id != REVIEW_CHANNEL_ID:
             raise ValueError("review status must use the exact enrolled channel")
         self._client = client

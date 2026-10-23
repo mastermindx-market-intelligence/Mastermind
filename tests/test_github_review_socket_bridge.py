@@ -189,3 +189,129 @@ def test_oversized_socket_frame_refuses_before_guard_or_ledger(tmp_path):
         owner.handle_frame(frame)
     assert checked == []
     assert runtime.jobs.list_jobs() == []
+
+def parent_frame(subject, job_id, *, ts="1792699000.000001",
+                 bot="U0BT71H4FQE", channel="C0CAUK8P8S3"):
+    return {
+        "schema": FRAME_SCHEMA, "action": "record_parent",
+        "decision": subject.to_dict(), "job_id": job_id,
+        "channel_id": channel, "thread_ts": ts, "author_user_id": bot,
+    }
+
+
+def test_socket_parent_requires_enrolled_relay_and_original_job(tmp_path):
+    from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+
+    subject = decision()
+    owner, runtime = make_owner(tmp_path)
+    job_id = owner.handle_frame(admit_frame(subject))["job_id"]
+    with pytest.raises(GitHubReviewSocketRefused, match="PROVENANCE_UNBOUND"):
+        owner.handle_frame(parent_frame(subject, job_id))
+    assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
+        decision=subject, job_id=job_id,
+    ) is None
+
+    authorized = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: None,
+        repositories=frozenset({"example/repo"}),
+        relay_bot_user_id="U0BT71H4FQE",
+    )
+    bad = [
+        parent_frame(subject, "JOB-999"),
+        parent_frame(subject, job_id, bot="U0ATTACKER"),
+        parent_frame(subject, job_id, channel="C0WRONGCHN"),
+        parent_frame(subject, job_id, ts="1234"),
+    ]
+    for frame in bad:
+        with pytest.raises(GitHubReviewSocketRefused):
+            authorized.handle_frame(frame)
+    assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
+        decision=subject, job_id=job_id,
+    ) is None
+
+    frame = parent_frame(subject, job_id)
+    receipt = authorized.handle_frame(frame)
+    assert receipt == {
+        "schema": RESPONSE_SCHEMA, "state": "PARENT_RECORDED",
+        "job_id": job_id,
+    }
+    assert authorized.handle_frame(frame) == receipt
+    assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
+        decision=subject, job_id=job_id,
+    ) == "1792699000.000001"
+    events = runtime.store.list_events(command_id_prefix="gh-review-slack-parent:")
+    assert len(events) == 1
+
+    with pytest.raises(GitHubReviewSocketRefused, match="CONFLICT"):
+        authorized.handle_frame(parent_frame(
+            subject, job_id, ts="1792699000.000002"
+        ))
+    assert len(runtime.store.list_events(
+        command_id_prefix="gh-review-slack-parent:"
+    )) == 1
+
+
+def test_partial_socket_parent_capture_is_unknown_no_automatic_repost(
+    tmp_path, monkeypatch,
+):
+    from integrations import github_review_socket_client as socket_module
+    from integrations.slack_agent_dialogue.engine import SlackMessage
+
+    class PartialSend:
+        def __enter__(self):
+            return self
+        def __exit__(self, *args):
+            return None
+        def settimeout(self, value):
+            return None
+        def connect(self, path):
+            return None
+        def sendall(self, raw):
+            assert b"record_parent" in raw
+            raise BrokenPipeError("partially transmitted parent receipt")
+
+    monkeypatch.setattr(socket_module.socket, "socket", lambda *args: PartialSend())
+    client = ExecutiveReviewSocketClient(socket_path=str(tmp_path / "held.sock"))
+    with pytest.raises(ReviewAdmissionUnavailable, match="PARENT_EFFECT_UNKNOWN"):
+        client.record_parent(
+            decision=decision(), job_id="JOB-001",
+            message=SlackMessage(
+                ts="1792699000.000001", author_user_id="U0BT71H4FQE",
+                text="Recorded trusted original Slack parent",
+            ),
+        )
+
+@pytest.mark.parametrize("invalid", [
+    {"eligible_quota_classes": []},
+    {"eligible_quota_classes": ["codex-native", "codex-native"]},
+    {"eligible_quota_classes": ["../../untrusted"]},
+    {"provider": "codex"},
+    {"eligible_quota_classes": ["codex-native"], "model": "override"},
+])
+def test_review_worker_eligibility_is_a_closed_host_only_binding(tmp_path, invalid):
+    runtime = Runtime.at(tmp_path / "runtime")
+    with pytest.raises(ValueError, match="worker"):
+        ExecutiveGitHubReviewSocketOwner(
+            runtime=runtime,
+            admission_guard=lambda: None,
+            source_guard=lambda _: None,
+            repositories=frozenset({"example/repo"}),
+            worker_constraints=invalid,
+        )
+    assert runtime.jobs.list_jobs() == []
+
+
+def test_owner_selected_existing_worker_quota_class_survives_socket_admission(tmp_path):
+    runtime = Runtime.at(tmp_path / "runtime")
+    owner = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: None, repositories=frozenset({"example/repo"}),
+        worker_constraints={"eligible_quota_classes": ["codex-native"]},
+    )
+    job_id = owner.handle_frame(admit_frame(decision()))["job_id"]
+    admitted = runtime.jobs.get_job(job_id)
+    assert admitted.constraints["eligible_quota_classes"] == ["codex-native"]
+    assert admitted.requested_authorities == ["READ"]
+    assert admitted.allowed_write_paths == []
+    assert admitted.attempt_count == 0
