@@ -137,6 +137,12 @@ def _scratch_qualify(
     source_root: Path, baseline_files: dict[str, str], successor_files: dict[str, str],
     scratch_root: Path,
 ) -> dict[str, object]:
+    # Assert the release boundary at the publisher entry point, rather than
+    # relying on a caller's construction of the baseline/successor manifests.
+    if (set(baseline_files) != set(successor_files)
+            or {key for key in baseline_files
+                if baseline_files[key] != successor_files[key]} != {OPERATOR}):
+        raise QualificationRefused("release contains a change outside operator guidance")
     fake_ext = scratch_root / "fake-owner" / "ext"
     fake_ext.mkdir(parents=True)
     previous = generation.publish(source_root / "baseline", fake_ext, baseline_files)
@@ -214,8 +220,6 @@ def qualify(
                 target.write_bytes(payload)
             baseline[rel] = wanted
             successor[rel] = sha(patched) if rel == OPERATOR else wanted
-        if {key for key in baseline if baseline[key] != successor[key]} != {OPERATOR}:
-            raise QualificationRefused("release contains a change outside operator guidance")
         test = _scratch_qualify(source, baseline, successor, scratch)
         if read_regular(store / "CURRENT.json", max_bytes=4096) != before:
             raise QualificationRefused("live selection changed during qualification")

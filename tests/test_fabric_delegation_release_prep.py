@@ -166,6 +166,102 @@ def test_staging_is_new_sibling_and_never_selects_live_generation(installed, tmp
                  merged_repo=ROOT, merged_ref="synthetic-test")
 
 
+@pytest.mark.parametrize("mutation", ["missing_file", "extra_file", "missing_operator"])
+def test_qualifier_refuses_wrong_selected_85_file_closure(installed, monkeypatch, mutation):
+    # Exercise the actual qualify() call, not the fixture's own 85-file count.
+    real_verify = release.generation.verify
+
+    def adversarial_verify(store, selected_generation):
+        root, metadata = real_verify(store, selected_generation)
+        files = dict(metadata["files"])
+        if mutation == "missing_file":
+            files.pop("pool")
+        elif mutation == "extra_file":
+            files["ext/unreviewed.py"] = "0" * 64
+        else:
+            files.pop(release.OPERATOR)
+        return root, {**metadata, "files": files}
+
+    monkeypatch.setattr(release.generation, "verify", adversarial_verify)
+    with pytest.raises(release.QualificationRefused, match="selected manifest closure differs"):
+        _qualify(installed)
+
+
+def test_qualifier_refuses_mismatched_sealed_nonoperator_digest(installed, monkeypatch):
+    # A forged upstream manifest cannot sidestep the independent per-file check.
+    real_verify = release.generation.verify
+
+    def adversarial_verify(store, selected_generation):
+        root, metadata = real_verify(store, selected_generation)
+        files = dict(metadata["files"])
+        files["pool"] = "0" * 64
+        return root, {**metadata, "files": files}
+
+    monkeypatch.setattr(release.generation, "verify", adversarial_verify)
+    with pytest.raises(release.QualificationRefused, match="sealed code digest changed: pool"):
+        _qualify(installed)
+
+
+@pytest.mark.parametrize("mutation", ["unchanged_operator", "extra_modified_file", "missing_file"])
+def test_scratch_publisher_rejects_any_non_operator_only_change(tmp_path, mutation):
+    # This is the production publisher entry point, not a textual assertion
+    # about an unreachable branch of qualify().
+    baseline = {release.OPERATOR: "a" * 64, "pool": "b" * 64}
+    successor = {release.OPERATOR: "c" * 64, "pool": "b" * 64}
+    if mutation == "unchanged_operator":
+        successor[release.OPERATOR] = baseline[release.OPERATOR]
+    elif mutation == "extra_modified_file":
+        successor["pool"] = "d" * 64
+    else:
+        successor.pop("pool")
+    scratch = tmp_path / "scratch"
+    with pytest.raises(release.QualificationRefused,
+                       match="release contains a change outside operator guidance"):
+        release._scratch_qualify(tmp_path, baseline, successor, scratch)
+    assert not scratch.exists()
+
+
+def test_merged_source_verifier_checks_real_git_ancestry_and_exact_candidate(tmp_path):
+    # A tiny local Git repository proves the protected-source gate without
+    # mocking its implementation or contacting GitHub/production remotes.
+    repo = tmp_path / "Mastermind"
+    repo.mkdir()
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, capture_output=True)
+
+    def git(*args):
+        return subprocess.run(["git", "-C", str(repo), *args],
+                              check=True, capture_output=True, text=True).stdout.strip()
+
+    rel = "ops/native_fabric/quota_continuity/candidate/fabric_operator_client.py"
+    candidate = repo / rel
+    candidate.parent.mkdir(parents=True)
+    original = b"# pinned merged candidate in local protected-master simulation\n"
+    candidate.write_bytes(original)
+    git("add", rel)
+    commit_options = ("-c", "user.name=Mastermind CI",
+                      "-c", "user.email=ci@example.invalid")
+    git(*commit_options, "commit", "-q", "-m", "fixture protected source")
+    protected_head = git("rev-parse", "HEAD")
+    git("update-ref", "refs/remotes/origin/master", protected_head)
+
+    assert release._verify_merged_source(repo, protected_head, original) == protected_head
+    with pytest.raises(release.QualificationRefused,
+                       match="protected merged candidate bytes mismatch"):
+        release._verify_merged_source(repo, protected_head, original + b"tampered")
+    with pytest.raises(release.QualificationRefused, match="source repository identity refused"):
+        release._verify_merged_source(tmp_path, protected_head, original)
+    with pytest.raises(release.QualificationRefused, match="protected merged commit not found"):
+        release._verify_merged_source(repo, "f" * 40, original)
+
+    candidate.write_bytes(original + b"# later unmerged revision\n")
+    git("add", rel)
+    git(*commit_options, "commit", "-q", "-m", "fixture unmerged change")
+    later_head = git("rev-parse", "HEAD")
+    with pytest.raises(release.QualificationRefused,
+                       match="candidate commit is not present on protected master"):
+        release._verify_merged_source(repo, later_head, candidate.read_bytes())
+
+
 def _run(run_id: str, parent: str, root: str, generation: str, *, answer: str = "verified returned result") -> dict:
     sha = "b" * 64
     return {
