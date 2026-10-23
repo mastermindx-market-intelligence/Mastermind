@@ -230,6 +230,12 @@ class NativePeekaboo:
         shot = private_dir / "paper-menu.png"
         args = ["see", "--window-id", str(window_id), "--ocr",
                 "--path", str(shot)]
+        # Never accept a previous menu capture if Peekaboo reports success
+        # but silently fails to refresh the PNG on this invocation.
+        try:
+            shot.unlink(missing_ok=True)
+        except OSError as exc:
+            raise bridge.Refusal("UI_ROW_VISUAL_UNAVAILABLE") from exc
         obj = self._json(args, timeout=18)
         data = obj.get("data")
         if not isinstance(data, dict):
@@ -260,7 +266,7 @@ def _row_visual_fingerprint(image_path: Path, context: dict,
     if (not isinstance(bounds, list) or len(bounds) != 2
             or not isinstance(bounds[1], list) or len(bounds[1]) != 2
             or not isinstance(frame, list) or len(frame) != 2
-            or scale != 1
+            or type(scale) is not int or scale != 1
             or any(type(x) is not int or x <= 0 for x in frame)
             or any(not _finite_number(x) or x <= 0 for x in bounds[1])
             or any(abs(frame[i] - bounds[1][i]) > 2 for i in (0, 1))):
@@ -272,6 +278,9 @@ def _row_visual_fingerprint(image_path: Path, context: dict,
             or not image_path.is_file()):
         raise bridge.Refusal("UI_ROW_VISUAL_UNVERIFIED")
     try:
+        # sips can return success without rewriting its output on a partial
+        # failure; a leftover crop must never become fresh visual evidence.
+        crop_path.unlink(missing_ok=True)
         p = subprocess.run(["/usr/bin/sips", "-s", "format", "png",
                             "-c", str(height), str(width), "--cropOffset",
                             str(y), str(x), str(image_path),
