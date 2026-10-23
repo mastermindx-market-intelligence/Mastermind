@@ -10,6 +10,8 @@ from __future__ import annotations
 import argparse
 from datetime import datetime
 import json
+import os
+import stat
 from pathlib import Path
 import re
 from typing import Any, Mapping
@@ -22,6 +24,13 @@ ENDPOINT = "https://ark.ap-southeast.bytepluses.com/api/coding"
 WINDOWS = ("session", "weekly", "monthly")
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
 OPERATION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+# An exact date-time grammar, not Python fromisoformat's broader ISO-8601
+# acceptance (basic dates, week dates, space separators and short offsets).
+RESET_RFC3339 = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]{1,6})?(?:Z|[+-][0-9]{2}:[0-9]{2})$"
+)
+MAX_INPUT_BYTES = 16384
 
 
 class CanaryEvidenceInputError(ValueError):
@@ -47,7 +56,7 @@ def _stamp_or_none(value: Any, where: str) -> None:
 def _reset_or_none(value: Any) -> None:
     if value is None:
         return
-    if type(value) is not str or len(value) > 45:
+    if type(value) is not str or len(value) > 45 or not RESET_RFC3339.fullmatch(value):
         raise CanaryEvidenceInputError("invalid window reset")
     try:
         dt = datetime.fromisoformat(value.replace("Z", "+00:00"))
@@ -97,7 +106,7 @@ def inspect_attended_evidence(document: Any) -> dict[str, Any]:
         raise CanaryEvidenceInputError("invalid attendance declaration")
     _stamp_or_none(row["started_at_unix"], "start")
     _stamp_or_none(row["ended_at_unix"], "end")
-    if row["started_at_unix"] is not None and row["ended_at_unix"] is not None and row["ended_at_unix"] < row["started_at_unix"]:
+    if row["started_at_unix"] is not None and row["ended_at_unix"] is not None and row["ended_at_unix"] <= row["started_at_unix"]:
         raise CanaryEvidenceInputError("reversed attempt timestamps")
     profile = get_profile("byteplus-coding-plan-personal")
     permitted = frozenset(profile.models.values())
@@ -194,17 +203,36 @@ def inspect_attended_evidence(document: Any) -> dict[str, Any]:
     }
 
 
+def _read_bounded_regular_json(path: Path) -> Any:
+    """Read from the *same* opened inode, bounded even if size mutates.
+
+    O_NONBLOCK prevents FIFO hangs before regular-file verification.
+    O_NOFOLLOW rejects symlink swapping on supported POSIX hosts.
+    """
+    flags = os.O_RDONLY | getattr(os, "O_NONBLOCK", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    with os.fdopen(fd, "rb") as handle:
+        meta = os.fstat(handle.fileno())
+        if not stat.S_ISREG(meta.st_mode):
+            raise CanaryEvidenceInputError("regular file required")
+        if meta.st_size > MAX_INPUT_BYTES:
+            raise CanaryEvidenceInputError("evidence file too large")
+        payload = handle.read(MAX_INPUT_BYTES + 1)
+        if len(payload) > MAX_INPUT_BYTES:
+            raise CanaryEvidenceInputError("evidence file too large")
+    return json.loads(payload.decode("utf-8"))
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="Validate a redacted attended BytePlus evidence candidate (NO admission).")
     ap.add_argument("evidence_json", type=Path)
     args = ap.parse_args()
     try:
-        # Limit memory consumption and accidental sensitive transcript ingestion.
-        if args.evidence_json.stat().st_size > 16384:
-            raise CanaryEvidenceInputError("evidence file too large")
-        raw = json.loads(args.evidence_json.read_text(encoding="utf-8"))
+        # Never stat one pathname inode and read another; never read unbounded
+        # pipes/devices or echo an unsafe operator record.
+        raw = _read_bounded_regular_json(args.evidence_json)
         result = inspect_attended_evidence(raw)
-    except (CanaryEvidenceInputError, OSError, ValueError, TypeError, json.JSONDecodeError):
+    except (CanaryEvidenceInputError, OSError, ValueError, TypeError, RecursionError, MemoryError):
         print(json.dumps({"schema": "mastermind.byteplus_attended_evidence_inspection.v1",
                           "status": "INVALID_OPERATOR_EVIDENCE", "capacity_fact_issued": False,
                           "autonomous_start_authorized": False}))

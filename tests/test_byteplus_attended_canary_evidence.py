@@ -1,6 +1,7 @@
 """Offline evidence candidate inspection never grants BytePlus capacity."""
 import copy
 import json
+import os
 from pathlib import Path
 import socket
 import subprocess
@@ -188,6 +189,81 @@ def test_preflight_never_calls_network_or_subprocess(monkeypatch):
         p.setattr(socket, "socket", forbidden)
         p.setattr(subprocess, "Popen", forbidden)
         assert inspect_attended_evidence(template())["capacity_fact_issued"] is False
+
+
+@pytest.mark.parametrize("invalid", [
+    "20261026T000000+0800",
+    "2026-10-26 00:00:00+08:00",
+    "2026-10-26T00:00:00+08",
+    "2026-W43-1T00:00:00+08:00",
+    "2026-10-26T00:00:00.123456789+08:00",
+])
+def test_non_rfc3339_reset_rejected_even_with_timezone(invalid):
+    d = complete_example()
+    d["after"]["reset_at"]["weekly"] = invalid
+    with pytest.raises(CanaryEvidenceInputError, match="invalid window reset"):
+        inspect_attended_evidence(d)
+
+
+def test_zero_duration_attempt_fails_closed():
+    d = complete_example()
+    d["attempt"]["ended_at_unix"] = d["attempt"]["started_at_unix"]
+    with pytest.raises(CanaryEvidenceInputError, match="reversed attempt timestamps"):
+        inspect_attended_evidence(d)
+
+
+def test_valid_zulu_reset_supported():
+    d = complete_example()
+    d["before"]["reset_at"]["weekly"] = "2026-10-26T00:00:00Z"
+    d["after"]["reset_at"]["weekly"] = "2026-10-26T00:00:00Z"
+    assert inspect_attended_evidence(d)["weekly_monthly_windows_comparable"]
+
+
+@pytest.mark.skipif(not hasattr(os, "mkfifo"), reason="POSIX FIFO required")
+def test_cli_fifo_refused_without_blocking(tmp_path):
+    path = tmp_path / "untrusted_pipe"
+    os.mkfifo(path)
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.byteplus_attended_canary_evidence", str(path)],
+        cwd=ROOT, capture_output=True, text=True, timeout=4,
+    )
+    assert proc.returncode == 2
+    assert json.loads(proc.stdout)["autonomous_start_authorized"] is False
+    assert not proc.stderr
+
+
+@pytest.mark.skipif(not Path("/dev/zero").exists(), reason="POSIX device required")
+def test_cli_device_refused_without_unbounded_read():
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.byteplus_attended_canary_evidence", "/dev/zero"],
+        cwd=ROOT, capture_output=True, text=True, timeout=4,
+    )
+    assert proc.returncode == 2
+    assert json.loads(proc.stdout)["capacity_fact_issued"] is False
+    assert proc.stderr == ""
+
+
+def test_cli_too_large_file_refused_without_content_leak(tmp_path):
+    path = tmp_path / "private.txt"
+    path.write_text("secret@example.invalid" * 1500)
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.byteplus_attended_canary_evidence", str(path)],
+        cwd=ROOT, capture_output=True, text=True, timeout=4,
+    )
+    assert proc.returncode == 2
+    assert "secret@example" not in proc.stdout + proc.stderr
+
+
+def test_cli_deeply_nested_json_refused_without_traceback(tmp_path):
+    path = tmp_path / "deep.json"
+    path.write_text("[" * 1100 + "0" + "]" * 1100)
+    proc = subprocess.run(
+        [sys.executable, "-m", "scripts.byteplus_attended_canary_evidence", str(path)],
+        cwd=ROOT, capture_output=True, text=True, timeout=4,
+    )
+    assert proc.returncode == 2
+    assert proc.stderr == ""
+    assert json.loads(proc.stdout)["capacity_fact_issued"] is False
 
 
 def test_cli_json_contract():
