@@ -18,7 +18,7 @@ def load_operator_environment(env, run_id, mode, model, packet_bytes, *, home=No
     if not marker:
         return result
     expected = 'lanes/tmp/' + run_id + '.operator-cap.json'
-    if marker != expected or (mode, model) not in {('glm', 'glm-5.3'), ('grok', 'grok-4.6')}:
+    if marker != expected or (mode, model) not in {('glm', 'glm-5.3'), ('grok', 'grok-4.6'), ('grok', 'grok-4.7')}:
         raise ValueError('operator_capsule_scope')
     if env.get('POOL_TASK_CLASS') != 'domain_orchestration':
         raise ValueError('operator_capsule_role')
