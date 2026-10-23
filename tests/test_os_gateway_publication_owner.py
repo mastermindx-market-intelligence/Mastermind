@@ -666,11 +666,12 @@ def gateway(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_assets, "require_sealed_path", lambda *a, **k: None)
     real_getpwuid = control.pwd.getpwuid
+    real_getpwnam = control.pwd.getpwnam
 
     class _Record:
         pw_uid = STUDIO_UID
         pw_gid = STUDIO_GID
-        pw_name = control.OS_GATEWAY_STUDIO_ACCOUNT
+        pw_name = "studio-os-owner"
 
         def __init__(self):
             self.pw_dir = str(home)
@@ -679,6 +680,10 @@ def gateway(monkeypatch, tmp_path):
         control.pwd,
         "getpwuid",
         lambda uid: _Record() if uid == STUDIO_UID else real_getpwuid(uid),
+    )
+    monkeypatch.setattr(
+        control.pwd, "getpwnam",
+        lambda name: _Record() if name == "studio-os-owner" else real_getpwnam(name),
     )
     _install_namespace_helper(monkeypatch)
     _rebind_installed_paths(monkeypatch, root, config_root)
@@ -2403,3 +2408,21 @@ def test_origin_joins_actual_release_verifier_before_protected_state(gateway, mo
     assert seen == [(s.release, SHA, TREE_SHA)]
     assert not control.AUTONOMY_TRANSACTION.exists()
     assert not control.OS_GATEWAY_RECEIPT.exists()
+
+
+def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch):
+    s = gateway
+    record = control.pwd.getpwuid(STUDIO_UID)
+    assert record.pw_name == "studio-os-owner"
+    assert record.pw_name != control.OS_GATEWAY_STUDIO_ACCOUNT
+    assert s.host._studio_account_identity() == (s.home, STUDIO_GID)
+    assert s.publish().state == "PUBLISHED"
+    actual_getpwnam = control.pwd.getpwnam
+    for field, foreign in (("pw_uid", 502), ("pw_gid", STUDIO_GID + 1),
+                           ("pw_dir", str(s.home / "foreign"))):
+        fields = {key: getattr(record, key) for key in ("pw_uid", "pw_gid", "pw_dir", "pw_name")}
+        fields[field] = foreign
+        monkeypatch.setattr(control.pwd, "getpwnam", lambda name, fields=fields: types.SimpleNamespace(**fields))
+        with pytest.raises(control.GatewayPublicationError):
+            s.host._studio_account_identity()
+    monkeypatch.setattr(control.pwd, "getpwnam", actual_getpwnam)

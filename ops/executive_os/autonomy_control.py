@@ -6050,8 +6050,19 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
             or record.pw_uid == 0
             or type(record.pw_gid) is not int
             or record.pw_gid == 0
-            or name != OS_GATEWAY_STUDIO_ACCOUNT
+            or type(name) is not str
+            or not name
             or not home.is_absolute()
+        ):
+            raise GatewayPublicationError("gateway_studio_invalid")
+        # The instance accountLabel is a private_service key, not an OS
+        # username. Rejoin the actual UID-501 pwd principal independently.
+        try:
+            named = pwd.getpwnam(name)
+        except (KeyError, TypeError, ValueError) as exc:
+            raise GatewayPublicationError("gateway_studio_invalid") from exc
+        if (named.pw_uid, named.pw_gid, named.pw_dir, named.pw_name) != (
+            record.pw_uid, record.pw_gid, record.pw_dir, name
         ):
             raise GatewayPublicationError("gateway_studio_invalid")
         return home, record.pw_gid
