@@ -36,7 +36,9 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 EXPECTED_NATIVE_FILES = 85
 # Integrated protected Fabric qualification and task/host overlays with
 # PR #1694 operator instructions, retaining all installed code preimages.
-NATIVE_MANIFEST_SHA = "78741512fd92cff5e5cbf2f21760ca458b8c99ed1d2d9551de11019c12b0e269"
+# Include the reviewed historical-denial outcome correction; executor and donor
+# transformation pins above remain unchanged.
+NATIVE_MANIFEST_SHA = "29e2506fc499eb8a3bfa01437b542f50085981594f8fbe9a47907104cc8d377b"
 
 
 def _sha(raw):
