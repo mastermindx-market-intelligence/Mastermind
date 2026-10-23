@@ -245,7 +245,11 @@ def test_expiry_and_real_unsubscribe_after_commit_withhold_send(event_case,tmp_p
     receipt=asyncio.run(with_peer(s,tmp_path,short_socket_root,subscribe));native=asyncio.run(native_commit(s))
     s.auth.now[0]=receipt.expires_at
     result=asyncio.run(s.host.consumer.handle_committed(read_ref=s.ref,message_key=native['message_key'],fingerprint=native['fingerprint']))
-    assert result[0]['state']=='UNAVAILABLE' and len(s.http)==1
+    # The recipient has expired, but after COMMIT the callback settlement
+    # cannot be proven no-effect: preserve the original reservation and
+    # classify an untyped post-send error as EFFECT_UNKNOWN, never replay.
+    assert result[0]['state']=='EFFECT_UNKNOWN' and result[0]['parent_consumed'] is False
+    assert len(s.http)==1
     s.auth.now[0]=receipt.expires_at-1
     async def stop(client,service):return await client.unsubscribe(s.principal,EventUnsubscribeRequest(s.event.command_id,URL))
     stopped=asyncio.run(with_peer(s,tmp_path,short_socket_root,stop));assert stopped.committed
