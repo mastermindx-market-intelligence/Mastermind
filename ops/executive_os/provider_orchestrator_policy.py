@@ -61,9 +61,10 @@ BACKUP_SUFFIX = ".mastermind-orchestrator-backup"
 ROLE_PACKAGE = "mastermind-fabric-orchestration"
 CLAUDE_FABRIC_SKILL_PACKAGE = "mastermind-claude-fabric-delegation"
 # Git blob digest of the separately reviewed local Skill source; not a runtime grant.
-CLAUDE_FABRIC_SKILL_BLOB_SHA = "3dc63723e0e002bdb2337aaf68dfa97b7c0ced5f"
+CLAUDE_FABRIC_SKILL_BLOB_SHA = "41d9b46459138bfef4537ab6a32fa7cd3a0559d8"
 CODEX_FABRIC_SKILL_PACKAGE = "mastermind-fabric-delegate"
-CODEX_FABRIC_SKILL_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
+CODEX_FABRIC_PRIOR_BLOB_SHA = "7fb137a1d2b2a0f4244897d3a71b1f17a70c0a73"
+CODEX_FABRIC_SKILL_BLOB_SHA = "b2a24eaada6c2996513eed32ea6a8fa283175015"
 CODEX_FABRIC_LEGACY_SHA256 = "4700ec891fc040df4d0e4a351ede5acc5cd89eebd5b19bb06e659656033d0b9c"
 CODEX_FABRIC_ENTRY_BEGIN = "<!-- mastermind-codex-fabric-entrypoint-v1 -->"
 CODEX_FABRIC_ENTRY_END = "<!-- /mastermind-codex-fabric-entrypoint-v1 -->"
@@ -1194,7 +1195,10 @@ def apply_codex_fabric_entrypoint(home: Path) -> dict[str, object]:
         _preflight_destination(paths[key], resolved)
     candidate = _canonical_codex_fabric_skill()
     existing = _regular_bytes(paths["codex_fabric_skill"], missing=b"")
-    if existing and existing != candidate and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256:
+    if (existing and existing != candidate
+            and _sha256(existing) != CODEX_FABRIC_LEGACY_SHA256
+            and hashlib.sha1(b"blob " + str(len(existing)).encode("ascii")
+                             + bytes((0,)) + existing).hexdigest() != CODEX_FABRIC_PRIOR_BLOB_SHA):
         raise OrchestratorPolicyError("Codex Fabric installed Skill changed; refusing replacement")
     original_doc = _regular_bytes(paths["codex_doc"], missing=b"")
     updated_doc = _render_codex_fabric_entry_doc(original_doc)

@@ -11,6 +11,7 @@ import pytest
 
 from ops.native_fabric.delegation_access import qualify_release as release
 from ops.native_fabric.delegation_access import canary_receipts as canary
+from ops.native_fabric.quota_continuity.rollout import build_review_stage
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -23,19 +24,45 @@ def installed(tmp_path_factory):
            "--output", str(stage)]
     result = subprocess.run(cmd, text=True, capture_output=True, timeout=90)
     assert result.returncode == 0, result.stderr[-1200:]
-    baseline = json.loads((stage / "native-manifest.json").read_text())
-    assert len(baseline) == 85
+    source_manifest = json.loads((stage / "native-manifest.json").read_text())
+    source_paths = {"pool"} | {
+        "ext/" + name for name in build_review_stage.BASE_FILES | build_review_stage.ADDITIONS
+    }
+    assert set(source_manifest) == source_paths
+    # The protected source closure is now 95 files. The CURRENT selected
+    # release qualification still pins the historically reviewed 85-file
+    # cohort: 74 base modules + 10 older additions + the pool launcher.
+    # Keep that explicit historical file set separate from source-stage growth.
+    selected_additions = frozenset({
+        "capacity_preflight.py", "commission_deadline.py",
+        "current_source_observation.py", "fabric_continuation.py",
+        "native_plain_packet_check.py", "native_plain_packet_reconcile.py",
+        "native_runtime_bindings.py", "provider_outcome.py",
+        "quota_circuit.py", "recovery_artifacts.py",
+    })
+    assert selected_additions <= build_review_stage.ADDITIONS
+    selected_paths = {"pool"} | {
+        "ext/" + name for name in build_review_stage.BASE_FILES | selected_additions
+    }
+    assert len(selected_paths) == 85 and selected_paths <= source_paths
+    synthetic_stage = temp / "synthetic-selected-85"
+    source_stage = stage / "native-code-stage"
+    for relative in sorted(selected_paths):
+        dest = synthetic_stage / relative
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes((source_stage / relative).read_bytes())
+    baseline = {relative: source_manifest[relative] for relative in selected_paths}
     prior = ROOT / "ops/native_fabric/grok47/overlay/fabric_operator_client.py"
     selected = prior.read_bytes()
     assert b"('grok', 'grok-4.7')" in selected
-    native_stage = stage / "native-code-stage"
-    inst = native_stage / release.OPERATOR
+    inst = synthetic_stage / release.OPERATOR
     inst.write_bytes(selected)
     baseline[release.OPERATOR] = release.sha(selected)
-    # Only explicit code hashes are published; the stage metadata is not copied.
+    # Publish only the isolated synthetic 85-file generation, never the
+    # actual 95-file source stage or any live M2 selected native generation.
     fake_ext = temp / "kit" / "ext"
     fake_ext.mkdir(parents=True)
-    prior_dir = release.generation.publish(native_stage, fake_ext, baseline)
+    prior_dir = release.generation.publish(synthetic_stage, fake_ext, baseline)
     store = fake_ext.parent / "native-code-releases"
     selected_pointer = release.generation.select(store, prior_dir.name, None)
     assert selected_pointer["sequence"] == 1
@@ -373,6 +400,59 @@ def test_canary_does_not_accept_failed_child_even_if_return_was_acknowledged():
     assert result["state"] == "REFUSED"
     assert "operator.child.terminal_result" in result["issues"]
     assert result["live_proven"] is False
+
+
+def test_canary_accepts_exact_qwen_required_completion_frame_when_transport_bound():
+    data = _valid_receipts()
+    child = data["cases"]["operator"]["child_run"]
+    digest = canary.EXPECTED_COMPUTATIONS["operator.child"]
+    response = "STATUS: COMPLETE\n" + digest + "\n"
+    transport = hashlib.sha256(response.encode("utf-8")).hexdigest()
+    child["result"].update(adapter_response=response, response_bytes=len(response.encode()),
+                           response_sha256=transport)
+    child["parent_return"]["result_sha256"] = transport
+    child["acceptance"]["reviewed_response_sha256"] = transport
+    op = data["cases"]["operator"]
+    op["child_acknowledgment"]["sha256"] = transport
+    op["operator_run"]["result"]["adapter_response"] = "Child transport digest: " + transport
+    assert canary.evaluate(data)["state"] == "ASSERTIONS_PASS_PROVENANCE_NOT_VERIFIED"
+
+
+@pytest.mark.parametrize("change", [
+    lambda response: response.replace("STATUS: COMPLETE", "STATUS: BLOCKED"),
+    lambda response: "Preamble\n" + response,
+    lambda response: response + "Extra final words\n",
+    lambda response: response.replace("\n", " ", 1),
+    lambda response: response.rstrip("\n"),
+    lambda response: response.replace("a41d34", "a41d35"),
+])
+def test_canary_rejects_unrecognized_or_tampered_qwen_frame(change):
+    data = _valid_receipts()
+    child = data["cases"]["operator"]["child_run"]
+    correct = canary.EXPECTED_COMPUTATIONS["operator.child"]
+    response = change("STATUS: COMPLETE\n" + correct + "\n")
+    raw = response.encode()
+    child["result"].update(adapter_response=response, response_bytes=len(raw),
+                           response_sha256=hashlib.sha256(raw).hexdigest())
+    assert canary.evaluate(data)["state"] == "REFUSED"
+    assert "operator.child.computed_task_result" in canary.evaluate(data)["issues"]
+
+
+@pytest.mark.parametrize("tamper", ["bytes", "sha"])
+def test_canary_rejects_forged_transport_for_exact_qwen_frame(tamper):
+    data = _valid_receipts()
+    child = data["cases"]["operator"]["child_run"]
+    digest = canary.EXPECTED_COMPUTATIONS["operator.child"]
+    response = "STATUS: COMPLETE\n" + digest + "\n"
+    child["result"].update(adapter_response=response, response_bytes=len(response.encode()),
+                           response_sha256=hashlib.sha256(response.encode()).hexdigest())
+    if tamper == "bytes":
+        child["result"]["response_bytes"] += 1
+    else:
+        child["result"]["response_sha256"] = "0"*64
+    outcome = canary.evaluate(data)
+    assert outcome["state"] == "REFUSED"
+    assert "operator.child.computed_task_result" in outcome["issues"]
 
 
 def test_canary_duplicate_json_keys_refused():

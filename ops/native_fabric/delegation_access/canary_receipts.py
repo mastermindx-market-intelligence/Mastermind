@@ -15,8 +15,9 @@ import re
 import sys
 
 SCHEMA = "mastermind.fabric_access_canary_receipts.v1"
-# Fixed, harmless C0 worker inputs. The return must contain ONLY the computed
-# digest (surrounding whitespace permitted), not a prompt echo or claim of rc=0.
+# Fixed, harmless C0 worker inputs. The substantive result must be the
+# computed digest, not a prompt echo or status-only claim. The incumbent Qwen
+# harness additionally requires an exact leading STATUS: COMPLETE line.
 CANARY_INPUTS = {
     "claude": "MMX_FABRIC_CLAUDE_CANARY_V1",
     "codex": "MMX_FABRIC_CODEX_CANARY_V1",
@@ -93,15 +94,21 @@ def _check_run(
              and len(result["adapter_response"].encode("utf-8")) > 0,
              issues, prefix + ".result_payload")
     # The adapter can hash a framed CLI response; do not infer that response_sha256
-    # equals SHA256 of adapter_response's human-facing text preview.
-    # C0 answers, in contrast, are constrained to an exact SHA256 calculation.
-    # Checking the returned answer's *content* prevents receipt-only success.
+    # equals SHA256 of every adapter_response human-facing text preview.
+    # The known incumbent Qwen harness mandates a STATUS: COMPLETE prefix
+    # (qwen_exec.sh terminal contract). Recognize only that EXACT two-line
+    # form when the raw bytes AND transport digest can be independently bound.
+    # Arbitrary text, echo commentary, STATUS: BLOCKED, and forged digest/length
+    # still fail closed. The receipt remains untrusted until ledger readback.
     if expected_computation is not None:
-        _require(
-            isinstance(result.get("adapter_response"), str)
-            and result["adapter_response"].strip() == expected_computation,
-            issues, prefix + ".computed_task_result",
-        )
+        response = result.get("adapter_response")
+        bare = isinstance(response, str) and response.strip() == expected_computation
+        framed = (isinstance(response, str)
+                  and response == "STATUS: COMPLETE\n" + expected_computation + "\n"
+                  and type(result.get("response_bytes")) is int
+                  and result["response_bytes"] == len(response.encode("utf-8"))
+                  and digest == hashlib.sha256(response.encode("utf-8")).hexdigest())
+        _require(bool(bare or framed), issues, prefix + ".computed_task_result")
     parent_return = record.get("parent_return")
     if not isinstance(parent_return, dict):
         parent_return = {}

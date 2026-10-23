@@ -61,6 +61,51 @@ def test_codex_source_pin_and_existing_legacy_digest() -> None:
         assert token in s
 
 
+
+def test_reviewed_prior_codex_guide_migrates_without_sandbox_or_config_override(
+    tmp_path: Path,
+) -> None:
+    current = (ROOT / SKILL_PATH).read_bytes()
+    fence = b"\n## Codex native session and sandbox boundary (mandatory before new Fabric requests)\n"
+    assert current.count(fence) == 1
+    prior = current.split(fence, 1)[0] + b"\n"
+    blob = hashlib.sha1(b"blob " + str(len(prior)).encode() + b"\0" + prior).hexdigest()
+    assert blob == policy.CODEX_FABRIC_PRIOR_BLOB_SHA
+    home, doc, config, hooks = _home(tmp_path, with_pointer=True)
+    (home / USER_SKILL).write_bytes(prior)
+    assert policy.verify_codex_fabric_entrypoint(home)["state"] == "DRIFT"
+    installed = policy.apply_codex_fabric_entrypoint(home)
+    assert installed["state"] == "READY"
+    assert installed["native_capacity_modified"] is False
+    assert installed["provider_settings_modified"] is False
+    assert installed["runtime_admission_proven"] is False
+    assert (home / USER_SKILL).read_bytes() == current
+    assert (home / DOC).read_bytes() == doc
+    assert (home / ".codex/config.toml").read_bytes() == config
+    assert (home / ".codex/hooks.json").read_bytes() == hooks
+    assert policy.apply_codex_fabric_entrypoint(home)["state"] == "READY"
+
+
+def test_codex_native_denial_procedure_preserves_identity_and_single_carrier() -> None:
+    skill = (ROOT / SKILL_PATH).read_text()
+    assert "FABRIC_ADAPTER_SANDBOX_DENIED" in skill
+    for phrase in (
+        "PermissionError: [Errno 1] Operation not",
+        "permitted",
+        "CODEX_THREAD_ID",
+        "status",
+        "NOT_FOUND",
+        "no recorded Fabric submission",
+        "Do not retry",
+        "do not",
+        "not",
+        "before any request",
+    ):
+        assert phrase in skill
+    assert "workspace-write" in skill
+    assert "Do not" in skill and "extend writable" in skill
+    assert "An unauthenticated" in skill
+
 def test_codex_m2_upgrade_preserves_native_32_and_mcp_and_user_instructions(tmp_path: Path) -> None:
     home, doc, config, hooks = _home(tmp_path, with_pointer=True)
     assert policy.verify_codex_fabric_entrypoint(home)["state"] == "DRIFT"
