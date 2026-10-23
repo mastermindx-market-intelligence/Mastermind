@@ -12,10 +12,13 @@ from types import SimpleNamespace
 
 import pytest
 
+from control_plane import executive_control_observation as contract
 from ops.executive_os import autonomy_control as owner
 from ops.executive_os import a2_control_restoration as restore
 from ops.executive_os import a2_agent_relay_enrollment as a2
 from tests.test_executive_autonomy_control import SHA, _inprocess_marker_host
+from ops.executive_os import control_observation as _original_control_observer
+_REAL_ORIGINAL_PUBLISHER = _original_control_observer.publish_for_transaction
 
 
 OLD = "3" * 40
@@ -40,6 +43,7 @@ def staged(monkeypatch, tmp_path):
     control_doc.update(
         terminal_return_armed=False, coo_foreground_only=False,
         terminal_return_socket_path=restore.PERSISTENT_SOCKET,
+        control_uid=contract.CONTROL_UID, python_runtime_provenance_digest="b" * 64,
     )
     control_file.chmod(0o640)
     control_file.write_bytes(owner.encode_config(control_doc))
@@ -235,7 +239,6 @@ def test_real_a2_reverse_drill_state_refused_then_restored_pair(
     # public wrapped function with the identical temporary-root setup.
     seed = a2_host_fixture.__wrapped__(monkeypatch, tmp_path)
     old_pair, new_pair = _prepare_reverse(seed, monkeypatch)
-    prior_sha = a2.OLD if hasattr(a2, "OLD") else "9" * 40
     monkeypatch.setattr(owner, "SYSTEM_ROOT", a2.SYSTEM_ROOT)
     witness = _reverse_witness(old_pair)
     intent = SimpleNamespace(
@@ -262,7 +265,9 @@ def test_service_restore_owner_refuses_untrusted_or_incomplete_arguments():
     import subprocess
     script = Path(__file__).parents[1] / "ops/executive_os/service-control.sh"
     content = script.read_text()
-    segment = content.split("  start-restored-a2-readside)", 1)[1].split(
+    # Two deliberate appearances: bounded upfront argument dispatch and
+    # the actual fixed-label lifecycle case. Read the latter.
+    segment = content.rsplit("  start-restored-a2-readside)", 1)[1].split(
         "  start-agent-relay)", 1)[0]
     assert segment.index("readside_preflight") < segment.index("start_agent_relay")
     assert segment.index("a2-restored-readside-preflight") < segment.index("start_agent_relay")
@@ -336,3 +341,191 @@ def test_settled_restored_readside_witness_binds_preimage_sha(staged):
     with pytest.raises(owner.TransactionEffectUnknown):
         restore.execute(s.host, forged)
     restore.qualify_restored_readside(s.host, intent)
+
+def test_seven_valid_restore_witnesses_reach_privilege_gate_not_usage():
+    import os
+    import sys
+    import subprocess
+    from pathlib import Path
+    # Never execute a lifecycle test while root on a production macOS host.
+    if os.geteuid() == 0 and sys.platform == "darwin":
+        pytest.skip("real root macOS service controller may have effects")
+    script = Path(__file__).parents[1] / "ops/executive_os/service-control.sh"
+    args = [
+        "start-restored-a2-readside",
+        "--expected-sha", SHA,
+        "--expected-control-sha256", "a"*64,
+        "--expected-previous-release-sha", OLD,
+        "--expected-previous-tree-sha", TREE,
+        "--expected-previous-config-sha256", "b"*64,
+        "--expected-previous-plist-sha256", "c"*64,
+        "--expected-bot-user-id", BOT,
+    ]
+    assert len(args)==15
+    result = subprocess.run(["/bin/bash", str(script), *args],
+                            text=True, capture_output=True, check=False)
+    assert result.returncode in (69, 77), (result.returncode, result.stderr)
+    assert "usage:" not in result.stderr
+
+
+@pytest.mark.parametrize("projection_failure", ["none", "lost-after-write", "refused-before-write"])
+def test_fresh_recovery_uses_original_observation_owner_once(
+    staged, monkeypatch, projection_failure,
+):
+    """Real publisher/marker/CAS/receipt on disposable files across host objects.
+
+    Only installed-source identity and the physical macOS Control UID are
+    adapted; the canonical publisher and original atomic-file implementation
+    execute, and no staged source is published into a real host.
+    """
+    import hashlib
+    import os
+    import stat
+    from ops.executive_os import control_observation as publisher
+    from control_plane import executive_control_observation as contract
+
+    s = staged
+    intent = _intent(s.current_hash)
+    original_publisher = publisher._publish_for_transaction
+    original_read = owner._read_root_file
+    original_atomic = owner._atomic_file
+    out = s.root / "control-observation-fixture.json"
+    monkeypatch.setattr(contract, "OBSERVATION_PATH", str(out))
+    writes = []
+
+    def installed_source_probe(sha):
+        assert sha == SHA
+
+    def observation_target(sha):
+        assert sha == SHA
+        raw = owner.CONTROL_CONFIG.read_bytes()
+        info = owner.CONTROL_CONFIG.stat()
+        identity = (
+            info.st_dev, info.st_ino, info.st_mode, 0,
+            contract.CONTROL_UID, info.st_nlink, len(raw),
+            info.st_mtime_ns, info.st_ctime_ns,
+        )
+        return contract.encode_observation(raw, identity, sha), ()
+
+    def read_observation():
+        if not out.exists():
+            return None
+        raw = out.read_bytes()
+        contract.parse_observation(raw)
+        return raw
+
+    def read_control(path, *, modes, uid=0, gid=None):
+        # Marker fixture's simulated root/control group is 0; production
+        # publisher requires the existing fixed Control gid.
+        if path == owner.CONTROL_CONFIG and gid == contract.CONTROL_UID:
+            gid = 0
+        return original_read(path, modes=modes, uid=uid, gid=gid)
+
+    def observe_write(path, raw, **kwargs):
+        if path == out:
+            writes.append(raw)
+            if projection_failure == "refused-before-write":
+                raise OSError("first original observation publication refused")
+        original_atomic(path, raw, **kwargs)
+        if path == out and projection_failure == "lost-after-write":
+            raise OSError("lost acknowledgement after one original publication")
+
+    monkeypatch.setattr(publisher, "_source", installed_source_probe)
+    monkeypatch.setattr(publisher, "_snapshot", observation_target)
+    monkeypatch.setattr(publisher, "_retained", read_observation)
+    monkeypatch.setattr(publisher, "_publish_for_transaction", original_publisher)
+    monkeypatch.setattr(publisher, "publish_for_transaction", publisher.publish_for_transaction.__wrapped__
+                        if hasattr(publisher.publish_for_transaction, "__wrapped__")
+                        else _REAL_ORIGINAL_PUBLISHER)
+    monkeypatch.setattr(owner, "_read_root_file", read_control)
+    monkeypatch.setattr(owner, "_atomic_file", observe_write)
+
+    retained_disarm(s)
+    # Simulate an original-process crash after *both* Control+DISARMED receipt
+    # are published, but before the original observation path has started.
+    def crash_before_observation(_tx):
+        raise RuntimeError("original process exited before original observation")
+    monkeypatch.setattr(s.host, "settle_readback", crash_before_observation)
+    with pytest.raises(owner.TransactionEffectUnknown):
+        restore.execute(s.host, intent)
+    assert s.marker.exists() and len(writes) == 0
+    assert json.loads(s.control.read_bytes())["terminal_return_socket_path"] == restore.LEGACY_SOCKET
+    s.host._release_transaction_owner()
+
+    def fresh_host():
+        recovered = restore.ProductionA2ControlRestorationHost()
+        monkeypatch.setattr(recovered, "effective_uid", lambda: 0)
+        monkeypatch.setattr(recovered, "require_exact_install", lambda sha: sha)
+        monkeypatch.setattr(recovered, "require_services_already_stopped", lambda: None)
+        monkeypatch.setattr(recovered, "require_service_uids_quiescent", lambda: None)
+        monkeypatch.setattr(recovered, "require_runtime_quiescent", lambda configs: None)
+        return recovered
+
+    first = fresh_host()
+    if projection_failure == "none":
+        assert first.reconcile(intent).startswith("autonomy-")
+        assert not s.marker.exists()
+    else:
+        with pytest.raises(owner.TransactionEffectUnknown):
+            first.reconcile(intent)
+        assert s.marker.exists()
+        assert json.loads((s.marker / "transaction.json").read_bytes())["phase"] == publisher.PUBLICATION_PHASE
+        first._release_transaction_owner()
+        second = fresh_host()
+        if projection_failure == "lost-after-write":
+            assert second.reconcile(intent).startswith("autonomy-")
+            assert not s.marker.exists()
+        else:
+            with pytest.raises(owner.TransactionEffectUnknown):
+                second.reconcile(intent)
+            assert s.marker.exists()
+            second._release_transaction_owner()
+    assert len(writes) == 1
+    if projection_failure != "refused-before-write":
+        assert out.exists()
+        assert contract.parse_observation(out.read_bytes())["control_sha256"] == hashlib.sha256(
+            s.control.read_bytes()
+        ).hexdigest()
+    else:
+        assert not out.exists()
+
+def test_fabric_bridge_armed_refuses_before_creating_a_global_marker(staged):
+    s = staged
+    config = json.loads(s.control.read_bytes())
+    config["fabric_bridge_armed"] = True
+    s.control.chmod(0o640)
+    s.control.write_bytes(owner.encode_config(config))
+    s.control.chmod(0o440)
+    before = s.control.read_bytes()
+    with pytest.raises(owner.TransactionEffectUnknown):
+        restore.execute(s.host, _intent(owner.sha256_bytes(before)))
+    assert s.control.read_bytes() == before
+    assert not s.marker.exists()
+
+
+@pytest.mark.parametrize("bad", ["wrong-flag-order", "invalid-config-digest", "duplicated-flag"])
+def test_seven_witness_service_invocation_rejects_malformed_full_width(bad):
+    import subprocess
+    from pathlib import Path
+    script = Path(__file__).parents[1] / "ops/executive_os/service-control.sh"
+    args = [
+        "start-restored-a2-readside",
+        "--expected-sha", SHA,
+        "--expected-control-sha256", "a"*64,
+        "--expected-previous-release-sha", OLD,
+        "--expected-previous-tree-sha", TREE,
+        "--expected-previous-config-sha256", "b"*64,
+        "--expected-previous-plist-sha256", "c"*64,
+        "--expected-bot-user-id", BOT,
+    ]
+    if bad == "wrong-flag-order":
+        args[9], args[11] = args[11], args[9]
+    elif bad == "invalid-config-digest":
+        args[10] = "not-a-hex-digest"
+    else:
+        args[9] = "--expected-control-sha256"
+    assert len(args) == 15
+    result = subprocess.run(["/bin/bash", str(script), *args],
+                            text=True, capture_output=True, check=False)
+    assert result.returncode == 64
+    assert "usage:" in result.stderr

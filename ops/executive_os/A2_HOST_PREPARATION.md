@@ -122,9 +122,13 @@ no new journal, credential, or lifecycle plane is introduced.
    config and launchd plist. Capture Control SHA-256 from the *currently
    installed disarmed* Control config, not the pre-installer backup.
 3. Under the original service lifecycle owner, observe MCP running,
-   backup absent and worker preserved; stop Control/C1 and A2, prove A2
-   disabled and all three labels unloaded; confirm no global autonomy
-   transaction marker. Preserve the original C1/A2 token metadata exactly.
+   backup absent and record the exact Worker service pre-state. Stop Control,
+   C1, A2 **and Worker** through their incumbent fixed-label owners; the
+   Executive global transaction refuses even a running/registered Worker.
+   Preserve the Worker configuration and its launchd disabled preimage; do
+   not silently re-enable it after A2/C1/Control recovery. Prove A2 disabled
+   and A2/C1/Control/Worker labels unloaded; confirm the global autonomy
+   transaction marker is absent. Preserve C1/A2 token metadata exactly.
 4. Run the **installed A2** reverse-rebind-release with flags
    --expected-bot-user-id, --expected-current-release-sha,
    --expected-previous-release-sha, --expected-previous-tree-sha,
@@ -141,8 +145,13 @@ no new journal, credential, or lifecycle plane is introduced.
    changed worker, armed return, loaded service, or changed Control preimage.
    It rebinds the original autonomy receipt in the original transaction.
    If interrupted, ONLY the original a2-restore-controller-socket-reconcile
-   with the same witnesses may confirm a fully settled postimage. It never
-   replays a replacement or repairs a partial Control/receipt pair.
+   with the same witnesses may settle the original transaction. It NEVER
+   rewrites the Control/receipt pair; a positive complete postimage and
+   original marker may admit exactly one first-attempt nonsecret Control
+   observation publication by its incumbent owner. Its durable attempted
+   publication phase forbids a second write: reconcile can only read back a
+   matching observation or retain EFFECT_UNKNOWN and the original marker.
+   Mixed/partial Control/receipt evidence remains refused.
 6. **After that transaction is completely settled**, ensure MCP is running
    and invoke the **installed** service-control.sh start-restored-a2-readside
    with the exact seven flags from step 5. Its read-only sealed-pair and
@@ -150,7 +159,11 @@ no new journal, credential, or lifecycle plane is introduced.
    fixed-label lifecycle owner starts **A2 -> C1 -> Control**, once.
    On any uncertain start effect, stop that carrier and reconcile launchd;
    do not replay start. No arbitrary label, path, socket, token or verb is
-   permitted.
+   permitted. If the recorded Worker pre-state required running+enabled,
+   restore that Worker separately through its **existing** fixed-label
+   service-control start admission and verify its preserved configuration,
+   Control rebind and all original A2/C1 readside states afterward. A Worker
+   previously stopped stays stopped. Never infer or silently change pre-state.
 7. Independently prove A2 PID and a real listener at the old volatile socket
    with exact service owner/mode, C1 and Control running, shared Slack bot,
    authentic read-side interaction, and a separately authorized correlated

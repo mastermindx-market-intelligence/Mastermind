@@ -6,8 +6,10 @@ existing disarm receipt in the existing autonomy-transaction archive. No
 token, enrollment, service, lease, or alternate publication plane is created.
 
 The root caller must first stop A2 and the Control/C1 read-side and reverse
-A2 to an exactly sealed prior release. A recover invocation only verifies
-an already-complete target; it never repeats a config replacement.
+A2 to an exactly sealed prior release. Recovery never repeats Control/receipt replacement. A claimed original
+marker may authorize one incumbent Control observation publication only when
+both exact postimages are already proven and no prior publication was attempted.
+A lost publication response is forever readback-only.
 """
 from __future__ import annotations
 
@@ -64,12 +66,14 @@ def _require_old_a2_pair(intent) -> None:
             or a2._read_exact(a2.CONFIG_PATH, uid=a2.RELAY_UID,
                               gid=a2.RELAY_GID, mode=0o400) != original_config
             or a2._read_exact(a2.PLIST_PATH, uid=a2.PLIST_UID,
-                              gid=a2.PLIST_GID, mode=0o644) != original_plist):
+                              gid=a2.PLIST_GID,
+                              mode=a2.c1_enrollment.PLIST_MODE) != original_plist):
         raise owner.TransactionEffectUnknown()
 
 
 def _candidate(prior):
     if (any(prior.control.get(k) is not False for k in A2_RETURN_FIELDS)
+            or prior.control.get("fabric_bridge_armed", False) is not False
             or prior.worker.get("operator_harness_armed") is not False
             or prior.control.get("terminal_return_socket_path")
                not in (PERSISTENT_SOCKET, LEGACY_SOCKET)):
@@ -223,7 +227,12 @@ class ProductionA2ControlRestorationHost(owner.ProductionCeoSubmitHost):
     def settle_readback(self, tx):
         self.verify_state(tx, target=True)
         self.verify_receipt(tx, target=True)
-        self._persist_phase(tx, "A2_CONTROL_RESTORED")
+        from ops.executive_os.control_observation import PUBLICATION_PHASE
+        # Never downgrade a durable 'attempted publication' phase to the
+        # pre-publication state. Any lost projection response can only be
+        # rejoined by observing its original expected postimage, not replay.
+        if self._manifest()["phase"] != PUBLICATION_PHASE:
+            self._persist_phase(tx, "A2_CONTROL_RESTORED")
         self.complete_transaction(tx)
         return tx.transaction_id
 
@@ -233,12 +242,13 @@ class ProductionA2ControlRestorationHost(owner.ProductionCeoSubmitHost):
         self.checked_configs(intent.expected_sha)
         self._claim_transaction_owner()
         manifest = self._manifest()
+        from ops.executive_os.control_observation import PUBLICATION_PHASE
         if (manifest["operation"] != OPERATION
                 or manifest["expected_sha"] != intent.expected_sha
                 or manifest["phase"] not in {
                     "LOCKED", "CANDIDATES_WRITTEN", "CANDIDATES_VALIDATED",
                     "CONTROL_REPLACED", "A2_RECEIPT_REBOUND",
-                    "A2_CONTROL_RESTORED", "CONTROL_OBSERVATION_PUBLISHED",
+                    "A2_CONTROL_RESTORED", PUBLICATION_PHASE,
                 }):
             raise owner.TransactionEffectUnknown()
         previous = self._archived_configs(intent.expected_sha)
@@ -251,6 +261,19 @@ class ProductionA2ControlRestorationHost(owner.ProductionCeoSubmitHost):
             manifest["transaction_id"], intent.expected_sha, previous, target, None,
         )
         self._active_transaction = tx
+        # A newly claimed original marker, both pinned final disk artifacts,
+        # and no prior publisher-attempt phase admit EXACTLY one observation
+        # publication for this original operation. The incumbent publisher
+        # fences the attempt by persisting PUBLICATION_PHASE before any write.
+        # A previously attempted phase is permanently READBACK_ONLY.
+        if manifest["phase"] != PUBLICATION_PHASE:
+            self.verify_state(tx, target=True)
+            self.verify_receipt(tx, target=True)
+            self._control_observation_recovery_owner = (
+                owner.os.getpid(), self._transaction_owner_fd,
+                tx.transaction_id, tx.expected_sha,
+            )
+            self._a2_restore_observation_recovery_proven = tx
         return self.settle_readback(tx)
 
 
@@ -350,7 +373,10 @@ def run_command(args, *, host=None):
         result = owner.operation_document(
             code="a2_controller_socket_restored",
             state="UNARMED", status="A2_CONTROLLER_SOCKET_RESTORED",
-            transaction_id=transaction_id, replayed=transaction_id is None,
+            transaction_id=transaction_id, replayed=(
+                transaction_id is None
+                or args.command == "a2-restore-controller-socket-reconcile"
+            ),
         )
         rc = 0
     except Exception:

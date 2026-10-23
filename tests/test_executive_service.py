@@ -9502,6 +9502,43 @@ def test_production_config_composes_remote_broker_and_launchd_socket(
         assert old_loaded["terminal_return_socket_path"] == Path(
             "/var/run/mastermind-agent-relay/agent-relay.sock"
         ).resolve(strict=False)
+        # Ordinary clients (including Company Consultation, Session Bridge,
+        # Product Acceptance and Principal Dialogue) must follow exactly the
+        # same reviewed recovery route as the Control return projector.
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=False,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
+        assert service_cli._agent_relay_readside_socket_for_control(
+            SimpleNamespace(
+                terminal_return_armed=True,
+                terminal_return_socket_path=old_loaded["terminal_return_socket_path"],
+            )
+        ) == Path("/var/db/mastermind-agent-relay/socket/agent-relay.sock")
+        # Exercise the actual Control composition, not only the selector helper:
+        # this legacy disarmed configuration must still instantiate the native
+        # service and carry the normalized old A2 path into its ServiceConfig.
+        captured_legacy: dict[str, object] = {}
+        with monkeypatch.context() as patch_legacy:
+            patch_legacy.setattr(
+                service_cli, "activate_launchd_socket", lambda _name: listener
+            )
+            patch_legacy.setattr(
+                service_cli, "ExecutiveControlService",
+                lambda service_config, **kwargs: (
+                    captured_legacy.update(config=service_config, kwargs=kwargs),
+                    object(),
+                )[1],
+            )
+            service_cli._service_from_config(
+                old_loaded,
+                initial_canary=json.loads(canary.read_text(encoding="utf-8")),
+            )
+        assert service_cli._agent_relay_readside_socket_for_control(
+            captured_legacy["config"]
+        ) == Path("/var/run/mastermind-agent-relay/agent-relay.sock").resolve(strict=False)
         for unsafe in (
             {**legacy_raw, "terminal_return_armed": True},
             {**legacy_raw, "ceo_submit_armed": True},

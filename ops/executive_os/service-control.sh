@@ -598,6 +598,10 @@ case "$1" in
     [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
     ;;
+  start-restored-a2-readside)
+    [ "$#" -eq 15 ] && [ "$2" = "--expected-sha" ] || usage
+    [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
+    ;;
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
@@ -714,11 +718,14 @@ case "$1" in
       && [[ "${13}" =~ ^[0-9a-f]{64}$ ]] \
       && [[ "${15}" =~ ^U[0-9A-Z]{9,}$ ]] || usage
     require_root
-    local_release_root="$(builtin cd -P "$SCRIPT_DIR/../.." && /bin/pwd)"
-    [ "${local_release_root##*/}" = "$3" ] || {
-      /bin/echo "installed recovery source differs from expected release" >&2
-      exit 65
-    }
+    local_release_root="$MCP_RELEASE_ROOT/$3"
+    local_release_dir="$local_release_root/ops/executive_os"
+    local_recovery_script="$local_release_dir/service-control.sh"
+    # Root Python import must bind to the exact installed service controller.
+    [[ "$SCRIPT_SOURCE" == "$local_recovery_script" ]] || exit 65
+    [[ "$SCRIPT_DIR" == "$local_release_dir" ]] || exit 65
+    [[ "$SCRIPT_PATH" == "$local_recovery_script" ]] || exit 65
+    [[ -f "$local_recovery_script" && ! -L "$local_recovery_script" ]] || exit 65
     validate_plist "$AGENT_RELAY_PLIST"
     validate_plist "$RELAY_PLIST"
     validate_plist "$CONTROL_PLIST"
