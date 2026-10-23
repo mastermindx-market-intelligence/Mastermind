@@ -1,11 +1,18 @@
-"""Single producer/reader contract for LOST reasons and UTC Runtime dates.
+"""Shared LOST-reason and UTC Runtime timestamp validators.
 
-Runtime owns timestamps using its injectable authoritative store clock. Formatting
-MUST NOT compare that clock with the host wall clock; that would reject valid
-simulated clocks and externally authorized long leases. The untrusted Web read
-boundary applies one common 24-hour *future event observation* tolerance; lease
-expiration deadlines are future-by-design and are checked for UTC shape only.
-Existing historical LOST reasons remain valid without a fixed reason allowlist.
+Runtime formats timestamps from its injectable authoritative store clock
+without comparing them to the producer host wall clock. The untrusted Web
+reader separately compares observed Runtime event timestamps to its own UTC
+wall clock, allowing at most 24 hours of future event skew. A producer with a
+far-future injected clock may therefore serialize a legitimate test timestamp
+that the reader intentionally rejects at its independent trust boundary.
+
+A lease expiration is a future-by-design deadline, so the reader checks its
+UTC shape without applying event-time skew. Envelope, inbox and Fabric
+generated_at fields retain their separate shape-only validation; they do not
+establish freshness or replay authority. Historical bounded verified-process-
+absence LOST reasons have no closed reason allowlist; expiry/fence LOST
+envelopes still require their exact pre-existing reason values.
 """
 from datetime import datetime, timedelta, timezone
 
@@ -31,9 +38,10 @@ def format_runtime_utc_timestamp(timestamp_ms: int | None) -> str:
 def valid_runtime_instant(
     value: object, *, now: datetime | None = None, deadline: bool = False
 ) -> bool:
-    """Validate a UTC event-time observation or a future-by-design deadline.
+    """Validate a UTC event observation or future-by-design deadline.
 
-    Reader-only wall-clock skew is not a constraint on producer store clocks.
+    The Web reader's independent clock bound applies to event observations,
+    not to producer serialization or lawful future lease deadlines.
     """
     if type(value) is not str:
         return False
