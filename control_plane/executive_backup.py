@@ -3428,7 +3428,7 @@ _PRE_CENSUS_QUALIFICATION_KEYS = frozenset({
     "schema_version", "operation_id", "original_barrier", "original_tool",
     "recovery_tool", "database", "normalized_schema_digest",
     "full_v5_content_digest", "migration_vector", "selected_source",
-    "source_control_config", "host", "created_at",
+    "source_control_config", "host", "created_at", "backup_inventory_sha256",
 })
 _PRE_CENSUS_IDENTITY_KEYS = frozenset({"path", "device", "inode", "size", "sha256", "payload_digest"})
 _PRE_CENSUS_ORIGIN_KEYS = frozenset({
@@ -3684,16 +3684,15 @@ def _validate_pre_census_qualification(value: Any) -> dict[str, Any]:
     for name in _PRE_CENSUS_ORIGIN_KEYS - {"path", "sha256"}:
         if type(database[name]) is not int or database[name] < 0:
             raise ExecutiveSchemaUpgradeError("pre-census database identity is malformed")
-    for name in ("normalized_schema_digest", "full_v5_content_digest"):
+    for name in ("normalized_schema_digest", "full_v5_content_digest", "backup_inventory_sha256"):
         _pre_census_hash(payload[name])
     _pre_census_hash(database["sha256"])
     if not isinstance(payload["migration_vector"], list) or len(payload["migration_vector"]) != 5:
         raise ExecutiveSchemaUpgradeError("pre-census qualification migration vector is malformed")
     for version, item in enumerate(payload["migration_vector"], start=1):
-        record = _pre_census_closed(item, frozenset({"version", "name", "checksum", "applied_at_ms"}), "migration")
+        record = _pre_census_closed(item, frozenset({"version", "name", "checksum"}), "migration")
         if (type(record["version"]) is not int or record["version"] != version
-                or not isinstance(record["name"], str) or not record["name"]
-                or type(record["applied_at_ms"]) is not int):
+                or not isinstance(record["name"], str) or not record["name"]):
             raise ExecutiveSchemaUpgradeError("pre-census qualification migration vector differs")
         _pre_census_hash(record["checksum"])
     selected = _pre_census_closed(payload["selected_source"], frozenset({"sha", "descriptor_raw_sha256", "descriptor_sha256", "source_backup_sha256", "baseline_sha256", "inventory_sha256", "prior_canary_sha256"}), "selected source")
