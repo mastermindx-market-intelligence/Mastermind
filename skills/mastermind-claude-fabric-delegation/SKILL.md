@@ -49,3 +49,27 @@ Inside the admitted operator, first call `mastermindStudio.fabric_operator_scope
 ## Proof ceiling
 
 Installed skill != loaded skill != authenticated tool != admitted Fabric START != reviewed accepted result. For rollout, verify the provider-home installation, a freshly started Claude session loading this skill, and one source-custody-safe root -> worker -> result -> review/accept path. For the nested path require real operator scope, child START, exact return to the same operator, its acknowledgement, and principal adjudication. Keep any missing evidence explicit.
+
+## Fresh Claude identity and authenticated tool preflight
+
+Before launching a child, check the current **fresh** Claude Code session's
+actual authenticated state using `claude auth status` (read-only) and the
+workspace's native trust ceremony. An installed
+`mastermind-claude-fabric-delegation` skill, an existing user-home directory,
+or a model label does **not** establish a fresh authenticated session, loaded
+guide, original root or immediate parent.
+
+- If `loggedIn=false`, the CLI reports `OAuth session expired and could
+  not be refreshed`, or the workspace trust dialog is pending, return
+  `CLAUDE_LOGIN_REQUIRED` and **dispatch nothing**. Only the actual account
+  owner may complete interactive OAuth login and approve the native workspace
+  trust dialog. Do not edit `~/.claude.json` to suppress trust, borrow a
+  Parallel-app account, read/replace credentials or pivot providers.
+- After authentication, the session itself must demonstrate loading this
+  guide and resolve its original Fabric root and immediate assigning parent
+  from trusted current binding. Missing evidence remains
+  `FABRIC_IDENTITY_UNVERIFIED`, even when `fabric_task.py --help` works.
+- If its shell sandbox denies Fabric packet retention, follow the same
+  no-replay, same-run reconciliation and explicit authority boundary described
+  by `FABRIC_ADAPTER_SANDBOX_DENIED` in the Codex Fabric skill. Do not switch
+  a refused operation to MCP or a less restrictive shell.

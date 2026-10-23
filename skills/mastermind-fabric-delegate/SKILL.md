@@ -178,3 +178,47 @@ The Codex host installer is **skill-only**: it preserves the original
 global Codex instructions, user hooks, MCP registrations, native-subagent
 limit and model settings. Installation and static tool names are not
 fresh Codex startup/load proof or an admitted two-level runtime canary.
+## Codex native session and sandbox boundary (mandatory before new Fabric requests)
+
+This is an **access preflight**, not new authentication, a sandbox exception, a
+dispatcher or a Fabric client. The guide being installed and an adapter
+responding to `--help` are not proof of a usable dispatch path.
+
+1. In the **current live** top-level Codex session, read `CODEX_THREAD_ID`
+   from the native session environment and compare it with the current
+   session's own trusted native thread identity/role. For native children,
+   separately verify the original parent's binding. Do not copy a thread ID
+   from another or earlier finished session, and do not mistake a caller-set
+   root label for authentication. Missing or unverified means
+   `FABRIC_IDENTITY_UNVERIFIED`: **no request**.
+2. Check `fabric_task.py` exists at the enrolled selected runtime, and use
+   `status` on the **one planned stable run ID** before submitting. Check the
+   current session's **actual** sandbox/approved filesystem and network
+   permissions for the installed adapter's retention directory. A successful
+   `test -f`, `--help`, `os.access`, or previous run on the M2 host does
+   **not** prove sandbox write authority. The shell adapter retains a
+   `<run_id>.request.packet` under the installed Fabric state, which may be
+   outside `workspace-write` roots.
+3. If an actual request raises `PermissionError: [Errno 1] Operation not
+   permitted` at packet retention, classify
+   `FABRIC_ADAPTER_SANDBOX_DENIED`. On the **same original ID**, perform a
+   bounded canonical `status` read. Even a truthful `NOT_FOUND` is evidence
+   of *no recorded Fabric submission*, not approval to replay that request.
+   **Do not retry**, change run ID/parent, alter permissions, extend writable
+   directories, disable sandbox, or switch to MCP/host-shell/other provider as
+   a workaround. Record the exact native thread, denied state path (without
+   secrets), original run ID and `NOT_FOUND`/uncertain status.
+4. If Fabric MCP is **already exposed and authenticated in this exact
+   session before any request**, that is a separate eligible entrypoint under
+   its own original-root permission proof. An unauthenticated
+   `mastermind-executive` or optional tool is not Fabric admission. After
+   a denial, do **not** move the same logical request to another carrier.
+   An operator may request a *future distinct* delegated task only after its
+   original permission issue is resolved through explicitly authorized
+   session setup/connector trust and the current host owner verifies that
+   allowed scope. Never self-approve a sandbox enlargement.
+
+**Completion boundary:** fresh native skill-load + verified native thread +
+actual Fabric START + terminal retained result + exact returned bytes/digest +
+original-parent adjudication is live proof. `FABRIC_ADAPTER_SANDBOX_DENIED`
+and `NOT_FOUND` are negative canary results, not a completed worker.

@@ -187,6 +187,72 @@ Direct raw flat helpers such as `sub.sh` and `lease_broker.py` remain legacy API
 The upgraded pool routes to their new generation counterparts. The rollout does
 not claim that every raw helper path is upgraded.
 
+## Paired launcher upgrade boundary
+
+An already installed pool/task bridge is not another first installation.
+`prepare` must continue to refuse an already bridged pool. Upgrading the sealed
+launcher requires the retained original installation bundle and its exact
+phase-one receipt, current paired ingress preimages, and a qualified target
+closure. Do not edit the original plan, roll back and rebootstrap, overwrite a
+sealed launcher, or infer a legacy-producer drain. The flat remote entry and
+all flat helpers retain their existing bytes and owners.
+
+During paired replacement, the existing selection must remain a generation
+that both old and new launchers verify. Selection of a generation requiring
+the new verifier follows successful readback of both upgraded bridges, through
+the original publication lock and selection compare-and-swap. Interrupted
+installation is reconciled using its exact retained upgrade identity and
+observed bytes; it does not authorize a replacement operation or blind replay.
+
+There is a bounded ingress availability limitation. A process that captured
+the old bridge before replacement can reach its old immutable launcher after
+the new selection. If that verifier cannot accept the new generation, it must
+return a truthful refusal before executing the selected business entrypoint or
+admitting work. Do not claim uninterrupted ingress, alter the old launcher,
+invent an ingress census/fence, or trigger an automatic replacement/retry.
+Already-pinned controllers continue through their original immutable paths;
+their operations, roots, leases and retained results are unchanged. Fresh
+upgraded entrypoints must verify the intended selected generation.
+
+### Closed 8bc to d044 transition
+
+The existing installer now has `prepare-upgrade` and `upgrade` commands. This
+transition accepts only the authentic retained phase-one bootstrap bundle,
+its exact owned receipt, the pinned 8bc launcher and derived paired bridges,
+and the reviewed 95-member manifest
+`6ac208bbd80f706931b11e8147a879f6e3ced6fe704cde7b9f15e1c098e37ee4`.
+The new sealed d044 launcher differs only by the two reviewed PyYAML artifact
+allowlist names. Neither the original bootstrap plan nor the flat remote entry
+is rewritten.
+
+After publishing and verifying that protected closure, run the protected
+installer's `prepare-upgrade --original-bundle <retained-bootstrap-bundle>
+--target-generation <published-digest> --output <fresh-external-bundle>`.
+Review its exact captured selection and ingress preimages, then invoke
+`upgrade --bundle <same-external-bundle>`. These are source command forms,
+not evidence of an installed upgrade. `prepare` remains inappropriate for an
+already bridged installation.
+
+The original publication lock serializes the finite operation. A durable
+intent inside the existing bootstrap artifact directory binds the exact
+upgrade plan before any bridge write. Each replacement requires the original
+or this transaction's exact new bytes; foreign bytes refuse. Both bridges
+must read back successfully before CURRENT advances from the full captured
+selection. Six tested interruption edges recover only this same retained
+transaction, including a committed pointer with a missing completion receipt.
+At that selected edge the exact sealed launcher and both bridges must already
+exist; only the missing receipt may be written. Their loss or alteration is an
+inconsistent state that refuses without repair. A completed invocation performs
+no writes. The receipt has no clock, nonce, fresh authority or external issuance:
+its full bytes derive from the retained plan digest, original bootstrap digest,
+exact previous/selected pointer and fixed bridged/legacy disposition. Thus loss
+after issuance can restore only that identical original receipt, never a new
+terminal identity or target effect. A changed selection, foreign
+intent, conflicting receipt or unrecognized partial state cannot be repaired
+or reactivated by this command. There is no automatic replacement or retry
+of a refused business operation. No quiescence, legacy drain, provider
+readiness or absence of unknown work is inferred.
+
 ## Rollback and failure handling
 
 Rollback restores only the exact original ingress bytes, child ingress first;
@@ -344,3 +410,12 @@ not accept a caller-bound sequence comparison; this source does not claim a
 two-field CAS or add one. Never substitute a stale observed generation or force
 selection. Installation, installed-route/host qualification, current scoped
 permission and target proof remain separate owner operations; this PR performs none.
+
+
+Protected Qwen priority integration retains all four PR1731 candidate files byte-exact.
+The canonical builder still verifies all nine accepted Grok overlay bases; six are
+staged directly and exactly three closed forward candidate hashes preserve the
+previously reviewed fresh-usage reader and caller UTC narrowing. The other91
+member bytes equal the accepted7efa closure. The finite upgrade target now pins
+the resulting95-member manifest6ac208bb; launcher8bc-to-d044, original epoch,
+preimages, intent, lock, CAS and receipt-only recovery behavior are unchanged.

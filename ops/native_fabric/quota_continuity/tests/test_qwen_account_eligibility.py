@@ -306,7 +306,9 @@ class RouterUsableNames(unittest.TestCase):
         with mock.patch.object(bailian_keys, "HERE", self.tmp), mock.patch.object(
             bailian_keys, "key_names", return_value=list(names)
         ), mock.patch.object(
-            bailian_keys, "cooldown_info", side_effect=lambda n: cooldowns.get(n)
+            bailian_keys, "cooldown_rank_readonly",
+            side_effect=lambda n: (0 if cooldowns.get(n) is None else
+                                   (2 if cooldowns[n][1] == "http_429" else 3))
         ), mock.patch.object(
             bailian_keys, "current_per_key_cap", return_value=10
         ):
@@ -334,6 +336,13 @@ class RouterUsableNames(unittest.TestCase):
             {"keys": {"malformed": {"parked": True}}},
         )
         self.assertEqual(got, ["norow", "malformed"])
+
+    def test_unknown_or_unsafe_cooldown_fails_closed_even_with_unparked_usage(self):
+        self._write({"keys": {"k": fresh_row(parked=False)}})
+        with mock.patch.object(bailian_keys, "HERE", self.tmp), \
+             mock.patch.object(bailian_keys, "key_names", return_value=["k"]), \
+             mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=1):
+            self.assertEqual(bailian_keys.usable_names(), [])
 
     def test_park_reaches_routing_even_for_429_key(self):
         got = self._router(
@@ -377,7 +386,7 @@ class RouterUsableNames(unittest.TestCase):
         with mock.patch.object(bailian_keys, "HERE", self.tmp), mock.patch.object(
             bailian_keys, "key_names", return_value=["k"]
         ), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=None
+            bailian_keys, "cooldown_rank_readonly", return_value=0
         ), mock.patch.object(
             bailian_keys,
             "read_usage_eligibility",
@@ -459,39 +468,45 @@ class BrokerUsageGate(unittest.TestCase):
 
     def test_fresh_park_blocks_before_cooldown_lookup(self):
         with self._with_usage({"keys": {"k": fresh_row(parked=True)}}), mock.patch.object(
-            bailian_keys, "cooldown_info", side_effect=RuntimeError("must not be reached")
+            bailian_keys, "cooldown_rank_readonly", side_effect=RuntimeError("must not be reached")
         ):
             self.assertIsNone(self.broker._bailian_effective_cap("k", 10))
 
     def test_fresh_park_blocks_429_key_too(self):
         with self._with_usage({"keys": {"k": fresh_row(parked=True)}}), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=("t", "http_429")
+            bailian_keys, "cooldown_rank_readonly", return_value=2
         ), mock.patch.object(bailian_keys, "_effective_cap_for_key", return_value=5):
+            self.assertIsNone(self.broker._bailian_effective_cap("k", 10))
+
+    def test_unknown_local_cooldown_is_not_grantable_when_usage_says_unparked(self):
+        with self._with_usage({"keys": {"k": fresh_row(parked=False)}}), \
+             mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=1), \
+             mock.patch.object(bailian_keys, "current_per_key_cap", return_value=10):
             self.assertIsNone(self.broker._bailian_effective_cap("k", 10))
 
     def test_unknown_usage_preserves_cooldown_and_cap_behavior(self):
         with self._with_usage({}), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=None
+            bailian_keys, "cooldown_rank_readonly", return_value=0
         ), mock.patch.object(bailian_keys, "current_per_key_cap", return_value=10):
             self.assertEqual(self.broker._bailian_effective_cap("k", 4), 4)
             self.assertEqual(self.broker._bailian_effective_cap("k", 25), 10)
 
     def test_unknown_usage_non_429_cooldown_still_not_grantable(self):
         with self._with_usage({}), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=("t", "http_403")
+            bailian_keys, "cooldown_rank_readonly", return_value=3
         ):
             self.assertIsNone(self.broker._bailian_effective_cap("k", 10))
 
     def test_unknown_usage_429_cooldown_keeps_soft_cap(self):
         with self._with_usage({}), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=("t", "http_429")
+            bailian_keys, "cooldown_rank_readonly", return_value=2
         ), mock.patch.object(bailian_keys, "_effective_cap_for_key", return_value=3):
             self.assertEqual(self.broker._bailian_effective_cap("k", 10), 3)
 
     def test_stale_park_does_not_block_429_key(self):
         stale = fresh_row(parked=True, observed_dt=NOW_DT - timedelta(days=2))
         with self._with_usage({"keys": {"k": stale}}), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=("t", "http_429")
+            bailian_keys, "cooldown_rank_readonly", return_value=2
         ), mock.patch.object(bailian_keys, "_effective_cap_for_key", return_value=7):
             self.assertEqual(self.broker._bailian_effective_cap("k", 10), 7)
 
@@ -503,14 +518,14 @@ class BrokerUsageGate(unittest.TestCase):
     def test_helper_failure_keeps_existing_eligibility(self):
         with self._with_usage({"keys": {"k": fresh_row(parked=True)}}), mock.patch.object(
             bailian_keys, "read_usage_eligibility", side_effect=RuntimeError("boom")
-        ), mock.patch.object(bailian_keys, "cooldown_info", return_value=None), mock.patch.object(
+        ), mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=0), mock.patch.object(
             bailian_keys, "current_per_key_cap", return_value=10
         ):
             self.assertEqual(self.broker._bailian_effective_cap("k", 9), 9)
 
     def test_failure_after_gate_cannot_restore_known_parked(self):
         with self._with_usage({"keys": {"k": fresh_row(parked=True)}}), mock.patch.object(
-            bailian_keys, "cooldown_info", side_effect=RuntimeError("late boom")
+            bailian_keys, "cooldown_rank_readonly", side_effect=RuntimeError("late boom")
         ):
             self.assertIsNone(self.broker._bailian_effective_cap("k", 10))
 
@@ -522,7 +537,11 @@ class Http429SoftUnchanged(unittest.TestCase):
         self.addCleanup(p.stop)
 
     def _cd(self, reason):
-        p = mock.patch.object(bailian_keys, "cooldown_info", return_value=("t", reason) if reason else None)
+        # The real broker and CLI now share a non-mutating, fail-closed rank
+        # reader. Fixture the rank directly instead of the obsolete mutating
+        # cooldown_info helper; 0 healthy, 2 soft-429, 3 hard denial.
+        rank = 0 if reason is None else (2 if reason == "http_429" else 3)
+        p = mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=rank)
         p.start()
         self.addCleanup(p.stop)
 
@@ -598,7 +617,7 @@ class FakeUsageCannotMutatePolicyOrStores(unittest.TestCase):
         with mock.patch.object(bailian_keys, "HERE", tmp), mock.patch.object(
             bailian_keys, "key_names", return_value=["k", "ghost"]
         ), mock.patch.object(
-            bailian_keys, "cooldown_info", return_value=("t", "http_429")
+            bailian_keys, "cooldown_rank_readonly", return_value=2
         ), mock.patch.object(
             bailian_keys, "current_per_key_cap", return_value=10
         ), mock.patch.object(
@@ -637,7 +656,7 @@ class FakeUsageCannotMutatePolicyOrStores(unittest.TestCase):
             json.dump(doc, fh)
         with mock.patch.object(bailian_keys, "HERE", tmp), mock.patch.object(
             bailian_keys, "key_names", return_value=["broken", "real"]
-        ), mock.patch.object(bailian_keys, "cooldown_info", return_value=None), mock.patch.object(
+        ), mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=0), mock.patch.object(
             pick, "BAILIAN_USAGE", usage
         ):
             self.assertEqual(bailian_keys.usable_names(), ["broken"])
@@ -703,7 +722,7 @@ class ActualBrokerSelectionIntegration(unittest.TestCase):
                 hosts_path=os.path.join(directory, "hosts.json"),
                 status_json=os.path.join(directory, "status.json"))
             with mock.patch.object(bailian_keys, "HERE", directory), \
-                 mock.patch.object(bailian_keys, "cooldown_info", return_value=None), \
+                 mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=0), \
                  mock.patch.object(bailian_keys, "current_per_key_cap", return_value=7):
                 self.assertEqual([a["name"] for a in broker.grantable_accounts("bailian")],
                                  ["ready"])

@@ -204,6 +204,12 @@ def validate_usage():
     def integer(value):
         return type(value) is int and 0 <= value <= 2**53
 
+    # No three-argument escape hatch: even read-only callers must identify
+    # the original controller's exact mode and model for truthful accounting.
+    if len(sys.argv) != 5:
+        raise SystemExit(2)
+    expected_mode = sys.argv[3]
+    expected_model = sys.argv[4]
     path = pathlib.Path(sys.argv[1])
     valid = False
     usage = None
@@ -218,16 +224,28 @@ def validate_usage():
             }
             if isinstance(usage, dict):
                 schema = usage.get("schema")
-                grok = schema == "mastermind.grok_usage.v1"
+                grok = schema in ("mastermind.grok_usage.v1", "mastermind.grok_usage.v2")
+                grok_v2 = schema == "mastermind.grok_usage.v2"
+                supported_grok = ("grok-4.6", "grok-4.7")
                 valid_schema = (
                     (schema in ("mastermind.codex_usage.v1", "mastermind.grok_usage.v1")
                      and set(usage) == required)
+                    or (schema == "mastermind.grok_usage.v2"
+                        and set(usage) == required | {"requested_model", "model_identity_source"})
                     or (schema == "mastermind.codex_usage.v2"
                         and set(usage) == required | {"native_compaction_records"})
                 )
                 valid_source = (
-                    (grok and usage.get("source") == "grok_native_headless"
+                    (schema == "mastermind.grok_usage.v1"
+                     and usage.get("source") == "grok_native_headless"
                      and usage.get("served_model") == "grok-4.6")
+                    or (grok_v2 and usage.get("source") == "grok_native_headless"
+                        and type(usage.get("requested_model")) is str
+                        and usage["requested_model"] in supported_grok
+                        and ((usage.get("served_model") is None
+                              and usage.get("model_identity_source") == "requested_cli_only")
+                             or (usage.get("served_model") == usage["requested_model"]
+                                 and usage.get("model_identity_source") == "native_headless_final_model_field")))
                     or (not grok and usage.get("source") == "codex_native_session"
                         and usage.get("served_model") is None)
                 )
@@ -237,6 +255,12 @@ def validate_usage():
                     and isinstance(usage.get("reason"), str)
                     and valid_source
                     and usage.get("run_id") == sys.argv[2]
+                    and (
+                        (grok and expected_mode == "grok"
+                         and (usage.get("requested_model") if grok_v2 else usage.get("served_model"))
+                         == expected_model)
+                        or (not grok and expected_mode in (
+                            "codex-native", "go-codex", "glm-codex", "minimax-codex")))
                     and isinstance(usage.get("session_ids"), list)
                     and len(usage["session_ids"]) == 1
                     and isinstance(usage["session_ids"][0], str)
