@@ -20,7 +20,15 @@ import tempfile
 
 import pytest
 
-REPO_ROOT = Path(__file__).resolve().parents[5]
+# Supports both deferred_tests/ placement in this source-only PR and final
+# tests/ placement when the same original owner installs the native hook.
+REPO_ROOT = next(
+    (parent for parent in Path(__file__).resolve().parents
+     if (parent / "ops" / "native_fabric" / "quota_continuity"
+         / "source" / "native_watchlist_review03_reconcile.py").is_file()),
+    None,
+)
+assert REPO_ROOT is not None, "original_review03_source_missing"
 SOURCE_DIR = REPO_ROOT / "ops" / "native_fabric" / "quota_continuity" / "source"
 sys.path.insert(0, str(SOURCE_DIR))
 

@@ -376,3 +376,45 @@ def test_source_snapshot_refuses_intermediate_symlink_even_when_final_files_vali
     state.symlink_to(move,target_is_directory=True)
     with pytest.raises((OSError,ValueError)):
         r.source_snapshot()
+
+
+
+def test_broker_db_symlink_is_refused_before_sqlite_can_follow_it(private_root,monkeypatch):
+    here,_=_original_local_source(private_root,monkeypatch)
+    db=here/"broker"/"leases.sqlite"
+    original=here/"broker"/"saved_lease.sqlite"
+    db.rename(original)
+    db.symlink_to(original)
+    with pytest.raises((OSError,ValueError)):
+        r.source_snapshot()
+    assert original.exists()
+
+
+def test_broker_parent_symlink_is_refused_even_when_database_is_valid(private_root,monkeypatch):
+    here,_=_original_local_source(private_root,monkeypatch)
+    parent=here/"broker"
+    original=here/"broker_original"
+    parent.rename(original)
+    parent.symlink_to(original,target_is_directory=True)
+    with pytest.raises((OSError,ValueError)):
+        r.source_snapshot()
+    assert (original/"leases.sqlite").exists()
+
+
+def test_incomplete_competing_exclusive_receipt_remains_untouched(original,monkeypatch):
+    _,proof=original
+    real_open=os.open
+    once=[]
+    def competing(name,flags,mode=0o777,*,dir_fd=None):
+        if (name==r.receipt_path().name and flags & os.O_CREAT
+                and flags & os.O_EXCL and not once):
+            once.append(True)
+            fd=real_open(name,flags,0o600,dir_fd=dir_fd)
+            os.close(fd)
+            raise FileExistsError(17,"other original writer reserved the receipt")
+        return real_open(name,flags,mode,dir_fd=dir_fd)
+    monkeypatch.setattr(os,"open",competing)
+    with pytest.raises(r.NotQualified,match="original_receipt_incomplete"):
+        r.reconcile_original(r.RUN,r.ROOT,proof["proof_sha256"])
+    assert once==[True]
+    assert r.receipt_path().read_bytes()==b""

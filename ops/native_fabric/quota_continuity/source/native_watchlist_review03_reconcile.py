@@ -151,10 +151,33 @@ def source_snapshot():
     require(row.get("root_id")==ROOT and row.get("rc")==124
             and row.get("signal")=="effect_unknown"
             and row.get("reason")=="transport_deadline_without_rc","controller_ledger_hold")
+    # Broker is the same original owner evidence as the launch artifacts.
+    # Its parent chain and leaf must not resolve through a symlink. Hold an
+    # O_NOFOLLOW descriptor across SQLite's read-only snapshot and verify that
+    # the visible database is still the same file when SQLite finishes.
+    import artifact_delivery as delivery
     db=HERE/"broker/leases.sqlite"
-    with sqlite3.connect("file:"+str(db)+"?mode=ro",uri=True,timeout=5) as conn:
-        lease=conn.execute("SELECT id,orchestrator_id,pool,account,host,state,model "
-                           "FROM leases WHERE id=?",(LEASE,)).fetchone()
+    with delivery.DirectoryChain(db.parent) as chain:
+        chain.verify()
+        fd=os.open(db.name,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK,dir_fd=chain.fd)
+        try:
+            before=os.fstat(fd)
+            visible=os.stat(db.name,dir_fd=chain.fd,follow_symlinks=False)
+            identity=lambda x:(x.st_dev,x.st_ino,x.st_mode,x.st_uid,
+                               x.st_size,x.st_mtime_ns,x.st_ctime_ns)
+            require(stat.S_ISREG(before.st_mode) and before.st_uid==os.getuid()
+                    and not before.st_mode & 0o022 and before.st_nlink==1
+                    and identity(before)==identity(visible),"broker_db_custody")
+            with sqlite3.connect("file:"+str(db)+"?mode=ro",uri=True,timeout=5) as conn:
+                lease=conn.execute("SELECT id,orchestrator_id,pool,account,host,state,model "
+                                   "FROM leases WHERE id=?",(LEASE,)).fetchone()
+            after=os.fstat(fd)
+            visible=os.stat(db.name,dir_fd=chain.fd,follow_symlinks=False)
+            require(identity(before)==identity(after)==identity(visible),
+                    "broker_db_changed")
+            chain.verify()
+        finally:
+            os.close(fd)
     require(lease is not None and tuple(lease)==
             (LEASE,ROOT,"bailian","Ryan",HOST,"expired",MODEL),
             "original_lease_not_expired")
@@ -333,7 +356,13 @@ def reconcile_original(run_id,root_id,expected_proof_sha256):
                 except BaseException:
                     # An effect may exist; never unlink or attempt replacement.
                     raise
-        existing=_saved()
+        try:
+            existing=_saved()
+        except (json.JSONDecodeError,UnicodeError) as exc:
+            # Another O_EXCL writer may still be populating its immutable file.
+            # Stop on that original effect; never unlink/recreate or poll/retry
+            # an uncertain rival receipt from this path.
+            raise NotQualified("original_receipt_incomplete") from exc
     require(existing is not None and existing["proof"]==proof,
             "original_reconciliation_conflict")
     return status_from_receipt()
