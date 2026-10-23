@@ -1,0 +1,122 @@
+{
+  "glm": {
+    "accounts": {
+      "chairman-max": {
+        "refreshed_at": 1792744947,
+        "states": [
+          {
+            "cap": 100.0,
+            "confidence": 0.98,
+            "detail": "z.ai quota/limit",
+            "observed_at": "2026-10-23T08:42:28Z",
+            "provider": "glm",
+            "remaining_pct": 100.0,
+            "reset_at": null,
+            "source": "PROVIDER_AUTHORITATIVE",
+            "used": 0.0,
+            "window": "5h"
+          },
+          {
+            "cap": 100.0,
+            "confidence": 0.98,
+            "detail": "z.ai quota/limit",
+            "observed_at": "2026-10-23T08:42:28Z",
+            "provider": "glm",
+            "remaining_pct": 5.0,
+            "reset_at": "2026-10-25T21:16:16Z",
+            "source": "PROVIDER_AUTHORITATIVE",
+            "used": 95.0,
+            "window": "weekly"
+          }
+        ]
+      },
+      "chairman-max-2": {
+        "refreshed_at": 1792744947,
+        "states": [
+          {
+            "cap": 100.0,
+            "confidence": 0.98,
+            "detail": "z.ai quota/limit",
+            "observed_at": "2026-10-23T08:42:28Z",
+            "provider": "glm",
+            "remaining_pct": 100.0,
+            "reset_at": null,
+            "source": "PROVIDER_AUTHORITATIVE",
+            "used": 0.0,
+            "window": "5h"
+          },
+          {
+            "cap": 100.0,
+            "confidence": 0.98,
+            "detail": "z.ai quota/limit",
+            "observed_at": "2026-10-23T08:42:28Z",
+            "provider": "glm",
+            "remaining_pct": 5.0,
+            "reset_at": "2026-10-26T01:39:33Z",
+            "source": "PROVIDER_AUTHORITATIVE",
+            "used": 95.0,
+            "window": "weekly"
+          }
+        ]
+      },
+      "chairman-max-3": {
+        "refreshed_at": 1792744947,
+        "states": [
+          {
+            "cap": 100.0,
+            "confidence": 0.98,
+            "detail": "z.ai quota/limit",
+            "observed_at": "2026-10-23T08:42:29Z",
+            "provider": "glm",
+            "remaining_pct": 99.0,
+            "reset_at": "2026-10-23T13:23:10Z",
+            "source": "PROVIDER_AUTHORITATIVE",
+            "used": 1.0,
+            "window": "5h"
+          },
+          {
+            "cap": 100.0,
+            "confidence": 0.98,
+            "detail": "z.ai quota/limit",
+            "observed_at": "2026-10-23T08:42:29Z",
+            "provider": "glm",
+            "remaining_pct": 51.0,
+            "reset_at": "2026-10-28T06:16:02Z",
+            "source": "PROVIDER_AUTHORITATIVE",
+            "used": 49.0,
+            "window": "weekly"
+          }
+        ]
+      }
+    }
+  },
+  "minimax": {
+    "refreshed_at": 1792744947,
+    "states": [
+      {
+        "cap": 0.0,
+        "confidence": 0.98,
+        "detail": "minimax token_plan/remains general",
+        "observed_at": "2026-10-23T08:42:27Z",
+        "provider": "minimax",
+        "remaining_pct": 84.0,
+        "reset_at": "2026-10-23T10:00:00Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "used": 0.0,
+        "window": "5h"
+      },
+      {
+        "cap": 0.0,
+        "confidence": 0.98,
+        "detail": "minimax token_plan/remains general",
+        "observed_at": "2026-10-23T08:42:27Z",
+        "provider": "minimax",
+        "remaining_pct": 85.0,
+        "reset_at": "2026-10-26T00:00:00Z",
+        "source": "PROVIDER_AUTHORITATIVE",
+        "used": 0.0,
+        "window": "weekly"
+      }
+    ]
+  }
+}

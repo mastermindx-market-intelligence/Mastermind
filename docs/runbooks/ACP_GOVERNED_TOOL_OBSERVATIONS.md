@@ -197,7 +197,19 @@ patch `243ec445...` from the original contributor evidence; the exact
 `c7781490...` compiled #1060 grant-profile artifact; and executable Node
 22.22.0 darwin-arm64 `913b144f...` from official distribution. The
 preparer validates donor lockfile, checkout state and all frozen artifact
-hashes before creating a **new** external output directory.
+hashes before creating a **new** external output directory. In addition to the
+lockfile SHA `081d9f86...`, the installed, Git-ignored pnpm dependency tree
+has an independently source-pinned macOS ARM64 content closure SHA256
+`bc046d6eee33feed3fa4782ec38761937a875b8230f36a0645d306fd5bed0b86`.
+It covers sorted file paths and bytes, executable bits, directories and
+symlink destinations (rejecting escapes outside the donor). The original
+clean donor and the separately built earlier frozen supply were measured
+with the same result. Any changed installed package byte (including esbuild,
+TypeScript, MCP client or SDK) causes rejection **before it is executed**;
+the snapshot is checked again after copy, and qualification re-verifies it.
+This binds *this materialized installation* to its source-reviewed fixed
+donor/lock profile. It does not independently attest an upstream npm
+publisher or establish general portability to another package install.
 
 ```sh
 python3.12 scripts/prepare_dsh_governed_supply.py \
@@ -214,7 +226,8 @@ entrypoint, observes the **actual** stdio MCP tools, derives a read/search-only
 `production_armed:false` projection through the original typed helper,
 and bundles AgentLoop with the pinned grant profile. Before accepting the
 projection, the preparer independently binds its exact read_file/search_files
-tool identities and observed input schemas, stdio command/server, synthetic
+tool identities and full observed tool rows (including annotations,
+outputSchema and execution metadata), stdio command/server, synthetic
 profile, and approval contract; two arbitrary tools never qualify.
 The final
 `preparation-receipt.json` has `SUPPLY_PINNED_NOT_YET_TESTED`: building
@@ -232,7 +245,12 @@ python3.12 scripts/qualify_dsh_governed_worker.py \
 
 Only `REAL_PROVIDER_FREE_WORKERRESULT_PASS` with **11 executed passes,
 zero failures/errors/skips**, a JUnit receipt and all immutable hashes
-verified qualifies this source-only WorkerResult experiment. An absent
+verified qualifies this source-only WorkerResult experiment. The independently
+source-anchored identities are the donor revision, lockfile, installed pnpm
+content closure, grant-profile source and binary, R4 patch, frozen fixture
+source files and Node executable. Other `files` and `fixture_input`
+hashes in the fresh private manifest are self-attested consistency checks,
+not a separate external provenance authority. An absent
 input, donor drift, changed compiled profile, old/wrong Node, malicious
 mount patch, accidental skipped test or replay of an evidence destination
 must refuse. Neither success promotes `acp.implemented` or grants real

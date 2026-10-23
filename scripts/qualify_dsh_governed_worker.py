@@ -10,6 +10,7 @@ import argparse
 import hashlib
 import json
 import os
+import stat
 from pathlib import Path, PurePosixPath
 import subprocess
 import sys
@@ -20,6 +21,9 @@ EXPECTED_PROFILE_SOURCE = "4159c403cf63bac8bd18138fa232911589afe06f"
 EXPECTED_PROFILE_SHA = "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c"
 EXPECTED_R4_SHA = "243ec445db513db3bb9ff0cad05bc70550df972a785b8af1546d89c055cadc1f"
 EXPECTED_NODE_SHA = "913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
+EXPECTED_DONOR_LOCK_SHA = "081d9f8641590187c359477a5ee01efe99e0f216d19b8ac946d50cc710cdfb8b"
+# Frozen darwin-arm64 pnpm materialization, bound to the exact donor+lock above.
+EXPECTED_PNPM_TREE_SHA = "bc046d6eee33feed3fa4782ec38761937a875b8230f36a0645d306fd5bed0b86"
 EXPECTED_TESTS = 11
 SOURCE_FILES = frozenset({
     "governed_acp_fixture.mjs", "scoped_profile.mjs",
@@ -38,6 +42,61 @@ class QualificationRefused(Exception):
 
 def digest(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def materialized_dependency_digest(donor: Path) -> str:
+    """Content-address every actual pnpm package byte, path and symlink.
+
+    The frozen donor Git SHA and pnpm lock cannot attest Git-ignored,
+    installed node_modules. This independent SHA-256 anchors the *entire*
+    materialized .pnpm tree on the reviewed macOS/arm64 fixture.
+    Symlink targets must remain within the frozen donor checkout; links
+    into tracked workspace packages are bound by the donor Git SHA.
+    """
+    try:
+        donor = donor.resolve(strict=True)
+        tree = donor / "node_modules/.pnpm"
+        if tree.is_symlink() or not tree.is_dir():
+            raise QualificationRefused("PIN_MISMATCH", "materialized pnpm tree missing")
+        result = hashlib.sha256()
+        result.update(b"mastermind.materialized-pnpm-tree.v1\0")
+        visited = 0
+
+        def onerror(exc: OSError) -> None:
+            raise QualificationRefused("PIN_MISMATCH", "unreadable pnpm directory") from exc
+
+        for directory, directories, filenames in os.walk(
+            tree, topdown=True, followlinks=False, onerror=onerror
+        ):
+            directories.sort()
+            filenames.sort()
+            for name in sorted((*directories, *filenames)):
+                item = Path(directory) / name
+                relative = item.relative_to(tree).as_posix().encode("utf-8", "surrogateescape")
+                info = item.lstat()
+                if stat.S_ISLNK(info.st_mode):
+                    target = item.resolve(strict=True)
+                    if not target.is_relative_to(donor):
+                        raise QualificationRefused("PIN_MISMATCH", "pnpm symlink escapes frozen donor")
+                    link = os.readlink(item).encode("utf-8", "surrogateescape")
+                    result.update(b"L\0" + relative + b"\0" + link + b"\0")
+                elif stat.S_ISDIR(info.st_mode):
+                    result.update(b"D\0" + relative + b"\0")
+                elif stat.S_ISREG(info.st_mode):
+                    with item.open("rb") as source:
+                        content_hash = hashlib.file_digest(source, "sha256").digest()
+                    executable = b"X" if (info.st_mode & 0o111) else b"-"
+                    result.update(b"F\0" + relative + b"\0" + executable + content_hash)
+                else:
+                    raise QualificationRefused("PIN_MISMATCH", "unsupported pnpm filesystem entry")
+                visited += 1
+        if visited == 0:
+            raise QualificationRefused("PIN_MISMATCH", "empty materialized pnpm tree")
+        return result.hexdigest()
+    except QualificationRefused:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise QualificationRefused("PIN_MISMATCH", "cannot attest materialized pnpm tree") from exc
 
 
 def pinned_file(root: Path, relative: str, expected: str) -> None:
@@ -71,9 +130,11 @@ def verify_supply(root: Path) -> dict:
         "r4_patch": EXPECTED_R4_SHA,
         "profile_artifact": EXPECTED_PROFILE_SHA,
         "node_sha256": EXPECTED_NODE_SHA,
+        "donor_lock_sha256": EXPECTED_DONOR_LOCK_SHA,
+        "materialized_pnpm_sha256": EXPECTED_PNPM_TREE_SHA,
     }
     if any(data.get(k) != v for k, v in frozen.items()):
-        raise QualificationRefused("PIN_MISMATCH", "donor/profile/patch/node pin mismatch")
+        raise QualificationRefused("PIN_MISMATCH", "frozen donor/lock/dependency/profile/patch/node pin mismatch")
     if set(data.get("fixture_sources", {})) != SOURCE_FILES:
         raise QualificationRefused("INVALID_MANIFEST", "fixture source set mismatch")
     for field, directory in (
@@ -87,6 +148,9 @@ def verify_supply(root: Path) -> dict:
             pinned_file(directory, relative, expected)
     pinned_file(root, "profile1060.mjs", EXPECTED_PROFILE_SHA)
     pinned_file(root, "governed-acp-mount.patch", EXPECTED_R4_SHA)
+    pinned_file(root, "donor/pnpm-lock.yaml", EXPECTED_DONOR_LOCK_SHA)
+    if materialized_dependency_digest(root / "donor") != EXPECTED_PNPM_TREE_SHA:
+        raise QualificationRefused("PIN_MISMATCH", "installed dependency closure differs from frozen lock")
     node_value, node_sha = data.get("node"), data.get("node_sha256")
     if not isinstance(node_value, str) or not os.path.isabs(node_value) or not isinstance(node_sha, str):
         raise QualificationRefused("INVALID_MANIFEST", "missing exact Node binary pin")

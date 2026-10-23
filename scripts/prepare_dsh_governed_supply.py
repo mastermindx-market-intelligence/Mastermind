@@ -24,6 +24,8 @@ DONOR_LOCK = "081d9f8641590187c359477a5ee01efe99e0f216d19b8ac946d50cc710cdfb8b"
 PROFILE_SHA = "c77814901495ebb3131d28b4968bd3f1cce3f39233e1c0cb580de5a7b9f9106c"
 R4_SHA = "243ec445db513db3bb9ff0cad05bc70550df972a785b8af1546d89c055cadc1f"
 NODE_SHA = "913b144fdb40638b1acef7974ab3c33fbd527cc0974cb5da467ab1e6ac51b4d4"
+# Exact installed pnpm content closure for the frozen donor/lock on darwin-arm64.
+PNPM_TREE_SHA = "bc046d6eee33feed3fa4782ec38761937a875b8230f36a0645d306fd5bed0b86"
 PROFILE_SOURCE = "4159c403cf63bac8bd18138fa232911589afe06f"
 SOURCES = REPO / "experiments/harness_convergence/dsh_worker"
 SERVER = REPO / "experiments/harness_convergence/dispatch_binding/stdio-fixture-server.mjs"
@@ -140,10 +142,64 @@ def require_read_search_projection(
     if set(selected) != allowed or {t.get("name") for t in tools
                                     if isinstance(t, dict)} != allowed:
         raise Refused("MCP projection includes an ungranted or missing tool")
-    if any(not isinstance(t, dict) or t.get("inputSchema") != (
-        selected[t["name"]].get("inputSchema")
-    ) for t in tools):
-        raise Refused("MCP projection tool schema differs from observed stdio catalog")
+    for tool in tools:
+        if not isinstance(tool, dict):
+            raise Refused("MCP projection tool must be typed")
+        observed_tool = selected[tool["name"]]
+        expected = {
+            "name": tool["name"],
+            "inputSchema": observed_tool.get("inputSchema"),
+            "outputSchema": observed_tool.get("outputSchema"),
+            "annotations": observed_tool.get("annotations"),
+            "execution": observed_tool.get("execution"),
+        }
+        if tool != expected:
+            raise Refused("MCP projection full tool row differs from observed stdio catalog")
+
+
+def load_qualifier():
+    """Load the independent frozen-input verifier from this exact source checkout."""
+    qualifier_file = REPO / "scripts/qualify_dsh_governed_worker.py"
+    spec = importlib.util.spec_from_file_location("dsh_governed_qualifier", qualifier_file)
+    if spec is None or spec.loader is None:
+        raise Refused("independent governed supply verifier unavailable")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def require_dependency_closure(module, donor: Path) -> None:
+    """Reject altered ignored pnpm bytes before executing any installed dependency."""
+    if (module.EXPECTED_PNPM_TREE_SHA != PNPM_TREE_SHA
+            or module.EXPECTED_DONOR_LOCK_SHA != DONOR_LOCK):
+        raise Refused("preparer and qualifier dependency pins disagree")
+    try:
+        actual = module.materialized_dependency_digest(donor)
+    except module.QualificationRefused as exc:
+        raise Refused("materialized dependency tree cannot be independently verified") from exc
+    if actual != PNPM_TREE_SHA:
+        raise Refused("materialized dependencies mismatch immutable donor lock closure")
+
+
+def safe_donor_git(donor: Path, *args: str) -> str:
+    """Security-gate Git with no inherited Git/provider environment and a timeout."""
+    environment = {
+        "PATH": "/usr/bin:/bin", "HOME": "/var/empty", "LC_ALL": "C",
+        "GIT_CONFIG_NOSYSTEM": "1", "GIT_CONFIG_GLOBAL": "/dev/null",
+        "GIT_OPTIONAL_LOCKS": "0", "GIT_NO_REPLACE_OBJECTS": "1",
+    }
+    command = [
+        "/usr/bin/git", "--no-optional-locks", "-C", str(donor),
+        "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null", *args,
+    ]
+    try:
+        result = subprocess.run(
+            command, text=True, capture_output=True, check=True,
+            env=environment, timeout=20,
+        )
+    except (subprocess.TimeoutExpired, subprocess.CalledProcessError) as exc:
+        raise Refused("frozen donor git provenance preflight refused") from exc
+    return result.stdout.strip()
 
 
 def build(args: argparse.Namespace) -> int:
@@ -157,16 +213,14 @@ def build(args: argparse.Namespace) -> int:
     require_sha(profile, PROFILE_SHA, "compiled grant profile")
     require_sha(node, NODE_SHA, "Node 22.22.0 darwin-arm64")
     require_sha(donor / "pnpm-lock.yaml", DONOR_LOCK, "donor lock")
-    donor_rev = subprocess.run(["/usr/bin/git", "-C", str(donor), "rev-parse", "HEAD"],
-                               text=True, capture_output=True, check=True).stdout.strip()
-    if donor_rev != DONOR_SHA:
+    if safe_donor_git(donor, "rev-parse", "HEAD") != DONOR_SHA:
         raise Refused("donor source SHA does not match the frozen fixture")
-    dirt = subprocess.run(["/usr/bin/git", "-C", str(donor), "status", "--porcelain"],
-                          text=True, capture_output=True, check=True).stdout
-    if dirt:
+    if safe_donor_git(donor, "status", "--porcelain"):
         raise Refused("donor checkout must be unmodified before cloning")
     if not (donor / "node_modules/.pnpm/node_modules/esbuild").exists():
         raise Refused("frozen donor dependencies missing; no automatic installation")
+    module = load_qualifier()
+    require_dependency_closure(module, donor)
     output = owned_out(Path(args.output), (donor, patch, profile, node))
     output.mkdir(mode=0o700, parents=True)
     logdir = output / "logs"
@@ -181,6 +235,8 @@ def build(args: argparse.Namespace) -> int:
                cwd=output, env=clean_env, log=logdir / "clone.log", timeout=240)
     del copy
     snapshot = output / "donor"
+    # A copy made after the first proof must not substitute ignored build code.
+    require_dependency_closure(module, snapshot)
     git = ["/usr/bin/git", "-C", str(snapshot)]
     run(git + ["apply", "--check", str(patch)], cwd=output, env=clean_env,
         log=logdir / "patch-check.log")
@@ -260,6 +316,8 @@ esbuild.buildSync({entryPoints:[root+'/packages/acp/acp/src/index.ts'],
         "donor": DONOR_SHA, "profile_head": PROFILE_SOURCE,
         "r4_patch": R4_SHA, "profile_artifact": PROFILE_SHA,
         "node": node_exec, "node_sha256": NODE_SHA,
+        "donor_lock_sha256": DONOR_LOCK,
+        "materialized_pnpm_sha256": PNPM_TREE_SHA,
         "files": {name: sha(output / name) for name in files},
         "fixture_input": {
             name: sha(fixture / name) for name in
@@ -272,12 +330,7 @@ esbuild.buildSync({entryPoints:[root+'/packages/acp/acp/src/index.ts'],
     run([node_exec, str(SOURCES / "build_governed_fixture.cjs"),
          str(output), str(snapshot / "node_modules/.pnpm/node_modules/esbuild")],
         cwd=REPO, env=clean_env, log=logdir / "governed-bundle.log")
-    qualifier_file = REPO / "scripts/qualify_dsh_governed_worker.py"
-    spec = importlib.util.spec_from_file_location("dsh_governed_qualifier", qualifier_file)
-    if spec is None or spec.loader is None:
-        raise Refused("existing validator unavailable")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # The independent qualifier re-attests this exact byte closure after bundling.
     module.verify_supply(output)
     receipt = {
         "schema": "mastermind.dsh_governed_supply_prepared.v1",
