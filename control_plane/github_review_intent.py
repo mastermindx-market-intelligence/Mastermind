@@ -1214,6 +1214,8 @@ def decide_review_intent(
     try:
         assert_untrusted_text_admissible(pull_request.title, name="pull_request.title")
         assert_untrusted_text_admissible(pull_request.body, name="pull_request.body")
+        # Individual limits do not guarantee the combined objective bound.
+        build_review_objective(pull_request=pull_request, intent_source=intent_source)
     except ReviewIntentError:
         return _refuse(
             ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED,

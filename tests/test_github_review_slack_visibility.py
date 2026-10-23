@@ -2,6 +2,9 @@
 from control_plane.github_review_intent import (
     IntentSource, ReviewIntentDecision, review_command_id, review_intent_id,
 )
+from control_plane.executive_runtime import Runtime
+from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+from integrations.slack_agent_dialogue.engine import SlackMessage
 from integrations.github_review_slack_visibility import (
     REVIEW_CHANNEL_ID, SlackReviewVisibility,
 )
@@ -30,13 +33,15 @@ def decision():
     )
 
 
-def test_public_channel_never_discloses_private_repository_or_pr_body():
+def test_public_channel_never_discloses_private_repository_or_pr_body(tmp_path):
     instance = client()
     sent = []
     async def fake_post_parent(*, channel_id, text):
         sent.append((channel_id, text))
+        return SlackMessage(ts="1792699000.000001", author_user_id="U0BT71H4FQE", text=text)
     instance.post_parent = fake_post_parent
-    notice = SlackReviewVisibility(client=instance)
+    threads = ExecutiveSlackReviewThreads(runtime=Runtime.at(tmp_path))
+    notice = SlackReviewVisibility(client=instance, threads=threads)
     notice.notify_review_admitted(summary="private secret title", decision=decision(), job_id="JOB-042")
     assert sent[0][0] == REVIEW_CHANNEL_ID
     assert "JOB-042" in sent[0][1]
@@ -46,13 +51,17 @@ def test_public_channel_never_discloses_private_repository_or_pr_body():
     assert "alice" not in sent[0][1]
 
 
-def test_exact_explicit_public_repo_opt_in():
+def test_exact_explicit_public_repo_opt_in(tmp_path):
     instance = client()
     sent = []
     async def fake_post_parent(*, channel_id, text):
         sent.append(text)
+        return SlackMessage(ts="1792699000.000001", author_user_id="U0BT71H4FQE", text=text)
     instance.post_parent = fake_post_parent
-    notice = SlackReviewVisibility(client=instance, public_repository_names_authorized=True)
+    threads = ExecutiveSlackReviewThreads(runtime=Runtime.at(tmp_path))
+    notice = SlackReviewVisibility(
+        client=instance, threads=threads, public_repository_names_authorized=True
+    )
     notice.notify_review_admitted(summary="", decision=decision(), job_id="JOB-042")
     assert "example/private#42" in sent[0]
 

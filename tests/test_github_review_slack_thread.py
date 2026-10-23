@@ -68,6 +68,7 @@ def test_admission_parent_and_exact_thread_result_with_one_reply(tmp_path):
 def test_invalid_second_github_review_receipt_cannot_claim_same_thread(tmp_path):
     runtime = Runtime.at(tmp_path)
     correlation = ExecutiveSlackReviewThreads(runtime=runtime)
+    assert correlation.reserve_parent_send(decision=decision(), job_id="JOB-777")
     correlation.record_parent(
         decision=decision(), job_id="JOB-777", message=parent_message("queued")
     )
@@ -95,6 +96,7 @@ def test_unbound_slack_thread_cannot_fabricate_a_result_post(tmp_path):
 def test_ambiguous_slack_post_is_never_retried(tmp_path):
     runtime = Runtime.at(tmp_path)
     correlation = ExecutiveSlackReviewThreads(runtime=runtime)
+    assert correlation.reserve_parent_send(decision=decision(), job_id="JOB-777")
     correlation.record_parent(
         decision=decision(), job_id="JOB-777", message=parent_message("queued")
     )
@@ -113,3 +115,63 @@ def test_ambiguous_slack_post_is_never_retried(tmp_path):
         decision=decision(), job_id="JOB-777", review_id="879"
     )
     assert len(count) == 1
+
+
+def test_duplicate_parent_admission_reserves_one_send_before_slack_post(tmp_path):
+    import concurrent.futures
+    import threading
+
+    runtime = Runtime.at(tmp_path)
+    correlation = ExecutiveSlackReviewThreads(runtime=runtime)
+    slack = client()
+    posts = []
+    lock = threading.Lock()
+
+    async def fake_post_parent(*, channel_id, text):
+        with lock:
+            posts.append((channel_id, text))
+        return parent_message(text)
+
+    slack.post_parent = fake_post_parent
+    visibility = SlackReviewVisibility(client=slack, threads=correlation)
+    subject = decision()
+    barrier = threading.Barrier(2)
+
+    def deliver(_):
+        barrier.wait(timeout=5)
+        visibility.notify_review_admitted(
+            summary="", decision=subject, job_id="JOB-777"
+        )
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as pool:
+        list(pool.map(deliver, range(2)))
+    assert len(posts) == 1
+    assert correlation.parent_thread(decision=subject, job_id="JOB-777") == ROOT
+    send_events = runtime.store.list_events(
+        command_id_prefix="gh-review-slack-send:"
+    )
+    assert len(send_events) == 1
+    assert send_events[0].event_type == "GITHUB_REVIEW_SLACK_PARENT_SEND_RESERVED"
+
+
+def test_parent_post_lost_ack_consumes_one_reservation_without_repost(tmp_path):
+    runtime = Runtime.at(tmp_path)
+    correlation = ExecutiveSlackReviewThreads(runtime=runtime)
+    relay = client()
+    sent = []
+
+    async def ambiguous_parent(*, channel_id, text):
+        sent.append((channel_id, text))
+        raise OSError("Slack acknowledged remotely but local ACK was lost")
+
+    relay.post_parent = ambiguous_parent
+    subject = decision()
+    owner = SlackReviewVisibility(client=relay, threads=correlation)
+    with pytest.raises(OSError):
+        owner.notify_review_admitted(summary="", decision=subject, job_id="JOB-777")
+    # The first request might have succeeded remotely. Do not issue a second.
+    owner.notify_review_admitted(summary="", decision=subject, job_id="JOB-777")
+    assert len(sent) == 1
+    assert correlation.parent_thread(decision=subject, job_id="JOB-777") is None
+    claims = runtime.store.list_events(command_id_prefix="gh-review-slack-send:")
+    assert len(claims) == 1

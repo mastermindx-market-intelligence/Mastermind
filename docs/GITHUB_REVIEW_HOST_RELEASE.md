@@ -143,8 +143,10 @@ for the Executive owner and hermetic tests. The receiver and publication gates
 default disabled; assembling an object is not starting a listener.
 
 The socket client exposes exact review-command status, bounded review
-admission, and one source-bound Slack parent-receipt capture frame over the
-**same existing authenticated socket**. It does not enumerate Executive jobs,
+admission, an atomic pre-send Slack parent reservation frame, and a separate
+source-bound parent-receipt capture frame over the **same existing authenticated
+socket**. The reservation precedes any Slack POST; a duplicate or lost socket
+ACK is not permission for a second parent. It does not enumerate Executive jobs,
 run a worker, retry a lost POST, hold a credential, or select a model. The
 `ExecutiveGitHubReviewSocketOwner` can apply those frames to the incumbent
 JobRegistry/EventStore **only when an authorized control host invokes it**.
@@ -163,11 +165,18 @@ Without it, the owner refuses the frame before EventStore mutation.
 The returned real `SlackMessage` must match that exact timestamp, enrolled
 bot author, unedited/un-deleted top-level state and deterministic parent
 body for the immutable PR/head/command/Job; a nonmatching message is refused.
-The installed host must ALSO inject `parent_recorder`, bound to the existing
-`ExecutiveSlackReviewThreads(runtime=runtime).record_parent`, and
-`parent_body_renderer`, bound to the existing
-`integrations.github_review_slack_thread.review_parent_body`. Without all
-three callbacks the frame is refused. The pure receipt protocol lives in
+The installed host must ALSO inject `parent_reserver`, bound to the existing
+`ExecutiveSlackReviewThreads(runtime=runtime).reserve_parent_send`, and
+`parent_recorder`, bound to that same incumbent EventStore owner's
+`record_parent`. `parent_body_renderer` stays bound to
+`integrations.github_review_slack_thread.review_parent_body`. The
+`reserve_parent` frame requires an enrolled Relay identity, exact original
+Job/head/source guard, and a real atomic EventStore send-attempt claim. It
+returns `PARENT_SEND_RESERVED` only for the first eligible attempt; repeats
+return `PARENT_ALREADY_ATTEMPTED` and never POST. A `record_parent` call
+without the earlier claim fails closed, even with a real Slack receipt.
+All four trusted callbacks (reserve, read, record, render) remain default-off
+until the installed Executive host explicitly binds them. The pure receipt protocol lives in
 `control_plane/github_review_socket_contract.py`; the existing Slack integration
 remains the sole owner of message formatting and its size limit. This
 preserves the enforced `control_plane -> integrations` dependency boundary

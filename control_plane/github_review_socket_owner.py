@@ -24,7 +24,7 @@ from control_plane.github_review_socket_contract import (
     FRAME_SCHEMA, RESPONSE_SCHEMA, MAX_FRAME_BYTES,
     REVIEW_SLACK_CHANNEL_ID, SlackParentMessage,
 )
-_SUPPORTED_ACTIONS = frozenset({"status", "admit", "record_parent"})
+_SUPPORTED_ACTIONS = frozenset({"status", "admit", "reserve_parent", "record_parent"})
 _DECISION_KEYS = frozenset({
     "schema", "admitted", "refusal", "intent_source", "intent_id",
     "command_id", "delivery_command_id", "repository", "pull_number",
@@ -96,6 +96,7 @@ class ExecutiveGitHubReviewSocketOwner:
         worker_constraints: Mapping[str, object] | None = None,
         parent_message_reader: Callable[[ReviewIntentDecision, str, str], SlackParentMessage] | None = None,
         parent_recorder: Callable[..., None] | None = None,
+        parent_reserver: Callable[..., bool] | None = None,
         parent_body_renderer: Callable[..., str] | None = None,
     ) -> None:
         if not isinstance(runtime, Runtime):
@@ -130,6 +131,11 @@ class ExecutiveGitHubReviewSocketOwner:
         # Host injects EXISTING ExecutiveSlackReviewThreads.record_parent;
         # a public frame cannot select a different Runtime/EventStore writer.
         self._parent_recorder = parent_recorder
+        if parent_reserver is not None and not callable(parent_reserver):
+            raise ValueError("canonical Slack parent sender must be callable")
+        # Installed owner supplies the SAME ExecutiveSlackReviewThreads
+        # instance's reserve_parent_send; no public-supplied recorder or DB.
+        self._parent_reserver = parent_reserver
         if parent_body_renderer is not None and not callable(parent_body_renderer):
             raise ValueError("trusted Slack parent renderer must be callable")
         self._parent_body_renderer = parent_body_renderer
@@ -190,13 +196,16 @@ class ExecutiveGitHubReviewSocketOwner:
                     or provenance.get("repository") not in self._repositories):
                 raise GitHubReviewSocketRefused("REVIEW_SOCKET_COMMAND_CONFLICT")
             return {"schema": RESPONSE_SCHEMA, "state": "EXISTS", "job_id": event.job_id}
-        if action == "record_parent":
-            if set(frame) != {
-                "schema", "action", "decision", "job_id",
-                "channel_id", "thread_ts", "author_user_id",
-            }:
+        if action in {"reserve_parent", "record_parent"}:
+            expected = {"schema", "action", "decision", "job_id", "channel_id"}
+            if action == "record_parent":
+                expected.update({"thread_ts", "author_user_id"})
+            if set(frame) != expected:
                 raise GitHubReviewSocketRefused("REVIEW_SOCKET_FRAME_INVALID")
-            if (self._relay_bot_user_id is None
+            if action == "reserve_parent":
+                if self._relay_bot_user_id is None or self._parent_reserver is None:
+                    raise GitHubReviewSocketRefused("REVIEW_SLACK_PROVENANCE_UNBOUND")
+            elif (self._relay_bot_user_id is None
                     or self._parent_message_reader is None
                     or self._parent_recorder is None
                     or self._parent_body_renderer is None):
@@ -207,7 +216,8 @@ class ExecutiveGitHubReviewSocketOwner:
                     or type(job_id) is not str
                     or re.fullmatch(r"JOB-[0-9]+", job_id) is None
                     or frame.get("channel_id") != REVIEW_SLACK_CHANNEL_ID
-                    or frame.get("author_user_id") != self._relay_bot_user_id):
+                    or (action == "record_parent"
+                        and frame.get("author_user_id") != self._relay_bot_user_id)):
                 raise GitHubReviewSocketRefused("REVIEW_SLACK_PARENT_IDENTITY_REFUSED")
             # The public webhook cannot name an arbitrary Job/thread: capture
             # only against the immutable canonical admission for this PR head.
@@ -227,6 +237,36 @@ class ExecutiveGitHubReviewSocketOwner:
                 or provenance.get("actor") != chosen.actor
             ):
                 raise GitHubReviewSocketRefused("REVIEW_SLACK_PARENT_JOB_MISMATCH")
+            if action == "reserve_parent":
+                # The source/actor/PR head must still be authorized before
+                # claiming a one-attempt Slack effect in canonical SQLite.
+                try:
+                    if self._source_guard(chosen) is not None:
+                        raise ValueError("review source no longer current")
+                except Exception:
+                    raise GitHubReviewSocketRefused(
+                        "REVIEW_SLACK_PARENT_SOURCE_UNVERIFIED"
+                    ) from None
+                try:
+                    first = self._parent_reserver(
+                        decision=chosen, job_id=job_id
+                    )
+                except Exception:
+                    # Reservation may have committed; never POST without
+                    # an authenticated positive reservation response.
+                    raise GitHubReviewSocketRefused(
+                        "REVIEW_SLACK_PARENT_RESERVATION_UNKNOWN"
+                    ) from None
+                if type(first) is not bool:
+                    raise GitHubReviewSocketRefused(
+                        "REVIEW_SLACK_PARENT_RESERVATION_UNKNOWN"
+                    )
+                return {
+                    "schema": RESPONSE_SCHEMA,
+                    "state": "PARENT_SEND_RESERVED" if first
+                             else "PARENT_ALREADY_ATTEMPTED",
+                    "job_id": job_id,
+                }
             ts = frame.get("thread_ts")
             if type(ts) is not str or re.fullmatch(
                 r"[0-9]{10,16}[.][0-9]{6}", ts

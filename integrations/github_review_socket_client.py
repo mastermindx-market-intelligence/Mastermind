@@ -123,6 +123,36 @@ class ExecutiveReviewSocketClient:
             raise ReviewAdmissionUnavailable("REVIEW_SOCKET_ADMISSION_RESULT_INVALID")
         return job_id
 
+    def reserve_parent_send(
+        self, *, decision: ReviewIntentDecision, job_id: str
+    ) -> bool:
+        """Claim one canonical Slack send attempt BEFORE external POST.
+
+        A lost socket response can mean the EventStore claim committed.
+        It must not be interpreted as a positive send grant or retried.
+        """
+        if (not isinstance(decision, ReviewIntentDecision) or not decision.admitted
+                or type(job_id) is not str
+                or re.fullmatch(r"JOB-[0-9]+", job_id) is None):
+            raise ReviewAdmissionUnavailable("REVIEW_SLACK_PARENT_INVALID")
+        answer = self._call({
+            "schema": FRAME_SCHEMA, "action": "reserve_parent",
+            "decision": decision.to_dict(), "job_id": job_id,
+            "channel_id": CHANNEL_ID,
+        })
+        if (set(answer) != {"schema", "state", "job_id"}
+                or answer.get("job_id") != job_id):
+            raise ReviewAdmissionUnavailable(
+                "REVIEW_SLACK_PARENT_RESERVATION_UNVERIFIED"
+            )
+        if answer.get("state") == "PARENT_SEND_RESERVED":
+            return True
+        if answer.get("state") == "PARENT_ALREADY_ATTEMPTED":
+            return False
+        raise ReviewAdmissionUnavailable(
+            "REVIEW_SLACK_PARENT_RESERVATION_UNVERIFIED"
+        )
+
     def record_parent(
         self, *, decision: ReviewIntentDecision, job_id: str,
         message: SlackMessage,

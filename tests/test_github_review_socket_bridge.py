@@ -199,6 +199,14 @@ def parent_frame(subject, job_id, *, ts="1792699000.000001",
     }
 
 
+def reserve_frame(subject, job_id, *, channel="C0CAUK8P8S3"):
+    return {
+        "schema": FRAME_SCHEMA, "action": "reserve_parent",
+        "decision": subject.to_dict(), "job_id": job_id,
+        "channel_id": channel,
+    }
+
+
 def test_socket_parent_requires_enrolled_relay_and_original_job(tmp_path):
     from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
 
@@ -225,6 +233,7 @@ def test_socket_parent_requires_enrolled_relay_and_original_job(tmp_path):
         relay_bot_user_id="U0BT71H4FQE",
         parent_message_reader=trusted_parent_reader,
         parent_recorder=ExecutiveSlackReviewThreads(runtime=runtime).record_parent,
+        parent_reserver=ExecutiveSlackReviewThreads(runtime=runtime).reserve_parent_send,
         parent_body_renderer=review_parent_body,
     )
     bad = [
@@ -241,6 +250,16 @@ def test_socket_parent_requires_enrolled_relay_and_original_job(tmp_path):
     ) is None
 
     frame = parent_frame(subject, job_id)
+    with pytest.raises(GitHubReviewSocketRefused, match="INVALID_OR_CONFLICT"):
+        authorized.handle_frame(frame)
+    assert authorized.handle_frame(reserve_frame(subject, job_id)) == {
+        "schema": RESPONSE_SCHEMA, "state": "PARENT_SEND_RESERVED",
+        "job_id": job_id,
+    }
+    assert authorized.handle_frame(reserve_frame(subject, job_id)) == {
+        "schema": RESPONSE_SCHEMA, "state": "PARENT_ALREADY_ATTEMPTED",
+        "job_id": job_id,
+    }
     receipt = authorized.handle_frame(frame)
     assert receipt == {
         "schema": RESPONSE_SCHEMA, "state": "PARENT_RECORDED",
@@ -449,3 +468,42 @@ def test_socket_parent_cannot_write_without_host_owned_dependencies(tmp_path, mi
     assert ExecutiveSlackReviewThreads(runtime=runtime).parent_thread(
         decision=subject, job_id=job_id,
     ) is None
+
+
+def test_socket_parent_send_cannot_be_claimed_without_canonical_job(tmp_path):
+    from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+    runtime = Runtime.at(tmp_path / "runtime")
+    subject = decision()
+    owners = ExecutiveSlackReviewThreads(runtime=runtime)
+    locked = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime,
+        admission_guard=lambda: None,
+        source_guard=lambda _: None,
+        repositories=frozenset({"example/repo"}),
+        relay_bot_user_id="U0BT71H4FQE",
+        parent_reserver=owners.reserve_parent_send,
+    )
+    with pytest.raises(GitHubReviewSocketRefused, match="JOB_MISMATCH"):
+        locked.handle_frame(reserve_frame(subject, "JOB-987"))
+    assert runtime.store.list_events(command_id_prefix="gh-review-slack-send:") == []
+
+
+def test_socket_parent_send_refused_for_revoked_source(tmp_path):
+    from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+    runtime = Runtime.at(tmp_path / "runtime")
+    subject = decision()
+    open_owner = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: None, repositories=frozenset({"example/repo"}),
+    )
+    job = open_owner.handle_frame(admit_frame(subject))["job_id"]
+    disabled = ExecutiveGitHubReviewSocketOwner(
+        runtime=runtime, admission_guard=lambda: None,
+        source_guard=lambda _: (_ for _ in ()).throw(PermissionError("revoked")),
+        repositories=frozenset({"example/repo"}),
+        relay_bot_user_id="U0BT71H4FQE",
+        parent_reserver=ExecutiveSlackReviewThreads(runtime=runtime).reserve_parent_send,
+    )
+    with pytest.raises(GitHubReviewSocketRefused, match="SOURCE_UNVERIFIED"):
+        disabled.handle_frame(reserve_frame(subject, job))
+    assert runtime.store.list_events(command_id_prefix="gh-review-slack-send:") == []

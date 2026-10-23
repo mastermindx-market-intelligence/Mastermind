@@ -210,7 +210,8 @@ class ExecutiveReviewPublicationRecord:
             # The existing pure adapter pre-reads GitHub, POSTs once at most,
             # then performs its own readback after an ambiguous submission.
             bridge = ReconcilingReviewPublication(
-                transport=self._transport, published=self
+                transport=self._transport, published=self,
+                before_post=self._authorize,
             )
             found = bridge.publish_review(
                 publication_command_id=publication_command_id,

@@ -18,6 +18,7 @@ def slack_components(runtime):
         channel_id=CHANNEL_ID, bot_user_id="U0BT71H4FQE",
     )
     threads = ExecutiveSlackReviewThreads(runtime=runtime)
+    assert threads.reserve_parent_send(decision=decision(), job_id="JOB-002")
     threads.record_parent(
         decision=decision(), job_id="JOB-002",
         message=SlackMessage(

@@ -227,3 +227,24 @@ def test_concurrent_publication_reservation_allows_only_one_github_post(tmp_path
     assert call(app) == "789"
     assert gh.submits == 1
     assert runtime.store.get_event_by_command_id(COMMAND + ":confirmed") is not None
+
+def test_publication_guard_revoked_during_readback_refuses_before_post(tmp_path):
+    allowed = {"value": True}
+
+    def guard():
+        if not allowed["value"]:
+            raise PermissionError("review publishing revoked")
+
+    class RevokingReadback(Transport):
+        def read_reviews(self, *, repository, pull_number, commit_id):
+            allowed["value"] = False
+            return super().read_reviews(
+                repository=repository, pull_number=pull_number, commit_id=commit_id
+            )
+
+    app, runtime, gh = publisher(tmp_path, transport=RevokingReadback(), guard=guard)
+    with pytest.raises(ReviewVerificationRefused, match="NOT_AUTHORIZED"):
+        call(app)
+    assert gh.submits == 0
+    assert runtime.store.get_event_by_command_id(COMMAND) is not None
+    assert COMMAND not in app.published_command_ids()

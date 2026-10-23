@@ -53,13 +53,18 @@ class SlackReviewVisibility:
             decision=decision, job_id=job_id,
             public_repository_names_authorized=self._publish_repo_names,
         )
-        # Called inside the ingress' to_thread, not inside an existing event
-        # loop. Reuse the real client's exact-channel, validated write receipt.
+        # A canonical pre-send reservation is required before the external
+        # Slack effect. No reservation -> no POST, even if the first ACK vanished.
+        if self._threads is None:
+            raise ValueError("canonical Slack parent send owner must be bound")
+        if not self._threads.reserve_parent_send(decision=decision, job_id=job_id):
+            return
+        # Called inside ingress' to_thread, outside any existing event loop.
+        # If the Slack POST or receipt is unknown, the reservation remains.
         receipt = asyncio.run(self._client.post_parent(channel_id=self._channel_id, text=message))
-        if self._threads is not None:
-            self._threads.record_parent(
-                decision=decision, job_id=job_id, message=receipt,
-            )
+        self._threads.record_parent(
+            decision=decision, job_id=job_id, message=receipt,
+        )
 
     def notify_review_refused(
         self, *, summary: str, decision: ReviewIntentDecision

@@ -57,7 +57,7 @@ import dataclasses
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from enum import Enum
 from typing import Protocol, runtime_checkable
 
@@ -107,7 +107,7 @@ VISIBILITY_ERROR_CODE = "VISIBILITY_TRANSPORT_UNAVAILABLE"
 
 MAX_VISIBILITY_SUMMARY_CHARS = 400
 MAX_REVIEW_SUMMARY_CHARS = 16_000
-MAX_REVIEW_BODY_CHARS = 24_000
+MAX_REVIEW_BODY_CHARS = 16_000
 _REVIEW_ID_RE = r"^[0-9A-Za-z:._-]{1,128}$"
 
 
@@ -405,14 +405,18 @@ class ReconcilingReviewPublication:
     """
 
     def __init__(
-        self, *, transport: ReviewTransportPort, published: PublishedCommandIndex
+        self, *, transport: ReviewTransportPort, published: PublishedCommandIndex,
+        before_post: Callable[[], None] | None = None,
     ) -> None:
         if not isinstance(transport, ReviewTransportPort):
             raise ReviewIngressError("ReviewTransportPort is not bound on this host")
         if not isinstance(published, PublishedCommandIndex):
             raise ReviewIngressError("PublishedCommandIndex is not bound on this host")
+        if before_post is not None and not callable(before_post):
+            raise ReviewIngressError("review before-post guard must be callable")
         self._transport = transport
         self._published = published
+        self._before_post = before_post
 
     def published_command_ids(self) -> frozenset[str]:
         return self._published.published_command_ids()
@@ -453,6 +457,10 @@ class ReconcilingReviewPublication:
         if existing is not None:
             return existing
         try:
+            # Source/publication authority can be revoked during GitHub GET.
+            # Recheck the incumbent host guard immediately before POST.
+            if self._before_post is not None:
+                self._before_post()
             return self._transport.submit_review(
                 repository=repository,
                 pull_number=pull_number,
@@ -1064,6 +1072,15 @@ def publish_verified_review(
         repository=decision.repository,
         pull_number=decision.pull_number,
     )
+    # The verified summary can fit while its rendered wrapper exceeds the
+    # concrete installed GitHub API's 16k body contract. Refuse before a
+    # publication reservation is created, not after POST authority is claimed.
+    if len(body) > MAX_REVIEW_BODY_CHARS:
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED,
+            publication_command_id=command,
+            refusal="REVIEW_BODY_OVER_BOUND",
+        )
 
     # --- the current head, read here, immediately before the effect ---------
     current = pull_read.read_pull_request(
@@ -1087,6 +1104,32 @@ def publish_verified_review(
             publication_command_id=command,
             refusal=ReviewIntentRefusal.HEAD_MOVED.value,
         )
+
+    # Revalidate the *full* current PR state before the single review effect.
+    # An unchanged commit does not imply that draft/state/title/body did not move.
+    def refuse_current(reason: ReviewIntentRefusal) -> ReviewPublishOutcome:
+        return ReviewPublishOutcome(
+            state=PublishState.REFUSED,
+            publication_command_id=command,
+            refusal=reason.value,
+        )
+    if current.state != "open":
+        return refuse_current(ReviewIntentRefusal.PULL_REQUEST_NOT_OPEN)
+    # Draft EXTERNAL_GITHUB_SUBMITTER reviews are advisory COMMENT only.
+    # Native review publication is still blocked on a draft transition.
+    if current.draft and result.source_basis != "EXTERNAL_GITHUB_SUBMITTER":
+        return refuse_current(ReviewIntentRefusal.PULL_REQUEST_DRAFT)
+    if (current.base_repository != decision.repository
+            or current.head_repository != current.base_repository):
+        return refuse_current(ReviewIntentRefusal.HEAD_REPOSITORY_MISMATCH)
+    if decision.intent_source is None:
+        raise ReviewVerificationRefused("admitted decision missing intent source")
+    try:
+        build_review_objective(
+            pull_request=current, intent_source=decision.intent_source
+        )
+    except ReviewIntentError:
+        return refuse_current(ReviewIntentRefusal.UNTRUSTED_CONTENT_DETECTED)
 
     try:
         review_id = publication_port.publish_review(

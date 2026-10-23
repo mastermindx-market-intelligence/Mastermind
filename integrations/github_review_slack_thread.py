@@ -19,6 +19,7 @@ from integrations.slack_agent_dialogue.engine import SlackMessage
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
 
 _PARENT = "GITHUB_REVIEW_SLACK_PARENT_OBSERVED"
+_PARENT_SEND = "GITHUB_REVIEW_SLACK_PARENT_SEND_RESERVED"
 _REPLY = "GITHUB_REVIEW_SLACK_REPLY_RESERVED"
 _SCHEMA = "mastermind.github_review_slack_visibility.v1"
 _TS_RE = re.compile(r"\A[0-9]{10,16}\.[0-9]{6}\Z")
@@ -71,6 +72,54 @@ class ExecutiveSlackReviewThreads:
             raise SlackReviewThreadUnavailable("REVIEW_INTENT_INVALID")
         return "gh-review-slack-parent:" + decision.intent_id
 
+    @classmethod
+    def _parent_send_command(cls, decision: ReviewIntentDecision) -> str:
+        return "gh-review-slack-send:" + cls._parent_command(decision)
+
+    def reserve_parent_send(
+        self, *, decision: ReviewIntentDecision, job_id: str
+    ) -> bool:
+        """Atomic one-attempt Slack parent send right from incumbent EventStore.
+
+        Return False for both an already reserved attempt and an already
+        observed legacy parent. A send whose ACK was lost is NOT retryable.
+        """
+        if type(job_id) is not str or _ID_RE.fullmatch(job_id) is None:
+            raise SlackReviewThreadUnavailable("SLACK_PARENT_JOB_INVALID")
+        parent_key = self._parent_command(decision)
+        send_key = self._parent_send_command(decision)
+        material = {
+            "schema": _SCHEMA, "job_id": job_id,
+            "review_command_id": decision.command_id,
+            "head_sha": decision.frozen_head_sha, "channel_id": CHANNEL_ID,
+        }
+        with self._runtime.store.transaction() as conn:
+            observed = self._runtime.store.get_event_by_command_id(
+                parent_key, connection=conn
+            )
+            if observed is not None:
+                if (observed.event_type != _PARENT
+                        or observed.payload.get("job_id") != job_id
+                        or observed.payload.get("review_command_id") != decision.command_id
+                        or observed.payload.get("head_sha") != decision.frozen_head_sha
+                        or observed.payload.get("channel_id") != CHANNEL_ID):
+                    raise SlackReviewThreadUnavailable("SLACK_PARENT_EFFECT_CONFLICT")
+                return False
+            existing = self._runtime.store.get_event_by_command_id(
+                send_key, connection=conn
+            )
+            if existing is not None:
+                if existing.event_type != _PARENT_SEND or existing.payload != material:
+                    raise SlackReviewThreadUnavailable("SLACK_PARENT_SEND_CONFLICT")
+                return False
+            self._runtime.store.append_event(
+                conn, aggregate_type="github_review_slack",
+                aggregate_id=send_key, event_type=_PARENT_SEND,
+                command_id=send_key, actor="github-review-slack-relay",
+                payload=material,
+            )
+            return True
+
     def record_parent(
         self, *, decision: ReviewIntentDecision, job_id: str, message: SlackMessage
     ) -> None:
@@ -95,6 +144,19 @@ class ExecutiveSlackReviewThreads:
                 if found.event_type != _PARENT or found.payload != material:
                     raise SlackReviewThreadUnavailable("SLACK_PARENT_EFFECT_CONFLICT")
                 return
+            # No unsolicited parent observation without the send reservation
+            # created atomically *before* Slack POST.
+            expected = {
+                "schema": _SCHEMA, "job_id": job_id,
+                "review_command_id": decision.command_id,
+                "head_sha": decision.frozen_head_sha, "channel_id": CHANNEL_ID,
+            }
+            reserved = self._runtime.store.get_event_by_command_id(
+                self._parent_send_command(decision), connection=conn
+            )
+            if (reserved is None or reserved.event_type != _PARENT_SEND
+                    or reserved.payload != expected):
+                raise SlackReviewThreadUnavailable("SLACK_PARENT_SEND_UNRESERVED")
             self._runtime.store.append_event(
                 conn, aggregate_type="github_review_slack",
                 aggregate_id=command_id,

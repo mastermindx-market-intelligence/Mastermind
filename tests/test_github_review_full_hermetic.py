@@ -10,7 +10,10 @@ from control_plane.github_review_host_config import ReviewHostSettings
 from control_plane.github_review_runtime_adapter import ExecutiveReviewJobAdmission
 from integrations.github_review_api import GitHubReviewAPI
 from integrations.github_review_ingress_asgi import GitHubReviewReceiver
-from integrations.github_review_slack_visibility import SlackReviewVisibility, REVIEW_CHANNEL_ID
+from integrations.github_review_slack_visibility import SlackReviewVisibility
+from integrations.github_review_slack_thread import ExecutiveSlackReviewThreads
+from integrations.slack_agent_dialogue.engine import SlackMessage
+from integrations.github_review_slack_visibility import REVIEW_CHANNEL_ID
 from integrations.slack_agent_dialogue.slack_web_api import SlackWebApiDialogueClient
 
 REPO = "example/repo"
@@ -64,8 +67,11 @@ def test_real_wiring_is_one_queued_job_and_one_sanitized_slack_notice(tmp_path):
     messages = []
     async def fake_post_parent(*, channel_id, text):
         messages.append((channel_id, text))
+        return SlackMessage(ts="1792699000.000001", author_user_id="U0BT71H4FQE", text=text)
     slack.post_parent = fake_post_parent
-    visibility = SlackReviewVisibility(client=slack)
+    visibility = SlackReviewVisibility(
+        client=slack, threads=ExecutiveSlackReviewThreads(runtime=runtime)
+    )
     settings = ReviewHostSettings(
         enabled=True, publication_enabled=True, expected_host="review.example.com",
         require_https=True, installation_id=4242,
