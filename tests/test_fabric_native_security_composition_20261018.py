@@ -33,11 +33,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 95-file closure adds the closed paid model-only path to protected
-# qualification/operator overlays. Historical donor, quota, deadline and root
-# transformations remain pinned before the explicit paid patch.
+# The reviewed95-file paid model-only closure composes protected #1720
+# historical-denial outcome correction. Executor/donor transformations remain
+# pinned before the explicit paid patch; no installed preimage is changed.
 EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "8f7b41a83efcb2a1b022efc7ca9a0f97b8e19bdc41b1ece2843f12404a245cb9"
+NATIVE_MANIFEST_SHA = "9c251102b617482a087f84acef166a3447a2bd0dc1bc935deeb7692f3ead6ed4"
 
 
 def _sha(raw):
