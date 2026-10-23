@@ -470,7 +470,9 @@ def test_run_broker_exits_when_idle_and_survives_one_client_socket_error(tmp_pat
 
     config = _broker(tmp_path).config
     listener = FakeListener()
-    monkeypatch.setattr(broker_module, "PrivilegedActionBroker", lambda _config: object())
+    class FakeBroker:
+        pass
+    monkeypatch.setattr(broker_module, "PrivilegedActionBroker", lambda _config: FakeBroker())
     monkeypatch.setattr(
         broker_module, "serve_connection", lambda *_args, **_kwargs: (_ for _ in ()).throw(BrokenPipeError())
     )

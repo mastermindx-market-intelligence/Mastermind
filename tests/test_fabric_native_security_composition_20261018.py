@@ -22,8 +22,11 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
-COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
-GROK_RELEASE_EXECUTOR_SHA = "afa10b7c6298f53fd214cb436d489119eb4caba3155903e7d1be45713dfb8c05"
+PRE_PAID_MODEL_COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
+PAID_MODEL_PATCH = ROOT / "tests/fixtures/fabric-native-paid-model-20261022.patch"
+PAID_MODEL_PATCH_SHA = "e0d937b9afdcc864592a7ba44a65ed121fa9c983f53de7109b1628e2141314f1"
+COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7"
+GROK_PAID_RUNTIME_EXECUTOR_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -31,15 +34,11 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 85-file closure composes protected physical-root admission and canonical
-# slot diagnostics with retention recovery and explicit acquisition correlation.
-# Historical executor, donor, quota, deadline and root transformations stay pinned.
-EXPECTED_NATIVE_FILES = 85
-# Integrated protected Fabric qualification and task/host overlays with
-# PR #1694 operator instructions, retaining all installed code preimages.
-# Include the reviewed historical-denial outcome correction; executor and donor
-# transformation pins above remain unchanged.
-NATIVE_MANIFEST_SHA = "b35ed6a5b2ce43b0e3e8b207d510690bb412ddb9b2b70386c5f59ae4b8acb892"
+# The reviewed95-file paid model-only closure composes protected #1720
+# outcome classification and #1729 request turn-ceiling attenuation.
+# Executor/donor transformations and installed preimages remain pinned.
+EXPECTED_NATIVE_FILES = 95
+NATIVE_MANIFEST_SHA = "3df4139b834b5a4bf45f186a884bdcb9b4817aff8520369a56b809ef999e2794"
 
 
 def _sha(raw):
@@ -78,9 +77,11 @@ def _composition(directory):
     assert _sha(PHYSICAL_ROOT_PATCH.read_bytes()) == PHYSICAL_ROOT_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(PHYSICAL_ROOT_PATCH))
     donor_contract._git(directory, "apply", str(PHYSICAL_ROOT_PATCH))
+    assert _sha(target.read_bytes()) == PRE_PAID_MODEL_COMPOSED_SHA
+    assert _sha(PAID_MODEL_PATCH.read_bytes()) == PAID_MODEL_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(PAID_MODEL_PATCH))
+    donor_contract._git(directory, "apply", str(PAID_MODEL_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
-    # Historical donor/deadline/physical-root composition remains its original
-    # identity; the published Grok runtime executor has its own separate pin.
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed
     return composed
@@ -134,7 +135,7 @@ def native_stage(tmp_path_factory):
     assert len(manifest) == EXPECTED_NATIVE_FILES
     for name, digest in manifest.items():
         assert _sha((output / "native-code-stage" / name).read_bytes()) == digest
-    assert manifest["ext/remote_sub_exec.py"] == GROK_RELEASE_EXECUTOR_SHA
+    assert manifest["ext/remote_sub_exec.py"] == GROK_PAID_RUNTIME_EXECUTOR_SHA
     return output
 
 
@@ -160,7 +161,7 @@ def _seam(stage, base):
         (ext.parent / "orch/fabric/pools.yaml").write_text(policy)
     (remote_ext.parent / "support-releases").mkdir(mode=0o700)
     files = json.loads((stage / "native-manifest.json").read_bytes())
-    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == GROK_RELEASE_EXECUTOR_SHA
+    assert len(files) == EXPECTED_NATIVE_FILES and files["ext/remote_sub_exec.py"] == GROK_PAID_RUNTIME_EXECUTOR_SHA
     generation = owner.publish(stage / "native-code-stage", native_ext, files)
     store = native_ext.parent / owner.STORE_NAME
     owner.select(store, generation.name, None)
@@ -201,7 +202,7 @@ def _seam(stage, base):
     for name in names:
         assert _sha((published / name).read_bytes()) == manifest[name]
         assert (published / name).stat().st_mode & 0o777 == 0o555
-    assert _sha((published / "remote_sub_exec.py").read_bytes()) == GROK_RELEASE_EXECUTOR_SHA
+    assert _sha((published / "remote_sub_exec.py").read_bytes()) == GROK_PAID_RUNTIME_EXECUTOR_SHA
     assert (published / "lanes").resolve() == remote_ext / "lanes"
     assert (published / "active").resolve() == remote_ext / "active"
     assert published.stat().st_mode & 0o777 == 0o555
@@ -322,7 +323,7 @@ print("benign fixture workspace ready")
         assert (fixture.original / "preserve.txt").read_text() == "ORIGINAL UNCOMMITTED WORK\n"
         assert os.environ.get("HOME") == initial_home
     return {"status": "OFFLINE_COMPOSITION_SEAM_PASS", "native_files": len(files),
-            "support_files": 37, "executor_sha256": GROK_RELEASE_EXECUTOR_SHA,
+            "support_files": 37, "executor_sha256": GROK_PAID_RUNTIME_EXECUTOR_SHA,
             "fixture_native_digest": generation.name, "fixture_support_digest": support_digest,
             "mint_receipt_sha256": _sha(receipt.read_bytes()), "provider_started": False,
             "production_macro_helper_tested": False, "physical_lease_acquired": False}
@@ -335,7 +336,7 @@ def test_selected_native_support_executor_preserves_mint_and_outcome_binding(nat
     assert result.returncode == 0, result.stderr
     proof = json.loads(result.stdout)
     assert proof["status"] == "OFFLINE_COMPOSITION_SEAM_PASS"
-    assert proof["executor_sha256"] == GROK_RELEASE_EXECUTOR_SHA
+    assert proof["executor_sha256"] == GROK_PAID_RUNTIME_EXECUTOR_SHA
     assert proof["native_files"] == EXPECTED_NATIVE_FILES and proof["support_files"] == 37
     assert proof["provider_started"] is False
     assert proof["physical_lease_acquired"] is False

@@ -9,6 +9,9 @@ receipt so transport loss can never be interpreted as proof of no effect.
 from __future__ import annotations
 
 import ctypes
+import contextvars
+import fcntl
+import weakref
 import dataclasses
 import datetime as dt
 import hashlib
@@ -27,6 +30,7 @@ from common.redaction import TRUNCATION_MARKER, sanitize_external_text
 from control_plane.executive_privileged_action import (
     ACTION_EFFECT_CLASS,
     ACTION_EFFECT_UNKNOWN_EXIT_CODE,
+    PAID_SERVICE_ACTIONS, PAID_SERVICE_ACTION_VERBS,
     PrivilegedActionRequest,
     PrivilegedActionStatusRequest,
     REQUEST_SCHEMA,
@@ -1034,6 +1038,63 @@ def verify_production_trust(config: PrivilegedBrokerConfig) -> None:
         _verify_release_entry(config.release_root, manifest, relative)
 
 
+_PAID_ACTIVE = contextvars.ContextVar('paid_original_privileged_owner',default=None)
+_PRODUCTION_BROKERS = weakref.WeakSet()
+
+
+def require_paid_lifecycle_owner(action,release_sha,definition_sha):
+    """Actual retained Root broker callstack, never a supplied receipt/flag."""
+    held=_PAID_ACTIVE.get()
+    if held is None:raise BrokerTrustError("paid original lifecycle owner required")
+    broker,request,request_sha=held
+    if (type(broker) is not PrivilegedActionBroker or broker not in _PRODUCTION_BROKERS
+            or not broker.require_root or os.geteuid()!=0
+            or request.action not in PAID_SERVICE_ACTIONS
+            or PAID_SERVICE_ACTION_VERBS[request.action].removesuffix('-paid')!=action
+            or broker.config.release_root.name!=release_sha
+            or request.args_dict()!={'expected_definition_sha256':definition_sha}):
+        raise BrokerTrustError("paid original lifecycle binding changed")
+    verify_production_trust(broker.config)
+    marker,_=broker._read_strict_inflight_marker(request.request_id)
+    if (marker['request_sha256']!=request_sha or marker['action']!=request.action
+            or marker['release_sha']!=release_sha):
+        raise BrokerTrustError("paid original lifecycle reservation changed")
+
+
+def paid_lifecycle_intent(action,release_sha,definition_sha):
+    require_paid_lifecycle_owner(action,release_sha,definition_sha)
+    broker,request,request_sha=_PAID_ACTIVE.get()
+    return dict(request_id=request.request_id,request_sha256=request_sha,
+                release_sha=release_sha,expected_definition_sha256=definition_sha)
+
+
+def paid_lifecycle_receipt_fd(action,release_sha,definition_sha):
+    """A separate read-only descriptor to this live broker's held intent."""
+    require_paid_lifecycle_owner(action,release_sha,definition_sha)
+    broker,request,_=_PAID_ACTIVE.get()
+    marker,raw=broker._read_strict_inflight_marker(request.request_id)
+    path=broker.inflight_path(request.request_id)
+    fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+    try:
+        before=os.fstat(fd)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid!=0 or before.st_gid!=0
+                or stat.S_IMODE(before.st_mode)!=0o600 or before.st_nlink!=1
+                or before.st_size>65536
+                or fcntl.fcntl(fd,fcntl.F_GETFL)&os.O_ACCMODE!=os.O_RDONLY):
+            raise BrokerTrustError("paid original receipt custody changed")
+        value=os.pread(fd,65537,0)
+        after=os.fstat(fd);named=path.lstat()
+        identity=lambda v:(v.st_dev,v.st_ino,v.st_mode,v.st_uid,v.st_gid,v.st_nlink,
+                           v.st_size,v.st_mtime_ns,v.st_ctime_ns)
+        if value!=raw or identity(before)!=identity(after) or identity(after)!=identity(named):
+            raise BrokerTrustError("paid original receipt changed")
+        require_paid_lifecycle_owner(action,release_sha,definition_sha)
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
 class PrivilegedActionBroker:
     def __init__(
         self,
@@ -1207,7 +1268,22 @@ class PrivilegedActionBroker:
         path.unlink()
         _fsync_directory(self.inflight_root)
 
-    def _handle_outcome(
+    def _handle_outcome(self,raw_request,*,peer_uid):
+        if (isinstance(peer_uid,bool) or not isinstance(peer_uid,int)
+                or peer_uid not in self.config.allowed_peer_uids):
+            raise PeerAuthorizationError("kernel peer uid is not authorized for privileged actions")
+        request=validate_request(raw_request)
+        if request.action not in PAID_SERVICE_ACTIONS:
+            return self._handle_outcome_locked(raw_request,peer_uid=peer_uid)
+        fd=os.open(self.receipt_root,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+        try:
+            try:fcntl.flock(fd,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            except BlockingIOError as exc:raise EffectUnknownError("original paid lifecycle owner occupied") from exc
+            return self._handle_outcome_locked(raw_request,peer_uid=peer_uid)
+        finally:
+            fcntl.flock(fd,fcntl.LOCK_UN);os.close(fd)
+
+    def _handle_outcome_locked(
         self, raw_request: Mapping[str, Any], *, peer_uid: int,
     ) -> tuple[dict[str, Any], bool]:
         if isinstance(peer_uid, bool) or not isinstance(peer_uid, int) or peer_uid not in self.config.allowed_peer_uids:
@@ -1241,11 +1317,26 @@ class PrivilegedActionBroker:
             if source["release_sha"] != self.config.release_root.name:
                 raise BrokerTrustError("native-probe drift Executive source changed")
 
+        if request.action in PAID_SERVICE_ACTIONS:
+            # Same target under another ID cannot replace a retained unknown
+            # start/stop. Scan only the incumbent original in-flight root.
+            paths=list(self.inflight_root.glob('*.json'))
+            if len(paths)>1024:raise EffectUnknownError("original lifecycle inventory bound exceeded")
+            for path in paths:
+                marker,_=_read_strict_inflight_marker_file(path,expected_request_id=path.stem,
+                    require_root_metadata=self._require_root)
+                if marker['action'] in PAID_SERVICE_ACTIONS:
+                    raise EffectUnknownError("original paid lifecycle remains unsettled")
         started_at = _utc_now()
         self._write_inflight(request, digest, started_at)
-        argv = build_argv(request, self.config.release_root)
+        if request.action in PAID_SERVICE_ACTIONS:
+            completed=self._execute_paid_lifecycle(request,digest)
+        else:
+            completed=None
+        argv = () if completed is not None else build_argv(request, self.config.release_root)
         try:
-            completed = self._executor(
+            if completed is None:
+                completed = self._executor(
                 argv,
                 cwd=self.config.release_root,
                 env=_CLOSED_ENV,
@@ -1304,6 +1395,37 @@ class PrivilegedActionBroker:
             # The terminal receipt wins replay, but cleanup drift must not be called clean success.
             raise EffectUnknownError("terminal receipt exists but in-flight cleanup failed") from exc
         return receipt, False
+
+    def _execute_paid_lifecycle(self,request,digest):
+        token=_PAID_ACTIVE.set((self,request,digest))
+        try:
+            verify_production_trust(self.config)
+            raw=_read_bounded_json(self.config.release_root/'.executive-release-manifest.json')
+            for name in ('ops/executive_os/canonical_paid_lifecycle.py',
+                         'control_plane/executive_privileged_broker.py',
+                         'control_plane/executive_privileged_action.py'):
+                _verify_release_entry(self.config.release_root,raw,name)
+            from ops.executive_os.canonical_paid_lifecycle import run_paid_lifecycle, PaidLifecycleError
+            if Path(run_paid_lifecycle.__code__.co_filename).resolve()!=self.config.release_root/'ops/executive_os/canonical_paid_lifecycle.py':
+                raise BrokerTrustError("paid lifecycle source owner changed")
+            # Production provenance is checked by the actual lifecycle owner;
+            # a test constructor or Root CLI never upgrades itself by type.
+            try:
+                result=run_paid_lifecycle(PAID_SERVICE_ACTION_VERBS[request.action].removesuffix('-paid'),
+                    self.config.release_root.name,request.args_dict()['expected_definition_sha256'])
+            except PaidLifecycleError as exc:
+                # Only this source-qualified owner's exact known pre-effect
+                # outcome can settle FAILED in the original receipt lifecycle.
+                # Never promote an ambiguous/subclass/arbitrary exception into
+                # absence or expose its message as a diagnostic.
+                if type(exc) is PaidLifecycleError and exc.effect_unknown is False:
+                    return subprocess.CompletedProcess((),78,b'',b'PAID_LIFECYCLE_PRE_EFFECT_REFUSED\n')
+                raise
+            raw=json.dumps(result,sort_keys=True,separators=(',',':'),allow_nan=False).encode()
+            return subprocess.CompletedProcess((),0,raw,b'')
+        except Exception as exc:
+            raise EffectUnknownError("original paid lifecycle unconfirmed") from exc
+        finally:_PAID_ACTIVE.reset(token)
 
     def _issue_incident_grant(
         self, request: PrivilegedActionRequest, digest: str
@@ -2270,6 +2392,9 @@ def run_broker(
     broker = PrivilegedActionBroker(config, **composition)
     listener = activated_socket if activated_socket is not None else activate_launchd_socket()
     listener.settimeout(_BROKER_IDLE_TIMEOUT_SECONDS)
+    # Only this qualified production constructor, after actual source trust and
+    # adopted service setup, may issue the private in-process paid lifecycle.
+    _PRODUCTION_BROKERS.add(broker)
     while True:
         try:
             connection, _address = listener.accept()

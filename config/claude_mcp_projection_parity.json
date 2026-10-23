@@ -26,6 +26,28 @@
         }
       }
     },
+    "fabric.paid.glm.sealed-input.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "ba1e883c749a1bd237b197141f9c4e83a206b70ea45cdee64ddbaf53f00739f7",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        }
+      }
+    },
     "operator.appserver.interactive.company-mcp.v1": {
       "package_generation_digests": {},
       "profile_digest": "19ea30bee5e609a70cae37c511cb519f8b6cbc535546aafa9b595729a5c59530",

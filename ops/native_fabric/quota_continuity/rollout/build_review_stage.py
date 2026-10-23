@@ -8,6 +8,8 @@ No directory scan decides what to transport; this fixed list is the inventory.
 import argparse
 import hashlib
 import json
+import io
+import zipfile
 from pathlib import Path
 
 BASE_FILES = frozenset("""
@@ -34,6 +36,8 @@ sub.sh support_bundle.py host_pull_probe.template yes
 """.split())
 ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
+                      "paid_controller_channel.py", "paid_glm_model_client.py", "paid_model_owner.py",
+                      "linux_process_identity.py", "paid_controller_spawn.py", "paid_incumbent_state.py", "paid_host_qualification.py", "paid_yaml_runtime.py", "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json",
                       "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
 # The retired credential-to-stdout helper is audit evidence only. It must never
 # be importable from source/ or selected as a runtime fallback. Its exact bytes
@@ -49,9 +53,9 @@ GROK47_MERGED_SOURCE_DIGESTS = {
     'fabric_operator_contract.py': 'e642e36ef99d2c40b1254975b9ad3cc218fb9ef81c4ce87f3c7b6e7be0808c6a',
     'native_remote.py': '388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e',
     'pick.py': '02afff09760a98d593f6bb25c4e6a41e2d7bd4d450d0c668b63c5d4aedf8e0e6',
-    'remote_sub.sh': '648802593d34d15a956a6558a5e6014c1982e352ae8c82dfc8b7b49b5c0ec084',
-    'remote_sub_exec.py': 'afa10b7c6298f53fd214cb436d489119eb4caba3155903e7d1be45713dfb8c05',
-    'remote_sub_helpers.py': 'c2b3859be4ba6f47b4ee9e07a372d7a2841e923818951594fcc5c5fcbabd17b6',
+    'remote_sub.sh': '3177b96fd3e7d4bb1ab0b3762bc99e72bc87fa25496736b3dc262cdea401db64',
+    'remote_sub_exec.py': '6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1',
+    'remote_sub_helpers.py': '9b9881aeb574082e1f54b581ce56af98c6257332d64c2fe0f0be8c9455fec94b',
     'sub.sh': '7ceaba75dc4375bb05742b779967ade294afcc969358f610ecdb43041fa2f7d2',
 }
 
@@ -123,7 +127,24 @@ def main():
                      "installed_preimage_sha256": rows['pool_launcher.sh'], "bytes": len(raw)}
     if {p.name for p in (stage / "ext").iterdir()} != BASE_FILES | ADDITIONS:
         raise ValueError("unexpected staged native file")
-    record = {"schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),
+    pure_yaml = json.loads((root/"candidate/paid_pyyaml_provenance.json").read_bytes())
+    pure_archive=(root/"candidate/paid_pyyaml_6_0_3.zip").read_bytes()
+    if sha(pure_archive) != pure_yaml["zip_sha256"]:
+        raise ValueError("qualified pure YAML archive differs")
+    lock=(root.parents[2]/pure_yaml['lock_path']).read_bytes()
+    if (sha(lock)!=pure_yaml['lock_sha256'] or pure_yaml['package']!='PyYAML'
+            or pure_yaml['version']!='6.0.3'
+            or ('PyYAML==6.0.3 --hash=sha256:'+pure_yaml['artifact_sha256']).encode() not in lock):
+        raise ValueError('qualified pure YAML lock differs')
+    with zipfile.ZipFile(io.BytesIO(pure_archive)) as archive:
+        if len(archive.namelist())!=len(set(archive.namelist())) or set(archive.namelist())!=set(pure_yaml['files']):
+            raise ValueError('qualified pure YAML closure differs')
+        for name,item in pure_yaml['files'].items():
+            raw=archive.read(name)
+            if (name not in {'LICENSE','METADATA'} and not (name.startswith('yaml/') and name.endswith('.py'))
+                    or len(raw)!=item['bytes'] or sha(raw)!=item['sha256']):
+                raise ValueError('qualified pure YAML member differs')
+    record = {"qualified_pure_yaml": pure_yaml, "schema": "native-code-source-inventory.v1", "native_code_files": len(manifest),
         "baseline_code_files": len(BASE_FILES) + 1, "new_code_files": sorted(ADDITIONS),
         "source_status": "SOURCE_INVENTORY_REQUIRES_PROTECTED_RELEASE_AND_INSTALLATION_EVIDENCE",
         "stable_ext": inventory["stable_ext"], "files": files,
