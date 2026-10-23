@@ -116,13 +116,21 @@ contract. There are no ignored foreign rows.
 The normal migration, source/target backup verification and restore drills,
 exclusive DDL, commit and completion proof follow. Transaction-owned SQLite
 sidecars require their exact normal fixed names and actual held connection
-transaction/custody; postcommit sidecar absence remains mandatory. On ANY
-post-intent failure, retain intent, qualification, original barrier and later
-artifacts. Do not regenerate a missing barrier, replace a swapped one, invoke
-normal rollback deletion, remove the intent, or create another operation.
-Missing/swapped custody is UNKNOWN/quarantined. Ordinary v5-to-v6 must not run
-around a lost barrier with consumed recovery residue. Ordinary v6-to-v7 is
-eligible only after the recovered v5-to-v6 chain has genuinely completed.
+transaction/custody; postcommit sidecar absence remains mandatory. Recovered
+C56 is published only after all final source/backup/drill/census proofs and
+exact held-original unlink, parent fsync, named absence and the expected one-name
+namespace removal. It is O_EXCL/fsynced terminal completion DATA, not an earlier
+promise. Ordinary v5-to-v6 keeps its existing publication order and wire.
+
+Any failure before durable C56 retains intent, qualification and all remaining
+artifacts. Even after successful unlink, missing/partial C56 blocks v6-to-v7.
+Do not regenerate a missing barrier, replace a swapped one, invoke normal
+rollback deletion, remove the intent, or create another operation. Missing or
+swapped original custody before its qualified unlink stays UNKNOWN/quarantined.
+Once genuine durable C56 exists, a later hook/result-delivery error is terminal
+result ambiguity: preserve its receipt and intent for same-operation inspection,
+never replay v5-to-v6. The ordinary v6-to-v7 gate may consume that exact completed
+chain. Ordinary v5-to-v6 cannot run around any consumed recovery residue.
 
 ## Retained evidence and subsequent acceptance
 

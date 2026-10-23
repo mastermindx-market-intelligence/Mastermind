@@ -240,14 +240,18 @@ def test_actual_same_operation_continuation_preserves_old_identity_and_new_execu
     assert not s.fd_paths
     with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent already exists'):_resume(s)
 
-@pytest.mark.parametrize('phase',['barrier_persisted','preflight_persisted','after_m6_statement:01','after_v6_commit_before_checkpoint','completion_persisted'])
+@pytest.mark.parametrize('phase',['barrier_persisted','preflight_persisted','after_m6_statement:01','after_v6_commit_before_checkpoint','recovered_barrier_removed_before_completion'])
 def test_consumed_failure_stays_quarantined_and_cannot_be_replayed(control_recovery,monkeypatch,phase):
     s=control_recovery;original=s.barrier.read_bytes();inode=s.barrier.stat().st_ino
     def fail(observed):
         if observed==phase:raise RuntimeError('inert post-intent failure')
     monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',fail)
     with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent retained'):_resume(s)
-    assert s.barrier.read_bytes()==original and s.barrier.stat().st_ino==inode
+    if phase=='recovered_barrier_removed_before_completion':
+        assert not s.barrier.exists()
+        assert not (s.database.parent/b._UPGRADE_V5_TO_V6_COMPLETION_NAME).exists()
+    else:
+        assert s.barrier.read_bytes()==original and s.barrier.stat().st_ino==inode
     assert (s.database.parent/b.PRE_CENSUS_CONTINUATION_NAME).is_file()
     assert not s.fd_paths
     with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent already exists'):_resume(s)
@@ -374,4 +378,62 @@ def test_completed_gate_requires_numerically_distinct_retained_fds(control_recov
     with pytest.raises(b.ExecutiveSchemaUpgradeError):
         with b._completed_pre_census_recovery(s.database,s.backups,b._prove_upgrade_release(s.release)):
             pass
+    assert not s.fd_paths
+
+
+def test_missing_barrier_after_completion_publication_cannot_admit_next_transition(control_recovery,monkeypatch):
+    s=control_recovery
+    def lose_original(phase):
+        if phase=='before_barrier_unlink':s.barrier.unlink()
+    monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',lose_original)
+    with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent retained'):_resume(s)
+    assert not s.barrier.exists() and (s.database.parent/b.PRE_CENSUS_CONTINUATION_NAME).exists()
+    assert not (s.database.parent/b._UPGRADE_V5_TO_V6_COMPLETION_NAME).exists()
+    monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',None)
+    with pytest.raises(b.ExecutiveSchemaUpgradeError):
+        b.upgrade_v6_to_v7(s.database,s.backups,release_sha=s.release)
+    assert not (s.database.parent/b._UPGRADE_V6_TO_V7_PREFLIGHT_NAME).exists()
+
+
+@pytest.mark.parametrize('failure',['between','partial','namespace'])
+def test_post_unlink_precompletion_failure_never_admits67(control_recovery,monkeypatch,failure):
+    s=control_recovery
+    if failure=='partial':
+        write=b._write_private_json
+        def broken(path,payload):
+            if path.name==b._UPGRADE_V5_TO_V6_COMPLETION_NAME:
+                fd=os.open(path,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600)
+                try:os.write(fd,b'{');os.fsync(fd)
+                finally:os.close(fd)
+                raise OSError('inert incomplete C56 publication')
+            return write(path,payload)
+        monkeypatch.setattr(b,'_write_private_json',broken)
+    else:
+        def fail(phase):
+            if phase=='recovered_barrier_removed_before_completion':
+                if failure=='between':raise RuntimeError('inert before C56 write')
+                (s.database.parent/'unexpected').write_bytes(b'inert namespace drift')
+        monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',fail)
+    with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent retained'):_resume(s)
+    assert not s.barrier.exists()
+    c=s.database.parent/b._UPGRADE_V5_TO_V6_COMPLETION_NAME
+    assert (c.read_bytes()==b'{') if failure=='partial' else not c.exists()
+    with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent already exists'):_resume(s)
+    with pytest.raises((b.ExecutiveSchemaUpgradeError,b.BackupVerificationError,OSError)):
+        b.upgrade_v6_to_v7(s.database,s.backups,release_sha=s.release)
+    assert not (s.database.parent/b._UPGRADE_V6_TO_V7_PREFLIGHT_NAME).exists()
+    assert not s.fd_paths
+
+
+def test_durable_c56_delivery_failure_is_terminal_and_same_operation_is_not_replayed(control_recovery,monkeypatch):
+    s=control_recovery
+    def fail(phase):
+        if phase=='completion_persisted':raise RuntimeError('inert lost completed result')
+    monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',fail)
+    with pytest.raises(b.ExecutiveSchemaUpgradeError,match='completion is durable'):_resume(s)
+    assert not s.barrier.exists()
+    assert (s.database.parent/b._UPGRADE_V5_TO_V6_COMPLETION_NAME).exists()
+    with pytest.raises(b.ExecutiveSchemaUpgradeError,match='intent already exists'):_resume(s)
+    monkeypatch.setattr(b,'_SCHEMA_UPGRADE_TEST_HOOK',None)
+    assert b.upgrade_v6_to_v7(s.database,s.backups,release_sha=s.release).target_schema_version==7
     assert not s.fd_paths

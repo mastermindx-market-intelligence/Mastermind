@@ -3900,7 +3900,10 @@ class _PreCensusContinuation:
         if _marker_exists(self.marker):
             raise ExecutiveSchemaUpgradeError("pre-census service marker is present")
         _held_service_lock_identity(self.lock, self.lock_fd, self.lock_identity)
-        self.barrier.check()
+        if self.phase == "COMPLETE":
+            self._check_removed_barrier()
+        else:
+            self.barrier.check()
         self.qualification.check()
         self.config.check()
         if self.intent is not None:
@@ -4065,11 +4068,16 @@ class _PreCensusContinuation:
         self.check()
         self.phase = "DDL"
 
-    def mark_barrier_removed(self) -> None:
+    def _check_removed_barrier(self) -> None:
         held = os.fstat(self.barrier.fd)
         if (held.st_dev, held.st_ino) != (self.barrier.identity["device"], self.barrier.identity["inode"]) or held.st_nlink != 0 or os.path.lexists(self.barrier.path):
             raise ExecutiveSchemaUpgradeError("pre-census final removal did not remove original held barrier")
+
+    def mark_barrier_removed(self) -> None:
+        self._check_removed_barrier()
+        self.names.remove(self.barrier.path.name)
         self.phase = "COMPLETE"
+        self.check()
 
     def close(self) -> None:
         self.stack.close()
@@ -4173,6 +4181,7 @@ def _upgrade_v5_to_v6_impl(
     preflight_identity: dict[str, Any] | None = None
     census: dict[str, Any] | None = None
     committed_v6 = False
+    recovered_completion_identity = None
     with (_offline_restore_lock(lock, marker, require_existing=True) if _recovery is None else nullcontext(_recovery.lock_fd)) as lock_fd:
         lock_identity = _held_service_lock_identity(lock, lock_fd)
         def current_census() -> dict[str, Any]:
@@ -4472,25 +4481,27 @@ def _upgrade_v5_to_v6_impl(
                 "release_sha": release["release_sha"],
                 "completed_at": completed_at,
             }
-            if _recovery is not None:
+            if _recovery is None:
+                _write_private_json(completion_path, completion)
+                completion_identity = _artifact_identity(
+                    completion_path, expected_payload=completion
+                )
+                _upgrade_hook("completion_persisted")
+            else:
+                # A recovered C56 is a durable completion fact only AFTER
+                # final proof and exact removal of the held original barrier.
                 _recovery.check()
-            _write_private_json(completion_path, completion)
-            if _recovery is not None:
-                _recovery.accept_state_artifact(completion_path)
-            completion_identity = _artifact_identity(
-                completion_path, expected_payload=completion
-            )
-            _upgrade_hook("completion_persisted")
             # The final adversarial seam is deliberately placed before the
             # complete authoritative/backup/drill/census proof.  Nothing after
             # this hook may escape revalidation before the barrier is removed.
             _upgrade_hook("before_barrier_unlink")
             revalidate_control_artifacts()
-            _artifact_identity(
-                completion_path,
-                expected_payload=completion,
-                expected=completion_identity,
-            )
+            if _recovery is None:
+                _artifact_identity(
+                    completion_path,
+                    expected_payload=completion,
+                    expected=completion_identity,
+                )
             final_v6 = _upgrade_v5_retained_state(database, version=6)
             final_v6_backup = verify_backup(
                 v6_backup.database_path,
@@ -4526,11 +4537,12 @@ def _upgrade_v5_to_v6_impl(
             if current_census() != census:
                 raise RestoreSafetyError("writer census changed before barrier release")
             revalidate_control_artifacts()
-            _artifact_identity(
-                completion_path,
-                expected_payload=completion,
-                expected=completion_identity,
-            )
+            if _recovery is None:
+                _artifact_identity(
+                    completion_path,
+                    expected_payload=completion,
+                    expected=completion_identity,
+                )
             _unlink_exact_upgrade_artifact(
                 barrier,
                 expected_payload=barrier_payload,
@@ -4538,6 +4550,17 @@ def _upgrade_v5_to_v6_impl(
             )
             if _recovery is not None:
                 _recovery.mark_barrier_removed()
+                _upgrade_hook("recovered_barrier_removed_before_completion")
+                _recovery.check()
+                final_origin = _pre_census_database_origin(database, _recovery.database_fd,
+                    _recovery.uid, _recovery.gid)
+                if {key: final_origin[key] for key in ("path", "device", "inode", "size", "sha256")} != verified_v6["database"]:
+                    raise ExecutiveSchemaUpgradeError("recovered final database changed before completion")
+                _write_private_json(completion_path, completion)
+                _recovery.accept_state_artifact(completion_path)
+                recovered_completion_identity = _artifact_identity(completion_path, expected_payload=completion)
+                _recovery.check()
+                _upgrade_hook("completion_persisted")
             return SchemaUpgradeV5ToV6Receipt(
                 schema_version=UPGRADE_COMPLETION_SCHEMA,
                 database_path=str(database),
@@ -4562,6 +4585,10 @@ def _upgrade_v5_to_v6_impl(
             )
         except Exception as exc:
             if _recovery is not None:
+                if recovered_completion_identity is not None:
+                    raise ExecutiveSchemaUpgradeError(
+                        "recovered v6 completion is durable; same-operation result inspection only"
+                    ) from exc
                 # The consumed one-use intent is the quarantine even if an
                 # external actor removed the original barrier. Never recreate,
                 # rewrite or unlink it and never enter ordinary rollback cleanup.
@@ -4652,7 +4679,10 @@ def _completed_pre_census_recovery(database: Path, backup_root: Path, release: M
         for name, owner, mode in ((names[0], 0, 0o440), (names[1], uid, 0o600),
                 (_UPGRADE_V5_TO_V6_PREFLIGHT_NAME, uid, 0o600),
                 (_UPGRADE_V5_TO_V6_COMPLETION_NAME, uid, 0o600)):
-            obs = _PreCensusReceiptObservation(database.parent / name, uid=owner, gid=gid, mode=mode)
+            try:
+                obs = _PreCensusReceiptObservation(database.parent / name, uid=owner, gid=gid, mode=mode)
+            except (OSError, BackupVerificationError) as exc:
+                raise ExecutiveSchemaUpgradeError("recovered completion receipt is missing or unsafe") from exc
             stack.callback(obs.close); held.append(obs)
         qualification, intent, preflight, completion = held
         q = _validate_pre_census_qualification(qualification.payload)

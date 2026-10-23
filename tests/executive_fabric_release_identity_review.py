@@ -467,7 +467,7 @@ REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
 # Fixed pre-census ancestor permission modes; not account UIDs. Only the
 # exact reviewed source, AST Constant and complete token qualify.
 REVIEWED_FILES['control_plane/executive_backup.py'] = {
-    'sha256': 'e5d1c56588d90ae043b4d9f92e8240cccb71f98792171c99d2c5f0e33ab6c6be',
+    'sha256': 'e7f236811c233322e82792c151c694076c81b19c0067f113c77f6a4d0d27cc8a',
     'sites': ((3500, 39, 44, 'int', '0o711'),
               (3502, 43, 48, 'int', '0o700'),
               (3504, 39, 44, 'int', '0o755')),
