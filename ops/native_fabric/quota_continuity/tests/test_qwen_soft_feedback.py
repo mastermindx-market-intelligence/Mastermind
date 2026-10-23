@@ -444,7 +444,7 @@ class LayeredAccountEligibility(QwenSoft):
         write_usage(990, 3000)
         self.br.external_gates = True
         with mock.patch.object(bailian_keys, "HERE", str(self.root)), \
-             mock.patch.object(bailian_keys, "cooldown_info", return_value=None), \
+             mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=0), \
              mock.patch.object(bailian_keys, "current_per_key_cap", return_value=8):
             qa = self.br.provider("bailian")["accounts"][0]
             self.assertIsNone(self.br.account_cap("bailian", qa))

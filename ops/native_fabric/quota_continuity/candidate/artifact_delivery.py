@@ -798,7 +798,7 @@ def qualify_grok_output(request, terminal, process, stdout):
     keys={'schema','algorithm','root','parent','run_id','host','lease_id','account','support_digest',
           'mode','model','raw_bytes','raw_sha256','normalized_bytes','normalized_sha256','contract','manifest'}
     if (type(b) is not dict or set(b)!=keys or b['schema']!='mastermind.grok_normalized_output.v1'
-            or b['algorithm']!='grok_plaintext_and_usage_v1' or b['mode']!='grok' or b['model']!='grok-4.6'
+            or b['algorithm']!='grok_plaintext_and_usage_v1' or b['mode']!='grok' or b['model'] not in ('grok-4.6', 'grok-4.7')
             or any(b[k]!=request[k] for k in ('root','parent','run_id','host'))
             or any(b[k]!=terminal.get(k) for k in ('root','run_id','host','lease_id','account','mode','model'))
             or b['support_digest']!=(terminal.get('launch_timing') or {}).get('support_digest')

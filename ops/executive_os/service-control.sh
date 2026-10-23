@@ -23,9 +23,11 @@ SCRIPT_PATH="$SCRIPT_DIR/$(/usr/bin/basename "$SCRIPT_SOURCE")"
 GATEWAY_PREFLIGHT_PYTHON="/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12"
 
 usage() {
-  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|status}" >&2
+  /bin/echo "usage: $0 {start|stop|restart|restart-gateway|start-finite|stop-finite|status-finite|prepare-paid|qualify-paid|stage-paid|reconcile-paid|status-paid|start-readside|stop-readside|stop-incident-broker|start-agent-relay|stop-agent-relay|status-agent-relay|publish-os-gateway|reconcile-os-gateway|status}" >&2
   /bin/echo "restart-gateway requires --expected-sha <40 lowercase hex characters>" >&2
   /bin/echo "finite actions require --expected-sha <40 lowercase hex> --expected-manifest-sha256 <64 lowercase hex>" >&2
+  /bin/echo "publish-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --expected-mcp-config-sha256 <64 lowercase hex> --expected-mcp-plist-sha256 <64 lowercase hex> and exactly one of --expected-grant-sha256 <64 lowercase hex> or --expected-grant-absent" >&2
+  /bin/echo "reconcile-os-gateway requires --expected-sha <40 lowercase hex> --expected-bundle-digest <64 lowercase hex> --transaction-id autonomy-<12 lowercase hex>" >&2
   exit 64
 }
 
@@ -465,6 +467,90 @@ qualify_gateway_refresh_preflight() {
 }
 
 
+# Closed OS gateway publication argv walk. Every flag is accepted at most
+# once, every value is a bounded digest or the original transaction id, and
+# any unknown word or missing required flag refuses. No path, account, label,
+# port, grant text or verified boolean is ever accepted here.
+GATEWAY_EXPECTED_SHA=""
+os_gateway_args() {
+  local verb="$1" flag value seen="" sha="" bundle=""
+  shift
+  while [ "$#" -gt 0 ]; do
+    flag="$1"
+    shift
+    case "$seen" in
+      *"|$flag|"*) return 1 ;;
+    esac
+    case "$flag" in
+      --expected-sha|--expected-bundle-digest) ;;
+      --expected-grant-absent)
+        [ "$verb" = "publish-os-gateway" ] || return 1
+        seen="$seen|$flag|"
+        continue
+        ;;
+      --expected-mcp-config-sha256|--expected-mcp-plist-sha256|--expected-grant-sha256)
+        [ "$verb" = "publish-os-gateway" ] || return 1
+        ;;
+      --transaction-id) [ "$verb" = "reconcile-os-gateway" ] || return 1 ;;
+      *) return 1 ;;
+    esac
+    [ "$#" -ge 1 ] || return 1
+    value="$1"
+    shift
+    seen="$seen|$flag|"
+    case "$flag" in
+      --expected-sha)
+        [[ "$value" =~ ^[0-9a-f]{40}$ ]] || return 1
+        sha="$value"
+        ;;
+      --transaction-id) [[ "$value" =~ ^autonomy-[0-9a-f]{12}$ ]] || return 1 ;;
+      *) [[ "$value" =~ ^[0-9a-f]{64}$ ]] || return 1 ;;
+    esac
+    case "$flag" in --expected-bundle-digest) bundle="$value" ;; esac
+  done
+  [ -n "$sha" ] && [ -n "$bundle" ] || return 1
+  if [ "$verb" = "publish-os-gateway" ]; then
+    case "$seen" in
+      *"|--expected-mcp-config-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    case "$seen" in
+      *"|--expected-mcp-plist-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+    # Exactly one grant expectation: the prior digest or explicit absence.
+    case "$seen" in
+      *"|--expected-grant-absent|"*)
+        case "$seen" in *"|--expected-grant-sha256|"*) return 1 ;; esac
+        ;;
+      *"|--expected-grant-sha256|"*) ;;
+      *) return 1 ;;
+    esac
+  else
+    case "$seen" in
+      *"|--transaction-id|"*) ;;
+      *) return 1 ;;
+    esac
+  fi
+  GATEWAY_EXPECTED_SHA="$sha"
+  return 0
+}
+
+dispatch_os_gateway() {
+  local verb="$1" gateway_dir
+  if ! os_gateway_args "$@"; then
+    usage
+  fi
+  # The publishing owner must be this exact installed release's controller:
+  # a copied or relocated service-control never publishes.
+  gateway_dir="$MCP_RELEASE_ROOT/$GATEWAY_EXPECTED_SHA/ops/executive_os"
+  [[ "$SCRIPT_SOURCE" == "$gateway_dir/service-control.sh" ]] || exit 65
+  [[ "$SCRIPT_DIR" == "$gateway_dir" ]] || exit 65
+  [[ "$SCRIPT_PATH" == "$gateway_dir/service-control.sh" ]] || exit 65
+  exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$gateway_dir/autonomy_control.py" "$@"
+}
+
+
 require_gateway_enabled() {
   local output
   if ! output="$(/bin/launchctl print-disabled system 2>/dev/null)"; then
@@ -602,6 +688,9 @@ case "$1" in
     [ "$#" -eq 3 ] && [ "$2" = "--expected-sha" ] || usage
     [[ "$3" =~ ^[0-9a-f]{40}$ ]] || usage
     ;;
+  publish-os-gateway|reconcile-os-gateway)
+    [ "$#" -ge 2 ] || usage
+    ;;
   *) [ "$#" -eq 1 ] || usage ;;
 esac
 case "$1" in
@@ -622,6 +711,10 @@ case "$1" in
     [[ "$SCRIPT_SOURCE" == "$finite_dir/service-control.sh" ]] || exit 65
     [[ "$SCRIPT_DIR" == "$finite_dir" ]] && [[ "$SCRIPT_PATH" == "$finite_dir/service-control.sh" ]] || exit 65
     exec "$GATEWAY_PREFLIGHT_PYTHON" -I -S -B "$finite_dir/finite_service_lifecycle.py" "$@"
+    ;;
+  publish-os-gateway|reconcile-os-gateway)
+    require_root
+    dispatch_os_gateway "$@"
     ;;
   start)
     require_root

@@ -14,6 +14,7 @@ Usage:
   bailian_keys.py cooldown <name> <seconds> <reason>
   bailian_keys.py cooldown-receipt <name> <seconds> <reason> <receipt-path> [classification-source]
   bailian_keys.py status
+  bailian_keys.py preflight-slots
   bailian_keys.py total_cap
   bailian_keys.py next_usable_in
   bailian_keys.py model <requested>
@@ -23,8 +24,10 @@ from __future__ import annotations
 
 import fcntl
 import json
+import math
 import os
 import re
+import stat
 import sys
 import time
 from datetime import datetime
@@ -212,7 +215,58 @@ def _key_value(name: str) -> str:
 
 
 def _ensure_slots() -> None:
-    os.makedirs(SLOTS_ROOT, exist_ok=True)
+    """Original-owner write preflight; never invoked by read-only admission.
+
+    Legacy installations created this directory under the caller's umask.
+    Safely tighten only an owned, stable physical final directory; changing
+    existing cooldown file bytes or clearing a provider restriction is forbidden.
+    """
+    try:
+        os.makedirs(SLOTS_ROOT, mode=0o700, exist_ok=True)
+    except OSError:
+        # Bounded diagnosis without disclosing physical owner path.
+        # No credentials or providers read; admission remains fail-closed.
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_CREATE_REFUSED") from None
+    required = ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")
+    if not all(hasattr(os, flag) for flag in required):
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_CUSTODY_UNAVAILABLE")
+    try:
+        fd = os.open(
+            SLOTS_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError as exc:
+        raise RuntimeError("BAILIAN_SLOTS_ROOT_UNSAFE_OR_UNREADABLE") from exc
+    try:
+        def qualified_current():
+            opened = os.fstat(fd)
+            try:
+                current = os.stat(SLOTS_ROOT, follow_symlinks=False)
+            except OSError as exc:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_CHANGED_DURING_PREFLIGHT") from exc
+            if (not stat.S_ISDIR(opened.st_mode)
+                    or not stat.S_ISDIR(current.st_mode)
+                    or opened.st_uid != os.geteuid()
+                    or (opened.st_dev, opened.st_ino, opened.st_uid, opened.st_mode)
+                       != (current.st_dev, current.st_ino, current.st_uid, current.st_mode)):
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_OWNERSHIP_OR_IDENTITY_REFUSED")
+            return opened
+
+        original = qualified_current()
+        if original.st_mode & 0o022:
+            # This is an explicit write-path migration, never a broker read.
+            # Preserve existing world/group read or traverse bits while
+            # removing only the unsafe group/world WRITE bits.
+            requested = stat.S_IMODE(original.st_mode) & ~0o022
+            try:
+                os.fchmod(fd, requested)
+            except OSError as exc:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_MODE_REPAIR_REFUSED") from exc
+            final = qualified_current()
+            if final.st_mode & 0o022:
+                raise RuntimeError("BAILIAN_SLOTS_ROOT_MODE_REPAIR_UNVERIFIED")
+            print("BAILIAN_SLOTS_ROOT_LEGACY_MODE_TIGHTENED", file=sys.stderr)
+    finally:
+        os.close(fd)
 
 
 def _with_lock() -> IO[str]:
@@ -295,6 +349,90 @@ def prune_stale(name: str) -> int:
     return alive
 
 
+def cooldown_rank_readonly(name: str) -> int:
+    """Read-only, directory-bound local cooldown classification.
+
+    0 verified absent/expired; 1 unknown; 2 live 429 soft throttle;
+    3 live non-429 hard denial. Never delete, write or pick a key.
+    """
+    if (not isinstance(name, str) or not name or len(name) > 128
+            or "/" in name or "\x00" in name or name in (".", "..")):
+        return 1
+    # A directory fd binds file reads to the original owned slots directory;
+    # O_NOFOLLOW rejects a symlinked *final* directory component. Installed
+    # generation ext/slots may itself be a trusted intermediate state link.
+    if not all(hasattr(os, x) for x in ("O_DIRECTORY", "O_NOFOLLOW", "O_CLOEXEC")):
+        return 1
+    try:
+        root_fd = os.open(
+            SLOTS_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+        )
+    except OSError:
+        return 1
+    try:
+        directory = os.fstat(root_fd)
+        if (not stat.S_ISDIR(directory.st_mode)
+                or directory.st_uid != os.geteuid()
+                or directory.st_mode & 0o022):
+            return 1
+
+        def bound_directory() -> bool:
+            try:
+                current = os.stat(SLOTS_ROOT, follow_symlinks=False)
+            except OSError:
+                return False
+            return (
+                stat.S_ISDIR(current.st_mode)
+                and (directory.st_dev, directory.st_ino, directory.st_uid,
+                     directory.st_mode) ==
+                    (current.st_dev, current.st_ino, current.st_uid,
+                     current.st_mode)
+            )
+
+        entry = name + ".cooldown"
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NONBLOCK | os.O_NOFOLLOW
+        try:
+            fd = os.open(entry, flags, dir_fd=root_fd)
+        except FileNotFoundError:
+            return 0 if bound_directory() else 1
+        except OSError:
+            return 1
+        try:
+            before = os.fstat(fd)
+            if (not stat.S_ISREG(before.st_mode)
+                    or before.st_uid != os.geteuid()
+                    or before.st_mode & 0o022
+                    or before.st_size < 1 or before.st_size > 256):
+                return 1
+            data = os.read(fd, 257)
+            after = os.fstat(fd)
+            observed = os.stat(entry, dir_fd=root_fd, follow_symlinks=False)
+            identity = lambda st: (
+                st.st_dev, st.st_ino, st.st_size, st.st_mode, st.st_uid,
+                st.st_mtime_ns, st.st_ctime_ns,
+            )
+            if (len(data) != before.st_size or identity(before) != identity(after)
+                    or identity(before) != identity(observed)
+                    or not bound_directory()):
+                return 1
+            parts = data.decode("utf-8").strip().split(None, 1)
+            if len(parts) != 2 or not parts[1].strip():
+                return 1
+            value = float(parts[0])
+            if not math.isfinite(value):
+                return 1
+            expiry = int(value)
+            if expiry <= int(time.time()):
+                return 0
+            return 2 if parts[1] == "http_429" else 3
+        except (OSError, ValueError, UnicodeError, OverflowError, IndexError):
+            return 1
+        finally:
+            os.close(fd)
+    finally:
+        os.close(root_fd)
+
+
 def cooldown_info(name: str) -> Optional[Tuple[int, str]]:
     """Return (expiry_epoch, reason) if an unexpired cooldown exists."""
     path = _cooldown_path(name)
@@ -315,10 +453,8 @@ def cooldown_info(name: str) -> Optional[Tuple[int, str]]:
     reason = parts[1] if len(parts) > 1 else ""
     now = int(time.time())
     if expiry <= now:
-        try:
-            os.unlink(path)
-        except OSError:
-            pass
+        # Observing expired evidence is not authority to unlink it.
+        # Explicit original-owner writer paths retain cleanup custody.
         return None
     return expiry, reason
 
@@ -511,21 +647,18 @@ def read_usage_eligibility(name, *, now=None, path=None) -> dict:
 
 
 def usable_names() -> List[str]:
-    """Configured keys. Keys in non-429 cooldown are excluded; 429 keys are included
-    (they can still handle reduced traffic at their soft cap). Keys whose fresh,
-    applicable usage row is literally parked=True are also excluded; stale,
-    future, expired, malformed or missing usage facts stay UNKNOWN and leave the
-    key eligible."""
-    import time as _time
+    """Read-only eligible names, preserving current usage parking.
 
-    now = _time.time()
+    Unknown/unsafe and hard-denial cooldowns fail closed. Verified soft 429
+    remains eligible with its reduced cap. Only CURRENT parked=True usage
+    removes another otherwise eligible account; missing/stale data never
+    overrides the stricter local cooldown result.
+    """
+    now = time.time()
     names = []
     for name in key_names():
-        cd = cooldown_info(name)
-        if cd is not None:
-            reason = cd[1] if len(cd) > 1 else ""
-            if reason != "http_429":
-                continue
+        if cooldown_rank_readonly(name) not in (0, 2):
+            continue
         try:
             info = read_usage_eligibility(name, now=now)
         except Exception:
@@ -535,18 +668,18 @@ def usable_names() -> List[str]:
         names.append(name)
     return names
 
-
 def _effective_cap_for_key(name: str) -> int:
     """Effective per-key cap: 0 for non-429 cooldown; soft cap for 429 cooldown."""
-    cd = cooldown_info(name)
+    rank = cooldown_rank_readonly(name)
     cap = current_per_key_cap()
-    if cd is None:
-        return cap
-    reason = cd[1] if len(cd) > 1 else ""
-    if reason != "http_429":
-        # Non-429 cooldown (401/403/402 etc.) — key is parked, contributes 0.
+    if rank in (1, 3):
+        # Unsafe/unreadable evidence is NOT permission to re-admit a possibly
+        # 401/403/402-denied credential. Keep provider access fail-closed.
         return 0
-    # In 429 cooldown — check soft cap.
+    if rank == 0:
+        # Proven absent or expired: ordinary policy cap.
+        return cap
+    # A verified live 429 retains the existing reduced soft-cap policy.
     pol = load_policy()
     if not pol.get("soft_cap_on_429", False):
         return cap
@@ -568,39 +701,57 @@ def total_cap() -> int:
     return cap
 
 
-def next_usable_in() -> int:
-    """Seconds until the earliest cooldown frees a key; 0 if one is pickable now.
+def _active_count_readonly(name: str) -> int:
+    """Advisory PID-marker count without pruning original-owner state."""
+    directory = _name_dir(name)
+    if not os.path.isdir(directory):
+        return 0
+    cutoff = int(time.time()) - 6 * 3600
+    try:
+        names = os.listdir(directory)
+    except OSError:
+        return sys.maxsize
+    count = 0
+    for item in names:
+        try:
+            pid = int(item)
+        except ValueError:
+            continue
+        path = os.path.join(directory, item)
+        try:
+            if (pid > 0 and os.path.isfile(path)
+                    and os.path.getmtime(path) >= cutoff and _pid_alive(pid)):
+                count += 1
+        except OSError:
+            return sys.maxsize
+    return count
 
-    Mirrors `pick`'s admission rules (not in non-429 cooldown, active slots
-    under the effective per-key cap). Keys in 429-cooldown are treated as
-    available at their soft cap, so next_usable_in returns 0 if any such key
-    has headroom. Returns -1 when waiting cannot help: no keys configured, or
-    every key is at its effective cap with no cooldown left to expire.
-    Never returns a key name or value.
+
+def next_usable_in() -> int:
+    """Read-only wait hint; never grants, removes cooldowns or prunes PID state.
+
+    Hard-denial wait time is advisory and is read only after strict rank 3.
+    Unknown/unsafe evidence offers no justified restart time.
     """
     names = key_names()
     if not names:
         return -1
-    base_cap = current_per_key_cap()
     now = int(time.time())
     soonest: Optional[int] = None
     for name in names:
-        cd = cooldown_info(name)
-        if cd is None:
-            eff_cap = base_cap
-        else:
-            reason = cd[1] if len(cd) > 1 else ""
-            if reason != "http_429":
-                # Non-429 cooldown: wait for it to clear.
+        rank = cooldown_rank_readonly(name)
+        if rank == 1:
+            continue
+        if rank == 3:
+            cd = cooldown_info(name)
+            if cd is not None and cd[1] != "http_429":
                 remain = max(1, cd[0] - now)
-                if soonest is None or remain < soonest:
-                    soonest = remain
-                continue
-            eff_cap = _effective_cap_for_key(name)
-        if prune_stale(name) < eff_cap:
+                soonest = remain if soonest is None else min(soonest, remain)
+            continue
+        cap = _effective_cap_for_key(name)
+        if cap > 0 and _active_count_readonly(name) < cap:
             return 0
     return soonest if soonest is not None else -1
-
 
 def pick(
     pid: Optional[int] = None,
@@ -624,7 +775,6 @@ def pick(
     prefer = (prefer or os.environ.get("BAILIAN_PREFER") or os.environ.get("POOL_ACCOUNT") or "").strip()
     if prefer in skip_set:
         prefer = ""
-    base_cap = current_per_key_cap()
     lock = _with_lock()
     try:
         candidates: List[Tuple[int, str]] = []
@@ -639,19 +789,17 @@ def pick(
         for name in names:
             if name in skip_set:
                 continue
-            cd = cooldown_info(name)
-            if cd is None:
-                # No cooldown: use base per-key cap.
-                eff_cap = base_cap
-                reason = ""
-            else:
-                reason = cd[1] if len(cd) > 1 else ""
-                if reason != "http_429":
-                    # Non-429 cooldown: key is not available.
-                    unavailable_reason = "cooldown"
-                    continue
-                # 429-cooldown key: use soft cap, key stays in the pool.
-                eff_cap = _effective_cap_for_key(name)
+            rank = cooldown_rank_readonly(name)
+            if rank in (1, 3):
+                # Unleased CLI accounts need the same refusal as the broker.
+                # Malformed/unreadable/unsafe evidence is NOT healthy state.
+                unavailable_reason = "cooldown_unverified" if rank == 1 else "cooldown"
+                continue
+            # Recheck strict rank under the incumbent writer lock.
+            eff_cap = _effective_cap_for_key(name)
+            if eff_cap <= 0:
+                unavailable_reason = "cooldown_unverified"
+                continue
             n = prune_stale(name)
             if n >= eff_cap:
                 continue
@@ -1080,6 +1228,17 @@ def cmd_cooldown(argv: List[str]) -> int:
     return 0
 
 
+def cmd_preflight_slots(argv: List[str]) -> int:
+    """Explicit original-owner release preflight; no provider or key access."""
+    if argv:
+        _die("usage: preflight-slots", 2)
+    try:
+        _ensure_slots()
+    except RuntimeError as exc:
+        # Explicit operator preflight has a bounded diagnostic, not a
+        # full absolute-path-bearing Python traceback.
+        _die(str(exc), 78)
+    print("BAILIAN_SLOTS_ROOT_VERIFIED")
 def cmd_cooldown_receipt(argv: List[str]) -> int:
     """Cooldown the account AND have THIS helper write its actual adaptive-429
     policy receipt into a private caller file, under the helper's own lock."""
@@ -1160,6 +1319,7 @@ COMMANDS = {
     "cooldown": cmd_cooldown,
     "cooldown-receipt": cmd_cooldown_receipt,
     "status": cmd_status,
+    "preflight-slots": cmd_preflight_slots,
     "total_cap": cmd_total_cap,
     "next_usable_in": cmd_next_usable_in,
     "model": cmd_model,

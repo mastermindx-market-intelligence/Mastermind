@@ -467,6 +467,17 @@ if [ "$DENIED" = "1" ]; then
   exit 78
 fi
 
+# Normalise the already-qualified Grok Build default before the economic
+# filter and before invoking the native CLI. Explicit historical 4.6 pins remain
+# valid; unknown models cannot silently inherit a provider-side default.
+if [ "$POOL" = grok ]; then
+  case "$MODEL" in
+    '') MODEL=grok-4.7 ;;
+    grok-4.6|grok-4.7) ;;
+    *) echo "LOCAL_GROK_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+  esac
+fi
+
 # Additive economic filter; all physical/project/provider gates still apply.
 # Recheck leased children too: a broker lease is not a cost-policy exemption.
 case "$POOL" in
@@ -915,8 +926,15 @@ exec claude -p "${_mm_prompt_args[@]}" --output-format stream-json --verbose --d
     python3 "$HERE/pool_ledger.py" append --pool ocfree --task-class oc-free --model "$model" --rc "$_rc" --signal ok 2>/dev/null || true
     exit "$_rc" ;;
   cursor)
+    # This direct legacy launcher may forward an explicitly validated model,
+    # but cannot enroll new Cursor models or rewrite the default.  In particular
+    # Grok 4.7 selection is separately held pending provider qualification.
+    case "$MODEL" in
+      ''|composer-2.5|cursor-grok-4.6-high) ;;
+      *) echo "LOCAL_CURSOR_MODEL_REFUSED unsupported_model" >&2; exit 78 ;;
+    esac
     _rc=0
-    python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" && exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null' _ "$CWD" "$PROMPT" || _rc=$?
+    python3 "$HERE/slot.py" cursor --wait 3600 -- bash -c 'cd "$1" || exit 2; if [ -n "$3" ]; then exec cursor-agent -p --trust --force --sandbox disabled --output-format text --model "$3" "$2" </dev/null; else exec cursor-agent -p --trust --force --sandbox disabled --output-format text "$2" </dev/null; fi' _ "$CWD" "$PROMPT" "$MODEL" || _rc=$?
     python3 "$HERE/pool_ledger.py" append --pool cursor --task-class cursor --rc "$_rc" --signal ok 2>/dev/null || true
     exit "$_rc" ;;
   *) echo "pool must be grok, qwen, minimax, glm, minimax-codex, glm-codex, go-codex, go-claude, oc-free or cursor" >&2; exit 2 ;;

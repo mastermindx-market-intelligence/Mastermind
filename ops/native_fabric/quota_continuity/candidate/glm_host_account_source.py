@@ -81,8 +81,22 @@ def filter_observed_accounts(accounts, *, host, model, now, preferred=None,
         document = json.loads(owned_bytes(Path(state_dir or HERE/'state/hosts')/(host+'.json')))
         digest = hashlib.sha256(owned_bytes(validator_path or HERE/validator_name)).hexdigest()
         predicate = filter_glm_host_accounts if mode == "glm" else filter_bailian_host_accounts
-        return predicate(accounts, document, host=host,
+        ready, reason = predicate(accounts, document, host=host,
             transport_alias=entry['ssh_alias'], mode=mode, model=model, candidate_model=model,
             validator_sha256=digest, now=now, preferred=preferred, source_verified=True)
+        if mode != "qwen" or not ready:
+            return ready, reason
+        envelope = document["bailian_local_account_readiness"]
+        flags = envelope.get("soft_429_accounts")
+        if envelope.get("soft_429_checked") is not True:
+            rank = {row["name"]: 1 for row in ready}  # old probe: never presume healthy
+        else:
+            configured = envelope.get("accounts")
+            if (not isinstance(flags, list) or len(flags) > 64
+                    or any(not isinstance(n, str) or n not in configured for n in flags)
+                    or len(flags) != len(set(flags))):
+                return [], "host_account_cooldown_invalid"
+            rank = {row["name"]: (2 if row["name"] in flags else 0) for row in ready}
+        return [dict(row, _host_qwen_429_rank=rank[row["name"]]) for row in ready], reason
     except (OSError, ValueError, KeyError, TypeError, OverflowError):
         return [], 'glm_host_account_source_unavailable'

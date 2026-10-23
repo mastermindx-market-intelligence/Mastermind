@@ -160,7 +160,65 @@ def test_parser_exposes_only_closed_commands_and_bounded_arguments():
         "finite-control-stage-reconcile",
         "paid-control-stage",
         "paid-control-stage-reconcile",
+        "publish-os-gateway",
+        "reconcile-os-gateway",
     }
+    # The OS gateway publication domain: the two closed verbs carry only the
+    # bounded digests and the original transaction id, and never accept a
+    # foreign flag, a duplicated value or the other verb's flags.
+    publish_argv = [
+        "publish-os-gateway",
+        "--expected-sha", SHA,
+        "--expected-bundle-digest", "a" * 64,
+        "--expected-mcp-config-sha256", "b" * 64,
+        "--expected-mcp-plist-sha256", "c" * 64,
+        "--expected-grant-absent",
+    ]
+    assert vars(parser.parse_args(publish_argv)) == {
+        "command": "publish-os-gateway",
+        "expected_sha": SHA,
+        "expected_bundle_digest": "a" * 64,
+        "expected_mcp_config_sha256": "b" * 64,
+        "expected_mcp_plist_sha256": "c" * 64,
+        "expected_grant_sha256": None,
+        "expected_grant_absent": True,
+    }
+    digest_publish = list(publish_argv)
+    digest_publish[-1:] = ["--expected-grant-sha256", "d" * 64]
+    assert parser.parse_args(digest_publish).expected_grant_sha256 == "d" * 64
+    reconcile_argv = [
+        "reconcile-os-gateway",
+        "--expected-sha", SHA,
+        "--expected-bundle-digest", "a" * 64,
+        "--transaction-id", "autonomy-" + "0" * 12,
+    ]
+    assert vars(parser.parse_args(reconcile_argv)) == {
+        "command": "reconcile-os-gateway",
+        "expected_sha": SHA,
+        "expected_bundle_digest": "a" * 64,
+        "transaction_id": "autonomy-" + "0" * 12,
+    }
+    for bad in (
+        # A missing required publish digest.
+        [w for w in publish_argv if w != "--expected-mcp-plist-sha256" and w != "c" * 64],
+        # The other verb's flag.
+        publish_argv + ["--transaction-id", "autonomy-" + "0" * 12],
+        # Foreign or duplicated values.
+        publish_argv + ["--foreign", "/tmp/x"],
+        ["reconcile-os-gateway", "--expected-sha", SHA, "--expected-sha", SHA,
+         "--expected-bundle-digest", "a" * 64, "--transaction-id", "autonomy-" + "0" * 12],
+        # Malformed digests and transaction ids.
+        [w if w != "a" * 64 else "A" * 64 for w in publish_argv],
+        ["reconcile-os-gateway", "--expected-sha", SHA, "--expected-bundle-digest",
+         "a" * 64, "--transaction-id", "autonomy-xyz"],
+        # Reconcile never carries publish flags.
+        reconcile_argv + ["--expected-grant-absent"],
+    ):
+        with pytest.raises(SystemExit):
+            parser.parse_args(bad)
+    # The exactly-one grant expectation is a closed service-control argv-walk
+    # law, already asserted end to end in the affected owner suite; the parser
+    # itself keeps both bounded spellings optional and exclusive of nothing.
     for command in ("paid-control-stage","paid-control-stage-reconcile"):
         argv=[command,"--expected-sha",SHA,"--expected-definition-sha256","d"*64]
         if command=="paid-control-stage":argv += ["--expected-control-sha256","c"*64]
@@ -1235,7 +1293,9 @@ def test_transaction_order_and_static_safety_fences_are_structural():
     # verified against the exact held inode.
     assert "os.mkdir(AUTONOMY_TRANSACTION" not in production
     create = production.split("def _create_marker", 1)[1].split("\n    def ", 1)[0]
-    assert "os.mkdir(generation, 0o700)" in create
+    # The generation is created only through the module's ONE directory
+    # creation site; the canonical audit leaf shares that same site.
+    assert "_create_directory(generation, 0o700)" in create
     assert "os.rename(generation, AUTONOMY_TRANSACTION)" in create
     assert "_seal_generation(" in create
     assert "_publication_mutex()" in create
@@ -4462,9 +4522,18 @@ def test_ceo_submit_process_recovery_refuses_legacy_marker_without_launchd_preim
 
 def test_ceo_submit_control_boundary_source_never_names_the_worker_or_the_lifecycle_script():
     source = Path(control.__file__).read_text(encoding="utf-8")
-    production = source.split("class ProductionCeoSubmitHost", 1)[1]
+    # The CEO-submit control boundary proper ends where the separate OS
+    # gateway publication domain begins.  That domain must name the fixed
+    # service-control entry exactly once, by law: its sealed module origin
+    # joins the installed controller that exec'd it, and never executes it.
+    production = (
+        source.split("class ProductionCeoSubmitHost", 1)[1]
+        .split("class ProductionGatewayPublicationHost", 1)[0]
+    )
     assert "service-control.sh" not in production
     assert production.count("service-control.sh") == 0
+    gateway_source = source.split("class ProductionGatewayPublicationHost", 1)[1]
+    assert gateway_source.count("service-control.sh") == 1
 
     for name in ("def _reconcile_control_boundary", "def reconcile_control_service"):
         body = production.split(name, 1)[1].split("\n    def ", 1)[0]
