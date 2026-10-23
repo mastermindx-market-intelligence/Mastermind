@@ -18756,9 +18756,13 @@ class AttemptRegistry:
         provider session) with the live process.  Unverified suspicions wait for
         lease-expiry reconciliation and cannot prematurely free or fence work.
         """
-        # Preserve historical caller coercion/normalization; the shared
-        # producer/reader bound then guards length and printable content.
-        reason = str(reason).strip()
+        # New LOST transitions require a real reason string; coercing None or
+        # 42 would fabricate an apparently valid recovery reason. Retain
+        # whitespace normalization for existing string callers and accept
+        # historical persisted free-text reasons at the Web read boundary.
+        if type(reason) is not str:
+            raise StateConflict("mark_lost requires a bounded printable reason")
+        reason = reason.strip()
         if not valid_lost_reason(reason):
             raise StateConflict("mark_lost requires a bounded printable reason")
         if verified_process_absent is not True:

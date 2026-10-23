@@ -927,3 +927,82 @@ def test_event_clock_boundary_and_invalid_types_fail_closed():
         assert not valid_runtime_instant(malformed, now=now, deadline=True)
     assert not valid_runtime_instant("2026-10-23T12:00:00-05:00", now=now)
     assert valid_runtime_instant("2020-01-01T00:00:00Z", now=now)
+
+
+@pytest.mark.parametrize("reason", [None, 42, True, ["not", "string"], b"bytes"])
+def test_real_writer_rejects_nonstr_reasons_before_state_change(tmp_path, reason):
+    """A non-string reason cannot become an apparently verified LOST event."""
+    from tests.test_remote_attempt_transport import (
+        _claimed_runtime, _pin_remote_claim, _host_binding,
+    )
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        provider_session_id="recovery-test-session",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    before = _produced_job(runtime, job.job_id, tmp_path)
+    assert before["data"]["latest_attempt"]["status"] == "RUNNING"
+    with pytest.raises(StateConflict, match="bounded printable reason"):
+        runtime.attempts.mark_lost(
+            lease.attempt.attempt_id,
+            fence_generation=lease.attempt.fence_generation,
+            lease_token=lease.lease_token,
+            reason=reason, verified_process_absent=True,
+        )
+    after = _produced_job(runtime, job.job_id, tmp_path)
+    assert after["data"]["latest_attempt"]["status"] == "RUNNING"
+    assert after["data"]["latest_attempt"]["error"] is None
+    assert _accepted(after)
+
+
+def test_real_writer_trims_string_reason_and_reader_preserves_historical_text(tmp_path):
+    """Only new input is type-fenced; valid legacy human text still roundtrips."""
+    from tests.test_remote_attempt_transport import (
+        _claimed_runtime, _pin_remote_claim, _host_binding,
+    )
+    runtime, job, lease = _claimed_runtime(tmp_path, attempt_limit=2)
+    _pin_remote_claim(runtime, lease, _host_binding(tmp_path))
+    runtime.attempts.record_process(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        provider_session_id="recovery-test-session",
+    )
+    runtime.attempts.mark_running(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+    )
+    runtime.attempts.mark_lost(
+        lease.attempt.attempt_id,
+        fence_generation=lease.attempt.fence_generation,
+        lease_token=lease.lease_token,
+        reason="  process identity absent during supervisor restart  ",
+        verified_process_absent=True,
+    )
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert document["data"]["latest_attempt"]["error"]["reason"] == (
+        "process identity absent during supervisor restart"
+    )
+    assert _accepted(document)
+
+
+@pytest.mark.parametrize("bad", [None, 123, True, ["not a date"], {"date": "bad"}])
+def test_real_producer_reader_rejects_nonstr_event_timestamp_without_exception(
+    tmp_path, bad,
+):
+    """The genuine Runtime/MCP-produced job document must fail closed at Web."""
+    from tests.test_remote_attempt_transport import _claimed_runtime
+    runtime, job, _ = _claimed_runtime(tmp_path, attempt_limit=2)
+    document = _produced_job(runtime, job.job_id, tmp_path)
+    assert _accepted(document)
+    document["data"]["job"]["updated_at"] = bad
+    assert not _accepted(document)
