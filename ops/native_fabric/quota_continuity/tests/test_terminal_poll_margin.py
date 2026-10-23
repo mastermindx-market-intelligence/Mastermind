@@ -111,12 +111,14 @@ class TerminalPollBudgetTests(unittest.TestCase):
         preimages = json.loads((ROOT / 'rollout/native-preimages.json').read_text())['files']
         candidate = ROOT / 'candidate/remote_sub.sh'
         original = ROOT / 'source/remote_sub.sh'
-        # The accepted Grok runtime overlay is the published native transport.
-        # The quota candidate is also margin-tested above, but is not selected
-        # over the reviewed Grok source solely because it exists in the tree.
-        selected = PATHS[1]
+        # The closed, hash-pinned forward candidate preserves both reviewed
+        # Grok behavior and caller UTC narrowing. Both distinct launchers keep
+        # their real runtime-margin checks above; this asserts the actual source.
+        selected = candidate
+        self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
+                         'ccd49590f1a8e8b5b337c6581aabd1671791f4e7b339b041112c8aadd99b5351')
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['source'],
-                         '../grok47/overlay/remote_sub.sh')
+                         'candidate/remote_sub.sh')
         self.assertEqual(hashlib.sha256(selected.read_bytes()).hexdigest(),
                          manifest['ext/remote_sub.sh'])
         self.assertEqual(inventory['files']['ext/remote_sub.sh']['sha256'],
