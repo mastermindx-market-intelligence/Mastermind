@@ -2582,8 +2582,8 @@ def _root_json(
     return value, raw
 
 
-def _release_manifest_json(expected_sha: str) -> dict[str, Any]:
-    """Read only the fixed whole-release manifest, within its 4 MiB budget.
+def _release_manifest_bytes(expected_sha: str) -> bytes:
+    """Capture only the fixed whole-release manifest, within its 4 MiB budget.
 
     The normal source inventory is larger than a configuration document.  This
     separate fixed-path reader does not enlarge the generic config JSON limit
@@ -2635,6 +2635,12 @@ def _release_manifest_json(expected_sha: str) -> dict[str, Any]:
     finally:
         if descriptor >= 0:
             os.close(descriptor)
+    return raw
+
+
+def _release_manifest_json(expected_sha: str) -> dict[str, Any]:
+    """Decode the same bounded original bytes without changing their identity."""
+    raw = _release_manifest_bytes(expected_sha)
     try:
         value = json.loads(raw.decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:

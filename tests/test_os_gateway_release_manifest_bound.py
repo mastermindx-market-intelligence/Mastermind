@@ -86,6 +86,11 @@ def test_real_inventory_document_larger_than_config_budget_is_bounded(manifest):
     assert not manifest.fds
 
 
+def test_fixed_manifest_raw_companion_preserves_original_bytes(manifest):
+    assert control._release_manifest_bytes(SHA) == manifest.raw
+    assert manifest.reads and not manifest.fds
+
+
 def test_same_document_still_refuses_generic_config_reader(manifest):
     with pytest.raises(control.HostControlError, match="config_identity_unavailable"):
         control._root_json(manifest.path, modes=frozenset({0o444}), gid=0)
