@@ -79,4 +79,7 @@ jobs:
             experiments/harness_convergence/dispatch_binding/.cache/profile-build-result.json
             experiments/harness_convergence/dispatch_binding/.cache/attempt-overlay-*.json
           if-no-files-found: error
+          # Only the two enumerated synthetic JSON globs above are selected.
+          # Both live under .cache; v4 excludes hidden directories by default.
+          include-hidden-files: true
           retention-days: 14
