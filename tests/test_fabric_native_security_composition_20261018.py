@@ -23,8 +23,6 @@ import test_fabric_clean_linked_donor_20261017 as donor_contract
 ROOT = Path(__file__).resolve().parents[1]
 NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
-# The historical source-composition contract remains pinned above; the native
-# selected executor is the accepted Grok 4.7 PR #1691 overlay.
 GROK_RELEASE_EXECUTOR_SHA = "afa10b7c6298f53fd214cb436d489119eb4caba3155903e7d1be45713dfb8c05"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
@@ -37,7 +35,11 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # slot diagnostics with retention recovery and explicit acquisition correlation.
 # Historical executor, donor, quota, deadline and root transformations stay pinned.
 EXPECTED_NATIVE_FILES = 85
-NATIVE_MANIFEST_SHA = "a5670d4dcbdda824c9c2ac967fc919d8257e3c43553c55f069d218dc8267321e"
+# Integrated protected Fabric qualification and task/host overlays with
+# PR #1694 operator instructions, retaining all installed code preimages.
+# Include the reviewed historical-denial outcome correction; executor and donor
+# transformation pins above remain unchanged.
+NATIVE_MANIFEST_SHA = "567084653574e7d9544dcd52faee1db59080504940be9cdcf458c53f340649be"
 
 
 def _sha(raw):
@@ -77,6 +79,8 @@ def _composition(directory):
     donor_contract._git(directory, "apply", "--check", str(PHYSICAL_ROOT_PATCH))
     donor_contract._git(directory, "apply", str(PHYSICAL_ROOT_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
+    # Historical donor/deadline/physical-root composition remains its original
+    # identity; the published Grok runtime executor has its own separate pin.
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed
     return composed

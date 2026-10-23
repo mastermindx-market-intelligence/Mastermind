@@ -49,7 +49,7 @@ GROK47_MERGED_SOURCE_DIGESTS = {
     'fabric_operator_contract.py': 'e642e36ef99d2c40b1254975b9ad3cc218fb9ef81c4ce87f3c7b6e7be0808c6a',
     'native_remote.py': '388c412ee5803ac54356275323eba5fb0ee57519a8810490f81fe13977459f9e',
     'pick.py': '02afff09760a98d593f6bb25c4e6a41e2d7bd4d450d0c668b63c5d4aedf8e0e6',
-    'remote_sub.sh': '0211c94f6669a66200f8c7a47f2cd85a43675acb1b8049896d921096c57391d6',
+    'remote_sub.sh': '648802593d34d15a956a6558a5e6014c1982e352ae8c82dfc8b7b49b5c0ec084',
     'remote_sub_exec.py': 'afa10b7c6298f53fd214cb436d489119eb4caba3155903e7d1be45713dfb8c05',
     'remote_sub_helpers.py': '075108ad8c2ea69ce4af0ff93ba55484cb135342b0096d536c1bec72637df295',
     'sub.sh': '72b3d9f7d7eec22f3cffb768f4795e144737623f1a46f5a59f4e9951a19df817',
