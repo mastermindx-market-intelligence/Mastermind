@@ -107,6 +107,38 @@ def test_one_native_owner_rebinds_controller_socket_without_other_writes(staged)
     assert not s.marker.exists()
 
 
+@pytest.mark.parametrize("foreground", ["absent", "explicitly_armed"])
+def test_optional_foreground_only_matches_native_disarmed_loader(staged, foreground):
+    """The incumbent M2 Control config legitimately omits this optional key.
+
+    Never broaden the explicit armed state; restoration only changes the
+    one return-socket field and must not add a policy field on recovery.
+    """
+    s = staged
+    prior = json.loads(s.control.read_bytes())
+    if foreground == "absent":
+        prior.pop("coo_foreground_only", None)
+    else:
+        prior["coo_foreground_only"] = True
+    s.control.chmod(0o640)
+    s.control.write_bytes(owner.encode_config(prior))
+    s.control.chmod(0o440)
+    original = s.control.read_bytes()
+    witness = owner.sha256_bytes(original)
+    if foreground == "absent":
+        tx = restore.execute(s.host, _intent(witness))
+        assert tx.startswith("autonomy-")
+        result = json.loads(s.control.read_bytes())
+        assert "coo_foreground_only" not in result
+        assert result == {**prior, "terminal_return_socket_path": restore.LEGACY_SOCKET}
+        assert owner.WORKER_CONFIG.read_bytes() == s.worker
+    else:
+        with pytest.raises(owner.TransactionEffectUnknown):
+            restore.execute(s.host, _intent(witness))
+        assert s.control.read_bytes() == original
+    assert not s.marker.exists()
+
+
 def test_a2_rebind_state_refused_fixture_prevents_control_publication(staged):
     s = staged
     s.a2_state["valid"] = False

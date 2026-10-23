@@ -29,8 +29,7 @@ COMMANDS = frozenset({"a2-restore-controller-socket", "a2-restore-controller-soc
 LEGACY_SOCKET = "/var/run/mastermind-agent-relay/agent-relay.sock"
 PERSISTENT_SOCKET = "/var/db/mastermind-agent-relay/socket/agent-relay.sock"
 A2_RETURN_FIELDS = frozenset(("coo_autonomy_armed", "coo_operator_harness_armed",
-                              "ceo_submit_armed", "terminal_return_armed",
-                              "coo_foreground_only"))
+                              "ceo_submit_armed", "terminal_return_armed"))
 
 
 def _require_old_a2_pair(intent) -> None:
@@ -73,6 +72,10 @@ def _require_old_a2_pair(intent) -> None:
 
 def _candidate(prior):
     if (any(prior.control.get(k) is not False for k in A2_RETURN_FIELDS)
+            # Incumbent disarmed Control configurations may omit this optional
+            # flag. The native Control loader defaults absence to false.
+            # Preserve that absence and refuse explicit true/foreign types.
+            or prior.control.get("coo_foreground_only", False) is not False
             or prior.control.get("fabric_bridge_armed", False) is not False
             or prior.worker.get("operator_harness_armed") is not False
             or prior.control.get("terminal_return_socket_path")
