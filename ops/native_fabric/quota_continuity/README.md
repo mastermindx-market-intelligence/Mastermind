@@ -73,8 +73,17 @@ Usage-based exclusion requires a fresh, applicable observation for that exact
 account. Stale, future, malformed or expired observations remain `UNKNOWN` and
 cannot establish exhaustion. A caller's explicit not-before bound is a separate
 constraint on that request; it is neither a permanent account ban nor evidence
-that an earlier operation became eligible. Historical failed reviews and unknown
-usage are not backfilled by this source change.
+that an earlier operation became eligible. `request --not-before` accepts a
+strict UTC `Z` instant, with up to six fractional digits. The exact witness is
+retained in the original request and launch digest. Before that instant, the
+request refuses before routing or capacity preflight, the direct controller
+refuses before host/state/lease work, the broker refuses before acquisition
+mutation, and Qwen refuses before its slot, configuration and credential owners.
+The controller carries the same bound to the remote wrapper. Equality allows
+ordinary admission checks to proceed; it grants no capacity. This option never
+sleeps, queues, schedules a successor, or authorizes replay. Omission preserves
+the prior request/launch shapes and clears an unrelated inherited label.
+Historical failed reviews and unknown usage are not backfilled by this change.
 
 The broker fixtures replace optional live status enrichment and enter a
 process-local boundary before qualification. It denies provider transport,

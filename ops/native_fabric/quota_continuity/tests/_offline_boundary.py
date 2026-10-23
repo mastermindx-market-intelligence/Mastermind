@@ -13,6 +13,7 @@ _expected = None
 _patches = []
 _child_scripts = set()
 _syntax_commands = set()
+_prelaunch_shell_commands = set()
 _protected = set()
 _HOME = Path(pwd.getpwuid(os.getuid()).pw_dir)
 _CREDENTIAL_ROOTS = tuple(str(_HOME / name) + os.sep for name in
@@ -40,7 +41,7 @@ def _audit(event, args):
         _deny('network')
     if event == 'subprocess.Popen':
         executable, argv = args[:2]
-        if tuple(argv) in _syntax_commands:
+        if tuple(argv) in _syntax_commands or tuple(argv) in _prelaunch_shell_commands:
             return
         if not (isinstance(argv, (list, tuple)) and len(argv) >= 3
                 and argv[0] == sys.executable and argv[1] == '-c'
@@ -139,4 +140,19 @@ def guarded_bash_syntax(path):
     """Allow syntax parsing only; this command cannot execute shell statements."""
     argv = ('/bin/bash', '-n', str(path))
     _syntax_commands.add(argv)
+    return list(argv)
+
+
+def guarded_prelaunch_shell(path, args):
+    """Exact copied source, future-bound fixture, isolated PATH with no transport.
+
+    This only admits the two owned prelaunch fixtures. Their Python shim enters
+    this boundary before running any helper, and no network CLI is on PATH.
+    """
+    path = Path(path)
+    assert path.name in {'remote_sub.sh', 'qwen_exec.sh'} and not path.is_symlink()
+    original = Path(__file__).resolve().parents[1] / 'candidate' / path.name
+    assert path.read_bytes() == original.read_bytes()
+    argv = ('/bin/bash', str(path), *map(str, args))
+    _prelaunch_shell_commands.add(argv)
     return list(argv)

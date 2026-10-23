@@ -66,6 +66,15 @@ if [ "${LANE_LEASED:-0}" = "1" ]; then
   esac
 fi
 
+# Check before the local slot/projection/config/key owners, and again before
+# each actual Codex entry if the wall clock moved while the run was waiting.
+qwen_not_before_check() {
+  if [ "${POOL_CALLER_NOT_BEFORE+x}" = x ]; then
+    python3 "$(cd "$(dirname "$0")" && pwd)/caller_not_before.py" || return $?
+  fi
+}
+qwen_not_before_check || exit $?
+
 if [ -z "${QWEN_EXEC_SLOTTED:-}" ]; then
   export QWEN_EXEC_SLOTTED=1
   exec python3 "$(cd "$(dirname "$0")" && pwd)/slot.py" qwen --wait "${QWEN_EXEC_SLOT_WAIT:-3600}" -- "$0" "$@"
@@ -595,6 +604,7 @@ QWEN_TERMINAL_CONTRACT_EOF
 }
 
 run_codex() {
+  qwen_not_before_check || exit $?
   # $1 = mode: new | resume
   # Capture both the provider and the credential-free response projection.
   _mode="$1"
