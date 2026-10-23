@@ -1533,17 +1533,14 @@ def _run_invocation(
     try:
         assert_secret_surfaces_clean(argv=argv, environ=environ)
         args = build_parser().parse_args(list(argv))
-        if require_native_tty and args.command == "enroll":
-            _require_native_tty(stdin)
         if args.command == "enroll":
-            enroll_kwargs = {
-                "bot_user_id": args.expected_bot_user_id,
-                "stdin": stdin,
-            }
-            if args.enable_w3c:
-                enroll_kwargs["w3c_enabled"] = True
-            receipt = asyncio.run(_enroll(**enroll_kwargs))
-        elif args.command == "enroll-shared":
+            # The accepted Agent OS decision admits only the shared C1/A2
+            # Slack app for *new* enrollment. An operator-supplied flag or
+            # token cannot reselect the deprecated dedicated app. Preserve
+            # installed legacy verify/rebind. Restoring new dedicated
+            # enrollment requires an explicitly reviewed source-law reversal.
+            raise A2EnrollmentError("A2_ENROLLMENT_ARGUMENTS_REFUSED")
+        if args.command == "enroll-shared":
             shared_kwargs = {"bot_user_id": args.expected_bot_user_id}
             if args.enable_w3c:
                 shared_kwargs["w3c_enabled"] = True
