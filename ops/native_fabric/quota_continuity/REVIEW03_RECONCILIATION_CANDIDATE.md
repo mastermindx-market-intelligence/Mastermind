@@ -39,3 +39,15 @@ Only after the installed facade returns a **root-verified terminal failure** for
 ## Independent Fabric source review and bounded repairs
 
 A separate MiniMax Fabric integration worker completed a root-verified terminal return under run `terminal-colw-pr1127-nativehook-integration-20261022-01`. It found that the earlier 15 tests omitted original-owner source/remote CLI paths, intermediate symlinks were not guarded, and O_EXCL winner races were misclassified. The module now delegates local ancestry custody to the **existing** `artifact_delivery.DirectoryChain`, holds remote ancestry descriptors in a source-fixed read-only ssh probe, and safely re-reads a concurrently published immutable receipt. **24 local focused tests now pass**, including owner fixtures for the eight original inputs, broker/ledger negative controls, the CLI and SSH response, symlink attacks and publication race. The read-only original M2/Ubuntu1/broker proof remains `6e22cfa3c2f1c147bbd2f79d3d0c08fc0d9aeac0446709df490cc6b33f22e47e`. No live receipt has been written.
+
+## Native facade integration artifact — deferred, not installed
+
+The original MiniMax Fabric source integration worker returned a source patch and integration-contract tests on its original root-qualified terminal result. These are now retained **in this same PR** as:
+
+- `review03_integration/review03-into-fabric_task.patch`: changes **only** the future incumbent `source/fabric_task.py`, with the fixed-run `EFFECT_UNKNOWN` guard, default read-only check, explicit one-time reconcile with proof-digest witness, and strict run/root identity for **both** actions. It is **not applied** in this PR because Draft #1648 still owns that file.
+- `review03_integration/deferred_tests/review03_integration_contract.py.txt`: source-only contract for the future integration. It uses the non-executable `.txt` suffix until the source owner integrates the hook, preventing the current green source-only PR from accidentally treating uninstalled integration as working.
+- `review03_integration/HANDOFF_REVIEW03_HOOK_INTEGRATION.md`: the original independent review return, with a contextual warning for already-repaired #1796 issues.
+
+**Actual validation:** a scratch, non-repository copy of current protected `fabric_task.py` was patched; Python compilation succeeded; **15/15 integration tests passed**, alongside the **24/24** current fixed-run source tests. This is **not** native installation, production readback, a provider review, or authority to alter #1648.
+
+After the native source owner reconciles #1648's writer and accepts the exact patch, apply it through the incumbent source branch, copy/rename the contract to `ops/native_fabric/quota_continuity/tests/test_review03_integration_contract.py`, then rerun the full Native Fabric and protected source composition suites. Merge only with required protected CI, independent review, and complete-generation manifest publication. The original failed review's immutable artifacts and expired broker lease must remain unchanged; installed `fabric_status` must read back terminal/root-qualified before any new reviewer is commissioned.
