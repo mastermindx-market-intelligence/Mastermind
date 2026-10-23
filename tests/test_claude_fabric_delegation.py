@@ -103,13 +103,28 @@ def test_operator_packet_gets_executable_discovery_contract_not_identity() -> No
     ) == {"POOL_TASK_CLASS": "mechanical"}
 
 
-def test_unadmitted_grok_47_cannot_mint_child_capability() -> None:
-    with pytest.raises(ValueError, match="operator_capsule_scope"):
-        operator.load_operator_environment(
-            {"FABRIC_OPERATOR_CAPSULE": "lanes/tmp/run1.operator-cap.json",
-             "POOL_TASK_CLASS": "domain_orchestration"},
-            "run1", "grok", "grok-4.7", b"packet",
-        )
+def test_truly_unadmitted_grok_model_cannot_mint_child_capability(
+        tmp_path: Path, monkeypatch) -> None:
+    """Deny only genuinely unadmitted models; grok-4.6 and grok-4.7 are admitted.
+
+    The closed source now admits grok-4.6 and grok-4.7, so the denial uses
+    grok-4.8 and an invalid grok-4.7 suffix. os.open is monkeypatched to fail
+    loudly and home is a disposable tmp_path, so no capsule can be opened and
+    any mistaken fallback stays disposable.
+    """
+
+    def _refuse_open(*args, **kwargs):
+        raise AssertionError("operator capsule must not be opened")
+
+    monkeypatch.setattr(operator.os, "open", _refuse_open)
+    for model in ("grok-4.8", "grok-4.7-preview"):
+        with pytest.raises(ValueError, match="operator_capsule_scope"):
+            operator.load_operator_environment(
+                {"FABRIC_OPERATOR_CAPSULE": "lanes/tmp/run1.operator-cap.json",
+                 "POOL_TASK_CLASS": "domain_orchestration"},
+                "run1", "grok", model, b"packet", home=tmp_path,
+            )
+    assert not (tmp_path / "lanes/tmp/run1.operator-cap.json").exists()
 
 
 def test_claude_fabric_only_installer_preserves_existing_native_twelve(tmp_path: Path) -> None:
