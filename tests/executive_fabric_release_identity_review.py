@@ -433,15 +433,18 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
  'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
                                            'sites': ((43, 81, 84, 'int', '450'),)}})
 
-# Gateway candidate-only fixed Studio UID and incumbent config/plist mode.
+# Gateway fixed Studio UID, incumbent config/plist mode, and the normal
+# installer's exact /Library/Application Support 0:80:0755 ancestor.
 # Exact source and Constant-token sites are frozen for the final changed-risk
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '1c58fd0f62163994c881ab92caab82e38a744ff0b6b927f8bc2b4f6ae76d710c',
+    'sha256': '114e9bd5cb1f0a8731a1aa081190d2d8ab28f01eac69b894031299e0a0dc39e7',
     'sites': ((322, 24, 27, 'int', '501'),
-              (6965, 41, 46, 'int', '0o644')),
+              (6434, 35, 37, 'int', '80'),
+              (6435, 50, 55, 'int', '0o755'),
+              (6972, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
