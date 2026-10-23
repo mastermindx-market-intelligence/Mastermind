@@ -28,6 +28,7 @@ import native_completion_reconcile as completion_reconcile
 import native_prestart_reconcile as prestart_reconcile
 import native_preexec_reconcile as preexec_reconcile
 import native_host_review_controller_reconcile as native_review_reconcile
+import native_watchlist_review03_reconcile as original_review_reconcile
 
 HERE = Path(__file__).resolve().parent
 RUN_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
@@ -537,6 +538,11 @@ def inspect_run(run_id: str) -> dict[str, Any]:
 
     if state == "EFFECT_UNKNOWN" and rid == native_review_reconcile.RUN:
         verified = native_review_reconcile.status_from_receipt()
+        if verified is not None:
+            return verified
+
+    if state == "EFFECT_UNKNOWN" and rid == original_review_reconcile.RUN:
+        verified = original_review_reconcile.status_from_receipt()
         if verified is not None:
             return verified
 
@@ -1343,6 +1349,12 @@ def main(argv: list[str] | None = None) -> int:
     p_original_native_review.add_argument("run_id")
     p_original_native_review.add_argument("--root", required=True)
 
+    p_original_review03 = sub.add_parser("reconcile-original-review03")
+    p_original_review03.add_argument("run_id")
+    p_original_review03.add_argument("--root", required=True)
+    p_original_review03.add_argument("--action", choices=("check", "reconcile"), default="check")
+    p_original_review03.add_argument("--expected-proof-sha256")
+
     for command in ("check-terminal", "reconcile-terminal"):
         p_terminal = sub.add_parser(command)
         p_terminal.add_argument("run_id")
@@ -1473,6 +1485,24 @@ def main(argv: list[str] | None = None) -> int:
                 return 0
             except (native_review_reconcile.RecoveryUnavailable, OSError, ValueError,
                     subprocess.SubprocessError, native_review_reconcile.sqlite3.Error) as exc:
+                print(str(exc), file=sys.stderr)
+                return 78
+        if args.cmd == "reconcile-original-review03":
+            try:
+                if (args.run_id,args.root) != (original_review_reconcile.RUN,original_review_reconcile.ROOT):
+                    raise original_review_reconcile.NotQualified("original_operation_only")
+                if args.action == "check":
+                    _json(original_review_reconcile.qualification())
+                    return 0
+                if type(args.expected_proof_sha256) is not str or not re.fullmatch(
+                        "[0-9a-f]{64}", args.expected_proof_sha256):
+                    raise original_review_reconcile.NotQualified("missing_proof_sha")
+                _json(original_review_reconcile.reconcile_original(
+                    args.run_id,args.root,args.expected_proof_sha256))
+                return 0
+            except (original_review_reconcile.NotQualified,OSError,ValueError,TypeError,
+                    KeyError,subprocess.SubprocessError,
+                    original_review_reconcile.sqlite3.Error) as exc:
                 print(str(exc), file=sys.stderr)
                 return 78
         if args.cmd == "reconcile-prestart":

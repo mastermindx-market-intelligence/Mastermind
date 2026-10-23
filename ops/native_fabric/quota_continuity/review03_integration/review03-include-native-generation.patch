@@ -1,0 +1,12 @@
+diff --git a/ops/native_fabric/quota_continuity/rollout/build_review_stage.py b/ops/native_fabric/quota_continuity/rollout/build_review_stage.py
+--- a/ops/native_fabric/quota_continuity/rollout/build_review_stage.py
++++ b/ops/native_fabric/quota_continuity/rollout/build_review_stage.py
+@@ -34,7 +34,7 @@
+ """.split())
+ ADDITIONS = frozenset({"recovery_artifacts.py", "fabric_continuation.py", "quota_circuit.py",
+                       "capacity_preflight.py", "provider_outcome.py", "native_runtime_bindings.py",
+-                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py"})
++                      "commission_deadline.py", "current_source_observation.py", "native_plain_packet_check.py", "native_plain_packet_reconcile.py", "native_watchlist_review03_reconcile.py"})
+ # The retired credential-to-stdout helper is audit evidence only. It must never
+ # be importable from source/ or selected as a runtime fallback. Its exact bytes
+ # still have to match the installed preimage before the secure overlay is used.

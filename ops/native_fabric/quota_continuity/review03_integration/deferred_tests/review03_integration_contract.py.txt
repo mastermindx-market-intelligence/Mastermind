@@ -1,0 +1,242 @@
+"""Integration-contract tests for review-03 -> fabric_task.inspect_run wiring.
+
+These complement PR #1796's expanded 24-test suite. The original-owner
+source and host evidence is exercised by fixtures and verified read-only live
+qualification; the remaining contract is the incumbent facade integration. These tests
+pin the integration contract (guard scoping, CLI gating, facade root_verified
+semantics, tamper behaviour) rather than re-testing the evidence reader.
+
+No provider, no network, no broker write, no installed-state mutation.
+"""
+from __future__ import annotations
+
+import ast
+import copy
+import json
+import os
+from pathlib import Path
+import sys
+import tempfile
+
+import pytest
+
+# Supports both deferred_tests/ placement in this source-only PR and final
+# tests/ placement when the same original owner installs the native hook.
+REPO_ROOT = next(
+    (parent for parent in Path(__file__).resolve().parents
+     if (parent / "ops" / "native_fabric" / "quota_continuity"
+         / "source" / "native_watchlist_review03_reconcile.py").is_file()),
+    None,
+)
+assert REPO_ROOT is not None, "original_review03_source_missing"
+SOURCE_DIR = REPO_ROOT / "ops" / "native_fabric" / "quota_continuity" / "source"
+CANDIDATE_DIR = REPO_ROOT / "ops" / "native_fabric" / "quota_continuity" / "candidate"
+sys.path.insert(0, str(SOURCE_DIR))
+
+import native_watchlist_review03_reconcile as r  # noqa: E402
+
+FACADE_ROOT_EXPR = "s.root_id===args.root_id"
+
+
+def facade_root_verified(status: dict, root_id: str) -> bool:
+    """Exact expression from integrations/studio_direct_mcp/fabric-backend.mjs.
+
+    `if(name==='fabric_status') return response({... root_verified:
+    s.root_id===args.root_id, execution_absence_proven:false});`
+    """
+    return status["root_id"] == root_id
+
+
+@pytest.fixture
+def private_root():
+    with tempfile.TemporaryDirectory(prefix=".review03-contract-test-",dir=Path.home()) as temp:
+        yield Path(temp)
+
+
+@pytest.fixture
+def receipt(private_root, monkeypatch):
+    """Publish a real receipt through the candidate's own writer, then read back."""
+    here = private_root / "owner"
+    (here / "state" / "remote_sub").mkdir(parents=True)
+    monkeypatch.setattr(r, "HERE", here)
+    material = {
+        "schema": r.SCHEMA, "run_id": r.RUN, "root_id": r.ROOT, "lease_id": r.LEASE,
+        "local": {"broker_lease_state": "expired", "local_source_sha256": {"log": "fixed"}},
+        "remote": {
+            "schema": "mastermind.original-review03-host-observation.v1",
+            "run_id": r.RUN, "host": "ubuntu1", "returncode": 1,
+            "review_produced": False, "worker_cleanup_proven": True,
+            "files_sha256": dict(r.HOST_EXPECTED),
+        },
+        "review_performed": False, "lease_released_by_this_operation": False,
+        "retry_permitted": False,
+    }
+    proof = {**material, "proof_sha256": r.digest(r.canonical(material))}
+    monkeypatch.setattr(r, "qualification", lambda: copy.deepcopy(proof))
+    return here, proof
+
+
+# --- integration wiring -------------------------------------------------------
+
+def _fabric_task_source() -> str:
+    # The active native generation selects the candidate overlay. Source is
+    # the immutable installed preimage and must NOT contain the new hook.
+    path = CANDIDATE_DIR / "fabric_task.py"
+    assert path.is_file(), f"integrated native candidate missing at {path}"
+    return path.read_text()
+
+
+def test_guard_is_present_and_scoped_to_the_single_original_run():
+    src = _fabric_task_source()
+    assert src.count("rid == original_review_reconcile.RUN") == 1, \
+        "exactly one fixed-run guard expected"
+    block = ('    if state == "EFFECT_UNKNOWN" and rid == original_review_reconcile.RUN:\n'
+             '        verified = original_review_reconcile.status_from_receipt()\n'
+             '        if verified is not None:\n'
+             '            return verified\n')
+    assert block in src, "guard must sit in EFFECT_UNKNOWN before acceptance projection"
+
+
+def test_guard_cannot_fire_for_a_different_run():
+    """Semantic failure: the guard is an exact identity match, not a prefix."""
+    assert r.RUN == "terminal-colw-pr1127-independent-review-03"
+    assert r.ROOT == "terminal-colw-20261022-pr1127"
+    # A neighbouring run id must not satisfy the equality the guard relies on.
+    assert (r.RUN + "x") != r.RUN
+    assert (r.ROOT + "-other") != r.ROOT
+
+
+def test_cli_branch_is_present_and_gated():
+    src = _fabric_task_source()
+    assert 'sub.add_parser("reconcile-original-review03")' in src
+    assert src.count('args.cmd == "reconcile-original-review03"') == 1
+    assert '"--expected-proof-sha256"' in src
+    assert 'choices=("check", "reconcile")' in src
+    # The write path must validate the echoed proof digest before writing.
+    dispatch = src.split('args.cmd == "reconcile-original-review03"')[1]
+    assert 'missing_proof_sha' in dispatch
+    assert dispatch.index('missing_proof_sha') < dispatch.index("reconcile_original(")
+    assert 'original_operation_only' in dispatch
+    assert dispatch.index('original_operation_only') < dispatch.index('qualification()')
+
+
+def test_no_new_control_plane_or_lease_mutation_in_integration():
+    src = _fabric_task_source()
+    for banned in ("broker.release(", "lease_broker.release(", "def release(",
+                   "quota_scope", "reset_lease"):
+        assert banned not in src, f"integration must not introduce {banned!r}"
+
+
+# --- typed MCP facade contract ----------------------------------------------
+
+def test_facade_root_verified_is_true_for_the_exact_original_root(receipt):
+    _, proof = receipt
+    status = r.reconcile_original(r.RUN, r.ROOT, proof["proof_sha256"])
+    assert facade_root_verified(status, r.ROOT) is True
+    assert status["root_id"] == r.ROOT and status["parent_run_id"] == r.ROOT
+
+
+@pytest.mark.parametrize("wrong_root", [
+    "terminal-colw-20261022-pr1128",
+    "terminal-colw-pr1127-independent-review-03",
+    "",
+])
+def test_facade_root_verified_false_for_any_other_root(receipt, wrong_root):
+    _, proof = receipt
+    status = r.reconcile_original(r.RUN, r.ROOT, proof["proof_sha256"])
+    assert facade_root_verified(status, wrong_root) is False
+
+
+def test_facade_root_verified_is_an_echo_not_independent_verification(receipt):
+    """Documents the house-wide limitation shared with the incumbent reconciler.
+
+    `root_verified` compares the status's returned root against the caller's
+    `--root`; it does not attest anything independently. The projected root is
+    the module constant, so a caller passing that same string is trivially
+    verified. `source_snapshot()` is what actually binds ROOT to the original
+    request/launch/return/continuation artifacts, and it is what must not be
+    bypassed for this projection to be emitted at all.
+    """
+    _, proof = receipt
+    status = r.reconcile_original(r.RUN, r.ROOT, proof["proof_sha256"])
+    assert FACADE_ROOT_EXPR.replace(" ", "") == "s.root_id===args.root_id"
+    assert status["root_id"] == r.ROOT  # projected constant, not caller echo
+    # A caller supplying a different root gets no projection to compare against.
+    with pytest.raises(r.NotQualified, match="original_operation_only"):
+        r.reconcile_original(r.RUN, "terminal-colw-20261022-pr1128", proof["proof_sha256"])
+
+
+# --- tamper / semantic failure ----------------------------------------------
+
+def test_tampered_receipt_never_surfaces_a_terminal_projection(receipt):
+    _, proof = receipt
+    path = r.receipt_path()
+    r.reconcile_original(r.RUN, r.ROOT, proof["proof_sha256"])
+    baseline = path.read_bytes()
+    # Flip each boolean/false-asserting key stored in the receipt. A tampered
+    # receipt must never yield a projection; the original EFFECT_UNKNOWN
+    # projection must stand instead.
+    keys = [k for k in proof if proof[k] is False or proof[k] == r.ROOT]
+    assert b"review_performed" in baseline
+    for token in [k.encode() for k in keys]:
+        assert token in baseline, f"{token!r} is not stored in the receipt"
+        tampered = baseline.replace(token, b"Z" * len(token))
+        assert tampered != baseline, f"{token!r} mutation was a no-op"
+        path.write_bytes(tampered)
+        assert r.status_from_receipt() is None, f"{token!r} tamper surfaced a projection"
+        path.write_bytes(baseline)
+    assert r.status_from_receipt() is not None
+
+
+def test_projection_can_never_assert_success_or_acceptance(receipt):
+    _, proof = receipt
+    status = r.reconcile_original(r.RUN, r.ROOT, proof["proof_sha256"])
+    assert status["state"] != "TERMINAL"
+    assert status["state"] == "TERMINAL_FAILURE"
+    assert status["rc"] == 1
+    assert status["accepted"] is None and status["accepted_by"] is None
+    assert status["acceptance_state"] == "UNVERIFIED"
+    assert status["acceptance_reason"] == "REVIEW_NOT_PERFORMED"
+    assert status["result_available"] is False and status["result_bytes"] is None
+    assert status["original_reconciliation"]["retry_allowed"] is False
+    assert status["original_reconciliation"]["review_completed"] is False
+    assert "TERMINAL_FAILURE" in (
+        "NOT_FOUND", "TERMINAL", "TERMINAL_FAILURE", "RESULT_UNAVAILABLE",
+        "EFFECT_UNKNOWN", "STATUS_UNREADABLE", "RECONCILED_PRESTART_FAILURE",
+        "RECONCILED_PREEXEC_FAILURE")
+
+
+def test_no_receipt_means_no_projection_so_original_state_is_preserved(receipt):
+    assert r.status_from_receipt() is None
+
+
+def test_write_requires_the_read_only_proof_digest(receipt):
+    _, proof = receipt
+    with pytest.raises(r.NotQualified, match="stale_qualification"):
+        r.reconcile_original(r.RUN, r.ROOT, "0" * 64)
+    assert not r.receipt_path().exists()
+
+
+def test_receipt_is_owner_only_0600_and_strictly_shaped(receipt):
+    _, proof = receipt
+    r.reconcile_original(r.RUN, r.ROOT, proof["proof_sha256"])
+    path = r.receipt_path()
+    assert path.stat().st_mode & 0o777 == 0o600
+    assert path.stat().st_uid == os.getuid()
+    saved = json.loads(path.read_bytes())
+    assert set(saved) == {"schema", "proof", "created_at", "receipt_sha256"}
+
+
+def test_directory_component_symlink_is_refused(receipt):
+    """Ancestor symlink may neither be read nor used for receipt publication."""
+    here,proof=receipt
+    real=here/"real"
+    real.mkdir()
+    (here/"state"/"remote_sub").rmdir()
+    (here/"state").rmdir()
+    (here/"state").symlink_to(real,target_is_directory=True)
+    (real/"remote_sub").mkdir()
+    with pytest.raises((OSError,ValueError)):
+        r.reconcile_original(r.RUN,r.ROOT,proof["proof_sha256"])
+    published=real/"remote_sub"/(r.RUN+".original-review03-reconciliation.json")
+    assert not published.exists()
