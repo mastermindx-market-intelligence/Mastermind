@@ -25,6 +25,7 @@ import shutil
 import sqlite3
 import stat
 import subprocess
+import sys
 import tempfile
 from collections.abc import Iterator, Mapping
 from contextlib import contextmanager
@@ -2206,6 +2207,24 @@ def _run_census_command(argv: list[str]) -> tuple[int, str, str, int]:
     return int(process.returncode), stdout, stderr, int(process.pid)
 
 
+def _parse_census_ps_uid(value: str) -> int:
+    """Decode ps presentation into the exact unsigned 32-bit kernel UID.
+
+    Darwin ps uses signed decimal UIDFMT for uid_t fields.  Normalizing that
+    representation preserves UID equality; it never excludes a process row.
+    Other platforms retain unsigned-only input.  Bounds precede int parsing.
+    """
+    if re.fullmatch(r"[0-9]{1,10}", value) is not None:
+        uid = int(value)
+        if uid <= 0xFFFFFFFF:
+            return uid
+    elif sys.platform == "darwin" and re.fullmatch(r"-[1-9][0-9]{0,9}", value) is not None:
+        uid = int(value)
+        if -(1 << 31) <= uid < 0:
+            return uid + (1 << 32)
+    raise RestoreSafetyError("independent process census is malformed")
+
+
 def _default_upgrade_census(
     database: Path, lock: Path, barrier: Path, lock_fd: int
 ) -> Mapping[str, Any]:
@@ -2232,10 +2251,12 @@ def _default_upgrade_census(
     sensor_child_observed = False
     for line in ps_output.splitlines():
         parts = line.strip().split(None, 4)
-        if len(parts) != 5 or any(not parts[index].isdigit() for index in range(4)):
+        if len(parts) != 5 or re.fullmatch(r"[0-9]{1,10}", parts[0]) is None:
             raise RestoreSafetyError("independent process census is malformed")
         pid = int(parts[0])
-        observed_uids = {int(parts[1]), int(parts[2]), int(parts[3])}
+        if not 0 < pid < (1 << 31):
+            raise RestoreSafetyError("independent process census is malformed")
+        observed_uids = {_parse_census_ps_uid(value) for value in parts[1:4]}
         if pid == os.getpid():
             if upgrader_observed or not observed_uids & set(control_uids):
                 raise RestoreSafetyError("process census upgrader sentinel is malformed")
