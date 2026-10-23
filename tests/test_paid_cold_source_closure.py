@@ -134,3 +134,11 @@ def test_default_remote_support_uses_only_verified_physical_owner(staged,tmp_pat
         (release/'ext').chmod(0o555)
         with pytest.raises(ValueError):owner.canonical_state_ext(release/'ext',env)
     finally:sys.path.remove(str(staged))
+
+
+def test_native_manifest_accepts_only_named_pure_dependency_containers():
+    from ops.native_fabric.quota_continuity.rollout import native_generation as generation
+    for name in ('ext/paid_pyyaml_6_0_3.zip','ext/paid_pyyaml_provenance.json'):
+        generation.file_name(name)
+    for name in ('ext/other.zip','ext/other.json','ext/pools.yaml','ext/../paid_pyyaml_6_0_3.zip'):
+        with pytest.raises(ValueError):generation.file_name(name)
