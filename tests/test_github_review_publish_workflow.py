@@ -20,7 +20,7 @@ class Tokens:
         return "bounded-test-token"
 
 
-def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False):
+def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False, draft=False):
     state = {"posts": [], "reviews": [], "source_reads": 0}
 
     def handler(req):
@@ -33,7 +33,7 @@ def git_api(*, moved_head=False, unknown_post=False, changed_submitter=False):
                 else 314
             )
             return httpx.Response(200, json={
-                "number": 42, "state": "open", "draft": False,
+                "number": 42, "state": "open", "draft": draft,
                 "user": {"login": "alice", "id": current_submitter_id},
                 "head": {"sha": ("b" if moved_head else "a") * 40,
                          "repo": {"full_name": REPO}},
@@ -303,3 +303,25 @@ def test_external_moved_head_is_not_given_a_builder_identity(tmp_path):
     assert receipt.state is PublishState.REFUSED
     assert receipt.refusal == "RESULT_NOT_VERIFIED"
     assert history["posts"] == []
+
+
+def test_draft_external_pr_can_receive_advisory_comment_without_readiness_or_approval(tmp_path):
+    from integrations.github_review_return import GitHubReviewReturn, ReviewReturnSourceMode
+    runtime, builder, review_job = completed_pair(tmp_path, review_verdict="reject")
+    github, history = git_api(draft=True)
+    owner = GitHubReviewReturn.for_authorized_source(
+        runtime=runtime, github=github, publication_guard=lambda: None,
+        source_mode=ReviewReturnSourceMode.EXTERNAL_GITHUB_ADVISORY,
+    )
+    result = owner.deliver(decision=decision(), job_id=review_job)
+    assert result.publication.state is PublishState.PUBLISHED
+    assert result.publication.review_id == "789"
+    assert len(history["posts"]) == 1
+    assert history["posts"][0]["commit_id"] == HEAD
+    assert history["posts"][0]["event"] == "COMMENT"
+    assert "REQUEST_CHANGES (advisory)" in history["posts"][0]["body"]
+    assert "NOT attested" in history["posts"][0]["body"]
+    assert owner.deliver(
+        decision=decision(), job_id=review_job
+    ).publication.state is PublishState.ALREADY_PUBLISHED
+    assert len(history["posts"]) == 1

@@ -187,7 +187,7 @@ class GitHubReviewAPI:
         if (
             _number(obj.get("number")) != pull_number
             or obj.get("state") != "open"
-            or obj.get("draft") is not False
+            or type(obj.get("draft")) is not bool
         ):
             raise GitHubReviewAPIUnavailable("GITHUB_EXTERNAL_SOURCE_UNAVAILABLE")
         head = _obj(obj.get("head"))

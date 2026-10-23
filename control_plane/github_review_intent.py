@@ -1142,7 +1142,11 @@ def decide_review_intent(
             envelope=envelope,
             pull_request=pull_request,
         )
-    if pull_request.draft:
+    # Drafts may be security-reviewed before merge readiness, but only via
+    # an explicitly authorized label/comment and a fresh permission read.
+    # Keep GitHub review-requested behavior closed on a draft, independent
+    # of whether the external API happens to accept such a request.
+    if pull_request.draft and channel is IntentSource.REVIEW_REQUESTED:
         return _refuse(
             ReviewIntentRefusal.PULL_REQUEST_DRAFT,
             envelope=envelope,
@@ -1179,6 +1183,18 @@ def decide_review_intent(
         intent_source = channel
     else:  # pragma: no cover - unreachable given the channel fence above
         return _refuse(ReviewIntentRefusal.ACTION_NOT_SUPPORTED, envelope=envelope)
+
+    # On a draft, even an action normally enforced by GitHub at triage
+    # cannot substitute for a fresh installation-authenticated permission.
+    # This does not enable PR readiness, GitHub APPROVE or a merge.
+    if (pull_request.draft and current_permission is None
+            and policy.actor_is_listed(login=signal.actor_login)):
+        return _refuse(
+            ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED,
+            envelope=envelope,
+            pull_request=pull_request,
+            actor=signal.actor_login,
+        )
 
     # --- actor authority: allowlist AND a real permission basis -------------
     actor_refusal = policy.actor_permitted(

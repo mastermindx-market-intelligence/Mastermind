@@ -591,9 +591,37 @@ class TestPullRequestIdentity:
         )
         assert decision.refusal is gri.ReviewIntentRefusal.HEAD_SHA_MALFORMED
 
-    def test_draft_pull_request_is_refused(self) -> None:
+    def test_draft_label_requires_a_fresh_permission(self) -> None:
+        draft = _pull_request(draft=True)
+        without_read = _decide(
+            _label_body(), event="pull_request", pull_request=draft
+        )
+        assert without_read.refusal is (
+            gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+        )
+        admitted = _decide(
+            _label_body(), event="pull_request", pull_request=draft,
+            current=_permission("write"),
+        )
+        assert admitted.admitted is True
+        assert admitted.frozen_head_sha == HEAD_SHA
+        assert admitted.intent_source is gri.IntentSource.INTENT_LABEL
+
+    def test_draft_comment_can_request_advisory_with_fresh_permission(self) -> None:
         decision = _decide(
-            _label_body(), event="pull_request", pull_request=_pull_request(draft=True)
+            _comment_body(), event="issue_comment",
+            pull_request=_pull_request(draft=True),
+            current=_permission("write"),
+        )
+        assert decision.admitted is True
+        assert decision.intent_source is gri.IntentSource.COMMAND_COMMENT
+        assert decision.frozen_head_sha == HEAD_SHA
+
+    def test_draft_review_requested_channel_stays_closed(self) -> None:
+        decision = _decide(
+            _review_requested_body(), event="pull_request",
+            pull_request=_pull_request(draft=True),
+            current=_permission("admin"),
         )
         assert decision.refusal is gri.ReviewIntentRefusal.PULL_REQUEST_DRAFT
 
@@ -919,3 +947,29 @@ def test_static_allowlist_never_proves_elevated_permission_floor(minimum):
     assert _decide(
         _label_body(), event="pull_request", policy=permissive
     ).refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_NOT_REVERIFIED
+
+
+def test_draft_advisory_intent_never_authorizes_unlisted_actor():
+    denied = _decide(
+        _label_body(sender="stranger"), event="pull_request",
+        pull_request=_pull_request(draft=True),
+    )
+    assert denied.refusal is gri.ReviewIntentRefusal.ACTOR_NOT_AUTHORIZED
+
+
+def test_draft_advisory_intent_does_not_accept_wrong_label():
+    denied = _decide(
+        _label_body(label="another-label"), event="pull_request",
+        pull_request=_pull_request(draft=True),
+        current=_permission("admin"),
+    )
+    assert denied.refusal is gri.ReviewIntentRefusal.LABEL_NOT_PRESENT
+
+
+def test_draft_advisory_actor_permission_downgrade_fails():
+    denied = _decide(
+        _comment_body(), event="issue_comment",
+        pull_request=_pull_request(draft=True),
+        current=_permission("read"),
+    )
+    assert denied.refusal is gri.ReviewIntentRefusal.ACTOR_PERMISSION_INSUFFICIENT

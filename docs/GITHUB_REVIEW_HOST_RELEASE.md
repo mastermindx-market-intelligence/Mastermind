@@ -373,3 +373,59 @@ source findings but terminated `rc=1` for provider permission /
 A fresh exact-head independent review requires a genuine provider
 configuration/authorization change and new evidence. Do not blind-retry
 through another carrier or provider to disguise that denial.
+
+
+## Draft PR review coverage and installed-host gate (2026-10-23)
+
+The incoming review-intent product owner identified a source-correctness gap:
+draft PRs are frequently where independent security/architecture review is
+needed, before GitHub merge readiness. The existing pure intent core rejected
+every draft, even a signed, explicit `independent-review` label or authorized
+`/independent-review` comment. The source now permits **only** those two
+explicit channels on an open, same-repository draft when the current actor
+permission has been freshly authenticated; an unbound/stale/underprivileged
+actor, unlisted login, wrong label, forged signature, unrelated event, moved
+SHA, plain issue, or `review_requested` channel remains refused. Nothing
+marks the PR ready, approves or merges. Real worker admission remains the
+same canonical Executive JobRegistry with one idempotent command ID.
+
+External advisory result readback now accepts an exact boolean
+`draft=True` from authenticated GitHub PR facts while continuing to require
+the current exact repo, number, head SHA, stable submitter ID and distinct
+publisher account. The verified reviewer remains an actual terminal read-only
+Executive Job/Attempt; results are GitHub `COMMENT` only, even when the
+analysis verdict is REQUEST_CHANGES. Tests cover source identity, draft
+label/comment admission, missing and revoked actor permission, the
+`review_requested` restriction, and one idempotent COMMENT on a draft with
+no APPROVE/merge behavior.
+
+**Production install is not proved by the above source tests.** Current
+`Mastermind_Executive_V3.executive_state` reported the installed control
+source as `80f384b8f58b7ca46422d9783aa5c0613c7bf4b2`, while protected
+Mastermind master was later pinned at
+`bcf7a98e2d0030f679138a326f11a7cdda0f74ca`. The connected M2
+Desktop Commander user cannot read the root-controlled live Executive
+checkout/Runtime directory. More importantly the earlier proposed
+`ExecutiveControlService._handle_ceo_ingress_connection` GitHub review
+frame mutation was **explicitly platform safety-denied**. The dormant
+21-line `control_plane/executive_service.py` local diff is still excluded
+and must not be replayed, repackaged, reassigned to Fabric/Codex or installed
+through another carrier. The `GitHubReviewReturn.for_authorized_source`
+factory is already constructed and exercised against the canonical test
+Runtime, but has **not** been installed into a production host callback.
+Any actual release requires the original Executive service owner to receive
+genuine authorization for that exact handler/return consumer and its raw
+frame cap, peer UID, timeout/out-of-lock GitHub calls, real event source,
+credential custody and deterministic readback, then separately verify
+installed SHA, authenticated webhook, real worker START/terminal, exactly
+one GitHub formal review and same Slack thread.
+
+Current #1741 and #1748 heads are clean/mergeable with passing original
+CI/CodeQL where applicable, but both remain DRAFT without formal GitHub
+reviews. #1741's original source writer gate was documented as unavailable
+(`RULES_ABSENT`) and its branch remains under separate custody, so this
+draft correction is delivered in existing downstream #1763 source rather
+than force-pushed to #1741. The protected master ALLGREEN/SQUASH merge queue
+and current-master merge group checks are distinct from branch-head green
+checks. No PR merge, mark-ready, production activation, or privilege
+escalation follows from this source improvement.

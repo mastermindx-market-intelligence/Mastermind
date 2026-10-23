@@ -253,7 +253,7 @@ def test_external_source_is_verified_app_pr_submitter_not_webhook_claim():
     lambda obj: obj.pop("user", None),
     lambda obj: obj["user"].update({"id": 0}),
     lambda obj: obj["user"].update({"login": "reviewer-bot[bot]"}),
-    lambda obj: obj.update({"draft": True}),
+    lambda obj: obj.update({"draft": "true"}),
     lambda obj: obj["head"]["repo"].update({"full_name": "fork/other"}),
     lambda obj: obj["head"].update({"sha": "not-a-valid-sha"}),
 ])
@@ -266,3 +266,17 @@ def test_external_source_refuses_unverified_invalid_or_self_origin(mutator):
     api, _ = source(authenticated)
     with pytest.raises(GitHubReviewAPIUnavailable):
         api.read_external_source(repository=REPO, pull_number=42)
+
+
+def test_authenticated_draft_pr_submitter_is_valid_for_comment_only_advisory():
+    def authenticated(req):
+        obj = pr()
+        obj["draft"] = True
+        obj["user"] = {"login": "alice", "id": 314}
+        return httpx.Response(200, json=obj)
+    api, tokens = source(authenticated)
+    origin = api.read_external_source(repository=REPO, pull_number=42)
+    assert origin.repository == REPO
+    assert origin.pull_number == 42 and origin.head_sha == SHA
+    assert origin.submitter_login == "alice" and origin.submitter_id == 314
+    assert tokens.calls == 1
