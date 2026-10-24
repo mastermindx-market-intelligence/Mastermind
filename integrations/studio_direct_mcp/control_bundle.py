@@ -174,12 +174,50 @@ def _write_private(path: Path, data: bytes) -> None:
         os.close(fd)
 
 
-def install(*, source: Path, control_root: Path, launcher: Path) -> dict:
+def _verify_original_before_upgrade(
+    *, control_root: Path, launcher: Path, expected_bundle_digest: str | None,
+) -> str | None:
+    """Verify original installed bytes or prove a genuinely empty first install.
+
+    No existing installed helper may be replaced without its verified prior
+    bundle digest supplied by the release operator. This is the incumbent
+    owner's original bundle; not an additional state store or lease.
+    """
+    manifest_path = control_root / "manifest.json"
+    present = manifest_path.exists() or manifest_path.is_symlink()
+    if not present:
+        if any((control_root / name).exists() or (control_root / name).is_symlink()
+               for name in CONTROL_FILES):
+            raise Refusal("CONTROL_BUNDLE_UNMANIFESTED")
+        if expected_bundle_digest is not None:
+            raise Refusal("CONTROL_BUNDLE_UNEXPECTED_CAS")
+        return None
+
+    if (type(expected_bundle_digest) is not str
+            or len(expected_bundle_digest) != 64
+            or any(c not in "0123456789abcdef" for c in expected_bundle_digest)):
+        raise Refusal("CONTROL_BUNDLE_CAS_REQUIRED")
+    original = verify(control_root=control_root, launcher=launcher)
+    if original["bundleDigest"] != expected_bundle_digest:
+        raise Refusal("CONTROL_BUNDLE_CAS_MISMATCH")
+    # Bind the full original manifest bytes (including advisory source pointer)
+    # for the in-transaction precommit comparison.
+    return _sha256(manifest_path)
+
+
+def install(
+    *, source: Path, control_root: Path, launcher: Path,
+    expected_bundle_digest: str | None = None,
+) -> dict:
     root = _require_private_dir(control_root)
     _require_regular(launcher, executable=True)
     source_files = _source_files(source)
     payload = _manifest_payload(source, source_files, launcher)
     with _lock(root):
+        original_manifest_sha = _verify_original_before_upgrade(
+            control_root=root, launcher=launcher,
+            expected_bundle_digest=expected_bundle_digest,
+        )
         stage = Path(tempfile.mkdtemp(prefix=".control-bundle.stage-", dir=root))
         stage.chmod(DIR_MODE)
         committed = False
@@ -190,6 +228,15 @@ def install(*, source: Path, control_root: Path, launcher: Path) -> dict:
                     raise Refusal("STAGED_HASH_MISMATCH")
             manifest_bytes = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode()
             _write_private(stage / "manifest.json", manifest_bytes)
+            # Check the entire original helper/launcher seal again immediately
+            # before the first replace. An intervening mutation is a pre-effect
+            # refusal, never a reason to overwrite or repair blindly.
+            current_manifest_sha = _verify_original_before_upgrade(
+                control_root=root, launcher=launcher,
+                expected_bundle_digest=expected_bundle_digest,
+            )
+            if current_manifest_sha != original_manifest_sha:
+                raise Refusal("CONTROL_BUNDLE_ORIGINAL_CHANGED")
             for name in CONTROL_FILES:
                 os.replace(stage / name, root / name)
                 committed = True
@@ -223,10 +270,22 @@ def _default_paths() -> tuple[Path, Path, Path]:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=("verify", "install"))
+    parser.add_argument(
+        "--expected-bundle-digest",
+        help="exact digest of the currently verified installed bundle; required for upgrades",
+    )
     args = parser.parse_args(argv)
     source, control_root, launcher = _default_paths()
     try:
-        result = verify(control_root=control_root, launcher=launcher) if args.action == "verify" else install(source=source, control_root=control_root, launcher=launcher)
+        if args.action == "verify":
+            if args.expected_bundle_digest is not None:
+                raise Refusal("CONTROL_BUNDLE_EXPECTATION_UNSUPPORTED_FOR_VERIFY")
+            result = verify(control_root=control_root, launcher=launcher)
+        else:
+            result = install(
+                source=source, control_root=control_root, launcher=launcher,
+                expected_bundle_digest=args.expected_bundle_digest,
+            )
         print(json.dumps(result, indent=2, sort_keys=True))
         return 0
     except EffectUnknown:
