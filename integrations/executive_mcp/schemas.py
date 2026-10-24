@@ -1088,6 +1088,60 @@ def bound_job_document(
     current = _jsonable(data)
     receipts: list[dict[str, Any]] = []
 
+    # A pre-current historical requeue may retain an unqualified legacy
+    # SEALED_WORKER launch record. It is durable evidence, NOT a launch seal.
+    # Narrowly bound its read projection, retaining the Job/Attempt lifecycle
+    # and exact original-bytes receipts instead of certifying it for execution.
+    job = current.get("job") if isinstance(current, Mapping) else None
+    attempts = current.get("attempts") if isinstance(current, Mapping) else None
+    latest = current.get("latest_attempt") if isinstance(current, Mapping) else None
+    legacy_keys = {
+        "authorities", "authority_policy_hash", "launch_attestation",
+        "launch_attestation_path", "launch_attestation_sha256", "quota_class",
+        "routing", "schema_version", "worker_recovery_binding",
+    }
+    if (
+        type(job) is dict and job.get("status") == "QUEUED"
+        and job.get("current_attempt_id") is None
+        and job.get("assigned_worker_id") is None
+        and job.get("assigned_quota_class") is None
+        and job.get("result") is None
+        and type(job.get("attempt_count")) is int
+        and job["attempt_count"] == 1
+        and type(job.get("attempt_limit")) is int
+        and job["attempt_limit"] > 1
+        and type(attempts) is list and len(attempts) == 1
+        and type(attempts[0]) is dict and type(latest) is dict
+        and attempts[0] == latest
+        and attempts[0].get("status") == "LOST"
+        and attempts[0].get("execution_mode") == "SEALED_WORKER"
+        and type(attempts[0].get("launch_metadata")) is dict
+        and set(attempts[0]["launch_metadata"]) == legacy_keys
+        and attempts[0]["launch_metadata"].get("schema_version")
+            == "mastermind.executive_process_launch/v1"
+        and type(attempts[0]["launch_metadata"].get("launch_attestation")) is dict
+        and attempts[0]["launch_metadata"]["launch_attestation"].get("schema_version")
+            == "mastermind.executive_launch_attestation/v1"
+    ):
+        candidates = []
+        for parts, row in ((("attempts", 0, "launch_metadata"), attempts[0]),
+                           (("latest_attempt", "launch_metadata"), latest)):
+            encoded = canonical_json(row["launch_metadata"])
+            preview = encoded.decode("utf-8")[:BOUND_PREVIEW_CHARS]
+            receipt = {
+                "bounded": True,
+                "original_bytes": len(encoded),
+                "returned_bytes": len(preview.encode("utf-8")),
+                "field": _display_path(parts),
+            }
+            if receipt["returned_bytes"] >= receipt["original_bytes"]:
+                break  # Never label complete historical evidence as truncated.
+            candidates.append((row, receipt, preview))
+        if len(candidates) == 2:
+            for row, receipt, preview in candidates:
+                row["launch_metadata"] = {**receipt, "preview": preview}
+                receipts.append(receipt)
+
     def size() -> int:
         return len(canonical_json(current)) + len(canonical_json(receipts))
 
