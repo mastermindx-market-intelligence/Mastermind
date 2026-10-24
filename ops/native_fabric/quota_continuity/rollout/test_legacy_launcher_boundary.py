@@ -13,6 +13,14 @@ import native_generation as generation
 class LegacyLauncherBoundary(unittest.TestCase):
     def test_late_old_launcher_refuses_before_business_exec(self):
         current_source = Path(generation.__file__).read_bytes()
+        # The host-pull plist admission is later than the paired-upgrade launcher.
+        # The historical 8bc verifier is this file with that one block removed.
+        admission = (
+            b"    # One vetted flat plist. Not a suffix rule and not a directory walk.\n"
+            b"    if relative == \"ext/host_pull_launchd.plist.template\":\n"
+            b"        return\n")
+        self.assertEqual(current_source.count(admission), 1)
+        current_source = current_source.replace(admission, b"")
         current_fragment = (b'or parts[1] in {"yes", "host_pull_probe.template",\n'
                             b'                        "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"})')
         previous_fragment = b'or parts[1] in {"yes", "host_pull_probe.template"})'

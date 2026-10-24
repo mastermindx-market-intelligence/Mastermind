@@ -135,6 +135,11 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     raise AssertionError('historical collector preimage differs')
                 (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
                 cls.manifest['ext/' + name] = digest
+            # The host-pull daemon and plist are later than this paired upgrade.
+            # The disposable target keeps the reviewed 95-member closure.
+            for relative in ('ext/host_pull_daemon.sh', 'ext/host_pull_launchd.plist.template'):
+                cls.manifest.pop(relative)
+                (cls.built / 'native-code-stage' / relative).unlink()
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
@@ -171,7 +176,15 @@ class PairedLauncherUpgrade(unittest.TestCase):
         manifest = {name: g.digest(raw) for name, raw in payloads.items()}
         self.initial = g.publish(source, self.ext, manifest)
         self.store = self.ext.parent / g.STORE_NAME
-        raw = Path(g.__file__).read_bytes().replace(
+        admission = (
+            b"    # One vetted flat plist. Not a suffix rule and not a directory walk.\n"
+            b"    if relative == \"ext/host_pull_launchd.plist.template\":\n"
+            b"        return\n")
+        live = Path(g.__file__).read_bytes()
+        self.assertEqual(live.count(admission), 1)
+        pinned = live.replace(admission, b"")
+        self.assertEqual(g.digest(pinned), installer.UPGRADE_TO)
+        raw = pinned.replace(
             b'or parts[1] in {"yes", "host_pull_probe.template",\n'
             b'                        "paid_pyyaml_6_0_3.zip", "paid_pyyaml_provenance.json"})',
             b'or parts[1] in {"yes", "host_pull_probe.template"})')
@@ -188,6 +201,17 @@ class PairedLauncherUpgrade(unittest.TestCase):
         # Actual installed selection may have advanced since first installation.
         self.previous = g.select(self.store, self.initial.name, self.initial.name)
         self.target = g.publish(self.built / 'native-code-stage', self.ext, self.manifest)
+        # prepare_upgrade requires the launcher bytes to be exactly UPGRADE_TO.
+        # Reads of this repo file return those pinned bytes. Writes stay on this module.
+        live_path = Path(g.__file__).resolve()
+        original_regular = g.regular_bytes
+        def regular_bytes(path, *args, **kwargs):
+            if Path(path).resolve() == live_path:
+                return pinned
+            return original_regular(path, *args, **kwargs)
+        self.bytes_patch = mock.patch.object(g, 'regular_bytes', regular_bytes)
+        self.bytes_patch.start()
+        self.addCleanup(self.bytes_patch.stop)
         self.bundle = self.root / 'upgrade'
         self.plan = installer.prepare_upgrade(self.original, self.target.name, self.bundle)
         self.old_plan = (self.original / 'PLAN.json').read_bytes()
