@@ -32,26 +32,15 @@ python3 "$FABRIC_ADAPTER" result "$CHILD" --max-bytes 8192
 python3 "$FABRIC_ADAPTER" accept "$CHILD" --by reviewer
 ```
 
-The original `request` may have executed if its tool response times out. **Never retry, change child ID, or switch to the MCP entrypoint** before same-carrier reconciliation. A controller PID, queued receipt or pending status is not START. Reuse the exact `run_id` for status/result; it is not a request replay. Review concrete artifacts, tests and source custody before acceptance. Unknown/partial results are not accepted. Return exact worker ID, source revision, outcome and remaining effects.
+A lost `request` response may have dispatched. **Never retry, change run ID, or switch entrypoints** before reconciling the same carrier. A controller PID or queued receipt is not START. Use the original run/root for status and result. Verify source and results before acceptance; unknown results are not accepted. Return exact identity, evidence and unresolved effects.
 
 ## Existing private Fabric MCP (only when actually granted)
 
 Invoke `fabric_request` **once**, supplying `run_id`, `root_id`, `parent_id`, `task_class`, `task_complexity`, and `work_packet`. The normal sequence is `fabric_status` -> `fabric_result` -> parent review -> `fabric_accept` with the returned digest and verification summary. `fabric_wait` is a short bounded observation, not a scheduler. Never treat a text receipt as original-root identity authentication.
 
-## Parent recovery status is staging-only, not an auto-resume command
+## Parent recovery (staging only)
 
-A source-proposed `parent_recovery` value on the Web `fabric_status` or
-`fabric_wait` response is diagnostic-only. The installed native status remains
-the owner, and an attended Mastermind OS DTO consumer does not automatically
-receive this optional Web facade field. `root_id:null` can retain an observed
-failure/active disposition while `root_verified:false` **forbids parent
-attention**. A prelaunch `request_root_id` provides correlation only. All
-projection `wake_proven`, `retry_authorized`, `dispatch_authorized`, and
-`result_consumption_authorized` flags stay false; no source merge or suggested
-disposition can override them. Reconcile the **same original controller**;
-never spawn, switch providers or accept a result based on the projection.
-Only the existing authorized Executive/Agent OS wake and session-binding
-owners may subsequently prove a true parent delivery and consumption.
+Web `parent_recovery` is diagnostic-only, with no installed consumer or parent wake. Null native roots forbid parent attention; all wake, retry, dispatch and result-consumption flags remain false. Reconcile the original run; never replay or accept from this view. See `integrations/studio_direct_mcp/FABRIC.md`.
 
 ## To commission an operator that can itself delegate
 
@@ -59,7 +48,7 @@ An ordinary leaf gets no descendant tools. A `domain_orchestration` operator can
 
 Inside the admitted operator, first call `mastermindStudio.fabric_operator_scope` (no arguments). Use returned `root` and `operator_run` as exact child `root` and `parent`. Then call `fabric_child_request` once with schema `mastermind.fabric_operator_child_request.v1`, a new stable `run_id`, `task_class` from the allowed set, `task_complexity` C0/C1 and a bounded `packet`. Observe with `fabric_child_status` / `fabric_child_wait`, consume `fabric_child_result`, review, then call `fabric_child_acknowledge` with the **exact** result SHA256. Acknowledgment closes attention only; original-parent acceptance stays separate. If the scope tool is missing or refused, no child launch is authorized. Do not read/export the private capability, run nested CLIs, or create an operator under an operator.
 
-**Current qualification limit:** the existing paid operator loader admits GLM 5.3 and Grok 4.6 under exact bound grants. A Grok 4.7 example is **not** evidence that Grok 4.7 has been admitted on this route. Use only the actually qualified installed provider route; extending the model catalog needs its own admission and live proof.
+**Nested operator admission:** GLM 5.3 and Grok 4.6 under exact grants only. Grok 4.7 is not yet proven admitted; other models require qualified installed routing and real admission proof.
 
 ## Proof ceiling
 
