@@ -337,3 +337,22 @@ def test_actual_execution_guard_revoked_after_preparation_never_starts_adapter(j
     attempts=runtime.attempts.list_attempts(job.job_id)
     assert len(attempts)==1 and attempts[0].pid is None
     assert attempts[0].status is er.AttemptStatus.FAILED
+
+
+def test_genuine_direct_terminal_rederives_raw_admission_not_caller_projection(joined):
+    """Legacy projection preservation cannot let direct callers supply authority."""
+    runtime,job,*_=joined
+    receipt=_complete(joined)
+    with runtime.store.read() as connection:
+        raw=connection.execute('SELECT * FROM attempts WHERE attempt_id=?',
+                              (receipt.attempt.attempt_id,)).fetchone()
+        caller=dict(raw)
+        caller.update(job_id='FOREIGN',effective_grant_json='{}',
+                      effective_grant_digest='f'*64,launch_metadata_json='{}')
+        proved=er._sealed_worker_result_payload(connection,caller,
+                    expected_role=None,terminal_payload=receipt.job.result)
+        assert proved==receipt.job.result and proved['job_id']==job.job_id
+        changed=dict(receipt.job.result,admission_digest='f'*64)
+        with pytest.raises(er.StateConflict):
+            er._sealed_worker_result_payload(connection,caller,
+                    expected_role=None,terminal_payload=changed)

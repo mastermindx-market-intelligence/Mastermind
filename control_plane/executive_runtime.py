@@ -5327,6 +5327,27 @@ def _direct_attempt_view(connection, row):
     return result
 
 
+def _direct_terminal_attempt_view(connection, attempt_row):
+    """Derive only genuine direct evidence; preserve incumbent launch views.
+
+    Legacy owners may pass an already-qualified merged launch projection. Its
+    remote identity and recovery material must not be replaced by the raw row.
+    The new role-null variant instead always derives from its durable admission
+    and raw Attempt, never from caller-projected grant or principal fields.
+    """
+    original = connection.execute(
+        "SELECT * FROM attempts WHERE attempt_id=?", (attempt_row["attempt_id"],)
+    ).fetchone()
+    if original is None or original["effective_grant_json"] is not None:
+        return attempt_row
+    job = connection.execute(
+        "SELECT * FROM jobs WHERE job_id=?", (original["job_id"],)
+    ).fetchone()
+    if _direct_native_provenance(connection, job) is None:
+        return attempt_row
+    return _direct_attempt_view(connection, original)
+
+
 def _attempt_from_row(row: sqlite3.Row) -> Attempt:
     effective_grant = _load_canonical_digest_pair(
         row["effective_grant_json"],
@@ -8235,10 +8256,7 @@ def _validated_sealed_worker_launch_material(
     """
 
     if connection is not None:
-        # An already-projected internal mapping is reconstructed from its raw
-        # authoritative row; caller-supplied projected values grant nothing.
-        original=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(attempt_row["attempt_id"],)).fetchone()
-        attempt_row=_direct_attempt_view(connection,original)
+        attempt_row = _direct_terminal_attempt_view(connection, attempt_row)
     from control_plane.executive_paid_runtime import (
         is_paid_attempt, validated_paid_launch_material,
     )
@@ -8603,8 +8621,7 @@ def _sealed_worker_result_payload(
 ) -> dict[str, Any]:
     """Build seal-equivalent evidence from the immutable sealed-worker receipt."""
 
-    original=connection.execute("SELECT * FROM attempts WHERE attempt_id=?",(attempt_row["attempt_id"],)).fetchone()
-    attempt_row=_direct_attempt_view(connection,original)
+    attempt_row = _direct_terminal_attempt_view(connection, attempt_row)
     from control_plane.executive_paid_runtime import (
         is_paid_attempt, paid_sealed_worker_result_payload,
     )

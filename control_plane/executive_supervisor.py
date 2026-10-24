@@ -148,7 +148,7 @@ class NoEligibleWorkerCapacity(SupervisorError):
 
 def _is_direct_native_job(job: Job) -> bool:
     """A closed routing hint only; Runtime still owns admission and access."""
-    if job.constraints.get("direct_native_policy") != "mastermind.direct_native_readonly/v1":
+    if not isinstance(job.constraints, Mapping) or job.constraints.get("direct_native_policy") != "mastermind.direct_native_readonly/v1":
         return False
     from control_plane.direct_native_execution import job_is_direct
 
