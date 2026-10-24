@@ -753,14 +753,14 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          _locked: bool = False) -> None:
     from portfolio import registry
     from brain import china_intake as _intake_mod, decision_submission
+    from bot import decision_rows
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
+    decision_rows.require_decision_log_directory(p)
     try:
         from brain import portfolio_learning
         lesson_links = portfolio_learning.trace_links(submission, target_status=target_status)
     except Exception:
         lesson_links = {}
-    from bot import decision_rows
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),

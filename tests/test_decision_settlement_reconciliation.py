@@ -373,6 +373,7 @@ def test_reconciliation_matches_exact_identity_without_overwriting_later_day(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     original = {
         "holdings": [{"ticker": "AAPL", "weight": 0.20, "action_effective": "add"}],
         "summary": "original",
@@ -414,6 +415,7 @@ def test_reconciliation_accepts_only_a_complete_deterministic_target_lineage(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [{"ticker": "AAPL", "weight": 0.20, "action_effective": "hold"}],
         "summary": "accepted before deterministic de-risk",
@@ -455,6 +457,7 @@ def test_zero_fill_receipt_still_transitions_queued_decision_to_no_change(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [{"ticker": "AAPL", "weight": 0.20, "action_effective": "hold"}],
         "summary": "carry unchanged",
@@ -487,6 +490,7 @@ def test_receipt_can_finish_binding_an_already_executed_direct_open_row(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [{"ticker": "AAPL", "weight": 0.20, "action_effective": "add"}],
         "summary": "direct open execution",
@@ -518,6 +522,7 @@ def test_pre_release_v2_queued_row_is_backfilled_from_exact_effective_target(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [
             {"ticker": "XOM", "weight": 0.10, "action_effective": "add"},
@@ -573,6 +578,7 @@ def test_reconciliation_fails_closed_without_mutating_ledger(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [{"ticker": "AAPL", "weight": 0.20, "action_effective": "add"}],
         "summary": "queued",
@@ -610,6 +616,7 @@ def test_zero_weight_is_not_part_of_executable_target_identity(
     from portfolio import paper_account, registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     raw_target = {"aapl": 0.20, "MSFT": 0.0}
     canonical = paper_account.validate_target_weights(
         raw_target, portfolio_id="autonomous"
@@ -652,6 +659,7 @@ def test_accepted_all_cash_target_supersedes_stale_same_day_book(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     stale = {
         "holdings": [
             {"ticker": "AAPL", "weight": 0.20, "action_effective": "hold"}
@@ -684,6 +692,7 @@ def test_accepted_post_submission_brain_error_supersedes_stale_same_day_book(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     stale = {
         "holdings": [
             {"ticker": "AAPL", "weight": 0.20, "action_effective": "hold"}
@@ -790,6 +799,7 @@ def test_receipt_fill_corruption_is_rejected_without_ledger_mutation(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [
             {"ticker": "AAPL", "weight": 0.20, "action_effective": "add"}
@@ -833,6 +843,7 @@ def test_more_than_twenty_target_rewrites_compact_without_breaking_lineage(
     from portfolio import paper_account, registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [
             {"ticker": "AAPL", "weight": 0.20, "action_effective": "hold"}
@@ -898,6 +909,7 @@ def test_receipt_retry_uses_captured_prices_and_original_settlement_date(
     from portfolio import autonomous_migration, paper_account, position_log, registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     submission = {
         "holdings": [
             {"ticker": "AAPL", "weight": 0.20, "action_effective": "add"}
@@ -1048,6 +1060,7 @@ def test_manual_legacy_receipt_without_required_decision_row_is_nonblocking(
     from portfolio import registry
 
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     unrelated = {
         "holdings": [
             {"ticker": "MSFT", "weight": 0.10, "action_effective": "add"}

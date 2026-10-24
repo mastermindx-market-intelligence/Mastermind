@@ -701,6 +701,8 @@ def test_all_three_daily_logs_preserve_per_name_governance(tmp_path, monkeypatch
     from portfolio import registry
 
     monkeypatch.setattr(registry, "data_dir", lambda book: tmp_path / book)
+    for book in ("autonomous", "china", "hk"):
+        registry.data_dir(book).mkdir(parents=True, exist_ok=True)
     holding = {
         **_holding("TEST", action="trim", weight=0.06),
         "proposed_weight": 0.99,

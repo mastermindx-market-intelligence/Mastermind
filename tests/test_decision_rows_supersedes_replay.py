@@ -97,6 +97,8 @@ def replay(events, root):
 
     books = ("autonomous", "china", "hk")
     paths = {book: Path(root) / book / "decisions.jsonl" for book in books}
+    for path in paths.values():
+        path.parent.mkdir(parents=True, exist_ok=True)
     reference = {book: [] for book in books}
     previous_bytes = {book: b"" for book in books}
     counts = {

@@ -29,11 +29,13 @@ still holds, and is now even safer: a barren re-run writes NOTHING at all.
 """
 from __future__ import annotations
 
+import errno
 import hashlib
 import json
 import math
 import os
 import re
+import stat
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -385,8 +387,22 @@ def _row_target_sha256(row: dict) -> str:
     return str(target_sha256(target))
 
 
+def require_decision_log_directory(path: Path) -> None:
+    """Require the existing parent; decision logging never provisions a book.
+
+    Follow directory symlinks as ECON's E14 book-directory check does. Missing,
+    dangling, unreadable and non-directory parents raise without creating paths.
+    """
+    parent = path.parent
+    metadata = parent.stat()
+    if not stat.S_ISDIR(metadata.st_mode):
+        raise NotADirectoryError(
+            errno.ENOTDIR, "decision log parent is not a directory", str(parent)
+        )
+
+
 def _atomic_write_bytes(path: Path, payload: bytes) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+    require_decision_log_directory(path)
     tmp = path.with_name(f".{path.name}.{uuid4().hex}.tmp")
     try:
         with tmp.open("wb") as handle:

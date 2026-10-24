@@ -686,8 +686,9 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
                          skipped: list, brain: dict, risk: dict, guardrails: list,
                          *, packet_id: str | None = None) -> None:
     from portfolio import etf_universe, registry
+    from bot import decision_rows
     p = registry.data_dir(PORTFOLIO_ID) / "decisions.jsonl"
-    p.parent.mkdir(parents=True, exist_ok=True)
+    decision_rows.require_decision_log_directory(p)
     entry = {
         "asof": asof,
         "ts": datetime.now(timezone.utc).isoformat(),
@@ -710,7 +711,6 @@ def _append_decision_log(asof: str, submission: dict | None, executed: list,
         "error": brain.get("error") if isinstance(brain, dict) else None,
         "packet_id": packet_id,
     }
-    from bot import decision_rows
     # Idempotent per asof in the EFFECTIVE view — but a FAILED re-run writes nothing, and the
     # ledger file is append-only: prior bytes are never rewritten. See bot/decision_rows.
     decision_rows.append_decision_row(p, entry, asof)

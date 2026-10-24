@@ -497,6 +497,7 @@ def _queued_autonomous_book(monkeypatch, tmp_path):
     from bot import autonomous
     from portfolio import registry
     monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    registry.data_dir("autonomous").mkdir(parents=True, exist_ok=True)
     autonomous._append_decision_log(
         "2026-08-12", _SUBMISSION, [], [], {},
         target_status="queued", effective_target={"AAPL": 0.20},
@@ -779,3 +780,129 @@ def test_scrub_decisions_row_without_asof_is_skipped_uncounted(tmp_path, capsys)
     assert path.read_bytes() == before      # nothing appended
     err = capsys.readouterr().err
     assert "2" in err and "asof" in err
+
+
+# ---------------------------------------------------------------------------
+# 9. decision logging never provisions a book directory (E14 composition)
+# ---------------------------------------------------------------------------
+
+def _decision_log_writer_for_directory_guard(portfolio_id):
+    from functools import partial
+    from importlib import import_module
+
+    module = import_module(f"bot.{portfolio_id}")
+    kwargs = {
+        "asof": "2026-08-12", "submission": None, "executed": [],
+        "skipped": [], "brain": {},
+    }
+    if portfolio_id == "etf":
+        kwargs.update(risk={}, guardrails=[])
+    elif portfolio_id == "heavyweight":
+        kwargs.update(kept=[], notes={}, held_prior=False)
+    return partial(module._append_decision_log, **kwargs)
+
+
+@pytest.mark.strict_book_dirs
+@pytest.mark.parametrize("portfolio_id", ["autonomous", "china", "hk", "etf", "heavyweight"])
+def test_decision_log_writer_does_not_recreate_renamed_book(tmp_path, monkeypatch, portfolio_id):
+    """A vanished book remains missing; its retained fixture bytes stay intact."""
+    import errno
+    from portfolio import registry
+
+    monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    write = _decision_log_writer_for_directory_guard(portfolio_id)
+    book = registry.data_dir(portfolio_id)
+    book.mkdir(parents=True)
+    original = {
+        "account.json": b'{"cash":1000000.0,"positions":{}}\n',
+        "decisions.jsonl": b'{"asof":"2026-08-11","summary":"retained fixture"}\n',
+    }
+    for name, payload in original.items():
+        (book / name).write_bytes(payload)
+    retained = book.with_name(book.name + ".retained")
+    book.rename(retained)
+
+    with pytest.raises(FileNotFoundError) as error:
+        write()
+
+    assert error.value.errno == errno.ENOENT
+    assert not book.exists()
+    assert {p.name: p.read_bytes() for p in retained.iterdir()} == original
+
+
+@pytest.mark.strict_book_dirs
+@pytest.mark.parametrize("portfolio_id", ["autonomous", "china", "hk", "etf", "heavyweight"])
+def test_decision_log_writer_rejects_non_directory_parent(tmp_path, monkeypatch, portfolio_id):
+    import errno
+    from portfolio import registry
+
+    monkeypatch.setattr(registry, "_ROOT", tmp_path)
+    write = _decision_log_writer_for_directory_guard(portfolio_id)
+    book = registry.data_dir(portfolio_id)
+    book.parent.mkdir(parents=True, exist_ok=True)
+    book.write_bytes(b"parent is a file")
+
+    with pytest.raises(NotADirectoryError) as error:
+        write()
+
+    assert error.value.errno == errno.ENOTDIR
+    assert book.read_bytes() == b"parent is a file"
+
+
+@pytest.mark.strict_book_dirs
+@pytest.mark.parametrize(
+    ("writer_name", "parent_state"),
+    [("append", "missing"), ("fixture_seed", "missing"),
+     ("append", "file"), ("fixture_seed", "file"),
+     ("append", "dangling"), ("fixture_seed", "dangling")],
+    ids=["append-missing", "fixture_seed-missing", "append-file",
+         "fixture_seed-file", "append-dangling", "fixture_seed-dangling"],
+)
+def test_central_decision_writer_requires_existing_parent(tmp_path, writer_name, parent_state):
+    import errno
+
+    parent = tmp_path / "book"
+    target = tmp_path / "absent-link-target"
+    if parent_state == "file":
+        parent.write_bytes(b"parent is a file")
+    elif parent_state == "dangling":
+        parent.symlink_to(target, target_is_directory=True)
+    path = parent / "decisions.jsonl"
+    entry = {"asof": "2026-08-12", "summary": "directory guard fixture"}
+    expected = NotADirectoryError if parent_state == "file" else FileNotFoundError
+
+    with pytest.raises(expected) as error:
+        if writer_name == "append":
+            dr.append_decision_row(path, entry, entry["asof"])
+        else:
+            dr.write_rows(path, [entry])
+
+    assert error.value.errno == (errno.ENOTDIR if parent_state == "file" else errno.ENOENT)
+    if parent_state == "file":
+        assert parent.read_bytes() == b"parent is a file"
+    elif parent_state == "dangling":
+        assert parent.is_symlink() and parent.readlink() == target
+        assert not target.exists()
+    else:
+        assert not parent.exists()
+
+
+@pytest.mark.strict_book_dirs
+def test_decision_writer_accepts_existing_directory_symlink(tmp_path):
+    """Match E14's stat-based directory contract; append keeps the existing prefix."""
+    target = tmp_path / "existing-book"
+    target.mkdir()
+    parent = tmp_path / "book-link"
+    parent.symlink_to(target, target_is_directory=True)
+    path = parent / "decisions.jsonl"
+    dr.write_rows(path, [{"asof": "2026-08-11", "summary": "fixture seed"}])
+    before = path.read_bytes()
+
+    row = dr.append_decision_row(
+        path, {"asof": "2026-08-12", "summary": "next decision"}, "2026-08-12",
+    )
+
+    assert row is not None
+    assert parent.is_symlink() and parent.readlink() == target
+    assert (target / "decisions.jsonl").read_bytes().startswith(before)
+    assert dr.read_effective_rows(path)[-1]["summary"] == "next decision"
