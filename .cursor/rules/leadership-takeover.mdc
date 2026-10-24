@@ -1,0 +1,8 @@
+---
+description: Leadership is the session doing the work; never wait for an absent owner
+alwaysApply: true
+---
+
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. No purchases, bypass flags, or secret exposure.
+
+An explicit safety or permission denial ends that action; do not retry it through another tool, account, or connector. `HANDOFF_SOURCE_LINK_V1`: the full brief stays in reviewed GitHub; Slack carries the recipient, one scoped action, the link, and the return. Reconcile a live writer or EFFECT_UNKNOWN before repeating it. A named owner is never the required reviewer; any fresh non-authoring reviewer, Fabric reviewer, or cloud agent counts.

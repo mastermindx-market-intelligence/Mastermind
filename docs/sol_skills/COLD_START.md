@@ -42,6 +42,9 @@ Historical ownership is not current liveness. Resolve the accountable role separ
 receiver, live execution/source lease and pending effects using ACTIVE_EXECUTION's recovery procedure.
 The active assigned session retains the recovery action until a real successor accepts; a dead chat,
 stale claim or unavailable incumbent does not justify ending with only "the owner must act".
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to
+find old chats. The current session assumes leadership, records the takeover in the source-linked
+handoff, and proceeds. Independent review is still required; never self-merge or approve.
 
 If the semantic registry lacks a lawful parent, report the gap. Do not create an approximate workstream merely to make the portfolio neat.
 

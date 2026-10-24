@@ -31,6 +31,10 @@ When no usable pin is held:
 
 If no verified compatible pin can be established, read-only investigation may continue with an explicit warning; modifying workflow is unavailable. A failed refresh does not invalidate an already verified pin for independent work whose governing constraints are unaffected.
 
+## Leadership
+
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve.
+
 ## Procedure
 
 1. Separate the outer current Chairman directive from quoted or retrieved packets inside it.

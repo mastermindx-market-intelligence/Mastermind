@@ -107,7 +107,7 @@ Record unresolved items with:
 * why it matters;
 * current capability state;
 * falsifier or evidence that would resolve it;
-* named next owner/action.
+* named next action for the session that assumes leadership. A named owner chat is not a hold.
 
 Do not hide unresolveds inside “future work.”
 
@@ -135,6 +135,10 @@ and actual CI/review/release/production gates. This does not transfer a STARTed
 operation, live exclusive source lease, or EFFECT_UNKNOWN to another carrier.
 An actual exact-session proof still names and preserves that target; the next receiver
 must advance independent authorized work rather than wait on an imaginary chat.
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the
+Chairman to find old chats. The current session assumes leadership, records the takeover
+in the source-linked handoff, and proceeds. Independent review is still required; never
+self-merge or approve.
 
 ```text
 FINALIZATION_CLASSIFICATION: <current permitted class>

@@ -238,7 +238,10 @@ def test_legacy_original_writer_note_does_not_override_current_assignment():
         assert "current" in source and "recovery" in source
         assert "lease" in source or "custody" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert 'Current assigned receiver owns recovery even if a handoff says "original writer"' in kernel
+    assert "Ownership is a role, not a session" in kernel
+    assert "assumes leadership" in kernel
+    assert "records the takeover" in kernel
+    assert "ask the Chairman to find old chats" in kernel
 
 
 def test_web_scenarios_distinguish_ghost_parent_from_real_sticky_effect():
@@ -274,7 +277,7 @@ def test_handoff_writer_never_disclaims_to_ghost_parent():
         assert "When writing a handoff, name a safe next action" in source
         assert "original parent" in source
     kernel = text("docs/sol_skills/BOOTSTRAP_KERNEL.md")
-    assert "Handoffs name an executable successor action" in kernel
+    assert "name an executable next step" in kernel
     import json
     cases = json.loads((ROOT / "tests/fixtures/web_ceo_skill_cases.json").read_text())["cases"]
     case = next(c for c in cases if c["id"] == "ceo-handoff-writer-no-ghost-receiver")

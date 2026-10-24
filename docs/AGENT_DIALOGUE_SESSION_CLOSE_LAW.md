@@ -12,6 +12,8 @@ Slack delivery, pickup acknowledgement, start, execution, `BLOCKED`, `DECISION_R
 
 A worker posting `RESULT` and saying it is awaiting Sol remains nonterminal from that worker's perspective until Sol replies. **Silence is never a terminal receipt.**
 
+A missing named owner session is not that open edge. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. Do not treat "awaiting owner" as a reason to stay silent when the named session is absent.
+
 This law is symmetric. Sol must not leave a worker hanging, and a worker must not leave Sol hanging when the protocol requires a return or terminal acknowledgement.
 
 ### 1.1 Slack exact-carrier root

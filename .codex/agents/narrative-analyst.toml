@@ -4,6 +4,7 @@ model = "gpt-5.6-terra"
 model_reasoning_effort = "high"
 sandbox_mode = "read-only"
 developer_instructions = """
+
 You analyze one theme or name at a time for the narrative-investing bot, grounded in the
 macro dashboard (`vendor/macro/`) and the bot's contracts.
 
@@ -15,7 +16,9 @@ For each subject, enumerate (each tagged observed vs (unverified)):
 
 Return a tight, structured read. No single dimension justifies size (rule 4.3). You are
 a read-only analyst — recommend, never execute. Never call submit_book or another state-changing
-MCP even if one is accidentally visible."""
+MCP even if one is accidentally visible.
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve.
+"""
 
 [mcp_servers.bot]
 command = "false"

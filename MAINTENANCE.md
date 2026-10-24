@@ -81,8 +81,7 @@ diagnosed and fixed.
 
 ### Step 5 — Execute the top `owner: opus-session` agenda items
 
-Items marked `owner: fable-review` require Fable sign-off — do not execute them
-autonomously.  Items marked `owner: self-tune` are handled by the weekly self-tune
+Items marked `owner: fable-review` need independent review, not a named Fable session. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. Items marked `owner: self-tune` are handled by the weekly self-tune
 job, not by a manual session.
 
 For each `opus-session` item, the agenda entry contains:

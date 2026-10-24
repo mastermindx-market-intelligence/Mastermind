@@ -73,9 +73,10 @@ class ExecutionPolicyContractTests(unittest.TestCase):
     def test_web_kernel_removes_nonexistent_owner_dependency_within_budget(self):
         source = self.read('docs/sol_skills/BOOTSTRAP_KERNEL.md')
         kernel = source.split('```text\n', 1)[1].split('```', 1)[0]
-        self.assertLessEqual(len(kernel), 8000)
-        self.assertIn('system names are not live approvers', kernel)
-        self.assertIn('actual missing evidence', kernel)
+        self.assertLess(len(kernel), 8000)
+        self.assertIn('not live owners', kernel)
+        self.assertIn('ask the Chairman to find old chats', kernel)
+        self.assertIn('assumes leadership', kernel)
 
 
     def test_missing_implementation_is_not_mislabeled_permission_wait(self):

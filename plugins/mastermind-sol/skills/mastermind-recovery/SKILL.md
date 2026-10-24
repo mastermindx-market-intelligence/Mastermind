@@ -20,6 +20,10 @@ constraints are unaffected. Apply gates only to the actual action under INDEX mo
 
 Do not run a recovery ritual for healthy work, a speculative future failure or a simple question. Do not use this skill to obtain an action that a safety or permission denial has forbidden.
 
+## Leadership
+
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve.
+
 ## Working method
 
 1. Freeze the exact failed action, target, operation, carrier and last verified effect. Distinguish a failure before dispatch from a lost response after possible dispatch. Record the observed error, not an inferred outage, quota, served-model change or hidden context limit.

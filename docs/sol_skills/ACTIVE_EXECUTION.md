@@ -53,7 +53,9 @@ displaced, proceed with permitted independent work instead of demanding a reply 
 Do not wait indefinitely for an abandoned conversation to ACK. The active assigned session owns the
 next recovery action: reconcile/recover through the incumbent owner, continue another safe in-scope
 lane, or expose the exact unavailable recovery capability and a real action target, not merely an
-historical owner name. This procedure does not itself transfer a STARTed operation.
+historical owner name. This procedure does not itself transfer a STARTed operation onto a second
+carrier. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the
+Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. No purchases, bypass flags, or secret exposure. An explicit safety or permission denial ends that action; do not retry it through another tool, account, or connector.
 
 **Gate the action, not the entire mission.** Apply current admission, permission and proof only to
 the effect or dependency that needs them. A later deployment, Slack dialogue, worker dispatch or
@@ -210,6 +212,7 @@ Either surface may perform either duty when current capability, continuity, and 
 Never turn observed duration into a minimum run, timeout promise, or stopping target.
 
 Exactly one current action-authoritative owner remains responsible for each modifying mission.
+That role is whichever session is currently working the item, not a historical named chat.
 No mandatory Astra-to-Sol-to-worker chain is introduced; do not add an extra principal for ordinary
 frozen work. A consultation is advice unless existing authority explicitly assigns that decision.
 Do not replace an incumbent principal or move a started operation merely to satisfy a model preference.
@@ -221,6 +224,9 @@ Never shrink an end-to-end assignment to a design-only assignment after writing 
 bounded design commission may close only at its declared acceptance and handoff boundary. An intended
 recipient is not a consumed handoff. A design result does not complete its parent delivery programme.
 Acceptance belongs to the decision owner named by the assignment or current source law.
+That decision owner is the leadership role of the session doing the work. Independent review
+by any fresh non-authoring reviewer, Fabric reviewer, or cloud agent satisfies the review gate;
+a named owner session is never required, and the author never self-merges or self-approves.
 A recipient's pickup acknowledgment is not by itself design acceptance or a transfer of source custody.
 A delivery assignment continues across accepted child milestones and unblocked authorized dependencies.
 Either principal may finish early when its actual assigned outcome is accepted; neither must stretch

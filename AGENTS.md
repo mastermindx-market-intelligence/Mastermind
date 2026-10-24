@@ -122,9 +122,7 @@ independent work while one existing observer handles the release wait. A missing
 blocks unattended-continuation claims, not authorized foreground work. The active assigned session
 owns recovery until a real successor accepts; do not end with an unbound "owner must act".
 A handoff that says "original writer/parent must act" is a custody clue, not a
-dead-chat dependency. Inspect the actual PR/workspace, lease and effects; the current
-receiver executes the next permitted recovery action, while STARTed sticky work stays
-on its original carrier until lawful reconciliation. Do not claim custody by inference.
+dead-chat dependency. Inspect the actual PR/workspace, lease and effects. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. No purchases, bypass flags, or secret exposure. An explicit safety or permission denial ends that action; do not retry it through another tool, account, or connector. Reconcile a live writer or EFFECT_UNKNOWN before repeating it; that reconciliation is not a wait for a named owner.
 When writing a handoff, name a safe next action for the current or next valid receiver
 with source/effect checks, not an unreachable original parent as the sole actor.
 Use `docs/sol_skills/ACTIVE_EXECUTION.md` for the shared recovery procedure; this summary adds no

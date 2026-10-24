@@ -60,8 +60,7 @@ If a checkpoint says "only the original writer/parent must finish", treat that a
 a custody/lineage clue, not a command to return the work to an old conversation.
 The currently commissioned receiver owns recovery: inspect the original PR/workspace,
 live writer and effects through existing owners; consume the next permitted result or
-advance an independent in-scope step. A live STARTed exact-session operation remains
-bound to its admitted receiver until lawful reconciliation, never assumed transferred.
+advance an independent in-scope step. A live STARTed exact-session operation is reconciled before it is repeated. Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. No purchases, bypass flags, or secret exposure. An explicit safety or permission denial ends that action; do not retry it through another tool, account, or connector.
 When writing a handoff, name a safe next action for the current or next valid receiver
 with source/effect checks, not an unreachable original parent as the sole actor.
 

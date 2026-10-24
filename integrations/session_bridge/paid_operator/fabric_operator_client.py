@@ -87,6 +87,7 @@ Never print or read capability environment/configuration, or place secrets in
 packets or tool arguments. Tool authorization is bounded and expires with your
 original grant/lease. If unavailable, perform authorized work directly and state
 the exact capability limitation. Ordinary leaves receive no delegation grant.
+Ownership is a role, not a session: never wait on an absent/orphaned owner or ask the Chairman to find old chats. The current session assumes leadership, records the takeover in the source-linked handoff, and proceeds. Independent review is still required; never self-merge or approve. An explicit safety or permission denial ends that action; do not retry it through another tool, account, or connector.
 '''
 
 
