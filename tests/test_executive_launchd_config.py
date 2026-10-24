@@ -790,7 +790,6 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
         "fabric_attended_probe",
         # Paid bindings are installed/qualified explicitly, never template admission.
         "canonical_paid_fabric",
-        "coo_foreground_only",
         "coo_principal_dialogue_armed",
         # Native V2 requires explicitly sealed source and remains absent by default.
         "native_capacity_v2",
@@ -800,6 +799,8 @@ def test_control_config_template_tracks_strict_service_schema() -> None:
     }
     assert installed_product_keys <= _CONFIG_OPTIONAL
     assert set(value) == _CONFIG_REQUIRED | (_CONFIG_OPTIONAL - installed_product_keys)
+    # A missing key fails start-finite. The seat template carries explicit false.
+    assert value["coo_foreground_only"] is False
 
 
 def _membership_snapshot() -> dict:
