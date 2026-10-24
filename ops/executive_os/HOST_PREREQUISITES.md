@@ -1370,13 +1370,27 @@ the worker UID, Runtime, configs, credentials or Gate B receipt. Success is
 current process-table evidence only, and the following arm independently
 rechecks service-UID quiescence.
 
-From the exact installed release, first prove the closed unarmed state, then
-quiesce the fixed Control UID and run the one root transaction that binds the
-reviewed Gate B receipt, formal acceptance, current provider readiness, both
-configs, exact release and Runtime quiescence:
+From the exact installed release, stage the already-installed finite definition,
+prove the closed unarmed state, quiesce the fixed Control UID, start the finite
+bridge while every arm bit is still false, then run the one root transaction
+that binds the reviewed Gate B receipt, formal acceptance, current provider
+readiness, both configs, exact release and Runtime quiescence. CEO-submit arm
+follows that transaction. Each step below runs against `$MERGE_SHA`.
 
 ```bash
-AUTONOMY_CONTROL="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA/ops/executive_os/autonomy-control.sh"
+RELEASE="/Library/Application Support/MastermindExecutive/releases/$MERGE_SHA"
+AUTONOMY_CONTROL="$RELEASE/ops/executive_os/autonomy-control.sh"
+SERVICE_CONTROL="$RELEASE/ops/executive_os/service-control.sh"
+PYTHON_BINARY='/Library/Frameworks/Python.framework/Versions/3.12/bin/python3.12'
+# autonomy-control.sh accepts only its closed command set. finite-control-stage
+# runs through the installed autonomy_control.py on this pinned interpreter.
+# EXPECTED_CONTROL_SHA256 is config.control_sha256 from a read-only status
+# taken while status is UNARMED and service_state is STOPPED. Repeat status
+# as step 1 after staging.
+EXPECTED_CONTROL_SHA256='<config.control_sha256>'
+# SHA-256 of the installed manifest at
+# $RELEASE/.executive-release-manifest.json.
+EXPECTED_MANIFEST_SHA256='<manifest sha256>'
 # Copy the exact values recorded in the device-auth readiness receipt at
 # /Library/Application Support/MastermindExecutive/config/provider-readiness-v2.json
 # (JSON keys "expected_credential_kind", "credential_expires_at", and
@@ -1386,9 +1400,28 @@ EXPECTED_CREDENTIAL_KIND='<expected_credential_kind from provider-readiness-v2.j
 CREDENTIAL_EXPIRES_AT='<credential_expires_at from provider-readiness-v2.json>'
 WORKSPACE_BINDING_CLASS='<workspace_binding_class from provider-readiness-v2.json>'
 
+# 0. Prerequisite. attended_control_staging.py candidate (lines 34-39) and
+# checked_configs (lines 219-227) require wholly disarmed configs, the exact
+# installed release, and already-stopped quiescent services.
+sudo "$PYTHON_BINARY" -I -S -B \
+  "$RELEASE/ops/executive_os/autonomy_control.py" \
+  finite-control-stage \
+  --expected-sha "$MERGE_SHA" \
+  --expected-control-sha256 "$EXPECTED_CONTROL_SHA256"
+
+# 1. Must read status UNARMED and service_state STOPPED.
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+
+# 2.
 sudo /bin/bash "$AUTONOMY_CONTROL" arm-quiesce-control-uid \
   --expected-sha "$MERGE_SHA"
+
+# 3. While all six arm bits are explicit JSON false. A missing key is refused.
+sudo /bin/bash "$SERVICE_CONTROL" start-finite \
+  --expected-sha "$MERGE_SHA" \
+  --expected-manifest-sha256 "$EXPECTED_MANIFEST_SHA256"
+
+# 4.
 sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --expected-sha "$MERGE_SHA" \
   --gate-b-receipt "$GATE_B_RECEIPT" \
@@ -1396,17 +1429,41 @@ sudo /bin/bash "$AUTONOMY_CONTROL" arm \
   --workspace-binding-class "$WORKSPACE_BINDING_CLASS" \
   --credential-expires-at "$CREDENTIAL_EXPIRES_AT" \
   --foreground-only
-sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
+
+# 5.
+sudo /bin/bash "$AUTONOMY_CONTROL" ceo-submit-arm --expected-sha "$MERGE_SHA"
+
+# 6. Must read status CEO_SUBMIT_ARMED.
+sudo /bin/bash "$AUTONOMY_CONTROL" ceo-submit-status --expected-sha "$MERGE_SHA"
 ```
+
+Do not reorder. Step 0 (`ops/executive_os/attended_control_staging.py`
+`candidate`, lines 34-39, and `checked_configs`, lines 219-227) requires
+wholly disarmed configs and already-stopped Control and worker services.
+Step 3 must still see all six arm bits as the JSON boolean false:
+`coo_autonomy_armed`, `coo_operator_harness_armed`, `coo_foreground_only`,
+`ceo_submit_armed`, `fabric_bridge_armed`, and the worker
+`operator_harness_armed`. A missing key is refused. `arm --foreground-only`
+then sets the autonomy, harness, and foreground bits and the worker
+`operator_harness_armed`, and starts Control. With the staged
+`fabric_attended_probe` present, that Control load
+(`scripts/executive_os_phase1c.py` lines 2936-2937) publishes
+`minimax.attended` through `installed_control_placements`
+(`control_plane/fabric_attended_routing.py` lines 97-107). `ceo-submit-arm`
+then sets `ceo_submit_armed`. Once any of those six bits is true,
+`ops/executive_os/finite_service_lifecycle.py` lines 349-353 reject
+`start-finite` with `configs_not_wholly_disarmed`.
 
 The sample always passes `--foreground-only` and never `--native-return`: `--native-return` selects the bounded native-return profile, which the `arm` parser in ops/executive_os/autonomy_control.py documents as requiring full v5 acceptance and the installed Company listener.
 
 The arm admission process scan reuses the worker owner's saved, real and effective UID projection. The control UID must have no process. For the dedicated worker UID, only the exact Apple per-user `distnoted` job may remain after its existing launchd, executable and code-signature attestation, followed by a second unchanged process and attribution observation. A name or executable path alone does not qualify. All other processes and unknown observations refuse; the gate never signals or disables a platform service.
 
-The first status must be exactly `UNARMED`; the post-transaction status must be
-exactly `ARMED_READY`. Arm stops both services before committing either config,
-starts worker then control, and removes its durable transaction marker only
-after exact PID/principal/socket/`READY` proof. Every armed control restart
+Step 1 must read exactly `UNARMED` and `service_state` `STOPPED`. The `arm`
+operation document status is `ARMED_READY`. Step 6 must read exactly
+`CEO_SUBMIT_ARMED`. Arm stops both Control and worker services before
+committing either config, starts worker then control, and removes its durable
+transaction marker only after exact PID/principal/socket/`READY` proof. The
+finite bridge is already running from step 3. Every armed control restart
 obtains a fresh same-PID environment/secret canary through the existing worker
 broker before entering `READY`; a prior-PID envelope is never reused and no
 provider allocation is spent by this boot re-attestation.
@@ -1420,8 +1477,8 @@ sudo /bin/bash "$AUTONOMY_CONTROL" disarm --expected-sha "$MERGE_SHA"
 sudo /bin/bash "$AUTONOMY_CONTROL" status --expected-sha "$MERGE_SHA"
 ```
 
-The second status must be exactly `UNARMED` and the canonical receipt must be
-`DISARMED`. A final re-arm is allowed only when the installed release, Gate B,
+The status after `disarm` must be exactly `UNARMED` and the canonical receipt
+must be `DISARMED`. A final re-arm is allowed only when the installed release, Gate B,
 acceptance, provider-readiness receipt, credential metadata and every frozen
 capability digest are unchanged and no new authority appeared. Otherwise stop
 for a fresh Chairman decision; never reuse the old arm command as a blind retry.
