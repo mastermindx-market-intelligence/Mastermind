@@ -292,6 +292,12 @@ def create_app(
             await request.app.state.admissions.release(slot)
             # The upstream may have seen the request: no blind POST replay.
             return JSONResponse({"error": {"message": "upstream transport failure; result may be ambiguous"}}, status_code=502)
+        except BaseException:
+            # Client cancellation (asyncio.CancelledError) and unexpected errors
+            # must not strand a concurrency slot while the upstream connects.
+            # The persisted RPM reservation intentionally remains consumed.
+            await request.app.state.admissions.release(slot)
+            raise
 
         response_headers = {
             k: v for k, v in upstream_response.headers.items() if k.lower() in RESPONSE_HEADERS

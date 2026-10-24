@@ -242,3 +242,26 @@ async def test_upstream_redirect_is_refused_without_following(tmp_path):
             r = await session.get("/v1/models", headers={"Authorization": f"Bearer {TOKEN}"})
             assert r.status_code == 502
     assert len(seen) == 1
+
+
+
+@pytest.mark.asyncio
+async def test_cancelled_upstream_connect_releases_inflight_slot(tmp_path):
+    started = asyncio.Event()
+
+    async def blocked_provider(req):
+        started.set()
+        await asyncio.Future()  # simulate a provider request cancelled by the worker
+
+    cfg = settings(tmp_path, api_keys=("upstream-A",), safe_rpm=3,
+                   max_inflight_per_key=1, max_queue_wait_s=0.1)
+    app = create_app(cfg, transport=httpx.MockTransport(blocked_provider))
+    async with app.router.lifespan_context(app):
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://proxy") as session:
+            task = asyncio.create_task(session.post("/v1/responses", headers={"Authorization": f"Bearer {TOKEN}"}, json={"input": "x"}))
+            await asyncio.wait_for(started.wait(), timeout=0.5)
+            assert app.state.admissions._inflight == [1]
+            task.cancel()
+            with pytest.raises(asyncio.CancelledError):
+                await task
+            assert app.state.admissions._inflight == [0]
