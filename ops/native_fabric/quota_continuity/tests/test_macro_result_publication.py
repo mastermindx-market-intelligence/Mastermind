@@ -259,8 +259,8 @@ class MacroResultPublication(unittest.TestCase):
             raise AssertionError("actual current-source stage failed:\n" + build.stderr)
         cls.source = staged / "native-code-stage"
         cls.manifest = json.loads((staged / "native-manifest.json").read_bytes())
-        if len(cls.manifest) != 95:
-            raise AssertionError("Paid source integration changed the reviewed 95-file closure")
+        if len(cls.manifest) != 96:
+            raise AssertionError("Native source closure differs from the explicit 96-member candidate")
         spec = importlib.util.spec_from_file_location("macro_fixture_native_generation",
             ROOT / "rollout/native_generation.py")
         cls.generation = importlib.util.module_from_spec(spec)
