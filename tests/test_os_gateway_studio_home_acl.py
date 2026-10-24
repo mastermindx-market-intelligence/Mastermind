@@ -718,12 +718,12 @@ class ReaderExceptionWiringTests(HomeAclReaderTestCase):
             self.assertRefused(self.fx.observe)
         self.assertEqual(calls, [])
 
-    def test_permissive_classifier_still_refuses_acl_off_home(self) -> None:
+    def test_permissive_classifier_still_refuses_acl_outside_fixed_directories(self) -> None:
         """Only the walk's component gate admits the exception, not the flag."""
 
         for label, target in (
             ("metadata-subdir", self.fx.home / ".local"),
-            ("library-subdir", self.fx.home / "Library"),
+            ("library-child", self.fx.home / "Library" / "LaunchAgents"),
             ("dependency-dir", self.fx.node_modules),
             ("home-ancestor", self.fx.root),
         ):

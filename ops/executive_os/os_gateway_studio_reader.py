@@ -219,7 +219,7 @@ def _check_manifest_path(value: object) -> tuple[str, ...]:
 
 
 def _pwd_home_components(observed_uid: int, gid: int) -> tuple[str, ...] | None:
-    """Resolve the sole ACL-exception home from the fixed uid's pwd record.
+    """Resolve the fixed uid's pwd home anchoring the allowed ACL locations.
 
     The reader's single ACL exception exists only when the account database
     itself names a home directory for the observed uid whose gid matches the
@@ -408,9 +408,9 @@ class _Walk:
 
     The walk carries only the qualified exact home component tuple (or
     ``None``) plus a revalidation callable for the pwd binding behind it.
-    That is location data for the single ACL exception, never a global
-    allow flag: every object refuses any ACL except the pwd-qualified home
-    directory observed at exactly those components.
+    That is location data for the fixed ACL exception, never a global
+    allow flag: only the pwd-qualified home directory and its canonical
+    Library directory may carry the exact classifier-qualified ACL.
     """
 
     def __init__(
@@ -428,7 +428,7 @@ class _Walk:
         self._exception_used = False
 
     def exception_was_used(self) -> bool:
-        """Whether the single home ACL exception was applied at least once."""
+        """Whether a fixed directory ACL exception was applied at least once."""
 
         return self._exception_used
 
@@ -441,9 +441,9 @@ class _Walk:
     ) -> None:
         """Apply the ACL rule to one anchored object before any payload.
 
-        Objects away from the qualified home keep the original rule: any ACL
-        refuses. Only an object whose anchored component path equals the
-        qualified home components exactly may carry an ACL, and even then the
+        Objects away from the qualified home and its immediate Library
+        directory keep the original rule: any ACL refuses. Only these exact
+        anchored directories may carry an ACL, and even then the
         pwd binding is revalidated first and the descriptor-bound native
         classifier must accept the exact single noninherited
         group:everyone deny delete-only entry. Anything else refuses.
@@ -452,7 +452,9 @@ class _Walk:
         if (
             path is None
             or self._home_exception_parts is None
-            or path != self._home_exception_parts
+            or path not in (self._home_exception_parts,
+                            self._home_exception_parts + ("Library",))
+            or not stat.S_ISDIR(pre.st_mode)
         ):
             _observe_acl(name, fd, pre)
             return
@@ -1085,7 +1087,7 @@ def observe_studio_files(
         STUDIO_INSTANCE_KEY,
     )
 
-    # The single ACL exception binds to the fixed uid's pwd home, resolved
+    # The ACL exception binds to the fixed uid's pwd home, resolved
     # independently here, and only when it is exactly the qualified caller
     # home at the same absolute components with the same qualified gid.
     exception_parts = _pwd_home_components(observed_uid, gid_value)
