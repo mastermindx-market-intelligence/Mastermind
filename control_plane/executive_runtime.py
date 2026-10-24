@@ -26440,6 +26440,9 @@ class Runtime:
         if type(access) is not direct_native.DirectNativeAccess:
             raise StateConflict("direct result access is not host-issued")
         access.check()
+        bounded=connection.execute("SELECT job_id FROM jobs WHERE job_id=? AND length(CAST(constraints_json AS BLOB))<=32768 AND coalesce(length(CAST(result_json AS BLOB)),0)<=2097152 AND coalesce(length(CAST(checkpoint_json AS BLOB)),0)<=65536",(selection["job_id"],)).fetchone()
+        if bounded is None:
+            raise StateConflict("direct result Job unavailable or exceeds source budget")
         row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(selection["job_id"],)).fetchone()
         admitted=_direct_native_provenance(connection,row,required=True)
         if (selection["work_ref"] != access.work_ref or admitted["source"]["work_ref"] != access.work_ref
@@ -26485,12 +26488,14 @@ class Runtime:
         try:
             with self.observe_bounded_read() as observation:
                 observation._select()
-                connection=observation._connection
+                observation._vm_progress.activate()
+                connection=_BoundedRoleResultLoader(observation._connection)
                 identity=self.require_direct_result_access(connection,selected,access)
-                row=connection.execute("SELECT current_attempt_id FROM jobs WHERE job_id=?",(selected["job_id"],)).fetchone()
+                row=connection.execute("SELECT current_attempt_id,status FROM jobs WHERE job_id=?",(selected["job_id"],)).fetchone()
                 if selected["attempt_id"] is None:
                     selected["attempt_id"]=row["current_attempt_id"]
-                if selected["attempt_id"] is None:
+                if selected["attempt_id"] is None or row["status"] != "COMPLETED":
+                    access.check()
                     return wire.unavailable(selected,"NOT_TERMINAL")
                 completion=self.validate_direct_completion(connection,selected)
                 state=direct_consumption_state(connection,selected,identity,completion["terminal_digest"])
@@ -26508,9 +26513,8 @@ class Runtime:
         selected=wire.validate_request(selection,consume=True)
         with self.store.transaction() as connection:
             identity=self.require_direct_result_access(connection,selected,access)
-            consume_direct_result_in_transaction(self,connection,selected,access=access,
+            return consume_direct_result_in_transaction(self,connection,selected,access=access,
                 command_id=consumption_command_id(selected["operation_key"],identity))
-        return self.read_direct_native_result_bounded({key:selected[key] for key in wire.SELECTION_KEYS},access=access)
 
     @contextmanager
     def bounded_acquisition(self) -> Iterator[BoundedRuntimeAcquisition]:

@@ -6649,20 +6649,33 @@ class ExecutiveControlService:
         if set(parsed)!=expected or parsed.get("operation") not in {"result","consume"}:
             raise ValueError("direct native frame is not closed")
         selection=wire.validate_request({key:parsed[key] for key in (wire.SELECTION_KEYS | {"result_digest","operation_key"} if consume else wire.SELECTION_KEYS)},consume=consume)
+        consume_entered=False
+        access_qualified=False
         try:
             with runtime.store.read() as connection:
-                row=connection.execute("SELECT payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2",(selection["job_id"],)).fetchall()
+                row=connection.execute("SELECT CASE WHEN length(CAST(payload_json AS BLOB))<=65536 THEN payload_json ELSE NULL END AS payload_json FROM events WHERE event_type='JOB_CREATED' AND job_id=? LIMIT 2",(selection["job_id"],)).fetchall()
                 if len(row)!=1: raise StateConflict("direct native origin unavailable")
                 provenance=json.loads(row[0][0])["provenance"]
                 intent_id=provenance["intent_id"]
             access,_,_=await asyncio.to_thread(self._direct_native_access,principal_scope=parsed["principal_scope"],
                 work_ref=selection["work_ref"],intent_id=intent_id,app_binding=app_binding)
+            access_qualified=True
             if consume:
                 from control_plane.workspace_owned_task import await_owned
-                return await await_owned(asyncio.create_task(asyncio.to_thread(runtime.consume_direct_native_result,selection,access=access)))
-            return await asyncio.to_thread(runtime.read_direct_native_result_bounded,selection,access=access)
+                consume_entered=True
+                acknowledged=await await_owned(asyncio.create_task(asyncio.to_thread(runtime.consume_direct_native_result,selection,access=access)))
+            if self._namespace_custody is None:
+                raise StateConflict("direct result namespace custody unavailable")
+            bound=self._namespace_custody.bound_runtime(runtime)
+            read_selection={key:selection[key] for key in wire.SELECTION_KEYS}
+            result=await asyncio.to_thread(bound.read_direct_native_result_bounded,read_selection,access=access)
+            bound.store.read_binding.validate_before_core_return()
+            if consume_entered and (result["availability"]!="AVAILABLE" or result["consumption"]!=acknowledged):
+                return wire.unavailable(read_selection,"EFFECT_UNKNOWN")
+            return result
         except Exception:
-            return wire.unavailable({key:selection[key] for key in wire.SELECTION_KEYS},"AUTHORITY_UNAVAILABLE")
+            reason="EFFECT_UNKNOWN" if consume_entered else "SOURCE_UNAVAILABLE" if access_qualified else "AUTHORITY_UNAVAILABLE"
+            return wire.unavailable({key:selection[key] for key in wire.SELECTION_KEYS},reason)
 
     async def _dispatch_direct_native(self, job_id, *, access):
         runtime=self._require_runtime()
