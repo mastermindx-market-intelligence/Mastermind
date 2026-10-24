@@ -514,9 +514,9 @@ def test_bounded_policy_source_coo_exact_limit_preserves_raw_digest(
     requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
     original_parse = policy_module._extract_block
 
-    def parse_after_close(value):
+    def parse_after_close(value, block="coo_cycle_policy"):
         assert len(handles) == 1 and handles[0].closed
-        return original_parse(value)
+        return original_parse(value, block)
 
     monkeypatch.setattr(policy_module, "_extract_block", parse_after_close)
     actual = CooCyclePolicy.load(selected)
@@ -545,7 +545,7 @@ def test_bounded_policy_source_coo_overflow_precedes_decode_and_parse(
     selected.write_bytes(raw)
     requests, handles = _record_coo_policy_source_reads(monkeypatch, selected)
 
-    def forbidden_parse(_raw):
+    def forbidden_parse(*_args, **_kwargs):
         pytest.fail("over-limit COO policy source reached the parser")
 
     monkeypatch.setattr(policy_module, "_extract_block", forbidden_parse)
