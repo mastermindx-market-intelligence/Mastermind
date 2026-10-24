@@ -132,3 +132,19 @@ M1/Ubuntu4 remain explicit-canary-only. No qualification bypass or second
 review launch was attempted. A new independent Fabric review can begin only
 when a lawful non-Qwen provider/host is actually eligible. GitHub human reviewer
 requests are still awaiting a verdict.
+
+## 2026-10-23 authenticated HTTP SDK manual-selector boundary proof
+
+Source-only HTTP qualification `integrations/studio_direct_mcp/fabric-http-qualification.mjs`
+now asserts **actual authenticated SDK `tools/list`** includes the closed native
+`fabric_request.pool` and `fabric_request.model` schema and prohibits additional
+properties. Through the same real HTTP/MCP private gateway and the maintained
+Desktop Commander process owner, an intentionally old isolated adapter lacking
+`--strict-manual-pin` returns `MANUAL_ROUTE_UNAVAILABLE` over MCP for an exact
+GLM model request; the rejected run remains native fixture `NOT_FOUND` and
+no packet/output artifact exists. The same session then completes the original
+unconstrained fixture request, retained-result retrieval and deterministic
+acceptance across two SDK sessions, with gateway backend spawn count one.
+Real `node --test fabric-http-qualification.mjs` on M2: **1/1 PASS**.
+This is a fixture/serialization proof only, not a live enrolled ChatGPT seat,
+qualified provider worker start or native immutable production selection.
