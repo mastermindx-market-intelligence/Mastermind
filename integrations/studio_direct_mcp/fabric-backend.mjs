@@ -99,6 +99,10 @@ function validate(name, args) {
     if (Buffer.byteLength(args.work_packet)>MAX_PACKET_BYTES) fail('INVALID_ARGUMENT',{field:'work_packet'});
     if (args.task_complexity==='C3_FRONTIER_JUDGMENT' && !args.escalation_reason?.trim()) fail('INVALID_ARGUMENT',{field:'escalation_reason'});
     if (args.model && !args.pool) fail('INVALID_ARGUMENT',{field:'pool'});
+    // Native per-request turn limits are qualified for GLM/MiniMax modes only.
+    // Refuse incompatible manual pools before reserving a run or controller.
+    if (args.pool && args.max_turns!==undefined && !['glm','minimax'].includes(args.pool))
+      fail('INVALID_ARGUMENT',{field:'max_turns'});
   }
 }
 function response(value, isError=false) {
@@ -399,6 +403,7 @@ export function createFabricFacade(engine, options={}) {
             || route.selection_rechecked_at_request!==true
             || route.run_id!==args.run_id || route.pool!==args.pool
             || typeof route.model!=='string' || !route.model
+            || (args.max_turns!==undefined && !['glm','minimax'].includes(route.mode))
             || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
             fail('MANUAL_ROUTE_UNAVAILABLE');
         }

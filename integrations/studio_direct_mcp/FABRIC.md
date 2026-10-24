@@ -37,7 +37,9 @@ Unsupported, stale or malformed selection refuses `MANUAL_ROUTE_UNAVAILABLE` bef
 controller dispatch. Native `request --strict-manual-pin` must independently recheck
 the same pool/model before launch. Preview does not reserve quota or prove a worker
 will start. Manual pins disable cross-provider/model quota continuation; a 429 cannot
-silently substitute another model. `subject_pool` remains the separate author
+silently substitute another model. Optional `max_turns` is limited by native
+policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
+read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
 independence filter. Existing model quality, budget, entitlement, host and policy
 gates always win; a model string is never proof that a model is served or permitted.
 

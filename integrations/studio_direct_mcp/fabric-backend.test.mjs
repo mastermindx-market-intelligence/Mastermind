@@ -547,13 +547,24 @@ test('pool-only pin and explicit model AUTO permit native qualified within-pool 
  }
 });
 
-test('manual request preserves existing bounded max-turn ceiling and strict selection',async()=>{
- const e=engine([manualHelp,capturedJSON(absent),capturedJSON(manualPreview),pending()]);
- const out=unwrap(await continuingFacade(e).call('fabric_request',{...manualPinned,max_turns:12}));
- assert.equal(out.requested_max_turns,12);assert.equal(e.calls.length,4);
- assert.match(e.calls[3].arguments.command,/'--max-turns' '12'/);
- assert.match(e.calls[3].arguments.command,/'--strict-manual-pin'/);
- assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+test('manual request max-turn ceiling permits only admitted GLM/MiniMax modes',async()=>{
+ const e=engine(),f=facade(e);
+ for(const pool of ['grok','bailian','cursor','ocfree','go']) {
+   const out=unwrap(await f.call('fabric_request',{...manualPinned,pool,model:'auto',max_turns:12}));
+   assert.equal(out.error,'INVALID_ARGUMENT');
+ }
+ assert.equal(e.calls.length,0);
+ const req={...manualPinned,pool:'glm',model:'auto',max_turns:12};
+ const preview={...manualPreview,pool:'glm',model:'glm-5.3',mode:'glm'};
+ const e2=engine([manualHelp,capturedJSON(absent),capturedJSON(preview),pending()]);
+ const out=unwrap(await continuingFacade(e2).call('fabric_request',req));
+ assert.equal(out.requested_max_turns,12);assert.equal(e2.calls.length,4);
+ assert.match(e2.calls[3].arguments.command,/'--max-turns' '12'/);
+ assert.match(e2.calls[3].arguments.command,/'--strict-manual-pin'/);
+ assert.doesNotMatch(e2.calls[3].arguments.command,/'--quota-fallback'/);
+ const e3=engine([manualHelp,capturedJSON(absent),capturedJSON({...preview,mode:'glm-codex'})]);
+ assert.equal(unwrap(await facade(e3).call('fabric_request',req)).error,'MANUAL_ROUTE_UNAVAILABLE');
+ assert.equal(e3.calls.length,3);
 });
 
 test('advertise manual routing only with native preview AND strict request support',async()=>{
