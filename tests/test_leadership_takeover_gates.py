@@ -154,10 +154,12 @@ def test_compact_project_instruction_stays_within_budget_and_keeps_both_contract
         "never wait on an absent/orphaned owner",
         "ask the Chairman to find old chats",
         "never self-merge or approve",
-        "not live owners",
+        "not live owners or approvers",
+        "system/role names",
         "name an executable next step",
+        "Independent non-author review",
         "HANDOFF_SOURCE_LINK_V1",
-        "Explicit safety denial ends that action",
+        "Explicit safety or permission denial ends that action",
         "cross-tool or cross-account retries",
     ):
         assert phrase in kernel, phrase
