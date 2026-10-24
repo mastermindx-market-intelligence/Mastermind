@@ -65,7 +65,7 @@ class CollisionChurnHTTP:
         *,
         first_roster: list[dict[str, object]],
         second_roster: list[dict[str, object]],
-        foreign_files: dict[int, tuple[str, ...]],
+        foreign_files: dict[int, tuple[str, ...] | list[tuple[str, ...]]],
         direct_details: dict[int, dict[str, object]] | None = None,
     ) -> None:
         self.module = module
@@ -75,12 +75,73 @@ class CollisionChurnHTTP:
         self.foreign_files = foreign_files
         self.direct_details = direct_details or {}
         self.roster_reads = 0
+        self.foreign_file_reads: dict[int, int] = {}
         self.plain_calls: list[str] = []
         self.conditional_calls: list[str] = []
 
     @staticmethod
     def _etag(url: str) -> str:
         return 'W/"' + hashlib.sha256(url.encode()).hexdigest() + '"'
+
+    @staticmethod
+    def _tree_sha(label: str) -> str:
+        return hashlib.sha256(label.encode("utf-8")).hexdigest()[:40]
+
+    def _paths_for_head(self, head_sha: str) -> tuple[str, ...]:
+        mapping = {A_HEAD: FOREIGN_A, A_HEAD_MOVED: FOREIGN_A, B_HEAD: FOREIGN_B}
+        number = mapping.get(head_sha)
+        if number is None or number not in self.foreign_files:
+            return ()
+        configured = self.foreign_files[number]
+        if isinstance(configured, list):
+            index = 1 if head_sha == A_HEAD_MOVED and len(configured) > 1 else 0
+            return tuple(configured[min(index, len(configured) - 1)])
+        return tuple(configured)
+
+    @staticmethod
+    def _owned_test_paths() -> tuple[str, ...]:
+        return ("scripts/source_continuity.py", "control_plane/source_continuity.py")
+
+    def _tree_response(self, url: str) -> object | None:
+        parsed = __import__('urllib.parse', fromlist=['urlparse']).urlparse(url)
+        commits = (fx.CURRENT_BASE_SHA, A_HEAD, A_HEAD_MOVED, B_HEAD)
+        for commit_sha in commits:
+            if parsed.path.endswith(f"/git/commits/{commit_sha}"):
+                root = self._tree_sha(f"root:{commit_sha}")
+                return {"sha": commit_sha, "tree": {"sha": root}}
+
+        for commit_sha in commits:
+            root = self._tree_sha(f"root:{commit_sha}")
+            if parsed.path.endswith(f"/git/trees/{root}"):
+                rows = []
+                for top in ("scripts", "control_plane"):
+                    rows.append({
+                        "path": top,
+                        "mode": "040000",
+                        "type": "tree",
+                        "sha": self._tree_sha(f"dir:{commit_sha}:{top}"),
+                    })
+                return {"sha": root, "truncated": False, "tree": rows}
+
+            for top in ("scripts", "control_plane"):
+                subtree = self._tree_sha(f"dir:{commit_sha}:{top}")
+                if parsed.path.endswith(f"/git/trees/{subtree}"):
+                    path = f"{top}/source_continuity.py"
+                    target_blob = self._tree_sha(f"target:{path}")
+                    changed = commit_sha != fx.CURRENT_BASE_SHA and path in self._paths_for_head(commit_sha)
+                    blob = self._tree_sha(f"changed:{commit_sha}:{path}") if changed else target_blob
+                    return {
+                        "sha": subtree,
+                        "truncated": False,
+                        "tree": [{
+                            "path": "source_continuity.py",
+                            "mode": "100644",
+                            "type": "blob",
+                            "sha": blob,
+                            "size": 123,
+                        }],
+                    }
+        return None
 
     @property
     def _open_roster_url(self) -> str:
@@ -105,11 +166,21 @@ class CollisionChurnHTTP:
             if "/files?per_page=100&page=1" in suffix:
                 number = int(suffix.split("/", 1)[0])
                 if number in self.foreign_files:
+                    configured = self.foreign_files[number]
+                    read_index = self.foreign_file_reads.get(number, 0)
+                    self.foreign_file_reads[number] = read_index + 1
+                    if isinstance(configured, list):
+                        paths = configured[min(read_index, len(configured) - 1)]
+                    else:
+                        paths = configured
                     return [
                         {"filename": path, "status": "modified"}
-                        for path in self.foreign_files[number]
+                        for path in paths
                     ]
 
+        tree_response = self._tree_response(url)
+        if tree_response is not None:
+            return tree_response
         return self.base(url, token=token, timeout=timeout)
 
     def __call__(
@@ -183,6 +254,7 @@ def test_new_disjoint_pr_is_freshly_proved_and_does_not_starve(
     )
 
     _assert_receipt(_run(module, http, capsys))
+    assert http.foreign_file_reads == {FOREIGN_A: 1, FOREIGN_B: 1}
     assert any(f"/pulls/{FOREIGN_B}/files?" in url for url in http.plain_calls)
 
 
@@ -201,6 +273,7 @@ def test_moved_disjoint_pr_is_freshly_reproved_and_does_not_starve(
     )
 
     _assert_receipt(_run(module, http, capsys))
+    assert http.foreign_file_reads == {FOREIGN_A: 2}
 
 
 def test_missing_disjoint_pr_may_drop_only_when_direct_detail_proves_closed(
@@ -262,7 +335,27 @@ def test_new_colliding_pr_refuses(
     _assert_changed(_run(module, http, capsys))
 
 
-def test_colliding_pr_identity_movement_refuses_even_if_paths_still_collide(
+def test_stable_colliding_pr_reuses_first_pass_evidence_without_refetch(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = sat._module()
+    row = _foreign_row(FOREIGN_A, head_sha=A_HEAD)
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), row],
+        second_roster=[_target_row(), copy.deepcopy(row)],
+        foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
+    )
+
+    result = _run(module, http, capsys)
+    _assert_receipt(result)
+    payload = result[1]
+    assert payload["collision_state"] == "OVERLAP"
+    assert payload["colliding_pr_numbers"] == [FOREIGN_A]
+    assert http.foreign_file_reads == {FOREIGN_A: 1}
+
+
+def test_colliding_pr_head_movement_with_same_overlap_projection_does_not_starve(
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     module = sat._module()
@@ -276,7 +369,230 @@ def test_colliding_pr_identity_movement_refuses_even_if_paths_still_collide(
         foreign_files={FOREIGN_A: ("scripts/source_continuity.py",)},
     )
 
+    result = _run(module, http, capsys)
+    _assert_receipt(result)
+    payload = result[1]
+    assert payload["collision_state"] == "OVERLAP"
+    assert payload["colliding_pr_numbers"] == [FOREIGN_A]
+    assert payload["receipt_version"] == "v2"
+    assert len(payload["collision_evidence_fingerprint"]) == 64
+    assert http.foreign_file_reads == {FOREIGN_A: 2}
+
+
+def test_colliding_pr_movement_that_swaps_target_path_refuses(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = sat._module()
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
+        second_roster=[
+            _target_row(),
+            _foreign_row(FOREIGN_A, head_sha=A_HEAD_MOVED),
+        ],
+        foreign_files={
+            FOREIGN_A: [
+                ("scripts/source_continuity.py",),
+                ("control_plane/source_continuity.py",),
+            ]
+        },
+    )
+
     _assert_changed(_run(module, http, capsys))
+
+
+def test_colliding_pr_movement_that_grows_target_overlap_refuses(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    module = sat._module()
+    http = CollisionChurnHTTP(
+        module,
+        first_roster=[_target_row(), _foreign_row(FOREIGN_A, head_sha=A_HEAD)],
+        second_roster=[
+            _target_row(),
+            _foreign_row(FOREIGN_A, head_sha=A_HEAD_MOVED),
+        ],
+        foreign_files={
+            FOREIGN_A: [
+                ("scripts/source_continuity.py",),
+                ("scripts/source_continuity.py", "control_plane/source_continuity.py"),
+            ]
+        },
+    )
+
+    _assert_changed(_run(module, http, capsys))
+
+
+class MovedSaturatedColliderHTTP(sat.SaturatedChangedHTTP):
+    def __init__(self, *, second_head_entry_sha: str) -> None:
+        super().__init__(
+            base_entry=sat._entry(),
+            head_entry=sat._entry(second_head_entry_sha),
+            foreign_identity={
+                "number": sat.FOREIGN_PR,
+                "head": {
+                    "sha": sat.DRIFTED_FOREIGN_HEAD,
+                    "repo": {"full_name": sat.REPOSITORY},
+                },
+                "base": {
+                    "sha": sat.BASE,
+                    "repo": {"full_name": sat.REPOSITORY},
+                },
+            },
+        )
+
+    def __call__(self, url: str, *, token: str, timeout: float) -> object:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(url)
+        if parsed.path.endswith(
+            f"/compare/{sat.BASE}...{sat.DRIFTED_FOREIGN_HEAD}"
+        ):
+            self.calls.append(url)
+            return {
+                "url": url,
+                "base_commit": {"sha": sat.BASE},
+                "merge_base_commit": {"sha": sat.MERGE_BASE},
+            }
+        if parsed.path.endswith(f"/git/commits/{sat.DRIFTED_FOREIGN_HEAD}"):
+            self.calls.append(url)
+            return {
+                "sha": sat.DRIFTED_FOREIGN_HEAD,
+                "tree": {"sha": sat.DRIFTED_HEAD_ROOT},
+            }
+        if parsed.path.endswith(f"/git/trees/{sat.DRIFTED_HEAD_ROOT}"):
+            self.calls.append(url)
+            return sat._tree(
+                sat.DRIFTED_HEAD_ROOT,
+                [{
+                    "path": "engine",
+                    "mode": "040000",
+                    "type": "tree",
+                    "sha": "2" * 40,
+                }],
+            )
+        return super().__call__(url, token=token, timeout=timeout)
+
+
+def test_saturated_colliding_pr_head_movement_with_same_overlap_projection_is_allowed() -> None:
+    module = sat._module()
+    first_http = sat.SaturatedChangedHTTP(
+        base_entry=sat._entry(),
+        head_entry=sat._entry("3" * 40),
+    )
+    first = module._collision_census_details(
+        first_http, sat.TOKEN, sat.REPOSITORY, sat.TARGET_PR, sat.OWNED
+    )
+    assert first.state is module.CollisionState.OVERLAP
+    assert first.colliding_pr_numbers == (sat.FOREIGN_PR,)
+
+    matched, complete, records = module._revalidate_collision_census(
+        MovedSaturatedColliderHTTP(second_head_entry_sha="4" * 40),
+        sat.TOKEN,
+        sat.REPOSITORY,
+        sat.TARGET_PR,
+        sat.OWNED,
+        first.foreign_records,
+        first.colliding_pr_numbers,
+    )
+    assert (matched, complete) == (True, True)
+    moved = next(record for record in records if record.pr_number == sat.FOREIGN_PR)
+    assert moved.identity is not None
+    assert moved.identity.head_sha == sat.DRIFTED_FOREIGN_HEAD
+
+
+def test_saturated_colliding_pr_movement_that_substitutes_overlap_path_refuses() -> None:
+    module = sat._module()
+    owned = ("engine/one.py", "engine/two.py")
+    base_entry = module._GitTreeEntry("100644", "blob", "1" * 40)
+    changed_a = module._GitTreeEntry("100644", "blob", "2" * 40)
+    changed_b = module._GitTreeEntry("100644", "blob", "3" * 40)
+    stable = module._GitTreeEntry("100644", "blob", "4" * 40)
+    first_identity = module._ForeignPullIdentity(
+        FOREIGN_A, sat.REPOSITORY, A_HEAD, sat.REPOSITORY, FOREIGN_BASE
+    )
+    second_identity = module._ForeignPullIdentity(
+        FOREIGN_A, sat.REPOSITORY, A_HEAD_MOVED, sat.REPOSITORY, FOREIGN_BASE
+    )
+    first_evidence = module._SaturatedCollisionEvidence(
+        pr_number=FOREIGN_A,
+        proof_method="OWNED_PATH_TREE_DIFF",
+        head_repository=sat.REPOSITORY,
+        head_sha=A_HEAD,
+        base_repository=sat.REPOSITORY,
+        base_sha=FOREIGN_BASE,
+        merge_base_sha="5" * 40,
+        owned_path_entries=(
+            (owned[0], base_entry, changed_a),
+            (owned[1], stable, stable),
+        ),
+    )
+    second_evidence = module._SaturatedCollisionEvidence(
+        pr_number=FOREIGN_A,
+        proof_method="OWNED_PATH_TREE_DIFF",
+        head_repository=sat.REPOSITORY,
+        head_sha=A_HEAD_MOVED,
+        base_repository=sat.REPOSITORY,
+        base_sha=FOREIGN_BASE,
+        merge_base_sha="5" * 40,
+        owned_path_entries=(
+            (owned[0], stable, stable),
+            (owned[1], base_entry, changed_b),
+        ),
+    )
+    first = module._ForeignCollisionRecord(
+        FOREIGN_A, first_identity, first_evidence, True
+    )
+    second = module._ForeignCollisionRecord(
+        FOREIGN_A, second_identity, second_evidence, True
+    )
+    # Exercise the real main() revalidation helper, not the unused
+    # _revalidate_collision_records test helper. The first pass has a real
+    # typed record; the second pass observes a moved head and re-proves it.
+    called = []
+    def second_roster(url: str, *, token: str, timeout: float):
+        assert token == sat.TOKEN and timeout > 0
+        assert url.endswith(
+            f"/repos/{sat.REPOSITORY}/pulls?state=open&per_page=100&page=1"
+        ), url
+        called.append(("roster", url))
+        return [
+            {"number": sat.TARGET_PR, "state": "open"},
+            {
+                "number": FOREIGN_A, "state": "open",
+                "head": {"sha": A_HEAD_MOVED,
+                         "repo": {"full_name": sat.REPOSITORY}},
+                "base": {"sha": FOREIGN_BASE,
+                         "repo": {"full_name": sat.REPOSITORY}},
+            },
+        ]
+
+    def reprove(
+        http_get, token, repository, raw_pr, number, owned_paths,
+        *, current_base_head=None, target_base_resolver=None,
+    ):
+        assert token == sat.TOKEN and repository == sat.REPOSITORY
+        assert number == FOREIGN_A and tuple(owned_paths) == owned
+        assert raw_pr["head"]["sha"] == A_HEAD_MOVED
+        called.append(("reproved", number))
+        return second_evidence, True
+
+    module._foreign_collision_evidence = reprove
+    matched, complete, records = module._revalidate_collision_census(
+        second_roster,
+        sat.TOKEN,
+        sat.REPOSITORY,
+        sat.TARGET_PR,
+        owned,
+        (first,),
+        (FOREIGN_A,),
+    )
+    assert called == [
+        ("roster", f"{module._API_ROOT}/repos/{sat.REPOSITORY}/pulls"
+         "?state=open&per_page=100&page=1"),
+        ("reproved", FOREIGN_A),
+    ]
+    assert (matched, complete, records) == (False, True, ())
 
 
 def test_colliding_pr_closure_refuses(

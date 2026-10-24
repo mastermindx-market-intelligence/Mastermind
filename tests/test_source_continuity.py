@@ -23,6 +23,7 @@ CURRENT_BASE_SHA = "6" * 40
 BLOB_A = "a" * 40
 BLOB_B = "b" * 40
 EFFECT_FINGERPRINT = "c" * 64
+COLLISION_EVIDENCE_FINGERPRINT = "d" * 64
 VERIFIED_AT = "2026-09-03T05:00:00Z"
 OPERATION = "agent-dialogue-source-continuity-rchp0-rch1-20260903-sol-001"
 REPOSITORY = "mastermindx-market-intelligence/Mastermind"
@@ -96,6 +97,7 @@ def _remote(module, **overrides):
         path_entries=_entries(module),
         collision_state=module.CollisionState.NONE,
         colliding_pr_numbers=(),
+        collision_evidence_fingerprint=COLLISION_EVIDENCE_FINGERPRINT,
         pagination_complete=True,
     )
     values.update(overrides)
@@ -171,6 +173,12 @@ def _assert_refusal(module, result, code: str, *, exit_code: int):
     assert BRANCH not in encoded
 
 
+def test_source_receipt_v2_is_isolated_from_writer_gate_v1() -> None:
+    module = _contract()
+    assert module.SOURCE_RECEIPT_VERSION == "v2"
+    assert module.WRITER_GATE_RECEIPT_VERSION == "v1"
+
+
 def test_checkpoint_receipt_binds_complete_identity_without_authority() -> None:
     module = _contract()
     result = _verify(module)
@@ -206,8 +214,9 @@ def test_checkpoint_receipt_binds_complete_identity_without_authority() -> None:
         "external_effect_evidence_fingerprint": EFFECT_FINGERPRINT,
         "collision_state": "NONE",
         "colliding_pr_numbers": [],
+        "collision_evidence_fingerprint": COLLISION_EVIDENCE_FINGERPRINT,
         "receipt_kind": "CHECKPOINT_VERIFIED",
-        "receipt_version": "v1",
+        "receipt_version": "v2",
         "verified_at": VERIFIED_AT,
         "authority_effect": "NONE",
         "writer_release_authorized": False,
@@ -237,6 +246,19 @@ def test_receipt_is_canonical_and_order_independent() -> None:
     assert module.canonical_json(first.to_dict()) == json.dumps(
         first.to_dict(), sort_keys=True, separators=(",", ":"), ensure_ascii=False
     )
+
+
+def test_collision_evidence_fingerprint_is_bound_into_receipt_digest() -> None:
+    module = _contract()
+    first = _verify(module)
+    second = _verify(
+        module,
+        remote=_remote(module, collision_evidence_fingerprint="e" * 64),
+    )
+    assert isinstance(first, module.SourceContinuityReceipt)
+    assert isinstance(second, module.SourceContinuityReceipt)
+    assert first.collision_evidence_fingerprint != second.collision_evidence_fingerprint
+    assert first.receipt_digest != second.receipt_digest
 
 
 def test_local_branch_is_bound_into_receipt_digest() -> None:
@@ -435,6 +457,8 @@ def test_hostile_request_scalar_range_hash_time_and_enum_shapes_refuse(
         {"changed_paths": list(OWNED_PATHS)},
         {"collision_state": "NONE"},
         {"colliding_pr_numbers": (True,)},
+        {"collision_evidence_fingerprint": "d" * 63},
+        {"collision_evidence_fingerprint": "G" * 64},
         {"pagination_complete": 1},
     ],
 )
@@ -899,6 +923,7 @@ class _ProbeRunner:
             "merge-base",
             "rev-list",
             "config",
+            "check-attr",
             "diff",
             "ls-files",
             "ls-tree",
@@ -942,6 +967,7 @@ class _ProbeRunner:
         if call in {
             ("cat-file", "-e", f"{HEAD_SHA}^{{commit}}"),
             ("cat-file", "-e", f"{BASE_SHA}^{{commit}}"),
+            ("cat-file", "-e", f"{CURRENT_BASE_SHA}^{{commit}}"),
         }:
             return self._done()
         if call == ("merge-base", "--is-ancestor", HEAD_SHA, "HEAD"):
@@ -954,6 +980,14 @@ class _ProbeRunner:
         ):
             return self._done(returncode=1)
         if call == (
+            "check-attr", "-z", "filter", "--", *FINAL_OWNED_PATHS,
+        ):
+            return self._done(
+                stdout="".join(
+                    f"{path}\0filter\0unspecified\0" for path in FINAL_OWNED_PATHS
+                )
+            )
+        if call == (
             "diff", "--no-renames", "--no-ext-diff", "--no-textconv",
             "--ignore-submodules=none", "--name-only", "-z", "HEAD", "--",
         ):
@@ -963,6 +997,18 @@ class _ProbeRunner:
             "--ignore-submodules=none", "--name-only", "-z", "--",
         ):
             return self._done()
+        if call == (
+            "diff", "--cached", "--raw", "-z",
+            "--no-renames", "--no-ext-diff", "HEAD", "--",
+        ):
+            # The canonical CLI synthetic workspace stages no changes,
+            # so no index-vs-HEAD gitlinks can be hidden from preflight.
+            return self._done()
+        if call == ("ls-files", "--stage", "-z"):
+            # Closed synthetic fixture has ordinary tracked owned files and no gitlinks.
+            return self._done(stdout="".join(
+                f"100644 {'a'*40} 0\t{path}\0" for path in FINAL_OWNED_PATHS
+            ))
         if call == ("ls-files", "-v", "-z"):
             return self._done(
                 stdout="".join(f"H {path}\0" for path in FINAL_OWNED_PATHS)
@@ -978,6 +1024,18 @@ class _ProbeRunner:
             "--name-only",
             "-z",
             f"{BASE_SHA}..{HEAD_SHA}",
+            "--",
+        ):
+            return self._done(stdout="\0".join(FINAL_OWNED_PATHS) + "\0")
+        if call == (
+            "diff",
+            "--no-renames",
+            "--no-ext-diff",
+            "--no-textconv",
+            "--ignore-submodules=none",
+            "--name-only",
+            "-z",
+            f"{CURRENT_BASE_SHA}..{HEAD_SHA}",
             "--",
         ):
             return self._done(stdout="\0".join(FINAL_OWNED_PATHS) + "\0")
