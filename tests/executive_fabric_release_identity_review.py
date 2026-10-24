@@ -449,11 +449,11 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'e68f6df4d70ca6bc68260bfbd9b64d95a0209926ca70fb9dda9872915739093a',
+    'sha256': 'dbd0462bce4d33c049e18673638c0fff60f6525b5bf3611527bc5cb029b790a6',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6535, 35, 37, 'int', '80'),
-              (6536, 50, 55, 'int', '0o755'),
-              (7073, 41, 46, 'int', '0o644')),
+              (6551, 35, 37, 'int', '80'),
+              (6552, 50, 55, 'int', '0o755'),
+              (7089, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
