@@ -42,6 +42,60 @@ def _mentions_byteplus(value: str) -> bool:
     return "byteplus" in compact
 
 
+def _commercial_byteplus_reviewed(
+    provider: str,
+    model_alias: str,
+    first_tier_id: str,
+    first_tier_aliases: tuple[str, ...],
+    reviewed_router: Any,
+) -> bool:
+    """Accept only an already reviewed commercial route, never preview rights.
+
+    The issuer credential, balance, model activation, host and claim-time
+    Capacity must still be independently proven by their incumbent owners.
+    No file, provider, broker or network read occurs in this projection.
+    """
+    if provider != "byteplus-modelark" or not model_alias.startswith("byteplus-modelark."):
+        return False
+
+    from control_plane.codex_provider_realm import (
+        BYTEPLUS_MODELARK_COMMERCIAL,
+        REVIEWED_CODEX_PROVIDER_REALMS,
+    )
+    from control_plane.model_router import ModelRouter
+
+    if (
+        type(reviewed_router) is not ModelRouter
+        or REVIEWED_CODEX_PROVIDER_REALMS.get(
+            BYTEPLUS_MODELARK_COMMERCIAL.realm_id
+        ) is not BYTEPLUS_MODELARK_COMMERCIAL
+    ):
+        return False
+    registered_provider = reviewed_router.providers.get(provider)
+    registered_model = reviewed_router.model_aliases.get(model_alias)
+    if (
+        registered_provider is None
+        or registered_provider.adapter_id != "codex-cli"
+        or registered_provider.enabled is not True
+        or registered_provider.autonomous_allowed is not True
+        or registered_model is None
+        or registered_model.provider_alias != provider
+        or registered_model.adapter_id != "codex-cli"
+        or registered_model.worker_eligible is not True
+    ):
+        return False
+    # Caller-supplied first-tier text is not routing authority. Require an
+    # actual first tier of the reviewed ModelRouter with the same identity.
+    return any(
+        risk in route
+        and bool(route[risk])
+        and route[risk][0].tier_id == first_tier_id
+        and tuple(route[risk][0].model_aliases) == first_tier_aliases
+        for route in reviewed_router.routes.values()
+        for risk in ("routine", "elevated")
+    )
+
+
 def _validate_tiers(value: Any) -> tuple[tuple[str, tuple[str, ...]], ...]:
     if not isinstance(value, Sequence) or isinstance(value, (str, bytes)) or not value:
         raise CapacityEconomicsProjectionError("suitability_tiers must be a non-empty sequence")
@@ -123,6 +177,8 @@ def _nonnegative_int(value: Any, *, field: str) -> int:
 def project_quota_preference(
     suitability_tiers: Sequence[Mapping[str, Any]],
     quota_preview: Mapping[str, Any],
+    *,
+    reviewed_router: Any = None,
 ) -> EconomicRoutePreference:
     """Project one provider/model economic preference without changing authority.
 
@@ -183,9 +239,14 @@ def project_quota_preference(
     # untrusted preview can assert license/Capacity facts. A commercial
     # BytePlus grant requires an explicit independently reviewed owner path.
     if _mentions_byteplus(provider) or _mentions_byteplus(model_alias):
-        raise CapacityEconomicsProjectionError(
-            "personal BytePlus Coding Plan cannot enter autonomous Capacity preference"
-        )
+        if not _commercial_byteplus_reviewed(
+            provider, model_alias, first_tier_id, first_tier_aliases,
+            reviewed_router,
+        ):
+            raise CapacityEconomicsProjectionError(
+                "personal BytePlus Coding Plan or unreviewed commercial route "
+                "cannot enter autonomous Capacity preference"
+            )
     option_id = _token(row.get("option_id"), field="option.option_id")
     estimated = _nonnegative_int(
         row.get("estimated_startable_jobs"), field="option.estimated_startable_jobs"

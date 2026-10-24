@@ -58,6 +58,34 @@ provider outages with existing traceable fallback. Never arm an unbounded
 spend plan, guess capacity, rehome a started job, or confuse a successful
 shell exit with accepted intelligence.
 
+## Reviewed-commercial adapter and load-balancer bridge
+
+The existing CodexWorkerAdapter's ordinary start path now has a narrow
+conditional commercial transport gate. Only the EXACT provider-realm object
+registered in REVIEWED_CODEX_PROVIDER_REALMS, using the existing credential
+loader, and with no subscription canary owner/claim, may reach the normal
+WorkerLaunchSpec validation and subprocess. The current ModelArk realm is
+still SPEC_ONLY in the candidate registry: no plain commercial START is
+authorized until independent transport validation and exact promotion.
+
+The incumbent capacity_economics_projection retains the full Personal
+Coding Plan and ambiguous-BytePlus-name exclusion. It will project a
+commercial ModelArk first-lawful-tier economic preference ONLY when a
+separately supplied exact ModelRouter instance identifies an enabled,
+autonomous, worker-eligible, codex-cli commercial model in its own FIRST
+tier, and the exact commercial realm is transport-reviewed. It remains
+preview-only, never grants Capacity or overrides missing provider quota.
+This is a source/consumer preparation seam, not an installed production
+load-balancer, a secret enrollment, or a new control plane.
+
+Model alias currently staged in config/executive_worker_routes.json is
+dola-seed-2-1-turbo-260628. That identifier appears in the public
+ap-southeast-1 ModelArk list as of October 23, 2026, but its availability
+to this specific account, compatible Codex tool calling, and rate/budget
+headroom remain unobserved. The same public catalog advertises cheaper
+DeepSeek V4.1 Flash Economy options; cost alone must never outrank
+measured suitability or circumvent a missing account/Quota receipt.
+
 ## Completion gates
 
 Source CI and independent review; native commercial transport canary;
