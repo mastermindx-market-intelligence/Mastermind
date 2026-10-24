@@ -49,7 +49,10 @@ def test_joined_catalog_and_manifest_are_real_read_only_attempt_one():
     from control_plane import ceo_request
     from integrations.executive_mcp import schemas
 
-    assert schemas.EXECUTION_PROFILES is ceo_request.EXECUTION_PROFILES
+    assert schemas.EXECUTION_PROFILES == {
+        name: ceo_request.EXECUTION_PROFILES[name]
+        for name in ("research_only", "bounded_code_change")}
+    assert "native_research_only" not in schemas.EXECUTION_PROFILES
     assert set(ceo_request.derive_authorities("native_research_only")) == {"READ", "RESEARCH"}
     value = manifest()
     assert assets.decode_launch_manifest(assets._canonical(value)) == assets._canonical(value)
@@ -110,6 +113,34 @@ def test_real_compiler_emits_exact_pair_and_preserves_legacy_distinct_scopes(opt
     assert published["grants"] == grants
     legacy = [pure.grant(), pure.grant(scope="2" * 64)]
     assert compiler._grants({"grants": legacy}) == tuple(legacy)
+
+
+def test_compiler_uses_real_canonical_native_law_and_frozen_legacy_adapter(monkeypatch):
+    from control_plane import ceo_request
+    from integrations.executive_mcp import schemas
+
+    canonical_profiles, legacy_profiles = [], []
+    actual_normalize = ceo_request.normalize_high_level_request
+    actual_validate = schemas.validate_tool_arguments
+
+    def observed_normalize(arguments):
+        canonical_profiles.append(arguments["execution_profile"])
+        return actual_normalize(arguments)
+
+    def observed_legacy(name, arguments):
+        legacy_profiles.append(arguments["execution_profile"])
+        return actual_validate(name, arguments)
+
+    monkeypatch.setattr(ceo_request, "normalize_high_level_request", observed_normalize)
+    monkeypatch.setattr(schemas, "validate_tool_arguments", observed_legacy)
+    grants = pair()
+    assert compiler._grants({"grants": grants}) == tuple(grants)
+    assert legacy_profiles == ["research_only"]
+    assert canonical_profiles == ["research_only", "native_research_only"]
+    # Publishing a qualified template cannot open the frozen callable surface.
+    with pytest.raises(schemas.GatewayError, match="authenticated App"):
+        actual_validate("submit_ceo_intent", {
+            **compiler.TEMPLATE_VALIDATION_ARGUMENTS, **grants[1]["template"]})
 
 
 @pytest.mark.parametrize("fault", [

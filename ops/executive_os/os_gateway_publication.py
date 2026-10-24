@@ -190,6 +190,7 @@ def _grants(document):
     require(type(grants) is list and MIN_GRANTS <= len(grants) <= MAX_GRANTS,
             "publication grants count refused")
     from integrations.executive_mcp.schemas import GatewayError, validate_tool_arguments
+    from control_plane.ceo_request import CeoRequestError, normalize_high_level_request
     scopes, seen = {}, []
     for grant in grants:
         require(type(grant) is dict and set(grant) == GRANT_KEYS,
@@ -201,12 +202,16 @@ def _grants(document):
         require(all(name in names for name in GRANT_TEMPLATE_REQUIRED)
                 and names <= set(GRANT_TEMPLATE_REQUIRED) | set(GRANT_TEMPLATE_OPTIONAL),
                 "publication grant template fields differ")
-        # Canonical five-tool law for the exact template form; the harmless
-        # arguments above exist only for this validation and are discarded.
+        # Templates are DATA, not a legacy MCP call or execution authority.
+        # The App-only native choice uses the same canonical request law;
+        # incumbent profiles retain the unchanged frozen transport validator.
         try:
-            validate_tool_arguments("submit_ceo_intent",
-                                    {**TEMPLATE_VALIDATION_ARGUMENTS, **template})
-        except GatewayError:
+            arguments = {**TEMPLATE_VALIDATION_ARGUMENTS, **template}
+            if template["execution_profile"] == "native_research_only":
+                normalize_high_level_request(arguments)
+            else:
+                validate_tool_arguments("submit_ceo_intent", arguments)
+        except (GatewayError, CeoRequestError):
             raise ValueError("publication grant template refused") from None
         encoded = canonical(grant)
         require(encoded not in seen, "publication grants must be unique")
