@@ -35,6 +35,10 @@ test('origin observations expose the actual successor and keep the failed attemp
  const out=unwrap(await continuingFacade(e).call('fabric_status',id));
  assert.equal(out.run_id,id.run_id);assert.equal(out.effective_run_id,successorId);
  assert.equal(out.status.run_id,successorId);assert.equal(out.status.continuation.prior_attempts[0].rc,1);
+ assert.equal(out.parent_recovery.requested_run_id,id.run_id);
+ assert.equal(out.parent_recovery.effective_run_id,successorId);
+ assert.equal(out.parent_recovery.disposition,'RESULT_VERIFICATION_REQUIRED');
+ assert.equal(out.parent_recovery.result_consumption_authorized,false);
  assert.match(e.calls[0].arguments.command,/'--follow'/);
 });
 test('result reads the successor; acceptance through the failed origin is refused',async()=>{
@@ -579,5 +583,91 @@ test('advertise manual routing only with native preview AND strict request suppo
    assert.equal(out.manual_routing.default,'AUTO');
    assert.equal(out.manual_routing.cross_provider_fallback,false);
    assert.equal(e.calls.length,top.includes('preview')?2:1);
+ }
+});
+
+test('parent attention: rootless or active observations cannot wake or authorize replay',async()=>{
+ const e=engine([capturedJSON(absent),capturedJSON({...done,state:'ACTIVE_OR_WAITING',rc:null,result_available:false})]);
+ const f=facade(e);
+ const absentView=unwrap(await f.call('fabric_status',id));
+ assert.equal(absentView.parent_recovery.disposition,'VERIFY_ORIGINAL_LINEAGE');
+ assert.equal(absentView.parent_recovery.parent_attention_required,false);
+ assert.equal(absentView.parent_recovery.retry_authorized,false);
+ const activeView=unwrap(await f.call('fabric_status',id));
+ assert.equal(activeView.parent_recovery.disposition,'WAIT_ORIGINAL_CONTROLLER');
+ assert.equal(activeView.parent_recovery.parent_attention_required,false);
+ assert.equal(activeView.parent_recovery.wake_proven,false);
+ assert.equal(e.calls.length,2);
+});
+test('parent attention: valid terminal success requires independent acceptance before consumption',async()=>{
+ const status={...done,state:'TERMINAL',rc:0,signal:'ok',accepted:false};
+ const accepted={...status,accepted:true,acceptance_state:'ACCEPTED',accepted_by:'reviewer'};
+ const misleading={...status,accepted:true,acceptance_state:'UNVERIFIED',accepted_by:'reviewer'};
+ const e=engine([capturedJSON(status),capturedJSON(misleading),capturedJSON(accepted)]);
+ const f=facade(e);
+ for(const state of ['RESULT_VERIFICATION_REQUIRED','RESULT_VERIFICATION_REQUIRED','ACCEPTED_RESULT_OBSERVED']){
+   const v=unwrap(await f.call('fabric_status',id)).parent_recovery;
+   assert.equal(v.disposition,state);
+   assert.equal(v.parent_attention_required,true);
+   assert.equal(v.retry_authorized,false);
+   assert.equal(v.dispatch_authorized,false);
+   assert.equal(v.result_consumption_authorized,false);
+ }
+ assert.equal(e.calls.length,3);
+});
+test('parent attention: missing final 429 or effect unknown never promotes to recovery approval',async()=>{
+ const terminal={...done,state:'TERMINAL',rc:1,signal:'quota',accepted:false,result_available:false,
+   reason:'QWEN_FINAL_RESPONSE_UNCONFIRMED',execution_absence_proven:false};
+ const uncertain={...terminal,state:'EFFECT_UNKNOWN',signal:'effect_unknown'};
+ const controller=continuationEnvelope('UNCONFIRMED');
+ const e=engine([capturedJSON(terminal),capturedJSON(uncertain),capturedJSON(controller)]);
+ const single=facade(e);
+ for(const state of ['CAPACITY_BLOCKED_OR_REVIEW_FAILED','RECONCILE_ORIGINAL_EFFECT']){
+   const v=unwrap(await single.call('fabric_status',id)).parent_recovery;
+   assert.equal(v.disposition,state);
+   assert.equal(v.parent_attention_required,true);
+   assert.equal(v.retry_authorized,false);
+ }
+ const third=unwrap(await continuingFacade(e).call('fabric_status',id)).parent_recovery;
+ assert.equal(third.disposition,'RECONCILE_ORIGINAL_EFFECT');
+ assert.equal(third.requested_run_id,id.run_id);
+ assert.equal(third.effective_run_id,successorId);
+ assert.equal(third.dispatch_authorized,false);
+ assert.equal(e.calls.length,3);
+});
+test('parent attention: native prelaunch request correlation is not authenticated root or wake',async()=>{
+ const refused={...done,state:'REQUEST_REFUSED_BEFORE_LAUNCH',
+   root_id:null,parent_run_id:null,request_root_id:id.root_id,request_parent_run_id:'mission-001',
+   accepted:null,accepted_by:null,acceptance_state:'UNVERIFIED',
+   execution_absence_proven:true,signal:null,rc:null,result_available:false};
+ const e=engine([capturedJSON(refused),capturedJSON({...refused,request_root_id:'other-root'})]);
+ const f=facade(e);
+ const out=unwrap(await f.call('fabric_status',id));
+ assert.equal(out.parent_recovery.disposition,'RECONCILE_PRELAUNCH_REFUSAL');
+ assert.equal(out.parent_recovery.request_correlation_only,true);
+ assert.equal(out.parent_recovery.root_verified,false);
+ assert.equal(out.parent_recovery.parent_attention_required,false);
+ assert.equal(out.parent_recovery.retry_authorized,false);
+ const mismatch=unwrap(await f.call('fabric_status',id));
+ assert.equal(mismatch.parent_recovery.disposition,'VERIFY_ORIGINAL_LINEAGE');
+ assert.equal(mismatch.parent_recovery.request_correlation_only,false);
+ assert.equal(mismatch.parent_recovery.parent_attention_required,false);
+ assert.equal(e.calls.length,2);
+});
+test('parent attention: bounded wait uses the same read-only projection without extra process',async()=>{
+ const value={...done,state:'TERMINAL',rc:0,signal:'ok',accepted:false};
+ const e=engine([capturedJSON(value),capturedJSON(value)]);
+ const out=unwrap(await facade(e).call('fabric_wait',{...id,timeout_seconds:0}));
+ assert.equal(out.parent_recovery.disposition,'RESULT_VERIFICATION_REQUIRED');
+ assert.equal(out.parent_recovery.parent_attention_required,true);
+ assert.equal(e.calls.length,2); // incumbent status preflight + the bounded native wait
+ assert.match(e.calls[1].arguments.command,/'wait' 'web-fabric-001'/);
+});
+test('parent attention: malformed or contradictory claims stay untrusted',()=>{
+ const s={...done,state:'TERMINAL',rc:0,signal:'ok',accepted:true,accepted_by:'reviewer',result_available:true};
+ assert.equal(api.projectFabricParentRecovery(s,id.root_id).disposition,'RESULT_VERIFICATION_REQUIRED');
+ assert.equal(api.projectFabricParentRecovery({...s,acceptance_state:'ACCEPTED'},'other-root').disposition,'VERIFY_ORIGINAL_LINEAGE');
+ for(const bad of [null,{}, {...s,schema:'fake'}, {...s,run_id:'../escape'}]){
+  assert.throws(()=>api.projectFabricParentRecovery(bad,id.root_id),/FABRIC_PARENT_RECOVERY_STATUS_INVALID/);
  }
 });
