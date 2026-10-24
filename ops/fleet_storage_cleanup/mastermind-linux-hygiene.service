@@ -1,0 +1,12 @@
+[Unit]
+Description=Mastermind fleet Linux storage hygiene (existing toolkit peer)
+Documentation=https://github.com/mastermindx-market-intelligence/Mastermind/tree/master/ops/fleet_storage_cleanup
+ConditionPathExists=%h/.local/lib/mastermind/storage-cleanup/linux_hygiene.py
+
+[Service]
+Type=oneshot
+WorkingDirectory=%h
+ExecStart=/usr/bin/python3 %h/.local/lib/mastermind/storage-cleanup/linux_hygiene.py --apply-safe-caches
+Nice=15
+IOSchedulingClass=idle
+TimeoutStartSec=7min
