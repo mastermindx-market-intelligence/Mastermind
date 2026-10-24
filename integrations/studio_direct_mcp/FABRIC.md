@@ -16,9 +16,41 @@ This installation is for already-authorized **trusted machine-owner channels**. 
 
 Every request supplies a verified original operation root, the actual immediate parent, and one stable new child ID. A fresh attended operation may use the incumbent operation naming and source-custody convention; do not fabricate `CODEX_THREAD_ID`, borrow a host environment's sibling identity, or invent an identity registry. Nested work preserves the same original root. Existing Executive-submitted, active, accepted, or effect-unknown operations remain on their original carrier.
 
-The tools do not accept arbitrary shell commands, adapter paths, working directories, providers, models, hosts, accounts or credentials. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
+The tools do not accept arbitrary shell commands, adapter paths, working directories, hosts, accounts or credentials. An optional *closed-schema* provider-pool and exact-model constraint is available only on `fabric_request`, subject to the original native selection and admission policy; this does not grant arbitrary providers or models. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
 
 Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
+
+## Opt-in strict provider and model constraints (source integration)
+
+Omitting `pool` and `model` retains the existing economical `AUTO` route, including the
+incumbent eligible pre-task capacity continuation. For a **new** run only, the Web
+`fabric_request` may set a closed `pool` from `grok`, `glm`, `minimax`, `bailian`,
+`cursor`, `ocfree`, or `go`; `model` requires `pool` and selects an exact *already
+qualified* model within that pool. `model: "auto"` means only the provider is pinned.
+This is a strict constraint, not a suggestion, and it does not expose a host or account.
+
+Every manual request must pass the installed native adapter's `request --help`
+`--strict-manual-pin` check, an exact-origin `NOT_FOUND` observation, and a no-effect
+`preview` with matching run, pool, requested exact model (if any), and both native
+`selection_rechecked_at_request` and `strict_pin_enforced_at_request` witnesses.
+Unsupported, stale or malformed selection refuses `MANUAL_ROUTE_UNAVAILABLE` before
+controller dispatch. Native `request --strict-manual-pin` must independently recheck
+the same pool/model before launch. Preview does not reserve quota or prove a worker
+will start. Manual pins disable cross-provider/model quota continuation; a 429 cannot
+silently substitute another model. Optional `max_turns` is limited by native
+policy to GLM/MiniMax: incompatible pool pins fail before dispatch, and the
+read-only preview must report a compatible native execution mode. `subject_pool` remains the separate author
+independence filter. Existing model quality, budget, entitlement, host and policy
+gates always win; a model string is never proof that a model is served or permitted.
+
+`fabric_capabilities.manual_routing.available` is true only when the installed native
+adapter advertises both `preview` and `--strict-manual-pin`. A source-merged Web
+facade or passing tests alone do not activate the feature in connected ChatGPT.
+Reconcile the pinned native generation, immutable service release, tool snapshot and
+actual originating parent; verify one new pinned-model START, useful result, parent
+consumption and acceptance before claiming `PROVEN_LIVE`. Never replay a held 429,
+failed, or effect-unknown reviewer or silently move an established carrier.
+
 
 ## Correct execution and recovery
 
@@ -157,6 +189,18 @@ node fabric-preflight.mjs YOUR_UNUSED_CHECK_ID YOUR_VERIFIED_ROOT
 ```
 
 The tests use an isolated local CLI fixture, never real provider credentials or the production ledger. They cover strict inputs, literal packet transport, same-ID rejection, uncertain effects, root mismatch, byte capture, changed-result rejection, acceptance separation, original PID binding, and preservation of the restricted installation across restage/upgrade.
+
+The optional `fabric-http-manual-qualification.mjs` invokes a real authenticated
+HTTP gateway/SDK plus the maintained Desktop Commander process engine, but binds
+only the separately marked **synthetic** `fixtures/fabric-adapter-manual.py`.
+It verifies a successful exact GLM-5.3 model-pin preview, strictly constrained
+native request with the original root, no cross-provider fallback, cross-session
+result retrieval and deterministic acceptance. All fixture host/model/return data
+are synthetic and no provider key, quota, actual worker or live Fabric ledger is
+accessed. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
+to its installed maintained engine; it is intentionally not a GitHub hosted test.
+The existing `fabric-http-qualification.mjs` retains the negative test for older
+native adapters that cannot enforce strict pins.
 
 `fabric-preflight.mjs` is a read-only real SDK/engine/adapter probe. `fabric-console.mjs` is an attended developer acceptance client: it issues one MCP call per input line, does not retry, and does not automatically accept a worker. Neither is an unattended orchestrator or proof of native ChatGPT installation.
 

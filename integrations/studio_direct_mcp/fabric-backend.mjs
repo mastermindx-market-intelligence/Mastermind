@@ -57,6 +57,8 @@ export const FABRIC_TOOLS = Object.freeze([
     max_turns:{type:'integer',minimum:1,maximum:400,description:'Optional per-request Claude turn ceiling. Only tightens the admitted wrapper limit; not a token, tool-call, dollar or acceptance budget.'},
     work_packet:{type:'string',minLength:1,maxLength:16000}, escalation_reason:{type:'string',minLength:1,maxLength:1000},
     subject_pool:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$'},
+    pool:{type:'string',enum:['grok','glm','minimax','bailian','cursor','ocfree','go'],description:'Optional strict provider-pool pin; omitted means native AUTO. No cross-provider quota continuation.'},
+    model:{type:'string',minLength:1,maxLength:64,pattern:'^[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}$',description:'Optional exact qualified model inside pool. Use auto to let the pinned pool choose its admitted model.'},
   }, ['run_id','root_id','parent_id','task_class','task_complexity','work_packet'], false),
   tool('fabric_status', 'Read the requested commission and its actual successor through fabric_task.py. Earlier failed attempts remain visible. NOT_FOUND after a lost request is not proof of no effect or permission to retry. Root metadata is not authentication.', identity, ['run_id','root_id'], true),
   tool('fabric_wait', 'Use the incumbent adapter bounded wait for this run, at most ten seconds. Creates no watcher, retry loop, cancellation or background wake.', {...identity,timeout_seconds:{type:'integer',minimum:0,maximum:10,default:5}}, ['run_id','root_id'], true),
@@ -96,6 +98,11 @@ function validate(name, args) {
   if (name==='fabric_request') {
     if (Buffer.byteLength(args.work_packet)>MAX_PACKET_BYTES) fail('INVALID_ARGUMENT',{field:'work_packet'});
     if (args.task_complexity==='C3_FRONTIER_JUDGMENT' && !args.escalation_reason?.trim()) fail('INVALID_ARGUMENT',{field:'escalation_reason'});
+    if (args.model && !args.pool) fail('INVALID_ARGUMENT',{field:'pool'});
+    // Native per-request turn limits are qualified for GLM/MiniMax modes only.
+    // Refuse incompatible manual pools before reserving a run or controller.
+    if (args.pool && args.max_turns!==undefined && !['glm','minimax'].includes(args.pool))
+      fail('INVALID_ARGUMENT',{field:'max_turns'});
   }
 }
 function response(value, isError=false) {
@@ -341,9 +348,16 @@ export function createFabricFacade(engine, options={}) {
       if(name==='fabric_capabilities') {
         const h=await runCapturedShort(['--help']);
         const continuity=await continuityAvailable();
+        let manualReady=false;
+        if(h.exit_code===0 && h.stdout.includes('preview')) {
+          try { const requestHelp=await runCapturedShort(['request','--help']);
+            manualReady=requestHelp.exit_code===0 && requestHelp.stdout.includes('--strict-manual-pin'); } catch {}
+        }
         return response({action:'capabilities',adapter_available:h.exit_code===0 && ['request','status','result','accept'].every(x=>h.stdout.includes(x)),
           quota_continuity:{enabled:cfg.quotaFallback,adapter_available:continuity,max_attempts:3,
             replay_basis:'pre_task_capacity_rejection',mid_task_replay:false,native_parent_wake:false,background_execution:false},
+          manual_routing:{available:manualReady,default:'AUTO',exact_model_requires_pool:true,
+            selection_preflight:'native_preview_no_reservation',strict_pin_required:true,cross_provider_fallback:false},
           controller_tracking:{max_unresolved:MAX_CONTROLLERS,max_generation_identities:MAX_ATTEMPT_IDENTITIES,scope:'backend_process_generation_only',restart_persistent:false},
           worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
           tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
@@ -363,11 +377,40 @@ export function createFabricFacade(engine, options={}) {
           requestHelp=await runCapturedShort(['request','--help']);
           if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--max-turns')) fail('ADAPTER_TURN_LIMIT_UNAVAILABLE');
         }
-        if(cfg.quotaFallback && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
+        if(args.pool) {
+          requestHelp ??= await runCapturedShort(['request','--help']);
+          if(requestHelp.exit_code!==0 || !requestHelp.stdout.includes('--strict-manual-pin')) fail('MANUAL_ROUTE_UNAVAILABLE');
+        }
+        if(cfg.quotaFallback && !args.pool && !await continuityAvailable(requestHelp)) fail('ADAPTER_CONTINUITY_UNAVAILABLE');
         const s=await status(args,false);
         if(s.state!=='NOT_FOUND') fail(s.state==='EFFECT_UNKNOWN'?'EFFECT_UNKNOWN':'RUN_EXISTS');
+        if(args.pool) {
+          // Native preview cannot reserve capacity. The native strict pin MUST
+          // recheck the same pool/model before any launch and refuse drift.
+          const previewArgs=['preview','--id',args.run_id,'--class',args.task_class,
+            '--pool',args.pool,'--model',args.model?.toLowerCase()==='auto'?'auto':args.model??'auto',
+            '--task-complexity',args.task_complexity];
+          if(args.escalation_reason) previewArgs.push('--escalation-reason',args.escalation_reason);
+          if(args.subject_pool) previewArgs.push('--subject-pool',args.subject_pool);
+          let route;
+          try {
+            const preview=await runCapturedShort(previewArgs);
+            if(preview.exit_code!==0) fail('MANUAL_ROUTE_UNAVAILABLE');
+            route=JSON.parse(preview.stdout);
+          } catch(error) { fail('MANUAL_ROUTE_UNAVAILABLE'); }
+          if(route?.state!=='PREVIEW_ONLY' || route.reserved!==false
+            || route.strict_pin_enforced_at_request!==true
+            || route.selection_rechecked_at_request!==true
+            || route.run_id!==args.run_id || route.pool!==args.pool
+            || typeof route.model!=='string' || !route.model
+            || (args.max_turns!==undefined && !['glm','minimax'].includes(route.mode))
+            || (args.model && args.model.toLowerCase()!=='auto' && route.model.toLowerCase()!==args.model.toLowerCase()))
+            fail('MANUAL_ROUTE_UNAVAILABLE');
+        }
         const argv=['request','--id',args.run_id,'--class',args.task_class,'--task-complexity',args.task_complexity,'--cwd',cfg.workerCwd,'--root',args.root_id,'--parent',args.parent_id,'--stdin'];
-        if(cfg.quotaFallback) argv.push('--quota-fallback');
+        if(cfg.quotaFallback && !args.pool) argv.push('--quota-fallback');
+        if(args.pool) argv.push('--pool',args.pool,'--strict-manual-pin');
+        if(args.model && args.model.toLowerCase()!=='auto') argv.push('--model',args.model);
         if(args.max_turns!==undefined) argv.push('--max-turns',String(args.max_turns));
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
         if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
@@ -389,6 +432,7 @@ export function createFabricFacade(engine, options={}) {
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
           ...(args.max_turns!==undefined?{requested_max_turns:args.max_turns}:{}),
+          ...(args.pool?{requested_pool:args.pool,requested_model:args.model??'auto',strict_manual_pin:true}:{}),
           adapter_exit_code:settled?.exit_code??null,execution_absence_proven:false,
           next_observation:'fabric_status with the same run and root; fabric_controller_output with this PID when needed'});
       }
