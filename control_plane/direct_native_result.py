@@ -35,12 +35,18 @@ def _identity(value):
     return {k: wire.hex_digest(value[k]) for k in IDENTITY_KEYS}
 
 
-def _completion(value):
+def _completion(value, selection, identity):
+    selected = wire.validate_selection(selection)
+    identity = _identity(identity)
     if type(value) is not dict or set(value) != {"payload", "terminal_digest", "terminal_record"}:
         _refuse()
     wire.hex_digest(value["terminal_digest"])
     terminal = value["terminal_record"]
     if (type(terminal) is not dict or terminal.get("payload") != value["payload"]
+            or terminal.get("job_id") != selected["job_id"]
+            or terminal.get("attempt_id") != selected["attempt_id"]
+            or terminal.get("status") != "COMPLETED"
+            or terminal.get("admission_digest") != identity["admission_digest"]
             or wire.digest(terminal) != value["terminal_digest"]):
         _refuse()
     payload = value["payload"]
@@ -84,8 +90,8 @@ def project_direct_native_result(snapshot, receipt):
         _refuse()
     selection = wire.validate_selection(dict(work_ref=snapshot.work_ref,
         job_id=snapshot.job_id, attempt_id=snapshot.attempt_id))
-    _identity(snapshot.admission)
-    completion = _completion(snapshot.completion)
+    identity = _identity(snapshot.admission)
+    completion = _completion(snapshot.completion, selection, identity)
     if completion["terminal_digest"] != wire.hex_digest(snapshot.terminal_digest):
         _refuse()
     consumption = wire.validate_consumption(snapshot.consumption)
@@ -167,7 +173,8 @@ def consume_direct_result_in_transaction(runtime, connection, selection, *, acce
     identity = _identity(runtime.require_direct_result_access(connection, current_selection, access))
     if command_id != consumption_command_id(selected["operation_key"], identity):
         _refuse()
-    completion = _completion(runtime.validate_direct_completion(connection, current_selection))
+    completion = _completion(runtime.validate_direct_completion(connection, current_selection),
+                             current_selection, identity)
     if completion["terminal_digest"] != selected["result_digest"]:
         _refuse()
     payload = dict(schema=CONSUMPTION_SCHEMA, selection=current_selection,
@@ -189,6 +196,7 @@ def consume_direct_result_in_transaction(runtime, connection, selection, *, acce
             event_type=EVENT_TYPE, actor="direct-native-parent", job_id=selected["job_id"],
             attempt_id=selected["attempt_id"], payload=payload, command_id=command_id)
     if (_identity(runtime.require_direct_result_access(connection, current_selection, access)) != identity
-            or _completion(runtime.validate_direct_completion(connection, current_selection)) != completion):
+            or _completion(runtime.validate_direct_completion(connection, current_selection),
+                           current_selection, identity) != completion):
         _refuse()
     return dict(state="CONSUMED", receipt_digest=wire.digest(payload))

@@ -18,18 +18,40 @@ class DirectResultIntegrityTests(unittest.TestCase):
                              source_digest="3" * 64, admission_digest="4" * 64)
         self.payload = dict(summary="Actual retained findings", current_state="Complete",
                             completed_steps=[], next_actions=[])
-        self.record = dict(schema_version="test-only-raw-integrity", payload=self.payload)
+        self.record = dict(schema_version="test-only-raw-integrity", payload=self.payload,
+            job_id=self.selection["job_id"], attempt_id=self.selection["attempt_id"],
+            status="COMPLETED", admission_digest=self.identity["admission_digest"])
         self.completion = dict(payload=copy.deepcopy(self.payload),
             terminal_record=copy.deepcopy(self.record), terminal_digest=c.digest(self.record))
 
     def test_changed_payload_or_terminal_record_cannot_keep_original_digest(self):
-        self.assertEqual(subject._completion(self.completion), self.completion)
+        self.assertEqual(subject._completion(self.completion, self.selection, self.identity), self.completion)
         for field in ("payload", "terminal_record"):
             changed = copy.deepcopy(self.completion)
             target = changed[field] if field == "payload" else changed[field]["payload"]
             target["summary"] = "forged"
             with self.subTest(field=field), self.assertRaises(subject.DirectResultProjectionError):
-                subject._completion(changed)
+                subject._completion(changed, self.selection, self.identity)
+
+    def test_self_consistent_terminal_for_other_selection_or_admission_refuses(self):
+        # Recompute the digest so these cases discriminate the owner-selection
+        # join rather than only testing self-integrity of the terminal DATA.
+        for key, value in (("job_id", "JOB-other"), ("attempt_id", "ATT-other"),
+                           ("status", "RUNNING"), ("admission_digest", "f" * 64)):
+            changed = copy.deepcopy(self.completion)
+            changed["terminal_record"][key] = value
+            changed["terminal_digest"] = c.digest(changed["terminal_record"])
+            with self.subTest(key=key), self.assertRaises(subject.DirectResultProjectionError):
+                subject._completion(changed, self.selection, self.identity)
+
+    def test_changed_snapshot_selection_or_admission_cannot_relabel_terminal(self):
+        for key, value in (("job_id", "JOB-other"), ("attempt_id", "ATT-other")):
+            selected = dict(self.selection, **{key: value})
+            with self.subTest(key=key), self.assertRaises(subject.DirectResultProjectionError):
+                subject._completion(self.completion, selected, self.identity)
+        with self.assertRaises(subject.DirectResultProjectionError):
+            subject._completion(self.completion, self.selection,
+                                dict(self.identity, admission_digest="f" * 64))
 
     def test_constructor_mapping_is_not_a_runtime_snapshot(self):
         with self.assertRaises(subject.DirectResultProjectionError):
