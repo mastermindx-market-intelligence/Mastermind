@@ -253,7 +253,8 @@ def test_current_access_is_rechecked_after_preparation_before_adapter_start(fixt
     monkeypatch.setattr(f.supervisor, '_reviewed_role_prompt_suffix', lambda *a: '')
     seen = []
     access = object()
-    def deny(runtime, job_id, attempt_id, actual):
+    def deny(runtime, job_id, attempt_id, actual, *, lease):
+        assert lease is f.lease
         assert runtime is f.runtime
         assert actual is access
         assert job_id == f.job.job_id and attempt_id == f.lease.attempt.attempt_id

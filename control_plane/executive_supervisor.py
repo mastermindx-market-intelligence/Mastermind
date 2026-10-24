@@ -2401,7 +2401,7 @@ class ExecutiveSupervisor:
                 raise SupervisorError("review subject changed after input sealing")
             if _is_direct_native_job(job):
                 self.runtime.require_direct_native_launch_access(
-                    job_id, lease.attempt.attempt_id, _direct_native_access
+                    job_id, lease.attempt.attempt_id, _direct_native_access, lease=lease
                 )
             start_invoked = True
             if paid_supervisor.is_paid_adapter(self.adapter):
