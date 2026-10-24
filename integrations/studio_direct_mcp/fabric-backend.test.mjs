@@ -83,6 +83,25 @@ test('request preflights exact ID and starts only the incumbent adapter, with ex
  assert.equal(e.calls.length,2);assert.match(e.calls[0].arguments.command,/'status' 'web-fabric-001'/);assert.match(e.calls[1].arguments.command,/'request' '--id' 'web-fabric-001'/);assert.match(e.calls[1].arguments.command,/'--root' 'mission-001' '--parent' 'mission-001'/);
  assert.ok(!e.calls[1].arguments.command.includes('ssh '));assert.ok(!e.calls[1].arguments.command.includes('spawn_agent'));
 });
+test('abbreviated brief refs remain presentation-only; full machine refs and authorized key text pass unchanged',async()=>{
+ const spec=api.FABRIC_TOOLS.find(t=>t.name==='fabric_request').inputSchema.properties.work_packet;
+ assert.match(spec.description,/12 hex/);
+ assert.match(spec.description,/machine-verification/);
+ const fullFileHash='a'.repeat(64),fullCommit='b'.repeat(40);
+ const payload=`Prose: file hash ${fullFileHash.slice(0,12)}, commit ${fullCommit.slice(0,12)}.
+MACHINE_SHA256=${fullFileHash}
+GIT_CHECKOUT_SHA=${fullCommit}
+KEY=synthetic-fixture-key`;
+ const e=engine([capturedJSON(absent),pending()]);
+ const out=unwrap(await facade(e).call('fabric_request',{...packet,work_packet:payload}));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');
+ const transmitted=e.calls[1].arguments.command;
+ assert.ok(transmitted.includes(payload));
+ assert.ok(transmitted.includes(fullFileHash));
+ assert.ok(transmitted.includes(fullCommit));
+ assert.ok(transmitted.includes('KEY=synthetic-fixture-key'));
+});
+
 test('packet metacharacters remain literal stdin, never interpolated arguments',async()=>{
  const e=engine([capturedJSON(absent),pending()]);const f=facade(e);
  const malicious="$(touch /tmp/not-authorized)\n' ; echo not-a-command\nWORK_PACKET\n`id`";
