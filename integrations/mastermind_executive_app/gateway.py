@@ -44,6 +44,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import json
+import re
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any, TYPE_CHECKING
@@ -405,14 +406,48 @@ class CeoIngressClient:
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
         principal_encoded = None
+        direct_encoded = None
         from common.direct_native_result_contract import PRIVATE_SCHEMA as direct_schema, validate_private_frame
-        direct_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
-        if direct_frame:
+        from control_plane.direct_native_execution import SUBMIT_SCHEMA as direct_submit_schema
+        direct_result_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
+        direct_submit_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_submit_schema
+        direct_frame = direct_result_frame or direct_submit_frame
+        if direct_result_frame:
             try:
                 frame = validate_private_frame(dict(frame))
             except ValueError:
                 return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
                     detail="direct-native frame is invalid")
+        elif direct_submit_frame:
+            from control_plane import ceo_request
+            from common.direct_native_result_contract import hex_digest
+
+            try:
+                frame = dict(frame)
+                if set(frame) != {"schema", "request_ref", "observed_grounding", "request", "principal_scope"}:
+                    raise ValueError("direct submit keys")
+                normalized = ceo_request.normalize_automated_request(frame["request"])
+                if (normalized["execution_profile"] != "native_research_only"
+                        or normalized != frame["request"]):
+                    raise ValueError("direct submit request")
+                # App admission derives this ref before removing operation_key.
+                # Transport can validate its canonical shape, not reconstruct
+                # the omitted logical key or issue receiving-side authority.
+                request_ref = frame["request_ref"]
+                if (type(request_ref) is not str or re.fullmatch(
+                    re.escape(ceo_request.APP_REQUEST_REF_PREFIX)
+                    + rf"[0-9a-f]{{{ceo_request.INTENT_ID_DIGEST_CHARS}}}", request_ref
+                ) is None):
+                    raise ValueError("direct submit request identity")
+                ceo_request.automated_intent_id(request_ref)
+                hex_digest(frame["principal_scope"])
+                ceo_ingress._validate_observed_grounding(frame["observed_grounding"])
+                direct_encoded = json.dumps(frame, ensure_ascii=False,
+                    sort_keys=True, allow_nan=False).encode("utf-8")
+            except (ValueError, TypeError, RecursionError, ceo_request.CeoRequestError,
+                    ceo_ingress.CeoIngressError):
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="direct-native submit frame is invalid")
         # This closed source-only frame has its own canonical byte bounds.
         # Selecting transport limits grants no receiving-side admission.
         from integrations.company_dialogue_principal_app_contract import (
@@ -448,8 +483,12 @@ class CeoIngressClient:
             response_ceiling = release_ingress.MAX_RESPONSE_BYTES
             stream_limit = response_ceiling + 4096
         try:
-            encoded = principal_encoded if principal_encoded is not None else json.dumps(
-                frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
+            if principal_encoded is not None:
+                encoded = principal_encoded
+            elif direct_encoded is not None:
+                encoded = direct_encoded
+            else:
+                encoded = json.dumps(frame, ensure_ascii=False, sort_keys=True).encode("utf-8")
         except (TypeError, ValueError) as exc:
             return CeoIngressResponse(
                 transport=TRANSPORT_NOT_SENT, detail=f"frame is not JSON-serializable: {exc}"
@@ -545,6 +584,10 @@ class CeoIngressClient:
                         raise ValueError("nonfinite direct response")
                     parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
                                         parse_constant=nonfinite)
+                    # JSON number exponents can overflow to inf without
+                    # parse_constant being called. Reject those and escaped
+                    # lone surrogates in either strict direct response shape.
+                    json.dumps(parsed, ensure_ascii=False, allow_nan=False).encode("utf-8")
                     if (type(parsed) is not dict or type(parsed.get("ok")) is not bool
                             or set(parsed) != ({"ok", "result"} if parsed["ok"] else {"ok", "error"})):
                         raise ValueError("invalid direct response envelope")
