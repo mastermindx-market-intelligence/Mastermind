@@ -90,6 +90,34 @@ class FleetLinuxHygieneTests(unittest.TestCase):
             self.assertEqual(row["mode"], "CRITICAL")
             self.assertEqual(row["cleanup"], [{"state": "REPORT_ONLY"}])
 
+    def test_nonzero_package_cache_effect_is_held_for_owner(self):
+        from types import SimpleNamespace
+        with tempfile.TemporaryDirectory() as d:
+            base = Path(d)
+            (base / ".cache/pip").mkdir(parents=True)
+            with patch.object(h, "package_busy", return_value=False), patch.object(
+                    h.shutil, "which", return_value="/usr/bin/python3"), patch.object(
+                    h.subprocess, "run",
+                    return_value=SimpleNamespace(returncode=17, stderr="partial purge")):
+                results = h.cache_cleanup(base, base, "CAUTION")
+            self.assertEqual(results[0]["state"], "EFFECT_UNVERIFIED")
+            self.assertEqual(results[0]["exit_code"], 17)
+            self.assertTrue((base / h.HOLD).exists())
+            self.assertEqual(h.cache_cleanup(base, base, "CRITICAL"),
+                             [{"state": "HELD_EFFECT_UNVERIFIED"}])
+
+    def test_degraded_receipt_returns_nonzero_without_disarming_timer(self):
+        with tempfile.TemporaryDirectory() as d, patch.object(
+                h, "run", return_value={"schema": "mastermind.fleet_linux_hygiene.v1",
+                                        "degraded": True,
+                                        "cleanup": [{"state": "EFFECT_UNVERIFIED"}]}):
+            self.assertEqual(h.main(["--state-dir", d]), 1)
+            rows = (Path(d) / h.LEDGER).read_text().splitlines()
+            self.assertEqual(len(rows), 1)
+            self.assertIn('"degraded": true', rows[0])
+        timer = (SOURCE.parent / "mastermind-linux-hygiene.timer").read_text()
+        self.assertIn("Persistent=true", timer)
+
     def test_lock_contention_does_not_run(self):
         with tempfile.TemporaryDirectory() as d, patch.object(
                 h.fcntl, "flock", side_effect=BlockingIOError):
