@@ -9,6 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from control_plane.dsh_mcp_client_projection import project_dsh_mcp_tools
+from control_plane.executive_agent_capabilities import (
+    ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+    ExecutionCapabilityRegistry,
+    observed_mcp_tool_schema_digest,
+)
 from control_plane.executive_worker_broker import BrokerPolicy
 from control_plane.worker_adapter import (
     adapter_descriptor,
@@ -26,6 +32,7 @@ from integrations.acp_worker.adapter import AcpWorkerAdapter
 from integrations.acp_worker.native import AcpNativeProfile
 from integrations.acp_worker.tool_admission import AcpNativeToolGate, AcpObservedTool
 from integrations.acp_worker.turn import AcpProfile
+from integrations.acp_worker.workspace_read_mcp import tool_catalog
 
 
 def _installed():
@@ -72,10 +79,29 @@ def _packet(tmp_path: Path, *, environment=None, private_startup=True):
         private_startup=private_startup,
         allowed_environment_keys=("PATH", "MMX_DSH_PROFILE_ROOT") if private_startup else None,
     )
+    # Construct from the actual canonical owners, not the private packet check.
+    profile = ExecutionCapabilityRegistry.load().resolve(
+        "worker.acp.providerfree.readonly.v1"
+    )
+    projection = project_dsh_mcp_tools(
+        profile,
+        capability_id=ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,
+        observed_tool_catalog={"tools": tool_catalog()},
+    ).configuration()
+    namespace = projection["target"]["serverName"]
     gate = AcpNativeToolGate(
-        "a" * 64,
+        hashlib.sha256(json.dumps(
+            projection, sort_keys=True, separators=(",", ":"),
+            ensure_ascii=True, allow_nan=False,
+        ).encode("utf-8")).hexdigest(),
         digest,
-        (AcpObservedTool("mcp__granted__read_file", "b" * 64),),
+        tuple(
+            AcpObservedTool(
+                f"mcp__{namespace}__{tool['name']}",
+                observed_mcp_tool_schema_digest({"tools": {tool["name"]: tool}}),
+            )
+            for tool in projection["tools"]
+        ),
         ((str(bootstrap), digest),),
     )
     policy = BrokerPolicy(
@@ -740,3 +766,176 @@ def test_installed_owner_cannot_send_foreign_attempt_to_existing_socket(tmp_path
             invalid, invalid.workspace_path.resolve(strict=True),
             invalid.run_dir.resolve(strict=True),
         )
+
+
+def test_packet_binds_canonical_tools_as_exact_name_contract_pairs(tmp_path):
+    packet = _packet(tmp_path)
+    tools = packet.tool_gate.tools
+    assert [tool.name for tool in tools] == [
+        "mcp__mastermindAcpWorkspaceRead__read_file",
+        "mcp__mastermindAcpWorkspaceRead__search_text",
+    ]
+    assert len({tool.contract_sha256 for tool in tools}) == 2
+    # Ordering is not an authority field; each name must retain its own contract.
+    reordered = dataclasses.replace(packet.tool_gate, tools=tuple(reversed(tools)))
+    assert dataclasses.replace(packet, tool_gate=reordered).tool_gate == reordered
+
+
+@pytest.mark.parametrize("mutation", [
+    "projection", "namespace", "unqualified", "missing", "extra",
+    "changed_contract", "swapped_contracts", "aggregate_contract",
+])
+def test_packet_refuses_unrelated_projection_or_tool_association(tmp_path, mutation):
+    packet = _packet(tmp_path)
+    gate = packet.tool_gate
+    tools = list(gate.tools)
+    if mutation == "projection":
+        gate = dataclasses.replace(gate, projection_sha256="a" * 64)
+    else:
+        if mutation == "namespace":
+            tools[0] = dataclasses.replace(
+                tools[0], name="mcp__foreign__read_file"
+            )
+        elif mutation == "unqualified":
+            tools[0] = dataclasses.replace(tools[0], name="read_file")
+        elif mutation == "missing":
+            tools.pop()
+        elif mutation == "extra":
+            tools.append(AcpObservedTool("mcp__foreign__write_file", "b" * 64))
+        elif mutation == "changed_contract":
+            tools[0] = dataclasses.replace(tools[0], contract_sha256="b" * 64)
+        elif mutation == "swapped_contracts":
+            assert tools[0].contract_sha256 != tools[1].contract_sha256
+            tools = [
+                dataclasses.replace(tools[0], contract_sha256=tools[1].contract_sha256),
+                dataclasses.replace(tools[1], contract_sha256=tools[0].contract_sha256),
+            ]
+        elif mutation == "aggregate_contract":
+            profile = ExecutionCapabilityRegistry.load().resolve(
+                "worker.acp.providerfree.readonly.v1"
+            )
+            aggregate = profile.mcp_server_grants[0].tool_schema_digest
+            tools = [
+                dataclasses.replace(tool, contract_sha256=aggregate)
+                for tool in tools
+            ]
+        gate = dataclasses.replace(gate, tools=tuple(tools))
+    with pytest.raises(ValueError, match="ACP installed canonical"):
+        dataclasses.replace(packet, tool_gate=gate)
+
+
+@pytest.mark.parametrize("field", [
+    "inputSchema", "outputSchema", "annotations", "execution",
+])
+def test_catalog_drift_refuses_construction_and_both_native_callbacks(
+    tmp_path, monkeypatch, field
+):
+    installed = _installed()
+    packet = _confined_packet(tmp_path)
+    spec = _confined_spec(packet, tmp_path)
+    adapter = installed.InstalledAcpWorkerAdapter(packet)
+    catalog = json.loads(json.dumps(tool_catalog()))
+    row = catalog[0]
+    if field == "inputSchema":
+        row[field]["properties"]["unexpected"] = {"type": "string"}
+    elif field == "outputSchema":
+        row[field] = {"type": "array", "items": {"type": "string"}}
+    elif field == "annotations":
+        row[field] = {"readOnlyHint": False}
+    else:
+        row[field] = {"taskSupport": "optional"}
+    monkeypatch.setattr(installed, "tool_catalog", lambda: catalog)
+
+    def must_not_render(*_args, **_kwargs):
+        pytest.fail("changed catalog reached the confinement launcher")
+
+    monkeypatch.setattr(installed.AcpSeatbeltConfinement, "render", must_not_render)
+    with pytest.raises(ValueError, match="schema drift|execution metadata"):
+        dataclasses.replace(packet)
+    for callback in (
+        adapter._native_owner._launch_argv,
+        adapter._native_owner.attempt_overlay_builder,
+    ):
+        with pytest.raises(ValueError, match="schema drift|execution metadata"):
+            callback(
+                spec, spec.workspace_path.resolve(strict=True),
+                spec.run_dir.resolve(strict=True),
+            )
+
+
+def test_catalog_prose_is_not_a_new_contract_digest_law(tmp_path, monkeypatch):
+    installed = _installed()
+    packet = _confined_packet(tmp_path)
+    spec = _confined_spec(packet, tmp_path)
+    catalog = json.loads(json.dumps(tool_catalog()))
+    catalog[0]["description"] = "Reworded source documentation."
+    monkeypatch.setattr(installed, "tool_catalog", lambda: catalog)
+    assert dataclasses.replace(packet).tool_gate == packet.tool_gate
+    adapter = installed.InstalledAcpWorkerAdapter(packet)
+    workspace = spec.workspace_path.resolve(strict=True)
+    run_dir = spec.run_dir.resolve(strict=True)
+    assert adapter._native_owner._launch_argv(spec, workspace, run_dir)
+    overlay = adapter._native_owner.attempt_overlay_builder(spec, workspace, run_dir)
+    assert overlay["env"]["MMX_ACP_WORKER_ID"] == spec.worker_id
+
+
+@pytest.mark.parametrize("mutation", [
+    "sandbox", "network", "extra_grant", "missing_grant", "foreign_grant",
+    "disabled", "profile", "realm", "surface", "write",
+])
+def test_profile_widening_refuses_construction_and_native_preflight(
+    tmp_path, monkeypatch, mutation
+):
+    installed = _installed()
+    packet = _confined_packet(tmp_path)
+    spec = _confined_spec(packet, tmp_path)
+    adapter = installed.InstalledAcpWorkerAdapter(packet)
+    registry = ExecutionCapabilityRegistry.load()
+    profile = registry.resolve("worker.acp.providerfree.readonly.v1")
+    changes = {
+        "sandbox": {"sandbox_policy": "workspace-write"},
+        "network": {"network_policy": "enabled"},
+        "extra_grant": {
+            "mcp_server_grants": (*profile.mcp_server_grants, profile.mcp_server_grants[0]),
+        },
+        "missing_grant": {"mcp_server_grants": ()},
+        "foreign_grant": {"mcp_server_grants": (
+            dataclasses.replace(profile.mcp_server_grants[0], capability_id="foreign"),
+        )},
+        "disabled": {"enabled": False},
+        "profile": {"profile_id": "foreign.profile"},
+        "realm": {"auth_realm": "foreign-realm"},
+        "surface": {"execution_surface": "codex-app-server"},
+        "write": {"write_capable": True},
+    }
+    changed = dataclasses.replace(profile, **changes[mutation])
+
+    class Drifted:
+        # Keep the generation strings identical to exercise the semantic ceiling,
+        # in addition to the existing independent policy-generation drift test.
+        policy_version = registry.policy_version
+        policy_digest = registry.policy_digest
+
+        def resolve(self, _profile_id):
+            return changed
+
+    monkeypatch.setattr(
+        installed.ExecutionCapabilityRegistry, "load",
+        classmethod(lambda cls, *args, **kwargs: Drifted()),
+    )
+
+    def must_not_render(*_args, **_kwargs):
+        pytest.fail("widened profile reached the confinement launcher")
+
+    monkeypatch.setattr(installed.AcpSeatbeltConfinement, "render", must_not_render)
+    with pytest.raises(ValueError):
+        dataclasses.replace(packet)
+    for callback in (
+        adapter._native_owner._launch_argv,
+        adapter._native_owner.attempt_overlay_builder,
+    ):
+        with pytest.raises(ValueError):
+            callback(
+                spec, spec.workspace_path.resolve(strict=True),
+                spec.run_dir.resolve(strict=True),
+            )
