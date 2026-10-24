@@ -146,6 +146,15 @@ class NoEligibleWorkerCapacity(SupervisorError):
         super().__init__(f"no eligible worker capacity for {job_id}")
 
 
+def _is_direct_native_job(job: Job) -> bool:
+    """A closed routing hint only; Runtime still owns admission and access."""
+    if not isinstance(job.constraints, Mapping) or job.constraints.get("direct_native_policy") != "mastermind.direct_native_readonly/v1":
+        return False
+    from control_plane.direct_native_execution import job_is_direct
+
+    return job_is_direct(job)
+
+
 def validate_effective_grant(
     job: Job, attempt: Attempt, decision: AuthorityDecision
 ) -> dict[str, Any] | None:
@@ -164,7 +173,8 @@ def validate_effective_grant(
         or ("WRITE_BRANCH" in decision.requested and decision.worktree != job.worktree)
     ):
         raise SupervisorError("preauthorized decision does not match Job authority scope")
-    if job.orchestration_role is None:
+    direct = _is_direct_native_job(job)
+    if job.orchestration_role is None and not direct:
         if attempt.effective_grant is not None or attempt.effective_grant_digest is not None:
             raise SupervisorError("role-null Attempt carries orchestration grant evidence")
         return None
@@ -205,6 +215,16 @@ def validate_effective_grant(
     ).hexdigest()
     if digest != attempt.effective_grant_digest:
         raise SupervisorError("orchestration Attempt effective grant digest drifted")
+    if direct and (
+        job.orchestration_role is not None
+        or set(job.requested_authorities) != {"READ", "RESEARCH"}
+        or len(job.requested_authorities) != 2
+        or set(value["authorities"]) != {"READ", "RESEARCH"}
+        or len(value["authorities"]) != 2
+        or job.allowed_write_paths or job.validation_commands
+        or value["write_paths"] != [] or value["validation_argv"] != []
+    ):
+        raise SupervisorError("direct native Attempt requires its exact read-only grant")
     return dict(value)
 
 
@@ -1026,7 +1046,8 @@ def verify_commission_for_job(
 ) -> VerifiedCommission | None:
     """Verify exact commission bytes from canonical strict-v2 root provenance."""
 
-    if job.orchestration_role is None:
+    direct = _is_direct_native_job(job)
+    if job.orchestration_role is None and not direct:
         return None
     try:
         with runtime.store.read() as connection:
@@ -1036,6 +1057,8 @@ def verify_commission_for_job(
     except StateConflict as exc:
         raise SupervisorError(f"immutable commission source is invalid: {exc}") from exc
     if source is None:
+        if direct:
+            raise SupervisorError("direct native Job lost its admitted commission source")
         return None
     if workspace is None:
         raise SupervisorError("commission-bound Job has no assigned workspace")
@@ -1053,6 +1076,8 @@ def verify_commission_for_job(
             raise SupervisorError("commission local blob identity is unavailable")
         content = _read_local_commission_blob(workspace, local.blob_oid)
     else:
+        if direct:
+            raise SupervisorError("direct native commission requires complete prepared local objects")
         content = _fetch_remote_commission(
             repository=ref.repository,
             commit=commit,
@@ -1543,7 +1568,7 @@ class ExecutiveSupervisor:
                 }
             ):
                 raise SupervisorError("aggregation producer schema is not admitted by the handoff")
-        return worker_result_schema(
+        result = worker_result_schema(
             job_id=job.job_id,
             run_id=attempt.attempt_id,
             worker_id=attempt.worker_id,
@@ -1554,6 +1579,14 @@ class ExecutiveSupervisor:
             root_job_id=(job.root_job_id if job.orchestration_role else None),
             aggregation_schema_version=aggregation_version,
         )
+        if _is_direct_native_job(job):
+            # Native's strict bounded JSON-schema reader rejects unknown x-*
+            # keywords. The actual grant remains bound by the typed launch spec
+            # and sealed receipts; this supported annotation is only context.
+            result.pop("x-mastermind-effective-grant-digest", None)
+            result["description"] = f"Direct read-only effective grant SHA256: {attempt.effective_grant_digest}"
+            result["properties"]["artifacts"]["maxItems"] = 0
+        return result
 
     def _validate_aggregation_schema(
         self,
@@ -1774,17 +1807,20 @@ class ExecutiveSupervisor:
             packet["routing_options"] = routing_options
         if effective_grant is not None:
             packet["effective_grant_digest"] = attempt.effective_grant_digest
-            packet["orchestration"] = {
-                "role": job.orchestration_role,
-                "root_job_id": job.root_job_id,
-                "plan_attempt_id": job.plan_attempt_id,
-                "plan_digest": job.plan_digest,
-                "plan_step_id": job.plan_step_id,
-                "repair_round": job.repair_round,
-                "supersedes_job_id": job.supersedes_job_id,
-                "reviews_job_id": job.reviews_job_id,
-                "creation_provenance": job.orchestration_provenance,
-            }
+            if _is_direct_native_job(job):
+                packet["direct_native_policy"] = "mastermind.direct_native_readonly/v1"
+            else:
+                packet["orchestration"] = {
+                    "role": job.orchestration_role,
+                    "root_job_id": job.root_job_id,
+                    "plan_attempt_id": job.plan_attempt_id,
+                    "plan_digest": job.plan_digest,
+                    "plan_step_id": job.plan_step_id,
+                    "repair_round": job.repair_round,
+                    "supersedes_job_id": job.supersedes_job_id,
+                    "reviews_job_id": job.reviews_job_id,
+                    "creation_provenance": job.orchestration_provenance,
+                }
             if job.orchestration_role == "aggregation":
                 packet["orchestration"]["aggregation_handoff"] = (
                     self.runtime.jobs.get_cycle_handoff(job.job_id)
@@ -1981,6 +2017,8 @@ class ExecutiveSupervisor:
         if paid and profile_id != "fabric.paid.glm.sealed-input.v1":
             raise SupervisorError("paid adapter requires its exact execution profile")
         if not profile_id:
+            if _is_direct_native_job(job):
+                raise SupervisorError("direct native Job requires its sealed execution profile")
             worker = self.runtime.workers.get_worker(lease.attempt.worker_id)
             if worker is not None and str(worker.worker_type).strip().lower() == "attended-fabric":
                 raise SupervisorError("Fabric requires the exact finite attended read-only profile")
@@ -2042,6 +2080,17 @@ class ExecutiveSupervisor:
             raise SupervisorError(
                 "sealed worker refuses an incompatible execution profile or unimplemented surface"
             )
+        if _is_direct_native_job(job) and (
+            adapter_id != "codex-cli" or quota.provider != "codex"
+            or paid or self.cleanup_policy is not CleanupPolicy.DEDICATED_UID
+            or effective_grant is None
+            or profile_id != "sealed.worker.readonly.no-extensions.v1"
+            or profile.execution_surface != "codex-exec"
+            or profile.sandbox_policy != "read-only" or profile.write_capable
+            or profile.resource_grants or profile.skill_grants
+            or self.require_complete_launch_attestation is not True
+        ):
+            raise SupervisorError("direct native Job requires the sealed native read-only owner")
         authorities = (
             effective_grant["authorities"]
             if effective_grant is not None
@@ -2231,15 +2280,40 @@ class ExecutiveSupervisor:
     async def start_job(self, job_id: str) -> ActiveRun:
         """Claim and launch one legacy role-null Job."""
 
+        if _is_direct_native_job(self._job(job_id)):
+            raise SupervisorError("direct native Job requires its authenticated dispatch owner")
         lease = self.runtime.broker.claim(job_id, lease_owner=self.instance_id)
         if lease is None:
             raise SupervisorError(f"no eligible worker capacity for {job_id}")
         return await self._start_claimed_job(job_id, lease)
 
+    async def start_direct_native_job(
+        self, job_id: str, *, access: Any
+    ) -> ActiveRun | OrchestrationDispatchOutcome:
+        """Claim once through Runtime; every retained replay is a no-launch return."""
+        job = self._job(job_id)
+        if not _is_direct_native_job(job):
+            raise SupervisorError("Job is not admitted for direct native execution")
+        self.runtime.jobs.direct_native_provenance(job_id)
+        outcome = self.runtime.attempts.claim_job(
+            job_id, command_id=f"direct-native-dispatch:{job_id}",
+            lease_owner=self.instance_id, _direct_native_access=access,
+        )
+        if outcome is None:
+            raise NoEligibleWorkerCapacity(job_id)
+        if type(outcome) is OrchestrationDispatchOutcome:
+            return outcome  # Includes CLAIMED: replay is never permission to launch.
+        if (type(outcome) is not AttemptLease or outcome.attempt.job_id != job_id
+                or outcome.attempt.status is not AttemptStatus.CLAIMED):
+            raise SupervisorError("direct native claim returned an invalid fresh lease")
+        return await self._start_claimed_job(job_id, outcome, _direct_native_access=access)
+
     async def start_cycle_job(
         self, job_id: str, *, command_id: str
     ) -> ActiveRun | OrchestrationDispatchOutcome:
         """Use the existing exact child claim; replay never reissues a target."""
+        if _is_direct_native_job(self._job(job_id)):
+            raise SupervisorError("direct native Job is not a COO cycle child")
         target = (
             self._exact_target_provider(job_id)
             if self._exact_target_provider is not None else None
@@ -2271,6 +2345,7 @@ class ExecutiveSupervisor:
     async def _start_claimed_job(
         self, job_id: str, lease: AttemptLease, *,
         exact_target: ExactWorkerClaimTarget | None = None,
+        _direct_native_access: Any = None,
     ) -> ActiveRun:
         """Launch one already claimed exact Job and persist its principal."""
 
@@ -2326,6 +2401,10 @@ class ExecutiveSupervisor:
             review_input_suffix = self._reviewed_role_prompt_suffix(job, lease.attempt)
             if review_input_suffix and not spec.prompt.endswith(review_input_suffix):
                 raise SupervisorError("review subject changed after input sealing")
+            if _is_direct_native_job(job):
+                self.runtime.require_direct_native_launch_access(
+                    job_id, lease.attempt.attempt_id, _direct_native_access, lease=lease
+                )
             start_invoked = True
             if paid_supervisor.is_paid_adapter(self.adapter):
                 process_ref = await self.adapter.start(spec, lease=lease, control_recovery={
@@ -2685,6 +2764,68 @@ class ExecutiveSupervisor:
         }
         payload["terminal_evidence_digest"] = canonical_digest(payload)
         return payload
+
+    def _direct_native_terminal_payload(
+        self, *, active: ActiveRun, job: Job, output: Mapping[str, Any],
+        collection_path: Path, validation_path: Path, assignment_path: Path,
+    ) -> dict[str, Any]:
+        """Retain a role-null direct result using the genuine sealed receipts.
+
+        Runtime independently deep-validates this receipt before completion.
+        No role result, aggregation, product acceptance or self-hash is invented.
+        """
+        if (not _is_direct_native_job(job) or job.orchestration_role is not None
+                or active.effective_grant is None
+                or self.cleanup_policy is not CleanupPolicy.DEDICATED_UID
+                or paid_supervisor.is_paid_adapter(self.adapter)):
+            raise SupervisorError("direct native terminal requires the native sealed owner")
+        grant = self._effective_grant(job, active.lease.attempt)
+        if grant != active.effective_grant:
+            raise SupervisorError("direct native effective grant changed before completion")
+        from control_plane.codex_worker import validate_json_schema
+        from control_plane.executive_orchestration_result import canonical_digest
+
+        envelope = _jsonable(output)
+        try:
+            validate_json_schema(envelope, self._result_schema(
+                job=job, attempt=active.lease.attempt, effective_grant=grant))
+        except Exception as exc:
+            raise SupervisorError("direct native result protocol refused") from exc
+        _validate_output_scope(job, envelope)
+        if envelope["status"] != "COMPLETED" or envelope["artifacts"] != []:
+            raise SupervisorError("direct native completion refuses outputs or noncompletion")
+        provenance = self.runtime.jobs.direct_native_provenance(job.job_id)
+        if type(provenance) is not dict:
+            raise SupervisorError("direct native completion lost original admission")
+        collection = self._read_private_receipt(collection_path, name="direct collection receipt")
+        validations = self._read_private_receipt(validation_path, name="direct validation receipt")
+        assignment = self._read_private_receipt(assignment_path, name="direct assignment seal receipt")
+        result = collection.get("collection", {}).get("result")
+        if (not isinstance(result, dict) or result.get("artifact_manifest") != []
+                or result.get("structured_output") != envelope):
+            raise SupervisorError("direct collection differs from the retained result")
+        evidence = {
+            "schema_version": "mastermind.sealed_worker_result_evidence/v1",
+            "collection_receipt": collection,
+            "collection_receipt_digest": canonical_digest(collection),
+            "validation_receipts": validations,
+            "validation_receipts_digest": canonical_digest(validations),
+            "assignment_seal_receipt": assignment,
+            "assignment_seal_receipt_digest": canonical_digest(assignment),
+        }
+        return {
+            "schema_version": "mastermind.direct_native_terminal/v1",
+            "status": "COMPLETED", "job_id": job.job_id,
+            "attempt_id": active.lease.attempt.attempt_id,
+            "admission_digest": canonical_digest(provenance),
+            "payload": {key: envelope[key] for key in (
+                "summary", "current_state", "completed_steps", "next_actions")},
+            "result_evidence": evidence, "result_envelope": envelope,
+            "result_envelope_digest": canonical_digest(envelope),
+            "artifact_receipt_digest": canonical_digest(result["artifact_manifest"]),
+            "validation_receipt_digest": evidence["validation_receipts_digest"],
+            "effective_grant_digest": active.lease.attempt.effective_grant_digest,
+        }
 
     def _terminal_assignment_receipt_path(self, attempt_id: str) -> Path:
         return self._receipt_path(
@@ -3462,12 +3603,13 @@ class ExecutiveSupervisor:
             )
             return cancelled, (), None, await ensure_sealed()
         output = receipt.result.structured_output
+        direct = _is_direct_native_job(job)
         if receipt.result.status == WorkerRunStatus.SUCCEEDED and isinstance(output, Mapping):
             validation_receipts: tuple[ValidationReceipt, ...] = ()
             validation_path: Path | None = None
             try:
                 self._revalidate_authority(job, self.runtime.attempts.get_attempt(attempt.attempt_id) or attempt)
-                if job.orchestration_role is None:
+                if job.orchestration_role is None and not direct:
                     _validate_output_scope(job, output)
                     payload: JobPayload | dict[str, Any] = _payload_from_output(output)
                 else:
@@ -3500,7 +3642,7 @@ class ExecutiveSupervisor:
                             validation_path,
                             await ensure_sealed(),
                         )
-                if job.orchestration_role is None:
+                if job.orchestration_role is None and not direct:
                     self.runtime.attempts.checkpoint_attempt(
                         attempt.attempt_id,
                         fence_generation=fence,
@@ -3509,12 +3651,14 @@ class ExecutiveSupervisor:
                     )
                 if str(output.get("status")) == "COMPLETED":
                     assignment_path = await ensure_sealed()
-                    if job.orchestration_role is not None:
+                    if job.orchestration_role is not None or direct:
                         if validation_path is None:  # pragma: no cover - helper invariant
                             raise SupervisorError(
                                 "orchestration completion lost its validation receipt"
                             )
-                        payload = self._orchestration_terminal_payload(
+                        producer = (self._direct_native_terminal_payload if direct
+                                    else self._orchestration_terminal_payload)
+                        payload = producer(
                             active=active,
                             job=job,
                             output=output,

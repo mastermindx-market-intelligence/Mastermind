@@ -282,8 +282,8 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": 'fe9cb8e7abf68730023f4aeebb1eb480c5ff3f787ccefb62b3d520db70568074',
-    "sites": ((96, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1733, 46, 49, 'int', '400'), (1733, 66, 69, 'int', '500')),
+    "sha256": '8a8e7e98b4563bf251c980aef81ebc8c47209ea73ec27f85e221e8f8eb754999',
+    "sites": ((101, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1739, 46, 49, 'int', '400'), (1739, 66, 69, 'int', '500')),
 }
 
 
@@ -449,18 +449,18 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': 'e68f6df4d70ca6bc68260bfbd9b64d95a0209926ca70fb9dda9872915739093a',
+    'sha256': 'dbd0462bce4d33c049e18673638c0fff60f6525b5bf3611527bc5cb029b790a6',
     'sites': ((335, 24, 27, 'int', '501'),
-              (6535, 35, 37, 'int', '80'),
-              (6536, 50, 55, 'int', '0o755'),
-              (7073, 41, 46, 'int', '0o644')),
+              (6551, 35, 37, 'int', '80'),
+              (6552, 50, 55, 'int', '0o755'),
+              (7089, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': '13ffc81477c6f57fdbb345bfed3f2142af6a5485f887a845d9e19ef4bfaa6587',
-    'sites': ((55, 21, 24, 'int', '501'),),
+    'sha256': 'eabe51db9bb94dc3589b8d05a7f4bbe42799d179d8c8d26e6be534a68612c0ee',
+    'sites': ((60, 21, 24, 'int', '501'),),
 }
 
 

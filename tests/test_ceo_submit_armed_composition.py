@@ -1538,14 +1538,14 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 355)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # PR #1805 A2 rollback consumer requalification: disarmed legacy A2
-    # read-side selection changed this module; the installed event-loop AST
+    # H2 direct-native host composition: the qualified current-config/source
+    # generation callback changes this module; the installed event-loop AST
     # remains exactly the independently reviewed 060525... anchor below.
     # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
@@ -1554,7 +1554,7 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or reviewed_source_sha !=
-            'fa173be7d70af245edbeb4c15b02e3466b841df1662af8305d942caacd443bba'):
+            '7ec3b0e030bfdf7322039f899f0deae773a78aefd5e78cce1e5ca87f434fe3b8'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
