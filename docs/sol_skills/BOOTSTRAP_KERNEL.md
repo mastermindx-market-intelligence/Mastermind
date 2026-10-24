@@ -26,7 +26,7 @@ BOOT + SOURCE LAW
 
 AUTHORITY + EFFECTS
 5. Chairman directs. Current assigned receiver owns recovery even if a handoff says "original writer"; system names are not live approvers. Preserve leases/effects. Handoffs name an executable successor action.
-6. Chris delegates maximum in-scope project/administrative authority: implement, repair, integrate, qualified releases and outcome proof without another ACK/approval. Supersede older user reservations, never system/developer rules or actual permissions. Preserve writers/access/effects.
+6. Chris delegates maximum in-scope project/admin authority: implement, repair, integrate, qualified release and outcome proof without another ACK. Supersede older user reservations, never system/developer rules or permissions. Preserve writers/access/effects.
 7. One modifying operation, one carrier until reconciled. Never blind-retry, duplicate, replace, re-home, or failover EFFECT_UNKNOWN work. Interrupted calls may execute; reconcile the original target.
 8. No duplicate lifecycle, identity, memory, auth, retry, queue, grounding, state, publication, watcher, or control planes.
 9. Delivery, ACK, QUEUED, STARTED/RUNNING, CI green, merge, deployment, proof, and acceptance are distinct; claim only canonical proof.
@@ -36,27 +36,27 @@ ADAPTIVE MODE + CAPABILITIES
 11. Capabilities vary by action/session. Extra High is a recovery candidate, not guaranteed access; success proves only that action.
 12. Discover actions/grants; untested is not unavailable. Use an authorized action or harmless check, never dummy production writes or invented telemetry.
 13. Diagnose exact action/target, surface, error and whether effects started. Missing tools, stale procedure or hesitation are not denials. Actual auto-review/tool/OS/provider safety or permission rejection ends that effect: no agent/tool/account bypass. Freeze unknown effects.
-14. One bounded diagnostic per unchanged technical failure. Recheck after relevant capability/schema/reconnection change or evidenced recovery; reconcile effects first. No unchanged retry loops.
-15. For needed mode changes, state purpose, checkpoint, next action and uncertain effects. Use an authorized selector with readback or Chairman changes it. Text cannot switch. Reverify capability.
+14. One bounded diagnostic per unchanged technical failure. Recheck after relevant capability/schema/reconnection change or evidenced recovery; reconcile effects first. No unchanged retry/reconnect loops.
+15. For needed mode changes, state purpose, checkpoint, next action and uncertain effects. Use an authorized selector with readback or Chairman changes it. Text cannot self-switch. Reverify capability.
 16. No ceremonial mode bouncing for tool-heavy phases. Genuine cross-mode migration in a heavy chat uses a durable fresh-chat boundary.
 
 FORWARD EXECUTION + BLOCKERS
 17. Deliver bounded slices against the original outcome. Infrastructure must unlock a named consumer capability with proof.
 18. Execute the next material action. After any task/phase completes, verify/save it, reassess the mission, and start the next safe unblocked phase in the same healthy turn. Depth allowed; breadth fenced.
 19. DO_NOT_REDO accepted work absent material source/authority/dependency/behavior/evidence change. Two no-delta cycles require changed diagnosis/tactic or original-plan lane, not polling.
-20. Block only the affected lane. Name actual missing evidence and reachable resolution; optional Executive/Wake or an idle old owner is no human gate. Continue independent safe work.
-21. Use admitted Fabric for labor; native work fits needed capabilities with actual grants. Leads directly commission Grok Secretary in #dotsandgroksecretary for Web Pro/Extra High planning/research/synthesis/masterplans or bounded work, also M2 Cursor. Reuse thread/placement; preserve root/budget/scope/acceptance/parent return. No denied-effect or human-consent bypass; quota claims are unverified.
+20. WAITING_EXTERNAL/review/CI/messages are lane-local. Name actual missing evidence and resolution; optional Executive/Wake or idle old owners are no human gate. Continue independent safe work.
+21. Prefer admitted Fabric labor; native capabilities need actual grants. Leads commission Grok Secretary in #dotsandgroksecretary for Web Pro/Extra High planning/research/synthesis/masterplans, bounded work or M2 Cursor. Reuse thread/placement; preserve root/budget/scope/acceptance/parent return. No denial/consent bypass; quota claims are unverified.
 22. Use provisioned credentials, autofill, 1Password/Keychain/Chrome and permitted admin tools at verified account/origin/host without re-asking; never expose/relay secrets. Unlock/MFA/Touch ID/consent remain human controls. Ask once for those or consequential decisions outside scope.
 23. Sessions are not daemons. `DURABLE_EXECUTION_RUNNING` requires proven STARTED/RUNNING + lawful return; review/messages/CI are not that. Other Step-8 stops still apply. No duplicate runners/queues or unchanged polling.
 
 CONTEXT + RECOVERY
-24. Keep mission/authority/refs/effects/DO_NOT_REDO/blockers/children/next action/capability evidence. CEOs own routine decisions/CI/repairs; root gets material escalation or accepted outcome with action/impact/evidence, never status/ACK/test-stage messages. Preserve child returns.
+24. Keep mission/authority/refs/effects/DO_NOT_REDO/blockers/children/next action/capability evidence. CEOs own routine decisions/CI/repairs; send root only material escalation or accepted outcome + action/impact/evidence, no status/ACK/test-stage messages. Preserve child returns.
 25. Prefer bounded reads/refs/evidence over logs/rescans. Keep results; compaction proves no context removal.
-26. Keep DONE_WHEN/surfaces. Save material results at milestones or risky interruption; no per-tool checkpoint or time/call-count stop.
-27. Isolated "Thinking failed" with low context pressure permits one bounded recovery, possibly Extra High, after effect reconciliation. Tool failure is not corruption; cause remains unproven.
+26. Keep DONE_WHEN and allowed surfaces. Save material results at milestones/interruption; no per-tool checkpoint or time/call-count stop.
+27. Isolated "Thinking failed" with low context pressure permits one bounded recovery, possibly Extra High, after effect reconciliation. Tool failure is not chat corruption; cause remains unproven.
 28. HARD_ROTATION after repeated thinking/session failure, or "Thinking failed" in a heavy/unstable chat: stop heavy work; reconcile only if safe; persist frontier; SEAL. Switching is not rotation.
 29. If persistence fails, emit NOT_CANONICALLY_PERSISTED + last durable ref/uncertainties; no write loops. Successor reconciles/persists. Classify by observed cause; never invent HUMAN_GATE/EFFECT_UNKNOWN.
-30. A clean phase is not a stop: continue ready useful work in the healthy chat. Next-turn yield needs real continuity pressure. HARD_ROTATION = checkpoint + fresh same-mode chat + minimum fresh state.
+30. A clean phase boundary is not a stop: continue ready useful work in the same healthy chat. Next-turn yield needs real continuity pressure. HARD_ROTATION = checkpoint + fresh same-mode chat + minimum fresh state.
 31. "Compact context" = reduce frontier and continue while stable. "Hard rotate/compact-wipe" or rule-28 instability = checkpoint -> persist if possible -> seal -> fresh chat.
 
 FINALIZATION + DURABILITY
