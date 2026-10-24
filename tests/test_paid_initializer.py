@@ -26,6 +26,29 @@ def commitment():
 def selectors():return dict(host_ref='ubuntu2',transport_alias='ubuntu2',python_path='/usr/bin/python3',capture_root='/home/worker/lanes/ext/lanes')
 
 
+def _linux_completion(request):
+    # Structured Actions notice only after the real assertions complete. This
+    # gives the retained safe annotation API exact-case evidence; no XML or
+    # raw terminal escape rendering is required or claimed.
+    reporter=request.config.pluginmanager.getplugin('terminalreporter')
+    if reporter is not None:
+        reporter.write_line('::notice file=tests/test_paid_initializer.py,title=H1 Linux case executed::'
+            +request.node.name+' PASS Python '+'.'.join(map(str,sys.version_info[:3])))
+
+
+def _inert_bootstrap(request,probe):
+    # Public source location only; never emit environment/config/credential
+    # values if the deliberately simulated distribution does not qualify.
+    try:return m.run_bootstrap(request,probe)
+    except m.InitializerCommitmentRefused as error:
+        frame=error.__traceback__;site=None
+        while frame is not None:
+            if frame.tb_frame.f_code.co_filename==m.__file__ and frame.tb_frame.f_code.co_name!='refuse':
+                site=frame.tb_lineno
+            frame=frame.tb_next
+        raise AssertionError('inert initializer source guard refused at paid_initializer.py:'+str(site)) from error
+
+
 def test_closed_commitment_is_detached_expected_input():
     value=commitment();raw=m.canonical(value);proved=m.decode_commitment(raw,hashlib.sha256(raw).hexdigest(),**selectors())
     assert proved==value and proved is not value
@@ -61,7 +84,7 @@ def test_different_input_digest_is_not_approval():
 
 
 @pytest.mark.skipif(sys.platform!='linux',reason='requires actual Linux memfd sealing')
-def test_hook_snapshot_cannot_change_after_approval_even_when_original_changes(tmp_path):
+def test_hook_snapshot_cannot_change_after_approval_even_when_original_changes(tmp_path,request):
     original=tmp_path/'HOST_ENV.sh';raw=b'export MM_INERT_APPROVED=exact\n';original.write_bytes(raw)
     fd=m.sealed_snapshot(original.read_bytes())
     try:
@@ -72,10 +95,11 @@ def test_hook_snapshot_cannot_change_after_approval_even_when_original_changes(t
             pass_fds=(fd,),capture_output=True,check=True)
         assert result.stdout==b'exact'
     finally:os.close(fd)
+    _linux_completion(request)
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 fd-exec/getpath')
-def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path):
+def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,request):
     """Kernel image, argv0 and venv configuration are separate observations."""
     root=tmp_path/'venv';venv.EnvBuilder(with_pip=False).create(root)
     logical=root/'bin/python3';real=logical.resolve(strict=True)
@@ -93,10 +117,11 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path)
         assert json.loads(changed)['kernel']==str(real)
         assert json.loads(changed)['executable']!=str(logical)
     finally:os.close(fd)
+    _linux_completion(request)
 
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
-def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch):
+def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request):
     """Real FD/snapshot/Bash/getpath; Root distribution ownership is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
@@ -148,7 +173,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat)
         monkeypatch.setenv('HOME',account.pw_dir)
-        result=json.loads(m.run_bootstrap(req,qualifier.m._REMOTE_PROBE))
+        result=json.loads(_inert_bootstrap(req,qualifier.m._REMOTE_PROBE))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
         assert result['context_identity']['host_env_sha256']==c['host_env']['sha256']
@@ -161,7 +186,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
             +'command() { printf /forged/python3; }; exec() { echo forged > '+str(forged)+'; printf "{}"; }; export -n -f command exec\n')
         c['host_env'].update(sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size)
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
-        actual=json.loads(m.run_bootstrap(req,qualifier.m._REMOTE_PROBE))
+        actual=json.loads(_inert_bootstrap(req,qualifier.m._REMOTE_PROBE))
         assert actual['binary']['real_path']==str(real) and not forged.exists()
         # Unsupported startup projection refuses before the approved hook body.
         marker=Path(scratch)/'must-not-exist'
@@ -171,6 +196,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
         with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
         assert not marker.exists()
+    _linux_completion(request)
 
 
 @pytest.mark.parametrize('raw',[b'HOME=x',b'HOME=x\0HOME=y\0',b'BASH_FUNC_exec%%=x\0',
