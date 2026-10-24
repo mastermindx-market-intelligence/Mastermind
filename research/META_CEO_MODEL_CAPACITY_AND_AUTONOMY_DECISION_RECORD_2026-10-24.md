@@ -1,6 +1,6 @@
 # Meta-CEO model capacity, autonomy, and deployment decision record
 
-**As of:** 2026-10-24. **Mode:** RESEARCH / CHAIRMAN-INTENT RECORD / NOT PRODUCTION PROOF. **Operation:** \`meta-ceo-open-harness-convergence-20261024-sol-001\`.
+**As of:** 2026-10-24. **Mode:** RESEARCH / CHAIRMAN-INTENT RECORD / NOT PRODUCTION PROOF. **Operation:** `meta-ceo-open-harness-convergence-20261024-sol-001`.
 
 **Purpose:** Preserve the relevant October 2026 Chairman conversation decisions and research inputs in Git, so the current Mastermind Meta-CEO program can reuse them. This is **not** a new company decision owner, production capacity grant, approved purchase, provider account inventory, architectural override, or authorization for a hosted rollout.
 
