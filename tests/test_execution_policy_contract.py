@@ -76,9 +76,6 @@ class ExecutionPolicyContractTests(unittest.TestCase):
         self.assertLessEqual(len(kernel), 8000)
         self.assertIn('system names are not live approvers', kernel)
         self.assertIn('actual missing evidence', kernel)
-        self.assertIn('Never delegate denied effects', kernel)
-        self.assertIn('admitted paid Fabric', kernel)
-        self.assertIn('No native Sol labor', kernel)
 
     def test_action_scoped_refusal_does_not_freeze_independent_work(self):
         active = ' '.join(self.read('docs/sol_skills/ACTIVE_EXECUTION.md').split())

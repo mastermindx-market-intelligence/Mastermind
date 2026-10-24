@@ -27,6 +27,8 @@ This is the Executive Ecosystem programme ownership split. Do not collapse these
 
 Ownership is a role, not a session: if the named owner is absent, orphaned or not you, assume leadership, record the takeover, proceed; independent review still required; never self-merge or approve.
 
+The fenced ChatGPT Project kernel in `docs/sol_skills/BOOTSTRAP_KERNEL.md` is the same artifact as #1842. This contract does not edit that text. Kernel wording, including any Project-instruction leadership clause, is reconciled on #1842 and the stack that owns it.
+
 Executive OS may present one coherent **project cockpit**, but each mutation goes to the owner of that fact: task-tree edits to the repo plan writer, wave/handoff/decision edits to the Agent OS writer, runtime effects through existing Executive admission. No second plan database and no independent `latest` checkpoint directory. One project may have a deep task tree while each bounded Executive execution plan remains subject to its own existing validator and step limit. Never expand the admitted-plan schema to hundreds of nested steps just to mimic the task tree.
 
 ## A. Before substantial project execution: acquire or create the plan

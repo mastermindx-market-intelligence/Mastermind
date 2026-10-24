@@ -78,16 +78,6 @@ second workstream or a second task registry, guess wave or Job status from a tas
 label, displace a STARTed worker, or call a GitHub draft an Agent OS checkpoint. If the writer is genuinely unavailable, report the precise
 persistence gap and continue independent safe scope.
 
-### Project bootstrap projection
-
-After a verified compatible pin, compare this session's embedded `bootstrap_revision`
-with the same-SHA fenced kernel in `BOOTSTRAP_KERNEL.md`. A mismatch is
-`PROJECT_BOOTSTRAP_DRIFT`: report the protected revision and kernel SHA-256, then name
-the safe next action (an authorized Project editor copies the approved fenced block).
-Follow current protected procedure anyway; do not invent a new admission, identity or
-control plane. If Project-settings write/read is unavailable, record `PROJECT_SYNC_PENDING`.
-A source merge is not Project-settings adoption.
-
 ## Step 3 — Read canonical sources in a bounded ladder
 
 Use the smallest ladder sufficient for the task:
