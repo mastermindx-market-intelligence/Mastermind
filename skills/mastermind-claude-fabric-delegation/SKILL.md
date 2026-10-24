@@ -38,6 +38,21 @@ The original `request` may have executed if its tool response times out. **Never
 
 Invoke `fabric_request` **once**, supplying `run_id`, `root_id`, `parent_id`, `task_class`, `task_complexity`, and `work_packet`. The normal sequence is `fabric_status` -> `fabric_result` -> parent review -> `fabric_accept` with the returned digest and verification summary. `fabric_wait` is a short bounded observation, not a scheduler. Never treat a text receipt as original-root identity authentication.
 
+## Parent recovery status is staging-only, not an auto-resume command
+
+A source-proposed `parent_recovery` value on the Web `fabric_status` or
+`fabric_wait` response is diagnostic-only. The installed native status remains
+the owner, and an attended Mastermind OS DTO consumer does not automatically
+receive this optional Web facade field. `root_id:null` can retain an observed
+failure/active disposition while `root_verified:false` **forbids parent
+attention**. A prelaunch `request_root_id` provides correlation only. All
+projection `wake_proven`, `retry_authorized`, `dispatch_authorized`, and
+`result_consumption_authorized` flags stay false; no source merge or suggested
+disposition can override them. Reconcile the **same original controller**;
+never spawn, switch providers or accept a result based on the projection.
+Only the existing authorized Executive/Agent OS wake and session-binding
+owners may subsequently prove a true parent delivery and consumption.
+
 ## To commission an operator that can itself delegate
 
 An ordinary leaf gets no descendant tools. A `domain_orchestration` operator can request C0/C1 descendants **only** when the controller has issued an immutable original-root allowance and its admitted launch has an opt-in `POOL_OPERATOR_CHILD_BUDGET`, a supported model/harness, a bound per-run capability and enough deadline/budget. Refer to `integrations/session_bridge/paid_operator/OPERATOR_QUICKSTART.md` for the incumbent original-root allowance and opt-in. The original principal keeps acceptance and any reserved decisions; do not mint a second root to extend the budget.

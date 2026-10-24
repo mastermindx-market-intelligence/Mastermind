@@ -209,9 +209,12 @@ export function projectFabricParentRecovery(s, expectedRoot) {
     && s.request_root_id===expectedRoot;
   const controller=s.continuation?.controller_return;
   let disposition='WAIT_ORIGINAL_CONTROLLER';
-  // A controller's uncertain return outranks any apparently successful leaf.
-  if (!rootVerified) disposition=prelaunchCorrelated
-    ? 'RECONCILE_PRELAUNCH_REFUSAL' : 'VERIFY_ORIGINAL_LINEAGE';
+  // A foreign attested root is not our original run. Preserve its mismatch
+  // label; otherwise retain the native state-specific diagnosis even when
+  // the native root is legitimately unverified/null. No new parent authority.
+  const foreignRoot=typeof s.root_id==='string' && s.root_id!==expectedRoot;
+  // For this original run, controller uncertainty outranks apparent success.
+  if (foreignRoot) disposition='VERIFY_ORIGINAL_LINEAGE';
   else if (s.state==='EFFECT_UNKNOWN' || controller==='UNCONFIRMED'
       || ['STATUS_UNREADABLE','RESULT_UNAVAILABLE','REQUEST_RETAINED_NO_START_EVIDENCE'].includes(s.state))
     disposition='RECONCILE_ORIGINAL_EFFECT';
@@ -223,11 +226,15 @@ export function projectFabricParentRecovery(s, expectedRoot) {
   } else if (['TERMINAL','TERMINAL_FAILURE'].includes(s.state) && s.signal==='quota')
     disposition='CAPACITY_BLOCKED_OR_REVIEW_FAILED';
   else if (s.state==='REQUEST_REFUSED_BEFORE_LAUNCH'
-      && s.execution_absence_proven===true)
+      && s.execution_absence_proven===true && (rootVerified || prelaunchCorrelated))
     disposition='RECONCILE_PRELAUNCH_REFUSAL';
   else if (['TERMINAL','TERMINAL_FAILURE','RECONCILED_PRESTART_FAILURE','RECONCILED_PREEXEC_FAILURE']
       .includes(s.state))
     disposition='RECONCILE_TERMINAL_FAILURE';
+  else if (['ACTIVE_OR_WAITING','SETTLING'].includes(s.state))
+    disposition='WAIT_ORIGINAL_CONTROLLER';
+  else if (!rootVerified)
+    disposition='VERIFY_ORIGINAL_LINEAGE';
   const attentionRequired=!['WAIT_ORIGINAL_CONTROLLER','VERIFY_ORIGINAL_LINEAGE']
     .includes(disposition);
   return {

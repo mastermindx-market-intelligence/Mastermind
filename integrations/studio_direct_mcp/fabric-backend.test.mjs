@@ -635,6 +635,43 @@ test('parent attention: missing final 429 or effect unknown never promotes to re
  assert.equal(third.dispatch_authorized,false);
  assert.equal(e.calls.length,3);
 });
+test('parent attention: adapter-shaped rootless states retain diagnoses but no authority',async()=>{
+  // Native _acceptance_unknown statuses and the attended DTO legitimately
+  // have root_id:null before the original ledger attests a worker root.
+  const rootless={...absent,rc:null,signal:null,result_bytes:null,accepted:null,
+    accepted_by:null,acceptance_state:'UNVERIFIED',acceptance_reason:'EXECUTION_NOT_ELIGIBLE'};
+  const rows=[
+    [{...rootless,state:'EFFECT_UNKNOWN',signal:'effect_unknown'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'STATUS_UNREADABLE'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'RESULT_UNAVAILABLE'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'REQUEST_RETAINED_NO_START_EVIDENCE'},'RECONCILE_ORIGINAL_EFFECT'],
+    [{...rootless,state:'TERMINAL_FAILURE',rc:1,signal:'prelaunch_failure'},'RECONCILE_TERMINAL_FAILURE'],
+    [{...rootless,state:'ACTIVE_OR_WAITING'},'WAIT_ORIGINAL_CONTROLLER'],
+    [{...rootless,state:'SETTLING'},'WAIT_ORIGINAL_CONTROLLER'],
+    [{...rootless,state:'NOT_FOUND'},'VERIFY_ORIGINAL_LINEAGE'],
+    [{...rootless,state:'TERMINAL',rc:0,signal:'ok',result_available:true,result_bytes:15},'RESULT_VERIFICATION_REQUIRED'],
+    [{...rootless,state:'TERMINAL',rc:0,signal:'ok',result_available:true,result_bytes:15,
+      continuation:{controller_return:'UNCONFIRMED'}},'RECONCILE_ORIGINAL_EFFECT'],
+  ];
+  const e=engine(rows.map(([s])=>capturedJSON(s))),f=facade(e);
+  for(const [status,disposition] of rows){
+    const v=unwrap(await f.call('fabric_status',id)).parent_recovery;
+    assert.equal(v.disposition,disposition,status.state);
+    assert.equal(v.root_verified,false);
+    assert.equal(v.request_correlation_only,false);
+    assert.equal(v.parent_attention_required,false);
+    assert.equal(v.wake_proven,false);
+    assert.equal(v.retry_authorized,false);
+    assert.equal(v.dispatch_authorized,false);
+    assert.equal(v.result_consumption_authorized,false);
+  }
+  assert.equal(e.calls.length,rows.length);
+  const foreign={...rootless,root_id:'different-native-root',state:'EFFECT_UNKNOWN',signal:'effect_unknown'};
+  const crossRoot=api.projectFabricParentRecovery(foreign,id.root_id);
+  assert.equal(crossRoot.disposition,'VERIFY_ORIGINAL_LINEAGE');
+  assert.equal(crossRoot.root_verified,false);
+  assert.equal(crossRoot.parent_attention_required,false);
+});
 test('parent attention: native prelaunch request correlation is not authenticated root or wake',async()=>{
  const refused={...done,state:'REQUEST_REFUSED_BEFORE_LAUNCH',
    root_id:null,parent_run_id:null,request_root_id:id.root_id,request_parent_run_id:'mission-001',
