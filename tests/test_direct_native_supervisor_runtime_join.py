@@ -86,6 +86,12 @@ def make_direct_supervisor(runtime, *, workspace_root, runs_root, provider_home)
         instance_id='joined-direct-supervisor')
 
 
+def _execution(access):
+    # Explicit fake execution-authority seam, separate from base read/admission.
+    # The actual capability checker/Runtime predicates are never stubbed.
+    return dn._issue_execution_access(access,lambda:None)
+
+
 def _source(root):
     source=root/'source'; source.mkdir(mode=0o700)
     home=root/'git-home'; home.mkdir(mode=0o700)
@@ -129,7 +135,7 @@ def joined(tmp_path):
     receipt=ceo_intent.submit_intent(runtime,intent,workspace_root=workspaces,direct_admission=admission)
     job=runtime.jobs.get_job(receipt['job_id'])
     runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,
-        shared_gid=os.getegid(),access=access)
+        shared_gid=os.getegid(),access=_execution(access))
     metadata={k:binding[k] for k in ('routing_policy_version','execution_profile_id',
         'execution_profile_digest','capability_policy_version','capability_policy_digest')}
     metadata['adapter_id']='codex-cli'
@@ -146,8 +152,9 @@ def joined(tmp_path):
 
 def _complete(f):
     runtime,job,access,_,adapter,supervisor=f
-    active=asyncio.run(supervisor.start_direct_native_job(job.job_id,access=access))
-    replay=asyncio.run(supervisor.start_direct_native_job(job.job_id,access=access))
+    execution=_execution(access)
+    active=asyncio.run(supervisor.start_direct_native_job(job.job_id,access=execution))
+    replay=asyncio.run(supervisor.start_direct_native_job(job.job_id,access=execution))
     assert type(replay) is er.OrchestrationDispatchOutcome
     assert replay.attempt.attempt_id==active.lease.attempt.attempt_id and adapter.start_count==1
     receipt=asyncio.run(supervisor.finish_job(active))
@@ -195,7 +202,7 @@ def test_actual_direct_producer_bounded_result_explicit_consume_replay_and_reope
         reopened=er.Runtime.at(runtime.store.root,create=False,read_binding=binding)
         again=reopened.read_direct_native_result_bounded(request,access=access)
         assert again==acknowledged and again['consumption']['receipt_digest']==original_receipt
-        terminal_replay=asyncio.run(supervisor.start_direct_native_job(job.job_id,access=access))
+        terminal_replay=asyncio.run(supervisor.start_direct_native_job(job.job_id,access=_execution(access)))
         assert type(terminal_replay) is er.OrchestrationDispatchOutcome and adapter.start_count==1
     finally:
         _release(keeper,binding)
@@ -234,7 +241,7 @@ def test_actual_expired_lease_during_preparation_never_starts_adapter(joined,mon
         return spec
     monkeypatch.setattr(supervisor,'_launch_spec',advance_after_sealing)
     with pytest.raises(er.RuntimeProofError):
-        asyncio.run(supervisor.start_direct_native_job(job.job_id,access=access))
+        asyncio.run(supervisor.start_direct_native_job(job.job_id,access=_execution(access)))
     assert adapter.start_count==0
     attempts=runtime.attempts.list_attempts(job.job_id)
     assert len(attempts)==1 and attempts[0].status is er.AttemptStatus.CLAIMED
@@ -247,7 +254,7 @@ def test_actual_expired_lease_during_preparation_never_starts_adapter(joined,mon
 def test_actual_final_gate_refuses_other_lease_identity(joined,field):
     runtime,job,access,_,adapter,supervisor=joined
     lease=runtime.attempts.claim_job(job.job_id,command_id='direct-native-dispatch:'+job.job_id,
-        lease_owner=supervisor.instance_id,_direct_native_access=access)
+        lease_owner=supervisor.instance_id,_direct_native_access=_execution(access))
     assert type(lease) is er.AttemptLease
     if field=='token':
         wrong=er.AttemptLease(attempt=lease.attempt,lease_token='wrong-token')
@@ -256,7 +263,7 @@ def test_actual_final_gate_refuses_other_lease_identity(joined,field):
             'worker_id' if field=='worker' else 'quota_class':'foreign-identity'}
         wrong=er.AttemptLease(attempt=dataclasses.replace(lease.attempt,**change),lease_token=lease.lease_token)
     with pytest.raises(er.RuntimeProofError):
-        runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=wrong)
+        runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,_execution(access),lease=wrong)
     assert adapter.start_count==0
 
 
@@ -300,3 +307,33 @@ def test_actual_bound_direct_read_refuses_oversized_event_before_python_material
         assert materialized==[]
     finally:
         _release(keeper,binding)
+
+
+def test_actual_base_admission_read_capability_cannot_allocate_or_launch(joined):
+    runtime,job,access,_,adapter,supervisor=joined
+    with pytest.raises(er.StateConflict,match='execution access'):
+        runtime.jobs.prepare_direct_native_workspace(job.job_id,
+            source_repository=Path(job.worktree).parent.parent/'source',shared_gid=os.getegid(),access=access)
+    with pytest.raises(er.StateConflict,match='exact host dispatch'):
+        asyncio.run(supervisor.start_direct_native_job(job.job_id,access=access))
+    assert runtime.attempts.list_attempts(job.job_id)==[] and adapter.start_count==0
+
+
+def test_actual_execution_guard_revoked_after_preparation_never_starts_adapter(joined,monkeypatch):
+    runtime,job,access,_,adapter,supervisor=joined
+    current=[True]
+    def execution_guard():
+        if not current[0]:raise ValueError('fixture current execution authority revoked')
+    execution=dn._issue_execution_access(access,execution_guard)
+    original=supervisor._launch_spec
+    def revoke_after_sealing(*args,**kwargs):
+        spec=original(*args,**kwargs)
+        current[0]=False
+        return spec
+    monkeypatch.setattr(supervisor,'_launch_spec',revoke_after_sealing)
+    with pytest.raises(er.RuntimeProofError,match='execution authority revoked'):
+        asyncio.run(supervisor.start_direct_native_job(job.job_id,access=execution))
+    assert adapter.start_count==0
+    attempts=runtime.attempts.list_attempts(job.job_id)
+    assert len(attempts)==1 and attempts[0].pid is None
+    assert attempts[0].status is er.AttemptStatus.FAILED
