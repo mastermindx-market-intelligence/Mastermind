@@ -63,6 +63,7 @@ _MISSION_ROUTE = "/workspace/mission/current"
 _MISSION_V3_ROUTE = "/workspace/mission/v3/current"
 _MISSION_V4_ROUTE = "/workspace/mission/v4/current"
 _RESULT_ROUTE = "/workspace/result/current"
+_MISSION_RESULT_ROUTE = "/workspace/mission-result/current"
 _PLAN_ROUTE = "/workspace/plan/current"
 _ACTIVITY_ROUTE = "/workspace/operator/activity/current"
 _ACTIVITY_QUERY_KEYS = frozenset({"work_ref", "root_job_id", "job_id", "attempt_id"})
@@ -334,7 +335,7 @@ def _dispatch_v2_selection(operation: str, query: Mapping[str, str]) -> dict[str
             return selection({k: query[k] for k in ("work_ref", "root_job_id")})
         except (TypeError, ValueError):
             return None
-    if operation == "result":
+    if operation in ("result", "mission_result"):
         return _v2_selection(query)
     if operation == "retained_activity":
         from common import executive_workspace_activity_contract as activity
@@ -740,6 +741,13 @@ async def _dispatch_v2(
                 "schema": contract.FRAME_SCHEMA_V3, "operation": operation,
                 "selection": contract.v3_selection(selection_value), "principal": principal_frame,
             })
+        elif operation == "mission_result":
+            frame = contract.validate_mission_result_frame({
+                "schema": contract.MISSION_RESULT_FRAME_SCHEMA,
+                "operation": contract.MISSION_RESULT_OPERATION,
+                "selection": contract.v2_selection(selection_value, "result"),
+                "principal": principal_frame,
+            })
         else:
             frame = contract.validate_v2_frame({
                 "schema": contract.FRAME_SCHEMA_V2,
@@ -852,6 +860,42 @@ async def mission_v3_current(
     )
 
 
+def _mission_result_envelope_response(envelope: Mapping[str, Any]) -> JSONResponse:
+    """Return the compound BODY. The socket ceiling stays the incumbent 2_000_000."""
+
+    if type(envelope) is dict and envelope.get("ok") is True:
+        result = envelope.get("result")
+        try:
+            if set(envelope) != {"ok", "result"} or type(result) is not dict:
+                raise ValueError("invalid_response")
+            contract.validate_mission_result_body(result)
+            body = contract.bounded_canonical(dict(result), limit=contract.MAX_COMPOUND_RESPONSE_BYTES)
+        except (TypeError, ValueError):
+            return _refuse_json(503, "source_unavailable")
+        status = 503 if result.get("availability") == "UNAVAILABLE" else 200
+        return Response(body, status_code=status, media_type="application/json",
+                        headers={"Cache-Control": "no-store"})
+    return _v2_envelope_response(envelope, operation="mission_v3")
+
+
+async def mission_result_current(
+    request: Request, *, config: WorkspaceAppConfig,
+) -> JSONResponse:
+    """Handle ``GET /workspace/mission-result/current``.
+
+    The five-field Result selector, the existing authentication and permission
+    recheck, and one App-peer Unix frame. No new account or grant rule.
+    """
+
+    return await _dispatch_v2(
+        request,
+        config=config,
+        operation="mission_result",
+        required_keys=_RESULT_QUERY_KEYS,
+        response_fn=_mission_result_envelope_response,
+    )
+
+
 async def result_current(
     request: Request, *, config: WorkspaceAppConfig,
 ) -> JSONResponse:
@@ -949,6 +993,7 @@ class _RawPathFence:
         _MISSION_V3_ROUTE,
         _MISSION_V4_ROUTE,
         _RESULT_ROUTE,
+        _MISSION_RESULT_ROUTE,
         _PLAN_ROUTE,
         _ACTIVITY_ROUTE,
     )
@@ -1006,6 +1051,9 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
     async def result_endpoint(request: Request) -> JSONResponse:
         return await result_current(request, config=config)
 
+    async def mission_result_endpoint(request: Request) -> JSONResponse:
+        return await mission_result_current(request, config=config)
+
     async def plan_endpoint(request: Request) -> JSONResponse:
         return await plan_current(request, config=config)
 
@@ -1019,6 +1067,7 @@ def create_workspace_app(config: WorkspaceAppConfig) -> Any:
         Route(_MISSION_V3_ROUTE, mission_v3_endpoint, methods=["GET"]),
         Route(_MISSION_V4_ROUTE, mission_v4_endpoint, methods=["GET"]),
         Route(_RESULT_ROUTE, result_endpoint, methods=["GET"]),
+        Route(_MISSION_RESULT_ROUTE, mission_result_endpoint, methods=["GET"]),
         Route(_PLAN_ROUTE, plan_endpoint, methods=["GET"]),
         Route(_ACTIVITY_ROUTE, activity_endpoint, methods=["GET"]),
     ]

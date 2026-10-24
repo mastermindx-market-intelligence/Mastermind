@@ -25788,6 +25788,190 @@ def _read_role_result_bounded(
         vm_guard.deactivate()
 
 
+def _accounted_root_snapshot(loader: _BoundedRoleResultLoader, root_token: str) -> BoundedRuntimeRootSnapshot:
+    """One root page through the shared role-result loader.
+
+    The fixed root ceilings stay 17 Jobs, 20 Attempts per Job and 340 Attempts.
+    Every statement, including the size-check aggregate, is charged to ``loader``.
+    """
+
+    row = loader.execute(
+        "SELECT job_id,parent_job_id,root_job_id,depth FROM jobs WHERE job_id=?",
+        (root_token,),
+    ).fetchone()
+    if (
+        row is None
+        or row["job_id"] != root_token
+        or row["parent_job_id"] is not None
+        or row["root_job_id"] != root_token
+        or int(row["depth"]) != 0
+    ):
+        raise StateConflict("bounded acquisition root_job_id is not an existing root Job")
+    page_limit = 1 + BOUNDED_RUNTIME_ROOT_MAX_CHILDREN
+    rows = loader.execute(
+        "SELECT * FROM jobs WHERE (root_job_id=?) ORDER BY depth,created_at_ms,job_id LIMIT ?",
+        (root_token, page_limit + 1),
+    ).fetchall()
+    jobs_truncated = len(rows) > page_limit
+    page_rows = rows[:page_limit]
+    if not page_rows or str(page_rows[0]["job_id"]) != root_token:
+        raise PersistenceError("bounded Runtime root membership is invalid")
+    jobs = tuple(_job_from_row(item) for item in page_rows)
+    attempts: list[Attempt] = []
+    truncated_attempt_jobs: list[str] = []
+    for job in jobs:
+        attempt_rows = loader.execute(
+            "SELECT * FROM attempts WHERE (job_id=?) ORDER BY job_id,attempt_number LIMIT ?",
+            (job.job_id, BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS + 1),
+        ).fetchall()
+        if len(attempt_rows) > BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS:
+            truncated_attempt_jobs.append(job.job_id)
+            attempt_rows = attempt_rows[:BOUNDED_RUNTIME_JOB_MAX_ATTEMPTS]
+        attempts.extend(_attempt_from_row(item) for item in attempt_rows)
+    if len(attempts) > BOUNDED_RUNTIME_ROOT_MAX_ATTEMPTS_TOTAL:
+        raise PersistenceError("bounded Runtime attempt budget exceeded")
+    attempts_tuple = tuple(attempts)
+    truncated_tuple = tuple(truncated_attempt_jobs)
+    payload = {
+        "schema_version": BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        "root_job_id": root_token,
+        "jobs": [job.to_dict() for job in jobs],
+        "attempts": [attempt.to_dict() for attempt in attempts_tuple],
+        "jobs_truncated": jobs_truncated,
+        "attempts_truncated_job_ids": list(truncated_tuple),
+    }
+    return BoundedRuntimeRootSnapshot(
+        schema_version=BOUNDED_RUNTIME_ROOT_SNAPSHOT_SCHEMA,
+        root_job_id=root_token,
+        jobs=jobs,
+        attempts=attempts_tuple,
+        jobs_truncated=jobs_truncated,
+        attempts_truncated_job_ids=truncated_tuple,
+        snapshot_digest=_bounded_runtime_snapshot_digest(payload),
+    )
+
+
+def _accounted_creation_event(observation: "BoundedRuntimeReadObservation", loader: _BoundedRoleResultLoader) -> Event:
+    """Charge the strict-root creation point read to the shared loader.
+
+    The retained connection alone is not accounting. This is selection work,
+    not observation setup. The validated Event is cached so a later point
+    read inside the same observation does not query again.
+    """
+
+    retained = [
+        (command_id, recorded)
+        for command_id, recorded in observation._commands.items()
+    ]
+    if len(retained) != 1:
+        raise RuntimeReadUnavailable("retained root creation command is not exact")
+    command_id, (job_id, digest, source_digest, creator) = retained[0]
+    rows = loader.execute(
+        "SELECT * FROM events WHERE command_id=?",
+        (command_id,),
+    ).fetchall()
+    if len(rows) != 1:
+        raise RuntimeReadUnavailable("retained root creation event cardinality is not exact")
+    event = _event_from_row(rows[0])
+    payload = event.payload
+    provenance = payload.get("provenance") if isinstance(payload, Mapping) else None
+    common = (
+        event.event_type == "JOB_CREATED"
+        and event.command_id == command_id
+        and event.job_id == event.aggregate_id == job_id
+        and event.aggregate_type == "job"
+        and isinstance(payload, Mapping)
+        and isinstance(provenance, Mapping)
+        and payload.get("orchestration_role") == "aggregation"
+        and payload.get("orchestration_provenance_digest") == digest
+    )
+    if not common:
+        raise RuntimeReadUnavailable("creation Event identity disagrees with included Job")
+    if creator == CEO_ORCHESTRATION_ROOT_CREATOR:
+        valid_creator = (
+            provenance.get("schema") == "mastermind.ceo_intent.v2"
+            and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+            and provenance.get("fingerprint") == source_digest
+        )
+    elif creator == PRINCIPAL_ORCHESTRATION_ROOT_CREATOR:
+        valid_creator = (
+            provenance.get("schema") == "mastermind.executive_principal_orchestration.v1"
+            and "ceo-intent:" + str(provenance.get("intent_id")) == command_id
+            and provenance.get("action_kind") == "governed_orchestration"
+            and provenance.get("actor") == "coo-principal"
+            and provenance.get("seat") == "coo"
+            and provenance.get("bundle_digest") == source_digest
+        )
+    else:
+        valid_creator = False
+    if not valid_creator:
+        raise RuntimeReadUnavailable("creation Event source disagrees with included Job")
+    observation._events[command_id] = event
+    return event
+
+
+@dataclasses.dataclass(frozen=True)
+class BoundedRootRoleResult:
+    """Root snapshot and one selected role result from a single selection."""
+
+    root: BoundedRuntimeRootSnapshot
+    role_result: BoundedRoleResultSnapshot
+    creation_event: Event
+    observation_source_identity: str | None = None
+
+
+def _read_root_role_result_bounded(
+    observation: "BoundedRuntimeReadObservation",
+    acquisition: BoundedRuntimeAcquisition,
+    vm_guard: _RuntimeReadProgressGuard,
+    *,
+    root_job_id: str,
+    job_id: str,
+    expected_attempt_id: str,
+    expected_result_envelope_digest: str,
+) -> BoundedRootRoleResult:
+    """Root, role result and creation event on one loader and one VM budget."""
+
+    root_token = _bounded_acquisition_identifier(root_job_id, name="root")
+    job_token = _bounded_acquisition_identifier(job_id, name="Job")
+    attempt_token = _bounded_acquisition_identifier(expected_attempt_id, name="Attempt")
+    digest_token = expected_result_envelope_digest
+    if type(digest_token) is not str or _DIGEST_RE.fullmatch(digest_token) is None:
+        raise StateConflict("bounded role-result read requires the canonical envelope digest")
+    acquisition._require_open()
+    loader = _BoundedRoleResultLoader(acquisition._connection)
+    vm_guard.activate()
+    try:
+        root = _accounted_root_snapshot(loader, root_token)
+        observation._remember(root.jobs)
+        role_result = _bounded_role_result_material(
+            loader,
+            root_token=root_token,
+            job_token=job_token,
+            attempt_token=attempt_token,
+            digest_token=digest_token,
+        )
+        creation_event = _accounted_creation_event(observation, loader)
+        if creation_event.job_id != root_token:
+            raise RuntimeReadUnavailable("retained creation event is not the selected root")
+        if not any(job.job_id == job_token and job.root_job_id == root_token for job in root.jobs):
+            raise StateConflict("selected role result is outside the retained root scope")
+        if not any(
+            attempt.attempt_id == attempt_token and attempt.job_id == job_token
+            for attempt in root.attempts
+        ):
+            raise StateConflict("selected attempt is outside the retained root scope")
+        return BoundedRootRoleResult(
+            root=root, role_result=role_result, creation_event=creation_event,
+        )
+    except sqlite3.OperationalError as exc:
+        if vm_guard.tripped:
+            raise RuntimeRoleResultOverBudget() from exc
+        raise
+    finally:
+        vm_guard.deactivate()
+
+
 def _read_product_acceptance_subject_bounded(
     acquisition: BoundedRuntimeAcquisition,
     vm_guard: _RuntimeReadProgressGuard,
@@ -26314,6 +26498,44 @@ class BoundedRuntimeReadObservation:
             )
             return dataclasses.replace(
                 result, observation_source_identity=self._identity
+            )
+        except BaseException:
+            self._failed = True
+            raise
+
+    def read_root_role_result_bounded(
+        self,
+        root_job_id: str,
+        job_id: str,
+        *,
+        expected_attempt_id: str,
+        expected_result_envelope_digest: str,
+    ) -> BoundedRootRoleResult:
+        """Select one root and one role result under the shared selection budgets.
+
+        This consumes the one-selection allowance exactly once. Root-page,
+        role-result and creation-event statements share one loader and one VM
+        budget; neither counter is reset between those phases. No receipt is
+        minted here. A second selection still poisons the observation.
+        """
+
+        self._select()
+        try:
+            result = _read_root_role_result_bounded(
+                self,
+                self._acquisition,
+                self._vm_progress,
+                root_job_id=root_job_id,
+                job_id=job_id,
+                expected_attempt_id=expected_attempt_id,
+                expected_result_envelope_digest=expected_result_envelope_digest,
+            )
+            return dataclasses.replace(
+                result,
+                observation_source_identity=self._identity,
+                role_result=dataclasses.replace(
+                    result.role_result, observation_source_identity=self._identity,
+                ),
             )
         except BaseException:
             self._failed = True

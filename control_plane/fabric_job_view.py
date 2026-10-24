@@ -1434,6 +1434,121 @@ def read_fabric_view_v2_from_runtime(
     )
 
 
+def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_reader, notes, runtime):
+    """Project one already-acquired root snapshot. ``notes`` is mutated in place.
+
+    No Runtime observation is opened here. The caller supplies the creation
+    event reader, which for a joint selection is the already-accounted event.
+    """
+
+    jobs = list(snapshot.jobs)
+    joined, unjoined = set(), []
+    attempts_by_job = {}
+    if (snapshot.root_job_id != root_job_id or not jobs
+            or jobs[0].job_id != root_job_id or len(jobs) > 17
+            or len(snapshot.attempts) > 340):
+        raise ValueError("bounded Runtime snapshot identity or budget invalid")
+    ids = {job.job_id for job in jobs}
+    if len(ids) != len(jobs) or any(job.root_job_id != root_job_id for job in jobs):
+        raise ValueError("bounded Runtime snapshot membership invalid")
+    for attempt in snapshot.attempts:
+        if attempt.job_id not in ids:
+            raise ValueError("bounded Runtime Attempt membership invalid")
+        attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
+    if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
+        raise ValueError("bounded Runtime Attempt budget invalid")
+    # The selected root keeps its existing Event-backed workstream
+    # validation; its validated provenance digest is the only anchor the
+    # narrow planner join may chain from.
+    root_job = jobs[0]
+    root_validated = False
+    provenance, warning = _bounded_provenance(
+        runtime, root_job, creation_event_reader=creation_event_reader)
+    if isinstance(provenance, Mapping) and provenance.get("workstream"):
+        joined.add(root_job.job_id)
+        root_validated = True
+    else:
+        unjoined = unjoined + [root_job.job_id]
+        notes.append(f"provenance not projected: {root_job.job_id}: {warning or 'workstream unavailable'}")
+    # Validate retained ancestry without reopening admission: completed
+    # coordinators and their terminal descendants remain visible.
+    from control_plane.executive_coo_hierarchy import (
+        HierarchyError, descendant_ids, validate_tree,
+    )
+    tree_valid = True
+    try:
+        hierarchy_rows = validate_tree([
+            {key: getattr(job, key) for key in
+             ("job_id", "parent_job_id", "root_job_id", "depth", "orchestration_role")}
+            for job in jobs
+        ], root_job_id)
+    except HierarchyError:
+        tree_valid = False
+    planner_candidates = {}
+    jobs_by_id = {job.job_id: job for job in jobs}
+    ordered = (sorted(jobs[1:], key=lambda row: (row.depth, row.job_id))
+               if tree_valid else jobs[1:])
+    for job in ordered:
+        coordinator = jobs_by_id.get(job.parent_job_id)
+        if not tree_valid:
+            candidate, warning = None, "bounded Runtime hierarchy invalid"
+        elif coordinator is None or coordinator.job_id not in joined:
+            candidate, warning = None, "immediate coordinator provenance unavailable"
+        elif job.orchestration_role == "plan":
+            candidate, warning = _bounded_plan_child(
+                job, root=root_job, root_validated=root_validated,
+                coordinator=coordinator,
+            )
+            if candidate is not None:
+                planner_candidates[coordinator.job_id] = (
+                    planner_candidates.get(coordinator.job_id, []) + [candidate])
+                continue
+        else:
+            candidate, warning = _bounded_cycle_child(
+                job, root=root_job, root_validated=root_validated,
+                jobs_by_id=jobs_by_id, coordinator=coordinator,
+            )
+            if candidate is not None and candidate.orchestration_role == "aggregation":
+                grant = candidate.orchestration_provenance["hierarchy_grant"]
+                descendants = descendant_ids(hierarchy_rows, candidate.job_id)
+                if (len(descendants) > grant["descendant_limit"]
+                        or any(hierarchy_rows[item]["depth"] > grant["max_depth"]
+                               for item in descendants)):
+                    candidate, warning = None, "retained subtree exceeds hierarchy grant"
+            if candidate is not None:
+                joined.add(candidate.job_id)
+                continue
+        unjoined = unjoined + [job.job_id]
+        notes.append(
+            f"provenance not projected: {job.job_id}: "
+            f"{warning or 'workstream unavailable'}"
+        )
+    # Planner identity is local to its coordinator. Truncation cannot
+    # establish uniqueness, including for an otherwise valid subtree.
+    for coordinator_id, candidates in sorted(planner_candidates.items()):
+        if len(candidates) == 1 and not snapshot.jobs_truncated:
+            joined.add(candidates[0].job_id)
+            continue
+        reason = ("bounded Runtime Job snapshot truncated: planner uniqueness unavailable"
+                  if snapshot.jobs_truncated else "ambiguous eligible plan children")
+        unjoined = unjoined + [candidate.job_id for candidate in candidates]
+        notes.append("planner join refused: " + reason + ": "
+                     + coordinator_id + ": "
+                     + ", ".join(sorted(row.job_id for row in candidates)))
+    if snapshot.jobs_truncated:
+        notes.append("bounded Runtime Job snapshot truncated")
+    if snapshot.attempts_truncated_job_ids:
+        notes.append("bounded Runtime Attempt snapshot truncated")
+    return {
+        "snapshot": snapshot,
+        "jobs": jobs,
+        "attempts_by_job": attempts_by_job,
+        "joined": joined,
+        "unjoined": unjoined,
+        "notes": notes,
+    }
+
+
 def _observe_bounded_root(runtime, root_job_id, *, notes, present):
     from control_plane import executive_runtime
 
@@ -1441,108 +1556,21 @@ def _observe_bounded_root(runtime, root_job_id, *, notes, present):
     snapshot = None
     jobs, joined, unjoined = [], set(), []
     attempts_by_job = {}
+    notes = list(notes)
     failed = runtime is None and present
     try:
         if runtime is not None:
             with runtime.observe_bounded_read() as read:
                 snapshot = read.read_job_root_bounded(root_job_id)
-                jobs = list(snapshot.jobs)
-                if (snapshot.root_job_id != root_job_id or not jobs
-                        or jobs[0].job_id != root_job_id or len(jobs) > 17
-                        or len(snapshot.attempts) > 340):
-                    raise ValueError("bounded Runtime snapshot identity or budget invalid")
-                ids = {job.job_id for job in jobs}
-                if len(ids) != len(jobs) or any(job.root_job_id != root_job_id for job in jobs):
-                    raise ValueError("bounded Runtime snapshot membership invalid")
-                for attempt in snapshot.attempts:
-                    if attempt.job_id not in ids:
-                        raise ValueError("bounded Runtime Attempt membership invalid")
-                    attempts_by_job[attempt.job_id] = attempts_by_job.get(attempt.job_id, []) + [attempt]
-                if any(len(attempts) > 20 for attempts in attempts_by_job.values()):
-                    raise ValueError("bounded Runtime Attempt budget invalid")
-                # The selected root keeps its existing Event-backed workstream
-                # validation on this same bounded observation; its validated
-                # provenance digest is the only anchor the narrow planner join
-                # may chain from.
-                root_job = jobs[0]
-                root_validated = False
-                provenance, warning = _bounded_provenance(
-                    runtime, root_job, creation_event_reader=read.get_creation_event_by_command_id)
-                if isinstance(provenance, Mapping) and provenance.get("workstream"):
-                    joined.add(root_job.job_id)
-                    root_validated = True
-                else:
-                    unjoined = unjoined + [root_job.job_id]
-                    notes = notes + [f"provenance not projected: {root_job.job_id}: {warning or 'workstream unavailable'}"]
-                # Validate retained ancestry without reopening admission: completed
-                # coordinators and their terminal descendants remain visible.
-                from control_plane.executive_coo_hierarchy import (
-                    HierarchyError, descendant_ids, validate_tree,
+                projected = _project_retained_root_snapshot(
+                    snapshot, root_job_id,
+                    creation_event_reader=read.get_creation_event_by_command_id,
+                    notes=notes, runtime=runtime,
                 )
-                tree_valid = True
-                try:
-                    hierarchy_rows = validate_tree([
-                        {key: getattr(job, key) for key in
-                         ("job_id", "parent_job_id", "root_job_id", "depth", "orchestration_role")}
-                        for job in jobs
-                    ], root_job_id)
-                except HierarchyError:
-                    tree_valid = False
-                planner_candidates = {}
-                jobs_by_id = {job.job_id: job for job in jobs}
-                ordered = (sorted(jobs[1:], key=lambda row: (row.depth, row.job_id))
-                           if tree_valid else jobs[1:])
-                for job in ordered:
-                    coordinator = jobs_by_id.get(job.parent_job_id)
-                    if not tree_valid:
-                        candidate, warning = None, "bounded Runtime hierarchy invalid"
-                    elif coordinator is None or coordinator.job_id not in joined:
-                        candidate, warning = None, "immediate coordinator provenance unavailable"
-                    elif job.orchestration_role == "plan":
-                        candidate, warning = _bounded_plan_child(
-                            job, root=root_job, root_validated=root_validated,
-                            coordinator=coordinator,
-                        )
-                        if candidate is not None:
-                            planner_candidates[coordinator.job_id] = (
-                                planner_candidates.get(coordinator.job_id, []) + [candidate])
-                            continue
-                    else:
-                        candidate, warning = _bounded_cycle_child(
-                            job, root=root_job, root_validated=root_validated,
-                            jobs_by_id=jobs_by_id, coordinator=coordinator,
-                        )
-                        if candidate is not None and candidate.orchestration_role == "aggregation":
-                            grant = candidate.orchestration_provenance["hierarchy_grant"]
-                            descendants = descendant_ids(hierarchy_rows, candidate.job_id)
-                            if (len(descendants) > grant["descendant_limit"]
-                                    or any(hierarchy_rows[item]["depth"] > grant["max_depth"]
-                                           for item in descendants)):
-                                candidate, warning = None, "retained subtree exceeds hierarchy grant"
-                        if candidate is not None:
-                            joined.add(candidate.job_id)
-                            continue
-                    unjoined = unjoined + [job.job_id]
-                    notes = notes + [
-                        f"provenance not projected: {job.job_id}: "
-                        f"{warning or 'workstream unavailable'}"
-                    ]
-                # Planner identity is local to its coordinator. Truncation cannot
-                # establish uniqueness, including for an otherwise valid subtree.
-                for coordinator_id, candidates in sorted(planner_candidates.items()):
-                    if len(candidates) == 1 and not snapshot.jobs_truncated:
-                        joined.add(candidates[0].job_id)
-                        continue
-                    reason = ("bounded Runtime Job snapshot truncated: planner uniqueness unavailable"
-                              if snapshot.jobs_truncated else "ambiguous eligible plan children")
-                    unjoined = unjoined + [candidate.job_id for candidate in candidates]
-                    notes = notes + ["planner join refused: " + reason + ": "
-                                     + coordinator_id + ": "
-                                     + ", ".join(sorted(row.job_id for row in candidates))]
-                if snapshot.jobs_truncated:
-                    notes = notes + ["bounded Runtime Job snapshot truncated"]
-                if snapshot.attempts_truncated_job_ids:
-                    notes = notes + ["bounded Runtime Attempt snapshot truncated"]
+                jobs = projected["jobs"]
+                attempts_by_job = projected["attempts_by_job"]
+                joined = projected["joined"]
+                unjoined = projected["unjoined"]
             generation = read.receipt.to_dict()
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError):
         notes = notes + [_BOUNDED_UNAVAILABLE_NOTE]
@@ -1822,6 +1850,51 @@ def read_fabric_view_v3_from_runtime(
             attempts_truncated_job_ids=(),
             snapshot_digest=None,
         )
+    result_refs = compose_fabric_result_reference_index(
+        snapshot, fabric_view["runtime"]["acquisition"]["generation"],
+    )
+    companion = {
+        "schema": SCHEMA_V3,
+        "fabric_view": fabric_view,
+        "result_refs": result_refs,
+    }
+    assert set(companion) == _V3_KEYS
+    return companion
+
+
+def compose_fabric_view_v3_from_retained(
+    snapshot,
+    receipt,
+    *,
+    creation_event,
+    armed,
+    runtime_identity,
+):
+    """Compose the v3 companion from one already-closed joint selection.
+
+    The creation event was charged during that selection. This function does
+    not open a Runtime observation or read another event.
+    """
+
+    def reader(command_id, event=creation_event):
+        if event is None or command_id != getattr(event, "command_id", None):
+            return None
+        return event
+
+    notes = []
+    projected = _project_retained_root_snapshot(
+        snapshot, str(getattr(snapshot, "root_job_id", "")),
+        creation_event_reader=reader, notes=notes, runtime=None,
+    )
+    observed = {
+        **projected,
+        "failed": False,
+        "generation": receipt.to_dict(),
+    }
+    root_job_id = str(snapshot.root_job_id)
+    fabric_view = _document_observed_fabric_view_v2(
+        root_job_id, armed=armed, runtime_identity=runtime_identity, observed=observed,
+    )
     result_refs = compose_fabric_result_reference_index(
         snapshot, fabric_view["runtime"]["acquisition"]["generation"],
     )

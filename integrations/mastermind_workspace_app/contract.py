@@ -55,6 +55,20 @@ from common.executive_workspace_contract import (  # noqa: F401
     _HEX,
     permission_stamp,
 )
+from common.executive_workspace_mission_result_contract import (  # noqa: F401
+    FRAME_SCHEMA as MISSION_RESULT_FRAME_SCHEMA,
+    OPERATION as MISSION_RESULT_OPERATION,
+    BODY_SCHEMA as MISSION_RESULT_BODY_SCHEMA,
+    MAX_COMPOUND_RESPONSE_BYTES,
+    MAX_NESTED_RESULT_RESPONSE_BYTES,
+    COMPOUND_REFUSAL_REASONS,
+    validate_frame as validate_mission_result_frame,
+    validate_body as validate_mission_result_body,
+    unavailable as mission_result_unavailable,
+    unavailable_body as mission_result_unavailable_body,
+    nested_result_envelope_fits,
+    compound_envelope_fits,
+)
 
 
 def principal_frame(principal):

@@ -1300,6 +1300,204 @@ class WorkspaceReadService:
         bounded_canonical(response, limit=MAX_RESPONSE_BYTES - 1)
         return response
 
+    def _mission_result_unavailable(self, selected, reason):
+        from common.executive_workspace_mission_result_contract import unavailable
+        return unavailable(selected, reason)
+
+    def _read_mission_result(self, frame):
+        """One Control Room bracket around one joint Runtime selection.
+
+        AVAILABLE is decided only after the final Mission composition. A
+        qualified nested CONTENT_OVER_BUDGET Result may remain inside that
+        pair. An acquisition, permission, close, budget or association failure
+        returns neither document.
+        """
+        from common.executive_workspace_mission_result_contract import (
+            BODY_SCHEMA,
+            compound_envelope_fits,
+            nested_result_envelope_fits,
+        )
+        from control_plane.fabric_job_view import compose_fabric_view_v3_from_retained
+        from control_plane.mission_workspace import compose_mission_workspace_v3
+
+        selected = frame["selection"]
+        try:
+            before = self.cache.snapshot()
+        except Exception:
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            _join(before.document, selected)
+        except LookupError:
+            raise LookupError("selection_not_found") from None
+        if not _qualified(before, selected):
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            material, receipt = self._bounded_mission_result_acquire(selected)
+        except _ResultOverBudget:
+            return self._mission_result_unavailable(selected, _REASON_OVER_BUDGET)
+        except _ResultSourceUnavailable:
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            after = self.cache.snapshot()
+        except Exception:
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        if (before.owner is not after.owner or before.instance != after.instance
+                or before.publication != after.publication
+                or digest(before.document) != digest(after.document)):
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_CHANGED)
+        if not _qualified(after, selected):
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        if not self._result_binding_verified(material.role_result, receipt, selected):
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        try:
+            projection = self._bounded_result_project(material.role_result, receipt)
+            generation = receipt.to_dict()
+            runtime = dict(generation, snapshot_digest=material.root.snapshot_digest)
+            mission_selection = {
+                "work_ref": selected["work_ref"],
+                "root_job_id": selected["root_job_id"],
+            }
+            observation = _observation(before, after, mission_selection, runtime)
+            companion = compose_fabric_view_v3_from_retained(
+                material.root, receipt, creation_event=material.creation_event,
+                armed=self.armed, runtime_identity=self.runtime_identity,
+            )
+            mission = compose_mission_workspace_v3(
+                control_room=before.document, fabric_view=companion,
+                work_ref=selected["work_ref"], root_job_id=selected["root_job_id"],
+                source_validity=after.validity, cache_currentness=after.currentness,
+                source_generation=None, owner_observation=observation,
+            )
+        except Exception:
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        shared = self._result_shared_selection(selected)
+        if (type(projection.complete) is not dict or type(projection.content_over_budget) is not dict
+                or projection.complete.get("selection") != shared
+                or projection.content_over_budget.get("selection") != shared):
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        result_observation = self._result_observation(before, after, selected, receipt)
+        role_body = self._nested_role_result_body(selected, result_observation, projection)
+        if role_body is None:
+            return self._mission_result_unavailable(selected, _REASON_RESPONSE_OVER_BUDGET)
+        if not self._mission_result_associated(mission, role_body, selected, receipt):
+            return self._mission_result_unavailable(selected, _REASON_SOURCE_UNAVAILABLE)
+        compound = {
+            "schema": BODY_SCHEMA,
+            "selection": dict(selected),
+            "availability": "AVAILABLE",
+            "reason_codes": [],
+            "mission": mission,
+            "role_result": role_body,
+        }
+        if not nested_result_envelope_fits(role_body) or not compound_envelope_fits(compound):
+            return self._mission_result_unavailable(selected, _REASON_RESPONSE_OVER_BUDGET)
+        return {"ok": True, "result": compound}
+
+    def _bounded_mission_result_acquire(self, selected):
+        """One joint selection. The receipt is read only after physical close."""
+
+        from control_plane.executive_runtime import RuntimeRoleResultOverBudget
+        bounded_runtime = (self._bounded_runtime(self.runtime)
+                           if self._bounded_runtime else self.runtime)
+        try:
+            with bounded_runtime.observe_bounded_read() as observation:
+                material = observation.read_root_role_result_bounded(
+                    selected["root_job_id"],
+                    selected["job_id"],
+                    expected_attempt_id=selected["attempt_id"],
+                    expected_result_envelope_digest=selected["result_envelope_digest"],
+                )
+            receipt = observation.receipt
+        except RuntimeRoleResultOverBudget as exc:
+            raise _ResultOverBudget() from exc
+        except Exception as exc:
+            raise self._result_acquire_refusal(exc) from exc
+        return material, receipt
+
+    def _nested_role_result_body(self, selected, observation, projection):
+        """Incumbent complete, then CONTENT_OVER_BUDGET, then refusal ladder.
+
+        The check is the nested Result socket envelope plus LF, not the
+        compound ceiling. None means neither representation fits.
+        """
+        from common.executive_workspace_mission_result_contract import nested_result_envelope_fits
+
+        complete = {
+            "schema": RESULT_BODY_SCHEMA,
+            "selection": dict(selected),
+            "availability": "AVAILABLE",
+            "reason_codes": [],
+            "source_observation": observation,
+            "result": projection.complete,
+        }
+        if nested_result_envelope_fits(complete):
+            return complete
+        fallback = {
+            "schema": RESULT_BODY_SCHEMA,
+            "selection": dict(selected),
+            "availability": "CONTENT_OVER_BUDGET",
+            "reason_codes": [_REASON_CONTENT_OVER_BUDGET],
+            "source_observation": observation,
+            "result": projection.content_over_budget,
+        }
+        if nested_result_envelope_fits(fallback):
+            return fallback
+        return None
+
+    @staticmethod
+    def _mission_result_associated(mission, role_body, selected, receipt):
+        """Final Mission currentness, exact tuple, and the shared receipt.
+
+        A SAME Runtime receipt does not make a partial or noncurrent Mission
+        an associated pair. The tuple is taken from the composed index, after
+        any noncurrent downgrade.
+        """
+        if type(mission) is not dict or mission.get("schema") != "mastermind.mission_workspace.v3":
+            return False
+        if mission.get("read_state", {}).get("state") != "CURRENT":
+            return False
+        source = mission.get("source") if type(mission.get("source")) is dict else {}
+        owner = source.get("owner_observation") if type(source.get("owner_observation")) is dict else {}
+        if owner.get("state") != "SAME":
+            return False
+        runtime = owner.get("runtime") if type(owner.get("runtime")) is dict else {}
+        generation = receipt.to_dict()
+        if (runtime.get("state") != "SAME"
+                or runtime.get("source_identity") != generation.get("source_identity")
+                or runtime.get("before") != generation.get("before")
+                or runtime.get("after") != generation.get("after")):
+            return False
+        index = mission.get("result_refs") if type(mission.get("result_refs")) is dict else {}
+        index_generation = index.get("generation") if type(index.get("generation")) is dict else {}
+        if (index_generation.get("state") != "SAME"
+                or index_generation.get("source_identity") != generation.get("source_identity")
+                or index_generation.get("before") != generation.get("before")
+                or index_generation.get("after") != generation.get("after")):
+            return False
+        refs = index.get("refs")
+        if type(refs) is not list or not any(
+            type(ref) is dict
+            and ref.get("root_job_id") == selected["root_job_id"]
+            and ref.get("job_id") == selected["job_id"]
+            and ref.get("attempt_id") == selected["attempt_id"]
+            and ref.get("result_envelope_digest") == selected["result_envelope_digest"]
+            for ref in refs
+        ):
+            return False
+        mission_control = owner.get("control_room")
+        result_control = role_body.get("source_observation", {}).get("control_room")
+        result_runtime = role_body.get("source_observation", {}).get("runtime")
+        if (type(mission_control) is not dict or type(result_control) is not dict
+                or type(result_runtime) is not dict
+                or any(mission_control.get(key) != result_control.get(key) for key in mission_control)
+                or set(mission_control) != set(result_control)
+                or result_runtime.get("source_identity") != generation.get("source_identity")
+                or result_runtime.get("before") != generation.get("before")
+                or result_runtime.get("after") != generation.get("after")
+                or role_body.get("source_observation", {}).get("state") != "SAME"):
+            return False
+        return True
+
     def read_mission_for_work_ref(self, work_ref):
         """Host-internal COO consumer of the SAME Mission v3 acquisition.
 
@@ -1323,8 +1521,42 @@ class WorkspaceReadService:
             raise ValueError("source_unavailable")
         return self._read_mission_v3({"selection": selection})["result"]
 
+    async def _handle_mission_result_frame(self, frame):
+        from common.executive_workspace_mission_result_contract import validate_frame
+        try:
+            validate_frame(frame)
+        except (TypeError, ValueError):
+            return error("invalid_input", 400)
+        try:
+            if self.authorize(frame["principal"]) is not True:
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        try:
+            permission_before = permission_stamp(self.authorize, frame["principal"])
+        except Exception:
+            return error("access_denied", 403)
+        task = asyncio.create_task(asyncio.to_thread(self._read_mission_result, frame))
+        try:
+            result = await await_owned(task)
+        except LookupError:
+            return error("selection_not_found", 404)
+        except Exception:
+            result = self._mission_result_unavailable(
+                frame["selection"], _REASON_SOURCE_UNAVAILABLE)
+        try:
+            if (self.authorize(frame["principal"]) is not True
+                    or permission_stamp(self.authorize, frame["principal"]) != permission_before):
+                return error("access_denied", 403)
+        except Exception:
+            return error("access_denied", 403)
+        return result
+
     async def handle_frame(self, frame):
+        from common.executive_workspace_mission_result_contract import FRAME_SCHEMA as MISSION_RESULT_FRAME_SCHEMA
         from common.product_acceptance_read_contract import FRAME_SCHEMA as ACCEPTANCE_FRAME_SCHEMA
+        if isinstance(frame, dict) and frame.get("schema") == MISSION_RESULT_FRAME_SCHEMA:
+            return await self._handle_mission_result_frame(frame)
         if isinstance(frame, dict) and frame.get("schema") == ACCEPTANCE_FRAME_SCHEMA:
             from common.product_acceptance_acquisition_contract import OPERATION as ORIGINAL_OPERATION
             if frame.get("operation") == ORIGINAL_OPERATION:

@@ -1,0 +1,36 @@
+{
+  "acceptance": "NOT_PROJECTED",
+  "brief_sha": "317eae34ecfda3fa4ef65fd80d1700e06bd5264f",
+  "control_room": {
+    "cache_currentness_digest": "c54e52e9d1976f565150e7cffb659a7bde3a73ac4079d1963a1bd72068adba6b",
+    "document_digest": "af62bba128587438e3aae57629da3b304d80b4da328654844896c3ceaa82f057",
+    "instance_after": "32fe52b0490d8e49ff8681b3bad6c0c91de9074d126b6a1305e70c7f408d7b15",
+    "instance_before": "32fe52b0490d8e49ff8681b3bad6c0c91de9074d126b6a1305e70c7f408d7b15",
+    "publication_after": 1,
+    "publication_before": 1,
+    "source_validity_digest": "c8668c551574029a8f7f2f08cba7fd510e378e9c485173f09aa9772c2d168069"
+  },
+  "execution_status": "COMPLETED",
+  "http_body_bytes": 10024,
+  "http_body_sha256": "027faefc46fb4def6f304330f20799ed886c42d72a8aa88ddbd95b7885c91dda",
+  "mission_acceptance": "NOT_PROJECTED",
+  "mission_read_state": "CURRENT",
+  "mission_runtime_source_identity": "d870e55698a78c2749750632bcf1b395",
+  "mission_schema": "mastermind.mission_workspace.v3",
+  "note": "http_body_sha256 is the whole HTTP response body. Nested mission and role_result are fields of that body, not separate raw HTTP responses.",
+  "proof_ceiling": "SOURCE_ASSOCIATED_READ_QUALIFIED",
+  "review_verdict": "reject",
+  "role_result_availability": "AVAILABLE",
+  "role_result_runtime_source_identity": "d870e55698a78c2749750632bcf1b395",
+  "role_result_schema": "mastermind.workspace_role_result.v1",
+  "route": "/workspace/mission-result/current",
+  "runtime_after": 2,
+  "runtime_before": 2,
+  "selection": {
+    "attempt_id": "ATT-1677825d5f214d5ab218a1ceeba86fc6",
+    "job_id": "JOB-004",
+    "result_envelope_digest": "7434333b5199e602660e48874a06b932cd9ce17a28c357476725ac37feb2e459",
+    "root_job_id": "JOB-001",
+    "work_ref": "WS:ONE"
+  }
+}
