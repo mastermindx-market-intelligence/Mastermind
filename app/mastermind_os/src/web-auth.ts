@@ -52,7 +52,7 @@ export interface WebAuthDeps {
   now?: () => number;
 }
 type Resource = "acquisition" | "content" | "executive" | "research";
-type Token = { value: string; expires: number };
+type Token = { value: string; expires: number; executiveSend?: boolean };
 const TYPE = "mastermind-auth-callback";
 const opaque = (s: unknown, max = 4096): s is string =>
   typeof s === "string" &&
@@ -284,14 +284,20 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
         (resource === "research"
           ? t.scope !== RESEARCH_SCOPE
           : resource === "executive"
-          ? typeof t.scope !== "string" || t.scope.trim().split(/\s+/).sort().join(" ") !==
-            EXECUTIVE_SCOPE.split(" ").sort().join(" ")
+          ? typeof t.scope !== "string" ||
+            ![EXECUTIVE_SCOPE.split(" ").sort().join(" "), "mastermind.executive.read"].includes(
+              t.scope.trim().split(/\s+/).sort().join(" "),
+            )
           : t.scope !== undefined && t.scope !== scope)
       )
         throw new Error("TOKEN_INVALID");
       return {
         value: t.access_token,
         expires: now() + Number(t.expires_in) * 1000,
+        ...(resource === "executive" ? {
+          executiveSend: typeof t.scope === "string" &&
+            t.scope.trim().split(/\s+/).sort().join(" ") === EXECUTIVE_SCOPE.split(" ").sort().join(" "),
+        } : {}),
       };
     } catch (e) {
       if (exchangeAbort.signal.aborted)
@@ -611,6 +617,9 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     const token = tokens.executive, ticket = executiveGeneration;
     if (!configured || !executiveResource || !token || !valid("executive"))
       throw new Error("EXECUTIVE_AUTH_REQUIRED");
+    // READ-only may observe but must never originate a SEND request.
+    if ((route === "submit" || route === "session/send") && token.executiveSend !== true)
+      throw new Error("EXECUTIVE_SEND_SCOPE_REQUIRED");
     const direct = route.startsWith("direct-native/");
     const body = JSON.stringify(route === "context" ? {} : (route === "session/context" || direct) ? arguments_ : { arguments: arguments_ });
     if (new TextEncoder().encode(body).length > (direct ? 4096 : 65_536)) throw new Error("EXECUTIVE_INPUT_TOO_LARGE");
