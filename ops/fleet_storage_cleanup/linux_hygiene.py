@@ -179,10 +179,19 @@ def cache_cleanup(root: Path, state: Path, mode: str) -> list[dict]:
             started = time.monotonic()
             proc = subprocess.run(argv, cwd=str(root), capture_output=True,
                                   text=True, timeout=90)
-            results.append({"cache": name, "state": "OK" if proc.returncode == 0 else "FAILED",
+            if proc.returncode:
+                # Even a completed nonzero cache command may have changed part of
+                # its target. Do not run another cache command or retry next hour
+                # until the incumbent owner reconciles this exact effect.
+                (state / HOLD).write_text(
+                    f"{time.time()}: {name}: nonzero_exit={proc.returncode}\n")
+            results.append({"cache": name,
+                            "state": "EFFECT_UNVERIFIED" if proc.returncode else "OK",
                             "exit_code": proc.returncode,
                             "duration_sec": round(time.monotonic() - started, 2),
                             "stderr_tail": proc.stderr[-160:] if proc.returncode else ""})
+            if proc.returncode:
+                break
         except (subprocess.TimeoutExpired, OSError) as exc:
             # A timed-out subprocess is not proof its descendants had no effects.
             (state / HOLD).write_text(f"{time.time()}: {name}: {type(exc).__name__}\n")
@@ -246,7 +255,10 @@ def main(argv=None) -> int:
         with (state / LEDGER).open("a") as ledger:
             ledger.write(json.dumps(report, sort_keys=True) + "\n")
         print(json.dumps(report, sort_keys=True))
-        return 1 if report.get("state") == "FAILED" else 0
+        # A receipt is written even on failure. Return nonzero to systemd so
+        # a failed/degraded run cannot be mistaken for a healthy last service.
+        # The persistent timer stays enabled and future hours still heartbeat.
+        return 1 if report.get("state") == "FAILED" or report.get("degraded") else 0
 
 
 if __name__ == "__main__":
