@@ -249,6 +249,8 @@ def _read_inputs(book: str) -> dict[str, Any]:
     }
     account, account_status = _read_json_object(paths["account"])
     decisions, decisions_status = _read_jsonl(paths["decisions"])
+    from bot import decision_rows
+    decisions = decision_rows.effective_rows(decisions)
     fills, fills_status = _read_jsonl(paths["fills"])
     nav, nav_status = _read_jsonl(paths["nav"])
     positions, positions_status = _read_json_object(paths["positions"])
