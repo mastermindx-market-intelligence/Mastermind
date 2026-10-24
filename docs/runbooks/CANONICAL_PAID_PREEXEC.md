@@ -190,3 +190,22 @@ strict/no-update SSH flags and EOF child stdin are retained. Inert tests join
 the actual eight-source compiler to the shell's exact SSH argv and exercise
 ASCII, multibyte, quoting and one-byte terminator boundaries without executing
 a remote initializer or enrolling a host.
+
+Linux failure discrimination
+----------------------------
+
+A denied write to a sealed memfd can still change its mtime/ctime. Immutable
+content does not imply unchanged full custody metadata. The healthy private-env
+case therefore remains separate from mutation attempts: those cases require
+immutable bytes and require the existing full-identity fence to refuse any
+metadata drift, including its context exit. The guard never re-baselines.
+
+The existing shard2 job runs a fast three-case initializer preflight before its
+full canonical suite. This is supplemental: there is no new workflow, runner,
+permission, exclusion or green path that omits a full shard. Unexpected final
+observer refusal emits only a closed test-owned function/line/errno/field-name
+diagnostic as a structured error annotation. The real nonzero exit and owner
+refusal remain. Environment, stderr, tokens, path values and exception repr are
+not emitted; unknown diagnostic data becomes a fixed unavailable classification.
+These diagnostic cases do not qualify an actual host namespace or approve an
+initializer, and a passing fast preflight alone is not protected acceptance.

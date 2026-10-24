@@ -111,6 +111,16 @@ jobs:
           find scripts ops/executive_os -type f -name '*.sh' -print0 |
             xargs -0 -n1 bash -n
 
+      # Supplementary fast discrimination for the three observed Linux
+      # initializer failures. A green matrix still requires every full shard.
+      - name: H1 initializer Linux fast preflight
+        if: matrix.index == 2
+        run: >-
+          python -m pytest -q --tb=short -p scripts.ci_pytest_timing
+          tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup
+          tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook
+          tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire
+
       - name: Run repository test shard
         run: python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}
 

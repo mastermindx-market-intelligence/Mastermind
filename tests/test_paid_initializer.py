@@ -101,17 +101,101 @@ def _observer_metadata_fixture(probe,*,exact,prefixes):
         +"os.getxattr=_fixture_getxattr\n"+probe)
 
 
-def _inert_bootstrap(request,probe,*,owner=m):
-    # Public source location only; never emit environment/config/credential
-    # values if the deliberately simulated distribution does not qualify.
-    try:return owner.run_bootstrap(request,probe)
-    except owner.InitializerCommitmentRefused as error:
+_DIAGNOSTIC_SCHEMA='mastermind.inert_observer_guard.v1'
+_DIAGNOSTIC_FUNCTIONS={'<module>','fail','acl','walk','read_file','observe'}
+_DIAGNOSTIC_FIELDS={'uid','write_mode','kind','size','acl','selector_or_context','identity_or_content'}
+_OBSERVER_DIAGNOSTIC_PREFIX=r"""
+import sys as _ds, json as _dj, os as _do, stat as _dt
+
+def _inert_guard_diagnostic(error):
+    sites=[];trace=error.__traceback__
+    while trace is not None:
+        name=trace.tb_frame.f_code.co_name;fields=[]
+        if name in ('<module>','fail','acl','walk','read_file','observe'):
+            item=trace.tb_frame.f_locals.get('s') if name=='walk' else trace.tb_frame.f_locals.get('before') if name=='read_file' else None
+            if item is not None:
+                if getattr(item,'st_uid',_do.getuid()) not in (0,_do.getuid()):fields.append('uid')
+                if getattr(item,'st_mode',0)&0o022:fields.append('write_mode')
+                if name=='read_file' and not _dt.S_ISREG(getattr(item,'st_mode',0)):fields.append('kind')
+            if name=='acl':fields.append('acl')
+            sites.append(dict(function=name,line=trace.tb_lineno,fields=fields))
+        trace=trace.tb_next
+    kind=type(error).__name__
+    if kind not in ('ValueError','AssertionError','OSError','PermissionError'):kind='REFUSAL'
+    number=getattr(error,'errno',None)
+    if type(number)is not int or not 0<=number<=4096:number=None
+    _ds.stdout.write(_dj.dumps(dict(schema='mastermind.inert_observer_guard.v1',kind=kind,sites=sites[-6:],errno=number),sort_keys=True,separators=(',',':'))+'\n')
+_ds.excepthook=lambda typ,error,trace:_inert_guard_diagnostic(error)
+"""
+
+
+def _decode_observer_diagnostic(raw):
+    """Only fixed test-owned fields may reach an annotation; never raw output."""
+    try:
+        if type(raw) not in (bytes,bytearray) or not 0<len(raw)<=4096:return None
+        def pairs(items):
+            value={}
+            for key,item in items:
+                if key in value:raise ValueError()
+                value[key]=item
+            return value
+        value=json.loads(raw,object_pairs_hook=pairs)
+        if type(value)is not dict or set(value)!={'schema','kind','sites','errno'}:return None
+        if value['schema']!=_DIAGNOSTIC_SCHEMA or value['kind'] not in ('ValueError','AssertionError','OSError','PermissionError','REFUSAL'):return None
+        if value['errno'] is not None and (type(value['errno'])is not int or not 0<=value['errno']<=4096):return None
+        if type(value['sites'])is not list or len(value['sites'])>6:return None
+        for site in value['sites']:
+            if type(site)is not dict or set(site)!={'function','line','fields'}:return None
+            if site['function'] not in _DIAGNOSTIC_FUNCTIONS or type(site['line'])is not int or not 1<=site['line']<=100000:return None
+            if type(site['fields'])is not list or len(site['fields'])>7 or any(type(x)is not str or x not in _DIAGNOSTIC_FIELDS for x in site['fields']):return None
+        return value
+    except (ValueError,TypeError,UnicodeError,RecursionError):return None
+
+
+def _guard_notice(fixture,value):
+    if fixture is None:return
+    try:public=_decode_observer_diagnostic(json.dumps(value,allow_nan=False).encode())
+    except (ValueError,TypeError):public=None
+    if public is None:public=dict(schema=_DIAGNOSTIC_SCHEMA,kind='REFUSAL',sites=[],errno=None)
+    reporter=fixture.config.pluginmanager.getplugin('terminalreporter')
+    if reporter is not None:
+        with fixture.getfixturevalue('capsys').disabled():
+            reporter.write_line('\n::error file=tests/test_paid_initializer.py,title=H1 Linux guard diagnostic::'
+                +fixture.node.name+' '+json.dumps(public,sort_keys=True,separators=(',',':'),ensure_ascii=True))
+
+
+def _inert_bootstrap(request,probe,*,owner=m,diagnostic_request=None):
+    # Final observer only. Capture/caller environment and stderr stay private.
+    from unittest.mock import patch
+    original=owner._bounded_child;diagnostic=[]
+    def traced(argv,**kwargs):
+        final=len(argv)==7 and argv[1:5]==['-I','-S','-B','-c'] and 'def observe(p):' in argv[5]
+        if final:
+            before='    except Exception:\n        sys.exit(78)'
+            assert argv[5].count(before)==1
+            argv=list(argv);argv[5]=_OBSERVER_DIAGNOSTIC_PREFIX+argv[5].replace(before,'    except Exception as _error:\n        _inert_guard_diagnostic(_error)\n        sys.exit(78)')
+        try:return original(argv,**kwargs)
+        except owner.InitializerCommitmentRefused as error:
+            if final:
+                frame=error.__traceback__
+                while frame is not None:
+                    if frame.tb_frame.f_code is original.__code__:
+                        value=_decode_observer_diagnostic(frame.tb_frame.f_locals.get('raw'))
+                        if value is not None:diagnostic.append(value)
+                    frame=frame.tb_next
+            raise
+    try:
+        with patch.object(owner,'_bounded_child',traced):return owner.run_bootstrap(request,probe)
+    except Exception as error:
         frame=error.__traceback__;site=None
         while frame is not None:
-            if frame.tb_frame.f_code.co_filename==owner.__file__ and frame.tb_frame.f_code.co_name!='refuse':
-                site=frame.tb_lineno
+            if frame.tb_frame.f_code.co_filename==owner.__file__ and frame.tb_frame.f_code.co_name!='refuse':site=frame.tb_lineno
             frame=frame.tb_next
-        raise AssertionError('inert initializer source guard refused at paid_initializer.py:'+str(site)) from error
+        public=diagnostic[-1] if diagnostic else dict(schema=_DIAGNOSTIC_SCHEMA,kind='REFUSAL',sites=[],errno=None)
+        _guard_notice(diagnostic_request,public)
+        # Suppress producer frames that may contain environment arguments. The
+        # fixed source line and allowlisted diagnostic retain the real refusal.
+        raise AssertionError('inert initializer guard line='+str(site)+' diagnostic='+json.dumps(public,sort_keys=True,separators=(',',':'))) from None
 
 
 def test_closed_commitment_is_detached_expected_input():
@@ -261,7 +345,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
         probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch])
-        result=json.loads(_inert_bootstrap(req,probe))
+        result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
         assert result['context_identity']['host_env_sha256']==c['host_env']['sha256']
@@ -274,7 +358,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
             +'command() { printf /forged/python3; }; exec() { echo forged > '+str(forged)+'; printf "{}"; }; export -n -f command exec\n')
         c['host_env'].update(sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size)
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
-        actual=json.loads(_inert_bootstrap(req,probe))
+        actual=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert actual['binary']['real_path']==str(real) and not forged.exists()
         # Unsupported startup projection refuses before the approved hook body.
         marker=Path(scratch)/'must-not-exist'
@@ -448,7 +532,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         monkeypatch.setattr(qualifier.m,'_initializer_module',lambda expected:(owner,sources['paid_initializer.py']) if expected==hashes['paid_initializer.py'] else m.refuse())
         req=qualifier.m._request(req)
         probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[str(lane)])
-        raw=_inert_bootstrap(req,probe,owner=owner)
+        raw=_inert_bootstrap(req,probe,owner=owner,diagnostic_request=request)
         result=qualifier.m._observation(raw,req)
         assert private_token.encode() not in raw
         assert result['binary']['path']==str(logical)!=str(bootstrap)
@@ -509,3 +593,89 @@ for name,key in (('/outside','system.posix_acl_access'),('/modeled/fixed','user.
 """
     child=subprocess.run([sys.executable,'-I','-S','-B','-c',source+_observer_metadata_fixture(body,exact=['/modeled/fixed'],prefixes=['/modeled/private'])],capture_output=True,timeout=5)
     assert child.returncode==0 and not child.stdout and not child.stderr
+
+
+@pytest.mark.parametrize('unhandled',[False,True])
+def test_child_diagnostic_is_allowlisted_and_preserves_nonzero(unhandled):
+    private='DO_NOT_EMIT_TOKEN_OR_PRIVATE_PATH'
+    if unhandled:body='raise AssertionError('+repr(private)+')\n'
+    else:
+        body=('import types\ndef fail():raise ValueError('+repr(private)+')\n'
+              'def walk():\n s=types.SimpleNamespace(st_uid=os.getuid()+100000,st_mode=0o100777)\n fail()\n'
+              'def observe(p):walk()\n'
+              'try:observe({})\nexcept Exception as error:\n _inert_guard_diagnostic(error)\n sys.exit(78)\n')
+    source='import os,sys\n'+_OBSERVER_DIAGNOSTIC_PREFIX+body
+    child=subprocess.run([sys.executable,'-I','-S','-B','-c',source],capture_output=True,timeout=5)
+    assert child.returncode==(1 if unhandled else 78) and not child.stderr
+    assert private.encode() not in child.stdout
+    value=_decode_observer_diagnostic(child.stdout)
+    assert value is not None and value['kind']==('AssertionError' if unhandled else 'ValueError')
+    if not unhandled:assert any(site['fields']==['uid','write_mode'] for site in value['sites'])
+
+
+@pytest.mark.parametrize('change',[
+    lambda v:v.update(environment={'GLM_SHIM_TOKEN':'must-not-emit'}),
+    lambda v:v.update(kind='/private/never-render'),lambda v:v.update(errno=True),
+    lambda v:v['sites'][0].update(function='/private/path'),
+    lambda v:v['sites'][0].update(line=True),lambda v:v['sites'][0].update(fields=['secret-value']),
+])
+def test_child_diagnostic_decoder_rejects_unbounded_or_private_fields(change):
+    value=dict(schema=_DIAGNOSTIC_SCHEMA,kind='ValueError',sites=[dict(function='walk',line=10,fields=['write_mode'])],errno=None)
+    change(value)
+    assert _decode_observer_diagnostic(json.dumps(value).encode()) is None
+
+
+def test_guard_failure_annotation_has_own_line_with_actual_ci_capture(tmp_path):
+    program=tmp_path/'test_guard_annotation_fixture.py'
+    program.write_text('def test_a_before():pass\n'
+        'def test_guard_fixture(request):\n'
+        ' from tests.test_paid_initializer import _guard_notice,_DIAGNOSTIC_SCHEMA\n'
+        ' _guard_notice(request,dict(schema=_DIAGNOSTIC_SCHEMA,kind="ValueError",sites=[],errno=None))\n'
+        ' raise AssertionError("controlled expected test failure")\n')
+    child=subprocess.run([sys.executable,'-m','pytest','-p','scripts.ci_pytest_timing','-q','--tb=short','-p','no:cacheprovider',str(program)],cwd=Path(__file__).resolve().parents[1],env={**os.environ,'PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'},stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=30)
+    assert child.returncode==1
+    notices=[v for v in child.stdout.splitlines() if v.startswith('::error ')]
+    assert len(notices)==1 and 'H1 Linux guard diagnostic' in notices[0]
+    assert 'test_guard_fixture' in notices[0] and '/private/' not in notices[0]
+
+
+def test_fast_preflight_is_supplementary_and_full_ci_fanin_unchanged():
+    from scripts import ci_parallel_shard as fan
+    from scripts import ci_pytest as policy
+    import shlex,yaml
+    text=(Path(__file__).resolve().parents[1]/'.github/workflows/ci.yml').read_text()
+    fan.validate_parallel_workflow(text)
+    value=yaml.load(text,Loader=policy._WorkflowYAMLLoader)
+    assert set(value['jobs'])=={'pytest_shards','test'}
+    steps=value['jobs']['pytest_shards']['steps']
+    preflight=[(i,x) for i,x in enumerate(steps) if x.get('name')=='H1 initializer Linux fast preflight']
+    full=[(i,x) for i,x in enumerate(steps) if x.get('name')=='Run repository test shard']
+    assert len(preflight)==len(full)==1 and preflight[0][0]<full[0][0]
+    pre=preflight[0][1];assert pre['if']=='matrix.index == 2' and not pre.get('continue-on-error',False)
+    assert shlex.split(pre['run'])==['python','-m','pytest','-q','--tb=short','-p','scripts.ci_pytest_timing',
+        'tests/test_paid_initializer_token_data.py::TestLinuxFrozenData::test_real_seals_custody_private_env_and_cleanup',
+        'tests/test_paid_initializer.py::test_actual_linux_initializer_exec_and_selector_drift_before_hook',
+        'tests/test_paid_initializer.py::test_actual_nested_initializer_private_package_context_and_wire']
+    assert full[0][1]['run']=='python -m scripts.ci_parallel_shard --jobs 3 --index ${{ matrix.index }}'
+    assert full[0][1].get('if') is None
+
+
+def test_annotation_boundary_itself_never_renders_unapproved_fields():
+    from types import SimpleNamespace
+    from contextlib import nullcontext
+    lines=[]
+    reporter=SimpleNamespace(write_line=lines.append)
+    fixture=SimpleNamespace(config=SimpleNamespace(pluginmanager=SimpleNamespace(getplugin=lambda _:reporter)),getfixturevalue=lambda _:SimpleNamespace(disabled=nullcontext),node=SimpleNamespace(name='synthetic-case'))
+    secret='DO_NOT_EMIT_PRIVATE_DATA'
+    _guard_notice(fixture,dict(environment={'GLM_SHIM_TOKEN':secret},path='/private/'+secret))
+    assert len(lines)==1 and secret not in lines[0] and '/private/' not in lines[0]
+    assert '"kind":"REFUSAL"' in lines[0] and '"sites":[]' in lines[0]
+
+
+def test_unexpected_pipeline_exception_keeps_private_repr_out_of_diagnostics(monkeypatch):
+    secret='NOT_REAL_SECRET_MUST_NOT_BE_RENDERED'
+    def fail(*args):raise OSError(secret)
+    monkeypatch.setattr(m,'run_bootstrap',fail)
+    with pytest.raises(AssertionError) as caught:_inert_bootstrap({},'')
+    assert secret not in str(caught.value) and 'diagnostic=' in str(caught.value)
+    assert caught.value.__suppress_context__ is True

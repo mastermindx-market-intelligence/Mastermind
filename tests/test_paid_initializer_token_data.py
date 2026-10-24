@@ -208,10 +208,6 @@ class TestLinuxFrozenData:
             assert not os.get_inheritable(snapshot) and not os.get_inheritable(origin_dup)
             required = fcntl.F_SEAL_WRITE|fcntl.F_SEAL_GROW|fcntl.F_SEAL_SHRINK|fcntl.F_SEAL_SEAL
             assert fcntl.fcntl(snapshot, fcntl.F_GET_SEALS)&required == required
-            for operation in (lambda: os.write(snapshot, b"x"),
-                              lambda: os.ftruncate(snapshot, len(RAW)-1),
-                              lambda: os.ftruncate(snapshot, len(RAW)+1)):
-                with pytest.raises(OSError): operation()
             assert set(frozen.fingerprint) == {"schema_version","sha256","size","uid","gid","mode"}
             assert INERT_TOKEN not in repr(frozen.fingerprint)
             env = frozen.private_data.child_environment({"HOME":"/inert"})
@@ -250,3 +246,38 @@ class TestLinuxFrozenData:
                     raise RuntimeError("inert body")
             for value in owned:
                 with pytest.raises(OSError): os.fstat(value)
+
+
+    @pytest.mark.parametrize("operation", ["write", "shrink", "grow"])
+    def test_denied_mutation_never_rebaselines_snapshot_custody(self, origin, operation):
+        """Linux can update times on a denied write; immutable bytes != identity."""
+        _path, fd, expected = origin
+        if not expected["uid"] or not expected["gid"]:
+            pytest.skip("positive-account helper profile requires nonroot fixture owner")
+        context=data.freeze_helper_data(fd, expected=expected)
+        frozen=context.__enter__()
+        snapshot=frozen.snapshot_fd;owned=(snapshot,frozen._origin)
+        before=frozen._snapshot_identity
+        try:
+            attempt={"write":lambda:os.write(snapshot,b"x"),
+                     "shrink":lambda:os.ftruncate(snapshot,len(RAW)-1),
+                     "grow":lambda:os.ftruncate(snapshot,len(RAW)+1)}[operation]
+            with pytest.raises(OSError):attempt()
+            assert os.pread(snapshot,len(RAW)+1,0)==RAW
+            drift=data._identity(os.fstat(snapshot))!=before
+            assert frozen._snapshot_identity==before  # no silent rebaseline
+            if drift:
+                with pytest.raises(data.TokenDataRefused):frozen.check()
+            else:frozen.check()
+        except BaseException:
+            context.__exit__(*sys.exc_info())
+            raise
+        else:
+            if drift:
+                # Exit also rechecks custody and closes both owned FDs even
+                # when a denied syscall changed only snapshot timestamps.
+                with pytest.raises(data.TokenDataRefused):context.__exit__(None,None,None)
+            else:context.__exit__(None,None,None)
+        for value in owned:
+            with pytest.raises(OSError):os.fstat(value)
+        os.fstat(fd)
