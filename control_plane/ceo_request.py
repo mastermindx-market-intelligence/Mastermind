@@ -197,6 +197,7 @@ VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_che
 #: ``CROSS_REPO_PUBLISH``.
 EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
     "research_only": ("READ", "RESEARCH"),
+    "native_research_only": ("READ", "RESEARCH"),
     "bounded_code_change": ("READ", "RUN_TESTS", "WRITE_BRANCH"),
 }
 
@@ -445,7 +446,7 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
     )
 
     # --- profile coherence (§4.3) ------------------------------------------
-    if profile == "research_only":
+    if profile in {"research_only", "native_research_only"}:
         if paths:
             raise CeoRequestInvalid(
                 "execution_profile 'research_only' grants no write authority; "
@@ -456,6 +457,8 @@ def normalize_high_level_request(payload: Any) -> dict[str, Any]:
                 "execution_profile 'research_only' grants no test authority; "
                 "validation is refused"
             )
+        if profile == "native_research_only" and result["attempt_limit"] != 1:
+            raise CeoRequestInvalid("native_research_only requires attempt_limit=1")
     else:  # bounded_code_change
         if not paths:
             raise CeoRequestInvalid(

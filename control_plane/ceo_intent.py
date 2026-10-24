@@ -90,6 +90,7 @@ from control_plane.executive_runtime import (
 #: Schema of the envelope this module accepts.  A bump means a migration.
 INTENT_SCHEMA = "mastermind.ceo_intent.v1"
 INTENT_SCHEMA_V2 = "mastermind.ceo_intent.v2"
+INTENT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_intent.v1"
 
 #: Schema of the strict NON-CEO service-principal intent.  Same sink, same
 #: adapter, same Job path — a second *principal class*, never a second control
@@ -102,6 +103,7 @@ INTENT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent.v1"
 #: Schema of the receipt this module returns.
 RECEIPT_SCHEMA = "mastermind.ceo_intent_receipt.v1"
 RECEIPT_SCHEMA_V2 = "mastermind.ceo_intent_receipt.v2"
+RECEIPT_SCHEMA_DIRECT = "mastermind.ceo_direct_native_receipt.v1"
 RECEIPT_SCHEMA_SERVICE = "mastermind.executive_service_intent_receipt.v1"
 RECEIPT_SCHEMA_PRINCIPAL = "mastermind.executive_principal_intent_receipt.v1"
 _DIALOGUE_SOURCE_UNSET = object()
@@ -731,6 +733,8 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         _exact_keys(raw, "intent", _REQUIRED_KEYS, _OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_V2:
         _exact_keys(raw, "intent", _V2_REQUIRED_KEYS, _V2_OPTIONAL_KEYS)
+    elif schema == INTENT_SCHEMA_DIRECT:
+        _exact_keys(raw, "intent", _V2_REQUIRED_KEYS | {"workstream"}, frozenset())
     elif schema == INTENT_SCHEMA_SERVICE:
         _exact_keys(raw, "intent", _SERVICE_REQUIRED_KEYS, _SERVICE_OPTIONAL_KEYS)
     elif schema == INTENT_SCHEMA_PRINCIPAL:
@@ -754,6 +758,17 @@ def validate_intent(payload: Any) -> dict[str, Any]:
         "grounding": _grounding(raw["grounding"]),
         "execution_contract": _execution_contract(raw["execution_contract"]),
     }
+    if schema == INTENT_SCHEMA_DIRECT:
+        contract = intent["execution_contract"]
+        if (raw["intent_kind"] != "direct_native_readonly"
+                or raw["business_impact"] != "routine"
+                or set(contract["requested_authorities"]) != {"READ", "RESEARCH"}
+                or contract.get("attempt_limit") != 1
+                or contract.get("allowed_write_paths")
+                or contract.get("validation_commands")
+                or contract.get("constraints")):
+            raise CeoIntentError("direct native intent requires its exact read-only contract")
+        intent.update(intent_kind="direct_native_readonly", business_impact="routine")
     if schema == INTENT_SCHEMA_V2:
         intent_kind = _text(
             raw["intent_kind"], "intent.intent_kind", max_chars=64
@@ -928,7 +943,7 @@ def _receipt(
             raise CeoIntentError("principal receipt identity is unavailable")
         value["principal"] = dict(principal)
         value["request_ref"] = _require_principal_request_ref(request_ref, intent_id)
-    if receipt_schema == RECEIPT_SCHEMA_V2 and work_ref is not None:
+    if receipt_schema in {RECEIPT_SCHEMA_V2, RECEIPT_SCHEMA_DIRECT} and work_ref is not None:
         value["work_ref"] = _text(
             work_ref, "intent.workstream", pattern=_WORKSTREAM_RE, max_chars=72
         )
@@ -956,7 +971,7 @@ def build_receipt(
         receipt_schema=_receipt_schema_for(intent.get("schema")),
         principal=_principal_identity(intent) if intent.get("schema") == INTENT_SCHEMA_PRINCIPAL else None,
         request_ref=principal_request_ref,
-        work_ref=intent.get("workstream") if intent.get("schema") == INTENT_SCHEMA_V2 else None,
+        work_ref=intent.get("workstream") if intent.get("schema") in {INTENT_SCHEMA_V2, INTENT_SCHEMA_DIRECT} else None,
     )
 
 
@@ -972,6 +987,8 @@ def _receipt_schema_for(intent_schema: Any) -> str:
         return RECEIPT_SCHEMA_PRINCIPAL
     if intent_schema == INTENT_SCHEMA_V2:
         return RECEIPT_SCHEMA_V2
+    if intent_schema == INTENT_SCHEMA_DIRECT:
+        return RECEIPT_SCHEMA_DIRECT
     if intent_schema == INTENT_SCHEMA_SERVICE:
         return RECEIPT_SCHEMA_SERVICE
     return RECEIPT_SCHEMA
@@ -1275,6 +1292,10 @@ def submit_intent(
     # path must provide the canonical fresh mission/binding/effect guard.
     # This sink adds no auth service, deployment, dispatch, or worker lifecycle.
     intent = validate_intent(payload)
+    if intent["schema"] == INTENT_SCHEMA_DIRECT:
+        # The pure discriminator is not a legacy create_job capability. The
+        # normal host/Runtime owner must supply the separately qualified seam.
+        raise CeoIntentError("direct native host admission is not composed")
     # Private host source seam, never a frame field or a launch capability.
     # Only the actual new-root branch calls it. Public/replay receipts remain
     # queued, and no observer may turn a duplicate into a fresh admission.
