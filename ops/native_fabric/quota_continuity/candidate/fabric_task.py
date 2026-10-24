@@ -822,6 +822,9 @@ def request(
                 # authorize another attempt/account on the same packet.
                 print("JEV_UNAVAILABLE=INPUT_OR_TRANSPORT",
                       file=sys.stderr, flush=True)
+            # The provider call consumes part of the original deadline; do
+            # not launch under a pre-advisory remaining-time witness.
+            check_deadline()
         if artifact_names:
             import artifact_production
         if qualification_host:
