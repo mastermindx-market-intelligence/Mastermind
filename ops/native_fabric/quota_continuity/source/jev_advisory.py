@@ -4,6 +4,7 @@ Advisory only: no worker/admission, policy, retry, lease or acceptance authority
 Exactly one native System One POST per evaluation. No auto-retries.
 """
 from __future__ import annotations
+import http.client
 import json
 import math
 import os
@@ -41,7 +42,7 @@ def native_post(body: bytes, key: str, timeout: float) -> dict[str, Any]:
             data = response.read(MAX_REPLY_BYTES + 1)
     except error.HTTPError as exc:
         raise JevUnavailable("HTTP_" + str(exc.code)) from None
-    except (error.URLError, OSError, TimeoutError):
+    except (error.URLError, OSError, TimeoutError, http.client.HTTPException):
         raise JevUnavailable("TRANSPORT") from None
     if len(data) > MAX_REPLY_BYTES:
         raise JevUnavailable("REPLY_TOO_LARGE")
@@ -118,9 +119,12 @@ def _score(value: Any) -> float:
 
 def _choice(answers: dict[str, Any], qid: str, options: set[str]) -> tuple[str, float]:
     raw = answers.get(qid)
-    if not isinstance(raw, dict) or raw.get("type") != "choice" or raw.get("choice") not in options:
+    if not isinstance(raw, dict) or raw.get("type") != "choice":
         raise JevUnavailable("MALFORMED_ANSWER")
-    return raw["choice"], _probability(raw.get("confidence"))
+    chosen = raw.get("choice")
+    if not isinstance(chosen, str) or chosen not in options:
+        raise JevUnavailable("MALFORMED_ANSWER")
+    return chosen, _probability(raw.get("confidence"))
 
 
 def _noul(answers: dict[str, Any], qid: str) -> float:
