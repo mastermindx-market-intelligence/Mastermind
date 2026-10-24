@@ -38,6 +38,7 @@ class Settings:
     proxy_token: str
     state_dir: Path
     safe_rpm: int = 1000
+    safe_rpm_shared: int | None = None  # optional shared organization-wide ceiling
     window_s: float = 60.0
     max_pending: int = 2000
     max_inflight_per_key: int = 128
@@ -53,6 +54,8 @@ class Settings:
             raise ValueError("FABRIC_PROXY_TOKEN must contain at least 24 characters")
         if not (1 <= self.safe_rpm <= 1000):
             raise ValueError("SAFE_RPM_PER_KEY must be between 1 and 1000")
+        if self.safe_rpm_shared is not None and self.safe_rpm_shared < 1:
+            raise ValueError("SAFE_RPM_SHARED must be positive when configured")
         if not (0 < self.window_s <= 60.0):
             raise ValueError("window_s must be within (0, 60]")
         if self.max_pending < 1 or self.max_inflight_per_key < 1 or self.max_queue_wait_s <= 0 or self.max_body_bytes < 1:
@@ -66,6 +69,7 @@ class Settings:
             proxy_token=os.environ.get("FABRIC_PROXY_TOKEN", ""),
             state_dir=Path(os.environ.get("FABRIC_GATEWAY_STATE_DIR", ".state")).expanduser(),
             safe_rpm=int(os.environ.get("SAFE_RPM_PER_KEY", "1000")),
+            safe_rpm_shared=(int(v) if (v := os.environ.get("SAFE_RPM_SHARED", "").strip()) else None),
             max_pending=int(os.environ.get("FABRIC_MAX_PENDING", "2000")),
             max_inflight_per_key=int(os.environ.get("FABRIC_MAX_INFLIGHT_PER_KEY", "128")),
             max_queue_wait_s=float(os.environ.get("FABRIC_MAX_QUEUE_WAIT_S", "600")),
@@ -151,11 +155,19 @@ class SlidingWindowAdmissions:
         """Select a free slot fairly or compute next admission time."""
         n = len(self.events)
         next_ready = float("inf")
+        for q in self.events:
+            while q and q[0] <= now - self.settings.window_s:
+                q.popleft()
+        # A provider may meter all keys in the same organization together.
+        # This optional stricter admission is computed from the same persistent
+        # per-key reservations, never from another uncoordinated token counter.
+        if self.settings.safe_rpm_shared is not None:
+            shared_used = sum(map(len, self.events))
+            if shared_used >= self.settings.safe_rpm_shared:
+                return None, min(q[0] for q in self.events if q) + self.settings.window_s
         for step in range(n):
             i = (self._cursor + step) % n
             q = self.events[i]
-            while q and q[0] <= now - self.settings.window_s:
-                q.popleft()
             if len(q) < self.settings.safe_rpm:
                 if self._inflight[i] < self.settings.max_inflight_per_key:
                     return i, now
@@ -237,6 +249,12 @@ class SlidingWindowAdmissions:
             return {
                 "pending": len(self._waiters),
                 "safe_rpm_per_key": self.settings.safe_rpm,
+                "shared_rpm_cap": self.settings.safe_rpm_shared,
+                "shared_used_in_window": sum(x["used_in_window"] for x in slots),
+                "shared_remaining_in_window": (
+                    max(0, self.settings.safe_rpm_shared - sum(x["used_in_window"] for x in slots))
+                    if self.settings.safe_rpm_shared is not None else None
+                ),
                 "window_seconds": self.settings.window_s,
                 "slots": slots,
             }

@@ -351,3 +351,31 @@ async def test_local_status_requires_token_and_reports_no_credentials(tmp_path):
             assert status["slots"][1]["remaining_in_window"] == 1
             assert "upstream-A" not in json.dumps(status)
             assert "upstream-B" not in json.dumps(status)
+
+
+@pytest.mark.asyncio
+async def test_shared_org_ceiling_queues_across_keys_and_survives_restart(tmp_path):
+    fake_time = [1000.0]
+    cfg = settings(tmp_path, safe_rpm=3, safe_rpm_shared=1, window_s=0.1)
+    first = SlidingWindowAdmissions(cfg, clock=lambda: fake_time[0])
+    assert await first.acquire(time.monotonic() + 0.05) == 0
+    await first.release(0)
+    with pytest.raises(QueueExpired):
+        await first.acquire(time.monotonic() + 0.015)
+    assert (await first.snapshot())["shared_remaining_in_window"] == 0
+    first.close()
+
+    second = SlidingWindowAdmissions(cfg, clock=lambda: fake_time[0])
+    with pytest.raises(QueueExpired):
+        await second.acquire(time.monotonic() + 0.015)
+    fake_time[0] += 0.11
+    # Cursor placement is deliberately process-local; aggregate capacity is durable.
+    slot = await second.acquire(time.monotonic() + 0.05)
+    assert slot in (0, 1)
+    await second.release(slot)
+    second.close()
+
+
+def test_shared_org_ceiling_rejects_nonpositive_values(tmp_path):
+    with pytest.raises(ValueError, match="SAFE_RPM_SHARED"):
+        settings(tmp_path, safe_rpm_shared=0)
