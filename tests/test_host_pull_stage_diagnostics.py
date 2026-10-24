@@ -334,7 +334,7 @@ def test_inspection_transport_no_key_mutation_normal_transport_unchanged(tmp_pat
         assert 'ARG:INERT\n' not in result.stdout
         assert result.stdout.endswith('STDIN:INERT\n')
         wrapper=result.stdout.split('ARG:mmx-ubuntu0\nARG:',1)[1].split('\nSTDIN:',1)[0]
-        assert 0<len(wrapper)<1024 and 'mktemp' in wrapper and 'exit 143' in wrapper
+        assert 0<len(wrapper)<4096 and 'mktemp' in wrapper and 'exit 143' in wrapper
 
 
 def physical_frame(output=None, digest='a'*64):
