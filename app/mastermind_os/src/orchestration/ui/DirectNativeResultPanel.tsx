@@ -164,7 +164,6 @@ export function DirectNativeResultPanel({
       <div className="section-title">
         <h2>{words.title}</h2>
       </div>
-      <p className="muted">{words.limit}</p>
       <button
         type="button"
         disabled={!read || reading || consuming}
@@ -185,6 +184,17 @@ export function DirectNativeResultPanel({
                   ? words.unconsumed
                   : words.unknown}
       </p>
+      {state?.availability === "AVAILABLE" &&
+      state.consumption?.state === "UNCONSUMED" ? (
+        <button
+          type="button"
+          disabled={held || consuming || reading}
+          onClick={consume}
+        >
+          {consuming ? words.consuming : words.consume}
+        </button>
+      ) : null}
+      {recovery}
       <div>
         {(held || consuming) &&
         (failed || state?.availability === "UNAVAILABLE") ? (
@@ -215,21 +225,12 @@ export function DirectNativeResultPanel({
             ) : (
               <p>{words.noneNext}</p>
             )}
-            {state.consumption?.state === "UNCONSUMED" ? (
-              <button
-                type="button"
-                disabled={held || consuming || reading}
-                onClick={consume}
-              >
-                {consuming ? words.consuming : words.consume}
-              </button>
-            ) : null}
           </>
         ) : null}
       </div>
-      {recovery}
       <details className="reason-details">
         <summary>{words.details}</summary>
+        <p>{words.limit}</p>
         <dl>
           <dt>Job</dt>
           <dd>

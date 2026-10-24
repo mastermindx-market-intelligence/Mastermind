@@ -139,6 +139,15 @@ it("actual frontend Launch→selected direct result→explicit consume preserves
   expect(
     await screen.findByRole("heading", { name: "Native task result" }),
   ).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+    "Native task",
+  );
+  expect(document.querySelector("main > .notice")).toBeNull();
+  const scopeDetails = screen
+    .getByText("Task scope and project source")
+    .closest("details");
+  expect(scopeDetails?.hasAttribute("open")).toBe(false);
+  expect(scopeDetails?.textContent).toContain("UNAVAILABLE");
   expect(window.location.search).toContain("direct_native_job=JOB-123");
   expect(submit).toHaveBeenCalledTimes(1);
   expect(submit.mock.calls[0][0].execution_profile).toBe(
@@ -167,6 +176,10 @@ it("actual frontend Launch→selected direct result→explicit consume preserves
   expect(
     await screen.findByRole("heading", { name: "Native task result" }),
   ).toBeTruthy();
+  expect(screen.getByRole("heading", { level: 1 }).textContent).toBe(
+    "Native task",
+  );
+  expect(document.querySelector("main > .notice")).toBeNull();
   expect(submit).toHaveBeenCalledTimes(1);
   expect(direct.consume).toHaveBeenCalledTimes(1);
 });

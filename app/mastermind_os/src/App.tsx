@@ -2243,6 +2243,8 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       active === "Conversations"
         ? observedConversation.projection.conversation.source.state
         : legacyConversationState,
+    directSelected = !!selection && new URL(window.location.href).searchParams.get("direct_native_job")===selection.rootJobId,
+    directRoute = active === "Projects" && directSelected,
     headerState = conversationActive
       ? conversationState
       : active === "Inbox" || active === "Knowledge"
@@ -2974,7 +2976,6 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     // unavailable code as Work, with no fabricated session or dispatch state.
     sessionUnavailableCard
   );
-  const directSelected = !!selection && new URL(window.location.href).searchParams.get("direct_native_job")===selection.rootJobId;
   const directResultPanel = directSelected && selection ? <DirectNativeResultPanel
     key={JSON.stringify([ownerContext?.principalScope,ownerContext?.generation,selection.workRef,selection.rootJobId,commandSelectionRevision])}
     locale={locale} selection={{work_ref:selection.workRef,job_id:selection.rootJobId,attempt_id:null}}
@@ -3168,6 +3169,20 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
     );
   else if (active === "Knowledge")
     content = <Knowledge projection={office.projection} />;
+  else if (directRoute)
+    content = <>
+      {directResultPanel}
+      <details className="reason-details">
+        <summary>{locale === "zh-CN" ? "任务范围与项目来源" : "Task scope and project source"}</summary>
+        <dl>
+          <dt>{locale === "zh-CN" ? "工作流" : "Workstream"}</dt><dd><code>{selection?.workRef}</code></dd>
+          <dt>Job</dt><dd><code>{selection?.rootJobId}</code></dd>
+          <dt>{locale === "zh-CN" ? "项目来源" : "Project source"}</dt><dd><State value={office.projection.programs.source.state} /></dd>
+        </dl>
+        <p>{visibleNotice}</p>
+        {programsRefreshControl}
+      </details>
+    </>;
   else if (active === "Projects")
     content = (
       <>
@@ -3557,14 +3572,14 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
       <main id="content" tabIndex={-1}>
         <header>
           <div>
-            <span className="eyebrow">{active}</span>
+            <span className="eyebrow">{directRoute ? (locale === "zh-CN" ? "单个只读任务" : "One read-only task") : active}</span>
             <h1 ref={routeHeading} tabIndex={-1}>
-              {active}
+              {directRoute ? (locale === "zh-CN" ? "原生任务" : "Native task") : active}
             </h1>
-            <p>{headerSummary}</p>
+            <p>{directRoute ? (locale === "zh-CN" ? "读取当前任务结果，再单独确认接收。" : "Read this task’s result, then acknowledge it separately.") : headerSummary}</p>
           </div>
           <div className="facts">
-            <State value={headerState} />
+            {!directRoute ? <State value={headerState} /> : null}
             {authState ? (
               <div>
                 <small>
@@ -3630,9 +3645,9 @@ export function App({ locale = "en", theme = "dark" }: AppProps = {}) {
             ) : null}
           </div>
         </header>
-        <div className="notice" role="status">
+        {!directRoute ? <div className="notice" role="status">
           {visibleNotice}
-        </div>
+        </div> : null}
         {build ? (
           <details className="build-details">
             <summary>Build details</summary>
