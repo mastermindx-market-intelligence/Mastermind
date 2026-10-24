@@ -2681,6 +2681,8 @@ def cmd_fabric_pool_pin_migrate(args) -> int:
     pool_path = _user_root() / ".local" / "bin" / "pool"
     _assert_no_symlink_ancestors(pool_path)
     observed_pool_sha = _stable_regular_file_hash(pool_path, label="selected native Fabric launcher")
+    if not any(selected == observed_pool_sha for selected, _ in cohorts):
+        raise SystemExit("Fabric pool pin: selected native launcher bytes drifted")
     matching = [(selected, registry[account]) for selected, registry in cohorts
                 if selected == observed_pool_sha and account in registry
                 and args.expected_manifest_sha256
