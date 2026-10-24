@@ -5984,8 +5984,8 @@ class ExecutiveControlService:
         proof_capabilities = ["code", "research", "tests"]
         direct_registration=False
         if direct_native_access is not None:
-            from control_plane.direct_native_execution import DirectNativeAccess
-            if type(direct_native_access) is not DirectNativeAccess:
+            from control_plane.direct_native_execution import DirectNativeExecutionAccess
+            if type(direct_native_access) is not DirectNativeExecutionAccess:
                 raise StateConflict("readonly native registration requires actual admitted access")
             direct_native_access.check()
             direct_registration=True
@@ -6618,6 +6618,20 @@ class ExecutiveControlService:
             return direct.digest(dict(host_generation=now[0],binding=now[1],source=now[2]))
         return direct._issue_access(principal_scope,work_ref,generation_digest,current),initial[1],initial[2]
 
+    def _direct_native_execution_access(self, access):
+        from control_plane import direct_native_execution as direct
+        def execution_guard():
+            # Sink admission/READY alone confer no native inference. Reuse the
+            # incumbent full-arm foreground owner and its genuine root receipt.
+            if (self.config.coo_autonomy_armed is not True
+                    or self.config.coo_operator_harness_armed is not True
+                    or self.config.coo_foreground_only is not True
+                    or not callable(self._autonomy_guard) or self._service_state!="READY"):
+                raise StateConflict("direct native execution is not armed by its existing foreground owner")
+            self._require_current_autonomy()
+            self._require_ceo_submit_admission()
+        return direct._issue_execution_access(access,execution_guard)
+
     async def _handle_direct_native_app_frame(self, parsed, *, app_binding):
         from control_plane import direct_native_execution as direct
         from common import direct_native_result_contract as wire
@@ -6628,6 +6642,7 @@ class ExecutiveControlService:
                     raise StateConflict("direct native admission requires genuine READY")
                 access,binding,source=self._direct_native_access(principal_scope=parsed["principal_scope"],
                     work_ref=work_ref,intent_id=intent_id,app_binding=app_binding)
+                self._direct_native_execution_access(access).check()
                 return direct._issue_admission(access,source,binding)
             result=await ceo_ingress.handle_direct_native_submit(parsed,runtime=runtime,
                 grounding_provider=app_binding.grounding_provider,workspace_root=self.config.proof_workspace_root,
@@ -6642,7 +6657,8 @@ class ExecutiveControlService:
                 try:
                     if self._service_state != "READY":
                         raise StateConflict("direct native worker is not READY")
-                    await self._dispatch_direct_native(result["job_id"],access=access)
+                    execution=self._direct_native_execution_access(access)
+                    await self._dispatch_direct_native(result["job_id"],access=execution)
                 except Exception as exc:
                     self._dispatch_errors[result["job_id"]]=type(exc).__name__ + ": original direct dispatch unavailable or uncertain; no retry"
                     # Keep the genuine durable admission receipt. It reports

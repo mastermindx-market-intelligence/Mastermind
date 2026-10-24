@@ -46,9 +46,9 @@ def test_actual_direct_creation_and_allocator_completion(tmp_path):
     assert Path(job.worktree)==workspaces/job.job_id.lower()
     material=runtime.jobs.direct_native_provenance(job.job_id)
     assert material['principal_scope']==access.principal_scope
-    receipt=runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=access)
+    receipt=runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=dn._issue_execution_access(access,lambda:None))
     assert receipt['receipt']['remote_count']==0
-    assert runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=access)==receipt
+    assert runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=dn._issue_execution_access(access,lambda:None))==receipt
     assert runtime.jobs.list_jobs()==[runtime.jobs.get_job(job.job_id)]
     with pytest.raises(er.StateConflict,match='exact host dispatch'):
         runtime.attempts.claim_job(job.job_id)
@@ -76,31 +76,31 @@ def test_genuine_sink_replay_and_private_direct_claim(tmp_path):
     assert not first['duplicate'] and again['duplicate'] and first['job_id']==again['job_id']
     assert first['dispatched'] is False
     job=runtime.jobs.get_job(first['job_id'])
-    runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=access)
+    runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=dn._issue_execution_access(access,lambda:None))
     runtime.workers.register_worker('codex-offline',provider='codex',account_label='offline',worker_type='test',
         quota_classes={'default':dict(provider='codex',model='gpt-5.4',effort='high',cost_class='default',capabilities=['read'],metadata={k:admission.binding[k] for k in ('routing_policy_version','execution_profile_id','execution_profile_digest','capability_policy_version','capability_policy_digest')})})
     lease=runtime.attempts.claim_job(job.job_id,command_id=f'direct-native-dispatch:{job.job_id}',
-        lease_owner='offline-supervisor',_direct_native_access=access)
+        lease_owner='offline-supervisor',_direct_native_access=dn._issue_execution_access(access,lambda:None))
     assert type(lease) is er.AttemptLease and lease.attempt.effective_grant['role'] is None
     assert set(lease.attempt.effective_grant['authorities'])=={'READ','RESEARCH'}
     replay=runtime.attempts.claim_job(job.job_id,command_id=f'direct-native-dispatch:{job.job_id}',
-        lease_owner='offline-supervisor',_direct_native_access=access)
+        lease_owner='offline-supervisor',_direct_native_access=dn._issue_execution_access(access,lambda:None))
     assert type(replay) is er.OrchestrationDispatchOutcome and replay.attempt.attempt_id==lease.attempt.attempt_id
     assert len(runtime.attempts.list_attempts())==1
-    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=lease)
-    assert runtime.read_direct_native_result_bounded(dict(work_ref='WS:H2',job_id=job.job_id,attempt_id=None),access=access)['availability']=='UNAVAILABLE'
+    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,dn._issue_execution_access(access,lambda:None),lease=lease)
+    assert runtime.read_direct_native_result_bounded(dict(work_ref='WS:H2',job_id=job.job_id,attempt_id=None),access=dn._issue_execution_access(access,lambda:None))['availability']=='UNAVAILABLE'
 
 
 @pytest.mark.parametrize('mutation', ['expiry','token','fence','quota'])
 def test_final_launch_reuses_exact_live_lease_predicate(tmp_path,mutation):
     f=fixture(tmp_path);runtime,_,_,access,source,_,_=f;job=create(f)
-    runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=access)
+    runtime.jobs.prepare_direct_native_workspace(job.job_id,source_repository=source,shared_gid=os.getegid(),access=dn._issue_execution_access(access,lambda:None))
     binding=f[2].binding
     runtime.workers.register_worker('codex-offline',provider='codex',account_label='offline',worker_type='test',quota_classes={
         'default':dict(provider='codex',model='gpt-5.4',effort='high',cost_class='default',capabilities=['read'],
         metadata={k:binding[k] for k in ('routing_policy_version','execution_profile_id','execution_profile_digest','capability_policy_version','capability_policy_digest')})})
-    lease=runtime.attempts.claim_job(job.job_id,command_id=f'direct-native-dispatch:{job.job_id}',lease_owner='inert',_direct_native_access=access)
-    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=lease)
+    lease=runtime.attempts.claim_job(job.job_id,command_id=f'direct-native-dispatch:{job.job_id}',lease_owner='inert',_direct_native_access=dn._issue_execution_access(access,lambda:None))
+    runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,dn._issue_execution_access(access,lambda:None),lease=lease)
     if mutation=='expiry':
         runtime.store.clock=lambda:10**15
     elif mutation=='token':
@@ -111,5 +111,5 @@ def test_final_launch_reuses_exact_live_lease_predicate(tmp_path,mutation):
         with runtime.store.transaction() as connection:
             connection.execute("UPDATE worker_quota_classes SET held_attempt_id=NULL,status='OFFLINE' WHERE worker_id='codex-offline'")
     with pytest.raises(er.StateConflict):
-        runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,access,lease=lease)
+        runtime.require_direct_native_launch_access(job.job_id,lease.attempt.attempt_id,dn._issue_execution_access(access,lambda:None),lease=lease)
     assert len(runtime.attempts.list_attempts())==1

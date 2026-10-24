@@ -149,3 +149,40 @@ def admission_material(admission):
         authority_generation_digest=admission.access.authority_generation_digest,
         source=copy.deepcopy(admission.source),source_digest=digest(admission.source),
         binding=normalize_binding(admission.binding))
+
+_EXECUTION = object()
+
+
+@dataclasses.dataclass(frozen=True, slots=True)
+class DirectNativeExecutionAccess:
+    """Separate current execution grant; queued admission/read grants none."""
+    access: DirectNativeAccess
+    _execution_guard: Callable[[], None] = dataclasses.field(repr=False, compare=False)
+    _capability: object = dataclasses.field(repr=False, compare=False)
+
+    @property
+    def principal_scope(self): return self.access.principal_scope
+    @property
+    def work_ref(self): return self.access.work_ref
+    @property
+    def authority_generation_digest(self): return self.access.authority_generation_digest
+
+    def check(self):
+        if self._capability is not _EXECUTION or type(self.access) is not DirectNativeAccess:
+            raise ValueError('native execution grant is not host-issued')
+        self.access.check()
+        if (not callable(self._execution_guard) or inspect.iscoroutinefunction(self._execution_guard)
+                or inspect.iscoroutinefunction(getattr(self._execution_guard,'__call__',None))):
+            raise ValueError('native execution owner guard is unavailable')
+        result=self._execution_guard()
+        if inspect.isawaitable(result):
+            if inspect.iscoroutine(result): result.close()
+            raise ValueError('native execution guard must be synchronous')
+        if result is not None: raise ValueError('native execution guard refused')
+        self.access.check()
+
+
+def _issue_execution_access(access, guard):
+    value=DirectNativeExecutionAccess(access,guard,_EXECUTION)
+    value.check()
+    return value

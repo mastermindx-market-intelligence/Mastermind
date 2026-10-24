@@ -49,13 +49,13 @@ OBJECTIVE=('Assess launch-readiness from supplied exact release evidence. Two in
 # Exact source pins are the qualified H2 App component 1c65016c; old producer semantics remain tested.
 SOURCE_PINS={
     'app/mastermind_os/src/orchestration/operation-key.ts':
-        
+
         '8596eef6272ed1055ed397670bbb0cb27162759539a18e35fbcd43b3a5bae791',
     'app/mastermind_os/src/orchestration/executive-launch-command-port.ts':
-        
+
         '8e982b602cecac6be11c0c7d294ee4f9992b39512d8ed7f9e911ae041770041e',
     'app/mastermind_os/src/launch-config.ts':
-        
+
         'eb138fd7e02f4bb3a8e28c0e15520612989fada6161be5c69850f2479afb8675',
 }
 

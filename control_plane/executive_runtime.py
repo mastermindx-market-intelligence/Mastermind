@@ -16355,6 +16355,8 @@ class JobRegistry:
 
     def prepare_direct_native_workspace(self, job_id, *, source_repository, shared_gid, access):
         from control_plane import executive_workspace as owner
+        if type(access) is not direct_native.DirectNativeExecutionAccess:
+            raise StateConflict("direct workspace requires current native execution access")
         access.check()
         source=Path(source_repository)
         if not source.is_absolute() or type(shared_gid) is not int or shared_gid<0:
@@ -17509,7 +17511,7 @@ class AttemptRegistry:
         _coo_cycle_dispatch_capability: object | None = None,
         exact_target: ExactWorkerClaimTarget | object = _NO_EXACT_WORKER_TARGET,
         _initial_prepared: object | None = None,
-        _direct_native_access: direct_native.DirectNativeAccess | None = None,
+        _direct_native_access: direct_native.DirectNativeExecutionAccess | None = None,
     ) -> AttemptLease | OrchestrationDispatchOutcome | None:
         duration = (
             self.store.lease_seconds if lease_seconds is None else int(lease_seconds)
@@ -17546,7 +17548,7 @@ class AttemptRegistry:
             direct_row=connection.execute("SELECT * FROM jobs WHERE job_id=?",(job_id,)).fetchone()
             direct_provenance=_direct_native_provenance(connection,direct_row) if direct_row is not None else None
             if direct_provenance is not None:
-                if (type(_direct_native_access) is not direct_native.DirectNativeAccess
+                if (type(_direct_native_access) is not direct_native.DirectNativeExecutionAccess
                         or command_id != f"direct-native-dispatch:{job_id}"
                         or _coo_cycle_dispatch_capability is not None or exact_target is not None):
                     raise StateConflict("direct native Job requires its exact host dispatch")
@@ -26445,6 +26447,8 @@ class Runtime:
 
 
     def require_direct_result_access(self, connection, selection, access):
+        if type(access) is direct_native.DirectNativeExecutionAccess:
+            access=access.access
         if type(access) is not direct_native.DirectNativeAccess:
             raise StateConflict("direct result access is not host-issued")
         access.check()
@@ -26462,6 +26466,9 @@ class Runtime:
                 "source_digest":admitted["source_digest"],"admission_digest":orchestration_digest(admitted)}
 
     def require_direct_native_launch_access(self, job_id, attempt_id, access, *, lease):
+        if type(access) is not direct_native.DirectNativeExecutionAccess:
+            raise StateConflict("direct native final launch requires execution authority")
+        access.check()
         if type(lease) is not AttemptLease or lease.attempt.attempt_id != attempt_id or lease.attempt.job_id != job_id:
             raise StateConflict("direct native launch requires its actual fresh lease")
         with self.store.read() as connection:
