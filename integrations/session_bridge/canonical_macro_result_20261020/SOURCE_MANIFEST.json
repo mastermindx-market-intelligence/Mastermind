@@ -1,0 +1,32 @@
+{
+  "changes": {
+    "remote_sub.sh": {
+      "candidate_git_blob_sha": "07e5e7f4c0d17c47e350eb55d477b207e9acfeb7",
+      "candidate_sha256": "16c1deae02121b24061c2312a4481535e2e88e4766073fb3f7b19eccc6856755",
+      "patch_bytes": 3421,
+      "source_git_blob_sha": "051362d28807094a6970010fe9b3726bb83262a1",
+      "source_sha256": "fdb50974e37852c8024135ddf4bf021e6c6a67d1a0418cd5675cc24dc4ad5a17"
+    },
+    "remote_sub_helpers.py": {
+      "candidate_git_blob_sha": "12c50b6258943ba10c81c51598f7a66e038e3249",
+      "candidate_sha256": "78a5216b0975b716aac3e2e795d9bab97243c110cd1a4575afe3a6a6a7b65138",
+      "patch_bytes": 9406,
+      "source_git_blob_sha": "757a6af5a8b47968abb9024f7b8c2deb31728c18",
+      "source_sha256": "60a01b4a56f827b36885ff262c407a3f47af69398cbe4a6fd8eb57b5520eec1b"
+    }
+  },
+  "protected_source_sha": "2b3429d9aca0d539e7ac2b097a199fb86de2d329",
+  "schema": "mastermind.fabric.canonical_result_candidate.v2",
+  "source_repo_paths": {
+    "remote_sub.sh": "ops/native_fabric/quota_continuity/source/remote_sub.sh",
+    "remote_sub_helpers.py": "ops/native_fabric/quota_continuity/source/remote_sub_helpers.py"
+  },
+  "source_test_sha256": "f9c2f646ee46fd2206a2ab8a57636c5714ac3c12e541ebd13f3e104f7a889490",
+  "status": "SOURCE_ONLY_NOT_INSTALLED",
+  "verification": {
+    "fixture_only": true,
+    "installation": false,
+    "local_pytest": "74 passed",
+    "local_syntax": "PASS"
+  }
+}

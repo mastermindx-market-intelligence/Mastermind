@@ -1,0 +1,316 @@
+--- a/remote_sub.sh
++++ b/remote_sub.sh
+@@ -309,6 +309,23 @@
+ 
+ if [ -z "$LOCAL_OUT" ]; then
+   LOCAL_OUT="$HERE/lanes/${ID}.remote.stdout"
++fi
++
++# A newly minted Macro worker must not import a stale local output into the
++# retained result path. Refuse both original --out and canonical collisions
++# BEFORE provider leasing. Historical runs are never altered by this check.
++if [ -n "$NEW_MACRO_COMMIT" ] && [ "$DRY_RUN" -ne 1 ]; then
++  CANONICAL_RESULT_PATH="$HERE/lanes/${ID}.remote.stdout"
++  if [ -e "$LOCAL_OUT" ] || [ -L "$LOCAL_OUT" ]; then
++    RC=78
++    log "FABRIC_NEW_MACRO_OUTPUT_PREEXISTS before_lease=1"
++    exit "$RC"
++  fi
++  if [ -e "$CANONICAL_RESULT_PATH" ] || [ -L "$CANONICAL_RESULT_PATH" ]; then
++    RC=78
++    log "FABRIC_NEW_MACRO_CANONICAL_PREEXISTS before_lease=1"
++    exit "$RC"
++  fi
+ fi
+ 
+ # The optional success contract must validate newly collected bytes, never
+@@ -1116,10 +1133,52 @@
+ done
+ WORKER_RC="$RC"
+ 
+-mkdir -p "$(dirname "$LOCAL_OUT")" 2>/dev/null || true
++# Only successful, observed new-Macro workers take the canonical-first path.
++# rsync never targets a fixed canonical filename: stage a private unique name
++# and atomically publish with create-if-absent after verifying its contents.
++RSYNC_DEST="$LOCAL_OUT"
++CAPTURE_TMP=""
+ RSYNC_RC=0
+-log "RSYNC stdout=~/lanes/ext/$REMOTE_STDOUT out=$(basename "$LOCAL_OUT")"
+-"$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/ext/$REMOTE_STDOUT" "$LOCAL_OUT" || RSYNC_RC=$?
++if [ -n "$NEW_MACRO_COMMIT" ] && [ "$RC_OBSERVED" -eq 1 ] &&
++   [ "$WORKER_RC" -eq 0 ]; then
++  mkdir -p "$HERE/lanes" 2>/dev/null || true
++  if CAPTURE_TMP=$(mktemp "$HERE/lanes/.macro-capture.${ID}.XXXXXXXX"); then
++    RSYNC_DEST="$CAPTURE_TMP"
++  else
++    RSYNC_RC=76
++    log "CANONICAL_CAPTURE_ALLOC_FAILED worker_rc=$WORKER_RC"
++  fi
++fi
++mkdir -p "$(dirname "$LOCAL_OUT")" "$(dirname "$RSYNC_DEST")" 2>/dev/null || true
++if [ "$RSYNC_RC" -eq 0 ]; then
++  log "RSYNC stdout=~/lanes/ext/$REMOTE_STDOUT out=$(basename "$RSYNC_DEST")"
++  "$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/ext/$REMOTE_STDOUT" "$RSYNC_DEST" || RSYNC_RC=$?
++fi
++if [ -n "$CAPTURE_TMP" ] && [ "$RSYNC_RC" -eq 0 ]; then
++  if CAPTURE_BOUND=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
++      publish-new-macro-canonical "$HERE" "$ID" "$CAPTURE_TMP" 2>/dev/null); then
++    log "$CAPTURE_BOUND"
++  else
++    CAPTURE_PUBLISH_RC=$?
++    RSYNC_RC=76
++    log "CANONICAL_CAPTURE_PUBLISH_FAILED helper_rc=$CAPTURE_PUBLISH_RC worker_rc=$WORKER_RC"
++    # Keep the exact original temporary bytes for same-run reconciliation.
++  fi
++fi
++# An optional caller-selected --out is exclusively derived from that run's
++# canonical result. It can never overwrite another run's custom output.
++# A copy failure is result-unavailable, not worker or acceptance success.
++if [ -n "$CAPTURE_TMP" ] && [ "$RSYNC_RC" -eq 0 ] &&
++   [ "$LOCAL_OUT" != "$HERE/lanes/${ID}.remote.stdout" ]; then
++  if CUSTOM_BOUND=$("$REMOTE_SUB_PYTHON" "$HERE/remote_sub_helpers.py" \
++      mirror-new-macro-result "$HERE" "$ID" "$LOCAL_OUT" 2>/dev/null); then
++    log "$CUSTOM_BOUND"
++  else
++    CUSTOM_COPY_RC=$?
++    RSYNC_RC=76
++    log "CUSTOM_RESULT_COPY_FAILED helper_rc=$CUSTOM_COPY_RC worker_rc=$WORKER_RC"
++  fi
++fi
+ if [ "$NATIVE_MODE" -eq 1 ]; then
+   NATIVE_TERMINAL="$LOG_DIR/${ID}.native-terminal.json"
+   if "$RSYNC_CMD" -aq "$SSH_ALIAS:~/lanes/ext/lanes/${ID}.native-terminal.json" "$NATIVE_TERMINAL" &&
+--- a/remote_sub_helpers.py
++++ b/remote_sub_helpers.py
+@@ -285,6 +285,222 @@
+     print(json.dumps(result, sort_keys=True))
+ 
+ 
++
++def publish_new_macro_canonical():
++    """Exclusively promote an already-transferred private temp result.
++
++    This is a controller-only result-file effect, not worker acceptance,
++    process settlement, lease release, retry, or workspace deletion.
++    """
++    import hashlib
++    import os
++    from pathlib import Path
++    import re
++    import stat
++
++    if len(sys.argv) != 4:
++        raise ValueError("canonical_capture_arguments")
++    root_arg, run_id, temp_arg = sys.argv[1:]
++    if (not os.path.isabs(root_arg)
++            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", run_id)
++            or not os.path.isabs(temp_arg)):
++        raise ValueError("canonical_capture_identity")
++    lanes = Path(root_arg) / "lanes"
++    capture = Path(temp_arg)
++    target_name = run_id + ".remote.stdout"
++    if (capture.parent != lanes
++            or not re.fullmatch(
++                r"\.macro-capture\." + re.escape(run_id) + r"\.[A-Za-z0-9]{8,32}",
++                capture.name,
++            )):
++        raise ValueError("canonical_capture_scope")
++    dirfd = os.open(lanes, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++    srcfd = None
++    try:
++        owner = os.fstat(dirfd)
++        if (not stat.S_ISDIR(owner.st_mode)
++                or owner.st_uid != os.getuid()
++                or owner.st_mode & 0o022):
++            raise ValueError("canonical_capture_directory_custody")
++        srcfd = os.open(
++            capture.name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK,
++            dir_fd=dirfd,
++        )
++        original = os.fstat(srcfd)
++        if (not stat.S_ISREG(original.st_mode)
++                or original.st_uid != os.getuid()
++                or original.st_nlink != 1
++                or original.st_size > 8_388_608):
++            raise ValueError("canonical_capture_file_custody")
++        data = hashlib.sha256()
++        count = 0
++        while True:
++            block = os.read(srcfd, 65536)
++            if not block:
++                break
++            count += len(block)
++            if count > 8_388_608:
++                raise ValueError("canonical_capture_over_limit")
++            data.update(block)
++        after = os.fstat(srcfd)
++        seen = os.stat(capture.name, dir_fd=dirfd, follow_symlinks=False)
++        def ident(st):
++            return (st.st_dev,st.st_ino,st.st_size,st.st_mtime_ns,st.st_ctime_ns)
++        if ident(original) != ident(after) or ident(seen) != ident(original):
++            raise ValueError("canonical_capture_changed")
++        # The transfer may have preserved a permissive remote file mode.
++        # Tighten the private *capture*, then atomically publish it.
++        os.fchmod(srcfd,0o600)
++        os.fsync(srcfd)
++        os.link(
++            capture.name, target_name,
++            src_dir_fd=dirfd, dst_dir_fd=dirfd, follow_symlinks=False,
++        )
++        os.unlink(capture.name, dir_fd=dirfd)
++        os.fsync(dirfd)
++        retained = os.stat(target_name,dir_fd=dirfd,follow_symlinks=False)
++        if (not stat.S_ISREG(retained.st_mode)
++                or retained.st_uid != os.getuid()
++                or retained.st_size != count
++                or retained.st_mode & 0o077):
++            raise ValueError("canonical_capture_postcondition")
++        print(f"CANONICAL_RESULT_CAPTURED bytes={count} sha256={data.hexdigest()}")
++    finally:
++        if srcfd is not None:
++            os.close(srcfd)
++        os.close(dirfd)
++
++
++def mirror_new_macro_result():
++    """Retain a canonical read-only result for an already-completed sparse worker.
++
++    This acts only on verified, controller-collected canonical stdout. No
++    provider, lease, host, process, acceptance, or workspace lifecycle action
++    occurs. The original per-run result remains unchanged; a requested
++    custom --out path is created atomically and exclusively, never replaced.
++    """
++    import hashlib
++    import os
++    from pathlib import Path
++    import re
++    import stat
++    import secrets
++
++    if len(sys.argv) != 4:
++        raise ValueError("canonical_result_arguments")
++    root_arg, run_id, output_arg = sys.argv[1:]
++    if (not os.path.isabs(root_arg)
++            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,95}", run_id)
++            or not output_arg):
++        raise ValueError("canonical_result_identity")
++
++    root = Path(root_arg)
++    source = root / "lanes" / (run_id + ".remote.stdout")
++    target = Path(os.path.abspath(output_arg))
++    lanes = target.parent
++    # The already-collected canonical stdout has the unique run ID. A custom
++    # output is only a derived second copy, never an unbound source of proof.
++    if source == target:
++        raise ValueError("canonical_result_already_selected")
++
++    # Canonical retained-result limit is 8 MiB. Larger files remain at
++    # their per-run path but are not represented as custom-delivery success.
++    max_bytes = 8_388_608
++    srcfd = os.open(source, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
++    dirfd = None
++    scratch_fd = None
++    scratch_name = None
++    try:
++        original = os.fstat(srcfd)
++        if (not stat.S_ISREG(original.st_mode)
++                or original.st_uid != os.getuid()
++                or original.st_nlink != 1
++                or original.st_mode & 0o022
++                or original.st_size > max_bytes):
++            raise ValueError("canonical_result_not_single_owned_bounded_regular_file")
++
++        dirfd = os.open(lanes, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
++        directory = os.fstat(dirfd)
++        if (not stat.S_ISDIR(directory.st_mode)
++                or directory.st_uid != os.getuid()
++                or directory.st_mode & 0o022):
++            raise ValueError("custom_result_parent_directory_custody")
++
++        # A pre-existing result is never overwritten, even if it appears
++        # identical. Collision reconciliation belongs to the original parent.
++        try:
++            os.stat(target.name, dir_fd=dirfd, follow_symlinks=False)
++        except FileNotFoundError:
++            pass
++        else:
++            raise FileExistsError("custom_result_destination_exists")
++
++        # All create/link/unlink operations stay anchored to the verified
++        # directory inode; never re-traverse its caller-supplied path.
++        scratch_name = ".macro-custom-" + run_id + "-" + secrets.token_hex(12) + ".tmp"
++        scratch_fd = os.open(
++            scratch_name, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW,
++            0o600, dir_fd=dirfd,
++        )
++        digest = hashlib.sha256()
++        count = 0
++        while True:
++            chunk = os.read(srcfd, 65536)
++            if not chunk:
++                break
++            count += len(chunk)
++            if count > max_bytes:
++                raise ValueError("canonical_result_size_limit")
++            digest.update(chunk)
++            view = memoryview(chunk)
++            while view:
++                n = os.write(scratch_fd, view)
++                if n <= 0:
++                    raise OSError("custom_result_short_write")
++                view = view[n:]
++
++        reread = os.fstat(srcfd)
++        src_lstat = os.lstat(source)
++        same = lambda a,b: (
++            a.st_dev, a.st_ino, a.st_size, a.st_mtime_ns, a.st_ctime_ns
++        ) == (
++            b.st_dev, b.st_ino, b.st_size, b.st_mtime_ns, b.st_ctime_ns
++        )
++        if (not same(reread, original) or not same(src_lstat, original)
++                or count != original.st_size):
++            raise ValueError("canonical_result_changed_during_copy")
++        os.fsync(scratch_fd)
++        os.close(scratch_fd)
++        scratch_fd = None
++
++        # link() is create-if-absent and never replaces a different result.
++        # The copy is fully written and fsynced *before* it becomes visible.
++        os.link(
++            scratch_name, target.name,
++            src_dir_fd=dirfd, dst_dir_fd=dirfd, follow_symlinks=False,
++        )
++        os.unlink(scratch_name, dir_fd=dirfd)
++        scratch_name = None
++        os.fsync(dirfd)
++        retained = os.stat(target.name, dir_fd=dirfd, follow_symlinks=False)
++        if (not stat.S_ISREG(retained.st_mode)
++                or retained.st_nlink != 1 or retained.st_uid != os.getuid()
++                or retained.st_size != count):
++            raise ValueError("custom_result_postcondition")
++        print(f"CUSTOM_RESULT_BOUND_FROM_CANONICAL bytes={count} sha256={digest.hexdigest()}")
++    finally:
++        if scratch_fd is not None:
++            os.close(scratch_fd)
++        if scratch_name is not None and dirfd is not None:
++            try:
++                os.unlink(scratch_name, dir_fd=dirfd)
++            except FileNotFoundError:
++                pass
++        if dirfd is not None:
++            os.close(dirfd)
++        os.close(srcfd)
++
++
+ def main():
+     if len(sys.argv) < 2:
+         raise SystemExit(2)
+@@ -298,6 +514,8 @@
+         'native-window': native_window,
+         'native-settle': native_settle,
+         'validate-usage': validate_usage,
++        'publish-new-macro-canonical': publish_new_macro_canonical,
++        'mirror-new-macro-result': mirror_new_macro_result,
+     }
+     if command not in handlers:
+         raise SystemExit(2)
