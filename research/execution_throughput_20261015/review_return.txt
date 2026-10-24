@@ -1,0 +1,46 @@
+## Review: NO_BLOCKING_FINDINGS (with three bounded notes)
+
+Scope: source snapshot only — `integrations/github_ci_candidate_reader.py`, `scripts/github_ci_candidate.py`, three test modules, and the supplied `github_ci_candidate_waiter` contract. No implementation, deploy, fixture repair, or release authority is granted by this CLI.
+
+### Affirmative observations
+
+The read-only path is structurally sound:
+
+- **Closed endpoint surface** (`scripts/github_ci_candidate.py:34-41`, `:103-105`). The `_PROJECTIONS` list with `re.fullmatch` and the explicit `--method GET` / `--hostname github.com` invocation give a closed allowlist. `test_cli_transport_has_only_closed_get_endpoints` exercises the negative cases (`-X POST`, `?access_token=x`, foreign repos, non-API URLs) — all rejected before any `gh` process is spawned.
+- **No data leakage in result**. `observe_candidate` (`scripts/github_ci_candidate.py:117-149`) returns `observation.to_dict()`, `material_return` derived from the existing `CandidateObserverDecision.wake_reasoning`, and *static* `release_authorized: False` / `wake_delivered: False` (`:146-147`). The `to_dict()` of `CandidateCIObservation` carries the digest-only `SourceReference` content; the full payload stays in the calling process.
+- **Wake/release authority is owned elsewhere**. The CLI is one foreground command whose job is exactly to surface one observation without merging, deploying, or signaling (`scripts/github_ci_candidate.py:2-7`). The hard-coded False booleans are the right shape — there is no field that could promote authority to the caller.
+- **Workflow generation is verified, not borrowed**. The reader pins four binding fields (`integrations/github_ci_candidate_reader.py:222`, `:254`) and re-reads each workflow after pagination, refusing on any drift. `test_workflow_generation_is_verified` and `test_workflow_rerun_during_read_refuses` exercise `id`, `head_sha`, `check_suite_id`, `run_attempt` changes.
+- **Candidate identity is revalidated after collection** (`:232-248`). `candidate_identity` deliberately omits `base.sha` so an unrelated base move cannot poison the sample, while still catching candidate/target mutation (`:247`). `test_unrelated_base_movement_does_not_restart_candidate_validation` and `test_candidate_movement_during_collection_refuses` confirm both halves.
+- **Required-check producer gating**. The reader rejects any required check whose `app_id` is not the GitHub Actions app (`integrations/github_ci_candidate_reader.py:104-106`). `test_unqualified_required_producer_is_explicitly_unsupported` covers `None`, `-1`, foreign ints, and `True`.
+- **Bounded subprocess**. `execute_candidate`-side `_bounded_get` (`scripts/github_ci_candidate.py:48-94`) bounds lifetime (`15.0s`), bytes (`_MAX_BODY = 5_000_000` for stdout, `65536` for stderr), and kills the child on any raise. `READ_TIMEOUT`, `READ_OUTPUT_LIMIT`, and HTTP-coded failures are mapped to typed `CandidateTransportError` values without logging raw stderr.
+- **CLI transport-level schema**. `SCHEMA = "mastermind.github_ci_candidate_cli.v1"` (`scripts/github_ci_candidate.py:30`) and the JSON envelope in `main` (`:169`, `:171`) are deterministic and bounded.
+- **Cadence discipline**. The baseline is sampled once, then a single `wait(interval_seconds)` precedes the waiter arming (`scripts/github_ci_candidate.py:131-137`). `test_fresh_baseline_is_not_immediately_read_again_before_cadence` proves this — `calls == ["sample", "wait", "sample"]`.
+
+### Three bounded notes
+
+**N1 (medium, contract assumption). `filter=latest` total_count semantics.**
+`integrations/github_ci_candidate_reader.py:117` requests `…check-runs?filter=latest&per_page=100&page={page}` and then asserts `len(rows) == total` for early return (`:131`). The implementation assumes GitHub's `total_count` reflects the *filtered* count when `filter=latest` is supplied. The current GitHub API behaviour matches this assumption, but the assertion `len(rows) > total or len(part) < _PAGE_SIZE` (`:133-134`) would reject the observation if GitHub ever returned the unfiltered total with a filtered `check_runs` page. No defensive fallback exists in V1. Suggested posture: keep this assumption but document it as a contract dependency.
+
+**N2 (held per parent direction). Two pagination fixture tests.**
+`tests/test_github_ci_candidate_reader.py:193-201` (`test_complete_check_pagination_uses_all_pages`) and `:204-211` (`test_checks_changed_during_pagination_refuses`) are the two preserved failures. Per the parent's `known_hold` and the explicit constraint "do not execute, repair, reroute or recommend replaying that edit", this review does not attempt the refused fixture edit. The current reader behaviour for *job* pagination is exercised by `test_job_pagination_is_complete_and_bounded` / `test_job_pagination_count_change_is_not_accepted` (`tests/test_github_ci_candidate_generation.py:76-96`), which do pass and use the same loop pattern, so the held tests do not invalidate the generator's overall correctness story.
+
+**N3 (low). Branch length check uses char count, not bytes.**
+`integrations/github_ci_candidate_reader.py:196-197` enforces `len(value) > 255` on `candidate_ref` and `branch`. GitHub's documented limit is 255 *bytes* of UTF-8 NFC. An exotic unicode branch name could pass the reader's check and still be rejected by `GET /repos/{owner}/{repo}/branches/{branch}` upstream. Practical branches are ASCII; the contract risk is theoretical. Severity: low.
+
+### Items checked and cleared
+
+- **Pagination budget**. `max_pages` is constructor-validated to `[1, 10]` (`:54`). With `_PAGE_SIZE = 100` that bounds every enumeration at 1,000 rows and produces a typed `CandidateReadError` ("…budget exhausted") rather than silent truncation.
+- **Mid-pagination drift**. Both `_checks` (`:121-123`) and `_jobs` (`:148-150`) compare `count` to the prior `total` and refuse on drift. The job variant is independently tested.
+- **Cross-repository rejection**. PR head/base repo identity must match the input `repository` (`:191`), and `details_url` is anchored to the same repository via `re.escape(repository)` (`:213`). Both `test_cross_repository_workflow_url_is_not_followed` and `test_cross_repository_candidate_is_not_adopted` pass.
+- **Workflow run/attempt pinning**. `_jobs` rejects any job whose `run_id`, `run_attempt`, or `head_sha` does not match the workflow attempt under evaluation (`:154-157`); `test_job_membership_cannot_be_borrowed_from_another_identity` covers all four mutation axes.
+- **Stale-candidate classification**. The packet carries both `expected_head_sha` and `observed_head_sha` (`:290-291`); the existing `assess_candidate_ci_observation` is the authority on STALE-vs-GREEN, and `test_old_expected_head_produces_stale_not_success` confirms the path.
+- **Closed PR / merged PR / missing PR**. `_policy` refuses non-`protected: True` (`:63`) and empty required-check sets (`:107-108`); `sample` refuses `state != "open"` (`:184`). Permission failures propagate as `PermissionError`, never downgraded to "no rules" — `test_permission_failure_propagates_without_alternate_read` and `test_ruleset_permission_error_never_means_no_required_checks` both pass.
+- **Exit-code surface**. `exit_code` (`:152-153`) maps `PENDING`→`4`, `STALE`→`3`, `UNKNOWN`→`2`, `FAILED`→`1`, `GREEN`→`0`, with `UNKNOWN` as the default. `test_exit_codes_do_not_turn_pending_or_stale_into_success` pins every cell.
+- **Materiality of continuation**. `material_return` requires `decision is not None and decision.wake_reasoning` (`:145`); `release_authorized` and `wake_delivered` are hard-coded False. There is no code path that can promote authority to the CLI caller.
+- **Budget exhaustion is not material**. `test_exhausted_wait_is_not_completion_or_delivered_wake` confirms `material_return=False` and both flags False when the waiter drains its `max_samples` without material transition.
+
+### Recommendation
+
+Ship as-is with respect to V1 scope. Treat N1 as a documented GitHub contract dependency and N3 as a known theoretical edge; revisit only if either is observed in practice. The held pagination fixtures are out of scope per the parent's direction.
+
+Word count: ~880.
