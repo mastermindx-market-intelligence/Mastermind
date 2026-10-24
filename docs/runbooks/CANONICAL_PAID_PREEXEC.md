@@ -173,3 +173,20 @@ disposable private namespace. Its real read/identity/codec body stays intact;
 outside paths and unrelated xattrs retain their errors. Completion notices name
 which fixture profile ran. A simulated branch proves mechanics and refusal
 composition, never current Linux platform custody or initializer approval.
+
+Protected telemetry transport composition
+----------------------------------------
+
+The normal protected host-pull telemetry and existing inspections retain their
+short SSH command, supervised stdin spool and cancellation behavior. Paid
+qualification remains a separate fixed-bootstrap branch: it cannot adopt the
+spool's ambient PATH-selected Python, SHELL or mutable script as new bootstrap
+authority. Its actual final remote command, after shell quoting/framing, is
+bounded to 100000 UTF-8 bytes including its terminating NUL before SSH. This
+finite ceiling is below Linux's 131072-byte per-argument bound. Multibyte paths,
+quote expansion and code growth are counted in that final representation; an
+over-bound command refuses without falling back to another transport. The
+strict/no-update SSH flags and EOF child stdin are retained. Inert tests join
+the actual eight-source compiler to the shell's exact SSH argv and exercise
+ASCII, multibyte, quoting and one-byte terminator boundaries without executing
+a remote initializer or enrolling a host.

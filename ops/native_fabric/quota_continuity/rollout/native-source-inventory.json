@@ -258,9 +258,9 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 8707,
+      "bytes": 12351,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "8b52b6d60a9de8b7a2fb1d14dc96dc5cfa7cd801efb44928509c9c52c506e166",
+      "sha256": "5ccbf6e92ffd91137542bf7e97480dfd3be668926f487e1ee4fd46f75fc5565c",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
@@ -438,9 +438,9 @@
       "source": "candidate/paid_glm_model_client.py"
     },
     "ext/paid_host_qualification.py": {
-      "bytes": 32744,
+      "bytes": 32911,
       "installed_preimage_sha256": null,
-      "sha256": "5b70408225dda7a94270b00125a794978d7a9a28760b0ac6ece1b8085b9f69f3",
+      "sha256": "239cdaaa97a4dbc5ec0ae873548045c75f95a762e896ba93eedd76ad5e5453fd",
       "source": "candidate/paid_host_qualification.py"
     },
     "ext/paid_incumbent_state.py": {

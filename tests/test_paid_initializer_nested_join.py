@@ -96,3 +96,79 @@ def test_private_package_exact_peer_hashes_and_command(selected_source,monkeypat
     assert '_load_qualified_package' in parts[5]
     assert len(parts)==8 and '.host_glm_token.sh' not in parts[0]
     assert req['initializer_commitment']['nested_helper']['sha256'] not in command
+
+
+def _compiled_fixture(selected_source,monkeypatch):
+    native=Path(owner.__file__).parent
+    sources={name:(native/name).read_bytes() for name in ('paid_initializer.py','paid_initializer_token_data.py','paid_initializer_nested_data.py')}
+    hashes={name:hashlib.sha256(raw).hexdigest() for name,raw in sources.items()}
+    namespace={};exec(selected_source._PACKAGE_LOADER,namespace)
+    loaded=namespace['_load_qualified_package'](sources,hashes)
+    monkeypatch.setattr(selected_source,'_initializer_bundle',lambda expected:(loaded,sources))
+    req=request();req['sources_sha256'].update(hashes)
+    return req
+
+
+def test_current_final_paid_command_reaches_exact_strict_ssh_argv_and_eof(selected_source,monkeypatch,tmp_path):
+    import json,os,shutil,subprocess,sys
+    req=_compiled_fixture(selected_source,monkeypatch)
+    alias,command=selected_source.build_paid_probe(req)
+    assert len(command.encode('utf-8'))+1<=selected_source.MAX_REMOTE_COMMAND_BYTES<131072
+    ext=tmp_path/'ext';ext.mkdir();shutil.copyfile(Path(owner.__file__).with_name('host_pull.sh'),ext/'host_pull.sh')
+    (ext/'host_pull_probe.template').write_text('unused telemetry DATA')
+    (ext/'host_pull_backend.py').write_text('import sys\nsys.stdin.buffer.read()\nprint('+repr(alias)+')\nprint('+repr(command)+')\n')
+    binpath=tmp_path/'bin';binpath.mkdir();record=tmp_path/'actual-ssh.json'
+    (binpath/'ssh').write_text('#!'+sys.executable+'\nimport json,sys\nfrom pathlib import Path\nrecord=Path('+repr(str(record))+')\nassert not record.exists(),\"duplicate SSH launch\"\nrecord.write_text(json.dumps(dict(argv=sys.argv[1:],stdin=sys.stdin.buffer.read().decode())))\nprint("inert-not-executed")\n')
+    (binpath/'ssh').chmod(0o700)
+    env=dict(HOME=str(tmp_path),PATH=str(binpath)+':'+str(Path(sys.executable).parent)+':/usr/bin:/bin')
+    child=subprocess.run(['/bin/bash',str(ext/'host_pull.sh'),'--paid-qualification',req['host_ref']],env=env,input=selected_source._canonical(req),capture_output=True,timeout=10)
+    assert child.returncode==0 and child.stdout.strip()==b'inert-not-executed'
+    actual=json.loads(record.read_bytes());assert actual['stdin']==''
+    assert actual['argv'][:-2]==['-o','BatchMode=yes','-o','ConnectTimeout=8','-o','StrictHostKeyChecking=yes','-o','UpdateHostKeys=no']
+    assert actual['argv'][-2]==alias
+    assert hashlib.sha256(actual['argv'][-1].encode()).digest()==hashlib.sha256(command.encode()).digest()
+    assert len(actual['argv'][-1].encode())+1<=100000
+    assert 'HOST_PULL_REMOTE_STDIN_EXEC' not in actual['argv'][-1]
+
+
+@pytest.mark.parametrize('kind',['ascii','multibyte','quoted'])
+def test_final_utf8_quoted_command_plus_terminator_bound_refuses_before_ssh(selected_source,monkeypatch,tmp_path,kind):
+    req=_compiled_fixture(selected_source,monkeypatch)
+    if kind=='multibyte':req['initializer_commitment']['bootstrap_python']['path']='/opt/'+'界'*30+'/python3'
+    elif kind=='quoted':req['initializer_commitment']['bootstrap_python']['path']='/opt/'+"q'"*30+'/python3'
+    req['initializer_commitment_sha256']=selected_source._digest(req['initializer_commitment'])
+    original_probe=selected_source._REMOTE_PROBE;cap=selected_source.MAX_REMOTE_COMMAND_BYTES
+    assert cap==100000
+    def compile_unbounded(padding):
+        probe=original_probe+' '*padding
+        monkeypatch.setattr(selected_source,'_REMOTE_PROBE',probe)
+        req['probe_sha256']=hashlib.sha256(probe.encode()).hexdigest()
+        with monkeypatch.context() as bound:
+            bound.setattr(selected_source,'MAX_REMOTE_COMMAND_BYTES',1000000)
+            return selected_source.build_paid_probe(req)[1]
+    low,high=0,20000
+    while low<high:
+        middle=(low+high)//2
+        if len(compile_unbounded(middle).encode('utf-8'))+1>cap:high=middle
+        else:low=middle+1
+    command=compile_unbounded(low)
+    assert len(command.encode('utf-8'))+1>cap
+    if kind=='multibyte':assert len(command)+1<=cap
+    if kind=='quoted':
+        path=req['initializer_commitment']['bootstrap_python']['path']
+        inflation=len(shlex.quote(path))-len(path)
+        assert inflation>0 and len(command.encode())+1-inflation<=cap
+    marker=tmp_path/'ssh-must-not-run'
+    def transport_after_compile():
+        selected_source.build_paid_probe(req)
+        marker.write_text('would cross transport boundary')
+    with pytest.raises(selected_source.QualificationRefused):transport_after_compile()
+    assert not marker.exists()
+    # Equality includes the terminating NUL: exact-size command succeeds; a
+    # one-byte-smaller allowance refuses the same final command.
+    size=len(command.encode('utf-8'))+1
+    with monkeypatch.context() as bound:
+        bound.setattr(selected_source,'MAX_REMOTE_COMMAND_BYTES',size)
+        assert selected_source.build_paid_probe(req)[1]==command
+        bound.setattr(selected_source,'MAX_REMOTE_COMMAND_BYTES',size-1)
+        with pytest.raises(selected_source.QualificationRefused):selected_source.build_paid_probe(req)

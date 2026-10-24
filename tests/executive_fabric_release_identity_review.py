@@ -419,8 +419,8 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                                         35,
                                                                         'int',
                                                                         '502'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '5b70408225dda7a94270b00125a794978d7a9a28760b0ac6ece1b8085b9f69f3',
- 'sites': ((34, 17, 20, 'int', '501'), (446, 85, 90, 'int', '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '239cdaaa97a4dbc5ec0ae873548045c75f95a762e896ba93eedd76ad5e5453fd',
+ 'sites': ((34, 17, 20, 'int', '501'), (450, 85, 90, 'int', '0o700'))},
  'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': 'a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c',
                                                                       'sites': ((138,
                                                                                  32,
@@ -452,7 +452,7 @@ REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': 'cf7e5933fc8d97d9aaddd28b5c21888414cc5f98ade69fd4f99ab4b8a2f25fa4',
+    'sha256': 'eabe51db9bb94dc3589b8d05a7f4bbe42799d179d8c8d26e6be534a68612c0ee',
     'sites': ((60, 21, 24, 'int', '501'),),
 }
 

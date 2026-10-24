@@ -379,6 +379,9 @@ def _initializer_bundle(expected_sources):
     return module,sources
 
 
+MAX_REMOTE_COMMAND_BYTES = 100000  # final UTF-8 argv including its NUL; below Linux 131072
+
+
 def build_paid_probe(value):
     """Compile only the expected unsourced bootstrap; absent binding refuses."""
     request = _request(value)
@@ -397,6 +400,7 @@ def build_paid_probe(value):
             +"    sys.stdout.buffer.write(module.run_bootstrap(request,base64.b64decode(sys.argv[2],validate=True).decode()))\n"
             +"except Exception:sys.exit(78)\n")
     command = shlex.quote(request["initializer_commitment"]["bootstrap_python"]["path"])+" -I -S -B -c "+shlex.quote(entry)+" "+shlex.quote(encoded)+" "+shlex.quote(probe)
+    if len(command.encode("utf-8"))+1>MAX_REMOTE_COMMAND_BYTES:_refuse()
     return request["transport_alias"], command
 
 

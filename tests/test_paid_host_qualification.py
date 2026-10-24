@@ -295,7 +295,10 @@ def test_transport_owned_child_capture_inert_local_process(monkeypatch):
 
 def test_shell_transport_is_shared_and_qualification_bypasses_cache():
     shell=(SOURCE/'host_pull.sh').read_text()
-    assert sum("perl -e 'alarm 25; exec @ARGV' ssh" in line for line in shell.splitlines() if not line.lstrip().startswith("#"))==1
+    # One incumbent function, two exclusive stdin/argv representations. The
+    # actual paid argv/EOF test proves exactly one SSH launch for that mode.
+    assert shell.count('run_probe() {')==1
+    assert sum("perl -e 'alarm 25; exec @ARGV' ssh" in line for line in shell.splitlines() if not line.lstrip().startswith("#"))==2
     assert 'OUT=$(run_probe "$is_local" "$alias" "$probe")' in shell
     qual=shell[shell.index('if [ "$PAID_REQUESTED" -eq 1 ]; then'):shell.index('pass_once() {')]
     assert 'run_probe 0 "$PAID_ALIAS" "$PAID_PROBE"' in qual
