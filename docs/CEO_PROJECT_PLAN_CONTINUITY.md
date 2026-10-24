@@ -25,6 +25,8 @@ This is the Executive Ecosystem programme ownership split. Do not collapse these
 
 `DEC:AGENTOS-NO-TASK-STORE` still holds: Agent OS has no Task entity. Waves plus PRs are the pinned plan; a pre-PR Job store, when it exists, is the Executive dispatcher. The repo master plan may hold a deep task tree. It must not become a second task registry, priority queue, or copy of wave status and Job state. Merged orchestrator continuity W0/W1/W2 (`WS:ORCHESTRATOR-PROJECT-CONTINUITY`, Mastermind #1664, #1666, macro #9967) already published that workstream's waves, cumulative handoff, and research plan. Reuse those records. Do not re-encode their waves as a new `P1.T*` status registry.
 
+Ownership is a role, not a session: if the named owner is absent, orphaned or not you, assume leadership, record the takeover, proceed; independent review still required; never self-merge or approve.
+
 Executive OS may present one coherent **project cockpit**, but each mutation goes to the owner of that fact: task-tree edits to the repo plan writer, wave/handoff/decision edits to the Agent OS writer, runtime effects through existing Executive admission. No second plan database and no independent `latest` checkpoint directory. One project may have a deep task tree while each bounded Executive execution plan remains subject to its own existing validator and step limit. Never expand the admitted-plan schema to hundreds of nested steps just to mimic the task tree.
 
 ## A. Before substantial project execution: acquire or create the plan
