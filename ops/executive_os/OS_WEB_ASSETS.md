@@ -93,6 +93,22 @@ no other repeat is permitted), exactly the three POST paths, and exactly the two
 reverse_proxy upstreams at the loopback reserved port. Duplicate hosts, extra
 or ambiguous matchers, wildcards, extra paths and wrong upstreams refuse.
 
+The planner accepts two inner shapes only: the three-branch OS shape (GET, POST,
+terminal abort) and the five-branch shape that adds the public MCP entrypoint
+(GET, POST, MCP metadata GET, MCP POST, terminal abort). The two MCP branches are
+observed, never rewritten: metadata is exactly GET `/.well-known/oauth-protected-resource/mcp`,
+and MCP is exactly POST `/mcp` with a 64000-byte body limit (an integer) before a
+loopback reverse_proxy at the same relay port. Every branch's proxy handler must
+equal the rendered one exactly: the relay upstream, the stripped forwarding and
+CDN client-identity headers, the rewritten X-Forwarded-For/-Proto, and the
+branch's own upstream Host (loopback for `/mcp`, the public host for the rest).
+A wildcard, extra path or method, a missing, duplicated or reordered MCP branch,
+a different body limit, an unexpected upstream or any extra or missing proxy
+field refuses. The planner only proves the Caddy shape; it does not prove the
+gateway behind it. The MCP branches are safe to install only after the installed
+gateway runs with the sealed `public_mcp_resource` key (see
+`docs/EXECUTIVE_MCP.md` section 8), which is outside this planner.
+
 `prepare-config` admits the sorted unique union of the retired and candidate
 asset routes plus the fixed GET routes, so the publisher can prepare both allowlists before the host switch; actual
 asset availability remains a separately verified host/publisher obligation; `final-config` admits only the candidate asset routes

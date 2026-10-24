@@ -155,6 +155,12 @@ class AppSettings:
     #: Each variant must be identical to ``policies`` except for ``resource``.
     #: The tuple is host/operator configuration; request data never reaches it.
     additional_policies: tuple[AppPolicies, ...] = ()
+    #: Optional dedicated audience for the public Streamable HTTP ``/mcp``
+    #: entrypoint (#1656).  It differs from ``policies`` only by ``resource``
+    #: and ``resource_metadata_url`` and keeps the primary policy ids, so audit
+    #: routing is unchanged.  The inner app verifies it like any other variant;
+    #: the MCP transport alone decides which variants each outer route admits.
+    public_policies: AppPolicies | None = None
     #: E1's temporary runtime projection root.  It is required only for the
     #: read-only capability and never comes from a request body.
     runtime_root: "Path | str | None" = None
@@ -187,6 +193,25 @@ class AppSettings:
                 ) != primary_policy:
                     raise ValueError(
                         "additional Executive policies may differ only by resource"
+                    )
+        if self.public_policies is not None:
+            public = self.public_policies
+            if type(public) is not AppPolicies:
+                raise ValueError("public_policies must be AppPolicies")
+            _metadata_policy_and_path(public)
+            if public.read.resource in resources:
+                raise ValueError("Executive OAuth resources must be unique")
+            for name in ("read", "submit"):
+                primary_policy = getattr(self.policies, name)
+                public_policy = getattr(public, name)
+                if dataclasses.replace(
+                    public_policy,
+                    resource=primary_policy.resource,
+                    resource_metadata_url=primary_policy.resource_metadata_url,
+                ) != primary_policy:
+                    raise ValueError(
+                        "public Executive policies may differ only by resource "
+                        "and resource metadata URL"
                     )
         if type(self.read_only) is not bool:
             raise ValueError("read_only must be a bool")
@@ -442,7 +467,8 @@ def _create_profile_app(
     metadata_policy, metadata_path = _metadata_policy_and_path(settings.policies)
     authenticator_variants = make_jwt_authenticator_variants(
         settings.policies,
-        settings.additional_policies,
+        settings.additional_policies
+        + ((settings.public_policies,) if settings.public_policies is not None else ()),
         primary_jwks_cache=settings.jwks_cache,
     )
     if len(authenticator_variants) == 1:
