@@ -1,0 +1,354 @@
+"""Refusal, bounded transport, and non-effect tests for Grok Mac read client."""
+from __future__ import annotations
+
+import hashlib
+import json
+import os
+import sys
+
+import pytest
+
+from integrations.grok_bot_local_fabric import read as client
+
+
+RUN = "grok-secretary-local-canary-20261020-01"
+ROOT = "grok-secretary-local-canary-20261020-root"
+
+
+def _status(**changes):
+    value = {
+        "schema": client.STATUS_SCHEMA,
+        "run_id": RUN,
+        "root_id": ROOT,
+        "parent_run_id": ROOT,
+        "state": "TERMINAL",
+        "rc": 0,
+        "signal": "ok",
+        "result_available": True,
+        "accepted": True,
+        "accepted_by": "deterministic",
+        "acceptance_state": "ACCEPTED",
+    }
+    value.update(changes)
+    return value
+
+
+def _capture(monkeypatch, tmp_path, *, status=None, result=b"OK\n", rc=0):
+    adapter = tmp_path / "fabric_task.py"
+    adapter.write_text("safe test fixture only\n")
+    monkeypatch.setattr(client, "APPROVED_ADAPTER", adapter)
+    monkeypatch.setattr(
+        client, "APPROVED_ADAPTER_SHA256",
+        hashlib.sha256(adapter.read_bytes()).hexdigest(),
+    )
+    seen = []
+
+    def fake_run(argv, max_bytes):
+        seen.append((argv, {"max_bytes": max_bytes}))
+        assert argv[:4] == [sys.executable, "-I", "-S", str(adapter)]
+        payload = json.dumps(_status() if status is None else status).encode()
+        if argv[4] == "result":
+            payload = result
+        elif argv[4] != "status":
+            pytest.fail("no action except incumbent status/result may be called")
+        if rc != 0:
+            raise client.Refused("ADAPTER_READ_REFUSED")
+        return payload
+
+    monkeypatch.setattr(client, "_run_bounded", fake_run)
+    return adapter, seen
+
+
+def test_status_returns_only_bounded_fields_and_is_not_authorization(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    response = client.status(adapter, RUN, ROOT, ROOT)
+    assert response["schema"] == client.SCHEMA
+    assert response["correlation_not_authentication"] is True
+    assert response["may_retry_request"] is False
+    assert response["status"]["root_id"] == ROOT
+    assert set(response["status"]) == set(client.STATUS_FIELDS)
+    assert len(seen) == 1
+    assert seen[0][0][4:] == ["status", RUN]
+
+
+def test_result_consumes_only_terminal_matching_root(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    response = client.result(adapter, RUN, ROOT, ROOT)
+    assert response["content_exposed"] is False
+    assert response["content_policy"] == "DIGEST_ONLY_UNAUTHENTICATED"
+    assert "text" not in response
+    assert response["result_sha256"] == hashlib.sha256(b"OK\n").hexdigest()
+    assert response["result_bytes"] == 3
+    assert response["accepted"] is True
+    assert [a[0][4] for a in seen] == ["status", "result"]
+    assert seen[-1][0][5:] == [RUN, "--max-bytes", str(client.DEFAULT_RESULT_BYTES)]
+
+
+@pytest.mark.parametrize("value", [
+    "../invalid", "bad id", "", ";rm -rf /", "\n", "x" * 129
+])
+def test_run_ids_fail_before_call(monkeypatch, tmp_path, value):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    with pytest.raises(client.Refused, match="INVALID_ID"):
+        client.status(adapter, value, ROOT, ROOT)
+    assert seen == []
+
+
+def test_mismatched_or_unverified_root_cannot_read_result(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(root_id=None))
+    with pytest.raises(client.Refused, match="ROOT_NOT_VERIFIED"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("changes", [
+    {"state": "ACTIVE_OR_WAITING", "result_available": False, "rc": None},
+    {"state": "TERMINAL", "rc": 1},
+    {"state": "TERMINAL", "result_available": False},
+])
+def test_nonterminal_or_unsuccessful_result_refused(monkeypatch, tmp_path, changes):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(**changes))
+    with pytest.raises(client.Refused, match="RESULT_NOT_READY"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("bad_signal", [
+    "effect_unknown", "other", "", None, False,
+])
+def test_non_ok_terminal_signal_is_not_success(monkeypatch, tmp_path, bad_signal):
+    adapter, seen = _capture(
+        monkeypatch, tmp_path, status=_status(signal=bad_signal)
+    )
+    with pytest.raises(client.Refused, match="RESULT_NOT_READY"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert [args[4] for args, _ in seen] == ["status"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"accepted": True, "accepted_by": None},
+    {"accepted": True, "accepted_by": "unknown"},
+    {"accepted": True, "accepted_by": ["deterministic"]},
+    {"accepted": True, "acceptance_state": "UNVERIFIED"},
+    {"accepted": False, "acceptance_state": "ACCEPTED"},
+])
+def test_contradictory_acceptance_is_not_affirmed(monkeypatch, tmp_path, changes):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(**changes))
+    projection = client.status(adapter, RUN, ROOT, ROOT)["status"]
+    assert projection["accepted"] is None
+    assert projection["accepted_by"] is None
+    assert projection["acceptance_state"] == "UNVERIFIED"
+    digest = client.result(adapter, RUN, ROOT, ROOT)
+    assert digest["accepted"] is None
+    assert digest["content_exposed"] is False
+    assert [args[4] for args, _ in seen] == ["status", "status", "result"]
+
+
+@pytest.mark.parametrize("changes", [
+    {"state": "TERMINAL_FAILURE", "rc": 78, "signal": "prelaunch_failure", "result_available": False},
+    {"state": "EFFECT_UNKNOWN", "rc": 0, "signal": "effect_unknown"},
+    {"state": "TERMINAL", "rc": 0, "signal": "other"},
+    {"state": "TERMINAL", "rc": 0, "signal": "ok", "result_available": False},
+])
+def test_positive_acceptance_requires_successful_terminal_tuple(monkeypatch, tmp_path, changes):
+    # Even a superficially complete accepted_by+ACCEPTED tuple is unverified
+    # when the incumbent run never satisfied terminal success eligibility.
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(**changes))
+    status = client.status(adapter, RUN, ROOT, ROOT)["status"]
+    assert status["accepted"] is None
+    assert status["accepted_by"] is None
+    assert status["acceptance_state"] == "UNVERIFIED"
+    with pytest.raises(client.Refused, match="RESULT_NOT_READY"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert [args[4] for args, _ in seen] == ["status", "status"]
+
+
+def test_legitimate_unaccepted_result_is_not_false_positive(monkeypatch, tmp_path):
+    adapter, _ = _capture(monkeypatch, tmp_path, status=_status(
+        accepted=False, accepted_by=None, acceptance_state="NOT_ACCEPTED"
+    ))
+    assert client.status(adapter, RUN, ROOT, ROOT)["status"]["accepted"] is False
+    assert client.result(adapter, RUN, ROOT, ROOT)["accepted"] is False
+
+
+def test_not_found_is_observation_only(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(state="NOT_FOUND", root_id=None, rc=None, result_available=False))
+    value = client.status(adapter, RUN, ROOT, ROOT)
+    assert value["status"]["state"] == "NOT_FOUND"
+    assert value["may_retry_request"] is False
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("bad", [
+    b"not-json", b"{}", b'{"schema":"unknown","run_id":"x","state":"TERMINAL"}'
+])
+def test_invalid_status_is_not_canonical(monkeypatch, tmp_path, bad):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    orig = client._call
+    monkeypatch.setattr(client, "_call", lambda *_: bad)
+    with pytest.raises(client.Refused, match="STATUS_INVALID"):
+        client.status(adapter, RUN, ROOT, ROOT)
+    assert seen == []
+    monkeypatch.setattr(client, "_call", orig)
+
+
+def test_result_bounds_do_not_expose_opaque_worker_bytes(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, result=b"\xff")
+    with pytest.raises(client.Refused, match="RESULT_BOUND_INVALID"):
+        client.result(adapter, RUN, ROOT, ROOT, client.MAX_RESULT_BYTES + 1)
+    assert seen == []
+    projection = client.result(adapter, RUN, ROOT, ROOT)
+    assert projection["content_exposed"] is False
+    assert "text" not in projection
+    assert projection["result_bytes"] == 1
+    assert len(seen) == 2
+
+
+def test_status_payload_too_large_refuses_without_echo(monkeypatch, tmp_path):
+    adapter, _ = _capture(monkeypatch, tmp_path)
+    monkeypatch.setattr(client, "_run_bounded", lambda *_: b"A" * (client.MAX_STATUS_BYTES + 1))
+    with pytest.raises(client.Refused, match="RESPONSE_TOO_LARGE"):
+        client.status(adapter, RUN, ROOT, ROOT)
+
+
+def test_nonzero_exit_does_not_echo_adapter_stderr(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, rc=17)
+    with pytest.raises(client.Refused) as exc:
+        client.status(adapter, RUN, ROOT, ROOT)
+    assert str(exc.value) == "ADAPTER_READ_REFUSED"
+    assert "secret" not in str(exc.value).lower()
+
+
+def test_adapter_symlink_is_not_invoked(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    alias = tmp_path / "alias"
+    alias.symlink_to(adapter)
+    with pytest.raises(client.Refused, match="ADAPTER_UNAVAILABLE"):
+        client.status(alias, RUN, ROOT, ROOT)
+    assert seen == []
+
+
+def test_cli_has_no_dispatch_or_accept_endpoint(tmp_path):
+    adapter = tmp_path / "fabric_task.py"
+    adapter.write_text("no execution")
+    with pytest.raises(SystemExit) as exc:
+        client.main(["--adapter", str(adapter), "request", "--run-id", RUN, "--root-id", ROOT])
+    assert exc.value.code == 2
+
+
+def test_process_reader_bounds_output_before_unlimited_collection():
+    with pytest.raises(client.Refused, match="RESPONSE_TOO_LARGE"):
+        client._run_bounded(
+            [sys.executable, "-c", "import sys;sys.stdout.write('a' * 999999)"],
+            128,
+        )
+
+
+def test_process_reader_timeout_kills_exact_process_group(monkeypatch):
+    monkeypatch.setattr(client, "TIMEOUT_SECONDS", 0.15)
+    with pytest.raises(client.Refused, match="ADAPTER_OBSERVATION_UNAVAILABLE"):
+        client._run_bounded([sys.executable, "-c", "import time;time.sleep(10)"], 128)
+
+
+def test_process_reader_refuses_nonzero_exit_without_echoing_stderr():
+    with pytest.raises(client.Refused, match="ADAPTER_READ_REFUSED"):
+        client._run_bounded(
+            [sys.executable, "-c", "import sys;sys.stderr.write('private secret');sys.exit(22)"],
+            128,
+        )
+
+
+def test_caller_chosen_python_script_refused_even_when_valid_file(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    other = tmp_path / "other.py"
+    other.write_text("print('unsafe code')")
+    with pytest.raises(client.Refused, match="ADAPTER_UNAVAILABLE"):
+        client.status(other, RUN, ROOT, ROOT)
+    assert seen == []
+
+
+def test_approved_adapter_must_have_exact_sealed_digest(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path)
+    adapter.write_text("print('changed script')")
+    with pytest.raises(client.Refused, match="ADAPTER_CHANGED"):
+        client.status(adapter, RUN, ROOT, ROOT)
+    assert seen == []
+
+
+def test_parent_mismatch_fails_before_result(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(parent_run_id="unexpected-parent"))
+    with pytest.raises(client.Refused, match="PARENT_NOT_VERIFIED"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert len(seen) == 1
+
+
+def test_correlates_true_root_but_refuses_none_parent(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(parent_run_id=None))
+    with pytest.raises(client.Refused, match="PARENT_NOT_VERIFIED"):
+        client.status(adapter, RUN, ROOT, ROOT)
+    assert len(seen) == 1
+
+
+def test_boolean_rc_is_not_terminal_success(monkeypatch, tmp_path):
+    adapter, seen = _capture(monkeypatch, tmp_path, status=_status(rc=False))
+    with pytest.raises(client.Refused, match="RESULT_NOT_READY"):
+        client.result(adapter, RUN, ROOT, ROOT)
+    assert len(seen) == 1
+
+
+def test_cli_must_supply_parent_id():
+    with pytest.raises(SystemExit) as exc:
+        client.main(["status", "--run-id", RUN, "--root-id", ROOT])
+    assert exc.value.code == 2
+
+
+def test_subprocess_does_not_inherit_model_auth_variables(monkeypatch):
+    monkeypatch.setenv("XAI_API_KEY", "fake-test-do-not-use")
+    monkeypatch.setenv("PYTHONPATH", "/tmp/fake-test-import-dir")
+    raw = client._run_bounded(
+        [sys.executable, "-c", "import json,os; print(json.dumps({k:os.environ.get(k) for k in ('XAI_API_KEY','PYTHONPATH','HOME','PATH')}))"],
+        1024,
+    )
+    env = json.loads(raw)
+    assert env["XAI_API_KEY"] is None
+    assert env["PYTHONPATH"] is None
+    assert env["HOME"]
+    assert env["PATH"]
+
+
+def test_os_read_error_is_a_typed_refusal(monkeypatch):
+    def broken_read(*a, **kw):
+        raise OSError("private simulation")
+    monkeypatch.setattr(client.os, "read", broken_read)
+    with pytest.raises(client.Refused, match="ADAPTER_OBSERVATION_UNAVAILABLE"):
+        client._run_bounded([sys.executable, "-c", "print(1)"], 128)
+
+
+def test_subprocess_timeout_reaps_its_original_process(monkeypatch, tmp_path):
+    pidfile = tmp_path / "run.pid"
+    monkeypatch.setattr(client, "TIMEOUT_SECONDS", 0.35)
+    script = (
+        "import os,time; "
+        f"open({str(pidfile)!r},'w').write(str(os.getpid())); "
+        "time.sleep(10)"
+    )
+    with pytest.raises(client.Refused, match="ADAPTER_OBSERVATION_UNAVAILABLE"):
+        client._run_bounded([sys.executable, "-c", script], 128)
+    if pidfile.is_file():
+        pid = int(pidfile.read_text())
+        with pytest.raises(ProcessLookupError):
+            os.kill(pid, 0)
+
+
+def test_secret_shaped_worker_result_does_not_enter_transport(monkeypatch, tmp_path):
+    secret = b"BEGIN SECRET PRIVATE TOKEN DO NOT LEAK"
+    adapter, seen = _capture(monkeypatch, tmp_path, result=secret)
+    value = client.result(adapter, RUN, ROOT, ROOT)
+    payload = json.dumps(value, sort_keys=True).encode()
+    assert b"SECRET" not in payload
+    assert b"PRIVATE" not in payload
+    assert secret not in payload
+    assert value["content_exposed"] is False
+    assert value["result_bytes"] == len(secret)
+    assert value["result_sha256"] == hashlib.sha256(secret).hexdigest()
+    assert len(seen) == 2
