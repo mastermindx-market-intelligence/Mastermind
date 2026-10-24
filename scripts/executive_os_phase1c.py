@@ -1821,7 +1821,6 @@ def _service_from_config(
     initial_canary: Mapping[str, Any] | None = None,
     content_profile_loader: Callable[[], Any] | None = None,
     workspace_acquisition_loader: Callable[[], Any] | None = None,
-    installed_cross_plane_enrollment: Any | None = None,
     exact_target_source: _ExactWorkerTargetSource | None = None,
     workspace_bindings_path: Path | None = None,
     coo_source: Any | None = None,
@@ -1835,12 +1834,6 @@ def _service_from_config(
     attended_work_placements: tuple = (),
     paid_worker_binding_source: Any | None = None,
 ) -> ExecutiveControlService:
-    if installed_cross_plane_enrollment is not None:
-        from control_plane.workspace_cross_plane_enrollment import InstalledCrossPlaneEnrollment
-        if type(installed_cross_plane_enrollment) is not InstalledCrossPlaneEnrollment:
-            raise ServiceError("qualified installed cross-plane owner required")
-        if "workspace_acquisition" not in raw:
-            raise ServiceError("cross-plane selection requires existing workspace enrollment")
     if "workspace_acquisition" in raw:
         # Closed unix/launchd stanza only. validate_workspace_control_room
         # refuses the legacy TCP port stanza and accepts no port or
@@ -2512,17 +2505,6 @@ def _service_from_config(
                     def original_target_guard():
                         if target_reader() is not original_target:
                             raise ServiceError("installed acceptance target changed")
-            # The only optional source enrollment point. This host-owned
-            # object contains already-authorized member scope and six read
-            # ports. It is NOT constructed from control.json, public App,
-            # ambient credentials, JWT body or a second membership registry.
-            cross_plane_context = None
-            if installed_cross_plane_enrollment is not None:
-                from control_plane.workspace_cross_plane_enrollment import select_installed_cross_plane
-                cross_plane_context = select_installed_cross_plane(
-                    control_room=workspace_control_room, authorize=authorize,
-                    enrollment=installed_cross_plane_enrollment,
-                )
             workspace_factories["workspace_read_provider_factory"] = workspace_provider_factory(
                 control_room=workspace_control_room, authorize=authorize,
                 authorize_discovery=authorize_discovery, authorize_actions=authorize_actions,
@@ -2537,8 +2519,7 @@ def _service_from_config(
                 product_acceptance_owner_target=original_target,
                 product_acceptance_owner_guard=original_target_guard,
                 product_acceptance_read=read_acceptance,
-                product_acceptance_observe=read_original_acceptance_observation,
-                cross_plane_context=cross_plane_context)
+                product_acceptance_observe=read_original_acceptance_observation)
         coo_factories = {}
         from ops.executive_os.coo_principal_host import CooInstalledSource, validate_control_coo
         from control_plane.coo_principal_host import CooHostProvider
@@ -2957,10 +2938,7 @@ def _ceo_admission_guard(raw: Mapping[str, Any], config_path: Path,
 
 
 async def _serve_from_config(config_path: Path, *, attended_work_placements: tuple = (),
-                             _installed_control: bool = False,
-                             installed_cross_plane_enrollment: Any | None = None) -> None:
-    if installed_cross_plane_enrollment is not None and not _installed_control:
-        raise ServiceError("source enrollment requires installed Control custody")
+                             _installed_control: bool = False) -> None:
     installed_config_sha256 = _sha256_file(config_path) if _installed_control else None
     raw = load_control_config(config_path)
     # Only a fixed host composition may select typed placements. Merely
@@ -3126,21 +3104,16 @@ async def _serve_from_config(config_path: Path, *, attended_work_placements: tup
         initial_canary=initial_canary,
         content_profile_loader=content_profile_loader,
         workspace_acquisition_loader=lambda: load_control_config(config_path)["workspace_acquisition"],
-        installed_cross_plane_enrollment=installed_cross_plane_enrollment,
         **({"coo_source": coo_source} if coo_source is not None else {}),
         **({"exact_target_source": exact_target_source} if exact_target_source is not None else {}),
     )
     await service.serve_until_stopped()
 
 
-def serve_installed_control(config_path: Path, *,
-                            installed_cross_plane_enrollment: Any | None = None) -> int:
+def serve_installed_control(config_path: Path) -> int:
     """Canonical wrapper entry; same service/guard, fixed source composition."""
     try:
-        asyncio.run(_serve_from_config(
-            config_path, _installed_control=True,
-            installed_cross_plane_enrollment=installed_cross_plane_enrollment,
-        ))
+        asyncio.run(_serve_from_config(config_path, _installed_control=True))
         return 0
     except (OSError, RuntimeProofError, ServiceError, ValueError) as exc:
         print(f'error: {exc}', file=sys.stderr)

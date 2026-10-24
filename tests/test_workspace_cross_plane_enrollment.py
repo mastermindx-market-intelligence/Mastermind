@@ -91,13 +91,11 @@ def test_existing_private_frame_uses_only_installed_scoped_ports(hosted, monkeyp
     monkeypatch.setattr(ccr, "_discover_document", lambda *_: pytest.fail("not a Session Truth source"))
     source_owners = Owners()
     admitted = owner({"fixture-web"})
-    selection = select_installed_cross_plane(
-        control_room=host, authorize=admitted,
-        enrollment=_enrollment(source_owners), clock=lambda: NOW,
-    )
+    from control_plane.workspace_cross_plane_enrollment import InstalledCrossPlaneEnrollment
+    installed = _enrollment(source_owners)
     service = workspace_provider_factory(
         control_room=host, authorize=admitted, armed={}, runtime_identity={},
-        cross_plane_context=selection,
+        cross_plane_enrollment=installed,
     )(object())
     async def exercise():
         await host.start()
@@ -114,3 +112,20 @@ def test_existing_private_frame_uses_only_installed_scoped_ports(hosted, monkeyp
             await host.close()
     asyncio.run(exercise())
     assert sorted(source_owners.calls) == ["base", "executive", "github", "identities", "linear", "slack"]
+
+
+def test_host_factory_rejects_conflicting_context_and_enrollment(hosted):
+    host, _ = hosted
+    source_owners = Owners()
+    admitted = owner({"fixture-web"})
+    installed = _enrollment(source_owners)
+    with pytest.raises(ValueError, match="ambiguous cross-plane source selection"):
+        workspace_provider_factory(
+            control_room=host, authorize=admitted, armed={}, runtime_identity={},
+            cross_plane_enrollment=installed, cross_plane_context=lambda *_: None,
+        )
+    with pytest.raises(ValueError, match="installed cross-plane source owner unavailable"):
+        workspace_provider_factory(
+            control_room=host, authorize=admitted, armed={}, runtime_identity={},
+            cross_plane_enrollment=object(),
+        )

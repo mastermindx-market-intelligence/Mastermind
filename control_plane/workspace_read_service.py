@@ -1546,7 +1546,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
                                product_acceptance_observe=None, activity_membership=None,
-                               cross_plane_context=None):
+                               cross_plane_context=None, cross_plane_enrollment=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1565,6 +1565,17 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     from control_plane.workspace_control_room_lifecycle import HostedControlRoom
     if type(control_room) is not HostedControlRoom or not callable(authorize):
         raise ValueError("workspace owner configuration refused")
+    if cross_plane_enrollment is not None:
+        # An installed host may select the same private reader through an
+        # already-qualified typed enrollment; never from HTTP or control.json.
+        # Preserve the existing source authority, not a second reader plane.
+        if cross_plane_context is not None:
+            raise ValueError("ambiguous cross-plane source selection")
+        from control_plane.workspace_cross_plane_enrollment import select_installed_cross_plane
+        cross_plane_context = select_installed_cross_plane(
+            control_room=control_room, authorize=authorize,
+            enrollment=cross_plane_enrollment,
+        )
     cache = ExistingControlRoomCache(control_room.current_owner)
     # The original source+permission owner, not a new publisher or identity.
     # Discovery requires an independent callback and remains dark by default.
