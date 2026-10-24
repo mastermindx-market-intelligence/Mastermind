@@ -11,7 +11,7 @@ dependencies = [
     "numpy",
     # the bot runtime adds:
     "anthropic>=0.40",
-    "claude-agent-sdk>=0.2",   # drives Claude Code CLI as the LLM reasoning layer
+    "claude-agent-sdk>=0.2.151",   # drives Claude Code CLI; >=0.2.151 names API-failure terminals (0.2.110 said "error result: success")
     "fastapi>=0.110",
     "uvicorn[standard]>=0.29",
     "sse-starlette>=2.0",
