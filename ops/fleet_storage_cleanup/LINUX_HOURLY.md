@@ -30,6 +30,27 @@ any pre-existing files and stop if their identities differ. Check
 `loginctl show-user "$USER" -p Linger` reports `Linger=yes` (if not, request
 authorized host administrator assistance; no sudo bypass).
 
+**Remote user-bus preflight (observed on Ubuntu3, 2026-10-24):** SSH and
+Desktop Commander noninteractive shells sometimes omit the user D-Bus
+environment even when `Linger=yes` and the real user timer manager is active.
+A bare `systemctl --user` then reports `Failed to connect to bus: No medium
+found`; this is **not** proof that a timer is stopped. Use only this same
+logged-in user's existing bus, after verifying that its runtime directory and
+socket exist and are owned by that UID:
+
+```sh
+uid="$(id -u)"
+test -d "/run/user/$uid" && test -S "/run/user/$uid/bus" || exit 1
+test "$(stat -c %u "/run/user/$uid" "/run/user/$uid/bus" | sort -u)" = "$uid" || exit 1
+export XDG_RUNTIME_DIR="/run/user/$uid"
+export DBUS_SESSION_BUS_ADDRESS="unix:path=/run/user/$uid/bus"
+systemctl --user list-timers --all
+```
+
+Do not manufacture another bus, alter access grants, use a different user's
+manager, or infer an install from this read-only preflight. If this original
+manager is unreachable, keep the installation pending with its exact failure.
+
 Validate with `/usr/bin/python3 .../linux_hygiene.py` first (report-only),
 then run `systemctl --user daemon-reload` and
 `systemctl --user enable --now mastermind-linux-hygiene.timer`.
