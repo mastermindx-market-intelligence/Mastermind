@@ -25,23 +25,38 @@ spec.loader.exec_module(m)
 H = 'a'*64
 R = 'b'*40
 SOURCE_HASHES = {name: H for name in m.SOURCE_NAMES}
+from tests.paid_initializer_fixtures import commitment,witness,module as initializer_module
+INITIALIZER_RAW=(SOURCE/'paid_initializer.py').read_bytes()
+SOURCE_HASHES['paid_initializer.py']=hashlib.sha256(INITIALIZER_RAW).hexdigest()
+
+@pytest.fixture(autouse=True)
+def selected_initializer_source_fixture(monkeypatch):
+    # Source/custody fixture seam; real closed contract/command code executes.
+    def load(expected):
+        assert expected==hashlib.sha256(INITIALIZER_RAW).hexdigest()
+        return initializer_module,INITIALIZER_RAW
+    monkeypatch.setattr(m,'_initializer_module',load)
+
 BINDING = dict(host_ref='ubuntu2', hosts_path='/safe/hosts.json', release_sha=R,
-    source_manifest_sha256=H, preimage_sha256='c'*64, expected_sources=SOURCE_HASHES)
+    source_manifest_sha256=H, preimage_sha256='c'*64, expected_sources=SOURCE_HASHES,initializer_commitment=commitment(python='/home/worker/lanes/venv/bin/python3',binary_sha=H,hook_sha=H))
+BINDING['initializer_commitment']['launch_python']['real_path']='/usr/bin/python3.12'
 PRINCIPAL = dict(uid=501, gid=20, user='operator', home='/Users/operator')
 SNAPSHOT = dict(sources={name:dict(sha256=H,identity=(1,2)) for name in m.SOURCE_NAMES},
     registry_sha256='d'*64, registry_identity=(3,4), alias='ubuntu2')
 
 
 def request():
-    return dict(schema='mastermind.paid_host_probe_request/v1', host_ref='ubuntu2',
+    c=commitment(python='/home/worker/lanes/venv/bin/python3',binary_sha=H,hook_sha=H)
+    c['launch_python']['real_path']='/usr/bin/python3.12'
+    return dict(schema='mastermind.paid_host_probe_request/v2', host_ref='ubuntu2',
         transport_alias='ubuntu2', nonce='nonce1', python_path='/home/worker/lanes/venv/bin/python3',
         capture_root='/home/worker/lanes/ext/lanes', release_sha=R, source_manifest_sha256=H,
         preimage_sha256='c'*64, registry_sha256='d'*64, sources_sha256=SOURCE_HASHES.copy(),
-        probe_sha256=hashlib.sha256(m._REMOTE_PROBE.encode()).hexdigest(), context=m._CONTEXT)
+        probe_sha256=hashlib.sha256(m._REMOTE_PROBE.encode()).hexdigest(), context=m._CONTEXT,initializer_commitment=c,initializer_commitment_sha256=m._digest(c))
 
 
 def response(req):
-    return dict(schema='mastermind.paid_host_observation/v1', request=copy.deepcopy(req),
+    return dict(schema='mastermind.paid_host_observation/v2', request=copy.deepcopy(req),pre_execution=witness(req),
         binary=dict(path=req['python_path'], real_path='/usr/bin/python3.12', version='3.12.10',
             sha256=H, team_identifier=None, size=1000, device=1, inode=2, mode=stat.S_IFREG|0o755,
             uid=0, gid=0, mtime_ns=100), worker_uid=1000, worker_gid=1000, worker_user='worker',
@@ -89,7 +104,7 @@ def test_actual_producer_path_and_one_time_consumption(mocked_owner):
     with pytest.raises(m.QualificationRefused):consume(q)
 
 
-@pytest.mark.parametrize('supplied',[{},True,dict(returncode=0),dict(schema='mastermind.paid_host_observation/v1')])
+@pytest.mark.parametrize('supplied',[{},True,dict(returncode=0),dict(schema='mastermind.paid_host_observation/v2')])
 def test_caller_data_never_qualifies(mocked_owner,supplied):
     with pytest.raises(m.QualificationRefused):consume(supplied)
 
@@ -177,9 +192,9 @@ def test_command_is_exact_context_not_system_python():
     alias,command=m.build_paid_probe(request())
     assert alias=='ubuntu2'
     assert 'HOST_ENV.sh' in command and '/venv/bin' in command
-    assert 'exec python3 -I -S -c' in command
-    assert '/usr/bin/python' not in command
-    assert command.count('source ')==1
+    assert command.startswith('/usr/bin/python3 -I -S -B -c ')
+    assert 'sealed_snapshot' in command
+    assert 'source /proc/self/fd/' in command
     ast.parse(m._REMOTE_PROBE)
 
 
@@ -318,7 +333,7 @@ def test_actual_shell_modes_use_only_inert_transport(tmp_path):
     """Exercise changed shell + backend using fake ssh, no host transport."""
     import shutil
     ext=tmp_path/'ext';ext.mkdir()
-    for name in ('host_pull.sh','host_pull_backend.py','host_pull_probe.template','paid_host_qualification.py'):
+    for name in ('host_pull.sh','host_pull_backend.py','host_pull_probe.template','paid_host_qualification.py','paid_initializer.py'):
         shutil.copyfile((SOURCE/name if (SOURCE/name).exists() else SOURCE.parent/'source'/name),ext/name)
     binpath=tmp_path/'bin';binpath.mkdir()
     ssh=binpath/'ssh'
@@ -331,9 +346,11 @@ def test_actual_shell_modes_use_only_inert_transport(tmp_path):
     poison=tmp_path/'poison';poison.mkdir()
     (poison/'sitecustomize.py').write_text('raise RuntimeError("untrusted site executed")')
     env['PYTHONPATH']=str(poison)
+    # These copied files are deliberately NOT a Root-owned selected release.
+    # The new preexec source verifier must refuse before the inert SSH marker.
     result=subprocess.run(['/bin/bash',str(ext/'host_pull.sh'),'--paid-qualification','ubuntu2'],
         input=m._canonical(request()),stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=5)
-    assert result.returncode==0 and result.stdout==b'fixture-response\n'
+    assert result.returncode==78 and result.stdout==b''
     assert not (tmp_path/'must-not-be-created').exists()
     bad=subprocess.run(['/bin/bash',str(ext/'host_pull.sh'),'--paid-qualification',''],
         input=m._canonical(request()),stdout=subprocess.PIPE,stderr=subprocess.PIPE,env=env,timeout=5)
@@ -405,3 +422,9 @@ def test_dict_receipt_cannot_substitute_for_retained_owned_process(mocked_owner,
     # ordinary callers cannot replace a sealed attribute.
     object.__setattr__(q,'_child',dict(pid=700,returncode=0))
     with pytest.raises(m.QualificationRefused):consume(q)
+
+
+def test_old_postsource_request_cannot_enter_initializer_transport(mocked_owner):
+    old=request();old['schema']='mastermind.paid_host_probe_request/v1'
+    with pytest.raises(m.QualificationRefused):m.build_paid_probe(old)
+    assert mocked_owner==[]

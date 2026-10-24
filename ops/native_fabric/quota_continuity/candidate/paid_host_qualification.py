@@ -28,8 +28,8 @@ _ID = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _RELEASE = re.compile(r"[0-9a-f]{40}\Z")
 SOURCE_NAMES = frozenset({"host_pull.sh", "host_pull_backend.py",
-    "host_pull_probe.template", "paid_host_qualification.py", "remote_sub.sh"})
-_SCHEMA = "mastermind.paid_host_observation/v1"
+    "host_pull_probe.template", "paid_host_qualification.py", "paid_initializer.py", "remote_sub.sh"})
+_SCHEMA = "mastermind.paid_host_observation/v2"
 _CONTEXT = "canonical-paid-physical-owner.v1"
 _TRANSPORT_UID = 501  # Same fixed owner as canonical_paid_definition.PAID_BRIDGE_UID.
 _LIMIT = 65536
@@ -294,13 +294,14 @@ def _owned_transport(request, principal):
 
 _REQUEST_FIELDS = frozenset({"schema", "host_ref", "transport_alias", "nonce",
     "python_path", "capture_root", "release_sha", "source_manifest_sha256",
-    "preimage_sha256", "registry_sha256", "sources_sha256", "probe_sha256", "context"})
+    "preimage_sha256", "registry_sha256", "sources_sha256", "probe_sha256", "context",
+    "initializer_commitment", "initializer_commitment_sha256"})
 
 
 def _request(value):
     _closed(value, _REQUEST_FIELDS)
     if (type(value["schema"]) is not str or type(value["context"]) is not str
-            or value["schema"] != "mastermind.paid_host_probe_request/v1" or value["context"] != _CONTEXT):
+            or value["schema"] != "mastermind.paid_host_probe_request/v2" or value["context"] != _CONTEXT):
         _refuse()
     for name in ("host_ref", "transport_alias", "nonce"):
         _text(value[name], _ID)
@@ -317,23 +318,36 @@ def _request(value):
         _text(h, _SHA)
     if value["probe_sha256"] != hashlib.sha256(_REMOTE_PROBE.encode()).hexdigest():
         _refuse()
+    module, _source = _initializer_module(value["sources_sha256"]["paid_initializer.py"])
+    commitment = module.validate_commitment(value["initializer_commitment"],
+        host_ref=value["host_ref"],transport_alias=value["transport_alias"],
+        python_path=value["python_path"],capture_root=value["capture_root"])
+    if _digest(commitment) != value["initializer_commitment_sha256"]:
+        _refuse()
     if len(_canonical(value)) > 16384:
         _refuse()
     return json.loads(_canonical(value))
 
 
+def _initializer_module(expected_sha256):
+    """Load only the selected sealed sibling; no mutable import search path."""
+    from types import ModuleType
+    raw, _identity = _read_owned(Path(__file__).absolute().with_name("paid_initializer.py"),owners={0})
+    if hashlib.sha256(raw).hexdigest() != _text(expected_sha256,_SHA):_refuse()
+    module=ModuleType("_qualified_paid_initializer")
+    exec(compile(raw,"<qualified-paid-initializer>","exec"),module.__dict__)
+    return module,raw
+
+
 def build_paid_probe(value):
-    """Pure command compilation for the existing shell transport, no grant."""
+    """Compile only the expected unsourced bootstrap; absent binding refuses."""
     request = _request(value)
-    lane = str(Path(request["capture_root"]).parent.parent)
+    _module, source = _initializer_module(request["sources_sha256"]["paid_initializer.py"])
     encoded = base64.b64encode(_canonical(request)).decode("ascii")
-    # Same reviewed physical-owner precedence as remote_sub. No -l shell,
-    # remote PATH substitute, interpreter fallback or provider invocation.
-    inner = ("export PATH=" + shlex.quote(lane + "/venv/bin") + ':"$HOME/.local/bin":/opt/homebrew/bin:"$PATH"; '
-        + "source " + shlex.quote(lane + "/ext/HOST_ENV.sh") + " >/dev/null 2>&1 || exit 78; "
-        + "export PATH=" + shlex.quote(lane + "/venv/bin") + ':"$PATH"; '
-        + "exec python3 -I -S -c " + shlex.quote(_REMOTE_PROBE) + " " + shlex.quote(encoded))
-    return request["transport_alias"], "/bin/bash -c " + shlex.quote(inner)
+    probe=base64.b64encode(_REMOTE_PROBE.encode()).decode("ascii")
+    entry = source.decode()+"\nif __name__=='__main__':\n    import base64,sys\n    try:sys.stdout.buffer.write(run_bootstrap(json.loads(base64.b64decode(sys.argv[1],validate=True)),base64.b64decode(sys.argv[2],validate=True).decode()))\n    except Exception:sys.exit(78)\n"
+    command = shlex.quote(request["initializer_commitment"]["bootstrap_python"]["path"])+" -I -S -B -c "+shlex.quote(entry)+" "+shlex.quote(encoded)+" "+shlex.quote(probe)
+    return request["transport_alias"], command
 
 
 def prepare_paid_transport(host_ref, raw):
@@ -344,7 +358,7 @@ def prepare_paid_transport(host_ref, raw):
 
 
 _RESPONSE_FIELDS = frozenset({"schema", "request", "binary", "worker_uid", "worker_gid",
-    "worker_user", "boot_id", "capture_root", "capture_identity", "context_identity"})
+    "worker_user", "boot_id", "capture_root", "capture_identity", "context_identity", "pre_execution"})
 _BINARY_FIELDS = frozenset({"path", "real_path", "version", "sha256", "team_identifier",
     "size", "device", "inode", "mode", "uid", "gid", "mtime_ns"})
 _DIR_FIELDS = frozenset({"device", "inode", "mode", "uid", "gid", "mtime_ns"})
@@ -388,6 +402,21 @@ def _observation(raw, request):
             or context["host_env_path"] != context["lane_root"] + "/ext/HOST_ENV.sh"):
         _refuse()
     _text(context["host_env_sha256"], _SHA)
+    commitment=request["initializer_commitment"]
+    pre=_closed(value["pre_execution"],frozenset({"commitment_sha256","snapshot_sha256","snapshot_sealed","host_env_identity","bootstrap_sha256","launch_sha256"}))
+    if (pre["commitment_sha256"]!=request["initializer_commitment_sha256"]
+            or pre["snapshot_sha256"]!=commitment["host_env"]["sha256"] or pre["snapshot_sealed"] is not True
+            or pre["bootstrap_sha256"]!=commitment["bootstrap_python"]["sha256"]
+            or pre["launch_sha256"]!=commitment["launch_python"]["sha256"]
+            or binary["real_path"]!=commitment["launch_python"]["real_path"]
+            or binary["sha256"]!=commitment["launch_python"]["sha256"]
+            or (uid,gid,value["worker_user"])!=(commitment["account"]["uid"],commitment["account"]["gid"],commitment["account"]["user"])
+            or context["host_env_sha256"]!=pre["snapshot_sha256"]
+            or type(pre["host_env_identity"]) is not list or len(pre["host_env_identity"])!=9):_refuse()
+    for number in pre["host_env_identity"]:_integer(number)
+    info=pre["host_env_identity"];hook=commitment["host_env"]
+    if (info[2]!=(stat.S_IFREG|hook["mode"]) or info[3]!=hook["uid"] or info[4]!=hook["gid"]
+            or info[5]!=1 or info[6]!=hook["size"] or not info[1]):_refuse()
     return json.loads(_canonical(value))
 
 
@@ -409,7 +438,7 @@ class PaidHostQualification:
         _refuse()
 
 
-def _binding(host_ref, hosts_path, release_sha, source_manifest_sha256, preimage_sha256, expected_sources):
+def _binding(host_ref, hosts_path, release_sha, source_manifest_sha256, preimage_sha256, expected_sources, initializer_commitment):
     _text(host_ref, _ID)
     _path(hosts_path)
     _text(release_sha, _RELEASE)
@@ -420,25 +449,28 @@ def _binding(host_ref, hosts_path, release_sha, source_manifest_sha256, preimage
         _text(v, _SHA)
     return json.loads(_canonical(dict(host_ref=host_ref, hosts_path=hosts_path, release_sha=release_sha,
         source_manifest_sha256=source_manifest_sha256, preimage_sha256=preimage_sha256,
-        expected_sources=expected_sources)))
+        expected_sources=expected_sources,initializer_commitment=initializer_commitment)))
 
 
 def qualify_paid_host(*, host_ref, hosts_path, python_path, capture_root, release_sha,
-                      source_manifest_sha256, preimage_sha256, expected_sources):
+                      source_manifest_sha256, preimage_sha256, expected_sources,
+                      initializer_commitment=None):
     """Own one fresh host-pull read inside the caller's real locked transaction."""
     try:
         if os.geteuid() != 0 or os.getuid() != 0:
             _refuse()
         binding = _binding(host_ref, hosts_path, release_sha, source_manifest_sha256,
-                           preimage_sha256, expected_sources)
+                           preimage_sha256, expected_sources, initializer_commitment)
+        if type(initializer_commitment) is not dict:_refuse()
         principal = _transport_principal()
         snapshot = _snapshot(hosts_path, host_ref, expected_sources)
-        request = _request(dict(schema="mastermind.paid_host_probe_request/v1", host_ref=host_ref,
+        request = _request(dict(schema="mastermind.paid_host_probe_request/v2", host_ref=host_ref,
             transport_alias=snapshot["alias"], nonce=secrets.token_hex(32),
             python_path=python_path, capture_root=capture_root, release_sha=release_sha,
             source_manifest_sha256=source_manifest_sha256, preimage_sha256=preimage_sha256,
             registry_sha256=snapshot["registry_sha256"], sources_sha256=dict(expected_sources),
-            probe_sha256=hashlib.sha256(_REMOTE_PROBE.encode()).hexdigest(), context=_CONTEXT))
+            probe_sha256=hashlib.sha256(_REMOTE_PROBE.encode()).hexdigest(), context=_CONTEXT,
+            initializer_commitment=initializer_commitment,initializer_commitment_sha256=_digest(initializer_commitment)))
         raw, child = _owned_transport(request, principal)
         observed = _observation(raw, request)
         if type(child) is not _POPEN_TYPE or child.returncode != 0 or type(child.pid) is not int or child.pid <= 0:
@@ -455,7 +487,7 @@ def qualify_paid_host(*, host_ref, hosts_path, python_path, capture_root, releas
 
 
 def consume_paid_host_qualification(value, *, host_ref, hosts_path, release_sha,
-                                    source_manifest_sha256, preimage_sha256, expected_sources):
+                                    source_manifest_sha256, preimage_sha256, expected_sources, initializer_commitment=None):
     """Consume only a fresh producer-owned result in the same root transaction."""
     try:
         if (os.geteuid() != 0 or os.getuid() != 0 or type(value) is not PaidHostQualification
@@ -463,7 +495,7 @@ def consume_paid_host_qualification(value, *, host_ref, hosts_path, release_sha,
                 or not 0 <= time.monotonic() - value._at <= 60):
             _refuse()
         binding = _binding(host_ref, hosts_path, release_sha, source_manifest_sha256,
-                           preimage_sha256, expected_sources)
+                           preimage_sha256, expected_sources, initializer_commitment)
         if (binding != value._binding
                 or _snapshot(hosts_path, host_ref, expected_sources) != value._snapshot
                 or _transport_principal() != value._principal
@@ -567,7 +599,7 @@ def observe(p):
     lane=os.path.dirname(os.path.dirname(root));host_env=lane+'/ext/HOST_ENV.sh'
     context,_=read_file(host_env,uid,65536)
     boot=open('/proc/sys/kernel/random/boot_id',encoding='ascii').read(64).strip()
-    return dict(schema='mastermind.paid_host_observation/v1',request=p,
+    return dict(schema='mastermind.paid_host_observation/v2',request=p,
         binary=dict(path=requested,real_path=real,version=sys.version,sha256=hashlib.sha256(binary).hexdigest(),team_identifier=None,
             size=bs.st_size,device=bs.st_dev,inode=bs.st_ino,mode=bs.st_mode,uid=bs.st_uid,gid=bs.st_gid,mtime_ns=bs.st_mtime_ns),
         worker_uid=uid,worker_gid=gid,worker_user=user,boot_id=boot,capture_root=root,

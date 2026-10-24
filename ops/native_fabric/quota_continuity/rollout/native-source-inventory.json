@@ -438,9 +438,9 @@
       "source": "candidate/paid_glm_model_client.py"
     },
     "ext/paid_host_qualification.py": {
-      "bytes": 25456,
+      "bytes": 28137,
       "installed_preimage_sha256": null,
-      "sha256": "d2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad",
+      "sha256": "260a456316eaabfecadb0edb79707f18fb3547705edeca569a7698fa35e1688c",
       "source": "candidate/paid_host_qualification.py"
     },
     "ext/paid_incumbent_state.py": {
@@ -448,6 +448,12 @@
       "installed_preimage_sha256": null,
       "sha256": "2fd23881b84ca8ee32a93b5e15267de117f40b37dd53fe095cb1d3dee658454d",
       "source": "candidate/paid_incumbent_state.py"
+    },
+    "ext/paid_initializer.py": {
+      "bytes": 18468,
+      "installed_preimage_sha256": null,
+      "sha256": "5bf44b1cb3af7539dc4c3d22bc9cc8325de950182054395e9f58f7dd36e8aeac",
+      "source": "candidate/paid_initializer.py"
     },
     "ext/paid_model_owner.py": {
       "bytes": 15953,
@@ -594,7 +600,7 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 95,
+  "native_code_files": 96,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
@@ -609,6 +615,7 @@
     "paid_glm_model_client.py",
     "paid_host_qualification.py",
     "paid_incumbent_state.py",
+    "paid_initializer.py",
     "paid_model_owner.py",
     "paid_pyyaml_6_0_3.zip",
     "paid_pyyaml_provenance.json",

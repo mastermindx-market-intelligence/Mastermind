@@ -39,6 +39,7 @@ from ops.executive_os import autonomy_control as owner
 from ops.executive_os import canonical_paid_definition as base
 from ops.executive_os import canonical_paid_qualification as qual
 from ops.executive_os import release_manifest as manifest_owner
+from tests.paid_initializer_fixtures import commitment,witness,module as initializer_module
 
 SHA = 'b' * 40
 TREE = 'c' * 40
@@ -259,7 +260,8 @@ def observation_document(request):
               'sha256': digest_raw(b'mechanical-python'),
               'team_identifier': None, 'size': 12345, 'device': 1, 'inode': 42,
               'mode': 0o100555, 'uid': 0, 'gid': 0, 'mtime_ns': 1}
-    return {'schema': 'mastermind.paid_host_observation/v1', 'request': request,
+    return {'schema': 'mastermind.paid_host_observation/v2', 'request': request,
+            'pre_execution':witness(request),
             'binary': binary, 'worker_uid': 501, 'worker_gid': 20,
             'worker_user': 'chriswong',
             'boot_id': str(uuid.UUID(int=0x12345678123456781234567812345678)),
@@ -393,6 +395,11 @@ def env(tmp_path, monkeypatch, request):
     monkeypatch.setattr(qual, '_resolve_rename_swap',
                         lambda: make_swap(swap_calls, fail))
     loaded = load_qualifier_module(release / QUALIFIER_EXT)
+    def selected_initializer(expected):
+        raw=files[QUALIFIER_EXT+'/paid_initializer.py']
+        assert digest_raw(raw)==expected
+        return initializer_module,raw
+    monkeypatch.setattr(loaded,'_initializer_module',selected_initializer)
     monkeypatch.setattr(loaded, '_transport_principal', lambda: {
         'uid': 501, 'gid': 20, 'user': 'chriswong', 'home': '/Users/chriswong'})
     snapshot = {'sources': {name: {'sha256': digest, 'identity': (1, 2)}
@@ -467,13 +474,18 @@ def capture_root(tmp_path):
 def run_publish(env, tmp_path, **overrides):
     kwargs = dict(QUALIFY_KWARGS)
     kwargs['capture_root'] = capture_root(tmp_path)
+    c=commitment(host=HOST_KEY,alias=ALIAS,python=PYTHON_PATH,capture=kwargs['capture_root'],uid=501,gid=20,user='chriswong',home='/Users/chriswong',binary_sha=digest_raw(b'mechanical-python'),hook_sha=digest_raw(b'HOST_ENV'))
+    raw=initializer_module.canonical(c)
+    kwargs.update(initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
     kwargs.update(overrides)
     return qual.qualify_and_publish(SHA, CONTROL_SHA, env.aggregate, **kwargs)
 
 
 
 def probe_request(env, tmp_path):
-    return {'schema': 'mastermind.paid_host_probe_request/v1',
+    c=commitment(host=HOST_KEY,alias=ALIAS,python=PYTHON_PATH,capture=capture_root(tmp_path),uid=501,gid=20,user='chriswong',home='/Users/chriswong',binary_sha=digest_raw(b'mechanical-python'),hook_sha=digest_raw(b'HOST_ENV'))
+    return {'schema': 'mastermind.paid_host_probe_request/v2',
+            'initializer_commitment':c,'initializer_commitment_sha256':digest_raw(initializer_module.canonical(c)),
             'host_ref': HOST_KEY, 'transport_alias': ALIAS, 'nonce': 'n' * 64,
             'python_path': PYTHON_PATH, 'capture_root': capture_root(tmp_path),
             'release_sha': SHA,
@@ -677,7 +689,8 @@ def test_signature_has_no_caller_boolean_or_factory_surface():
     assert set(parameters) == {
         'expected_release_sha', 'expected_control_sha256',
         'expected_definition_sha256', 'transport_host', 'python_path',
-        'capture_root', 'worker_id', 'quota_class', 'account_label'}
+        'capture_root', 'worker_id', 'quota_class', 'account_label',
+        'initializer_raw','expected_initializer_sha256'}
 
 
 
@@ -820,17 +833,17 @@ def test_registry_and_alias_drift_refused(env, tmp_path, monkeypatch):
         return raw, child
 
     monkeypatch.setattr(env.loaded, '_owned_transport', drifting_transport)
-    with pytest.raises(qual.CanonicalPaidQualificationRefused):
+    with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):
         run_publish(env, tmp_path)
     assert env.counts == {'qualify': 1, 'consume': 1}
-    assert not env.staging.exists()
+    assert set(os.listdir(env.staging))=={'qualification-intent.json'}
     monkeypatch.setattr(env.loaded, '_owned_transport', env.real_transport)
     monkeypatch.setattr(env.loaded, '_snapshot',
                         lambda hosts_path, host_ref, expected: dict(
                             env.snapshot, alias='other-alias'))
     with pytest.raises(qual.CanonicalPaidQualificationRefused):
         run_publish(env, tmp_path)
-    assert env.counts == {'qualify': 2, 'consume': 2}
+    assert env.counts == {'qualify': 1, 'consume': 1}
 
 
 
@@ -955,7 +968,7 @@ def test_partial_stage_failure_retains_residue_as_unknown(env, tmp_path, monkeyp
     with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):
         run_publish(env, tmp_path)
     assert env.staging.exists() and env.destination.is_dir()
-    assert set(os.listdir(env.staging)) == {'bindings.json'}
+    assert set(os.listdir(env.staging)) == {'qualification-intent.json'}
     assert not (env.staging / (base.PAID_LABEL + '.plist')).exists()
     assert ((env.destination / 'profile.json').read_bytes()
             == env.original['profile.json'])
@@ -1017,7 +1030,7 @@ def test_forged_observation_cannot_pass_real_opaque_consume(env, tmp_path):
                    release_sha=SHA,
                    source_manifest_sha256=request['source_manifest_sha256'],
                    preimage_sha256=env.aggregate,
-                   expected_sources=dict(request['sources_sha256']))
+                   expected_sources=dict(request['sources_sha256']),initializer_commitment=request['initializer_commitment'])
     with pytest.raises(env.loaded.QualificationRefused):
         consume(observation_document(request), **binding)
     observed = env.loaded.qualify_paid_host(python_path=PYTHON_PATH,
@@ -1089,3 +1102,25 @@ def test_no_cleanup_or_replay_after_unknown(env, tmp_path):
     with pytest.raises(qual.CanonicalPaidQualificationRefused):
         run_publish(env, tmp_path)
     assert set(os.listdir(env.staging)) == staging_names
+
+
+def test_missing_expected_initializer_refuses_before_reservation_or_transport(env,tmp_path):
+    with pytest.raises(qual.CanonicalPaidQualificationRefused):
+        run_publish(env,tmp_path,initializer_raw=None,expected_initializer_sha256=None)
+    assert env.counts=={'qualify':0,'consume':0} and not env.staging.exists()
+
+
+def test_initializer_transport_loss_keeps_original_reservation_and_refuses_replay(env,tmp_path,monkeypatch):
+    def lose(request,principal):
+        assert set(os.listdir(env.staging))=={'qualification-intent.json'}
+        intent=json.loads((env.staging/'qualification-intent.json').read_bytes())
+        assert intent['binding']['initializer_commitment']==request['initializer_commitment']
+        raise OSError('inert original transport return loss')
+    monkeypatch.setattr(env.loaded,'_owned_transport',lose)
+    with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):run_publish(env,tmp_path)
+    original=(env.staging/'qualification-intent.json').read_bytes()
+    assert env.counts=={'qualify':1,'consume':0}
+    with pytest.raises(qual.CanonicalPaidQualificationRefused):run_publish(env,tmp_path)
+    assert env.counts=={'qualify':1,'consume':0}
+    assert (env.staging/'qualification-intent.json').read_bytes()==original
+    assert not env.swap_calls

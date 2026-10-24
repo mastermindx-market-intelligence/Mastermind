@@ -71,7 +71,21 @@ def require_paid_source(physical,source):
         q=source['qualification']
         qfields={'registry_key','registry_sha256','transport_alias','host_env_path','host_env_sha256','boot_id',
                  'capture_identity','qualifier_source_manifest_sha256','qualifier_sources_sha256','probe_sha256'}
-        if type(q) is not dict or set(q)!=qfields:_refuse()
+        preexec_fields={'initializer_commitment','initializer_commitment_sha256'}
+        if type(q) is not dict or set(q) not in (qfields,qfields|preexec_fields):_refuse()
+        has_preexec=set(q)==qfields|preexec_fields
+        if has_preexec:
+            from ops.native_fabric.quota_continuity.candidate.paid_initializer import validate_commitment
+            commitment=validate_commitment(q['initializer_commitment'],host_ref=q['registry_key'],
+                transport_alias=q['transport_alias'],python_path=binary['path'],capture_root=source['capture_root'])
+            if (digest(commitment)!=q['initializer_commitment_sha256']
+                    or commitment['host_env']['sha256']!=q['host_env_sha256']
+                    or commitment['host_env']['path']!=q['host_env_path']
+                    or commitment['launch_python']['real_path']!=binary['real_path']
+                    or commitment['launch_python']['sha256']!=binary['sha256']
+                    or (commitment['account']['uid'],commitment['account']['gid'],commitment['account']['user'])
+                       !=(source['worker_uid'],source['worker_gid'],source['worker_user'])):_refuse()
+
         for key in ('registry_sha256','host_env_sha256','qualifier_source_manifest_sha256','probe_sha256'):
             if type(q[key]) is not str or not _SHA.fullmatch(q[key]):_refuse()
         for key in ('registry_key','transport_alias','boot_id'):
@@ -86,6 +100,7 @@ def require_paid_source(physical,source):
                 or ci['mode'] & 0o022):_refuse()
         hashes=q['qualifier_sources_sha256']
         names={'host_pull.sh','host_pull_backend.py','host_pull_probe.template','paid_host_qualification.py','remote_sub.sh'}
+        if has_preexec:names=names|{'paid_initializer.py'}
         if (type(hashes) is not dict or set(hashes)!=names
                 or any(type(v) is not str or not _SHA.fullmatch(v) for v in hashes.values())):_refuse()
         return json.loads(canonical(physical))
