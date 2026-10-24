@@ -405,6 +405,14 @@ class CeoIngressClient:
         response_ceiling = MAX_RESPONSE_BYTES
         stream_limit = _STREAM_LIMIT
         principal_encoded = None
+        from common.direct_native_result_contract import PRIVATE_SCHEMA as direct_schema, validate_private_frame
+        direct_frame = isinstance(frame, Mapping) and frame.get("schema") == direct_schema
+        if direct_frame:
+            try:
+                frame = validate_private_frame(dict(frame))
+            except ValueError:
+                return CeoIngressResponse(transport=TRANSPORT_NOT_SENT,
+                    detail="direct-native frame is invalid")
         # This closed source-only frame has its own canonical byte bounds.
         # Selecting transport limits grants no receiving-side admission.
         from integrations.company_dialogue_principal_app_contract import (
@@ -525,11 +533,32 @@ class CeoIngressClient:
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response exceeded byte ceiling"
                 )
             try:
-                parsed = json.loads(raw.decode("utf-8"))
+                if direct_frame:
+                    def unique(pairs):
+                        value = {}
+                        for key, item in pairs:
+                            if key in value:
+                                raise ValueError("duplicate direct response key")
+                            value[key] = item
+                        return value
+                    def nonfinite(_value):
+                        raise ValueError("nonfinite direct response")
+                    parsed = json.loads(raw.decode("utf-8"), object_pairs_hook=unique,
+                                        parse_constant=nonfinite)
+                    if (type(parsed) is not dict or type(parsed.get("ok")) is not bool
+                            or set(parsed) != ({"ok", "result"} if parsed["ok"] else {"ok", "error"})):
+                        raise ValueError("invalid direct response envelope")
+                else:
+                    parsed = json.loads(raw.decode("utf-8"))
             except (UnicodeDecodeError, json.JSONDecodeError):
                 return CeoIngressResponse(
                     transport=TRANSPORT_SENT_UNKNOWN, detail="response was not valid JSON"
                 )
+            except (ValueError, RecursionError):
+                if not direct_frame:
+                    raise
+                return CeoIngressResponse(
+                    transport=TRANSPORT_SENT_UNKNOWN, detail="direct-native response was invalid")
             if not isinstance(parsed, dict) or "ok" not in parsed or not isinstance(
                 parsed.get("ok"), bool
             ):
