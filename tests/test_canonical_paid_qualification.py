@@ -1124,3 +1124,13 @@ def test_initializer_transport_loss_keeps_original_reservation_and_refuses_repla
     assert env.counts=={'qualify':1,'consume':0}
     assert (env.staging/'qualification-intent.json').read_bytes()==original
     assert not env.swap_calls
+
+
+def test_reserved_identity_is_checked_before_initializer_transport(env,tmp_path,monkeypatch):
+    def refuse_reservation(_reservation):
+        raise ValueError('inert reservation changed before initializer')
+    monkeypatch.setattr(qual,'_check_reservation',refuse_reservation)
+    with pytest.raises(qual.CanonicalPaidQualificationEffectUnknown):run_publish(env,tmp_path)
+    assert env.counts=={'qualify':0,'consume':0}
+    assert (env.staging/'qualification-intent.json').exists()
+    assert not env.swap_calls

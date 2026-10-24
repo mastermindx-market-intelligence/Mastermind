@@ -153,6 +153,16 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         assert result['pre_execution']['snapshot_sealed'] is True
         assert result['context_identity']['host_env_sha256']==c['host_env']['sha256']
         assert not config.exists()  # Selector was compared, never opened/read.
+        # Hook-created Bash functions used to forge command selection and
+        # replace exec with arbitrary observer JSON. They are no longer called:
+        # the original pinned parent launches the genuine fixed probe itself.
+        forged=Path(scratch)/'shadow-exec-must-not-run'
+        hook.write_text('export GLM_CONFIG='+str(config)+'\n'
+            +'command() { printf /forged/python3; }; exec() { echo forged > '+str(forged)+'; printf "{}"; }; export -n -f command exec\n')
+        c['host_env'].update(sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size)
+        req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
+        actual=json.loads(m.run_bootstrap(req,qualifier.m._REMOTE_PROBE))
+        assert actual['binary']['real_path']==str(real) and not forged.exists()
         # Unsupported startup projection refuses before the approved hook body.
         marker=Path(scratch)/'must-not-exist'
         hook.write_text('echo effect > '+str(marker)+'\nexport GLM_CONFIG='+str(config)+'\n')
@@ -161,3 +171,21 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
         with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
         assert not marker.exists()
+
+
+@pytest.mark.parametrize('raw',[b'HOME=x',b'HOME=x\0HOME=y\0',b'BASH_FUNC_exec%%=x\0',
+    b'LD_PRELOAD=x\0',b'PYTHONHOME=x\0',b'ENV=x\0',b'HOME=x\0',b'x'*65537])
+def test_untrusted_initializer_environment_refuses(raw):
+    with pytest.raises(m.InitializerCommitmentRefused):m._initialized_environment(raw,commitment())
+
+
+def test_shell_stdout_cannot_be_a_probe_witness():
+    # The old shell could return forged JSON. The new boundary accepts only
+    # a closed/bounded environment DATA transfer, not observer JSON.
+    raw=b'{"pre_execution":{"snapshot_sealed":true}}\n'
+    with pytest.raises(m.InitializerCommitmentRefused):m._initialized_environment(raw,commitment())
+
+
+def test_child_output_is_bounded_before_materialization():
+    with pytest.raises(m.InitializerCommitmentRefused):
+        m._bounded_child([sys.executable,'-I','-S','-c','import sys;sys.stdout.write("x"*65537)'],timeout=5)

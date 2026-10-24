@@ -17,7 +17,9 @@ account/context. A hash or a correctly shaped document alone proves none of thos
 facts. In particular, the fixed unsourced bootstrap is a previously qualified
 platform prerequisite; its later self-observed kernel hash does not authenticate
 its own earlier startup. SSH server/user-shell startup belongs to that same
-independently qualified platform premise. Those facts are currently unproven by
+independently qualified platform premise. Paid qualification additionally forces
+StrictHostKeyChecking=yes and UpdateHostKeys=no on the existing SSH transport;
+it cannot enroll or update a host key. Ordinary telemetry policy is unchanged. Those facts are currently unproven by
 this source change, and are not a new human-only gate or a request to inspect a
 held remote operation.
 
@@ -59,9 +61,17 @@ checks, not a claim of byte immutability. Unsupported memfd sealing refuses.
 The contract explicitly uses FD-source semantics; a hook depending on its old
 BASH_SOURCE pathname is not silently treated equivalent. The actual initialized
 Python/HOME/GLM_CONFIG selectors must match; they are not overwritten to pass.
+Bash returns only bounded, NUL-framed UTF-8 environment DATA. Functions, traps
+or options created by the hook never acquire final-launch or witness authority.
+The pinned Python parent rejects duplicate/invalid environment keys, exported
+functions, loader/Python startup overrides and context drift, then transfers the
+validated environment to the held launch image with fixed observer code. Neither
+Bash output nor an environment emitter is treated as observer evidence. The
+parent alone constructs the final witness after that genuine child completes.
 
 The fixed existing `.initial-qualification` staging sibling is reserved durably
-before the sole remote child starts. Its Root-only intent binds the current
+before the sole remote child starts and is checked immediately before transport.
+Its Root-only intent binds the current
 release/source/registry/definition and expected initializer. Any failed or lost
 transport after that reservation remains EFFECT_UNKNOWN with the same directory
 retained. A later call refuses the occupied sibling. It never cleans up, retries,

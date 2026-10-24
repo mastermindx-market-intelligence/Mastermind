@@ -848,6 +848,7 @@ def qualify_and_publish(expected_release_sha: str,
         effect = True
         reservation = _reserve_qualification(binding, expected_initializer_sha256,
             registration, control_sha256, worker_sha256)
+        _check_reservation(reservation)
         observed = qualifier.qualify_paid_host(python_path=python_path,
                                                capture_root=capture_root, **binding)
         observation = qualifier.consume_paid_host_qualification(observed, **binding)

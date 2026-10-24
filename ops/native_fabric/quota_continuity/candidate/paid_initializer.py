@@ -130,6 +130,71 @@ def sealed_snapshot(raw):
         os.close(fd);raise
 
 
+def _initialized_environment(raw,commitment):
+    """Environment is transferred as DATA, never shell-generated proof/code."""
+    if type(raw) is not bytes or not 0<len(raw)<=65536 or not raw.endswith(b'\0'):refuse()
+    result={}
+    try:
+        for item in raw[:-1].split(b'\0'):
+            key,separator,value=item.partition(b'=')
+            name=key.decode('ascii')
+            if (not separator or not re.fullmatch(r'[A-Za-z_][A-Za-z0-9_]*',name)
+                    or name in result or name.startswith(('BASH_FUNC_','LD_'))
+                    or name in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__')):refuse()
+            result[name]=value.decode('utf-8','strict')
+        expected=commitment['initialized_context']
+        if result.get('HOME')!=expected['home'] or result.get('GLM_CONFIG')!=expected['glm_config']:refuse()
+        # Reproduce the incumbent post-initializer lane-prefix operation. The
+        # observed PATH is otherwise retained; no fallback to another image.
+        result['PATH']=commitment['lane_root']+'/venv/bin:'+result.get('PATH','')
+        selected=None
+        for directory in result['PATH'].split(':'):
+            candidate=os.path.join(directory,'python3')
+            if os.path.isfile(candidate) and os.access(candidate,os.X_OK):
+                selected=candidate;break
+        if selected!=commitment['launch_python']['path']:refuse()
+        return result
+    except (UnicodeError,ValueError,TypeError):refuse()
+
+
+def _bounded_child(argv,*,timeout,**kwargs):
+    """Bound pipe acquisition before materialization; output never goes to logs."""
+    import selectors
+    import subprocess
+    import time
+    child=subprocess.Popen(argv,stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,
+        stderr=subprocess.DEVNULL,**kwargs)
+    selector=selectors.DefaultSelector();selector.register(child.stdout,selectors.EVENT_READ)
+    raw=bytearray();deadline=time.monotonic()+timeout
+    try:
+        while True:
+            remaining=deadline-time.monotonic()
+            if remaining<=0 or not selector.select(remaining):refuse()
+            chunk=os.read(child.stdout.fileno(),min(65537-len(raw),65536))
+            if not chunk:break
+            raw.extend(chunk)
+            if len(raw)>65536:refuse()
+        if child.wait(timeout=max(0.001,deadline-time.monotonic()))!=0:refuse()
+        if not raw:refuse()
+        return bytes(raw)
+    finally:
+        selector.close();child.stdout.close()
+        if child.poll() is None:
+            child.kill();child.wait()
+
+
+def _capture_environment(snapshot,commitment):
+    import shlex
+    # Even a forged env emitter can supply only DATA. No expected request,
+    # observer code or executable FD is inherited by the initializer shell.
+    script=('export PATH='+shlex.quote(commitment['lane_root']+'/venv/bin')
+        +':"$HOME/.local/bin":/opt/homebrew/bin:"$PATH"; '
+        +'source /proc/self/fd/'+str(snapshot)+' >/dev/null 2>&1 || exit 78; '
+        +'/usr/bin/env -0')
+    return _bounded_child(['/bin/bash','--noprofile','--norc','-c',script],
+        pass_fds=(snapshot,),timeout=15)
+
+
 def run_bootstrap(request, probe_source):
     """One Linux qualification child; caller already owns request/source trust.
 
@@ -295,7 +360,6 @@ def run_bootstrap(request, probe_source):
         snapshot=sealed_snapshot(raw);snapshots.append(snapshot)
         pin(request['capture_root'],directory=True)
         check()
-        for fd in (snapshot,launch_fd):os.set_inheritable(fd,True)
         # The post-initialization selector is observed, never overwritten. The
         # child receives no credential bytes in argv or this expected document.
         encoded=base64.b64encode(canonical(request)).decode('ascii')
@@ -303,38 +367,20 @@ def run_bootstrap(request, probe_source):
             +"assert sys.version_info[:2]==(3,12) and sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode\n"
             +"assert all(getattr(sys,k)==_p['initializer_commitment']['startup'][k] for k in ('prefix','exec_prefix','base_prefix','base_exec_prefix'))\n"
             +probe_source)
-        bridge=r'''import base64,hashlib,json,os,sys
-p=json.loads(base64.b64decode(sys.argv[1],validate=True));fd=int(sys.argv[2]);selected=sys.argv[3]
-c=p['initializer_commitment'];expected=c['initialized_context']
-if os.environ.get('HOME')!=expected['home'] or os.environ.get('GLM_CONFIG')!=expected['glm_config'] or selected!=c['launch_python']['path']:
-    sys.exit(78)
-os.execve(fd,[c['launch_python']['path'],'-I','-S','-B','-c',sys.argv[4],sys.argv[1]],dict(os.environ))
-'''
-        # Run the bridge in the independently pinned bootstrap image. It then
-        # fd-execs the pinned launch image with the genuine logical argv0. The
-        # actual probe must still prove its sys.executable/kernel image; Linux
-        # CI compares getpath/venv semantics rather than assuming argv0 works.
-        lane=commitment['lane_root']
-        script=('export PATH='+shlex.quote(lane+'/venv/bin')+':"$HOME/.local/bin":/opt/homebrew/bin:"$PATH"; '
-                +'source /proc/self/fd/'+str(snapshot)+' >/dev/null 2>&1 || exit 78; '
-                +'export PATH='+shlex.quote(lane+'/venv/bin')+':"$PATH"; '
-                +'for _mm_ld in ${!LD_@}; do exit 78; done; '
-                +'[ -z "${BASH_ENV+x}${ENV+x}${PYTHONHOME+x}${PYTHONEXECUTABLE+x}${__PYVENV_LAUNCHER__+x}" ] || exit 78; '
-                +'selected=$(command -v python3) || exit 78; '
-                +'exec -a '+shlex.quote(commitment['bootstrap_python']['path'])+' /proc/self/fd/'+str(bootstrap_fd)
-                +' -I -S -B -c '+shlex.quote(bridge)+' '+shlex.quote(encoded)+' '+str(launch_fd)
-                +' "$selected" '+shlex.quote(probe_source))
-        # Bash is a fixed trusted OS component, not a PATH-selected hook.
-        # Its platform trust remains part of the independent bootstrap premise.
-        os.set_inheritable(bootstrap_fd,True)
-        child=subprocess.run(['/bin/bash','--noprofile','--norc','-c',script],
-            stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,
-            pass_fds=(snapshot,launch_fd,bootstrap_fd),timeout=25,check=False)
+        # Bash can redefine builtins, functions, traps and options. It is never
+        # trusted to launch/attest the observer. Its entire return is untrusted
+        # environment DATA; only this still-running pinned Python parent can
+        # validate it and launch the held image with the fixed probe source.
+        environment_raw=_capture_environment(snapshot,commitment)
+        initialized=_initialized_environment(environment_raw,commitment)
+        check()
+        child=_bounded_child([logical,'-I','-S','-B','-c',probe_source,encoded],
+            executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
+            env=initialized,timeout=10)
         check()
         for name,before,target in bootstrap_links+launch_links:
             if identity(os.lstat(name))!=before or os.readlink(name)!=target:refuse()
-        if child.returncode or not 0<len(child.stdout)<=65536:refuse()
-        result=json.loads(child.stdout)
+        result=json.loads(child)
         result['pre_execution']={'commitment_sha256':request['initializer_commitment_sha256'],
             'snapshot_sha256':expected['sha256'],'snapshot_sealed':True,
             'host_env_identity':list(identity(hs)),

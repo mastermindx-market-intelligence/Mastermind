@@ -97,8 +97,8 @@ write_state() { # $1 host, $2 probe rc, $3 probe stdout
 run_probe() {
   local is_local="$1" alias="$2" probe="$3" key_guard="${4:-}"
   local key_options=()
-  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ]; then
-    # This read-only inspection must never enroll/update a host key. Normal
+  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ] || [ "$key_guard" = "fixed-paid-qualification" ]; then
+    # Fixed inspection/qualification must never enroll/update a host key. Normal
     # telemetry retains its existing inherited transport policy unchanged.
     key_options=(-o StrictHostKeyChecking=yes -o UpdateHostKeys=no)
   elif [ -n "$key_guard" ]; then
@@ -149,7 +149,7 @@ if [ "$PAID_REQUESTED" -eq 1 ]; then
   esac
   PAID_ALIAS="${PREPARED%%$'\n'*}"
   PAID_PROBE="${PREPARED#*$'\n'}"
-  run_probe 0 "$PAID_ALIAS" "$PAID_PROBE"
+  run_probe 0 "$PAID_ALIAS" "$PAID_PROBE" fixed-paid-qualification
   exit $?
 fi
 

@@ -352,7 +352,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                             (546, 48, 53, 'int', '0o660'),
                                                             (752, 53, 58, 'int', '0o755'),
                                                             (790, 84, 89, 'int', '0o755'))},
- 'ops/executive_os/canonical_paid_qualification.py': {'sha256': 'a67792821682a7201d241d127fbf5d67e50e2ae47b949492099fc93a3a1b672c',
+ 'ops/executive_os/canonical_paid_qualification.py': {'sha256': '268ac1524db03372972117356c1933736e8d519da8e246e0eff97295f3bd6ac0',
  'sites': ((161, 48, 53, 'int', '0o755'),
            (612, 21, 26, 'int', '0o700'),
            (630, 74, 79, 'int', '0o700'),
@@ -465,5 +465,5 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
 }
 
 # Immutable input-mode mask only; not a new UID or execution grant.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': 'da233ec83fe7aee0aa3be897eb2669478268f7178b0c1294e237cd63643ef747',
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '87db33039f70151c6ddeef46192525fc979880d337a26489420cf91f6ae0b1a5',
  'sites': ((84, 36, 41, 'int', '0o777'),)}

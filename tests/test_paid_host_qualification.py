@@ -428,3 +428,24 @@ def test_old_postsource_request_cannot_enter_initializer_transport(mocked_owner)
     old=request();old['schema']='mastermind.paid_host_probe_request/v1'
     with pytest.raises(m.QualificationRefused):m.build_paid_probe(old)
     assert mocked_owner==[]
+
+
+def test_paid_shell_transport_enforces_fixed_host_keys_before_fake_ssh(tmp_path):
+    """Actual shell argv only; backend/SSH are inert fixture executables."""
+    import shutil
+    ext=tmp_path/'ext';ext.mkdir()
+    shutil.copyfile(SOURCE/'host_pull.sh',ext/'host_pull.sh')
+    (ext/'host_pull_probe.template').write_text('unused telemetry probe')
+    (ext/'host_pull_backend.py').write_text('import sys\nassert sys.argv[1:]==["paid-qualification","ubuntu2"]\nprint("fixed-fixture-alias\\ninert-fixture-command")\n')
+    binpath=tmp_path/'bin';binpath.mkdir()
+    ssh=binpath/'ssh';ssh.write_text('#!/bin/sh\nprintf "%s\\000" "$@" > "$MM_ARGV_FILE"\nprintf fixture-only\n');ssh.chmod(0o700)
+    record=tmp_path/'argv'
+    env={**os.environ,'PATH':str(binpath)+':'+str(Path(sys.executable).parent)+':/usr/bin:/bin',
+         'MM_ARGV_FILE':str(record),'HOST_PULL_STATE_DIR':str(tmp_path/'no-state')}
+    result=subprocess.run(['/bin/bash',str(ext/'host_pull.sh'),'--paid-qualification','ubuntu2'],
+        env=env,capture_output=True,timeout=5)
+    assert result.returncode==0 and result.stdout==b'fixture-only'
+    assert record.read_bytes().split(b'\0')==[b'-o',b'BatchMode=yes',b'-o',b'ConnectTimeout=8',
+        b'-o',b'StrictHostKeyChecking=yes',b'-o',b'UpdateHostKeys=no',
+        b'fixed-fixture-alias',b'inert-fixture-command',b'']
+    assert not (tmp_path/'no-state').exists()
