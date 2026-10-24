@@ -30,6 +30,18 @@
 # that one in-flight call finish after the lock drops; the parent does not
 # issue a second bootout or bootstrap. A nonzero bootout is never retried
 # and is never followed by bootstrap.
+#
+# install-agent additionally holds <store>/.install-transaction.lock with a
+# nonblocking kernel flock for the whole transaction: the first launchd read,
+# backup, bootout, pid wait, plist replace, bootstrap, and the final receipt.
+# The file is mode 0600 and owned by the installing user. The kernel releases
+# the flock when this process dies. This is not .publication.lock and it is
+# not the collector's /usr/bin/lockf. A second install-agent finds the flock
+# busy and exits before any launchctl, plist, or backup write. Once this
+# process is about to mutate, it writes .install-transaction.marker. A crash
+# after that leaves the marker; the next installer can acquire the flock and
+# then fail-closes without mutating. A crash before the marker has not mutated,
+# and the kernel has already released the flock.
 
 set -u
 set -o pipefail
@@ -49,6 +61,7 @@ WAIT_LIMIT=50
 ADMIT_PID=""
 ADMIT_RELEASE=""
 FAULT=""
+MARKER_OWNED=0
 
 release_admission() {
   if [ -n "${ADMIT_RELEASE:-}" ]; then
@@ -65,11 +78,25 @@ die() {
   local code=$1
   shift
   release_admission
+  # A clean preflight refusal has not mutated. A crash cannot run this path,
+  # so an abandoned marker stays for the next installer.
+  if [ "${PHASE:-START}" = "START" ] && [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
+    py install-transaction-complete "$STORE" || true
+    MARKER_OWNED=0
+  fi
   if [ -n "${RENDERED:-}" ]; then
     rm -f -- "$RENDERED"
   fi
   printf 'HOST_PULL_LIFECYCLE_REFUSED: %s\n' "$*" >&2
   exit "$code"
+}
+
+finish_install_success() {
+  if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
+    py install-transaction-complete "$STORE" || die 78 "install transaction marker"
+    MARKER_OWNED=0
+  fi
+  exit 0
 }
 
 restore_plist() {
@@ -87,7 +114,16 @@ on_signal() {
   trap - TERM HUP INT
   release_admission
   case "$PHASE" in
-    START|VERIFIED|BACKED_UP)
+    START|VERIFIED)
+      # No backup and no bootout yet. Release the transaction marker so a
+      # later installer is not stuck on a clean signal. SIGKILL cannot get here.
+      if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
+        py install-transaction-complete "$STORE" || true
+        MARKER_OWNED=0
+      fi
+      exit "$code"
+      ;;
+    BACKED_UP)
       exit "$code"
       ;;
     PLIST_REPLACED)
@@ -692,6 +728,102 @@ elif cmd == "write-receipt":
     finally:
         os.close(fd)
 
+elif cmd == "install-transaction-prepare":
+    path = sys.argv[2]
+    require_safe(path, "install transaction")
+    if os.path.lexists(path):
+        st = os.lstat(path)
+        if stat.S_ISLNK(st.st_mode) or not stat.S_ISREG(st.st_mode):
+            fail("install transaction lock kind")
+        if st.st_uid != os.geteuid() or stat.S_IMODE(st.st_mode) != 0o600:
+            fail("install transaction lock owner")
+    else:
+        fd = os.open(path, os.O_RDWR | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        try:
+            os.fchmod(fd, 0o600)
+        finally:
+            os.close(fd)
+
+elif cmd == "install-transaction-acquire":
+    # fd 9 is the caller's open file description. flock sticks to that
+    # description after this process exits, and the kernel drops it when the
+    # caller dies. Exit 75: another installer holds it. Exit 77: we hold it,
+    # but a previous installer crashed and left the marker.
+    store, generation, pid = sys.argv[2:5]
+    require_safe(store, "store")
+    if HEX.fullmatch(generation) is None:
+        fail("generation identity")
+    if re.fullmatch(r"[1-9][0-9]*", pid) is None:
+        fail("install transaction pid")
+    lockpath = store + "/.install-transaction.lock"
+    marker = store + "/.install-transaction.marker"
+    require_safe(lockpath, "install transaction")
+    require_safe(marker, "install transaction marker")
+    st_path = os.lstat(lockpath)
+    if stat.S_ISLNK(st_path.st_mode) or not stat.S_ISREG(st_path.st_mode):
+        fail("install transaction lock kind")
+    st_fd = os.fstat(9)
+    if st_fd.st_ino != st_path.st_ino or st_fd.st_dev != st_path.st_dev:
+        fail("install transaction lock fd")
+    if (st_fd.st_uid != os.geteuid() or stat.S_IMODE(st_fd.st_mode) != 0o600
+            or not stat.S_ISREG(st_fd.st_mode)):
+        fail("install transaction lock owner")
+    try:
+        fcntl.flock(9, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        sys.stderr.write("install transaction already in progress\n")
+        raise SystemExit(75)
+    # A marker means a previous holder died after it had committed to mutate.
+    # Do not replace it and do not continue into launchctl.
+    if os.path.lexists(marker):
+        st_marker = os.lstat(marker)
+        if stat.S_ISLNK(st_marker.st_mode) or not stat.S_ISREG(st_marker.st_mode):
+            fail("install transaction marker kind")
+        sys.stderr.write("install transaction incomplete\n")
+        raise SystemExit(77)
+
+elif cmd == "install-transaction-arm":
+    store, generation, pid = sys.argv[2:5]
+    require_safe(store, "store")
+    if HEX.fullmatch(generation) is None:
+        fail("generation identity")
+    if re.fullmatch(r"[1-9][0-9]*", pid) is None:
+        fail("install transaction pid")
+    marker = store + "/.install-transaction.marker"
+    require_safe(marker, "install transaction marker")
+    if os.path.lexists(marker):
+        fail("install transaction marker exists")
+    fd = os.open(marker, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, (pid + " " + generation + "\n").encode("ascii"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+elif cmd == "install-transaction-complete":
+    store = sys.argv[2]
+    require_safe(store, "store")
+    marker = store + "/.install-transaction.marker"
+    require_safe(marker, "install transaction marker")
+    if not os.path.lexists(marker):
+        raise SystemExit(0)
+    st_marker = os.lstat(marker)
+    if stat.S_ISLNK(st_marker.st_mode) or not stat.S_ISREG(st_marker.st_mode):
+        fail("install transaction marker kind")
+    os.unlink(marker)
+
+elif cmd == "ensure-receipt-dir":
+    directory = sys.argv[2]
+    require_safe(directory, "receipt dir")
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    st_dir = lstat_nofollow(directory)
+    if stat.S_ISDIR(st_dir.st_mode) and stat.S_IMODE(st_dir.st_mode) != 0o700:
+        os.chmod(directory, 0o700)
+        st_dir = lstat_nofollow(directory)
+    if (not stat.S_ISDIR(st_dir.st_mode) or stat.S_IMODE(st_dir.st_mode) != 0o700
+            or st_dir.st_uid != os.geteuid()):
+        fail("receipt dir")
+
 elif cmd == "not-user-launchagents":
     path = sys.argv[2]
     home = os.path.realpath(os.path.expanduser("~"))
@@ -804,6 +936,38 @@ write_receipt() {
   shift 2
   [ -n "${BACKUP_DIR:-}" ] || return 1
   py write-receipt "$BACKUP_DIR" "$GENERATION" "$outcome" "$phase" "$*"
+}
+
+note_install_blocked() {
+  local phase=$1
+  shift
+  [ -n "${BACKUP_DIR:-}" ] || return 1
+  py ensure-receipt-dir "$BACKUP_DIR" || return 1
+  py write-receipt "$BACKUP_DIR" "$GENERATION" "EFFECT_UNKNOWN" "$phase" "$*"
+}
+
+# Holds fd 9 for the life of this process. Children do not inherit it.
+acquire_install_transaction() {
+  local lockpath rc
+  lockpath="$STORE/.install-transaction.lock"
+  py install-transaction-prepare "$lockpath" || die 78 "install transaction lock refused"
+  exec 9<>"$lockpath" || die 78 "install transaction lock refused"
+  py install-transaction-acquire "$STORE" "$GENERATION" "$$"
+  rc=$?
+  "$PYTHON" -c 'import fcntl; fcntl.fcntl(9, fcntl.F_SETFD, fcntl.FD_CLOEXEC)' || rc=78
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+  if [ "$rc" -eq 75 ]; then
+    exec 9>&-
+    note_install_blocked INSTALL_CONTENTION "install transaction already in progress" || true
+    die 78 "install transaction already in progress"
+  fi
+  if [ "$rc" -eq 77 ]; then
+    note_install_blocked INSTALL_ABANDONED "install transaction incomplete" || true
+    die 78 "install transaction incomplete"
+  fi
+  die 78 "install transaction lock refused"
 }
 
 stop_uncertain() {
@@ -1048,6 +1212,12 @@ case "$COMMAND" in
     if [ "$HERMETIC" -eq 1 ]; then
       py not-user-launchagents "$DEST_PLIST" || die 78 "hermetic launch agents path"
     fi
+    if [ -z "$BACKUP_DIR" ]; then
+      BACKUP_DIR=$(dirname -- "$(dirname -- "$DEST_PLIST")")/com.mastermind.host-pull-plist-backups
+    fi
+    # Before the first launchd read. Contention writes a receipt and returns
+    # without launchctl, plist, or backup mutations.
+    acquire_install_transaction
     resolve_tool launchctl /bin/launchctl
     LAUNCHCTL=$TOOL_PATH
     resolve_tool ps /bin/ps
@@ -1055,9 +1225,6 @@ case "$COMMAND" in
     TEMPLATE=${TEMPLATE:-$HERE/launchd/com.mastermind.host-pull.plist.template}
     require_verified_pin
     py paths-ready "$LOCK" "$LOG_PATH" || die 78 "lock or log path"
-    if [ -z "$BACKUP_DIR" ]; then
-      BACKUP_DIR=$(dirname -- "$(dirname -- "$DEST_PLIST")")/com.mastermind.host-pull-plist-backups
-    fi
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH") \
       || die 78 "render failed"
     launchctl_print || die 78 "launchctl state uncertain"
@@ -1068,7 +1235,8 @@ case "$COMMAND" in
         [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
         if argv_matches && py same-file "$RENDERED" "$DEST_PLIST"; then
           rm -f -- "$RENDERED"
-          exit 0
+          RENDERED=""
+          finish_install_success
         fi
         if argv_matches; then
           die 78 "launchctl and plist disagree"
@@ -1085,6 +1253,11 @@ case "$COMMAND" in
         die 78 "launchctl state uncertain"
         ;;
     esac
+    # The flock is already held. The marker is written only once this process
+    # is about to back up, boot out, or replace the plist. A clean refusal
+    # before this point leaves no marker.
+    py install-transaction-arm "$STORE" "$GENERATION" "$$" || die 78 "install transaction marker"
+    MARKER_OWNED=1
     hold_if_requested "$HOLD_MUTATION"
     if [ -e "$DEST_PLIST" ]; then
       HAD_PLIST=1
@@ -1213,7 +1386,7 @@ case "$COMMAND" in
     ps_state "$LC_PID"
     [ "$PS_RESULT" = "alive" ] || die 78 "process state uncertain"
     argv_matches || die 78 "bootstrap did not pin the verified collector"
-    exit 0
+    finish_install_success
     ;;
   *)
     usage

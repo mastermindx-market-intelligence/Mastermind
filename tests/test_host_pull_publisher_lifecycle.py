@@ -753,6 +753,10 @@ def test_term_before_mutation_and_during_wait_and_before_bootstrap(workspace):
         _chmod_tree(ctx["backup"])
         for child in ctx["backup"].iterdir():
             child.unlink()
+    # The pid-wait signal abandoned the transaction. This next scenario is a
+    # fresh absent install, so the crash marker is cleared with the rest of
+    # the fixture. A real successor must leave that marker and fail closed.
+    (ctx["store"] / ".install-transaction.marker").unlink(missing_ok=True)
     (ctx["stub"] / "print-mode").write_text("stopped\n")
     (ctx["stub"] / "print-style").write_text("notfound\n")
     (ctx["stub"] / "launchctl.log").write_text("")
@@ -1196,4 +1200,85 @@ def test_holder_death_during_bootout_does_not_mutate_again(workspace):
     assert receipt["outcome"] == "EFFECT_UNKNOWN"
     assert receipt["service"] == "stopped-uncertain"
     assert receipt["phase"] == "BOOTOUT"
+    assert_not_executed(ctx)
+
+
+def _plist_backups(ctx):
+    if not ctx["backup"].exists():
+        return []
+    return sorted(path.name for path in ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+
+
+def test_second_installer_makes_no_mutation_while_first_holds_transaction(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-plist"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_plist=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    assert "bootout " in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    log_before = launch_log(ctx)
+    backups_before = _plist_backups(ctx)
+    assert backups_before
+    other = run(ctx)
+    assert other.returncode == 78, other.stderr
+    assert "install transaction already in progress" in other.stderr
+    assert launch_log(ctx) == log_before
+    assert ctx["plist"].read_bytes() == original
+    assert _plist_backups(ctx) == backups_before
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "INSTALL_CONTENTION"
+    assert "already in progress" in receipt["reason"]
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    hold.unlink()
+    _out, err = proc.communicate(timeout=10)
+    assert proc.returncode == 0, err
+    log = launch_log(ctx)
+    assert log.count("bootout ") == 1
+    assert log.count("bootstrap ") == 1
+    plist = plistlib.loads(ctx["plist"].read_bytes())
+    assert plist["ProgramArguments"] == [
+        "/usr/bin/lockf", "-t", "0", str(ctx["lock"]), "/bin/bash", str(ctx["pin"]),
+    ]
+    assert plist["ProgramArguments"].count("/bin/bash") == 1
+    lockf_log = ctx["stub"] / "lockf.log"
+    assert not lockf_log.exists() or lockf_log.read_text() == ""
+    assert_not_executed(ctx)
+
+
+def test_installer_crash_releases_mutex_and_next_fails_closed(workspace):
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-plist"
+    hold.write_text("")
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_plist=hold),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    _release_hold(proc, hold)
+    log_before = launch_log(ctx)
+    backups_before = _plist_backups(ctx)
+    assert "bootout " in log_before
+    os.kill(proc.pid, signal.SIGKILL)
+    proc.communicate(timeout=5)
+    marker = ctx["store"] / ".install-transaction.marker"
+    assert marker.is_file()
+    later = run(ctx)
+    assert later.returncode == 78, later.stderr
+    assert "install transaction incomplete" in later.stderr
+    assert "already in progress" not in later.stderr
+    assert launch_log(ctx) == log_before
+    assert "bootstrap " not in launch_log(ctx)
+    assert ctx["plist"].read_bytes() == original
+    assert _plist_backups(ctx) == backups_before
+    assert (ctx["stub"] / "print-mode").read_text().strip() == "absent"
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["service"] == "stopped-uncertain"
+    assert receipt["phase"] == "INSTALL_ABANDONED"
+    assert marker.is_file()
     assert_not_executed(ctx)
