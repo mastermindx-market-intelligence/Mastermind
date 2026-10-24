@@ -540,7 +540,7 @@ def test_event_date_requires_identity_and_primary_class():
         config=cfg,
     )
     assert outcome["verdict"] != facts.VerificationOutcome.CONTRADICTED
-    assert outcome["compared"]["classless_record_count"] == 1
+    assert outcome["compared"]["excluded_non_primary_record_count"] == 1
     assert outcome["compared"]["matched_record_count"] == 0
 
     # (c) A fact with no period identity of its own is recorded unverified.
