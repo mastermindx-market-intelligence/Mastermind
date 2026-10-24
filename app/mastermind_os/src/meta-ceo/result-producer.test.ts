@@ -10,8 +10,8 @@
  *    or malformed explicit input fails this process. The committed export is
  *    never substituted for the supplied directory.
  * 2. Committed replay — the key is absent. The committed three-file export
- *    beside this test is the subject, labelled replay, with the same consumer
- *    and the acquisition sha256 pins.
+ *    beside this test is the subject, labelled replay. Sha256 and runtime
+ *    source-identity pins apply only in this mode.
  *
  * Root meta-ceo-open-harness-convergence-20261024-sol-001.
  * Parent meta-ceo-harness-implementation-20261024-web-001.
@@ -59,9 +59,13 @@ const PINNED_SHA256 = {
     "f76459d06520b84bd46ee03eddcc8df9d2b96ec358db755b85bd5de738366d5f",
 } as const;
 
-/** Request-scoped identities from the unchanged export. They are not equated. */
-const MISSION_RUNTIME_SOURCE_IDENTITY = "21e17d36420f8de07b9f72167c390119";
-const RESULT_RUNTIME_SOURCE_IDENTITY = "371a2ea68a30441c37388d21b2513860";
+/**
+ * Request-scoped identities of the committed export. Replay is the only mode
+ * that may compare a consumed document to these values.
+ */
+const REPLAY_MISSION_RUNTIME_SOURCE_IDENTITY = "21e17d36420f8de07b9f72167c390119";
+const REPLAY_RESULT_RUNTIME_SOURCE_IDENTITY = "371a2ea68a30441c37388d21b2513860";
+const ATTEMPT_OWNED_NEGATIVE_ROOT = /^\/tmp\/result-producer-negative-[A-Za-z0-9]{6,}$/;
 
 /** Test-owned acquisition clock. It is not an owner timestamp. */
 const LOCAL_ACQUIRED_AT = "2026-10-24T20:00:00Z";
@@ -96,6 +100,7 @@ interface NodeFs {
   writeFile(path: string, data: Uint8Array | string): Promise<void>;
   mkdir(path: string, options: { recursive: true }): Promise<void>;
   mkdtemp(prefix: string): Promise<string>;
+  rm(path: string, options: { recursive: true; force: true }): Promise<void>;
 }
 
 const callerEnv = (globalThis as { process?: { env?: CallerEnv } }).process
@@ -123,6 +128,18 @@ async function realFs(): Promise<NodeFs> {
 
 function joinPath(dir: string, name: string): string {
   return `${dir.replace(/\/+$/, "")}/${name}`;
+}
+
+/**
+ * Deletes one mkdtemp root created by the negative-input test. The path must
+ * be exactly that attempt's directory. Caller-provided exports and shared
+ * directories never match the pattern, so they are not removed.
+ */
+async function removeAttemptOwnedRoot(fs: NodeFs, root: string): Promise<void> {
+  if (!ATTEMPT_OWNED_NEGATIVE_ROOT.test(root)) {
+    throw new Error(`refusing to remove a path outside this attempt: ${root}`);
+  }
+  await fs.rm(root, { recursive: true, force: true });
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
@@ -442,18 +459,44 @@ function expectDecoded(consumed: ConsumedExport): void {
   ).toBe(true);
 }
 
+function runtimeSourceIdentities(consumed: ConsumedExport): {
+  mission: string;
+  result: string;
+} {
+  const mission = consumed.mission.result_refs.generation.source_identity;
+  const result = consumed.result.source_observation.runtime?.source_identity;
+  if (!mission || !result) {
+    throw new Error("consumed export is missing a runtime source identity");
+  }
+  return { mission, result };
+}
+
+function controlRoomsEqual(consumed: ConsumedExport): boolean {
+  const missionRoom = consumed.mission.source.owner_observation?.control_room;
+  const resultRoom = consumed.result.source_observation.control_room;
+  if (!missionRoom || !resultRoom) return false;
+  const keys = [
+    "instance_before",
+    "instance_after",
+    "publication_before",
+    "publication_after",
+    "document_digest",
+    "source_validity_digest",
+    "cache_currentness_digest",
+  ] as const;
+  return keys.every((key) => missionRoom[key] === resultRoom[key]);
+}
+
 function expectWithheld(consumed: ConsumedExport): void {
   const missionRoom = consumed.mission.source.owner_observation?.control_room;
   const resultRoom = consumed.result.source_observation.control_room;
-  const missionIdentity =
-    consumed.mission.result_refs.generation.source_identity;
-  const resultIdentity =
-    consumed.result.source_observation.runtime?.source_identity;
+  const identities = runtimeSourceIdentities(consumed);
+  expect(controlRoomsEqual(consumed)).toBe(true);
   expect(missionRoom).toEqual(resultRoom);
   expect(missionRoom).not.toBe(resultRoom);
-  expect(missionIdentity).toBe(MISSION_RUNTIME_SOURCE_IDENTITY);
-  expect(resultIdentity).toBe(RESULT_RUNTIME_SOURCE_IDENTITY);
-  expect(missionIdentity).not.toBe(resultIdentity);
+  expect(identities.mission).toMatch(/^[0-9a-f]{32}$/);
+  expect(identities.result).toMatch(/^[0-9a-f]{32}$/);
+  expect(identities.mission).not.toBe(identities.result);
   expect(consumed.projection.mission.source.state).toBe("CURRENT");
   expect(consumed.projection.result.source.state).toBe("UNKNOWN");
   expect(consumed.projection.result.reason).toBe(
@@ -516,6 +559,7 @@ function expectPresentation(consumed: ConsumedExport): void {
 }
 
 function expectChallenges(consumed: ConsumedExport): void {
+  const identities = runtimeSourceIdentities(consumed);
   const digest = projectMutated(consumed, (_mission, result) => {
     result.selection.result_envelope_digest = "f".repeat(64);
   });
@@ -558,13 +602,8 @@ function expectChallenges(consumed: ConsumedExport): void {
   expect(generation.result.source.state).toBe("UNKNOWN");
   expect(generation.result.reason).toBe("RESULT_OBSERVATION_UNQUALIFIED");
   expect(generation.result.value).toBeNull();
-
-  expect(consumed.result.source_observation.runtime?.source_identity).toBe(
-    RESULT_RUNTIME_SOURCE_IDENTITY,
-  );
-  expect(consumed.mission.result_refs.generation.source_identity).toBe(
-    MISSION_RUNTIME_SOURCE_IDENTITY,
-  );
+  expect(consumed.projection.result.source.state).toBe("UNKNOWN");
+  expect(runtimeSourceIdentities(consumed)).toEqual(identities);
 }
 
 function consumptionReport(consumed: ConsumedExport): Record<string, unknown> {
@@ -581,9 +620,13 @@ function consumptionReport(consumed: ConsumedExport): Record<string, unknown> {
       decodeResultEnvelope: "accepted",
       decodeMissionv3: "accepted",
     },
-    control_room_equal: true,
-    mission_runtime_source_identity: MISSION_RUNTIME_SOURCE_IDENTITY,
-    result_runtime_source_identity: RESULT_RUNTIME_SOURCE_IDENTITY,
+    control_room_equal: controlRoomsEqual(consumed),
+    mission_control_room: consumed.mission.source.owner_observation?.control_room ?? null,
+    result_control_room: consumed.result.source_observation.control_room,
+    mission_runtime_source_identity:
+      consumed.mission.result_refs.generation.source_identity,
+    result_runtime_source_identity:
+      consumed.result.source_observation.runtime?.source_identity ?? null,
     projected_mission_state: consumed.projection.mission.source.state,
     projected_result_state: consumed.projection.result.source.state,
     projected_result_reason: consumed.projection.result.reason,
@@ -642,10 +685,20 @@ describe("result-producer consumer", () => {
 
       registerConsumer(() => consumed);
 
-      it("reports the consumed byte hashes on stdout", () => {
+      it("reports identities, control facts, and hashes from the consumed documents", () => {
         const report = consumptionReport(consumed);
+        const identities = runtimeSourceIdentities(consumed);
         expect(report.mode).toBe("fresh");
         expect(report.directory).toBe(GATE.mode === "fresh" ? GATE.path : "");
+        expect(report.sha256).toEqual(consumed.hashes);
+        expect(report.mission_runtime_source_identity).toBe(identities.mission);
+        expect(report.result_runtime_source_identity).toBe(identities.result);
+        expect(report.mission_runtime_source_identity).not.toBe(
+          report.result_runtime_source_identity,
+        );
+        expect(report.control_room_equal).toBe(true);
+        expect(report.projected_result_state).toBe("UNKNOWN");
+        expect(report.projected_result_reason).toBe("RESULT_OBSERVATION_UNQUALIFIED");
         emitConsumptionReport(report);
       });
     },
@@ -657,9 +710,15 @@ describe("result-producer consumer", () => {
       consumed = await consumeExport(COMMITTED_DIR, "replay");
     });
 
-    it("pins the acquisition sha256 of each unchanged export file", () => {
+    it("pins the committed export bytes and runtime source identities", () => {
       expect(consumed.mode).toBe("replay");
       expect(consumed.hashes).toEqual(PINNED_SHA256);
+      expect(consumed.mission.result_refs.generation.source_identity).toBe(
+        REPLAY_MISSION_RUNTIME_SOURCE_IDENTITY,
+      );
+      expect(consumed.result.source_observation.runtime?.source_identity).toBe(
+        REPLAY_RESULT_RUNTIME_SOURCE_IDENTITY,
+      );
     });
 
     registerConsumer(() => consumed);
@@ -683,28 +742,58 @@ describe("result-producer consumer", () => {
 
     it("rejects an empty, unreadable, or malformed explicit file", async () => {
       const fs = await realFs();
-      const root = await fs.mkdtemp("/tmp/result-producer-negative-");
-      const emptyDir = joinPath(root, "empty");
-      const badDir = joinPath(root, "bad");
-      const dirFile = joinPath(root, "dir-as-file");
-      const selectionDir = joinPath(root, "missing-selection");
-      await fs.mkdir(emptyDir, { recursive: true });
-      await fs.mkdir(badDir, { recursive: true });
-      await fs.mkdir(dirFile, { recursive: true });
-      await fs.mkdir(selectionDir, { recursive: true });
-      await fs.writeFile(joinPath(emptyDir, "actual-result.json"), new Uint8Array());
-      await fs.mkdir(joinPath(dirFile, "actual-result.json"), { recursive: true });
-      const committed = await readExportBytes(COMMITTED_DIR);
-      for (const name of FILE_NAMES) {
-        const payload = name === "actual-result.json" ? "{" : committed[name];
-        await fs.writeFile(joinPath(badDir, name), payload);
-        const selectionPayload = name === "fixture-provenance.json" ? "{}" : committed[name];
-        await fs.writeFile(joinPath(selectionDir, name), selectionPayload);
+      let root: string | undefined;
+      try {
+        root = await fs.mkdtemp("/tmp/result-producer-negative-");
+        const emptyDir = joinPath(root, "empty");
+        const badDir = joinPath(root, "bad");
+        const dirFile = joinPath(root, "dir-as-file");
+        const selectionDir = joinPath(root, "missing-selection");
+        await fs.mkdir(emptyDir, { recursive: true });
+        await fs.mkdir(badDir, { recursive: true });
+        await fs.mkdir(dirFile, { recursive: true });
+        await fs.mkdir(selectionDir, { recursive: true });
+        await fs.writeFile(joinPath(emptyDir, "actual-result.json"), new Uint8Array());
+        await fs.mkdir(joinPath(dirFile, "actual-result.json"), { recursive: true });
+        const committed = await readExportBytes(COMMITTED_DIR);
+        for (const name of FILE_NAMES) {
+          const payload = name === "actual-result.json" ? "{" : committed[name];
+          await fs.writeFile(joinPath(badDir, name), payload);
+          const selectionPayload = name === "fixture-provenance.json" ? "{}" : committed[name];
+          await fs.writeFile(joinPath(selectionDir, name), selectionPayload);
+        }
+        await expect(readExportBytes(emptyDir)).rejects.toThrow(/empty/);
+        await expect(readExportBytes(dirFile)).rejects.toThrow();
+        await expect(consumeExport(badDir, "fresh")).rejects.toThrow(/not JSON/);
+        await expect(consumeExport(selectionDir, "fresh")).rejects.toThrow(/selection/);
+      } finally {
+        if (root !== undefined) await removeAttemptOwnedRoot(fs, root);
       }
-      await expect(readExportBytes(emptyDir)).rejects.toThrow(/empty/);
-      await expect(readExportBytes(dirFile)).rejects.toThrow();
-      await expect(consumeExport(badDir, "fresh")).rejects.toThrow(/not JSON/);
-      await expect(consumeExport(selectionDir, "fresh")).rejects.toThrow(/selection/);
+      if (root === undefined) throw new Error("attempt-owned root was not created");
+      await expect(fs.readFile(joinPath(root, "empty/actual-result.json"))).rejects.toThrow();
+      const committedAfter = await readExportBytes(COMMITTED_DIR);
+      expect(await sha256Hex(committedAfter["actual-result.json"])).toBe(
+        PINNED_SHA256["actual-result.json"],
+      );
+      expect(await sha256Hex(committedAfter["actual-mission-v3.json"])).toBe(
+        PINNED_SHA256["actual-mission-v3.json"],
+      );
+      expect(await sha256Hex(committedAfter["fixture-provenance.json"])).toBe(
+        PINNED_SHA256["fixture-provenance.json"],
+      );
+    });
+
+    it("refuses to remove a caller-provided or shared directory", async () => {
+      const fs = await realFs();
+      await expect(removeAttemptOwnedRoot(fs, COMMITTED_DIR)).rejects.toThrow(/refusing/);
+      await expect(removeAttemptOwnedRoot(fs, "/tmp")).rejects.toThrow(/refusing/);
+      await expect(removeAttemptOwnedRoot(fs, "/tmp/result-producer-negative-")).rejects.toThrow(
+        /refusing/,
+      );
+      const committed = await readExportBytes(COMMITTED_DIR);
+      expect(await sha256Hex(committed["actual-result.json"])).toBe(
+        PINNED_SHA256["actual-result.json"],
+      );
     });
 
     it("rejects provenance that does not carry the exported selection", () => {

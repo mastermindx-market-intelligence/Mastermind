@@ -23,10 +23,18 @@ registration. No live credential is in these files.
 
 `app/mastermind_os/src/meta-ceo/result-producer.test.ts` reads the bytes and
 passes them to `decodeResultBytes`, `decodeResultEnvelope`, `decodeMissionv3`,
-and `projectOffice`. Committed replay is the default Vitest run. Fresh
-consumption is a separate mode: set `RESULT_PRODUCER_FIXTURE_DIR` to a directory
-that contains these three names. An empty, missing, unreadable, or malformed
-explicit input fails that process. The committed files are not substituted.
+and `projectOffice`. Committed replay is the default Vitest run. Its sha256
+and runtime `source_identity` pins are the table and the identities below, and
+they apply only to these committed files.
+
+Fresh consumption is a separate mode: set `RESULT_PRODUCER_FIXTURE_DIR` to a
+directory that contains these three names. That process reports the sha256,
+runtime source identities, and Control Room facts of the files it actually
+read. A later exporter run has new request-scoped identities. The consumer
+withholds the result while those identities differ. An empty, missing,
+unreadable, or malformed explicit input fails that process. The committed
+files are not substituted. The malformed-input case removes only the temporary
+directory it created.
 
 ```sh
 cd app/mastermind_os
@@ -38,7 +46,7 @@ RESULT_PRODUCER_FIXTURE_DIR=/absolute/export npm test -- src/meta-ceo/result-pro
 
 Both decoders accept the pair. The five-key review tuple is present in
 `result_refs`. The Control Room brackets are equal and remain separate objects.
-The runtime `source_identity` values differ:
+The committed replay's runtime `source_identity` values differ:
 
 - Mission `result_refs.generation.source_identity`: `21e17d36420f8de07b9f72167c390119`
 - Result `source_observation.runtime.source_identity`: `371a2ea68a30441c37388d21b2513860`
