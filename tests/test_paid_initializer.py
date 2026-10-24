@@ -152,8 +152,9 @@ def _decode_observer_diagnostic(raw):
     except (ValueError,TypeError,UnicodeError,RecursionError):return None
 
 
-def _guard_notice(fixture,value):
+def _guard_notice(fixture,value,*,phase='PIPELINE_REFUSAL'):
     if fixture is None:return
+    if phase not in ('FINAL_OBSERVER_REFUSAL','CLEANUP_AFTER_OBSERVER_REFUSAL','PIPELINE_REFUSAL'):phase='PIPELINE_REFUSAL'
     try:public=_decode_observer_diagnostic(json.dumps(value,allow_nan=False).encode())
     except (ValueError,TypeError):public=None
     if public is None:public=dict(schema=_DIAGNOSTIC_SCHEMA,kind='REFUSAL',sites=[],errno=None)
@@ -161,7 +162,7 @@ def _guard_notice(fixture,value):
     if reporter is not None:
         with fixture.getfixturevalue('capsys').disabled():
             reporter.write_line('\n::error file=tests/test_paid_initializer.py,title=H1 Linux guard diagnostic::'
-                +fixture.node.name+' '+json.dumps(public,sort_keys=True,separators=(',',':'),ensure_ascii=True))
+                +fixture.node.name+' phase='+phase+' '+json.dumps(public,sort_keys=True,separators=(',',':'),ensure_ascii=True))
 
 
 def _inert_bootstrap(request,probe,*,owner=m,diagnostic_request=None):
@@ -181,7 +182,7 @@ def _inert_bootstrap(request,probe,*,owner=m,diagnostic_request=None):
                 while frame is not None:
                     if frame.tb_frame.f_code is original.__code__:
                         value=_decode_observer_diagnostic(frame.tb_frame.f_locals.get('raw'))
-                        if value is not None:diagnostic.append(value)
+                        if value is not None:diagnostic.append((value,error))
                     frame=frame.tb_next
             raise
     try:
@@ -191,11 +192,12 @@ def _inert_bootstrap(request,probe,*,owner=m,diagnostic_request=None):
         while frame is not None:
             if frame.tb_frame.f_code.co_filename==owner.__file__ and frame.tb_frame.f_code.co_name!='refuse':site=frame.tb_lineno
             frame=frame.tb_next
-        public=diagnostic[-1] if diagnostic else dict(schema=_DIAGNOSTIC_SCHEMA,kind='REFUSAL',sites=[],errno=None)
-        _guard_notice(diagnostic_request,public)
+        public=diagnostic[-1][0] if diagnostic else dict(schema=_DIAGNOSTIC_SCHEMA,kind='REFUSAL',sites=[],errno=None)
+        phase=('FINAL_OBSERVER_REFUSAL' if diagnostic[-1][1] is error else 'CLEANUP_AFTER_OBSERVER_REFUSAL') if diagnostic else 'PIPELINE_REFUSAL'
+        _guard_notice(diagnostic_request,public,phase=phase)
         # Suppress producer frames that may contain environment arguments. The
         # fixed source line and allowlisted diagnostic retain the real refusal.
-        raise AssertionError('inert initializer guard line='+str(site)+' diagnostic='+json.dumps(public,sort_keys=True,separators=(',',':'))) from None
+        raise AssertionError('inert initializer guard line='+str(site)+' phase='+phase+' diagnostic='+json.dumps(public,sort_keys=True,separators=(',',':'))) from None
 
 
 def test_closed_commitment_is_detached_expected_input():
@@ -678,4 +680,27 @@ def test_unexpected_pipeline_exception_keeps_private_repr_out_of_diagnostics(mon
     monkeypatch.setattr(m,'run_bootstrap',fail)
     with pytest.raises(AssertionError) as caught:_inert_bootstrap({},'')
     assert secret not in str(caught.value) and 'diagnostic=' in str(caught.value)
+    assert caught.value.__suppress_context__ is True
+
+
+@pytest.mark.parametrize('cleanup',[False,True])
+def test_final_observer_primary_and_cleanup_refusals_stay_distinct(monkeypatch,cleanup):
+    from types import SimpleNamespace
+    private='PRIVATE_CLEANUP_TEXT_MUST_NOT_ESCAPE'
+    public=dict(schema=_DIAGNOSTIC_SCHEMA,kind='ValueError',sites=[dict(function='walk',line=17,fields=['kind'])],errno=None)
+    def bounded(argv,**kwargs):
+        raw=bytearray(json.dumps(public).encode())
+        raise m.InitializerCommitmentRefused()
+    owner=SimpleNamespace(_bounded_child=bounded,InitializerCommitmentRefused=m.InitializerCommitmentRefused,__file__=__file__)
+    def run(request,probe):
+        try:return owner._bounded_child(['python','-I','-S','-B','-c','def observe(p):pass\n    except Exception:\n        sys.exit(78)','{}'])
+        finally:
+            if cleanup:raise ValueError(private)
+    owner.run_bootstrap=run
+    notices=[]
+    monkeypatch.setattr(sys.modules[__name__],'_guard_notice',lambda fixture,value,**kw:notices.append((value,kw['phase'])))
+    expected='CLEANUP_AFTER_OBSERVER_REFUSAL' if cleanup else 'FINAL_OBSERVER_REFUSAL'
+    with pytest.raises(AssertionError) as caught:_inert_bootstrap({},'',owner=owner)
+    assert notices==[(public,expected)]
+    assert 'phase='+expected in str(caught.value) and private not in str(caught.value)
     assert caught.value.__suppress_context__ is True
