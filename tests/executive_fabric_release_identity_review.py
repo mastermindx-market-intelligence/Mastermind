@@ -282,8 +282,8 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # Re-pinned for the explicit unstarted PREPROOF successor mode; same three
 # guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": '322708005acd49517f727feb49743433da7612d776e6afc222079c443f43f511',
-    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1655, 46, 49, 'int', '400'), (1655, 66, 69, 'int', '500')),
+    "sha256": '703470426984f995f39690aaf667c8d0ed5c98262f6e83224b201611d873a080',
+    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1711, 46, 49, 'int', '400'), (1711, 66, 69, 'int', '500')),
 }
 
 
@@ -291,8 +291,8 @@ REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
 # This exact token is the Root config-directory permission mode, not a UID.
 # Source, path, AST location and complete token must all match; scanner unchanged.
 REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
-    "sha256": '8c7f1584128a7e1834706bb7d3e02825e6263abba9eaf828d27a254e095b26d7',
-    "sites": ((332, 46, 51, 'int', '0o755'),),
+    "sha256": 'd7d4e069e76e689f2d476c1ec1c7289f3e5c700c26e9f7a55e0db3044fdcdfdd',
+    "sites": ((339, 46, 51, 'int', '0o755'),),
 }
 
 
@@ -461,4 +461,14 @@ REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
     'sha256': 'aea09940df9475c571002309fa70eae88d19d2b2034b9f1a4700a3e86619534d',
     'sites': ((55, 21, 24, 'int', '501'),),
+}
+
+
+# Fixed pre-census ancestor permission modes; not account UIDs. Only the
+# exact reviewed source, AST Constant and complete token qualify.
+REVIEWED_FILES['control_plane/executive_backup.py'] = {
+    'sha256': 'e7f236811c233322e82792c151c694076c81b19c0067f113c77f6a4d0d27cc8a',
+    'sites': ((3500, 39, 44, 'int', '0o711'),
+              (3502, 43, 48, 'int', '0o700'),
+              (3504, 39, 44, 'int', '0o755')),
 }

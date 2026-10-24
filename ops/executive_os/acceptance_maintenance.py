@@ -943,12 +943,15 @@ def _validate_v5_to_v7_material(material: Any) -> tuple[Path, Path]:
     original by being the same migration evidence.
     """
     owner = _evidence_owner()
+    recovered = (isinstance(material, dict)
+                 and material.get("schema_version") == owner.RECOVERED_MATERIAL_SCHEMA_VERSION)
     if (not isinstance(material, dict)
             or set(material) != {"schema_version", "phase", "host", "origin_records", "chain"}
-            or material["schema_version"] != owner.MATERIAL_SCHEMA_VERSION
+            or material["schema_version"] not in {owner.MATERIAL_SCHEMA_VERSION,
+                                                  owner.RECOVERED_MATERIAL_SCHEMA_VERSION}
             or material["phase"] != owner.EVIDENCE_PHASE_INITIAL
             or not isinstance(material["origin_records"], list)
-            or len(material["origin_records"]) != 12):
+            or len(material["origin_records"]) != (14 if recovered else 12)):
         raise MaintenanceError("schema upgrade evidence material is malformed")
     host = material["host"]
     if (not isinstance(host, dict)
@@ -973,6 +976,25 @@ def _validate_v5_to_v7_material(material: Any) -> tuple[Path, Path]:
             or _DIGEST.fullmatch(release["manifest_sha256"]) is None):
         raise MaintenanceError("schema upgrade evidence tool release is malformed")
     return runtime_root, backup_root
+
+
+def _bind_pre_census_selected(evidence, selected_sha, selected, source_control):
+    """Join recovery's held Root attestation to the real selected lineage."""
+    owner = _evidence_owner()
+    if evidence.material["schema_version"] != owner.RECOVERED_MATERIAL_SCHEMA_VERSION:
+        return
+    qualification = evidence.pre_census_qualification
+    raw = (bundle_path(selected_sha)/"descriptor.json").read_bytes()
+    expected = dict(sha=selected_sha,
+        descriptor_raw_sha256=hashlib.sha256(raw).hexdigest(),
+        descriptor_sha256=digest(selected), source_backup_sha256=selected["backup_sha256"],
+        baseline_sha256=selected["baseline_sha256"], inventory_sha256=selected["inventory_sha256"],
+        prior_canary_sha256=selected["prior_canary_sha256"])
+    if (not isinstance(qualification, dict)
+            or qualification["selected_source"] != expected
+            or qualification["source_control_config"]["sha256"]
+            != hashlib.sha256(source_control).hexdigest()):
+        raise MaintenanceError("recovery qualification selected source or control preimage differs")
 
 
 def _runtime_owner_path(path: Path, guard=None) -> Path:
@@ -1158,8 +1180,17 @@ class _ServiceAdmissionLock:
     migration or before normal Service startup.
     """
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, *, _pre_census_barrier=None):
         self._config = config
+        self._pre_census_barrier = _pre_census_barrier
+        if _pre_census_barrier is not None:
+            # This is a retained observation created by the existing backup
+            # owner's Root-only context, never a caller boolean or path DTO.
+            from control_plane import executive_backup as backup
+            if (os.geteuid() != 0 or not isinstance(
+                    _pre_census_barrier, backup._PreCensusBarrierObservation)):
+                raise MaintenanceError("retained barrier requires the actual Root owner")
+            _pre_census_barrier.check()
         self.state: Path | None = None
         self.alias: tuple | None = None
         self.lock_fd: int | None = None
@@ -1280,6 +1311,11 @@ class _ServiceAdmissionLock:
                 or _identity(self.state.lstat()) != self.state_initial):
             raise MaintenanceError("Executive service state directory changed while held")
         for absent_name in (_SERVICE_MARKER, _UPGRADE_BARRIER_NAME):
+            if absent_name == _UPGRADE_BARRIER_NAME and self._pre_census_barrier is not None:
+                self._pre_census_barrier.check()
+                if self._pre_census_barrier.identity['path'] != str(self.state / absent_name):
+                    raise MaintenanceError("retained barrier differs from the canonical state")
+                continue
             if os.path.lexists(self.state / absent_name):
                 raise MaintenanceError(
                     "Executive " + absent_name + " is present; v5-to-v7 admission refuses")
@@ -1287,6 +1323,26 @@ class _ServiceAdmissionLock:
             info = _MACOS_VAR_ALIAS.lstat()
             if (_identity(info), os.readlink(_MACOS_VAR_ALIAS)) != self.alias:
                 raise MaintenanceError("retained Runtime alias changed")
+
+    def _accept_qualification_creation(self, path: Path, before_names: set[str]) -> None:
+        """Admit exactly our own initially private O_EXCL child publication.
+
+        Creating that one child changes directory timestamps; inode, custody,
+        all ancestors and the exact name transition remain qualified. This
+        private operation is unavailable to normal maintenance callers.
+        """
+        if (self._pre_census_barrier is None or self.state_fd is None
+                or path.parent != self.state):
+            raise MaintenanceError("qualification publication has no retained custody")
+        info = os.fstat(self.state_fd)
+        stable = lambda value: (value.st_dev, value.st_ino, value.st_mode,
+                                value.st_uid, value.st_gid)
+        if (stable(info) != stable(self.ancestry.nodes[self.state][1])
+                or stable(path.parent.lstat()) != stable(info)
+                or set(os.listdir(self.state_fd)) != before_names | {path.name}):
+            raise MaintenanceError("qualification publication changed the state namespace")
+        self.state_initial = _identity(info)
+        self.check()
 
     def __exit__(self, kind, error, traceback) -> bool:
         lock_fd, self.lock_fd = self.lock_fd, None
@@ -2794,6 +2850,7 @@ def _issue_v5_to_v7(args: argparse.Namespace, config: dict, guard, *, lock=None,
     evidence_runtime_root, _evidence_backup_root = _validate_v5_to_v7_material(material)
     if evidence_runtime_root != _runtime_owner_path(Path(config["runtime_root"]), guard):
         raise MaintenanceError("schema upgrade evidence runtime root drifted")
+    _bind_pre_census_selected(evidence, selected_sha, selected, config_bytes)
     # The separately qualified current Root config preimage is what the
     # owner observed; issuance happens while the installed release is still
     # the selected v5 one, so this is the same preimage this process holds.
@@ -2881,7 +2938,195 @@ def _issue_v5_to_v7(args: argparse.Namespace, config: dict, guard, *, lock=None,
     return final_bundle
 
 
+def _require_pre_census_stopped() -> None:
+    """Preserve the supported readside stop boundary, never stop MCP."""
+    require_stopped()
+    label = 'com.mastermind.executive.sol-state-relay'
+    result = subprocess.run(['/bin/launchctl', 'print', 'system/' + label],
+                            capture_output=True, timeout=10)
+    absent = f'Could not find service "{label}" in domain for system\n'.encode('ascii')
+    if result.returncode != 113 or result.stdout or result.stderr != absent:
+        raise MaintenanceError("Executive relay absence could not be verified")
+
+
+def _pre_census_absences(database: Path, *, own_qualification: bool = False) -> None:
+    from control_plane import executive_backup as backup
+    names = (backup._UPGRADE_V5_TO_V6_PREFLIGHT_NAME,
+             backup._UPGRADE_V5_TO_V6_COMPLETION_NAME,
+             backup._UPGRADE_V6_TO_V7_PREFLIGHT_NAME,
+             backup._UPGRADE_V6_TO_V7_COMPLETION_NAME,
+             backup.PRE_CENSUS_CONTINUATION_NAME)
+    if not own_qualification:
+        names += (backup.PRE_CENSUS_QUALIFICATION_NAME,)
+    if any(os.path.lexists(database.parent / name) for name in names):
+        raise MaintenanceError("pre-census qualification already has receipts or reservation")
+    if any(name.startswith('.executive.sqlite3.restore-') for name in os.listdir(database.parent)):
+        raise MaintenanceError("pre-census qualification found unresolved restore residue")
+
+
+def _current_v5_qualification(database: Path, guard) -> dict:
+    """Current physical DATA and full semantic proof, never historical prestate."""
+    from control_plane import executive_backup as backup
+    fd = guard._hold(database, directory=False, exact=True)
+    info = os.fstat(fd)
+    observed, offset = hashlib.sha256(), 0
+    while offset < info.st_size:
+        part = os.pread(fd, min(1024 * 1024, info.st_size - offset), offset)
+        if not part:
+            raise MaintenanceError("current v5 database was truncated")
+        observed.update(part)
+        offset += len(part)
+    with backup._readonly_database(database) as connection:
+        _pages, _size, vector = backup._verify_connection(connection, expected_schema_version=5)
+        schema = backup.normalized_schema_digest(connection)
+        content = backup.full_v5_content_digest(connection)
+    guard.check()
+    record = dict(path=str(database), device=info.st_dev, inode=info.st_ino,
+                  uid=info.st_uid, gid=info.st_gid, mode=stat.S_IMODE(info.st_mode),
+                  nlink=info.st_nlink, size=info.st_size, mtime_ns=info.st_mtime_ns,
+                  ctime_ns=info.st_ctime_ns, sha256=observed.hexdigest())
+    return dict(database=record, normalized_schema_digest=schema,
+                full_v5_content_digest=content,
+                migration_vector=[item.to_dict() for item in vector])
+
+
+def _issue_pre_census_qualification(args: argparse.Namespace) -> dict:
+    """Issue one Root-to-Control proof for the original operation's safe PRESENT.
+
+    The qualification is deliberately separate from a migration descriptor.
+    The original barrier is retained unchanged, its phase remains unknown,
+    and only the Control owner may reserve the one-use continuation later.
+    """
+    from datetime import datetime, timezone
+    from control_plane import executive_backup as backup
+    if os.geteuid() != 0 or sys.platform != 'darwin':
+        raise MaintenanceError("pre-census qualification requires Root on macOS")
+    if getattr(args, 'qualify_v5_source_only', False):
+        raise MaintenanceError("pre-census qualification cannot mix source-only actions")
+    selected_sha = _v5_to_v7_selector(args)
+    if selected_sha is None:
+        raise MaintenanceError("pre-census qualification requires exact selected v5 source")
+    with _RootConfig() as config_holder:
+        config = config_holder.value
+        _v5_to_v7_gates(args, config, selected_sha)
+        _require_pre_census_stopped()
+        database = _runtime_owner_path(Path(config['runtime_root']) /
+                                       'data/control_plane/executive.sqlite3')
+        with backup._open_pre_census_barrier_for_root_issuer(database) as barrier:
+            # Optional selectors constrain the actual observed leaf; they do
+            # not supply its UUID, expected payload or authority.
+            if (getattr(args, 'expected_operation_id', None) not in (None, barrier.payload['operation_id'])
+                    or getattr(args, 'expected_barrier_sha256', None) not in (None, barrier.identity['sha256'])):
+                raise MaintenanceError("retained barrier CAS selector differs")
+            with _ServiceAdmissionLock(config, _pre_census_barrier=barrier) as lock, _UnstartedPreproofGuard() as guard:
+                database = _quiescent_database(config, lock, guard)
+                _pre_census_absences(database)
+                proof = _qualify_v5_source_only(args, config, lock=lock,
+                                                 config_holder=config_holder)
+                selected = descriptor_for(selected_sha)
+                if selected is None:
+                    raise MaintenanceError("selected source disappeared")
+                view = _v5_to_v7_view_candidate(selected, selected_sha,
+                    args.superseded_descriptor_sha256, args.successor_sha,
+                    baseline_sha256=proof['source_baseline_sha256'],
+                    inventory_sha256=proof['source_inventory_sha256'],
+                    prior_canary_sha256=proof['source_canary_sha256'])
+                guard.lineage(view)
+                guard.file(Path(config['secret_canary_receipt_path']))
+                source = _current_v5_qualification(database, guard)
+                _selected_v5_backup(selected_sha, selected, guard, source['full_v5_content_digest'])
+                descriptor_path = bundle_path(selected_sha)/'descriptor.json'
+                descriptor_fd = guard._hold(descriptor_path, directory=False, exact=True)
+                raw_descriptor = os.pread(descriptor_fd, _MAX_DOCUMENT_BYTES + 1, 0)
+                if len(raw_descriptor) > _MAX_DOCUMENT_BYTES:
+                    raise MaintenanceError("selected descriptor exceeds its bound")
+                old = barrier.payload
+                old_tool = dict(root=old['tool_release_root'], sha=old['release_sha'],
+                                tree_sha=old['tool_release_tree_sha'],
+                                manifest_sha256=old['tool_release_manifest_sha256'])
+                old_seal = _evidence_owner()._verify_pinned_release(
+                    Path(old_tool['root']), old_tool['sha'], old_tool['tree_sha'])
+                if any(old_seal.get(key) != old_tool[value] for key, value in (
+                        ('commit_sha', 'sha'), ('tree_sha', 'tree_sha'),
+                        ('manifest_sha256', 'manifest_sha256'))):
+                    raise MaintenanceError("original retained migration tool seal differs")
+                release = backup._prove_upgrade_release(args.successor_sha)
+                new_tool = dict(root=release['release_root'], sha=release['release_sha'],
+                                tree_sha=release['release_tree_sha'],
+                                manifest_sha256=release['release_manifest_sha256'])
+                backup_root = _runtime_owner_path(Path(config['backup_root']), guard)
+                payload = dict(schema_version=backup.PRE_CENSUS_QUALIFICATION_SCHEMA,
+                    operation_id=old['operation_id'],
+                    original_barrier=dict(payload=dict(old), identity=dict(barrier.identity)),
+                    original_tool=old_tool, recovery_tool=new_tool, **source,
+                    selected_source=dict(sha=selected_sha,
+                        descriptor_raw_sha256=hashlib.sha256(raw_descriptor).hexdigest(),
+                        descriptor_sha256=digest(selected), source_backup_sha256=selected['backup_sha256'],
+                        baseline_sha256=selected['baseline_sha256'],
+                        inventory_sha256=selected['inventory_sha256'],
+                        prior_canary_sha256=selected['prior_canary_sha256']),
+                    source_control_config=dict(path=str(config_holder.path),
+                        sha256=hashlib.sha256(config_holder.raw).hexdigest()),
+                    host=dict(runtime_root=str(database.parents[2]), backup_root=str(backup_root),
+                              control_uid=lock.control_uid, control_gid=lock.control_gid),
+                    backup_inventory_sha256=digest(inventory([backup_root])),
+                    created_at=datetime.now(timezone.utc).isoformat())
+                backup._validate_pre_census_qualification(payload)
+                raw = backup._upgrade_receipt_bytes(payload)
+                if len(raw) > 64 * 1024:
+                    raise MaintenanceError("Root qualification exceeds the protocol bound")
+                destination = database.parent / backup.PRE_CENSUS_QUALIFICATION_NAME
+                # All source predicates precede creation. Until the final
+                # chmod, an interrupted child remains Root-private and is not
+                # a Control-readable qualification. It is never auto-deleted.
+                before_names = set(os.listdir(lock.state_fd))
+                fd = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL |
+                             os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+                try:
+                    lock._accept_qualification_creation(destination, before_names)
+                    data = memoryview(raw)
+                    while data:
+                        size = os.write(fd, data)
+                        if size <= 0:
+                            raise MaintenanceError("Root qualification write was incomplete")
+                        data = data[size:]
+                    os.fchown(fd, _TRUSTED_UID, lock.control_gid)
+                    os.fsync(fd)
+                    # Re-derive the complete sealed-source predicates at the
+                    # publication boundary; do not replay this on failure.
+                    final_proof = _qualify_v5_source_only(args, config, lock=lock,
+                                                          config_holder=config_holder)
+                    if (final_proof != proof or _current_v5_qualification(database, guard) != source
+                            or digest(inventory([backup_root])) != payload['backup_inventory_sha256']
+                            or os.path.lexists(database.parent / backup.PRE_CENSUS_CONTINUATION_NAME)):
+                        raise MaintenanceError("safe-present source changed before qualification")
+                    _pre_census_absences(database, own_qualification=True)
+                    final_old_seal = _evidence_owner()._verify_pinned_release(
+                        Path(old_tool['root']), old_tool['sha'], old_tool['tree_sha'])
+                    if final_old_seal != old_seal:
+                        raise MaintenanceError("original migration tool changed before qualification")
+                    _require_pre_census_stopped()
+                    barrier.check(); config_holder.check(); guard.check(); lock.check()
+                    os.fchmod(fd, 0o440)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
+                backup._fsync_directory(database.parent)
+                identity = backup._pre_census_artifact_identity(destination,
+                    uid=_TRUSTED_UID, gid=lock.control_gid, mode=0o440)
+                barrier.check(); guard.check(); lock.check(); config_holder.check()
+                return dict(action='qualify-v5-pre-census-continuation',
+                            operation_id=old['operation_id'], qualification_identity=identity)
+
+
 def prepare(args: argparse.Namespace) -> Path:
+    if getattr(args, 'qualify_v5_pre_census_continuation', False):
+        result = _issue_pre_census_qualification(args)
+        print(json.dumps(result, sort_keys=True))
+        return result
+    if (getattr(args, 'expected_operation_id', None) is not None
+            or getattr(args, 'expected_barrier_sha256', None) is not None):
+        raise MaintenanceError("barrier CAS selectors require the explicit qualification action")
     qualify = bool(getattr(args, "qualify_v5_source_only", False))
     v5_to_v7_sha = getattr(args, "supersede_unstarted_preproof_v5_to_v7_sha", None)
     if qualify and v5_to_v7_sha is None:
@@ -3144,6 +3389,7 @@ class Maintenance:
                     or snapshot(Path(initial.source_v5_database), immutable=True)
                     != sealed_json(bundle_path(selected_sha)/'baseline.json')):
                 raise MaintenanceError("maintenance INITIAL evidence drifted")
+            _bind_pre_census_selected(initial, selected_sha, selected, source_control)
             _selected_v5_backup(selected_sha, selected, guard, initial.source_v5_content_digest)
             _v5_to_v7_projection_digests(initial, self.database)
             additions = _v5_to_v7_working_inventory(source_inventory,
@@ -3437,12 +3683,19 @@ def main() -> int:
                         help="Retire one installed unstarted supersede_preproof_v1 preparation whose source release completed the offline v5->v6->v7 transitions; never relabel or replay its acceptance.")
     parser.add_argument("--qualify-v5-source-only", action="store_true",
                         help="Read-only v5 source qualification paired only with --supersede-unstarted-preproof-v5-to-v7-sha; writes nothing and grants no write authority.")
+    parser.add_argument("--qualify-v5-pre-census-continuation", action="store_true",
+                        help="Issue one control-readable Root safe-present qualification for the retained original pre-census operation; never migrate, clear its barrier or issue a successor descriptor.")
+    parser.add_argument("--expected-operation-id",
+                        help="Optional CAS comparison against the actual retained barrier UUID.")
+    parser.add_argument("--expected-barrier-sha256",
+                        help="Optional CAS comparison against the actual retained barrier bytes.")
     parser.add_argument("--superseded-descriptor-sha256",
                         help="Exact selected V2 descriptor digest; predecessor remains its accepted ancestor.")
     args = parser.parse_args()
     try:
         bundle = prepare(args)
-        if getattr(args, "qualify_v5_source_only", False):
+        if (getattr(args, "qualify_v5_source_only", False)
+                or getattr(args, "qualify_v5_pre_census_continuation", False)):
             return 0
         descriptor = descriptor_for(args.successor_sha)
         print(json.dumps({"bundle":str(bundle),"descriptor_sha256":digest(descriptor)}))
