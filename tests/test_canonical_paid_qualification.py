@@ -1177,3 +1177,21 @@ def test_new_nested_contract_real_root_publication_and_wire(env,tmp_path):
     with pytest.raises(qual.CanonicalPaidQualificationRefused):
         run_publish(env,tmp_path,capture_root=capture,initializer_raw=raw,expected_initializer_sha256=digest_raw(raw))
     assert env.counts=={'qualify':1,'consume':1}
+
+
+@pytest.mark.parametrize('source_count',[5,6,7,8])
+def test_retained_legacy_source_shapes_stay_closed_data(env,tmp_path,source_count):
+    """Historical DATA readability is not a new Root qualification grant."""
+    from control_plane.paid_fabric_wire import require_paid_source,PaidWireRefused
+    row=json.loads(v2_artifacts(env,tmp_path)['bindings.json'])['bindings'][0]
+    source=row['source_config'];q=source['qualification']
+    if source_count<8:q['qualifier_sources_sha256'].pop('paid_initializer_nested_data.py')
+    if source_count<7:q['qualifier_sources_sha256'].pop('paid_initializer_token_data.py')
+    if source_count==5:
+        q['qualifier_sources_sha256'].pop('paid_initializer.py')
+        q.pop('initializer_commitment');q.pop('initializer_commitment_sha256')
+    physical={k:v for k,v in source.items() if k not in ('schema_version','capacity_capability_id')}
+    physical.update(schema_version=qual.PHYSICAL_DOC_SCHEMA,worker_source_config_digest=contract.digest(source))
+    if source_count==7:
+        with pytest.raises(PaidWireRefused):require_paid_source(physical,source)
+    else:assert require_paid_source(physical,source)==physical
