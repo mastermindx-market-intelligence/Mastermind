@@ -486,3 +486,109 @@ def test_main_emits_only_closed_receipts_and_opaque_errors(monkeypatch) -> None:
     assert out.getvalue() == ""
     assert err.getvalue() == "REFUSED: PROJECTOR_HOST_INTERNAL\n"
     assert "projector-secret" not in err.getvalue()
+
+
+def test_prepare_new_directories_corrects_inherited_parent_group(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """macOS may inherit root:admin from /Library/Application Support.
+
+    Exercise normalization through the real created-directory path without
+    requiring root or changing a host's group membership.
+    """
+    mod = _load()
+    root = tmp_path / "new-projector"
+    # Use the actual group inherited from this test parent, which can differ
+    # from the invoking user's effective group on macOS.
+    probe = tmp_path / "parent-gid-probe"
+    probe.mkdir()
+    gid = probe.lstat().st_gid
+    probe.rmdir()
+    uid = os.geteuid()
+    actual_fstat = os.fstat
+    fchown_calls: list[tuple[int, int]] = []
+
+    def inherited_parent_group(fd):
+        metadata = actual_fstat(fd)
+        return SimpleNamespace(
+            st_mode=metadata.st_mode,
+            st_uid=metadata.st_uid,
+            st_gid=gid + 1,
+        )
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mod.os, "fstat", inherited_parent_group)
+        patch.setattr(
+            mod.os,
+            "fchown",
+            lambda fd, user, group: fchown_calls.append((user, group)),
+        )
+        mod.prepare_host(root=root, uid=uid, gid=gid)
+
+    assert fchown_calls == [(-1, gid), (-1, gid)]
+    assert stat.S_IMODE(root.lstat().st_mode) == 0o750
+    assert stat.S_IMODE((root / "config").lstat().st_mode) == 0o750
+    assert not (root / "config" / "oauth-client-secret").exists()
+
+
+def test_prepare_refuses_to_correct_preexisting_wrong_group(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """Only brand-new inodes may be group-normalized; no blind repair."""
+    mod = _load()
+    root = tmp_path / "preexisting-projector"
+    root.mkdir()
+    root.chmod(0o750)
+    uid, gid = os.geteuid(), os.getegid()
+    real_lstat = Path.lstat
+    fchown_calls: list[tuple[int, int]] = []
+
+    def mismatched_existing_group(path):
+        info = real_lstat(path)
+        if path == root:
+            return SimpleNamespace(
+                st_mode=info.st_mode, st_uid=info.st_uid, st_gid=gid + 1
+            )
+        return info
+
+    with monkeypatch.context() as patch:
+        patch.setattr(Path, "lstat", mismatched_existing_group)
+        patch.setattr(
+            mod.os, "fchown",
+            lambda fd, user, group: fchown_calls.append((user, group)),
+        )
+        with pytest.raises(mod.ProjectorHostError) as exc:
+            mod.prepare_host(root=root, uid=uid, gid=gid)
+
+    assert exc.value.code == "PROJECTOR_HOST_PERMISSIONS_REFUSED"
+    assert fchown_calls == []
+    assert not (root / "config").exists()
+
+
+def test_prepare_new_group_normalization_failure_is_closed(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A denied group repair cannot advance to creating config/credentials."""
+    mod = _load()
+    root = tmp_path / "new-projector"
+    uid, gid = os.geteuid(), os.getegid()
+    actual_fstat = os.fstat
+
+    def inherited_group(fd):
+        info = actual_fstat(fd)
+        return SimpleNamespace(
+            st_mode=info.st_mode, st_uid=info.st_uid, st_gid=gid + 1
+        )
+
+    def deny_fchown(fd, user, group):
+        raise PermissionError("simulated denied group normalization")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(mod.os, "fstat", inherited_group)
+        patch.setattr(mod.os, "fchown", deny_fchown)
+        with pytest.raises(mod.ProjectorHostError) as exc:
+            mod.prepare_host(root=root, uid=uid, gid=gid)
+
+    assert exc.value.code == "PROJECTOR_HOST_PREPARE_REFUSED"
+    assert not (root / "config").exists()
+    assert not (root / "oauth-client-secret").exists()
