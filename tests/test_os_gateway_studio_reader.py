@@ -373,6 +373,11 @@ class Fixture:
 
 class StudioReaderTestCase(unittest.TestCase):
     def setUp(self) -> None:
+        if sys.platform != "darwin":
+            # Every inert case, including direct positive observations, needs
+            # the test-only kernel seam. unittest restores it even on failure.
+            from test_os_gateway_studio_prefix_identity import MechanicalPrefixGuard
+            self.enterContext(patched_constant("_PrefixMutationGuard", MechanicalPrefixGuard))
         self._tmp = tempfile.mkdtemp(prefix="studio-reader-fixture-", dir=TESTS_DIR.parent)
         self.fx = Fixture(Path(self._tmp)).build()
         self._uid = observed_uid_fixture()
