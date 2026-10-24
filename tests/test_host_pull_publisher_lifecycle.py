@@ -1363,3 +1363,100 @@ def test_outliving_child_does_not_keep_transaction_lock(workspace):
                 os.kill(desc_pid, signal.SIGKILL)
             except OSError:
                 pass
+
+
+def test_holder_death_before_arm_does_not_mutate_after_peer_install(workspace):
+    """Kill only A's lock helper after the old label read and before arm.
+
+    B then completes the install and clears the marker. A must not boot out
+    or replace B's service from the stale read.
+    """
+    ctx = prepare(workspace)
+    original = arm_running(ctx, workspace)
+    hold = workspace / "hold-arm"
+    hold.write_text("")
+    report = workspace / "holder-report"
+    fd = os.open(report, os.O_CREAT | os.O_EXCL | os.O_RDWR, 0o600)
+    os.close(fd)
+    proc = subprocess.Popen(
+        base_args(ctx, hold_before_arm=hold, holder_report=report),
+        env=ctx["env"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    try:
+        _release_hold(proc, hold)
+        deadline = time.time() + 8
+        while time.time() < deadline and b"armed\n" not in report.read_bytes():
+            if proc.poll() is not None:
+                raise AssertionError(proc.stderr.read())
+            time.sleep(0.05)
+        fields = dict(
+            line.split("=", 1) for line in report.read_text().splitlines() if "=" in line)
+        holder = int(fields["pid"])
+        assert proc.poll() is None
+        log_at_pause = launch_log(ctx)
+        assert "print " in log_at_pause
+        assert "bootout " not in log_at_pause
+        assert "bootstrap " not in log_at_pause
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert ctx["plist"].read_bytes() == original
+        os.kill(holder, signal.SIGKILL)
+        _wait_transaction_unlocked(ctx)
+        assert proc.poll() is None
+        (ctx["stub"] / "pause-pid").write_text("")
+        other = subprocess.Popen(
+            base_args(ctx), env=ctx["env"],
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        deadline = time.time() + 8
+        while time.time() < deadline and not (ctx["stub"] / "ps-entered").exists():
+            if other.poll() is not None:
+                _out, err = other.communicate()
+                raise AssertionError(err)
+            time.sleep(0.05)
+        (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+        (ctx["stub"] / "pause-pid").unlink()
+        _out, err = other.communicate(timeout=10)
+        assert other.returncode == 0, err
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        log_after_peer = launch_log(ctx)
+        plist_after_peer = ctx["plist"].read_bytes()
+        backups_after_peer = _plist_backups(ctx)
+        assert log_after_peer.count("bootout ") == 1
+        assert log_after_peer.count("bootstrap ") == 1
+        assert plist_after_peer != original
+        assert backups_after_peer
+        hold.unlink()
+        _out, err = proc.communicate(timeout=10)
+        assert proc.returncode == 78, err
+        assert "install transaction holder lost" in err
+        assert "bootout had no effect" not in err
+        assert launch_log(ctx) == log_after_peer
+        assert ctx["plist"].read_bytes() == plist_after_peer
+        assert _plist_backups(ctx) == backups_after_peer
+        assert not (ctx["store"] / ".install-transaction.marker").exists()
+        assert (ctx["stub"] / "print-mode").read_text().strip() == "running"
+        receipt = receipt_body(ctx)
+        assert receipt["outcome"] == "EFFECT_UNKNOWN"
+        assert receipt["phase"] == "INSTALL_HOLDER_LOST"
+        assert "holder lost" in receipt["reason"]
+        assert_not_executed(ctx)
+    finally:
+        if proc.poll() is None:
+            os.kill(proc.pid, signal.SIGKILL)
+            proc.communicate(timeout=5)
+
+
+def test_ready_before_watch_registration_is_refused(workspace):
+    """A premature 0 is not readiness. Watch registration must already have succeeded."""
+    ctx = prepare(workspace)
+    result = run(ctx, fault="watch-after-ready")
+    assert result.returncode == 78, result.stderr
+    assert "install transaction watch refused" in result.stderr
+    assert "print " not in launch_log(ctx)
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert _plist_backups(ctx) == []
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "INSTALL_WATCH_REFUSED"
+    assert "watch refused" in receipt["reason"]
+    assert_not_executed(ctx)

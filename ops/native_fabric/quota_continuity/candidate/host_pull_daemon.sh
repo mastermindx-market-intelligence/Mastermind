@@ -39,14 +39,24 @@
 # itself with O_CLOEXEC. This shell does not keep the descriptor, so launchctl,
 # ps, publisher, and other descendants do not inherit it. The helper releases
 # the flock when this installer exits, including SIGKILL: it watches this pid
-# and treats a Linux zombie as already dead. An unrelated descendant that
-# outlives the installer does not hold the flock. This is not .publication.lock
-# and it is not the collector's /usr/bin/lockf. A second install-agent finds
-# the flock busy and exits before any launchctl, plist, or backup write. Once
-# this process is about to mutate, it writes .install-transaction.marker. A
-# crash after that leaves the marker; the next installer can acquire the flock
-# and then fail-closes without mutating. A crash before the marker has not
-# mutated, and the helper releases the flock when this process dies.
+# and treats a Linux zombie as already dead. The death watch is registered
+# before readiness is visible. A status of 0 is not readiness. An unrelated
+# descendant that outlives the installer does not hold the flock. This is not
+# .publication.lock and it is not the collector's /usr/bin/lockf.
+#
+# The helper also holds a private fence flock for its whole life. This shell
+# re-proves that fence immediately before the launchd read, before the marker
+# arm, and inside every effect process before the command. A dead helper fails
+# this installer closed with INSTALL_HOLDER_LOST and no further launchctl,
+# plist, or backup effect. A one-time kill check is not that fence. A kill of
+# the helper during an already-started launchctl syscall can still let that
+# one call finish; this process does not issue another. A second install-agent
+# finds the transaction flock busy and exits before any launchctl, plist, or
+# backup write. Once this process is about to mutate, it writes
+# .install-transaction.marker. A crash after that leaves the marker; the next
+# installer can acquire the flock and then fail-closes without mutating. A
+# crash before the marker has not mutated, and the helper releases the flock
+# when this process dies.
 
 set -u
 set -o pipefail
@@ -68,6 +78,7 @@ ADMIT_RELEASE=""
 FAULT=""
 MARKER_OWNED=0
 INSTALL_HOLDER_PID=""
+INSTALL_FENCE=""
 
 release_install_holder() {
   if [ -z "${INSTALL_HOLDER_PID:-}" ]; then
@@ -110,6 +121,7 @@ die() {
 }
 
 finish_install_success() {
+  prove_install_holder
   if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
     py install-transaction-complete "$STORE" || die 78 "install transaction marker"
     MARKER_OWNED=0
@@ -197,6 +209,24 @@ def lstat_nofollow(path):
     if stat.S_ISLNK(st.st_mode):
         fail("symlink refused: " + path)
     return st
+
+def transaction_fence_held(path):
+    # True only while the install helper still holds its private fence flock.
+    # Acquiring the flock here means that helper is gone; release it at once.
+    require_safe(path, "install fence")
+    fd = os.open(path, os.O_RDWR | os.O_NOFOLLOW)
+    try:
+        blob = os.read(fd, 128)
+        if not blob.startswith(b"armed\n"):
+            return False
+        try:
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        return False
+    finally:
+        os.close(fd)
 
 def perform_install(src, dest, fault):
     if fault not in ("", "before-replace", "after-replace"):
@@ -565,8 +595,8 @@ elif cmd == "locked-effect":
     # Exit 76: bootout returned nonzero and the same pid is still loaded.
     # Exit 77: bootout returned nonzero and the result is not that proof.
     # The parent must not issue another bootout or a bootstrap for either.
-    store, generation, expect, publisher, work, pause, kind = sys.argv[2:9]
-    effect_args = sys.argv[9:]
+    store, generation, expect, publisher, work, pause, kind, fence = sys.argv[2:10]
+    effect_args = sys.argv[10:]
     require_safe(store, "store")
     require_safe(publisher, "publisher")
     require_safe(work, "lock work")
@@ -680,6 +710,10 @@ elif cmd == "locked-effect":
                 time.sleep(0.05)
             if enforce_generation:
                 read_selected()
+        # The transaction helper must still hold its fence. Otherwise the
+        # publication lock would fence a command the installer no longer owns.
+        if not transaction_fence_held(fence):
+            raise SystemExit(79)
         mark_started()
         if kind == "bootout":
             launchctl, ps_bin, target, expected_pid = effect_args
@@ -768,12 +802,14 @@ elif cmd == "install-transaction-prepare":
             os.close(fd)
 
 elif cmd == "install-transaction-arm":
-    store, generation, pid = sys.argv[2:5]
+    store, generation, pid, fence = sys.argv[2:6]
     require_safe(store, "store")
     if HEX.fullmatch(generation) is None:
         fail("generation identity")
     if re.fullmatch(r"[1-9][0-9]*", pid) is None:
         fail("install transaction pid")
+    if not transaction_fence_held(fence):
+        fail("install transaction holder lost")
     marker = store + "/.install-transaction.marker"
     require_safe(marker, "install transaction marker")
     if os.path.lexists(marker):
@@ -784,6 +820,10 @@ elif cmd == "install-transaction-arm":
         os.fsync(fd)
     finally:
         os.close(fd)
+
+elif cmd == "install-transaction-prove":
+    if not transaction_fence_held(sys.argv[2]):
+        raise SystemExit(79)
 
 elif cmd == "install-transaction-complete":
     store = sys.argv[2]
@@ -859,6 +899,8 @@ parse_launchctl() {
 
 launchctl_print() {
   local out err rc
+  # Every launchd read is inside the helper's lifetime, including preflight.
+  prove_install_holder
   out=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-out.XXXXXX")
   err=$(mktemp "${TMPDIR:-/tmp}/host-pull-lc-err.XXXXXX")
   "$LAUNCHCTL" print "$DOMAIN/$LABEL" >"$out" 2>"$err"
@@ -905,6 +947,7 @@ wait_pid_dead() {
     return 2
   fi
   while [ "$i" -lt "$WAIT_LIMIT" ]; do
+    prove_install_holder
     ps_state "$pid"
     [ "$PS_RESULT" = "dead" ] && return 0
     [ "$PS_RESULT" = "uncertain" ] && return 2
@@ -931,16 +974,41 @@ note_install_blocked() {
   py write-receipt "$BACKUP_DIR" "$GENERATION" "EFFECT_UNKNOWN" "$phase" "$*"
 }
 
+# The private fence flock is the lifetime proof. Process-liveness alone is not.
+lose_install_holder() {
+  if [ "${PHASE:-START}" = "PLIST_REPLACED" ]; then
+    restore_plist || true
+  fi
+  note_install_blocked INSTALL_HOLDER_LOST "install transaction holder lost" || true
+  die 78 "install transaction holder lost"
+}
+
+prove_install_holder() {
+  if [ -z "${INSTALL_FENCE:-}" ] || [ -z "${INSTALL_HOLDER_PID:-}" ]; then
+    lose_install_holder
+  fi
+  py install-transaction-prove "$INSTALL_FENCE" || lose_install_holder
+}
+
 # The helper, not this shell, owns the transaction flock. It is a direct child
 # and exits when this installer exits, so descendants cannot keep the flock.
+# Readiness is the word "armed", written only after the death watch is registered
+# and the private fence flock is held. A bare 0 is a failed watch and is refused.
 acquire_install_transaction() {
-  local lockpath status line waited
+  local lockpath status line waited fence
   lockpath="$STORE/.install-transaction.lock"
   py install-transaction-prepare "$lockpath" || die 78 "install transaction lock refused"
   status=$(mktemp "${TMPDIR:-/tmp}/host-pull-tx.XXXXXX")
-  "$PYTHON" - "$STORE" "$GENERATION" "$status" "$$" >"$status.out" 2>"$status.err" <<'PY' &
+  if [ -n "${HOLDER_REPORT:-}" ]; then
+    [ "$HERMETIC" -eq 1 ] || die 78 "holder report is hermetic-only"
+    fence=$HOLDER_REPORT
+  else
+    fence=$(mktemp "${TMPDIR:-/tmp}/host-pull-fence.XXXXXX")
+  fi
+  INSTALL_FENCE=$fence
+  "$PYTHON" - "$STORE" "$GENERATION" "$status" "$$" "$fence" "${FAULT:-}" >"$status.out" 2>"$status.err" <<'PY' &
 import fcntl, os, re, stat, sys, time
-store, generation, status, installer = sys.argv[1:5]
+store, generation, status, installer, fence, fault = sys.argv[1:7]
 HEX = re.compile(r"[0-9a-f]{64}\Z")
 SAFE = re.compile(r"/[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*\Z")
 
@@ -965,7 +1033,8 @@ def linux_installer_dead(pid):
     # Z means the process has exited and its descriptors are already closed.
     return state == "Z"
 
-def watch_installer(pid):
+def register_watch(pid):
+    # Registration finishes before any readiness token is written.
     if sys.platform == "darwin":
         import select
         kq = select.kqueue()
@@ -975,8 +1044,17 @@ def watch_installer(pid):
             flags=select.KQ_EV_ADD,
             fflags=select.KQ_NOTE_EXIT,
         )
-        # Register once. Re-adding the watch on every poll can drop NOTE_EXIT.
         kq.control([watch], 0)
+        return ("darwin", kq, watch)
+    proc = "/proc/%d/stat" % pid
+    raw = open(proc, "r", encoding="ascii", errors="replace").read()
+    state = raw.rsplit(")", 1)[1].split()[0]
+    if state == "Z":
+        raise RuntimeError("installer already dead")
+    return ("linux", None, None)
+
+def watch_installer(kind, kq, watch, pid):
+    if kind == "darwin":
         while True:
             events = kq.control(None, 1, 0.2)
             if events:
@@ -989,9 +1067,29 @@ def watch_installer(pid):
     while not linux_installer_dead(pid):
         time.sleep(0.05)
 
+def hold_fence(path):
+    if SAFE.fullmatch(path) is None:
+        raise RuntimeError("unsafe install fence")
+    st_path = os.lstat(path)
+    if stat.S_ISLNK(st_path.st_mode) or not stat.S_ISREG(st_path.st_mode):
+        raise RuntimeError("install fence kind")
+    fd = os.open(path, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+    st_fd = os.fstat(fd)
+    if (st_fd.st_ino != st_path.st_ino or st_fd.st_dev != st_path.st_dev
+            or st_fd.st_uid != os.geteuid() or stat.S_IMODE(st_fd.st_mode) != 0o600):
+        raise RuntimeError("install fence owner")
+    fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    os.ftruncate(fd, 0)
+    os.lseek(fd, 0, os.SEEK_SET)
+    os.write(fd, ("armed\npid=%d\n" % os.getpid()).encode("ascii"))
+    os.fsync(fd)
+    return fd
+
 try:
     if SAFE.fullmatch(store) is None or SAFE.fullmatch(status) is None:
         raise RuntimeError("unsafe install transaction path")
+    if SAFE.fullmatch(fence) is None:
+        raise RuntimeError("unsafe install fence")
     if HEX.fullmatch(generation) is None or re.fullmatch(r"[1-9][0-9]*", installer) is None:
         raise RuntimeError("install transaction identity")
     lockpath = store + "/.install-transaction.lock"
@@ -1015,13 +1113,20 @@ try:
         st_marker = os.lstat(marker)
         if stat.S_ISLNK(st_marker.st_mode) or not stat.S_ISREG(st_marker.st_mode):
             raise RuntimeError("install transaction marker kind")
+        kind, kq, watch = register_watch(int(installer))
         report(77)
-        code = 77
-    else:
+        watch_installer(kind, kq, watch, int(installer))
+        raise SystemExit(77)
+    # Hermetic stand-in for a watcher that announces readiness and then fails
+    # to register. The parent must not treat 0 as armed.
+    if fault == "watch-after-ready":
         report(0)
-        code = 0
-    watch_installer(int(installer))
-    raise SystemExit(code)
+        raise SystemExit(78)
+    kind, kq, watch = register_watch(int(installer))
+    hold_fence(fence)
+    report("armed")
+    watch_installer(kind, kq, watch, int(installer))
+    raise SystemExit(0)
 except SystemExit:
     raise
 except Exception:
@@ -1035,17 +1140,19 @@ PY
   line=""
   waited=0
   while [ "$waited" -lt 100 ]; do
-    line=$(tr -cd '0-9' <"$status" 2>/dev/null || true)
-    if [ "$line" = "0" ] || [ "$line" = "75" ] || [ "$line" = "77" ] || [ "$line" = "78" ]; then
+    line=$(tr -cd 'A-Za-z0-9' <"$status" 2>/dev/null || true)
+    if [ "$line" = "armed" ] || [ "$line" = "75" ] || [ "$line" = "77" ] || [ "$line" = "78" ]; then
       break
     fi
     if ! kill -s 0 "$INSTALL_HOLDER_PID" 2>/dev/null; then
+      line=$(tr -cd 'A-Za-z0-9' <"$status" 2>/dev/null || true)
       break
     fi
     waited=$((waited + 1))
     sleep 0.05
   done
-  if [ "$line" = "0" ]; then
+  if [ "$line" = "armed" ]; then
+    prove_install_holder
     if [ -n "${LOCK_DESCENDANT:-}" ]; then
       [ "$HERMETIC" -eq 1 ] || die 78 "lock descendant is hermetic-only"
       # This child is the inheritance probe. It must stay alive after the
@@ -1089,6 +1196,10 @@ PY
   if [ "$line" = "77" ]; then
     note_install_blocked INSTALL_ABANDONED "install transaction incomplete" || true
     die 78 "install transaction incomplete"
+  fi
+  if [ "$line" = "0" ]; then
+    note_install_blocked INSTALL_WATCH_REFUSED "install transaction watch refused" || true
+    die 78 "install transaction watch refused"
   fi
   die 78 "install transaction lock refused"
 }
@@ -1157,14 +1268,18 @@ run_locked() {
   local kind=$1
   shift
   local pause rc
+  prove_install_holder
   LOCKED_DIR=$(mktemp -d "${TMPDIR:-/tmp}/host-pull-lock.XXXXXX") || return 78
   LOCKED_DETAIL=""
   STOP_LOCKED=0
   pause="${HOLD_DURING_LOCK:-"-"}"
   [ -n "$pause" ] || pause="-"
   py locked-effect "$STORE" "$GENERATION" "$EXPECT_CURRENT" "$PUBLISHER" \
-    "$LOCKED_DIR" "$pause" "$kind" "$@" 2>"$LOCKED_DIR/err"
+    "$LOCKED_DIR" "$pause" "$kind" "$INSTALL_FENCE" "$@" 2>"$LOCKED_DIR/err"
   rc=$?
+  if [ "$rc" -eq 79 ]; then
+    lose_install_holder
+  fi
   LOCKED_DETAIL=$(cat "$LOCKED_DIR/err" 2>/dev/null || true)
   if [ -n "$LOCKED_DETAIL" ]; then
     printf '%s\n' "$LOCKED_DETAIL" >&2
@@ -1261,7 +1376,9 @@ HOLD_BOOTSTRAP=""
 HOLD_BOOTOUT=""
 HOLD_PLIST=""
 HOLD_DURING_LOCK=""
+HOLD_ARM=""
 LOCK_DESCENDANT=""
+HOLDER_REPORT=""
 EXPECT_OWNER_UID=""
 
 while [ "$#" -gt 0 ]; do
@@ -1282,7 +1399,9 @@ while [ "$#" -gt 0 ]; do
     --hold-before-plist) HOLD_PLIST=${2:-}; shift 2 ;;
     --hold-before-bootstrap) HOLD_BOOTSTRAP=${2:-}; shift 2 ;;
     --hold-during-lock) HOLD_DURING_LOCK=${2:-}; shift 2 ;;
+    --hold-before-arm) HOLD_ARM=${2:-}; shift 2 ;;
     --lock-descendant) LOCK_DESCENDANT=${2:-}; shift 2 ;;
+    --holder-report) HOLDER_REPORT=${2:-}; shift 2 ;;
     --expect-owner-uid) EXPECT_OWNER_UID=${2:-}; shift 2 ;;
     --fault) FAULT=${2:-}; shift 2 ;;
     --wait-limit) WAIT_LIMIT=${2:-}; shift 2 ;;
@@ -1301,13 +1420,14 @@ if [ "$HERMETIC" -eq 1 ]; then
   [ -n "$FIXTURE_ROOT" ] || die 78 "hermetic fixture root required"
   [ "$WAIT_LIMIT" -le 200 ] || die 78 "wait limit"
   case "$FAULT" in
-    ""|wait-pid|post-bootout-print|install-before-replace|install-after-replace|pre-bootstrap-print) ;;
+    ""|wait-pid|post-bootout-print|install-before-replace|install-after-replace|pre-bootstrap-print|watch-after-ready) ;;
     *) die 78 "unknown fault" ;;
   esac
 else
   [ -z "$FIXTURE_ROOT" ] || die 78 "fixture root is hermetic-only"
   [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
-    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$LOCK_DESCENDANT" ] \
+    && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
+    && [ -z "$LOCK_DESCENDANT" ] && [ -z "$HOLDER_REPORT" ] \
     && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] \
     || die 78 "test hooks are hermetic-only"
   [ "$WAIT_LIMIT" -eq 50 ] || die 78 "wait limit"
@@ -1378,12 +1498,17 @@ case "$COMMAND" in
         die 78 "launchctl state uncertain"
         ;;
     esac
-    # The flock is already held. The marker is written only once this process
-    # is about to back up, boot out, or replace the plist. A clean refusal
-    # before this point leaves no marker.
-    py install-transaction-arm "$STORE" "$GENERATION" "$$" || die 78 "install transaction marker"
+    # The fence is re-checked after the old label was sampled and again after
+    # any hold, before the marker exists. A helper that died in that window
+    # cannot leave this process free to arm on the stale read.
+    prove_install_holder
+    hold_if_requested "$HOLD_ARM"
+    prove_install_holder
+    py install-transaction-arm "$STORE" "$GENERATION" "$$" "$INSTALL_FENCE" \
+      || lose_install_holder
     MARKER_OWNED=1
     hold_if_requested "$HOLD_MUTATION"
+    prove_install_holder
     if [ -e "$DEST_PLIST" ]; then
       HAD_PLIST=1
       backup_out=$(py backup "$DEST_PLIST" "$BACKUP_DIR" "$GENERATION") || die 78 "backup failed"
