@@ -1,0 +1,12 @@
+# Workbench Browser direct runtime roots — macOS arm64 / CPython 3.12
+# Compile on an authorized Darwin arm64 host with Python 3.12 and pip-tools 7.6.1.
+# This dedicated hash-locked closure includes the Browser screenshot encoder.
+# Keep the existing Workbench Read transitive pins unless separately reviewed.
+mcp==1.28.1
+PyJWT[crypto]==2.14.0
+httpx==0.28.1
+jsonschema==4.26.0
+pydantic==2.13.5
+starlette==1.6.0
+uvicorn[standard]==0.52.4
+Pillow==12.3.0

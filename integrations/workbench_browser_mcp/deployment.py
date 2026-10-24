@@ -6,7 +6,9 @@ policy. It creates no lease, queue, lifecycle, permission or retry owner.
 """
 from __future__ import annotations
 
+import asyncio
 import inspect
+import threading
 from dataclasses import dataclass
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -14,14 +16,16 @@ from typing import Any
 
 from control_plane.codex_worker import ProcessInspector
 from integrations.business_mcp_auth.contracts import validate_resource_policy
+from integrations.workbench_action_mcp.contracts import ActionCaller
 from integrations.workbench_action_mcp.deployment import RuntimeServices
 
 from .app import create_authenticated_browser_server
-from .browser_port import BrowserActionPort
-from .contracts import BrowserRefCodec
+from .browser_port import BrowserActionPort, BrowserPortRefused
+from .contracts import BrowserRefCodec, BrowserResourceRef
 from .resource_port import (
     BrowserHostConfig,
     BrowserResourcePort,
+    BrowserResourceRefused,
     ProfileResolver,
     RelayCommandBuilder,
     RelayRequester,
@@ -40,6 +44,14 @@ class BrowserPorts:
 
 
 @dataclass(frozen=True)
+class ActiveBrowserProjection:
+    """Ephemeral read projection of an exact started or reconciled resource."""
+
+    browser_ref: str
+    resource: BrowserResourceRef
+
+
+@dataclass(frozen=True)
 class BrowserDeployment:
     """Borrowed browser facade over one existing Workbench runtime generation."""
 
@@ -55,6 +67,13 @@ class BrowserDeployment:
     run_action: Callable[..., Any]
     reconcile_action: Callable[..., Any]
     cleanup_resource: Callable[..., Any]
+    observe_active_resources: Callable[..., Any]
+    observe_active_resources_with_status: Callable[..., Any]
+    observe_active_resource: Callable[..., Any]
+    observe_resources: Callable[..., Any]
+    observe_tab_group: Callable[..., Any]
+    observe_connection: Callable[..., Any]
+    activate_configured_profiles: Callable[..., Any]
 
 
 async def _run_existing(services: RuntimeServices, operation: Callable[[], object]) -> object:
@@ -114,18 +133,6 @@ def create_browser_ports(
     selected_inspector = inspector or ProcessInspector()
     codec = BrowserRefCodec(action_token_key)
 
-    resource_port = BrowserResourcePort(
-        resolve_binding=resolve_binding,
-        clock_ms=clock_ms,
-        codec=codec,
-        artifact_store=artifact_store,
-        host_binding=host_binding,
-        host_config=selected_host,
-        profile_resolver=profile_resolver,
-        inspector=selected_inspector,
-        relay_requester=relay_requester,
-        relay_command_builder=relay_command_builder,
-    )
     action_port = BrowserActionPort(
         resolve_binding=resolve_binding,
         resolve_recovery_binding=resolve_recovery_binding,
@@ -139,6 +146,19 @@ def create_browser_ports(
         relay_requester=relay_requester,
         action_ttl_ms=action_ttl_ms,
     )
+    resource_port = BrowserResourcePort(
+        resolve_binding=resolve_binding,
+        clock_ms=clock_ms,
+        codec=codec,
+        artifact_store=artifact_store,
+        host_binding=host_binding,
+        host_config=selected_host,
+        profile_resolver=profile_resolver,
+        has_active_actions=action_port.has_active_actions,
+        inspector=selected_inspector,
+        relay_requester=relay_requester,
+        relay_command_builder=relay_command_builder,
+    )
     return BrowserPorts(resource_port=resource_port, action_port=action_port)
 
 
@@ -148,6 +168,7 @@ def create_browser_deployment(
     host_config: BrowserHostConfig,
     tool_catalog: Mapping[str, Any],
     profile_resolver: ProfileResolver,
+    configured_profile_refs: tuple[str, ...] = (),
     inspector: ProcessInspector | None = None,
     relay_requester: RelayRequester = relay_request,
     relay_command_builder: RelayCommandBuilder = default_relay_command,
@@ -179,9 +200,39 @@ def create_browser_deployment(
         relay_requester=relay_requester,
         relay_command_builder=relay_command_builder,
     )
+    if (type(configured_profile_refs) is not tuple or len(configured_profile_refs) > 64
+            or any(type(ref) is not str or not ref for ref in configured_profile_refs)
+            or len(set(configured_profile_refs)) != len(configured_profile_refs)):
+        raise ValueError("BROWSER_PROFILE_CONFIGURATION_INVALID")
     resource_port = ports.resource_port
     action_port = ports.action_port
     selected_host = validate_host_config(host_config)
+
+    # Runtime-scoped projection only. The signed browser_ref and Workbench owner
+    # remain authoritative; this set is neither durable nor independently
+    # recoverable and disappears with the deployment process.
+    projection_gate = threading.RLock()
+    active_projection: dict[
+        str, tuple[tuple[str, str, str], BrowserResourceRef]
+    ] = {}
+
+    def caller_key(caller: ActionCaller) -> tuple[str, str, str]:
+        if type(caller) is not ActionCaller:
+            raise TypeError("browser projection caller must be ActionCaller")
+        return (caller.subject_digest, caller.client_ref, caller.resource)
+
+    def remember(
+        caller: ActionCaller, browser_ref: str, resource: BrowserResourceRef
+    ) -> None:
+        key = caller_key(caller)
+        with projection_gate:
+            active_projection[browser_ref] = (key, resource)
+
+    def forget(browser_ref: object) -> None:
+        if type(browser_ref) is not str:
+            return
+        with projection_gate:
+            active_projection.pop(browser_ref, None)
 
     async def prepare_resource(caller, project_ref, mode, profile_ref):
         return await _run_existing(
@@ -194,14 +245,159 @@ def create_browser_deployment(
             ),
         )
 
+    def remember_applied_resource(caller, receipt):
+        if (
+            isinstance(receipt, Mapping)
+            and receipt.get("effect_state") == "APPLIED"
+            and type(receipt.get("browser_ref")) is str
+        ):
+            browser_ref = receipt["browser_ref"]
+            try:
+                observed = action_port.observe_resource(caller, browser_ref)
+            except BrowserPortRefused:
+                # The start receipt remains authoritative. A transient inability
+                # to observe it must not be rewritten as NOT_APPLIED.
+                pass
+            else:
+                if type(observed) is BrowserResourceRef:
+                    remember(caller, browser_ref, observed)
+
+    def run_and_remember(caller, operation):
+        receipt = operation()
+        # Stay inside the original admitted executor call: a second admission
+        # could refuse after the owner already persisted an APPLIED receipt.
+        remember_applied_resource(caller, receipt)
+        return receipt
+
     async def start_resource(caller, start_ref):
         return await _run_existing(
-            services, lambda: resource_port.start_resource(caller, start_ref)
+            services,
+            lambda: run_and_remember(
+                caller, lambda: resource_port.start_resource(caller, start_ref)
+            ),
         )
 
     async def reconcile_resource(caller, start_ref):
+        # A recreated facade can re-observe a resource under the retained owner.
+        # This does not adopt a relay from a different owner process or extend
+        # the original signed resource lifetime.
         return await _run_existing(
-            services, lambda: resource_port.reconcile_resource(caller, start_ref)
+            services,
+            lambda: run_and_remember(
+                caller, lambda: resource_port.reconcile_resource(caller, start_ref)
+            ),
+        )
+
+    activation_gate = asyncio.Lock()
+    activation_pending: threading.Event | None = None
+    activation_observation: tuple[dict[str, str], ...] = ()
+
+    async def activate_configured_profiles(caller, project_ref):
+        from common.bounded_sync_executor import SyncExecutionTimeout
+        from integrations.workbench_action_mcp.action_artifacts import ActionArtifactError
+        nonlocal activation_pending, activation_observation
+        async with activation_gate:
+            if activation_pending is not None and not activation_pending.is_set():
+                return activation_observation
+            activation_pending = None
+            outcomes = []
+            for index, profile_ref in enumerate(configured_profile_refs):
+                completed = threading.Event()
+                entered = threading.Event()
+
+                def activate(ref=profile_ref, physical_done=completed, physical_entered=entered):
+                    physical_entered.set()
+                    try:
+                        return run_and_remember(caller, lambda: resource_port.activate_configured_profile(
+                            caller, project_ref=project_ref, profile_ref=ref))
+                    finally:
+                        # Observation only: the incumbent executor still owns
+                        # admission, cancellation, drain and physical completion.
+                        physical_done.set()
+
+                try:
+                    receipt = await _run_existing(services, activate)
+                    active = receipt.get("effect_state") == "APPLIED" and type(receipt.get("browser_ref")) is str
+                    outcomes.append({"profile_ref": profile_ref, "status": "active" if active else "unavailable",
+                                     "code": "OK" if active else receipt.get("effect_state", "EFFECT_UNKNOWN")})
+                except SyncExecutionTimeout:
+                    outcomes.append({"profile_ref": profile_ref, "status": "pending",
+                                     "code": "BROWSER_ACTIVATION_TIMEOUT"})
+                    if entered.is_set() and not completed.is_set():
+                        activation_pending = completed
+                        outcomes.extend({"profile_ref": ref, "status": "deferred",
+                                         "code": "BROWSER_ACTIVATION_INFLIGHT"}
+                                        for ref in configured_profile_refs[index + 1:])
+                        break
+                except BrowserResourceRefused as error:
+                    outcomes.append({"profile_ref": profile_ref, "status": "unavailable", "code": error.code})
+                except (ActionArtifactError, ValueError, OSError):
+                    outcomes.append({"profile_ref": profile_ref, "status": "unavailable",
+                                     "code": "BROWSER_RECOVERY_UNAVAILABLE"})
+            activation_observation = tuple(outcomes)
+            return activation_observation
+
+
+    async def observe_active_resources_with_status(caller: ActionCaller):
+        key = caller_key(caller)
+        def project():
+            with projection_gate:
+                snapshot = tuple(active_projection.items())
+            result, expired, partial = [], [], False
+            for browser_ref, (owner_key, cached) in snapshot:
+                if owner_key != key:
+                    continue
+                if cached.expires_at_ms <= services.clock_ms():
+                    expired.append(browser_ref)
+                    continue
+                try:
+                    live = action_port.observe_resource(caller, browser_ref)
+                except BrowserPortRefused:
+                    # Observation refusal is not positive evidence of retirement.
+                    # Keep the candidate for the next independent observation.
+                    partial = True
+                    continue
+                result.append(ActiveBrowserProjection(browser_ref=browser_ref, resource=live))
+            if expired:
+                with projection_gate:
+                    for browser_ref in expired:
+                        current = active_projection.get(browser_ref)
+                        if current is not None and current[0] == key and current[1].expires_at_ms <= services.clock_ms():
+                            active_projection.pop(browser_ref, None)
+            return tuple(result), partial
+        return await _run_existing(services, project)
+
+    async def observe_active_resources(caller: ActionCaller):
+        rows, _partial = await observe_active_resources_with_status(caller)
+        return rows
+
+    async def observe_active_resource(caller: ActionCaller, browser_ref: str):
+        key = caller_key(caller)
+        def project():
+            # The exact signed resource is the authority; no fleet scan or
+            # other browser status call is necessary for selected use.
+            live = action_port.observe_resource(caller, browser_ref)
+            if (live.subject_digest, live.client_ref, live.resource) != key:
+                return None
+            return ActiveBrowserProjection(browser_ref=browser_ref, resource=live)
+        return await _run_existing(services, project)
+
+    async def observe_resources(caller, request):
+        from .resource_observation import observe_resource_projection
+        return await observe_resource_projection(
+            deployment=deployment, caller=caller, request=request,
+            backend_digest=selected_host.expected_tool_schema_digest,
+            clock_ms=services.clock_ms, host_binding=services.host_binding)
+
+    async def observe_connection(caller: ActionCaller, browser_ref: str):
+        return await _run_existing(
+            services, lambda: action_port.observe_connection(caller, browser_ref)
+        )
+
+    async def observe_tab_group(caller: ActionCaller, browser_ref: str):
+        return await _run_existing(
+            services,
+            lambda: action_port.observe_tab_group(caller, browser_ref),
         )
 
     async def read_tool(caller, browser_ref, tool, arguments):
@@ -245,7 +441,7 @@ def create_browser_deployment(
         tool_call_inflight: bool = False,
     ):
         # Host/lease-owner method only; deliberately not exported as an MCP tool.
-        return await _run_existing(
+        receipt = await _run_existing(
             services,
             lambda: resource_port.cleanup_resource(
                 browser_ref,
@@ -254,6 +450,9 @@ def create_browser_deployment(
                 tool_call_inflight=tool_call_inflight,
             ),
         )
+        if isinstance(receipt, Mapping) and receipt.get("released") is True:
+            forget(browser_ref)
+        return receipt
 
     server = create_authenticated_browser_server(
         authenticator=services.authenticator,
@@ -272,9 +471,10 @@ def create_browser_deployment(
         call_receipt_sink=services.call_receipt_sink,
         allowed_origins=services.allowed_origins,
         expected_tool_schema_digest=selected_host.expected_tool_schema_digest,
+        observe_resources=observe_resources,
     )
 
-    return BrowserDeployment(
+    deployment = BrowserDeployment(
         services=services,
         server=server,
         resource_port=resource_port,
@@ -287,7 +487,21 @@ def create_browser_deployment(
         run_action=run_action,
         reconcile_action=reconcile_action,
         cleanup_resource=cleanup_resource,
+        observe_active_resources=observe_active_resources,
+        observe_active_resources_with_status=observe_active_resources_with_status,
+        observe_active_resource=observe_active_resource,
+        observe_resources=observe_resources,
+        observe_tab_group=observe_tab_group,
+        observe_connection=observe_connection,
+        activate_configured_profiles=activate_configured_profiles,
     )
+    return deployment
 
 
-__all__ = ["BrowserDeployment", "BrowserPorts", "create_browser_deployment", "create_browser_ports"]
+__all__ = [
+    "ActiveBrowserProjection",
+    "BrowserDeployment",
+    "BrowserPorts",
+    "create_browser_deployment",
+    "create_browser_ports",
+]

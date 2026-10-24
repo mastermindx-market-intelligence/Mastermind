@@ -19,6 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from . import web_sol_deployment as deployment
+from . import web_sol_browser_link_overlay as browser_overlay
+from . import browser_link_native_deployment as browser_native
 
 PREPARED_RECEIPT_SCHEMA = "mastermind.web_sol_deployment_prepared_receipt.v1"
 MAX_PREIMAGE_BYTES = 1_048_576
@@ -172,6 +174,16 @@ def _plan_rows(
         raise WebSolDeploymentApplyError("TARGET_DUPLICATE")
     if set(rows) != set(artifact_paths):
         raise WebSolDeploymentApplyError("PLAN_MISMATCH")
+    if isinstance(bundle, browser_overlay.BrowserLinkOverlayBundle):
+        try:
+            browser_overlay.validate_overlay_plan(bundle, plan)
+        except deployment.WebSolDeploymentError as error:
+            raise WebSolDeploymentApplyError("OVERLAY_PLAN_INVALID") from error
+    if isinstance(bundle, browser_native.BrowserLinkNativeBundle):
+        try:
+            browser_native.validate_native_plan(bundle, plan)
+        except deployment.WebSolDeploymentError as error:
+            raise WebSolDeploymentApplyError("NATIVE_PLAN_INVALID") from error
     return rows
 
 
@@ -310,9 +322,27 @@ def _prepared_digest_from_state(
         plan_rows = _plan_rows(bundle, plan)
         artifacts = {str(row.destination): row for row in bundle.artifacts}
         target_rows: list[dict[str, object]] = []
-        for row in sorted(preimages, key=lambda item: str(item.path)):
+        if isinstance(bundle, browser_native.BrowserLinkNativeBundle):
+            if tuple((row.kind, row.path) for row in preimages) != tuple(
+                    (row.kind, row.destination) for row in bundle.artifacts):
+                raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+            ordered_preimages = preimages
+        else:
+            ordered_preimages = sorted(preimages, key=lambda item: str(item.path))
+        for row in ordered_preimages:
             artifact = artifacts[str(row.path)]
             change = plan_rows[str(row.path)]
+            if isinstance(bundle, browser_native.BrowserLinkNativeBundle):
+                if row.path_digest != _sha256(str(row.path).encode("utf-8")):
+                    raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+                if change.action == "CREATE":
+                    if row.prior_state != "ABSENT" or any(value is not None for value in (
+                            row.prior_bytes, row.prior_sha256, row.prior_mode, row.prior_uid, row.prior_gid)):
+                        raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
+                elif (row.prior_state != "PRESENT" or row.prior_bytes != artifact.content
+                      or row.prior_sha256 != artifact.sha256 or row.prior_mode != artifact.mode
+                      or row.prior_uid != expected_uid or row.prior_gid != expected_gid):
+                    raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
             if row.kind != artifact.kind:
                 raise WebSolDeploymentApplyError("PREPARED_INTEGRITY_MISMATCH")
             target_rows.append(
@@ -385,8 +415,15 @@ def prepare_deployment(
     except OSError as exc:
         raise WebSolDeploymentApplyError("CLEANUP_NONCE_UNAVAILABLE") from exc
     root = _install_root(install_root, uid=expected_uid, gid=expected_gid)
+    if (isinstance(bundle, browser_overlay.BrowserLinkOverlayBundle)
+            and root != bundle.extension_root):
+        raise WebSolDeploymentApplyError("OVERLAY_ROOT_MISMATCH")
+    if (isinstance(bundle, browser_native.BrowserLinkNativeBundle)
+            and root != bundle.native_hosts_root):
+        raise WebSolDeploymentApplyError("NATIVE_ROOT_MISMATCH")
     rows = _plan_rows(bundle, plan)
-    artifacts = sorted(bundle.artifacts, key=lambda row: str(row.destination))
+    artifacts = (bundle.artifacts if isinstance(bundle, browser_native.BrowserLinkNativeBundle)
+                 else sorted(bundle.artifacts, key=lambda row: str(row.destination)))
 
     directory_paths = {root}
     for artifact in artifacts:
@@ -792,6 +829,12 @@ def _current_matches_artifact(
 def _validate_prepared_digest(prepared: PreparedDeployment) -> None:
     if not isinstance(prepared, PreparedDeployment):
         raise WebSolDeploymentApplyError("PREPARED_INVALID")
+    if (isinstance(prepared.bundle, browser_overlay.BrowserLinkOverlayBundle)
+            and prepared.install_root != prepared.bundle.extension_root):
+        raise WebSolDeploymentApplyError("OVERLAY_ROOT_MISMATCH")
+    if (isinstance(prepared.bundle, browser_native.BrowserLinkNativeBundle)
+            and prepared.install_root != prepared.bundle.native_hosts_root):
+        raise WebSolDeploymentApplyError("NATIVE_ROOT_MISMATCH")
     try:
         current_digest = _prepared_digest_from_state(
             operation_key=prepared.operation_key,
@@ -1692,6 +1735,7 @@ def verify_applied_deployment(applied: AppliedDeployment) -> dict[str, object]:
 
     if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
         raise WebSolDeploymentApplyError("APPLIED_INVALID")
+    _validate_prepared_digest(applied.prepared)
     if not _postimage_complete(applied.prepared):
         raise WebSolDeploymentApplyError("READBACK_MISMATCH")
     return {
@@ -2077,6 +2121,11 @@ def rollback_deployment(applied: AppliedDeployment) -> dict[str, object]:
     if not isinstance(applied, AppliedDeployment) or applied._state != "APPLIED":
         raise WebSolDeploymentApplyError("TRANSACTION_CONSUMED")
     prepared = applied.prepared
+    if isinstance(prepared.bundle, (browser_overlay.BrowserLinkOverlayBundle,
+                                    browser_native.BrowserLinkNativeBundle)):
+        # A changed closed bundle identity/root is a definite pre-effect refusal.
+        # Do not relabel the already-applied transaction as an uncertain rollback.
+        _validate_prepared_digest(prepared)
     try:
         verify_applied_deployment(applied)
         artifacts = {

@@ -52,6 +52,13 @@ business-mcp = [
     "PyYAML==6.0.3",
 ]
 
+# Browser image decoding is isolated to the Browser MCP service.
+browser-mcp = [
+    "mcp==1.28.1",
+    "PyJWT[crypto]==2.14.0",
+    "Pillow==12.3.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = [

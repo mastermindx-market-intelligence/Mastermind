@@ -638,16 +638,18 @@ def _build_runtime_roots(account: str) -> dict:
 
 @contextmanager
 def _c2_lifecycle_mutex(account: str):
-    """Serialize enrolled Paper and Fabric mutations on persistent private lock inodes.
-
-    Never unlink this file: replacement would let another invocation lock a new
-    inode while the previous one is still held. Closing the descriptor (including
-    process exit) releases the lock, and CLOEXEC prevents launchctl inheriting it.
-    """
+    """Keep the enrolled Studio account gate above the shared inode lock."""
     if account not in (PAPER_RUNTIME_UPGRADE_ACCOUNTS | FABRIC_BACKEND_ACCOUNTS | {"chatgpt2-business"}):
         raise SystemExit("C2 lifecycle mutex cannot select another account")
     subject = "Fabric" if account in FABRIC_BACKEND_ACCOUNTS else "C2"
     lock_path = _build_runtime_roots(account)["state"] / C2_LIFECYCLE_LOCK_NAME
+    with _owned_lifecycle_mutex(lock_path, subject=subject):
+        yield
+
+
+@contextmanager
+def _owned_lifecycle_mutex(lock_path: Path, *, subject: str):
+    """Internal fixed-target lock. Never replace or unlink its persistent inode."""
     _assert_dest_safe(lock_path)
     current = lock_path.parent
     home = _user_root()
@@ -684,7 +686,9 @@ def _c2_lifecycle_mutex(account: str):
         except OSError as exc:
             raise SystemExit(f"{subject} lifecycle lock could not be acquired") from exc
         verify_inode()
-        yield
+        # Async bounded producers can requalify this same held inode after
+        # network awaits, immediately before their synchronous publication.
+        yield verify_inode
     finally:
         os.close(fd)
 
@@ -3115,6 +3119,12 @@ def cmd_stop(args) -> int:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="private_service")
     sub = p.add_subparsers(dest="cmd", required=True)
+
+    try:
+        from . import workbench_host_service
+    except ImportError:
+        import workbench_host_service
+    workbench_host_service.add_commands(sub)
 
     fabric = sub.add_parser("fabric-backend-release")
     fabric.add_argument("--account", required=True)

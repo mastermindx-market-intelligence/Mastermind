@@ -309,7 +309,7 @@ def test_expired_unclaimed_action_does_not_dispatch(tmp_path: Path):
         port._clock_ms = lambda: 6000  # action expires at 5000, resource at 8000
         with pytest.raises(BrowserPortRefused, match="BROWSER_ACTION_INVALID"):
             port.run_action(caller, browser_ref, action_ref)
-        assert port.reconcile_action(caller, browser_ref, action_ref)["effect_state"] == "NOT_APPLIED"
+        assert port.reconcile_action(caller, browser_ref, action_ref)["effect_state"] == "EFFECT_UNKNOWN"
         assert list((tmp_path / "artifacts").iterdir()) == []
     finally:
         os.close(fd)
@@ -362,5 +362,78 @@ def test_unknown_effect_allows_only_bound_read_after_resource_expiry(tmp_path: P
         with pytest.raises(BrowserPortRefused, match="BROWSER_BINDING_CHANGED"):
             port.call_read_tool(caller, browser_ref, "browser_snapshot", {})
         assert calls == ["browser_click", "browser_snapshot"]
+    finally:
+        os.close(fd)
+
+
+def test_owner_can_observe_exact_live_resource_without_dispatch(tmp_path: Path):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        raise AssertionError("resource observation must not invoke the browser relay")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        observed = port.observe_resource(caller, browser_ref)
+        assert observed.start_action_id == "c" * 32
+        assert observed.relay_pid == 4321
+        assert observed.relay_start_identity == "1700000000.000001"
+        assert observed.tool_schema_digest == "d" * 64
+        assert calls == []
+        assert list((tmp_path / "artifacts").iterdir()) == []
+    finally:
+        os.close(fd)
+
+
+def test_owner_tab_observation_hardcodes_list_and_creates_no_action_claim(tmp_path: Path):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append((request, timeout))
+        return {
+            "schema": "mastermind.workbench_browser_relay_response.v1",
+            "request_id": request["request_id"],
+            "resource_id": "c" * 32,
+            "ok": True,
+            "result": {
+                "content": [
+                    {
+                        "type": "text",
+                        "text": "### Result\n- 0: (current) [Example](https://example.test/path)",
+                    }
+                ],
+                "isError": False,
+            },
+        }
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        result = port.observe_tab_group(caller, browser_ref)
+        assert result["isError"] is False
+        assert len(calls) == 1
+        request, timeout = calls[0]
+        assert request["kind"] == "tool"
+        assert request["tool"] == "browser_tabs"
+        assert request["arguments"] == {"action": "list"}
+        assert timeout == 2
+        assert list((tmp_path / "artifacts").iterdir()) == []
+    finally:
+        os.close(fd)
+
+
+def test_owner_tab_observation_refuses_relay_errors_without_retry(tmp_path: Path):
+    calls = []
+
+    def relay(_path, request, *, timeout):
+        calls.append(request)
+        raise BrowserRelayError("synthetic transport loss")
+
+    fd, caller, port, browser_ref = _fixture(tmp_path, relay)
+    try:
+        with pytest.raises(BrowserPortRefused, match="BROWSER_TAB_OBSERVATION_UNAVAILABLE"):
+            port.observe_tab_group(caller, browser_ref)
+        assert len(calls) == 1
+        assert list((tmp_path / "artifacts").iterdir()) == []
     finally:
         os.close(fd)
