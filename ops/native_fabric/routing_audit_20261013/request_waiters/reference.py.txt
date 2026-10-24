@@ -1,0 +1,146 @@
+def _class_priority(task_class: str, job_class: Optional[str] = None) -> int:
+    # Transport identity (remote-glm, etc.) remains intact for admission and
+    # leases. Only the existing queue priority uses the logical work class.
+    logical = str(job_class or "").strip()
+    return CLASS_PRIORITY.get((logical or task_class or "unknown").strip().lower(), 4)
+
+
+class Broker:
+    def _waiters(self, conn: sqlite3.Connection, pool: str) -> List[sqlite3.Row]:
+        pool = self.provider_name(pool)
+        return list(
+            conn.execute(
+                "SELECT * FROM waiters WHERE pool=? AND id NOT LIKE 'plan-%' "
+                "ORDER BY priority ASC, enqueued_at ASC",
+                (pool,),
+            ).fetchall()
+        )
+
+    def _active_orchestrators(self, conn: sqlite3.Connection, pool: str) -> List[str]:
+        pool = self.provider_name(pool)
+        ids = set()
+        for r in conn.execute(
+            "SELECT DISTINCT orchestrator_id FROM leases "
+            "WHERE state IN ('held','rented') AND pool=?",
+            (pool,),
+        ):
+            ids.add(r["orchestrator_id"])
+        for r in conn.execute(
+            "SELECT DISTINCT orchestrator_id FROM waiters "
+            "WHERE pool=? AND id NOT LIKE 'plan-%'",
+            (pool,),
+        ):
+            ids.add(r["orchestrator_id"])
+        return sorted(ids)
+
+    def fair_share(self, conn: sqlite3.Connection, pool: str, extra: Optional[str] = None) -> int:
+        cap = self.pool_cap(pool)
+        orchs = set(self._active_orchestrators(conn, pool))
+        if extra:
+            orchs.add(extra)
+        n = max(1, len(orchs))
+        if cap <= 0:
+            return 1
+        return max(1, cap // n)
+
+    def _enqueue_waiter(
+        self,
+        conn: sqlite3.Connection,
+        waiter_id: Optional[str],
+        orch: str,
+        pool: str,
+        account: Optional[str],
+        task_class: str,
+        host: str,
+        need: int = 1,
+        job_class: Optional[str] = None,
+    ) -> str:
+        now = self.now()
+        existing = conn.execute(
+            "SELECT id FROM waiters WHERE orchestrator_id=? AND pool=?",
+            (orch, pool),
+        ).fetchone()
+        if existing:
+            wid = existing["id"]
+            conn.execute(
+                "UPDATE waiters SET last_heartbeat=?, task_class=?, priority=?, "
+                "account=?, host=?, need=? WHERE id=?",
+                (
+                    now,
+                    task_class,
+                    _class_priority(task_class, job_class),
+                    account,
+                    host,
+                    int(need),
+                    wid,
+                ),
+            )
+            conn.commit()
+            return wid
+        wid = waiter_id or uuid.uuid4().hex[:12]
+        conn.execute(
+            "INSERT OR REPLACE INTO waiters "
+            "(id, orchestrator_id, pool, account, task_class, host, "
+            "enqueued_at, priority, need, last_heartbeat) "
+            "VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (
+                wid,
+                orch,
+                pool,
+                account,
+                task_class,
+                host,
+                now,
+                _class_priority(task_class, job_class),
+                int(need),
+                now,
+            ),
+        )
+        conn.commit()
+        return wid
+
+    def _register_demand(
+        self,
+        conn: sqlite3.Connection,
+        waiter_id: Optional[str],
+        orch: str,
+        pool: str,
+        account: Optional[str],
+        task_class: str,
+        host: str,
+        need: int = 1,
+        job_class: Optional[str] = None,
+    ) -> str:
+        """Blocked/failed acquire: persist demand and drain surplus (B5 / N1)."""
+        wid = self._enqueue_waiter(
+            conn, waiter_id, orch, pool, account, task_class, host, need, job_class=job_class
+        )
+        share_now = self.fair_share(conn, pool)
+        if self._below_share_waiters(conn, pool, "", share_now):
+            self._mark_surplus_nonrenewable(conn, pool, share_now)
+            conn.commit()
+        return wid
+
+    def _front_of_queue(
+        self, conn: sqlite3.Connection, pool: str, orch: str, task_class: str,
+        job_class: Optional[str] = None,
+    ) -> bool:
+        """True if this orch may take the next slot (priority + oldest-first)."""
+        waiters = self._waiters(conn, pool)
+        if not waiters:
+            return True
+        my_p = _class_priority(task_class, job_class)
+        # higher-priority (lower number) waiter from someone else blocks us
+        for w in waiters:
+            if w["orchestrator_id"] == orch:
+                # A root's waiter may describe a different sibling's urgency.
+                # Reuse its FIFO position only for the same logical priority.
+                if int(w["priority"]) == my_p:
+                    return True
+                continue
+            if int(w["priority"]) < my_p:
+                return False
+            if int(w["priority"]) == my_p:
+                # oldest at this class: if it's us, ok; if someone else, wait
+                return w["orchestrator_id"] == orch
+        return True

@@ -1,0 +1,19 @@
+--- a/ext/quota_remote.py
++++ b/ext/quota_remote.py
+@@ -416,6 +416,16 @@
+             stamp = datetime.fromisoformat(observed[:-1] + "+00:00").timestamp()
+             age = now_ts - stamp
+             if 0.0 <= age <= FRESH_S:
++                # A recent observation belongs to its measured window, not to
++                # the new allowance after that window's reset. Unknown remains
++                # unknown; never refresh or synthesize post-reset capacity here.
++                if state.reset_at is not None:
++                    reset = _iso(state.reset_at)
++                    if not reset:
++                        continue
++                    reset_ts = datetime.fromisoformat(reset[:-1] + "+00:00").timestamp()
++                    if reset_ts <= now_ts:
++                        continue
+                 accepted.append(state)
+         except (OSError, OverflowError, ValueError, TypeError):
+             continue

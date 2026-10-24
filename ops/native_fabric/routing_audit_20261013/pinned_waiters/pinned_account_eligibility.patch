@@ -1,0 +1,45 @@
+--- a/ext/lease_broker.py
++++ b/ext/lease_broker.py
+@@ -2,2 +2,28 @@
++    def _waiter_pinned_account_full(
++        self, conn: sqlite3.Connection, pool: str, waiter: sqlite3.Row
++    ) -> bool:
++        """Only proven total-account saturation may remove blocking demand.
++
++        An unpinned request, absent/ambiguous observation or model-only limit
++        remains a contender. This read is made under the incumbent broker lock;
++        it neither drops the waiter nor grants a different account or model.
++        """
++        try:
++            account = waiter["account"]
++            if type(account) is not str or not account:
++                return False
++            matches = [a for a in self.grantable_accounts(pool)
++                       if a.get("name") == account]
++            if len(matches) != 1:
++                return False
++            cap = matches[0].get("_eff_cap")
++            if type(cap) is not int or cap <= 0:
++                return False
++            held = self._account_held(conn, pool, account)
++            return type(held) is int and held >= cap
++        except (AttributeError, KeyError, TypeError, ValueError, ImportError,
++                OSError, sqlite3.Error):
++            return False
++
+     def _below_share_waiters(
+         self, conn: sqlite3.Connection, pool: str, except_orch: str, share: int
+@@ -5,4 +31,6 @@
+         out = []
+         for w in self._waiters(conn, pool):
++            if self._waiter_pinned_account_full(conn, pool, w):
++                continue
+             if w["orchestrator_id"] == except_orch:
+                 continue
+@@ -24,4 +52,6 @@
+         # A scoped sibling is a separate contender, not this request's FIFO credit.
+         for w in waiters:
++            if self._waiter_pinned_account_full(conn, pool, w):
++                continue
+             own_row = (w["orchestrator_id"] == orch and
+                        (w["id"] == waiter_id if scoped else not w["id"].startswith("rq-")))
