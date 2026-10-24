@@ -991,3 +991,37 @@ describe("fixed acquisition Control Room action transport", () => {
     expect(e.fetcher).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("fixed H2 direct-native authenticated routes",()=>{
+  const resource="https://fixture-resource.mastermind-x.com/executive";
+  const selection={work_ref:"WS:H2-FIXTURE",job_id:"JOB-123",attempt_id:null};
+  const unavailable={schema:"mastermind.direct_native_result_response.v1",selection,availability:"UNAVAILABLE",reason_codes:["NOT_TERMINAL"],result:null,consumption:null};
+  it("uses the existing executive bearer and exact direct bodies without automatic consumption",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+    e.fetcher.mockImplementation(async()=>response(unavailable));
+    const signal=new AbortController().signal;
+    await e.client.executive!.directNative!.read(selection,signal);
+    expect(e.fetcher).toHaveBeenCalledTimes(1);
+    const consumed={...selection,attempt_id:"ATT-456",result_digest:"d".repeat(64),operation_key:"mmos-consume-fixture"};
+    await e.client.executive!.directNative!.consume(consumed,signal);
+    expect(e.fetcher.mock.calls.map(([url])=>url)).toEqual([ORIGIN+'/os/executive/direct-native/result',ORIGIN+'/os/executive/direct-native/consume']);
+    expect(e.fetcher.mock.calls.map(([,init])=>JSON.parse(String(init?.body)))).toEqual([selection,consumed]);
+    for(const [,init] of e.fetcher.mock.calls)expect(init).toMatchObject({method:"POST",redirect:"error",credentials:"omit",cache:"no-store",headers:{Authorization:"Bearer private-token"}});
+  });
+  it("preserves typed unavailable on503 and rejects duplicate fields before display",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+    e.fetcher.mockResolvedValueOnce(new Response(JSON.stringify(unavailable),{status:503,headers:{'content-type':'application/json'}}));
+    expect(await e.client.executive!.directNative!.read(selection,new AbortController().signal)).toMatchObject(unavailable);
+    e.fetcher.mockResolvedValueOnce(new Response('{"schema":"a","schema":"b"}',{headers:{'content-type':'application/json'}}));
+    await expect(e.client.executive!.directNative!.read(selection,new AbortController().signal)).rejects.toThrow('RESPONSE_INVALID_JSON');
+    expect(e.fetcher).toHaveBeenCalledTimes(2);
+  });
+  it("rejects malformed digest/selection before fetch and fences a late reply after signout",async()=>{
+    const e=setup({executiveResource:resource});await e.login();e.fetcher.mockClear();
+    await expect(e.client.executive!.directNative!.consume({...selection,attempt_id:'ATT-456',result_digest:'x'+'d'.repeat(64),operation_key:'original'},new AbortController().signal)).rejects.toThrow('DIRECT_SELECTION_INVALID');
+    expect(e.fetcher).not.toHaveBeenCalled();
+    const pendingResponse=deferred<Response>();e.fetcher.mockReturnValueOnce(pendingResponse.promise);
+    const pending=e.client.executive!.directNative!.read(selection,new AbortController().signal);
+    const rejected=expect(pending).rejects.toThrow();await e.client.signOut();pendingResponse.resolve(response(unavailable));await rejected;
+  });
+});

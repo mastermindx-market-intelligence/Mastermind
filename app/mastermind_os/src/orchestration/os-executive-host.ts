@@ -4,6 +4,8 @@ import {
   type LaunchBindingConfig,
 } from "./executive-launch-command-port";
 import type { OwnerContext, PendingPointerStore } from "./operation-controller";
+import type { DirectNativeTransport, DirectSelection, DirectTerminalSelection } from "../direct-native-result";
+import { DirectNativeCommandPort } from "./direct-native-command-port";
 
 /** Implemented inside the existing private web/Rust auth owner. No token getter. */
 export interface OsExecutiveTransport {
@@ -13,6 +15,7 @@ export interface OsExecutiveTransport {
   context(signal: AbortSignal): Promise<unknown>;
   submit(arguments_: Readonly<Record<string, unknown>>, signal: AbortSignal): Promise<unknown>;
   status(arguments_: { readonly intent_id: string }, signal: AbortSignal): Promise<unknown>;
+  readonly directNative?: DirectNativeTransport;
 }
 
 interface VerifiedContext {
@@ -98,6 +101,24 @@ export function createOsExecutiveHost(
     }
   }
 
+  async function directCall(operation: "read" | "consume", args: DirectSelection | (DirectTerminalSelection & {result_digest:string;operation_key:string}), signal: AbortSignal) {
+    const owner=context(), capturedEpoch=epoch, authGeneration=transport.authGeneration();
+    if(!owner||signal.aborted||!transport.directNative)throw Error("EXECUTIVE_UNAVAILABLE");
+    const request=new AbortController(), boundarySignal=boundary.signal;
+    const abort=()=>request.abort();signal.addEventListener("abort",abort,{once:true});boundarySignal.addEventListener("abort",abort,{once:true});
+    if(signal.aborted||boundarySignal.aborted)abort();
+    try {
+      const raw=operation==="read"?await transport.directNative.read(args,request.signal):
+        await transport.directNative.consume(args as DirectTerminalSelection & {result_digest:string;operation_key:string},request.signal);
+      const current=context();
+      if(request.signal.aborted||capturedEpoch!==epoch||authGeneration!==transport.authGeneration()||!current||
+        current.principalScope!==owner.principalScope||current.generation!==owner.generation)throw Error("EXECUTIVE_EPOCH_CHANGED");
+      return raw;
+    }finally{signal.removeEventListener("abort",abort);boundarySignal.removeEventListener("abort",abort);}
+  }
+  const direct = transport.directNative ? new DirectNativeCommandPort({
+    read:(args,signal)=>directCall("read",args,signal),consume:(args,signal)=>directCall("consume",args,signal),
+  },context) : null;
   const binding = createExecutiveLaunchBinding(config, {
     async callTool(name, args, signal): Promise<ExecutiveToolEnvelope> {
       const owner = context();
@@ -136,7 +157,8 @@ export function createOsExecutiveHost(
     store,
     getSession: () => null, // LAUNCH has no SEND/STOP session producer.
     subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
-  });
+  }, direct ? {port:direct,capability:{read:(selection,signal)=>direct.read(selection,signal),
+    makeConsumeIntent:(selection,digest)=>direct.makeConsumeIntent(selection,digest)}} : undefined);
   const unsubscribe = transport.subscribe(() => { void refresh(); });
   const ready = refresh();
   return {
