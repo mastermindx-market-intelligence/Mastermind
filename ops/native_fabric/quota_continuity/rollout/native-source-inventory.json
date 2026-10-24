@@ -162,9 +162,9 @@
       "source": "source/fabric_stop_return.py"
     },
     "ext/fabric_task.py": {
-      "bytes": 85869,
+      "bytes": 86040,
       "installed_preimage_sha256": "8f28799dc4f2d0b815fa467dab1dee5c5a9781d220199a5358be49773a74b686",
-      "sha256": "616718444dc542eaa24e26c161c66618f2fd8296c61fb505d6a8838c75d457d6",
+      "sha256": "b8b5b7cf3c7fa3f9f65b72ca865b526030c36d0eaf97fc2ee9af8d934a65cce7",
       "source": "candidate/fabric_task.py"
     },
     "ext/glm_bound_claude.py": {
@@ -276,9 +276,9 @@
       "source": "candidate/host_pull_probe.template"
     },
     "ext/jev_advisory.py": {
-      "bytes": 11147,
+      "bytes": 11291,
       "installed_preimage_sha256": null,
-      "sha256": "4c8d74527bacb5e116e3349916e35b8c87036572daaf4c0d54fb6ce59c91ef13",
+      "sha256": "50d7649d297b48f6ad8b43a31ee6c06ee8429dc20b0c01ae6d2e49aa6959f222",
       "source": "source/jev_advisory.py"
     },
     "ext/lane_runtime.py": {
