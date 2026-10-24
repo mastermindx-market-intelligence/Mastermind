@@ -1403,6 +1403,33 @@ stage_sealed_release() {
         --bundle "$OS_WEB_ASSETS" --expected-digest "$OS_WEB_ASSETS_DIGEST" \
         --release-root "$STAGING" >/dev/null || return 65
     fi
+    # The canonical paid owner consumes the existing native closure at this
+    # fixed release subtree. Git archives contain its reviewed inputs, not its
+    # generated stage. Materialize with the unchanged owner builder before the
+    # immutable release seal; recorded inventory bytes must remain identical.
+    "$PYTHON_BINARY" -I -S -B - "$STAGING" <<'MASTERMIND_RELEASE_NATIVE_STAGE' >/dev/null || return 65
+import json
+import pathlib
+import runpy
+import sys
+
+root = pathlib.Path(sys.argv[1])
+rollout = root / "ops/native_fabric/quota_continuity/rollout"
+builder = rollout / "build_review_stage.py"
+records = {name: (rollout / name).read_bytes()
+           for name in ("native-manifest.json", "native-source-inventory.json")}
+sys.argv = [str(builder), "--output", str(rollout)]
+runpy.run_path(str(builder), run_name="__main__")
+if any((rollout / name).read_bytes() != expected for name, expected in records.items()):
+    raise ValueError("native closure differs from the reviewed release inventory")
+# The installer uses umask077. These are public reviewed code bytes, not state;
+# both service UIDs must traverse/read them after the root-owned seal.
+stage = rollout / "native-code-stage"
+for directory in (stage, stage / "ext"):
+    directory.chmod(0o755)
+for relative in json.loads(records["native-manifest.json"]):
+    (stage / relative).chmod(0o644)
+MASTERMIND_RELEASE_NATIVE_STAGE
     # Seal and verify while the directory is still operation-owned staging. A
     # settled interruption must never expose a canonical release without a seal.
     "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/release_manifest.py" create \

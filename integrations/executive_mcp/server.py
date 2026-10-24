@@ -74,6 +74,8 @@ _OS_EXECUTIVE_ROUTES: tuple[str, ...] = (
     "/os/executive/context",
     "/os/executive/submit",
     "/os/executive/status",
+    "/os/executive/direct-native/result",
+    "/os/executive/direct-native/consume",
 )
 
 #: Three fixed POST routes served by the opt-in selected-session transport.
@@ -961,6 +963,8 @@ def _build_profile_mcp_app(
     os_session_transport_handler = None
     if enable_os_executive_transport:
         from integrations.mastermind_executive_app.os_transport import OsExecutiveTransportApp
+        from integrations.mastermind_executive_app.direct_native import DirectNativeResultClient
+        from integrations.mastermind_executive_app.gateway import CeoIngressClient
 
         if (
             profile_server_name != "mastermind-executive"
@@ -990,6 +994,8 @@ def _build_profile_mcp_app(
             submit_authenticator=os_authenticator,
             clock=configured.clock,
             commission_preparer=os_commission_preparer,
+            direct_result_client=DirectNativeResultClient(configured.ceo_ingress_socket_path, CeoIngressClient(
+                connect_timeout=configured.connect_timeout, read_timeout=configured.read_timeout)),
         )
         if os_session_bridge_client is not None:
             # The opt-in selected-session leaf reuses this factory's audited

@@ -69,10 +69,107 @@ a failed or ambiguous create must be reconciled on the same host/command owner.
 7. If any gate fails, leave acceptance open and reconcile the specific
    installed generation/effect. Do not force-install an older release
    over a successful new A2 generation: old renderers cannot certify the
-   new config/plist pair. A rollback needs its own reviewed exact-release
-   reverse migration and root/service lifecycle transaction. Rolling
-   forward with a reviewed fix is preferred over an unreviewed overwrite.
+   new config/plist pair. The installed successor's separately reviewed
+   **reverse-rebind-release** command can restore an exact historical
+   volatile-socket enrollment pair, but only when the native A2 service
+   is unloaded/disabled, the controller return path is disarmed, the
+   previous sealed release manifest verifies, and the previous config/plist
+   hashes are supplied from a previously captured owner-only backup.
+   It uses the existing A2 token-metadata-only lock/CAS transaction;
+   it never reads, rewrites or re-enrolls the token. It requires:
+   --expected-bot-user-id, --expected-current-release-sha,
+   --expected-previous-release-sha, --expected-previous-tree-sha,
+   --expected-previous-config-sha256, and
+   --expected-previous-plist-sha256. The previous generation must
+   correspond to the exact reconstructed historical /var/run A2 pair,
+   with the shared scope set and W3C disabled. It is NOT a generic
+   downgrade, does NOT select a release, and cannot reverse an armed W3C
+   generation. A service start or other control/identity drift freezes
+   publication for same-carrier reconciliation; do not retry blindly.
+   The full Executive/C1/control restart and any release selection remain
+   governed by their separate original owners and admission receipts.
+   Rolling forward with a reviewed fix is preferred over an unreviewed
+   overwrite. Reboot and app retirement remain separate effects.
 
 This migration does not activate `terminal_return_armed`, W3C, a Job/Attempt,
 new broker, watcher or transport plane. A passing source test or green CI
 is not the reboot recovery receipt.
+
+## Governed A2 return-socket reverse migration and service restoration
+
+The separate A2 reverse-CAS source (#1804) restores only the old A2 config
+and launchd plist. The full Executive installer also migrates disarmed
+Control's terminal_return_socket_path to the durable socket. Reversing A2
+without reverting that Control binding strands the original return route.
+
+The **existing** global Executive autonomy transaction owner now provides
+a2-restore-controller-socket and a2-restore-controller-socket-reconcile.
+It is a disarmed, single-field Control config restoration. It does not copy a
+historical Control document, revert another policy, change worker config,
+re-enroll a token, or start services. Its marker is the existing
+autonomy-transaction.lock with the original root-only preimage archive.
+The current disarmed autonomy receipt is rebound under that SAME transaction;
+no new journal, credential, or lifecycle plane is introduced.
+
+### Required ordering and exact inputs
+
+1. Install a protected, accepted release **that contains both the A2
+   reverse-rebind-release owner and this Control recovery owner**. Verify
+   immutable manifest and source closure *before shutdown*. A staged-unselected
+   or draft workspace cannot execute production recovery.
+2. Independently attest the selected release SHA and the exact historical
+   **sealed** A2 release SHA/tree, plus SHA-256 of both saved original A2
+   config and launchd plist. Capture Control SHA-256 from the *currently
+   installed disarmed* Control config, not the pre-installer backup.
+3. Under the original service lifecycle owner, observe MCP running,
+   backup absent and record the exact Worker service pre-state. Stop Control,
+   C1, A2 **and Worker** through their incumbent fixed-label owners; the
+   Executive global transaction refuses even a running/registered Worker.
+   Preserve the Worker configuration and its launchd disabled preimage; do
+   not silently re-enable it after A2/C1/Control recovery. Prove A2 disabled
+   and A2/C1/Control/Worker labels unloaded; confirm the global autonomy
+   transaction marker is absent. Preserve C1/A2 token metadata exactly.
+4. Run the **installed A2** reverse-rebind-release with flags
+   --expected-bot-user-id, --expected-current-release-sha,
+   --expected-previous-release-sha, --expected-previous-tree-sha,
+   --expected-previous-config-sha256 and --expected-previous-plist-sha256.
+   Only its original CAS owner publishes the prior volatile-socket pair.
+   A2_REBIND_STATE_REFUSED is a no-write refusal and never permits manual
+   file patching or blind replay.
+5. Run the **installed** autonomy_control.py a2-restore-controller-socket
+   with --expected-sha (current selected), --expected-control-sha256
+   (current disarmed Control), --expected-previous-release-sha,
+   --expected-previous-tree-sha, --expected-previous-config-sha256,
+   --expected-previous-plist-sha256 and --expected-bot-user-id.
+   This operation refuses mixed/foreign A2 state, unsealed previous release,
+   changed worker, armed return, loaded service, or changed Control preimage.
+   It rebinds the original autonomy receipt in the original transaction.
+   If interrupted, ONLY the original a2-restore-controller-socket-reconcile
+   with the same witnesses may settle the original transaction. It NEVER
+   rewrites the Control/receipt pair; a positive complete postimage and
+   original marker may admit exactly one first-attempt nonsecret Control
+   observation publication by its incumbent owner. Its durable attempted
+   publication phase forbids a second write: reconcile can only read back a
+   matching observation or retain EFFECT_UNKNOWN and the original marker.
+   Mixed/partial Control/receipt evidence remains refused.
+6. **After that transaction is completely settled**, ensure MCP is running
+   and invoke the **installed** service-control.sh start-restored-a2-readside
+   with the exact seven flags from step 5. Its read-only sealed-pair and
+   disarmed Control preflight precedes all launchd effects. The original
+   fixed-label lifecycle owner starts **A2 -> C1 -> Control**, once.
+   On any uncertain start effect, stop that carrier and reconcile launchd;
+   do not replay start. No arbitrary label, path, socket, token or verb is
+   permitted. If the recorded Worker pre-state required running+enabled,
+   restore that Worker separately through its **existing** fixed-label
+   service-control start admission and verify its preserved configuration,
+   Control rebind and all original A2/C1 readside states afterward. A Worker
+   previously stopped stays stopped. Never infer or silently change pre-state.
+7. Independently prove A2 PID and a real listener at the old volatile socket
+   with exact service owner/mode, C1 and Control running, shared Slack bot,
+   authentic read-side interaction, and a separately authorized correlated
+   Runtime return. An exit-zero startup is NOT the SEND/read/return receipt.
+
+This does not roll back the whole Executive release, alter credentials,
+arm W3C or terminal return, retire the legacy app, reboot, or override a
+maintenance window. This is exact A2 **return-route** recovery, not a
+generic downgrade. Source tests do not authorize a live cutover.

@@ -26,6 +26,28 @@
         }
       }
     },
+    "fabric.paid.glm.sealed-input.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "ba1e883c749a1bd237b197141f9c4e83a206b70ea45cdee64ddbaf53f00739f7",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "Paid sealed-input model-only worker; Claude MCP surfaces are unsupported and no tool or native-principal admission may be inferred.",
+          "status": "unsupported"
+        }
+      }
+    },
     "operator.appserver.interactive.company-mcp.v1": {
       "package_generation_digests": {},
       "profile_digest": "19ea30bee5e609a70cae37c511cb519f8b6cbc535546aafa9b595729a5c59530",
@@ -448,6 +470,28 @@
         },
         "inline-subagent": {
           "reason": "Sealed no-extension worker; no MCP or rich-principal authority may be inferred or enabled.",
+          "status": "unsupported"
+        }
+      }
+    },
+    "worker.acp.providerfree.readonly.v1": {
+      "package_generation_digests": {},
+      "profile_digest": "f2fa8bd627f3e5f28a341744b59d29596d1c3ecfb8456dc82de7051a62681942",
+      "surfaces": {
+        "agent-sdk": {
+          "reason": "ACP AgentLoop is not Claude Agent SDK. Its native Attempt tool grant and process are separately admitted.",
+          "status": "unsupported"
+        },
+        "cli": {
+          "reason": "ACP is an isolated provider-free DSH worker, not Claude CLI. No Claude MCP grant or provider credential may be borrowed.",
+          "status": "unsupported"
+        },
+        "desktop-local": {
+          "reason": "ACP native workspace-read tools are not enrolled in Claude Desktop Local or any desktop MCP surface.",
+          "status": "unsupported"
+        },
+        "inline-subagent": {
+          "reason": "ACP is not a Claude inline subagent. No context, delegated permission or tool namespace may be inherited.",
           "status": "unsupported"
         }
       }

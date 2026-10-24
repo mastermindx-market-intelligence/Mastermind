@@ -21,8 +21,9 @@ from control_plane.fabric_attended_claude import (
     attended_profile_digest,
     prepare_attended_claude_launch,
 )
-from control_plane.subscription_harness_bindings import SubscriptionHarnessBinding
-from control_plane.subscription_provider_profiles import SubscriptionProviderProfile
+from control_plane.subscription_harness_bindings import SubscriptionHarnessBinding, get_binding
+from control_plane.subscription_provider_profiles import SubscriptionProviderProfile, get_profile
+from control_plane.claude_subscription_worker import _usage_policy_satisfied
 from control_plane.worker_execution_contract import BinaryAttestation, WorkerLaunchSpec
 
 PROMPT = "FABRIC-ATTENDED-PROMPT-MARKER-7f3a: audit the login flow only."
@@ -501,6 +502,104 @@ class AttendedClaudeLaunchPreparationTests(unittest.TestCase):
             dataclasses.replace(descriptor, start_authorized=True)
         with self.assertRaises((AttendedClaudePreparationError, ValueError)):
             dataclasses.replace(descriptor, preparation_only=False)
+
+    def test_byteplus_real_catalog_prepares_attended_only_without_credential(self) -> None:
+        """Prove the actual BytePlus binding enters the existing Claude compiler.
+
+        This is *preparation*, not authentication, provider execution, quota
+        proof or an autonomous Fabric start.
+        """
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        spec = _spec(model=profile.model_for("routine"))
+        prepared = _prepare(profile=profile, binding=binding, spec=spec, model_class="routine")
+        self.assertEqual(prepared.endpoint, "https://ark.ap-southeast.bytepluses.com/api/coding")
+        self.assertEqual(prepared.model, "glm-5.3-flash")
+        self.assertEqual(prepared.implementation_state, "SPEC_ONLY")
+        self.assertTrue(prepared.preparation_only)
+        self.assertFalse(prepared.start_authorized)
+        self.assertFalse(prepared.binding_autonomous_allowed)
+        self.assertEqual(prepared.profile_usage_policy["interactive_only"], True)
+        self.assertEqual(prepared.profile_usage_policy["single_user_only"], True)
+        self.assertFalse(prepared.profile_usage_policy["unattended_background_allowed"])
+        self.assertFalse(prepared.profile_usage_policy["production_backend_allowed"])
+        self.assertTrue(_usage_policy_satisfied(profile, "interactive_canary"))
+        self.assertFalse(_usage_policy_satisfied(profile, "executive_worker"))
+        self.assertFalse(_usage_policy_satisfied(profile, "automated_fabric"))
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.environment)
+        self.assertNotIn("ANTHROPIC_API_KEY", prepared.environment)
+        self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.to_dict())
+
+    def test_byteplus_specialist_models_prepare_supported_claude_only(self) -> None:
+        from control_plane.subscription_provider_profiles import get_profile
+        from control_plane.subscription_harness_bindings import get_binding
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        for model_class, model in (
+            ("backend_coding", "deepseek-v4.1-flash"),
+            ("frontend_visual", "dola-seed-2.0-code"),
+            ("adversarial_review", "deepseek-v4-pro"),
+        ):
+            prepared = _prepare(
+                spec=_spec(model=model), profile=profile,
+                binding=binding, model_class=model_class,
+            )
+            self.assertEqual(prepared.model, model)
+            self.assertEqual(prepared.model_class, model_class)
+            self.assertEqual(prepared.endpoint, "https://ark.ap-southeast.bytepluses.com/api/coding")
+            self.assertTrue(prepared.preparation_only)
+            self.assertFalse(prepared.start_authorized)
+            self.assertEqual(prepared.implementation_state, "SPEC_ONLY")
+            self.assertFalse(prepared.binding_autonomous_allowed)
+            self.assertNotIn("ANTHROPIC_AUTH_TOKEN", prepared.environment)
+
+    def test_byteplus_seven_roles_compile_offline_and_require_owner_launch_proofs(self) -> None:
+        """No fake binary attestation can become a real admitted worker."""
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        expected = {
+            "routine": "glm-5.3-flash",
+            "subagent": "glm-5.3-flash",
+            "hard": "dola-seed-2.0-pro",
+            "fast": "dola-seed-2.0-lite",
+            "backend_coding": "deepseek-v4.1-flash",
+            "frontend_visual": "dola-seed-2.0-code",
+            "adversarial_review": "deepseek-v4-pro",
+        }
+        self.assertEqual(dict(profile.models), expected)
+        self.assertEqual(set(binding.model_classes), set(expected))
+        for model_class, model in expected.items():
+            with self.subTest(model_class=model_class):
+                descriptor = _prepare(
+                    spec=_spec(model=model), profile=profile,
+                    binding=binding, model_class=model_class,
+                    max_turns=2, result_schema={"type": "object"},
+                )
+                self.assertEqual(descriptor.model, model)
+                self.assertEqual(descriptor.implementation_state, "SPEC_ONLY")
+                self.assertEqual(descriptor.endpoint, profile.base_url)
+                self.assertEqual(descriptor.required_launch_proofs, REQUIRED_LAUNCH_PROOFS)
+                self.assertTrue(descriptor.preparation_only)
+                self.assertFalse(descriptor.start_authorized)
+                self.assertFalse(descriptor.binding_autonomous_allowed)
+                self.assertEqual(descriptor.environment["ANTHROPIC_MODEL"], model)
+                self.assertEqual(descriptor.environment["ANTHROPIC_BASE_URL"], profile.base_url)
+                self.assertEqual(descriptor.environment["CLAUDE_CODE_MAX_RETRIES"], "0")
+                self.assertNotIn("ANTHROPIC_AUTH_TOKEN", descriptor.environment)
+                self.assertNotIn("ANTHROPIC_API_KEY", descriptor.environment)
+                self.assertNotIn("ANTHROPIC_AUTH_TOKEN", descriptor.to_dict())
+                with self.assertRaises(AttendedClaudePreparationError):
+                    dataclasses.replace(descriptor, start_authorized=True)
+
+    def test_byteplus_real_catalog_cannot_prepare_unreviewed_model(self) -> None:
+        profile = get_profile("byteplus-coding-plan-personal")
+        binding = get_binding("byteplus-coding-plan-personal.claude-code-anthropic")
+        with self.assertRaises(AttendedClaudePreparationError):
+            _prepare(
+                profile=profile, binding=binding,
+                spec=_spec(model="glm-5.3"),
+                model_class="routine",
+            )
 
     def test_profile_digest_is_stable_and_sensitive(self) -> None:
         first = attended_profile_digest(_profile())

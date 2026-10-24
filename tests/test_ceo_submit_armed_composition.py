@@ -1538,16 +1538,16 @@ def test_d6_no_new_transport_and_all_arm_defaults_are_false():
         for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
             if line.startswith("class CeoIngressClient"):
                 clients.append((path.relative_to(ROOT).as_posix(), line_number))
-    assert clients == [("integrations/mastermind_executive_app/gateway.py", 355)]
+    assert clients == [("integrations/mastermind_executive_app/gateway.py", 356)]
     tree = ast.parse(source)
     assert not any(isinstance(node, (ast.Import, ast.ImportFrom)) and any(alias.name == "socket" for alias in node.names) for node in tree.body)
 
 
 def _d7_reviewed_installed_event_loop(path, source, tree, node):
-    # PR #1743 requalification: scripts/executive_os_phase1c.py changed
-    # exactly one static A2 socket-path literal. Its installed event-loop AST
-    # remains byte-for-byte the reviewed 060525... anchor below. Retain a
-    # *full-source* SHA pin; never dynamically derive its allowed digest.
+    # H2 direct-native host composition: the qualified current-config/source
+    # generation callback changes this module; the installed event-loop AST
+    # remains exactly the independently reviewed 060525... anchor below.
+    # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
     # Return plus attention composition changes the module; the installed entry
@@ -1557,10 +1557,11 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            # Exact static hash of the combined Bridge + protected relay
-            # composition; the reviewed serve_installed_control AST above
+            # Exact static hash of the composed Bridge (attention, authorized
+            # policies, reference cursor) on the current readside socket
+            # selector. The reviewed serve_installed_control AST above
             # remains byte-identical and is independently checked below.
-            'dd2906a1a05885b8081d906f1011ac7443881c4a72ba93d03dfc43e46230b1ac'):
+            'c4b87d037656f10a05b2fef9da0df7f752b9ce4b5ceb608930ba6e2a61d953f0'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']
