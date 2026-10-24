@@ -191,3 +191,20 @@ test('reused native PIDs cannot preserve output authority for another operation'
     assert.equal(unwrap(await model.facade.call('fabric_request',request(id))).error,'REQUEST_ALREADY_ATTEMPTED');
   }
 });
+
+test('a suspended output read cannot return data after its binding is invalidated',async()=>{
+  const model=owner();
+  const first=unwrap(await model.facade.call('fabric_request',request('before-reuse')));
+  let release;
+  model.retention=()=>new Promise(resolve=>{release=resolve;});
+  const reading=model.facade.call('fabric_controller_output',{
+    run_id:'before-reuse',root_id:root,controller_pid:first.controller_pid});
+  await new Promise(resolve=>setImmediate(resolve));
+  assert.equal(typeof release,'function');
+  model.requestPid=first.controller_pid;
+  assert.equal(unwrap(await model.facade.call('fabric_request',request('after-reuse'))).error,'EFFECT_UNKNOWN');
+  release({content:[{type:'text',text:'unrelated reused-PID output'}]});
+  const result=unwrap(await reading);
+  assert.equal(result.error,'CONTROLLER_NOT_BOUND');
+  assert.equal(result.process_output,undefined);
+});

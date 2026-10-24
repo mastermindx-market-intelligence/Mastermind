@@ -352,6 +352,7 @@ export function createFabricFacade(engine, options={}) {
         const binding=controllers.get(args.controller_pid);
         if(!binding || binding.run_id!==args.run_id || binding.root_id!==args.root_id) fail('CONTROLLER_NOT_BOUND');
         const raw=await engine.callTool({name:'read_process_output',arguments:{pid:args.controller_pid,timeout_ms:1000,offset:args.offset??0,length:args.max_lines??60}});
+        if(controllers.get(args.controller_pid)!==binding) fail('CONTROLLER_NOT_BOUND');
         return response({action:name,...args,process_output:raw,execution_absence_proven:false});
       }
       if(name==='fabric_request') {
