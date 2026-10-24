@@ -32,8 +32,9 @@ def _linux_completion(request):
     # raw terminal escape rendering is required or claimed.
     reporter=request.config.pluginmanager.getplugin('terminalreporter')
     if reporter is not None:
-        reporter.write_line('::notice file=tests/test_paid_initializer.py,title=H1 Linux case executed::'
-            +request.node.name+' PASS Python '+'.'.join(map(str,sys.version_info[:3])))
+        with request.getfixturevalue('capsys').disabled():
+            reporter.write_line('\n::notice file=tests/test_paid_initializer.py,title=H1 Linux case executed::'
+                +request.node.name+' ASSERTIONS_COMPLETED Python '+'.'.join(map(str,sys.version_info[:3])))
 
 
 def _inert_bootstrap(request,probe):
@@ -122,7 +123,7 @@ def test_actual_pinned_image_exec_matches_normal_isolated_venv_startup(tmp_path,
 
 @pytest.mark.skipif(sys.platform!='linux' or sys.version_info[:2]!=(3,12),reason='requires actual Linux CPython3.12 initializer/getpath')
 def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,monkeypatch,request):
-    """Real FD/snapshot/Bash/getpath; Root distribution ownership is simulated.
+    """Real FD/snapshot/Bash/getpath; trusted-platform metadata is simulated.
 
     No remote/system mutation, credential read or provider is used. This does
     not qualify the current host's package ownership/trust or a live hook.
@@ -132,17 +133,24 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     from tests import test_paid_host_qualification as qualifier
     if os.getuid()==0:pytest.skip('production qualifier requires a non-Root transport account')
     account=pwd.getpwuid(os.getuid())
+    # The hosted toolcache supplies LD_LIBRARY_PATH. This inert fixture models
+    # the supported clean bootstrap premise; production never normalizes it.
+    for key in tuple(os.environ):
+        if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
+            monkeypatch.delenv(key)
     logical=Path(sys.executable).with_name('python3')
     assert logical.exists()
     real=logical.resolve()
     observed=json.loads(subprocess.check_output([str(logical),'-I','-S','-B','-c',
         'import json,sys;print(json.dumps({k:getattr(sys,k) for k in ("prefix","exec_prefix","base_prefix","base_exec_prefix")}))']))
-    rawstat=os.stat;rawfstat=os.fstat;rawlstat=os.lstat
+    rawstat=os.stat;rawfstat=os.fstat;rawlstat=os.lstat;rawxattr=os.getxattr
     protected=[str(real),str(logical.parent),*set(observed.values())]
+    ancestors={str(v) for p in (real,logical,*map(Path,observed.values())) for v in p.parents}
+    private=[];fault_acl=False
     def distribution(name):
-        return any(str(name)==p or str(name).startswith(p+'/') for p in protected)
+        return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
     def root_view(info):
-        fields=list(info);fields[4]=0
+        fields=list(info);fields[4]=0;fields[0]&=~0o022
         return os.stat_result(fields)
     def owned_fstat(fd):
         info=rawfstat(fd)
@@ -157,7 +165,18 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     def owned_lstat(name,*args,**kwargs):
         info=rawlstat(name,*args,**kwargs)
         return root_view(info) if distribution(name) else info
+    def modeled_xattr(name,key,*args,**kwargs):
+        # Only metadata of the fixed image/startup chain and this disposable
+        # private account chain is modeled; no general ACL bypass exists.
+        actual=os.path.realpath('/proc/self/fd/'+str(name)) if isinstance(name,int) else str(name)
+        modeled=distribution(actual) or actual in private or any(actual.startswith(p+'/') for p in private[-1:])
+        if key in ('system.posix_acl_access','system.posix_acl_default') and modeled:
+            if fault_acl and actual==str(logical.parent):return b'inert-extended-acl'
+            import errno
+            raise OSError(errno.ENODATA,'inert trusted metadata has no ACL')
+        return rawxattr(name,key,*args,**kwargs)
     with tempfile.TemporaryDirectory(prefix='.mmx-inert-init-',dir=account.pw_dir) as scratch:
+        private.extend([str(v) for v in Path(scratch).parents]+[scratch])
         lane=Path(scratch)/'lanes';(lane/'ext/lanes').mkdir(parents=True,mode=0o700)
         hook=lane/'ext/HOST_ENV.sh';config=Path(scratch)/'not-read.json'
         hook.write_text('export GLM_CONFIG='+str(config)+'\n');hook.chmod(0o600)
@@ -169,9 +188,9 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
             initialized_context=dict(home=account.pw_dir,glm_config=str(config)))
         req=qualifier.request();req.update(python_path=str(logical),capture_root=str(lane/'ext/lanes'),initializer_commitment=c,
             initializer_commitment_sha256=hashlib.sha256(m.canonical(c)).hexdigest())
-        # Explicit metadata-only Root distribution seam; actual child/process/
+        # Explicit ownership/mode/ACL-only trusted-platform seam; actual child/process/
         # image/getpath/Bash/immutable FD and protocol validators stay real.
-        monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat)
+        monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
         result=json.loads(_inert_bootstrap(req,qualifier.m._REMOTE_PROBE))
         assert result['binary']['real_path']==str(real)
@@ -192,6 +211,18 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         marker=Path(scratch)/'must-not-exist'
         hook.write_text('echo effect > '+str(marker)+'\nexport GLM_CONFIG='+str(config)+'\n')
         c['host_env'].update(sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size)
+        req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
+        # Real production ACL predicate is still invoked; injected metadata
+        # must refuse before a single hook marker is written.
+        fault_acl=True
+        with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
+        assert not marker.exists()
+        fault_acl=False
+        # Forbidden loader environment is not silently cleaned by production.
+        monkeypatch.setenv('LD_LIBRARY_PATH','/inert-not-a-library-path')
+        with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
+        assert not marker.exists()
+        monkeypatch.delenv('LD_LIBRARY_PATH')
         c['startup']['prefix']='/not-the-observed-prefix'
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
         with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
@@ -215,3 +246,42 @@ def test_shell_stdout_cannot_be_a_probe_witness():
 def test_child_output_is_bounded_before_materialization():
     with pytest.raises(m.InitializerCommitmentRefused):
         m._bounded_child([sys.executable,'-I','-S','-c','import sys;sys.stdout.write("x"*65537)'],timeout=5)
+
+
+def test_native_initializer_extends_only_exact_preimage_members():
+    """Changing current pins cannot replace unrelated/historical native bytes."""
+    import base64
+    root=Path(__file__).resolve().parents[1]
+    retained=json.loads((root/'tests/fixtures/paid-host-preinitializer-f608.json').read_bytes())
+    assert retained['source']=='f608f52f35384dcfa8e4305dc594f1fbe823d5ec'
+    raw=base64.b64decode(retained['native_manifest']['base64'],validate=True)
+    assert hashlib.sha256(raw).hexdigest()==retained['native_manifest']['sha256']=='74c5bd3e38e54430c45cc8ccb8d109a3b50fe0abba171ba572cc7be9d35a6270'
+    before=json.loads(raw)
+    native=root/'ops/native_fabric/quota_continuity'
+    current=json.loads((native/'rollout/native-manifest.json').read_bytes())
+    assert len(before)==95 and len(current)==96
+    assert set(before)<=set(current)
+    assert set(current)-set(before)=={'ext/paid_initializer.py'}
+    assert {p for p in before if before[p]!=current[p]}=={'ext/host_pull.sh','ext/paid_host_qualification.py'}
+    assert sum(before[p]==current[p] for p in before)==93
+    for name in ('host_pull.sh','paid_host_qualification.py','paid_initializer.py'):
+        assert current['ext/'+name]==hashlib.sha256((native/'candidate'/name).read_bytes()).hexdigest()
+    # The paired-upgrade target remains historical; only ordinary generation
+    # selection consumes the new complete current closure.
+    source=(native/'rollout/native_install.py').read_text()
+    assert '6ac208bbd80f706931b11e8147a879f6e3ced6fe704cde7b9f15e1c098e37ee4' in source
+
+
+def test_completion_notice_has_own_line_with_real_ci_capture(tmp_path):
+    program=tmp_path/'test_notice_fixture.py'
+    program.write_text('def test_a_before():pass\n'
+        'def test_notice_fixture(request):\n'
+        ' from tests.test_paid_initializer import _linux_completion\n'
+        ' _linux_completion(request)\n')
+    env={**os.environ,'PYTEST_DISABLE_PLUGIN_AUTOLOAD':'1','PYTHONDONTWRITEBYTECODE':'1'}
+    child=subprocess.run([sys.executable,'-m','pytest','-p','scripts.ci_pytest_timing',
+        '-q','-p','no:cacheprovider',str(program)],cwd=Path(__file__).resolve().parents[1],
+        env=env,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=30)
+    assert child.returncode==0,child.stdout
+    notices=[v for v in child.stdout.splitlines() if v.startswith('::notice ')]
+    assert len(notices)==1 and 'test_notice_fixture ASSERTIONS_COMPLETED' in notices[0]

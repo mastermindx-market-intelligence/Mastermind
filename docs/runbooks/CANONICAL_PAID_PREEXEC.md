@@ -89,8 +89,10 @@ import search or controller callback supplies it.
 Local source tests do not establish current host trust, actual approved hook
 bytes/effects, credentials or availability. Linux memfd, FD-exec/venv and the full
 inert initializer journey require the actual Linux CI results. The full inert
-journey explicitly simulates Root distribution metadata while keeping actual
-FDs, sealed bytes, Bash/getpath and the child probe real; it is not a production
-Root ownership receipt. Normal remote_sub/readiness and actual first paid START
+journey explicitly simulates the supported startup/account namespace metadata
+(ownership, permissions and ACL absence) and a clean allowed launcher environment.
+Actual FDs, sealed bytes, Bash/getpath and the child probe stay real. Injected ACL
+and loader-environment negatives must still refuse before a hook marker. This is
+not a production Root ownership/ACL/bootstrap receipt. Normal remote_sub/readiness and actual first paid START
 remain separate held consumers until their own same-context prerequisites are
 qualified. A protected source release alone does not authorize any of them.
