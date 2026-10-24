@@ -22,7 +22,7 @@
   "ext/fabric_operator_stop.py": "d3024c7bf0aadc64ad29577a9e8e0829462744704170fa399dcffe37d5b01e77",
   "ext/fabric_policy_snapshot.py": "a711a79f89f135d0434bea1161da3cd0d786522998904e692f316b5e5628ba20",
   "ext/fabric_stop_return.py": "58456d8a6ce3e94dcff79bdabd70282ea05c5a86ecce88f7a12009976fa2313c",
-  "ext/fabric_task.py": "30a4b294ac86b021957c1e207720047aee01c99f0d8aa80574f5367bc4cbad91",
+  "ext/fabric_task.py": "3b447a0e2285e1c707408c32aadd82285d8c5663b1117d2c7400c8bcaf831ea1",
   "ext/glm_bound_claude.py": "7eece47bce1fa3e5701cd7d152b95e2674da7bc2d9e1b9669320fe9811e4d363",
   "ext/glm_codex_exec.sh": "fbb6558d4963e0dc7c1aea00a3171757f1e167eba61d276bd02ae6fe2baf7743",
   "ext/glm_host_account_probe.py": "2dbbdf5c7585b45c34269d8d19a8eb68c3919423b91164a024d8a558b42d3325",
