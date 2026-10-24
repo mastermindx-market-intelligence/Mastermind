@@ -5,6 +5,7 @@ import asyncio
 from types import SimpleNamespace
 
 from integrations.session_bridge.installed_reply_events import RuntimeReplyEventHost
+from integrations.session_bridge.runtime_reply_authorization import BoundedReplyAuthorizationUnavailable
 from integrations.session_bridge.runtime_reply_delivery import ReplyDeliveryUnavailable
 
 
@@ -50,6 +51,20 @@ def test_post_send_settlement_error_keeps_original_effect_unknown():
     result = _observe(_host(delivery))
     assert delivery.callback_attempted is True
     assert result == {"state": "EFFECT_UNKNOWN", "parent_consumed": False}
+
+
+def test_expired_authorization_before_send_is_unavailable():
+    class NotCalled:
+        def deliver_subscription(self, _ident):
+            raise AssertionError("expired authorization must not enter delivery")
+
+    host = _host(NotCalled())
+
+    def refuse(_ident):
+        raise BoundedReplyAuthorizationUnavailable()
+
+    host.audiences.capture = refuse
+    assert _observe(host) == {"state": "UNAVAILABLE", "parent_consumed": False}
 
 
 def test_typed_pre_send_refusal_stays_unavailable():

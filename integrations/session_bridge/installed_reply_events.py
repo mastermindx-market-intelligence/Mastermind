@@ -16,7 +16,9 @@ from control_plane.principal_projection import NeutralPrincipalProjection
 from integrations.mastermind_executive_app.gateway import CeoIngressClient, TRANSPORT_SENT_OK
 from .installed import _principal
 from .reply_policy_selection import ReplyPolicySelection, ReplyPolicyDenied
-from .runtime_reply_authorization import capture_reply_authorization, policy_fingerprint
+from .runtime_reply_authorization import (
+    BoundedReplyAuthorizationUnavailable, capture_reply_authorization, policy_fingerprint,
+)
 from .runtime_reply_authorization_owner import RuntimeReplyAuthorizationOwner, ObservedReplyPolicyDenial
 from .runtime_reply_delivery import build_runtime_reply_delivery, ReplyDeliveryUnavailable
 from .runtime_reply_subscriptions import RuntimeReplySubscriptionStore, ExecutiveReplyCipher
@@ -129,13 +131,15 @@ class RuntimeReplyEventHost:
             except ObservedReplyPolicyDenial as denial:
                 await self.audiences.revoke_observed(denial)
                 observations.append({"state":"NOT_SENT","parent_consumed":False})
-            except (SubscriptionUnavailable, ReplyDeliveryUnavailable):
-                # Qualified pre-send refusal does not imply a callback attempt.
+            except (SubscriptionUnavailable, ReplyDeliveryUnavailable, BoundedReplyAuthorizationUnavailable):
+                # Typed pre-send refusal, including an expired bounded
+                # authorization. No callback was attempted and no reservation
+                # was made.
                 observations.append({"state":"UNAVAILABLE","parent_consumed":False})
             except Exception:
-                # Failure after a possible send/settlement must never look like
-                # a proven unavailable/non-effectful callback. Reservation
-                # custody still prevents the original delivery from replaying.
+                # Only a failure after a possible send or settlement. That
+                # observation must not look like a proven non-effect, and the
+                # reservation still prevents the original delivery from replaying.
                 observations.append({"state":"EFFECT_UNKNOWN","parent_consumed":False})
         return tuple(observations)
 

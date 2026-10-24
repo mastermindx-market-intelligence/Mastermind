@@ -245,15 +245,37 @@ def test_expiry_and_real_unsubscribe_after_commit_withhold_send(event_case,tmp_p
     receipt=asyncio.run(with_peer(s,tmp_path,short_socket_root,subscribe));native=asyncio.run(native_commit(s))
     s.auth.now[0]=receipt.expires_at
     result=asyncio.run(s.host.consumer.handle_committed(read_ref=s.ref,message_key=native['message_key'],fingerprint=native['fingerprint']))
-    # The recipient has expired, but after COMMIT the callback settlement
-    # cannot be proven no-effect: preserve the original reservation and
-    # classify an untyped post-send error as EFFECT_UNKNOWN, never replay.
-    assert result[0]['state']=='EFFECT_UNKNOWN' and result[0]['parent_consumed'] is False
+    # Expired subscriber: capture raises BoundedReplyAuthorizationUnavailable
+    # before deliver_subscription. No callback is sent and no reservation is made.
+    assert result[0]['state']=='UNAVAILABLE' and result[0]['parent_consumed'] is False
     assert len(s.http)==1
+    assert s.f.runtime.events.list_events(aggregate_type='reply_subscription_delivery')==[]
     s.auth.now[0]=receipt.expires_at-1
     async def stop(client,service):return await client.unsubscribe(s.principal,EventUnsubscribeRequest(s.event.command_id,URL))
     stopped=asyncio.run(with_peer(s,tmp_path,short_socket_root,stop));assert stopped.committed
     assert asyncio.run(s.host.consumer.handle_committed(read_ref=s.ref,message_key=native['message_key'],fingerprint=native['fingerprint']))==()
+
+
+def test_post_send_settlement_failure_records_effect_unknown(event_case,tmp_path,short_socket_root):
+    s=event_case
+    async def subscribe(client,service):return await client.subscribe(s.principal,EventSubscribeRequest(s.event.command_id,URL,SECRET,600000))
+    asyncio.run(with_peer(s,tmp_path,short_socket_root,subscribe));native=asyncio.run(native_commit(s))
+    original=s.host.store.settle_delivery
+    async def fail_settlement(delivery_ref,*,outcome,http_status=None):
+        if outcome=='EFFECT_UNKNOWN':
+            raise RuntimeError('post-send settlement unknown')
+        return await original(delivery_ref,outcome=outcome,http_status=http_status)
+    s.host.store.settle_delivery=fail_settlement
+    s.fail_http=True
+    result=asyncio.run(s.host.consumer.handle_committed(read_ref=s.ref,message_key=native['message_key'],fingerprint=native['fingerprint']))
+    assert result[0]['state']=='EFFECT_UNKNOWN' and result[0]['parent_consumed'] is False
+    assert len(s.http)==2 and s.http[1][0].get('type')!='verification'
+    started=s.f.runtime.events.list_events(aggregate_type='reply_subscription_delivery')
+    assert [event.event_type for event in started]==['REPLY_DELIVERY_STARTED']
+    s.host.store.settle_delivery=original
+    s.fail_http=False
+    again=asyncio.run(s.host.consumer.handle_committed(read_ref=s.ref,message_key=native['message_key'],fingerprint=native['fingerprint']))
+    assert again[0]['fresh_send'] is False and again[0]['state']=='EFFECT_UNKNOWN' and len(s.http)==2
 
 
 def test_callback_failure_preserves_native_receipt_and_unknown_reservation(event_case,tmp_path,short_socket_root):
