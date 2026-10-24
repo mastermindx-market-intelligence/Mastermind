@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -8,13 +8,30 @@ export const RAKAZO_PIN = "c5e66e010ee3f3166d2ad216f928a75a0b9a2218";
 export const RAKAZO_REPOSITORY = "https://github.com/elie222/rakazo.git";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
+const COMMAND_TIMEOUT_MS = 180_000;
+const ownedDirectories = new Set();
+let cachedBaseEnv = null;
 
-const REAL_SOURCE = {
-  computerScopeKey: "team:${input.spaceId}:${input.userId}",
-  resolveActionApproval: "resolveActionApprovalDetail",
-  projectMessages: "thread.message.created",
-  nextRoutineRunDate: "nextCronDate",
-};
+const ENTRY_FILES = [
+  "packages/core/src/events.ts",
+  "packages/db/src/computers.ts",
+  "packages/adapters/src/computer-support.ts",
+  "packages/core/src/cron.ts",
+  "packages/core/src/action-approval.ts",
+  "packages/core/src/approval-effect-key.ts",
+  "packages/core/src/run-state.ts",
+  "packages/core/src/inbound-routine.ts",
+  "packages/core/src/user-error.ts",
+];
+
+export class QualificationError extends Error {
+  constructor(message, code) {
+    super(message);
+    this.name = "QualificationError";
+    this.code = code;
+    this.imported = false;
+  }
+}
 
 export function qualifyPinIdentity({ sha, licenseText, packageLicense }) {
   const failures = [];
@@ -28,12 +45,107 @@ export function qualifyPinIdentity({ sha, licenseText, packageLicense }) {
   return { ok: failures.length === 0, failures };
 }
 
-function git(args, cwd) {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-  }).trim();
+function createOwnedAttempt() {
+  const created = realpathSync(mkdtempSync(path.join(tmpdir(), "rakazo-qualification-")));
+  ownedDirectories.add(created);
+  return created;
+}
+
+export function removeOwnedDirectory(target) {
+  let resolved = path.resolve(String(target));
+  try {
+    resolved = realpathSync(resolved);
+  } catch {
+    // A missing path is still unowned unless this process created it.
+  }
+  if (!ownedDirectories.has(resolved)) {
+    throw new QualificationError(`unowned path: ${resolved}`, "UNOWNED_PATH");
+  }
+  rmSync(resolved, { recursive: true, force: true });
+  ownedDirectories.delete(resolved);
+  return resolved;
+}
+
+function baseExecutionEnv() {
+  if (!cachedBaseEnv) {
+    const home = createOwnedAttempt();
+    const temp = createOwnedAttempt();
+    const cache = path.join(home, "npm-cache");
+    mkdirSync(cache, { recursive: true });
+    const npmrc = path.join(home, ".npmrc");
+    writeFileSync(npmrc, "");
+    cachedBaseEnv = {
+      PATH: process.env.PATH ?? "",
+      HOME: home,
+      TMPDIR: temp,
+      LC_ALL: "C",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+      npm_config_userconfig: npmrc,
+      npm_config_globalconfig: "/dev/null",
+      npm_config_cache: cache,
+      npm_config_ignore_scripts: "true",
+      npm_config_audit: "false",
+      npm_config_fund: "false",
+      npm_config_update_notifier: "false",
+    };
+  }
+  return { ...cachedBaseEnv };
+}
+
+// PATH is the only ambient value. Provider keys, proxies, NODE_OPTIONS, and
+// user git/npm config stay out of acquisition and test execution.
+export function buildExecutionEnv({ pinRoot, source } = {}) {
+  const env = baseExecutionEnv();
+  if (pinRoot) env.RAKAZO_PIN_ROOT = pinRoot;
+  if (source) env.RAKAZO_SOURCE = source;
+  return env;
+}
+
+function commandFailure(command, error) {
+  const timedOut = Boolean(error.killed || error.signal);
+  const detail = timedOut
+    ? `timed out after ${COMMAND_TIMEOUT_MS}ms`
+    : String(error.stderr ?? error.message ?? "").trim().slice(0, 400);
+  return new QualificationError(`${command} failed: ${detail}`, "COMMAND_FAILED");
+}
+
+function runGit(args, cwd, { input, allowStatus1 = false } = {}) {
+  try {
+    return execFileSync("git", args, {
+      cwd,
+      input,
+      encoding: "utf8",
+      timeout: COMMAND_TIMEOUT_MS,
+      maxBuffer: 32 * 1024 * 1024,
+      env: buildExecutionEnv(),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    if (allowStatus1 && error.status === 1) return "";
+    throw commandFailure(`git ${args[0]}`, error);
+  }
+}
+
+function runNpm(args) {
+  try {
+    execFileSync("npm", args, {
+      cwd: here,
+      encoding: "utf8",
+      timeout: COMMAND_TIMEOUT_MS,
+      maxBuffer: 32 * 1024 * 1024,
+      env: buildExecutionEnv(),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+  } catch (error) {
+    throw commandFailure(`npm ${args[0]}`, error);
+  }
+}
+
+function canonical(target) {
+  return realpathSync(path.resolve(target));
 }
 
 function readIdentity(root, sha) {
@@ -42,50 +154,161 @@ function readIdentity(root, sha) {
   return qualifyPinIdentity({ sha, licenseText, packageLicense });
 }
 
-export function ensurePinCheckout() {
-  const requested = process.env.RAKAZO_SOURCE;
-  if (requested) {
-    const sha = git(["rev-parse", "HEAD"], requested);
-    const identity = readIdentity(requested, sha);
-    if (!identity.ok) {
-      throw new Error(`RAKAZO_SOURCE refused: ${identity.failures.join("; ")}`);
+function nulRecords(text) {
+  return text.split("\0").filter((record) => record.length > 0);
+}
+
+function hashWorktree(root, paths) {
+  if (paths.some((filePath) => filePath.includes("\n"))) {
+    throw new QualificationError("worktree drift: newline in tracked path", "SOURCE_DRIFT");
+  }
+  if (paths.length === 0) {
+    throw new QualificationError("worktree drift: no tracked files", "SOURCE_DRIFT");
+  }
+  const output = runGit(["hash-object", "--stdin-paths"], root, { input: `${paths.join("\n")}\n` });
+  const hashes = output.split("\n").filter((line) => line.length > 0);
+  if (hashes.length !== paths.length) {
+    throw new QualificationError("worktree drift: hash count mismatch", "SOURCE_DRIFT");
+  }
+  return hashes;
+}
+
+export function assertImmutableSource(root) {
+  const resolved = path.resolve(String(root ?? ""));
+  let toplevel = "";
+  try {
+    toplevel = runGit(["rev-parse", "--show-toplevel"], resolved).trim();
+  } catch (error) {
+    if (error instanceof QualificationError) {
+      throw new QualificationError(`not a canonical git root: ${resolved}`, "ROOT_MISMATCH");
     }
-    return requested;
+    throw error;
+  }
+  let canonicalRoot = resolved;
+  let canonicalTop = toplevel;
+  try {
+    canonicalRoot = canonical(resolved);
+    canonicalTop = canonical(toplevel);
+  } catch (error) {
+    if (error instanceof QualificationError) throw error;
+    throw new QualificationError(`not a canonical git root: ${resolved}`, "ROOT_MISMATCH");
+  }
+  if (canonicalTop !== canonicalRoot) {
+    throw new QualificationError(`canonical root ${canonicalTop} is not ${canonicalRoot}`, "ROOT_MISMATCH");
   }
 
-  const dest = path.join(tmpdir(), `rakazo-pin-${RAKAZO_PIN}`);
-  let sha = "";
-  if (existsSync(path.join(dest, ".git"))) {
-    try {
-      sha = git(["rev-parse", "HEAD"], dest);
-    } catch {
-      sha = "";
+  const sha = runGit(["rev-parse", "HEAD"], resolved).trim();
+  if (sha !== RAKAZO_PIN) {
+    throw new QualificationError(`commit ${sha} is not pin ${RAKAZO_PIN}`, "PIN_MISMATCH");
+  }
+  const identity = readIdentity(resolved, sha);
+  if (!identity.ok) {
+    throw new QualificationError(identity.failures.join("; "), "PIN_MISMATCH");
+  }
+
+  const tracked = new Map();
+  for (const record of nulRecords(runGit(["ls-files", "-v", "-z"], resolved))) {
+    if (record.length < 3 || record[1] !== " ") {
+      throw new QualificationError("worktree drift: unreadable index record", "SOURCE_DRIFT");
+    }
+    const flag = record[0];
+    const filePath = record.slice(2);
+    if (flag !== "H") {
+      throw new QualificationError(`worktree drift: index flag ${flag} on ${filePath}`, "SOURCE_DRIFT");
+    }
+    tracked.set(filePath, true);
+  }
+
+  const committed = new Map();
+  for (const record of nulRecords(runGit(["ls-tree", "-r", "-z", "--format=%(objectname) %(path)", "HEAD"], resolved))) {
+    if (!/^[0-9a-f]{40} /.test(record)) {
+      throw new QualificationError("worktree drift: unreadable tree record", "SOURCE_DRIFT");
+    }
+    committed.set(record.slice(41), record.slice(0, 40));
+  }
+  if (committed.size !== tracked.size) {
+    throw new QualificationError("worktree drift: index does not match HEAD", "SOURCE_DRIFT");
+  }
+  for (const filePath of committed.keys()) {
+    if (!tracked.has(filePath)) {
+      throw new QualificationError(`worktree drift: ${filePath}`, "SOURCE_DRIFT");
     }
   }
-  if (sha !== RAKAZO_PIN) {
-    rmSync(dest, { recursive: true, force: true });
+  for (const relative of ENTRY_FILES) {
+    if (!tracked.has(relative)) {
+      throw new QualificationError(`worktree drift: missing ${relative}`, "SOURCE_DRIFT");
+    }
+  }
+
+  const paths = [...tracked.keys()];
+  const hashes = hashWorktree(resolved, paths);
+  for (let index = 0; index < paths.length; index += 1) {
+    if (hashes[index] !== committed.get(paths[index])) {
+      throw new QualificationError(`worktree drift: ${paths[index]}`, "SOURCE_DRIFT");
+    }
+  }
+
+  for (const relative of ENTRY_FILES) {
+    const shadow = relative.replace(/\.ts$/, ".js");
+    if (existsSync(path.join(resolved, shadow)) && !tracked.has(shadow)) {
+      throw new QualificationError(`shadow file ${shadow}`, "SOURCE_SHADOW");
+    }
+  }
+
+  for (const record of nulRecords(runGit(["status", "--porcelain=v1", "--untracked-files=all", "-z"], resolved))) {
+    const status = record.slice(0, 2);
+    const filePath = record.slice(3);
+    if (status === "??" && filePath.endsWith(".js") && tracked.has(filePath.replace(/\.js$/, ".ts"))) {
+      throw new QualificationError(`shadow file ${filePath}`, "SOURCE_SHADOW");
+    }
+    throw new QualificationError(`worktree drift: ${filePath || record}`, "SOURCE_DRIFT");
+  }
+
+  return { root: resolved, sha, checked_before_import: true };
+}
+
+export function ensurePinCheckout(options = {}) {
+  const hasSource = Object.prototype.hasOwnProperty.call(options, "source");
+  if (hasSource && options.source) {
+    assertImmutableSource(options.source);
+    return path.resolve(options.source);
+  }
+  if (!hasSource && process.env.RAKAZO_SOURCE) {
+    assertImmutableSource(process.env.RAKAZO_SOURCE);
+    return path.resolve(process.env.RAKAZO_SOURCE);
+  }
+
+  const attempt = createOwnedAttempt();
+  const dest = path.join(attempt, "checkout");
+  try {
     mkdirSync(dest, { recursive: true });
-    git(["init", "-b", "main"], dest);
-    git(["remote", "add", "origin", RAKAZO_REPOSITORY], dest);
-    git(["fetch", "--quiet", "--depth", "1", "origin", RAKAZO_PIN], dest);
-    git(["checkout", "--quiet", "--detach", "FETCH_HEAD"], dest);
-    sha = git(["rev-parse", "HEAD"], dest);
+    runGit(["init", "-b", "main"], dest);
+    runGit(["remote", "add", "origin", RAKAZO_REPOSITORY], dest);
+    runGit(["fetch", "--quiet", "--depth", "1", "origin", RAKAZO_PIN], dest);
+    runGit(["-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", "FETCH_HEAD"], dest);
+    assertImmutableSource(dest);
+    return dest;
+  } catch (error) {
+    error.removedOwnedPath = removeOwnedDirectory(attempt);
+    throw error;
   }
-  const identity = readIdentity(dest, sha);
-  if (!identity.ok) {
-    throw new Error(`pinned checkout refused: ${identity.failures.join("; ")}`);
-  }
+}
+
+export function cloneOwnedCheckout(source) {
+  const qualified = assertImmutableSource(source);
+  const attempt = createOwnedAttempt();
+  const dest = path.join(attempt, "checkout");
+  // A shallow checkout ignores `git clone --local` and may reach the network.
+  // Copy the already qualified tree instead of fetching or altering it.
+  cpSync(qualified.root, dest, { recursive: true, verbatimSymlinks: true });
+  assertImmutableSource(dest);
   return dest;
 }
 
 export function ensureDependencies() {
   const zodPackage = path.join(here, "node_modules/zod/package.json");
   if (!existsSync(zodPackage)) {
-    execFileSync("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], {
-      cwd: here,
-      encoding: "utf8",
-      env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
-    });
+    runNpm(["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
   }
   const readVersion = (relative) =>
     JSON.parse(readFileSync(path.join(here, "node_modules", relative), "utf8")).version;
@@ -99,7 +322,7 @@ export function ensureDependencies() {
 function declaredDependency(root, packageRelative, name) {
   const manifest = JSON.parse(readFileSync(path.join(root, packageRelative), "utf8"));
   const version = manifest.dependencies?.[name];
-  if (!version) throw new Error(`${packageRelative} does not declare dependency ${name}`);
+  if (!version) throw new QualificationError(`${packageRelative} does not declare dependency ${name}`, "PIN_MISMATCH");
   return version;
 }
 
@@ -119,44 +342,20 @@ export function assertDependencyPin(root, installed) {
       failures.push(`installed ${name}@${installed[name]} != pin ${expected[name]}`);
     }
   }
-  if (failures.length > 0) throw new Error(failures.join("; "));
+  if (failures.length > 0) throw new QualificationError(failures.join("; "), "PIN_MISMATCH");
   return expected;
 }
 
 async function importPinned(root, relativePath) {
-  process.env.RAKAZO_PIN_ROOT = root;
   return import(pathToFileURL(path.join(root, relativePath)).href);
 }
 
 export async function loadPinnedModules(root) {
-  const [events, computers, support, cron, approval, keys, state, routines, errors] =
-    await Promise.all([
-      importPinned(root, "packages/core/src/events.ts"),
-      importPinned(root, "packages/db/src/computers.ts"),
-      importPinned(root, "packages/adapters/src/computer-support.ts"),
-      importPinned(root, "packages/core/src/cron.ts"),
-      importPinned(root, "packages/core/src/action-approval.ts"),
-      importPinned(root, "packages/core/src/approval-effect-key.ts"),
-      importPinned(root, "packages/core/src/run-state.ts"),
-      importPinned(root, "packages/core/src/inbound-routine.ts"),
-      importPinned(root, "packages/core/src/user-error.ts"),
-    ]);
-  const loaded = { events, computers, support, cron, approval, keys, state, routines, errors };
-  for (const [name, marker] of Object.entries(REAL_SOURCE)) {
-    const owner =
-      name === "computerScopeKey"
-        ? computers
-        : name === "resolveActionApproval"
-          ? approval
-          : name === "projectMessages"
-            ? events
-            : cron;
-    const source = owner[name].toString();
-    if (!source.includes(marker)) {
-      throw new Error(`loaded ${name} is not the pinned Rakazo function`);
-    }
-  }
-  return loaded;
+  const qualified = assertImmutableSource(root);
+  const [events, computers, support, cron, approval, keys, state, routines, errors] = await Promise.all(
+    ENTRY_FILES.map((relativePath) => importPinned(qualified.root, relativePath)),
+  );
+  return { events, computers, support, cron, approval, keys, state, routines, errors, qualified };
 }
 
 function event(fields) {
@@ -189,23 +388,17 @@ function textMessage(seq, botId, text, runId) {
 }
 
 function cordisListing(root) {
-  try {
-    return git(["grep", "-I", "-l", "cordis"], root);
-  } catch (error) {
-    if (error.status === 1) return "";
-    throw error;
-  }
+  return runGit(["grep", "-I", "-l", "cordis"], root, { allowStatus1: true });
 }
 
-export async function observePinnedRakazo(root = ensurePinCheckout()) {
+export async function observePinnedRakazo(root) {
+  const resolved = root === undefined ? ensurePinCheckout() : path.resolve(root);
+  const qualified = assertImmutableSource(resolved);
   const installed = ensureDependencies();
-  const dependencies = assertDependencyPin(root, installed);
-  const modules = await loadPinnedModules(root);
-  const sha = git(["rev-parse", "HEAD"], root);
-  const identity = readIdentity(root, sha);
-  if (!identity.ok) throw new Error(identity.failures.join("; "));
+  const dependencies = assertDependencyPin(qualified.root, installed);
+  const { events, computers, support, cron, approval, keys, state, routines, errors } =
+    await loadPinnedModules(qualified.root);
 
-  const { events, computers, support, cron, approval, keys, state, routines, errors } = modules;
   const spaceId = "space-1";
   const userId = "user-1";
   const team = { mode: "team", spaceId, userId };
@@ -277,18 +470,24 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
     otherBotWrite = error.message;
   }
 
-  const journeys = readFileSync(path.join(root, "packages/testkit/src/journeys.test.ts"), "utf8");
+  const journeys = readFileSync(path.join(qualified.root, "packages/testkit/src/journeys.test.ts"), "utf8");
   const productJourneyGated = journeys.includes(
     "const describeJourneys = hasDb ? describe : describe.skip",
   );
-  const cordis = cordisListing(root);
+  const cordis = cordisListing(qualified.root);
+  const databasePrerequisite =
+    "packages/testkit/src/journeys.test.ts stays on describe.skip until VERIFY_DATABASE=1 and DATABASE_URL are both set. The next disposable testkit requirement is a disposable Postgres at DATABASE_URL with VERIFY_DATABASE=1. This repair does not install or start Postgres, Graphile Worker, the donor API, or Docker.";
 
   return {
-    pin: sha,
+    pin: qualified.sha,
     repository: RAKAZO_REPOSITORY,
     license: "Apache-2.0",
+    checkout_root: qualified.root,
     dependencies,
-    real_function_markers: REAL_SOURCE,
+    source_gate: {
+      checked_before_import: qualified.checked_before_import,
+      sha: qualified.sha,
+    },
     cases: {
       two_bot_identities: {
         team_scope: [
@@ -352,7 +551,7 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
         ),
         other_bot_write: otherBotWrite,
       },
-      effect_approval: {
+      approval_rule_and_effect_key: {
         ruled_effect: asked.decision,
         ruled_gate: approval.planActionGate({
           resolved: asked,
@@ -386,7 +585,7 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
           actions: [{ id: "allow", label: "Allow" }],
         }),
       },
-      disconnect_recovery: {
+      connection_classification_and_event_projection: {
         dropped_connection_is_unreachable: errors.isServerUnreachable(dropped),
         answered_request_is_not_unreachable: errors.isServerUnreachable(answered),
         retained_thread: cancelled
@@ -410,7 +609,7 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
         cancelled_to_running: state.canTransition("cancelled", "running"),
         waiting_input_can_resume: state.canTransition("waiting_input", "queued"),
       },
-      streaming: {
+      streaming_preference_and_progress_projection: {
         enabled_only_when_on: [
           events.responseStreamingEnabled("on"),
           events.responseStreamingEnabled("off"),
@@ -421,7 +620,7 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
           .filter((message) => message.id.startsWith("progress:"))
           .flatMap((message) => message.blocks.map((block) => block.text)),
       },
-      cancellation_without_replay: {
+      cancel_event_projection_and_status_transition: {
         running_to_cancelled: state.canTransition("running", "cancelled"),
         cancelled_to_running: state.canTransition("cancelled", "running"),
         cancelled_to_queued: state.canTransition("cancelled", "queued"),
@@ -436,7 +635,7 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
         progress_survives_cancel: cancelled.some((message) => message.id.startsWith("progress:")),
         user_message_count: cancelled.filter((message) => message.role === "user").length,
       },
-      restart_persistence: {
+      failed_status_transition_and_path_repeat: {
         failed_to_queued: state.canTransition("failed", "queued"),
         completed_to_queued: state.canTransition("completed", "queued"),
         workspace_path: [
@@ -445,40 +644,62 @@ export async function observePinnedRakazo(root = ensurePinCheckout()) {
         ],
       },
     },
-    unsupported: [
-      {
-        id: "cordis_plugin_load",
-        observed: cordis.length === 0 ? "absent" : "present",
+    absent: {
+      cordis_plugin_load: {
+        status: cordis.length === 0 ? "ABSENT" : "PRESENT",
+        matches: cordis.length === 0 ? 0 : cordis.split("\n").filter(Boolean).length,
         reason:
-          "Pinned Rakazo has no Cordis plugin host. MCP contract modules are not loaded or executed as a plugin runtime in this slice.",
+          cordis.length === 0
+            ? "git grep -I -l cordis found no Cordis host in the pinned tree."
+            : "git grep -I -l cordis found a Cordis match in the pinned tree.",
+      },
+    },
+    not_run: [
+      {
+        id: "process_restart_persistence",
+        status: "NOT_RUN",
+        reason:
+          "No process was restarted and no workspace bytes were reloaded. The repeated path is a pure function call.",
       },
       {
-        id: "postgres_graphile_product_journey",
-        observed: productJourneyGated ? "database-gated" : "ungated",
+        id: "real_disconnect_stream_cancel",
+        status: "NOT_RUN",
         reason:
-          "packages/testkit/src/journeys.test.ts runs only when VERIFY_DATABASE=1 and DATABASE_URL are set. This qualification does not start Postgres, Graphile Worker, Docker, or the donor API, and does not adopt them as company authority.",
+          "Reachability, streaming, and cancellation were classified from constructed errors and fabricated events. No socket, stream, or cancel request was observed.",
+      },
+      {
+        id: "committed_effect_deduplication",
+        status: "NOT_RUN",
+        reason: "Identical arguments produce one effect key. No effect was committed or deduplicated in a store.",
+      },
+      {
+        id: "database_backed_product_journey",
+        status: "NOT_RUN",
+        gate_present: productJourneyGated,
+        prerequisite: databasePrerequisite,
       },
       {
         id: "authenticated_signed_in_ui",
-        observed: "not-run",
-        reason: "No account, browser session, credential, or production service is started.",
+        status: "NOT_RUN",
+        reason: "No account, browser session, or signed-in UI was started.",
+      },
+      {
+        id: "live_model_provider",
+        status: "NOT_RUN",
+        reason: "No live model provider was called.",
+      },
+      {
+        id: "elapsed_reliability_observation",
+        status: "NOT_RUN",
+        reason: "The 24-hour and seven-day observation windows were not run.",
       },
     ],
     integration_burden: {
       summary:
-        "The pinned product journey needs Postgres, the API, a sandbox provider, and Graphile Worker. Those stay outside Mastermind authority. This slice observes the pinned pure modules with mock messages and no model call.",
+        "The pinned product journey needs Postgres, the API, a sandbox provider, and Graphile Worker. Those stay outside Mastermind authority. This slice observes pinned pure modules with fabricated messages and no model call.",
       adopted_as_company_authority: [],
-      load_boundary_stubs: [
-        "packages/db/src/client.js",
-        "packages/db/src/row-security.js",
-      ],
-      missing_proof: [
-        "authenticated signed-in UI",
-        "database-backed product journeys",
-        "Cordis plugin load",
-        "live model provider",
-        "24-hour and seven-day observation",
-      ],
+      load_boundary_stubs: ["packages/db/src/client.js", "packages/db/src/row-security.js"],
+      prerequisite_census: databasePrerequisite,
     },
   };
 }

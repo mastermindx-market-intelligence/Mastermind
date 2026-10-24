@@ -17,7 +17,7 @@ def test_rakazo_hc_p1b_qualification_observes_pinned_source() -> None:
         check=False,
         text=True,
         capture_output=True,
-        timeout=240,
+        timeout=300,
     )
     if completed.returncode != 0:
         raise AssertionError(
@@ -25,4 +25,5 @@ def test_rakazo_hc_p1b_qualification_observes_pinned_source() -> None:
             f"{completed.stdout}\n{completed.stderr}"
         )
     assert RAKAZO_PIN in completed.stdout
-    assert "unsupported capabilities stay explicit" in completed.stdout
+    assert "tampered donor source is rejected before import" in completed.stdout
+    assert "NOT_RUN" in completed.stdout

@@ -3,7 +3,7 @@
 import { spawnSync } from "node:child_process";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { ensureDependencies, ensurePinCheckout } from "./qualify.mjs";
+import { buildExecutionEnv, ensureDependencies, ensurePinCheckout } from "./qualify.mjs";
 
 const root = ensurePinCheckout();
 ensureDependencies();
@@ -12,8 +12,12 @@ const child = spawnSync(
   ["--experimental-strip-types", "--import", "./register.mjs", "--test", "qualify.test.mjs"],
   {
     cwd: path.dirname(fileURLToPath(import.meta.url)),
-    env: { ...process.env, RAKAZO_PIN_ROOT: root, GIT_TERMINAL_PROMPT: "0" },
+    env: buildExecutionEnv({ pinRoot: root, source: root }),
     stdio: "inherit",
+    timeout: 240_000,
   },
 );
+if (child.error) {
+  console.error(child.error.message);
+}
 process.exit(child.status ?? 1);
