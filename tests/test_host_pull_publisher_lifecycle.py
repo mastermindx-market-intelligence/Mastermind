@@ -129,6 +129,14 @@ print_running() {
 }
 case "$cmd" in
   print)
+    if [ -f "$STUB_STATE/print-budget" ]; then
+      budget=$(cat "$STUB_STATE/print-budget")
+      if [ "$budget" -le 0 ]; then
+        printf 'hello\n'
+        exit 0
+      fi
+      printf '%s\n' "$((budget - 1))" > "$STUB_STATE/print-budget"
+    fi
     case "$style" in
       garbage)
         printf 'hello\n'
@@ -1770,4 +1778,164 @@ def test_ready_before_watch_registration_is_refused(workspace):
     assert receipt["outcome"] == "EFFECT_UNKNOWN"
     assert receipt["phase"] == "INSTALL_WATCH_REFUSED"
     assert "watch refused" in receipt["reason"]
+    assert_not_executed(ctx)
+
+
+_SELECT_FAULT_PUBLISHER = r'''import importlib.util
+import os
+import signal
+import sys
+from pathlib import Path
+
+real = os.environ["HOST_PULL_REAL_PUBLISHER"]
+spec = importlib.util.spec_from_file_location("native_generation_under_test", real)
+module = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(module)
+current = module.current
+_fsync = module.fsync_directory
+
+
+def fsync_directory(path):
+    fault = Path(os.environ["HOST_PULL_SELECT_FAULT"])
+    seen = Path(str(fault) + ".seen")
+    fence = Path(os.environ["HOST_PULL_STORE"]) / ".select-pending"
+    if not fence.is_file():
+        seen.write_text("missing\n")
+        raise OSError("select fence missing")
+    seen.write_text("present\n")
+    mode = fault.read_text().strip() if fault.exists() else ""
+    if mode == "fsync-once":
+        fault.write_text("done\n")
+        raise OSError("INJECTED_POST_RENAME_FSYNC_FAILURE")
+    result = _fsync(path)
+    installer = int(os.environ.get("HOST_PULL_INSTALLER_PID") or "0")
+    if mode == "signal-term":
+        fault.write_text("done\n")
+        os.kill(installer, signal.SIGTERM)
+    elif mode == "signal-hup":
+        fault.write_text("done\n")
+        os.kill(installer, signal.SIGHUP)
+    return result
+
+
+module.fsync_directory = fsync_directory
+
+if __name__ == "__main__":
+    try:
+        module.main()
+    except (OSError, ValueError) as exc:
+        print("NATIVE_GENERATION_REFUSED: " + str(exc), file=sys.stderr)
+        raise SystemExit(78)
+'''
+
+
+def _faulty_publisher(ctx, mode):
+    directory = ctx["stub"] / "publisher"
+    directory.mkdir()
+    path = directory / "native_generation.py"
+    path.write_text(_SELECT_FAULT_PUBLISHER)
+    fault = ctx["stub"] / "select-fault"
+    fault.write_text(mode + "\n")
+    ctx["env"]["HOST_PULL_REAL_PUBLISHER"] = str(PUBLISHER)
+    ctx["env"]["HOST_PULL_SELECT_FAULT"] = str(fault)
+    ctx["env"]["HOST_PULL_STORE"] = str(ctx["store"])
+    return path
+
+
+def _arm_old_collector(ctx):
+    original = b"OLD-LAUNCHD-PREIMAGE\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-mode").write_text("running\n")
+    (ctx["stub"] / "ps-alive").write_text("")
+    (ctx["stub"] / "argv").write_text("/bin/bash\n/old/generation/ext/host_pull.sh\n")
+    return original
+
+
+def test_advance_fsync_after_rename_rolls_back_only_the_proven_preimage(workspace):
+    """A publisher error after CURRENT is renamed is not NO_EFFECT."""
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 21\n")
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 22\n")
+    original = _arm_old_collector(ctx)
+    publisher = _faulty_publisher(ctx, "fsync-once")
+    result = run(
+        ctx, publisher=publisher, generation=target.name,
+        expect=selector.name, advance_from=selector.name)
+    assert result.returncode == 78, result.stderr
+    assert "INJECTED_POST_RENAME_FSYNC_FAILURE" in result.stderr
+    assert "selector advance refused" in result.stderr
+    assert "EFFECT_UNKNOWN" not in result.stderr
+    assert (ctx["stub"] / "select-fault.seen").read_text() == "present\n"
+    final = _selection(ctx)
+    assert final["generation"] == selector.name
+    assert final["previous"] == target.name
+    assert final["sequence"] == before["sequence"] + 2
+    assert ctx["plist"].read_bytes() == original
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert not (ctx["store"] / ".select-pending").exists()
+    assert list(ctx["backup"].glob("*.receipt")) == []
+    assert_not_executed(ctx)
+
+
+def test_advance_fsync_after_rename_keeps_unknown_when_service_is_unreadable(workspace):
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 23\n")
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 24\n")
+    original = _arm_old_collector(ctx)
+    (ctx["stub"] / "print-budget").write_text("1\n")
+    publisher = _faulty_publisher(ctx, "fsync-once")
+    result = run(
+        ctx, publisher=publisher, generation=target.name,
+        expect=selector.name, advance_from=selector.name)
+    assert result.returncode == 78, result.stderr
+    assert "EFFECT_UNKNOWN" in result.stderr
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    final = _selection(ctx)
+    assert final["generation"] == target.name
+    assert final["previous"] == selector.name
+    assert final["sequence"] == before["sequence"] + 1
+    assert ctx["plist"].read_bytes() == original
+    assert (ctx["store"] / ".install-transaction.marker").is_file()
+    fence = (ctx["store"] / ".select-pending").read_text()
+    assert fence == selector.name + " " + target.name + "\n"
+    receipt = receipt_body(ctx)
+    assert receipt["outcome"] == "EFFECT_UNKNOWN"
+    assert receipt["phase"] == "SELECT_UNKNOWN"
+    assert_not_executed(ctx)
+
+
+@pytest.mark.parametrize(("mode", "text"), [
+    ("signal-term", "signal during select"),
+    ("signal-hup", "signal during select"),
+])
+def test_signal_between_select_cas_and_ack_reconciles_current(workspace, mode, text):
+    ctx = prepare(workspace, body=b"#!/bin/bash\nexit 25\n")
+    selector = ctx["release"]
+    before = _selection(ctx)
+    target = _reviewed_target(ctx, workspace, b"#!/bin/bash\nexit 26\n")
+    original = _arm_old_collector(ctx)
+    publisher = _faulty_publisher(ctx, mode)
+    result = run(
+        ctx, publisher=publisher, generation=target.name,
+        expect=selector.name, advance_from=selector.name)
+    assert result.returncode == 78, result.stderr
+    assert text in result.stderr
+    assert "EFFECT_UNKNOWN" not in result.stderr
+    assert (ctx["stub"] / "select-fault.seen").read_text() == "present\n"
+    final = _selection(ctx)
+    assert final["generation"] == selector.name
+    assert final["previous"] == target.name
+    assert final["sequence"] == before["sequence"] + 2
+    assert ctx["plist"].read_bytes() == original
+    assert "bootout " not in launch_log(ctx)
+    assert "bootstrap " not in launch_log(ctx)
+    assert not (ctx["store"] / ".install-transaction.marker").exists()
+    assert not (ctx["store"] / ".select-pending").exists()
+    assert list(ctx["backup"].glob("*.receipt")) == []
     assert_not_executed(ctx)

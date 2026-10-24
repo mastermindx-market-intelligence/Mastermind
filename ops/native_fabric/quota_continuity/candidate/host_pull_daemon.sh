@@ -20,12 +20,17 @@
 # service together. It must equal --expect-current and must differ from
 # --generation. Before any effect, CURRENT must still be that prior generation
 # and the target generation must verify. After the install marker is armed,
-# and before bootout, this process calls the original publisher select CLI.
-# That call is not nested under .publication.lock. Bootstrap is refused until
-# the old pid is dead and the label is absent. A later path that restores the
-# old plist and proves the service CAS-selects back to --advance-from. An
-# unknown service state leaves the selector where the first CAS put it and
-# records EFFECT_UNKNOWN. Rebinding launchd while CURRENT names a different
+# and before bootout, this process writes a durable select fence and then
+# calls the original publisher select CLI. That call is not nested under
+# .publication.lock. A nonzero exit or a caught signal re-reads CURRENT and
+# the service sampled before the call. A proven unchanged selector releases
+# the fence. A proven new selector is CAS-rolled back only while that service
+# preimage is still proven. Anything else keeps the fence, the install
+# marker, and an EFFECT_UNKNOWN receipt. Bootstrap is refused until the old
+# pid is dead and the label is absent. A later path that restores the old
+# plist and proves the service CAS-selects back to --advance-from. An unknown
+# service state leaves the selector where the first CAS put it and records
+# EFFECT_UNKNOWN. Rebinding launchd while CURRENT names a different
 # generation, without --advance-from, fails before launchctl.
 #
 # Single-collector exclusion is /usr/bin/lockf -t 0 (contention status 75).
@@ -92,6 +97,17 @@ INSTALL_HOLDER_PID=""
 INSTALL_FENCE=""
 ADVANCE_FROM=""
 SELECTED_ADVANCE=0
+SELECT_FENCE=0
+SELECT_SETTLED=0
+SELECT_ROLLBACK=0
+SELECT_CLASS=unknown
+SELECT_GENERATION=""
+SELECT_PREVIOUS=""
+PRE_CLASS=""
+PRE_PID=""
+PRE_ARGV=""
+PRE_IS_TARGET=0
+PRE_PLIST_SHA=""
 
 release_install_holder() {
   if [ -z "${INSTALL_HOLDER_PID:-}" ]; then
@@ -157,6 +173,24 @@ on_signal() {
   local code=$1
   trap - TERM HUP INT
   release_admission
+  # A signal during publisher select is not proof the CAS had no effect.
+  # SELECTED_ADVANCE is still 0 until the shell has accepted the ack.
+  if [ "${SELECT_FENCE:-0}" -eq 1 ]; then
+    if [ "${SELECT_ROLLBACK:-0}" -eq 1 ]; then
+      if read_selector_generation && [ "$SELECT_GENERATION" = "$ADVANCE_FROM" ] \
+          && service_still_snapshot && [ "${PRE_IS_TARGET:-1}" -eq 0 ]; then
+        clear_select_fence || true
+        SELECT_FENCE=0
+        release_owned_marker || true
+        die 78 "signal during select rollback"
+      fi
+      write_receipt EFFECT_UNKNOWN SELECT_UNKNOWN "signal during select rollback" \
+        || note_install_blocked SELECT_UNKNOWN "signal during select rollback" \
+        || true
+      die 78 "EFFECT_UNKNOWN service stopped pending repair: signal during select rollback"
+    fi
+    settle_failed_select "signal during select"
+  fi
   case "$PHASE" in
     START|VERIFIED)
       # No backup and no bootout yet. Release the transaction marker so a
@@ -208,7 +242,7 @@ usage() {
 
 py() {
   python3 - "$@" <<'PY'
-import fcntl, hashlib, json, os, re, stat, subprocess, sys, tempfile, time
+import fcntl, hashlib, importlib.util, json, os, re, stat, subprocess, sys, tempfile, time
 
 cmd = sys.argv[1]
 SAFE = re.compile(r"/[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*\Z")
@@ -893,6 +927,77 @@ elif cmd == "ensure-receipt-dir":
             or st_dir.st_uid != os.geteuid()):
         fail("receipt dir")
 
+elif cmd == "file-sha":
+    path = sys.argv[2]
+    require_safe(path, "plist")
+    observed = lstat_nofollow(path)
+    if (not stat.S_ISREG(observed.st_mode) or observed.st_uid != os.geteuid()):
+        fail("plist owner")
+    sys.stdout.write(hashlib.sha256(open(path, "rb").read()).hexdigest() + "\n")
+
+elif cmd == "write-select-fence":
+    store, prior, generation = sys.argv[2:5]
+    require_safe(store, "store")
+    if (HEX.fullmatch(prior) is None or HEX.fullmatch(generation) is None
+            or prior == generation or os.path.basename(store) != "native-code-releases"):
+        fail("select fence")
+    path = store + "/.select-pending"
+    require_safe(path, "select fence")
+    if os.path.lexists(path):
+        fail("select fence exists")
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    try:
+        os.write(fd, (prior + " " + generation + "\n").encode("ascii"))
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    directory = os.open(store, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+elif cmd == "clear-select-fence":
+    store, prior, generation = sys.argv[2:5]
+    require_safe(store, "store")
+    if HEX.fullmatch(prior) is None or HEX.fullmatch(generation) is None:
+        fail("select fence")
+    path = store + "/.select-pending"
+    require_safe(path, "select fence")
+    observed = lstat_nofollow(path)
+    if (not stat.S_ISREG(observed.st_mode) or stat.S_IMODE(observed.st_mode) != 0o600
+            or observed.st_uid != os.geteuid()):
+        fail("select fence owner")
+    raw = open(path, "rb").read()
+    if raw != (prior + " " + generation + "\n").encode("ascii"):
+        fail("select fence body")
+    os.unlink(path)
+    directory = os.open(store, os.O_RDONLY | os.O_NOFOLLOW)
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+elif cmd == "read-current":
+    store, publisher = sys.argv[2:4]
+    require_safe(store, "store")
+    require_safe(publisher, "publisher")
+    if os.path.basename(publisher) != "native_generation.py":
+        fail("publisher name")
+    if os.path.basename(store) != "native-code-releases":
+        fail("store name")
+    spec = importlib.util.spec_from_file_location("host_pull_select_publisher", publisher)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    try:
+        selected = module.current(store)
+    except (OSError, ValueError):
+        fail("current unreadable")
+    if selected is None:
+        fail("current absent")
+    previous = selected["previous"] if selected["previous"] is not None else "-"
+    sys.stdout.write(selected["generation"] + "\n" + str(previous) + "\n")
+
 elif cmd == "not-user-launchagents":
     path = sys.argv[2]
     home = os.path.realpath(os.path.expanduser("~"))
@@ -1388,61 +1493,187 @@ if (body.get("schema")!="native-code-selection.v1"
     raise SystemExit(78)' "$1" "$2" "$3"
 }
 
-# Publisher select is a separate process. Call it only while this installer
-# does not hold .publication.lock. A refused CAS before bootout has not
-# changed launchd, so the install marker is cleared and the caller may retry.
+snapshot_service() {
+  PRE_CLASS=$LC_CLASS
+  PRE_PID=${LC_PID:-}
+  PRE_ARGV=$LC_ARGV
+  if argv_matches; then
+    PRE_IS_TARGET=1
+  else
+    PRE_IS_TARGET=0
+  fi
+  if [ -e "$DEST_PLIST" ]; then
+    PRE_PLIST_SHA=$(py file-sha "$DEST_PLIST") || PRE_PLIST_SHA=unreadable
+  else
+    PRE_PLIST_SHA=absent
+  fi
+}
+
+service_still_snapshot() {
+  local now
+  launchctl_print || return 1
+  [ "$LC_CLASS" = "$PRE_CLASS" ] || return 1
+  [ "${LC_PID:-}" = "$PRE_PID" ] || return 1
+  [ "$LC_ARGV" = "$PRE_ARGV" ] || return 1
+  if [ "$PRE_PLIST_SHA" = "absent" ]; then
+    [ ! -e "$DEST_PLIST" ] || return 1
+  elif [ "$PRE_PLIST_SHA" = "unreadable" ]; then
+    return 1
+  else
+    now=$(py file-sha "$DEST_PLIST") || return 1
+    [ "$now" = "$PRE_PLIST_SHA" ] || return 1
+  fi
+  if [ "$PRE_CLASS" = "loaded-running" ]; then
+    ps_state "$PRE_PID"
+    [ "$PS_RESULT" = "alive" ] || return 1
+  fi
+  return 0
+}
+
+read_selector_generation() {
+  local body
+  body=$(py read-current "$STORE" "$PUBLISHER" 2>/dev/null) || return 1
+  SELECT_GENERATION=$(printf '%s\n' "$body" | sed -n '1p')
+  SELECT_PREVIOUS=$(printf '%s\n' "$body" | sed -n '2p')
+  [ -n "$SELECT_GENERATION" ]
+}
+
+classify_select_result() {
+  SELECT_CLASS=unknown
+  service_still_snapshot || return 0
+  read_selector_generation || return 0
+  if [ "$SELECT_GENERATION" = "$ADVANCE_FROM" ]; then
+    SELECT_CLASS=unchanged
+  elif [ "$SELECT_GENERATION" = "$GENERATION" ] && [ "$SELECT_PREVIOUS" = "$ADVANCE_FROM" ]; then
+    SELECT_CLASS=new
+  fi
+}
+
+arm_select_fence() {
+  py write-select-fence "$STORE" "$ADVANCE_FROM" "$GENERATION" || die 78 "select fence"
+  SELECT_FENCE=1
+}
+
+clear_select_fence() {
+  py clear-select-fence "$STORE" "$ADVANCE_FROM" "$GENERATION"
+}
+
+release_owned_marker() {
+  if [ "${MARKER_OWNED:-0}" -eq 1 ] && [ -n "${STORE:-}" ]; then
+    py install-transaction-complete "$STORE" || return 1
+    MARKER_OWNED=0
+  fi
+  return 0
+}
+
+keep_select_unknown() {
+  local why=$1
+  write_receipt EFFECT_UNKNOWN SELECT_UNKNOWN "$why" \
+    || note_install_blocked SELECT_UNKNOWN "$why" \
+    || true
+  die 78 "EFFECT_UNKNOWN service stopped pending repair: $why"
+}
+
+# One CAS back to the fenced prior generation. The exit status is not the
+# effect. Fresh CURRENT plus the sampled service decides.
+rollback_unacked_select() {
+  local out verr rc
+  SELECT_ROLLBACK=1
+  verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
+  out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
+  fi
+  rm -f -- "$verr"
+  read_selector_generation || return 1
+  [ "$SELECT_GENERATION" = "$ADVANCE_FROM" ] || return 1
+  service_still_snapshot || return 1
+  [ "$PRE_IS_TARGET" -eq 0 ] || return 1
+  EXPECT_CURRENT=$ADVANCE_FROM
+  SELECTED_ADVANCE=0
+  SELECT_ROLLBACK=0
+  return 0
+}
+
+settle_failed_select() {
+  local why=$1
+  [ "${SELECT_SETTLED:-0}" -eq 0 ] || keep_select_unknown "$why"
+  SELECT_SETTLED=1
+  classify_select_result
+  case "$SELECT_CLASS" in
+    unchanged)
+      clear_select_fence || keep_select_unknown "select fence"
+      SELECT_FENCE=0
+      release_owned_marker || keep_select_unknown "install transaction marker"
+      die 78 "$why"
+      ;;
+    new)
+      if [ "$PRE_IS_TARGET" -eq 0 ] && rollback_unacked_select; then
+        clear_select_fence || keep_select_unknown "select fence"
+        SELECT_FENCE=0
+        release_owned_marker || keep_select_unknown "install transaction marker"
+        die 78 "$why"
+      fi
+      keep_select_unknown "$why"
+      ;;
+    *)
+      keep_select_unknown "$why"
+      ;;
+  esac
+}
+
+# Publisher select is a separate process and is not nested under
+# .publication.lock. The fence is durable before that process starts. A
+# refused or interrupted CAS is reconciled from CURRENT and the service
+# sampled above; the publisher's exit status alone never clears the marker.
 advance_selector() {
-  local out verr
+  local out verr rc
   [ -n "$ADVANCE_FROM" ] || return 0
   [ "$SELECTED_ADVANCE" -eq 0 ] || die 78 "selector already advanced"
+  [ "$SELECT_FENCE" -eq 0 ] || die 78 "select fence already armed"
   prove_install_holder
+  snapshot_service
+  arm_select_fence
   verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select.XXXXXX")
-  out=$("$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$GENERATION" --expect "$ADVANCE_FROM" 2>"$verr") || {
+  out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$GENERATION" --expect "$ADVANCE_FROM" 2>"$verr") && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
     rm -f -- "$verr"
-    if [ "$BOOTED" -eq 0 ] && [ "$PHASE" != "PLIST_REPLACED" ] \
-        && [ "$PHASE" != "BOOTSTRAP_STARTED" ] && [ "$PHASE" != "BOOTOUT_STARTED" ] \
-        && [ "$PHASE" != "BOOTED_OUT" ] && [ "$PHASE" != "PID_GONE" ] \
-        && [ "$PHASE" != "ROLLING_BACK" ]; then
-      if [ "$MARKER_OWNED" -eq 1 ] && [ -n "$STORE" ]; then
-        py install-transaction-complete "$STORE" || true
-        MARKER_OWNED=0
-      fi
-    fi
-    die 78 "selector advance refused"
-  }
+    settle_failed_select "selector advance refused"
+  fi
   rm -f -- "$verr"
   if ! confirm_selection_json "$out" "$GENERATION" "$ADVANCE_FROM"; then
-    # The publisher process already returned the CAS. Remember that before
-    # refusing the output, so a bad body cannot leave the selector forward
-    # with no rollback attempt. Launchd has not moved yet.
-    SELECTED_ADVANCE=1
-    EXPECT_CURRENT=$GENERATION
-    if ! rollback_advanced_selector; then
-      write_receipt EFFECT_UNKNOWN SELECT_ADVANCE "selector advance output" || true
-      die 78 "EFFECT_UNKNOWN service stopped pending repair: selector advance output"
-    fi
-    die 78 "selector advance output"
+    settle_failed_select "selector advance output"
   fi
+  read_selector_generation || settle_failed_select "selector advance output"
+  if [ "$SELECT_GENERATION" != "$GENERATION" ] || [ "$SELECT_PREVIOUS" != "$ADVANCE_FROM" ]; then
+    settle_failed_select "selector advance output"
+  fi
+  clear_select_fence || die 78 "select fence"
+  SELECT_FENCE=0
   EXPECT_CURRENT=$GENERATION
   SELECTED_ADVANCE=1
 }
 
 # CAS back to the generation we advanced from. The caller may invoke this
-# only after the old service state is proven. Failure leaves SELECTED_ADVANCE
-# set so the receipt stays EFFECT_UNKNOWN instead of RECOVERED.
+# only after the old service state is proven. A publisher error is re-read:
+# CURRENT at the prior generation is a committed rollback. Failure leaves
+# SELECTED_ADVANCE set so the receipt stays EFFECT_UNKNOWN instead of RECOVERED.
 rollback_advanced_selector() {
-  local out verr
+  local out verr rc
   [ "$SELECTED_ADVANCE" -eq 1 ] || return 0
   prove_install_holder
   verr=$(mktemp "${TMPDIR:-/tmp}/host-pull-select-back.XXXXXX")
-  out=$("$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") || {
+  out=$(HOST_PULL_INSTALLER_PID=$$ "$PYTHON" "$PUBLISHER" select --store "$STORE" --generation "$ADVANCE_FROM" --expect "$GENERATION" 2>"$verr") && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
     printf '%s\n' "$(cat "$verr" 2>/dev/null || true)" >&2
-    rm -f -- "$verr"
-    return 1
-  }
+  fi
   rm -f -- "$verr"
-  confirm_selection_json "$out" "$ADVANCE_FROM" "$GENERATION" || return 1
+  if [ "$rc" -eq 0 ]; then
+    confirm_selection_json "$out" "$ADVANCE_FROM" "$GENERATION" || true
+  fi
+  read_selector_generation || return 1
+  [ "$SELECT_GENERATION" = "$ADVANCE_FROM" ] || return 1
   EXPECT_CURRENT=$ADVANCE_FROM
   SELECTED_ADVANCE=0
 }
@@ -1532,6 +1763,17 @@ HOLDER_REPORT=""
 EXPECT_OWNER_UID=""
 ADVANCE_FROM=""
 SELECTED_ADVANCE=0
+SELECT_FENCE=0
+SELECT_SETTLED=0
+SELECT_ROLLBACK=0
+SELECT_CLASS=unknown
+SELECT_GENERATION=""
+SELECT_PREVIOUS=""
+PRE_CLASS=""
+PRE_PID=""
+PRE_ARGV=""
+PRE_IS_TARGET=0
+PRE_PLIST_SHA=""
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
