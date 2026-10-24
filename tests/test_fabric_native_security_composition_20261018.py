@@ -38,14 +38,14 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The 95-file closure composes protected #1720/#1729 with Qwen source feedback
+# The 97-file closure composes protected #1720/#1729 with Qwen source feedback
 # and request UTC narrowing, extended by the reviewed Grok forward delta. This
 # candidate pin is a changed-risk review input, not reuse of an earlier review.
 # The Grok delta's source risk was independently reviewed at 3d864/25efd; this
 # comment records that review and invents no fresh approval.
 # Executor/donor/preimage pins stay exact.
-EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "6e139a3af51b89038e3e0f5109eceee522547e6237c38daee7dc8c3c6f634ad8"
+EXPECTED_NATIVE_FILES = 97
+NATIVE_MANIFEST_SHA = "e3e8111f1190efb08c7b7b61f0300c3fc9476ea8bfce52fb0846451ab70aa1ae"
 
 
 def _sha(raw):

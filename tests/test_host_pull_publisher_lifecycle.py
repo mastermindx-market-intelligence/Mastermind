@@ -4,9 +4,9 @@ PATH fixtures replace launchctl, lockf, and ps. These tests never call the
 real launchctl, the real lockf, the real ps, or the original host_pull
 collector.
 
-The candidate under test is not an installable sealed generation. The plist
-template is refused by native_generation.file_name(), and these tests do not
-admit it to the 95-member manifest.
+The candidate under test is admitted as two flat manifest members. Admission
+is not selection and is not an install. These tests do not select or install
+a live native generation.
 """
 from __future__ import annotations
 
@@ -28,8 +28,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 DAEMON = ROOT / "ops/native_fabric/quota_continuity/candidate/host_pull_daemon.sh"
 TEMPLATE = (
-    ROOT / "ops/native_fabric/quota_continuity/candidate/launchd"
-    / "com.mastermind.host-pull.plist.template"
+    ROOT / "ops/native_fabric/quota_continuity/candidate"
+    / "host_pull_launchd.plist.template"
 )
 PUBLISHER = ROOT / "ops/native_fabric/quota_continuity/rollout/native_generation.py"
 ORIGINAL_HOST_PULL = ROOT / "ops/native_fabric/quota_continuity/candidate/host_pull.sh"
@@ -326,7 +326,7 @@ def prepare(workspace, *, body=b"#!/bin/bash\nexit 91\n", select=True):
 
 def base_args(ctx, **extra):
     args = [
-        "/bin/bash", str(DAEMON), extra.pop("command", "install-agent"),
+        "/bin/bash", str(extra.pop("daemon", DAEMON)), extra.pop("command", "install-agent"),
         "--store", str(ctx["store"]),
         "--generation", ctx["release"].name,
         "--expect-current", extra.pop("expect", ctx["release"].name),
@@ -379,6 +379,8 @@ def test_bash_syntax_and_no_pidfile_race():
         assert template.count(marker) == 1
     assert "__LOG__" not in template
     assert "com.mastermind.host-pull" in template
+    assert text.count("$HERE/host_pull_launchd.plist.template") == 1
+    assert "launchd/com.mastermind.host-pull.plist.template" not in text
 
 
 def test_stopped_publication_pins_only_verified_generation(workspace):
@@ -435,6 +437,85 @@ def test_bootout_waits_for_old_pid_before_one_bootstrap(workspace):
     assert proc.returncode == 0, err
     assert ctx["plist"].read_bytes() != b"OLD-PLIST\n"
     assert launch_log(ctx).count("bootstrap ") == 1
+    assert_not_executed(ctx)
+
+
+def test_admitted_flat_template_rollback_restores_one_preimage(workspace):
+    daemon = DAEMON.read_text()
+    assert daemon.count("$HERE/host_pull_launchd.plist.template") == 1
+    ctx = prepare(workspace)
+    original = b"OLD-PLIST\n"
+    ctx["plist"].write_bytes(original)
+    ctx["plist"].chmod(0o600)
+    (ctx["stub"] / "print-style").write_text("notfound\n")
+    (ctx["stub"] / "bootstrap-fail-left").write_text("1\n")
+    (ctx["stub"] / "argv").write_text(expected_argv(ctx["lock"], ctx["pin"]))
+    args = base_args(ctx)
+    assert "--template" not in args
+    result = run(ctx)
+    assert result.returncode == 78, result.stderr
+    assert ctx["plist"].read_bytes() == original
+    backups = list(ctx["backup"].glob("com.mastermind.host-pull.plist.pre-*"))
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == original
+    assert_not_executed(ctx)
+
+
+def _daemon_beside(directory, template_bytes=None, symlink_target=None):
+    directory.mkdir()
+    daemon = directory / "host_pull_daemon.sh"
+    daemon.write_bytes(DAEMON.read_bytes())
+    daemon.chmod(0o755)
+    target = directory / "host_pull_launchd.plist.template"
+    if symlink_target is not None:
+        target.symlink_to(symlink_target)
+    elif template_bytes is not None:
+        target.write_bytes(template_bytes)
+    return daemon
+
+
+def test_nested_and_alias_plists_are_refused(workspace):
+    ctx = prepare(workspace)
+    nested = workspace / "nested" / "launchd"
+    nested.mkdir(parents=True)
+    unsigned = nested / "com.mastermind.host-pull.plist.template"
+    unsigned.write_text("<plist><string>/bin/sh</string></plist>\n")
+    alias = workspace / "host_pull_launchd.plist"
+    alias.write_bytes(TEMPLATE.read_bytes())
+    admitted_nested = workspace / "nested" / "sub"
+    admitted_nested.mkdir()
+    admitted_copy = admitted_nested / "host_pull_launchd.plist.template"
+    admitted_copy.write_bytes(TEMPLATE.read_bytes())
+    for path in (unsigned, alias, admitted_copy):
+        result = run(ctx, template=path)
+        assert result.returncode == 78, result.stderr
+        assert "template path" in result.stderr
+        assert not ctx["plist"].exists()
+        assert (ctx["stub"] / "launchctl.log").read_text() == ""
+        assert_not_executed(ctx)
+
+
+def test_symlink_template_at_the_fixed_lookup_is_refused(workspace):
+    ctx = prepare(workspace)
+    daemon = _daemon_beside(workspace / "symlink_lookup", symlink_target=TEMPLATE)
+    result = run(ctx, daemon=daemon)
+    assert result.returncode == 78, result.stderr
+    assert "symlink refused" in result.stderr
+    assert not ctx["plist"].exists()
+    assert (ctx["stub"] / "launchctl.log").read_text() == ""
+    assert_not_executed(ctx)
+
+
+def test_unsigned_template_at_the_fixed_lookup_is_refused(workspace):
+    ctx = prepare(workspace)
+    mutated = TEMPLATE.read_bytes().replace(b"/usr/bin/lockf", b"/bin/sh")
+    assert mutated != TEMPLATE.read_bytes()
+    daemon = _daemon_beside(workspace / "unsigned_lookup", template_bytes=mutated)
+    result = run(ctx, daemon=daemon)
+    assert result.returncode == 78, result.stderr
+    assert "template digest" in result.stderr
+    assert not ctx["plist"].exists()
+    assert (ctx["stub"] / "launchctl.log").read_text() == ""
     assert_not_executed(ctx)
 
 
@@ -841,14 +922,18 @@ def test_release_descriptor_fields_are_the_ones_verify_seals(workspace):
     assert_not_executed(ctx)
 
 
-def test_candidate_is_not_an_installable_sealed_member():
+def test_candidate_admission_is_not_a_selected_install():
     daemon = DAEMON.read_text()
     template = TEMPLATE.read_text()
     for blob in (daemon, template):
-        assert "native-policy integration gate" in blob
+        assert "Admission is not selection" in blob
+        assert "is not an install" in blob
         assert "file_name()" in blob
-    assert "95-member" in daemon
+        assert "do not bootstrap" in blob.lower()
     assert "NOT INSTALLABLE" in daemon
+    assert "ext/host_pull_launchd.plist.template" in daemon
+    assert "95-member" not in daemon
+    assert "launchd/com.mastermind.host-pull.plist.template" not in daemon
 
 
 def arm_running(ctx, workspace):

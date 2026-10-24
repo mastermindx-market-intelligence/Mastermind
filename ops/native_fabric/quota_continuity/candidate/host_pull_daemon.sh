@@ -2,16 +2,15 @@
 # host_pull_daemon.sh — source-controlled candidate for the original Fabric
 # host-pull LaunchAgent lifecycle (flat ext/host_pull_daemon.sh).
 #
-# NOT INSTALLABLE FROM THIS FILE ALONE. This candidate and its plist template
-# sit outside the sealed 95-member native manifest. native_generation.file_name()
-# rejects a plist template (it is not ext/*.py, ext/*.sh, or a named exception).
-# A separate native-policy integration gate — manifest admission plus a
-# file_name() policy change, reconciled with the open manifest pins — is
-# required before any host install. Running install-agent from this draft is
-# not authorized and is not a sealed generation install.
+# The native source inventory admits exactly two flat host-pull lifecycle
+# files: ext/host_pull_daemon.sh and ext/host_pull_launchd.plist.template.
+# native_generation.file_name() allows that one plist relative and no other
+# plist. Admission is not selection and is not an install. The live native
+# generation and the selector are unchanged. This candidate is NOT INSTALLABLE
+# as a selected generation. Do not bootstrap this file from this PR.
 #
-# When that gate exists, install-agent still never reads a caller-supplied
-# collector path. The only collector it will pin is
+# install-agent never reads a caller-supplied collector path. The only
+# collector it will pin is
 #   <native-code-releases>/<verified-64hex>/ext/host_pull.sh
 # and only after native_generation.py verify, a CURRENT.json compare under the
 # original publication lock immediately before each effect, and owner, mode,
@@ -195,6 +194,8 @@ SERVICE_PATH = re.compile(
     r"/(?:[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*)"
     r"(?::/(?:[A-Za-z0-9._+-]+(?:/[A-Za-z0-9._+-]+)*))*\Z")
 HEX = re.compile(r"[0-9a-f]{64}\Z")
+ADMITTED_TEMPLATE_NAME = "host_pull_launchd.plist.template"
+ADMITTED_TEMPLATE_SHA256 = "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f"
 
 def fail(message):
     sys.stderr.write(message + "\n")
@@ -366,8 +367,25 @@ elif cmd == "render":
         fail("plist name")
     if "LaunchAgents" in lock_path.split("/") or "LaunchAgents" in log_path.split("/"):
         fail("lock or log inside LaunchAgents")
-    text = open(template, "r", encoding="utf-8").read()
-    lstat_nofollow(template)
+    if os.path.basename(template) != ADMITTED_TEMPLATE_NAME:
+        fail("template name")
+    st_template = lstat_nofollow(template)
+    if not stat.S_ISREG(st_template.st_mode):
+        fail("template file")
+    try:
+        template_fd = os.open(template, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError:
+        fail("template file")
+    try:
+        raw_template = os.read(template_fd, st_template.st_size + 1)
+        if (len(raw_template) != st_template.st_size
+                or os.fstat(template_fd).st_ino != st_template.st_ino):
+            fail("template file")
+    finally:
+        os.close(template_fd)
+    if hashlib.sha256(raw_template).hexdigest() != ADMITTED_TEMPLATE_SHA256:
+        fail("template digest")
+    text = raw_template.decode("utf-8")
     for marker in ("__HOST_PULL__", "__STDOUT_LOG__", "__STDERR_LOG__", "__PATH__", "__LOCK__"):
         if text.count(marker) != 1:
             fail("template marker " + marker)
@@ -1428,7 +1446,7 @@ else
   [ -z "$HOLD_MUTATION" ] && [ -z "$HOLD_BOOTSTRAP" ] && [ -z "$HOLD_BOOTOUT" ] \
     && [ -z "$HOLD_PLIST" ] && [ -z "$HOLD_DURING_LOCK" ] && [ -z "$HOLD_ARM" ] \
     && [ -z "$LOCK_DESCENDANT" ] && [ -z "$HOLDER_REPORT" ] \
-    && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] \
+    && [ -z "$EXPECT_OWNER_UID" ] && [ -z "$FAULT" ] && [ -z "$TEMPLATE" ] \
     || die 78 "test hooks are hermetic-only"
   [ "$WAIT_LIMIT" -eq 50 ] || die 78 "wait limit"
 fi
@@ -1467,7 +1485,11 @@ case "$COMMAND" in
     LAUNCHCTL=$TOOL_PATH
     resolve_tool ps /bin/ps
     PS=$TOOL_PATH
-    TEMPLATE=${TEMPLATE:-$HERE/launchd/com.mastermind.host-pull.plist.template}
+    ADMITTED_TEMPLATE=$HERE/host_pull_launchd.plist.template
+    if [ -n "$TEMPLATE" ] && [ "$TEMPLATE" != "$ADMITTED_TEMPLATE" ]; then
+      die 78 "template path"
+    fi
+    TEMPLATE=$ADMITTED_TEMPLATE
     require_verified_pin
     py paths-ready "$LOCK" "$LOG_PATH" || die 78 "lock or log path"
     RENDERED=$(py render "$TEMPLATE" "$DEST_PLIST" "$PIN" "$LOG_PATH" "$LOCK" "$SERVICE_PATH") \
