@@ -1,10 +1,19 @@
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { before, test } from "node:test";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   RAKAZO_PIN,
   buildExecutionEnv,
@@ -33,6 +42,7 @@ test("pinned Apache-2.0 source is the only admitted Rakazo identity", () => {
   assert.ok(refused.failures.some((failure) => failure.includes("LICENSE text")));
 
   assert.equal(report.pin, RAKAZO_PIN);
+  assert.equal(report.checkout_root, realpathSync(report.checkout_root));
   console.log(`rakazo pin ${report.pin}`);
   assert.equal(report.repository, "https://github.com/elie222/rakazo.git");
   assert.equal(report.license, "Apache-2.0");
@@ -62,6 +72,167 @@ test("tampered donor source is rejected before import", async () => {
       return true;
     },
   );
+});
+
+function isolatedGit(args, cwd, input) {
+  return execFileSync("git", ["-c", "core.fsmonitor=", "-c", "core.hooksPath=/dev/null", ...args], {
+    cwd,
+    input,
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH ?? "",
+      HOME: cwd,
+      LC_ALL: "C",
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_CONFIG_GLOBAL: "/dev/null",
+      GIT_CONFIG_NOSYSTEM: "1",
+      GIT_CONFIG_SYSTEM: "/dev/null",
+    },
+  });
+}
+
+function runLoaderChild(source, { loaderChallenge = false } = {}) {
+  const dir = path.dirname(fileURLToPath(import.meta.url));
+  const qualifyUrl = pathToFileURL(path.join(dir, "qualify.mjs")).href;
+  const eventsUrl = pathToFileURL(path.join(source, "packages/core/src/events.ts")).href;
+  const probe = path.join(path.dirname(source), `probe-${process.pid}-${Math.random().toString(16).slice(2)}.mjs`);
+  writeFileSync(
+    probe,
+    `import { observePinnedRakazo } from ${JSON.stringify(qualifyUrl)};
+const source = process.env.RAKAZO_SOURCE;
+let gate;
+try {
+  const report = await observePinnedRakazo(source);
+  gate = { ok: true, pin: report.pin, root: report.checkout_root };
+} catch (error) {
+  gate = { ok: false, code: error.code, imported: error.imported, message: String(error.message) };
+}
+let loader = "SKIPPED";
+if (${loaderChallenge ? "true" : "false"}) {
+  try {
+    const events = await import(${JSON.stringify(eventsUrl)});
+    loader = typeof events.projectMessages === "function" ? "LOADER_OK" : "LOADER_FAIL";
+  } catch (error) {
+    loader = "LOADER_FAIL " + error.message;
+  }
+}
+console.log(JSON.stringify({ gate, loader }));
+`,
+  );
+  return spawnSync(
+    process.execPath,
+    ["--experimental-strip-types", "--import", path.join(dir, "register.mjs"), probe],
+    {
+      cwd: dir,
+      env: buildExecutionEnv({ pinRoot: source, source }),
+      encoding: "utf8",
+      timeout: 180_000,
+    },
+  );
+}
+
+function parseChild(child) {
+  assert.equal(child.status, 0, `${child.stdout}\n${child.stderr}`);
+  const line = child.stdout.trim().split("\n").filter(Boolean).at(-1);
+  return JSON.parse(line);
+}
+
+test("replacement refs and clean filters do not change the pinned tree", () => {
+  const copy = cloneOwnedCheckout(report.checkout_root);
+  const attempt = path.dirname(copy);
+  const callerConfig = readFileSync(path.join(report.checkout_root, ".git", "config"), "utf8");
+  const marker = path.join(attempt, "filter-fired");
+  const filter = path.join(attempt, "clean-filter.sh");
+  writeFileSync(filter, `#!/bin/sh\necho fired >> '${marker}'\ncat\n`, { mode: 0o755 });
+  isolatedGit(["config", "--local", "filter.sentinel.clean", filter], copy);
+  isolatedGit(["config", "--local", "filter.sentinel.required", "true"], copy);
+  writeFileSync(path.join(copy, ".git", "info", "attributes"), "* filter=sentinel\n");
+  const tree = isolatedGit(["rev-parse", "HEAD^{tree}"], copy).trim();
+  const empty = isolatedGit(["hash-object", "-t", "tree", "-w", "--stdin"], copy, "").trim();
+  isolatedGit(["update-ref", `refs/replace/${tree}`, empty], copy);
+  const copyConfig = readFileSync(path.join(copy, ".git", "config"), "utf8");
+  assert.equal(isolatedGit(["ls-tree", "-r", "--name-only", "HEAD"], copy).trim(), "");
+
+  const accepted = parseChild(runLoaderChild(copy));
+  assert.equal(accepted.gate.ok, true, JSON.stringify(accepted));
+  assert.equal(accepted.gate.pin, RAKAZO_PIN);
+  assert.equal(accepted.gate.root, realpathSync(copy));
+  assert.equal(existsSync(marker), false);
+  assert.equal(readFileSync(path.join(copy, ".git", "config"), "utf8"), copyConfig);
+  assert.equal(readFileSync(path.join(report.checkout_root, ".git", "config"), "utf8"), callerConfig);
+  assert.equal(callerConfig.includes("filter.sentinel"), false);
+  assert.equal(existsSync(path.join(report.checkout_root, ".git", "refs", "replace")), false);
+
+  const tampered = cloneOwnedCheckout(report.checkout_root);
+  const relative = "packages/core/src/events.ts";
+  const original = isolatedGit(["rev-parse", `HEAD:${relative}`], tampered).trim();
+  appendFileSync(path.join(tampered, relative), '\nthrow new Error("IMPORTED_TAMPERED_SOURCE");\n');
+  const fake = isolatedGit(["hash-object", "-w", "--", relative], tampered).trim();
+  assert.notEqual(fake, original);
+  const subtree = isolatedGit(["rev-parse", "HEAD:packages/core/src"], tampered).trim();
+  const listing = isolatedGit(["ls-tree", "HEAD:packages/core/src"], tampered);
+  const rebuilt = `${listing.split("\n").filter(Boolean).map((line) => (
+    line.endsWith("\tevents.ts") ? line.replace(original, fake) : line
+  )).join("\n")}\n`;
+  const newTree = isolatedGit(["mktree"], tampered, rebuilt).trim();
+  isolatedGit(["update-ref", `refs/replace/${subtree}`, newTree], tampered);
+  const hidden = isolatedGit(["ls-tree", "-r", "--format=%(objectname) %(path)", "HEAD"], tampered);
+  assert.equal(hidden.includes(`${fake} packages/core/src/events.ts`), true);
+  const rejected = parseChild(runLoaderChild(tampered));
+  assert.equal(rejected.gate.ok, false, JSON.stringify(rejected));
+  assert.equal(rejected.gate.code, "SOURCE_DRIFT");
+  assert.equal(rejected.gate.imported, false);
+  assert.equal(rejected.gate.message.includes("IMPORTED_TAMPERED_SOURCE"), false);
+});
+
+test("fsmonitor and local git config do not run during validation", () => {
+  const copy = cloneOwnedCheckout(report.checkout_root);
+  const attempt = path.dirname(copy);
+  const callerConfig = readFileSync(path.join(report.checkout_root, ".git", "config"), "utf8");
+  const marker = path.join(attempt, "fsmonitor-fired");
+  const hook = path.join(attempt, "fsmonitor.sh");
+  writeFileSync(hook, `#!/bin/sh\necho fired >> '${marker}'\nexit 0\n`, { mode: 0o755 });
+  isolatedGit(["config", "--local", "core.fsmonitor", hook], copy);
+  const copyConfig = readFileSync(path.join(copy, ".git", "config"), "utf8");
+  assert.match(copyConfig, /fsmonitor\.sh/);
+  const accepted = parseChild(runLoaderChild(copy));
+  assert.equal(accepted.gate.ok, true, JSON.stringify(accepted));
+  assert.equal(accepted.gate.pin, RAKAZO_PIN);
+  assert.equal(existsSync(marker), false);
+  assert.equal(readFileSync(path.join(copy, ".git", "config"), "utf8"), copyConfig);
+  assert.equal(readFileSync(path.join(report.checkout_root, ".git", "config"), "utf8"), callerConfig);
+  assert.equal(callerConfig.includes("fsmonitor"), false);
+});
+
+test("a symlink root and an ignored transitive shadow are rejected before import", () => {
+  const copy = cloneOwnedCheckout(report.checkout_root);
+  const attempt = path.dirname(copy);
+  const link = path.join(attempt, "alias");
+  symlinkSync(copy, link);
+  assert.equal(ensurePinCheckout({ source: link }), realpathSync(copy));
+
+  const shadow = "packages/core/src/cloud-agent.js";
+  const marker = path.join(attempt, "shadow-fired");
+  writeFileSync(
+    path.join(copy, shadow),
+    `import { writeFileSync } from "node:fs";
+writeFileSync(${JSON.stringify(marker)}, "shadow");
+throw new Error("IMPORTED_IGNORED_SHADOW");
+`,
+  );
+  appendFileSync(path.join(copy, ".git", "info", "exclude"), `\n${shadow}\n`);
+  assert.equal(isolatedGit(["ls-files", "--others", "--exclude-standard"], copy).includes(shadow), false);
+  assert.equal(existsSync(path.join(copy, shadow)), true);
+  assert.equal(existsSync(path.join(report.checkout_root, shadow)), false);
+
+  const rejected = parseChild(runLoaderChild(link, { loaderChallenge: true }));
+  assert.equal(rejected.gate.ok, false, JSON.stringify(rejected));
+  assert.equal(rejected.gate.code, "SOURCE_SHADOW");
+  assert.equal(rejected.gate.imported, false);
+  assert.equal(rejected.gate.message.includes("IMPORTED_IGNORED_SHADOW"), false);
+  assert.match(rejected.gate.message, /cloud-agent\.js/);
+  assert.equal(rejected.loader, "LOADER_OK");
+  assert.equal(existsSync(marker), false);
 });
 
 test("an untracked sibling shadow is rejected before import", async () => {
@@ -162,6 +333,7 @@ test("unrelated environment variables do not leak into execution", () => {
     assert.equal(env.PATH, process.env.PATH);
     assert.notEqual(env.HOME, process.env.HOME);
     assert.equal(env.GIT_CONFIG_GLOBAL, "/dev/null");
+    assert.equal(env.GIT_NO_REPLACE_OBJECTS, "1");
     assert.equal(env.NODE_OPTIONS, undefined);
     assert.equal(env.HTTPS_PROXY, undefined);
     assert.equal(env.HTTP_PROXY, undefined);

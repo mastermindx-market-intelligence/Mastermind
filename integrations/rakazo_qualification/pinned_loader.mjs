@@ -1,17 +1,28 @@
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const qualificationDir = path.dirname(fileURLToPath(import.meta.url));
 
-function requirePinRoot() {
-  const root = process.env.RAKAZO_PIN_ROOT;
-  if (!root) throw new Error("RAKAZO_PIN_ROOT is not set");
-  return root;
+function canonicalPin() {
+  const configured = process.env.RAKAZO_PIN_ROOT || "";
+  if (!configured) return "";
+  return realpathSync(configured);
+}
+
+function canonicalParent(parentURL) {
+  if (!parentURL) return "";
+  const parent = fileURLToPath(parentURL);
+  try {
+    return realpathSync(parent);
+  } catch {
+    return parent;
+  }
 }
 
 export async function resolve(specifier, context, nextResolve) {
-  const parent = context.parentURL ? fileURLToPath(context.parentURL) : "";
+  const parent = canonicalParent(context.parentURL);
+  const root = canonicalPin();
   if (
     specifier === "zod" ||
     specifier === "croner" ||
@@ -24,18 +35,17 @@ export async function resolve(specifier, context, nextResolve) {
     });
   }
 
-  const root = process.env.RAKAZO_PIN_ROOT || "";
   if (specifier === "@rakazo/contracts") {
-    const pinned = requirePinRoot();
+    if (!root) throw new Error("RAKAZO_PIN_ROOT is not set");
     return {
-      url: pathToFileURL(path.join(pinned, "packages/contracts/src/index.ts")).href,
+      url: pathToFileURL(path.join(root, "packages/contracts/src/index.ts")).href,
       shortCircuit: true,
     };
   }
   if (specifier === "@rakazo/core/node/desktop-runtime") {
-    const pinned = requirePinRoot();
+    if (!root) throw new Error("RAKAZO_PIN_ROOT is not set");
     return {
-      url: pathToFileURL(path.join(pinned, "packages/core/src/node/desktop-runtime.ts")).href,
+      url: pathToFileURL(path.join(root, "packages/core/src/node/desktop-runtime.ts")).href,
       shortCircuit: true,
     };
   }

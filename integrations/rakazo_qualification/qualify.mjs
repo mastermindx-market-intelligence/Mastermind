@@ -83,6 +83,7 @@ function baseExecutionEnv() {
       GIT_CONFIG_NOSYSTEM: "1",
       GIT_CONFIG_GLOBAL: "/dev/null",
       GIT_CONFIG_SYSTEM: "/dev/null",
+      GIT_NO_REPLACE_OBJECTS: "1",
       npm_config_userconfig: npmrc,
       npm_config_globalconfig: "/dev/null",
       npm_config_cache: cache,
@@ -112,9 +113,34 @@ function commandFailure(command, error) {
   return new QualificationError(`${command} failed: ${detail}`, "COMMAND_FAILED");
 }
 
+// Per-invocation only. These override repo-local config for this process and
+// do not write the caller's git config. `git status` is not used: it runs
+// clean filters even when fsmonitor is disabled. `hash-object --no-filters`
+// compares worktree bytes as stored.
+const validationGitArgs = [
+  "-c", "core.fsmonitor=",
+  "-c", "core.fsmonitorHookVersion=0",
+  "-c", "core.hooksPath=/dev/null",
+  "-c", "core.autocrlf=false",
+  "-c", "core.safecrlf=false",
+  "-c", "advice.detachedHead=false",
+];
+
+function gitSubcommand(args) {
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg === "-c" || arg === "-C") {
+      index += 1;
+      continue;
+    }
+    if (!arg.startsWith("-")) return arg;
+  }
+  return "git";
+}
+
 function runGit(args, cwd, { input, allowStatus1 = false } = {}) {
   try {
-    return execFileSync("git", args, {
+    return execFileSync("git", [...validationGitArgs, ...args], {
       cwd,
       input,
       encoding: "utf8",
@@ -125,7 +151,7 @@ function runGit(args, cwd, { input, allowStatus1 = false } = {}) {
     });
   } catch (error) {
     if (allowStatus1 && error.status === 1) return "";
-    throw commandFailure(`git ${args[0]}`, error);
+    throw commandFailure(`git ${gitSubcommand(args)}`, error);
   }
 }
 
@@ -165,7 +191,9 @@ function hashWorktree(root, paths) {
   if (paths.length === 0) {
     throw new QualificationError("worktree drift: no tracked files", "SOURCE_DRIFT");
   }
-  const output = runGit(["hash-object", "--stdin-paths"], root, { input: `${paths.join("\n")}\n` });
+  const output = runGit(["hash-object", "--no-filters", "--stdin-paths"], root, {
+    input: `${paths.join("\n")}\n`,
+  });
   const hashes = output.split("\n").filter((line) => line.length > 0);
   if (hashes.length !== paths.length) {
     throw new QualificationError("worktree drift: hash count mismatch", "SOURCE_DRIFT");
@@ -248,34 +276,35 @@ export function assertImmutableSource(root) {
     }
   }
 
-  for (const relative of ENTRY_FILES) {
-    const shadow = relative.replace(/\.ts$/, ".js");
-    if (existsSync(path.join(resolved, shadow)) && !tracked.has(shadow)) {
+  for (const relative of tracked.keys()) {
+    if (!relative.endsWith(".ts")) continue;
+    const shadow = `${relative.slice(0, -3)}.js`;
+    if (tracked.has(shadow)) continue;
+    if (existsSync(path.join(canonicalRoot, shadow))) {
       throw new QualificationError(`shadow file ${shadow}`, "SOURCE_SHADOW");
     }
   }
 
-  for (const record of nulRecords(runGit(["status", "--porcelain=v1", "--untracked-files=all", "-z"], resolved))) {
-    const status = record.slice(0, 2);
-    const filePath = record.slice(3);
-    if (status === "??" && filePath.endsWith(".js") && tracked.has(filePath.replace(/\.js$/, ".ts"))) {
+  for (const filePath of nulRecords(runGit(
+    ["ls-files", "--others", "--exclude-standard", "-z"],
+    resolved,
+  ))) {
+    if (filePath.endsWith(".js") && tracked.has(`${filePath.slice(0, -3)}.ts`)) {
       throw new QualificationError(`shadow file ${filePath}`, "SOURCE_SHADOW");
     }
-    throw new QualificationError(`worktree drift: ${filePath || record}`, "SOURCE_DRIFT");
+    throw new QualificationError(`worktree drift: ${filePath}`, "SOURCE_DRIFT");
   }
 
-  return { root: resolved, sha, checked_before_import: true };
+  return { root: canonicalRoot, sha, checked_before_import: true };
 }
 
 export function ensurePinCheckout(options = {}) {
   const hasSource = Object.prototype.hasOwnProperty.call(options, "source");
   if (hasSource && options.source) {
-    assertImmutableSource(options.source);
-    return path.resolve(options.source);
+    return assertImmutableSource(options.source).root;
   }
   if (!hasSource && process.env.RAKAZO_SOURCE) {
-    assertImmutableSource(process.env.RAKAZO_SOURCE);
-    return path.resolve(process.env.RAKAZO_SOURCE);
+    return assertImmutableSource(process.env.RAKAZO_SOURCE).root;
   }
 
   const attempt = createOwnedAttempt();
@@ -285,9 +314,8 @@ export function ensurePinCheckout(options = {}) {
     runGit(["init", "-b", "main"], dest);
     runGit(["remote", "add", "origin", RAKAZO_REPOSITORY], dest);
     runGit(["fetch", "--quiet", "--depth", "1", "origin", RAKAZO_PIN], dest);
-    runGit(["-c", "advice.detachedHead=false", "checkout", "--quiet", "--detach", "FETCH_HEAD"], dest);
-    assertImmutableSource(dest);
-    return dest;
+    runGit(["checkout", "--quiet", "--detach", "FETCH_HEAD"], dest);
+    return assertImmutableSource(dest).root;
   } catch (error) {
     error.removedOwnedPath = removeOwnedDirectory(attempt);
     throw error;
@@ -301,8 +329,7 @@ export function cloneOwnedCheckout(source) {
   // A shallow checkout ignores `git clone --local` and may reach the network.
   // Copy the already qualified tree instead of fetching or altering it.
   cpSync(qualified.root, dest, { recursive: true, verbatimSymlinks: true });
-  assertImmutableSource(dest);
-  return dest;
+  return assertImmutableSource(dest).root;
 }
 
 export function ensureDependencies() {
@@ -392,7 +419,7 @@ function cordisListing(root) {
 }
 
 export async function observePinnedRakazo(root) {
-  const resolved = root === undefined ? ensurePinCheckout() : path.resolve(root);
+  const resolved = root === undefined ? ensurePinCheckout() : root;
   const qualified = assertImmutableSource(resolved);
   const installed = ensureDependencies();
   const dependencies = assertDependencyPin(qualified.root, installed);

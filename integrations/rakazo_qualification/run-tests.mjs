@@ -5,6 +5,17 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { buildExecutionEnv, ensureDependencies, ensurePinCheckout } from "./qualify.mjs";
 
+const registry = process.env.npm_config_registry ?? "";
+const userconfig = process.env.npm_config_userconfig ?? "";
+const canaryConfig = registry.includes("127.0.0.1:9")
+  || registry.includes("canary-registry")
+  || userconfig.includes("canary-npmrc");
+if (process.env.NODE_OPTIONS || canaryConfig) {
+  console.error("launcher-env leaked");
+  process.exit(1);
+}
+console.log("launcher-env NODE_OPTIONS absent npm-config-canary absent");
+
 const root = ensurePinCheckout();
 ensureDependencies();
 const child = spawnSync(
