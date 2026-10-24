@@ -263,6 +263,18 @@ _claude_worker_profile() {
     echo "POOL_MAX_TURNS must not exceed 400" >&2
     return 2
   fi
+  # Request ceilings attenuate this profile; they never raise an incumbent
+  # operator limit or a model/complexity default. This is the existing CLI fuse,
+  # not a second token counter, retry policy, or acceptance decision.
+  local request_turns="${POOL_REQUEST_MAX_TURNS:-}"
+  if [ -n "$request_turns" ]; then
+    case "$request_turns" in ''|*[!0-9]*|0*) echo "invalid POOL_REQUEST_MAX_TURNS" >&2; return 2 ;; esac
+    if [ "${#request_turns}" -gt 3 ] || [ "$request_turns" -gt 400 ]; then
+      echo "POOL_REQUEST_MAX_TURNS must not exceed 400" >&2
+      return 2
+    fi
+    [ "$turns" -le "$request_turns" ] || turns="$request_turns"
+  fi
   CLAUDE_WORKER_MAX_TURNS="$turns"
 }
 

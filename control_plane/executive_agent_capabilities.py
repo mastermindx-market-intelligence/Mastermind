@@ -10,6 +10,12 @@ MCP server/plugin/skill therefore cannot become ambient authority merely because
 it exists in a provider home: it must belong to the exact reviewed profile that
 both the Job and claimed capacity name.  The operator-harness attestation layer
 remains responsible for proving the provider process actually matches the grant.
+
+The paid model-only sealed-input profile (``fabric.paid.glm.sealed-input.v1``)
+is a closed configuration-only extension: one exact surface/realm tuple, the
+sealed-worker fences, and no inference transport, permission or authority of
+any kind.  A live paid-model admission remains separately authorized by the
+actual adapter and its paid lease, never by this registry.
 """
 from __future__ import annotations
 
@@ -70,16 +76,39 @@ _DIGEST_RE = re.compile(r"^[0-9a-f]{64}$")
 CLAUDE_OPERATOR_PROVIDER = "claude"
 CLAUDE_OPERATOR_HARNESS_KIND = "claude-agent-sdk"
 CLAUDE_OPERATOR_EXECUTION_SURFACE = "claude-agent-sdk"
+# Paid model-only sealed-input extension: exactly one reviewed surface/realm/
+# profile tuple (fabric.paid.glm.sealed-input.v1).  The surface joins the
+# sealed-worker fence below, so it can never carry MCP servers, plugins,
+# resources, skills, V4 skill capabilities, native helpers or a writable
+# sandbox.  The paid realm and the model-only surface are refused on every
+# other profile, and only the canonical paid Fabric adapter maps the surface;
+# no arbitrary alias, second registry or generation rename exists.  This is
+# configuration naming only: it grants no permission, token, provider
+# admission or authority, and live model transport stays separately authorized
+# by the actual adapter and its paid lease.
+PAID_FABRIC_ADAPTER_ID = "canonical-paid-fabric"
+PAID_GLM_SEALED_PROFILE_ID = "fabric.paid.glm.sealed-input.v1"
+PAID_GLM_EXECUTION_SURFACE = "glm-model-only"
+PAID_GLM_AUTH_REALM = "paid-lease-bound-account"
+ACP_EXECUTION_SURFACE = "acp-agent"
+ACP_PROVIDER_FREE_AUTH_REALM = "dedicated-worker-no-auth"
 _EXECUTION_SURFACES = frozenset({
     "codex-exec", "codex-app-server", "claude-code", CLAUDE_OPERATOR_EXECUTION_SURFACE,
+    PAID_GLM_EXECUTION_SURFACE, ACP_EXECUTION_SURFACE,
 })
-_AUTH_REALMS = frozenset({"dedicated-worker-account"})
+_AUTH_REALMS = frozenset({
+    "dedicated-worker-account", PAID_GLM_AUTH_REALM, ACP_PROVIDER_FREE_AUTH_REALM,
+})
 _ADAPTER_EXECUTION_SURFACES = {
     "codex-cli": frozenset({"codex-exec", "codex-app-server"}),
     "claude-code": frozenset({"claude-code"}),
     "attended-fabric": frozenset({"claude-code"}),
+    PAID_FABRIC_ADAPTER_ID: frozenset({PAID_GLM_EXECUTION_SURFACE}),
+    "acp": frozenset({ACP_EXECUTION_SURFACE}),
 }
-_SEALED_WORKER_EXECUTION_SURFACES = frozenset({"codex-exec", "claude-code"})
+_SEALED_WORKER_EXECUTION_SURFACES = frozenset({
+    "codex-exec", "claude-code", PAID_GLM_EXECUTION_SURFACE,
+})
 
 
 def adapter_supports_execution_surface(adapter_id: str, execution_surface: str) -> bool:
@@ -160,6 +189,17 @@ _MCP_COMMON_KEYS = frozenset(
 )
 _MCP_HTTP_KEYS = _MCP_COMMON_KEYS | {"url"}
 _MCP_STDIO_KEYS = _MCP_COMMON_KEYS | {"args", "command"}
+ACP_WORKSPACE_READ_MCP_CAPABILITY_ID = "mastermind-acp-workspace-read-v1"
+ACP_WORKSPACE_READ_MCP_CONFIG_NAME = "mastermindAcpWorkspaceRead"
+ACP_WORKSPACE_READ_MCP_COMMAND = (
+    "/Library/Application Support/MastermindExecutive/bin/mmx-acp-workspace-read-mcp"
+)
+ACP_WORKSPACE_READ_MCP_ARGS: tuple[str, ...] = ()
+ACP_WORKSPACE_READ_MCP_SERVER_IDENTITY = "mastermind-acp-workspace-read"
+ACP_WORKSPACE_READ_MCP_SERVER_VERSION = "1.0.0"
+ACP_WORKSPACE_READ_MCP_TOOL_SCHEMA_DIGEST = (
+    "76bc2f621a26a36cae7a1e90edab3af113cdc6924a662fa83004f6b56babd18d"
+)
 WORKER_BROWSER_MCP_COMMAND = "/usr/bin/python3"
 WORKER_BROWSER_MCP_BOOTSTRAP = r'''import hashlib,json,os,stat
 K=("MASTERMIND_BROWSER_ARTIFACT_DIR","MASTERMIND_BROWSER_FIXTURE_A_URL","MASTERMIND_BROWSER_FIXTURE_B_URL","MASTERMIND_BROWSER_FIXTURE_NONCE","MASTERMIND_BROWSER_ORIGIN","MASTERMIND_BROWSER_PROXY_URL","MASTERMIND_BROWSER_RUNTIME_MANIFEST_PATH","MASTERMIND_BROWSER_RUNTIME_MANIFEST_SHA256","MASTERMIND_BROWSER_RUNTIME_ROOT","MASTERMIND_BROWSER_WORKSPACE_PATH","PLAYWRIGHT_BROWSERS_PATH")
@@ -1011,8 +1051,51 @@ class ExecutionCapabilityProfile:
             }
         return projection
 
+    def acp_config_projection(self) -> dict[str, object]:
+        """Secret-free policy projection for the provider-neutral ACP surface."""
+
+        if self.execution_surface != ACP_EXECUTION_SURFACE:
+            raise CapabilityPolicyError(
+                f"profile {self.profile_id!r} is not an ACP profile"
+            )
+        return {
+            "execution_surface": self.execution_surface,
+            "auth_realm": self.auth_realm,
+            "sandbox_policy": self.sandbox_policy,
+            "approval_policy": self.approval_policy,
+            "network_policy": self.network_policy,
+            "write_capable": self.write_capable,
+            "native_helper_policy": self.native_helper_policy.value,
+            "skills": list(self.skills),
+            "skill_grants": [
+                {
+                    "capability_id": grant.capability_id,
+                    "grant_digest": grant.grant_digest,
+                }
+                for grant in self.skill_grants
+            ],
+            "mcp_servers": [
+                {
+                    "capability_id": grant.capability_id,
+                    "grant_digest": grant.grant_digest,
+                }
+                for grant in self.mcp_server_grants
+            ],
+            "resources": [
+                {
+                    "resource_id": grant.resource_id,
+                    "grant_digest": grant.grant_digest,
+                }
+                for grant in self.resource_grants
+            ],
+            "plugins": list(self.plugins),
+            "forbidden": list(self.forbidden),
+        }
+
     @property
     def expected_config_digest(self) -> str:
+        if self.execution_surface == ACP_EXECUTION_SURFACE:
+            return _digest(self.acp_config_projection())
         if self.execution_surface == CLAUDE_OPERATOR_EXECUTION_SURFACE:
             requested = self.claude_sdk_config_projection()
             return claude_security_config_digest({
@@ -1410,7 +1493,7 @@ class ExecutionCapabilityRegistry:
                 )
             else:
                 command_value = str(value.get("command") or "").strip()
-                reviewed = {
+                reviewed_stdio = {
                     "playwright-worker-browser-b1": (
                         WORKER_BROWSER_MCP_COMMAND,
                         WORKER_BROWSER_MCP_ARGS,
@@ -1425,14 +1508,19 @@ class ExecutionCapabilityRegistry:
                     ),
                     "native-return-mcp-v1": (COMPANY_MCP_COMMAND, NATIVE_RETURN_MCP_ARGS),
                     "product-acceptance-mcp-v1": (COMPANY_MCP_COMMAND, PRODUCT_ACCEPTANCE_MCP_ARGS),
-                }.get(capability_id)
-                if reviewed is None or command_value != reviewed[0]:
+                    ACP_WORKSPACE_READ_MCP_CAPABILITY_ID: (
+                        ACP_WORKSPACE_READ_MCP_COMMAND,
+                        ACP_WORKSPACE_READ_MCP_ARGS,
+                    ),
+                }
+                expected_stdio = reviewed_stdio.get(capability_id)
+                if expected_stdio is None or command_value != expected_stdio[0]:
                     raise CapabilityPolicyError(
                         f"MCP grant {capability_id!r} stdio command is not reviewed"
                     )
                 raw_args = value.get("args")
                 if (
-                    raw_args != list(reviewed[1])
+                    raw_args != list(expected_stdio[1])
                     or len(
                         json.dumps(
                             raw_args,
@@ -1923,6 +2011,32 @@ class ExecutionCapabilityRegistry:
                 raise CapabilityPolicyError(
                     "rich Claude principal profile requires disabled inert owner admission"
                 )
+            is_acp_profile = execution_surface == ACP_EXECUTION_SURFACE
+            if is_acp_profile:
+                if (
+                    auth_realm != ACP_PROVIDER_FREE_AUTH_REALM
+                    or sandbox_policy != "read-only"
+                    or approval_policy != "never"
+                    or network_policy != "disabled"
+                    or write_capable
+                    or native_helper_policy is not NativeHelperPolicy.DISABLED
+                    or native_helper is not None
+                    or skills
+                    or plugins
+                    or resource_ids
+                    or mcp_server_ids != (ACP_WORKSPACE_READ_MCP_CAPABILITY_ID,)
+                    or len(resolved_mcp) != 1
+                    or resolved_mcp[0].transport != "stdio"
+                    or resolved_mcp[0].auth_status != "unsupported"
+                ):
+                    raise CapabilityPolicyError(
+                        "ACP first profile exceeds the reviewed provider-free read-only ceiling"
+                    )
+            elif auth_realm == ACP_PROVIDER_FREE_AUTH_REALM:
+                raise CapabilityPolicyError(
+                    "provider-free auth realm is reserved for the ACP execution surface"
+                )
+
             is_browser_profile = profile_id == "operator.browser.local-review.v1"
             if is_browser_profile:
                 if (
@@ -2021,6 +2135,45 @@ class ExecutionCapabilityRegistry:
                     raise CapabilityPolicyError(
                         "pending fabric browser profile requires disabled, inert owner admission"
                     )
+            # Paid model-only sealed-input fence: the paid auth realm and the
+            # model-only surface exist for exactly one closed profile tuple and
+            # are refused everywhere else.  No alias profile, no legacy-profile
+            # adoption, no mixed surface/realm combination and no field widening
+            # is accepted, and the sealed-worker fences above already deny MCP,
+            # plugins, resources, skills, skill capabilities and helpers.
+            is_paid_glm_profile = profile_id == PAID_GLM_SEALED_PROFILE_ID
+            if auth_realm == PAID_GLM_AUTH_REALM and not is_paid_glm_profile:
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot use the paid lease-bound auth realm"
+                )
+            if (
+                execution_surface == PAID_GLM_EXECUTION_SURFACE
+                and not is_paid_glm_profile
+            ):
+                raise CapabilityPolicyError(
+                    f"profile {profile_id!r} cannot use the paid model-only execution surface"
+                )
+            if is_paid_glm_profile and (
+                not enabled
+                or execution_surface != PAID_GLM_EXECUTION_SURFACE
+                or auth_realm != PAID_GLM_AUTH_REALM
+                or sandbox_policy != "read-only"
+                or approval_policy != "never"
+                or network_policy != "disabled"
+                or write_capable
+                or native_helper_policy is not NativeHelperPolicy.DISABLED
+                or native_helper is not None
+                or skills
+                or skill_capability_ids
+                or skill_grants
+                or mcp_server_ids
+                or resource_ids
+                or plugins
+                or forbidden
+            ):
+                raise CapabilityPolicyError(
+                    "paid GLM sealed-input profile differs from its exact reviewed ceiling"
+                )
             if write_capable and sandbox_policy != "workspace-write":
                 raise CapabilityPolicyError(
                     f"profile {profile_id!r} write capability requires workspace-write"
@@ -2175,6 +2328,8 @@ __all__ = [
     "CAPABILITY_POLICY_SCHEMA",
     "CAPABILITY_POLICY_SCHEMA_V3",
     "CAPABILITY_POLICY_SCHEMA_V4",
+    "ACP_EXECUTION_SURFACE",
+    "ACP_PROVIDER_FREE_AUTH_REALM",
     "DEFAULT_CAPABILITY_POLICY_PATH",
     "DEFAULT_CAPABILITY_SOURCE_ROOT",
     "CapabilityPolicyError",
@@ -2185,6 +2340,10 @@ __all__ = [
     "NativeHelperGrant",
     "ResourceGrant",
     "PendingBrowserResource",
+    "PAID_FABRIC_ADAPTER_ID",
+    "PAID_GLM_AUTH_REALM",
+    "PAID_GLM_EXECUTION_SURFACE",
+    "PAID_GLM_SEALED_PROFILE_ID",
     "app_server_security_config_digest",
     "app_server_security_config_projection",
     "build_company_consultation_grant_profile",

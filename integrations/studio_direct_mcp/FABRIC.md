@@ -16,9 +16,39 @@ This installation is for already-authorized **trusted machine-owner channels**. 
 
 Every request supplies a verified original operation root, the actual immediate parent, and one stable new child ID. A fresh attended operation may use the incumbent operation naming and source-custody convention; do not fabricate `CODEX_THREAD_ID`, borrow a host environment's sibling identity, or invent an identity registry. Nested work preserves the same original root. Existing Executive-submitted, active, accepted, or effect-unknown operations remain on their original carrier.
 
-The tools do not accept arbitrary shell commands, adapter paths, working directories, providers, models, hosts, accounts or credentials. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
+The tools do not accept arbitrary shell commands, adapter paths, working directories, hosts, accounts or credentials. An optional *closed-schema* provider-pool and exact-model constraint is available only on `fabric_request`, subject to the original native selection and admission policy; this does not grant arbitrary providers or models. The operator pins the adapter, Python interpreter and worker working directory at installation. The default working directory is the literal `~`, expanded by the receiving worker's existing adapter path. A bounded packet must contain the required input or exact worker-accessible references; neither a Web `/mnt/data` file nor an M2 workspace is assumed available on another worker host.
 
 Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Packets are limited to 16,000 characters / 32,768 UTF-8 bytes, contain no NUL, and travel as literal stdin using a quoted heredoc. C0/C1/C2 classify the child independently; C3 requires a specific escalation reason. The existing router selects admitted qualified provider/host capacity. `subject_pool` expresses author-pool review independence only; it does not select the reviewer.
+
+## Opt-in strict provider and model constraints (source integration)
+
+Omitting `pool` and `model` retains the existing economical `AUTO` route, including the
+incumbent eligible pre-task capacity continuation. For a **new** run only, the Web
+`fabric_request` may set a closed `pool` from `grok`, `glm`, `minimax`, `bailian`,
+`cursor`, `ocfree`, or `go`; `model` requires `pool` and selects an exact *already
+qualified* model within that pool. `model: "auto"` means only the provider is pinned.
+This is a strict constraint, not a suggestion, and it does not expose a host or account.
+
+Every manual request must pass the installed native adapter's `request --help`
+`--strict-manual-pin` check, an exact-origin `NOT_FOUND` observation, and a no-effect
+`preview` with matching run, pool, requested exact model (if any), and both native
+`selection_rechecked_at_request` and `strict_pin_enforced_at_request` witnesses.
+Unsupported, stale or malformed selection refuses `MANUAL_ROUTE_UNAVAILABLE` before
+controller dispatch. Native `request --strict-manual-pin` must independently recheck
+the same pool/model before launch. Preview does not reserve quota or prove a worker
+will start. Manual pins disable cross-provider/model quota continuation; a 429 cannot
+silently substitute another model. `subject_pool` remains the separate author
+independence filter. Existing model quality, budget, entitlement, host and policy
+gates always win; a model string is never proof that a model is served or permitted.
+
+`fabric_capabilities.manual_routing.available` is true only when the installed native
+adapter advertises both `preview` and `--strict-manual-pin`. A source-merged Web
+facade or passing tests alone do not activate the feature in connected ChatGPT.
+Reconcile the pinned native generation, immutable service release, tool snapshot and
+actual originating parent; verify one new pinned-model START, useful result, parent
+consumption and acceptance before claiming `PROVEN_LIVE`. Never replay a held 429,
+failed, or effect-unknown reviewer or silently move an established carrier.
+
 
 ## Correct execution and recovery
 
@@ -32,6 +62,34 @@ Parameters have closed schemas. IDs use `[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}`. Pac
 **Acceptance limit:** this digest identifies the complete adapter CLI response, not every referenced artifact. It does not make the legacy acceptance operation atomic or cryptographically attest the bytes originally reviewed. Do not claim stronger guarantees than the existing ledger supplies.
 
 Any lost modifying response is `EFFECT_UNKNOWN` with no retry permission. Preserve the original child and process; do not create a replacement child, change carriers, kill a worker or manually release a lease. Missing result delivery is a same-run recovery problem, not a reason to rerun paid work. Read-only observations may continue without moving the operation. There is no facade cancellation or recursive spawn tool. A tool timeout, provider admission error, explicit permission denial and process exit are different evidence.
+
+## Optional per-request turn ceiling
+
+`fabric_request.max_turns` is an integer from 1 through 400. It narrows one new
+commission through the incumbent native `request --max-turns` and Claude wrapper;
+it does not change fleet defaults, model tiers, admission, leases or acceptance.
+The effective limit is the smaller of this request ceiling and the existing
+model/complexity/operator profile. An omitted value preserves existing behavior.
+A turn is not a tool-call count, token allowance or dollar budget.
+
+Before creating a controller, the facade verifies that the native request help
+advertises `--max-turns`. An older adapter returns
+`ADAPTER_TURN_LIMIT_UNAVAILABLE` rather than silently discarding the constraint.
+The existing router considers only qualified `glm`/`minimax` modes for a capped
+request; another mode is refused before launch. This filter is not admission or
+permission to use a new provider. Unsupported modes remain available to requests
+without this option under their unchanged rules.
+
+The native owner retains the requested ceiling with the original request. Its
+existing foreground quota continuation preserves that same ceiling, root, parent
+and deadline, and still requires its original pre-task rejection proof. Reaching
+the turn limit is not a capacity rejection and does not authorize another attempt.
+A returned controller receipt reports the requested value, not proven worker START
+or acceptance. Inspect the actual terminal result and retain partial work.
+
+Roll out the complete protected native generation before the same-account facade
+release. Until both are qualified, the new opt-in must fail closed. Existing
+controllers remain on their original code and cannot be retroactively capped.
 
 ## Quota continuity
 

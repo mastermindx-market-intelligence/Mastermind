@@ -81,3 +81,23 @@ New pinned native patch SHA256: 1c30952c04e6d130eeae0121cb17e9fb25683cc5eea61c45
 **Requalification:** On actual sealed M2 native generation 16, fresh disposable git apply --check and apply, three output hashes, and **12/12** no-provider tests passed. Receipt: SOURCE_ONLY_TESTED, current_selected_at_end=true, sealed_generation_unchanged=true, live_install_performed=false, provider_call_performed=false, worker_start_proven=false, review_required=true. Negatives include wrong, unknown and missing modes; legitimate Bailian/GLM/OpenCode modes remain valid. The read-only source reviewer is not a Fabric independent MAS-258 worker or final release approval.
 
 This correction changes only existing PR #1692 source patch, fixture, verifier and this research note. Installed Fabric remains unchanged; no worker retry, Macro #10067 edit/release, MAS-258 procedure-pin change or #9957/#9980 hold release occurred. Native/Web installation, reviewer acceptance and true provider-pinned MAS independent review still require future guarded stages.
+
+## 2026-10-23 direct integrated Web backend (same original PR)
+
+After the Chairman requested taking PR #1692 on verified inactivity, its source-only
+patch was forward-ported to the **actual current protected Web facade**, rather
+than being applied onto an obsolete backend blob. The current protected master
+was integrated as a parent without conflict; the original patch files, native
+qualification and historical source evidence are retained. The Web source now
+exposes typed `pool` and `model` on the live `fabric_request` contract, validates
+strict native help, performs matching no-effect native preview, and forwards the
+strict pin without cross-provider quota fallback. Unspecified routing keeps AUTO.
+Current backend Node tests include explicit pool-only, exact model, max turns,
+preview mismatch, unsupported native flag, and capabilities negatives. The old
+source-only patch replay test was converted into a test of the actual integrated
+Node backend; its preimages are historical, not current release instructions.
+
+**Source integration is not release:** installed generation, actual native preview,
+provider-specific entitlements, independent review and Web seat installation remain
+separate held gates. A synthetic `grok-4.7` test token never establishes that model
+is offered or may be routed. Do not issue retries for earlier Qwen 429 operations.

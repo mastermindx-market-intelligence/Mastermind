@@ -10,9 +10,11 @@ import asyncio
 import dataclasses
 import hashlib
 import json
+import math
 import re
 import socket
-from collections.abc import Callable
+import time
+from collections.abc import Callable, Mapping
 from pathlib import Path
 
 from control_plane.worker_execution_contract import WorkerLaunchSpec, WorkerProcessRef
@@ -21,6 +23,71 @@ _SHA = re.compile(r"[0-9a-f]{64}\Z")
 _NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}\Z")
 _LIMIT = 32768
 FD_ENV = "MMX_ACP_ATTEST_FD"
+_ACP_SHA40 = re.compile(r"[0-9a-f]{40}\Z")
+_ACP_ATTEMPT_ENV = frozenset({
+    "MMX_ACP_WORKSPACE_PATH", "MMX_ACP_WORKSPACE_BASE_SHA",
+    "MMX_ACP_RUN_ID", "MMX_ACP_JOB_ID", "MMX_ACP_WORKER_ID",
+    "MMX_ACP_DEADLINE_MS",
+})
+
+
+def _sealed_attempt_overlay(spec: WorkerLaunchSpec, raw: Mapping) -> dict:
+    """Verify a trusted factory's per-Attempt snapshot before native spawn.
+
+    This is existing ACP readiness socket input, never an env var, credential,
+    tool grant or separate transport. Revalidate scope against the exact spec
+    even if a caller supplies a plausible but foreign overlay.
+    """
+    try:
+        if not isinstance(raw, Mapping) or set(raw) != {"cwd", "env"}:
+            raise ValueError("ACP Attempt channel overlay shape refused")
+        cwd, env = raw["cwd"], raw["env"]
+        if not isinstance(cwd, str) or not isinstance(env, Mapping):
+            raise ValueError("ACP Attempt channel overlay values refused")
+        if set(env) != _ACP_ATTEMPT_ENV:
+            raise ValueError("ACP Attempt channel environment ceiling refused")
+        if any(not isinstance(value, str) or not value
+               or len(value.encode("utf-8")) > 4096
+               or any(c in value for c in ("\x00", "\r", "\n"))
+               for value in env.values()):
+            raise ValueError("ACP Attempt channel environment value refused")
+        path = Path(cwd)
+        if not path.is_absolute() or path == Path("/") or path.resolve(strict=True) != path:
+            raise ValueError("ACP Attempt channel workspace refused")
+        if path != Path(spec.workspace_path).resolve(strict=True):
+            raise ValueError("ACP Attempt channel foreign workspace refused")
+        if (env["MMX_ACP_WORKSPACE_PATH"] != cwd
+                or env["MMX_ACP_WORKSPACE_BASE_SHA"] != spec.expected_base_sha
+                or env["MMX_ACP_RUN_ID"] != spec.run_id
+                or env["MMX_ACP_JOB_ID"] != spec.job_id
+                or env["MMX_ACP_WORKER_ID"] != spec.worker_id
+                or not isinstance(spec.expected_base_sha, str)
+                or not _ACP_SHA40.fullmatch(spec.expected_base_sha)
+                or any(_NAME.fullmatch(env[key]) is None for key in (
+                    "MMX_ACP_RUN_ID", "MMX_ACP_JOB_ID", "MMX_ACP_WORKER_ID"
+                ))):
+            raise ValueError("ACP Attempt channel identity refused")
+        scopes = set(spec.authorities)
+        if spec.authority is not None:
+            scopes.add(str(spec.authority).strip().upper())
+        if not scopes or not scopes.issubset({"READ", "RESEARCH"}):
+            raise ValueError("ACP Attempt channel write authority refused")
+        deadline_text = env["MMX_ACP_DEADLINE_MS"]
+        if not deadline_text.isascii() or not deadline_text.isdecimal():
+            raise ValueError("ACP Attempt channel deadline refused")
+        deadline = int(deadline_text, 10)
+        now_ms = int(time.time() * 1000)
+        if (str(deadline) != deadline_text or deadline <= now_ms
+                or deadline > 8_640_000_000_000_000
+                or not isinstance(spec.timeout_seconds, (int, float))
+                or isinstance(spec.timeout_seconds, bool)
+                or not math.isfinite(spec.timeout_seconds)
+                or not 0 < spec.timeout_seconds <= 86_400
+                or deadline - now_ms > int(spec.timeout_seconds * 1000)):
+            raise ValueError("ACP Attempt channel deadline refused")
+        return {"cwd": cwd, "env": {key: env[key] for key in sorted(_ACP_ATTEMPT_ENV)}}
+    except (OSError, RuntimeError, TypeError, OverflowError, UnicodeError, AttributeError, KeyError) as exc:
+        raise ValueError("ACP Attempt channel overlay refused") from exc
 
 
 @dataclasses.dataclass(frozen=True)
@@ -120,8 +187,21 @@ class AcpAdmissionChannel:
     precedes session publication; the standard ACP session/model handshake then
     binds that single mount to the one admitted turn before its prompt.
     """
-    def __init__(self, gate: AcpNativeToolGate) -> None:
+    def __init__(
+        self,
+        gate: AcpNativeToolGate,
+        *,
+        spec: WorkerLaunchSpec | None = None,
+        attempt_overlay: Mapping | None = None,
+    ) -> None:
         self.gate = gate
+        if (spec is None) != (attempt_overlay is None):
+            raise ValueError("ACP Attempt channel requires exact spec and overlay")
+        self.attempt_spec = spec
+        self.attempt_overlay = (
+            _sealed_attempt_overlay(spec, attempt_overlay)
+            if spec is not None and attempt_overlay is not None else None
+        )
         self.parent, self.child = socket.socketpair()
         self.parent.setblocking(False)
         self.writer: asyncio.StreamWriter | None = None
@@ -135,17 +215,27 @@ class AcpAdmissionChannel:
 
     async def start(self, spec: WorkerLaunchSpec, ref: WorkerProcessRef,
                     identity_matches: Callable[[WorkerProcessRef], bool]) -> None:
+        if self.attempt_spec is not None:
+            if spec != self.attempt_spec:
+                raise ValueError("ACP Attempt channel changed before readiness")
+            # A pending process cannot borrow a now-expired overlay; this
+            # explicit refusal leaves the incumbent owner to settle the child.
+            _sealed_attempt_overlay(spec, self.attempt_overlay)
         self.child.close()
         reader, self.writer = await asyncio.open_connection(sock=self.parent, limit=_LIMIT)
         self.spec, self.ref, self.identity_matches = spec, ref, identity_matches
         self.seed = {
-            "schema": "mastermind.acp_tools_ready/v1",
+            "schema": "mastermind.acp_tools_ready/v2" if self.attempt_overlay else "mastermind.acp_tools_ready/v1",
             "run_id": spec.run_id, "job_id": spec.job_id, "worker_id": spec.worker_id,
             "launch_nonce": ref.launch_nonce, "pid": ref.pid, "base_sha": ref.base_sha,
             "projection_sha256": self.gate.projection_sha256,
             "artifact_sha256": self.gate.artifact_sha256,
             "admitted_tools": [dataclasses.asdict(t) for t in self.gate.tools],
         }
+        if self.attempt_overlay is not None:
+            # Native readiness v2 carries the *existing* immutable packet on
+            # the single inherited socket, never on ambient env/argv/stdout.
+            self.seed["attempt_overlay"] = self.attempt_overlay
         frame = json.dumps(self.seed, separators=(",", ":")).encode() + b"\n"
         if len(frame) > _LIMIT:
             raise ValueError("ACP readiness seed exceeds limit")
@@ -160,8 +250,16 @@ class AcpAdmissionChannel:
             if not line.endswith(b"\n") or len(line) > _LIMIT:
                 raise ValueError("ACP readiness frame refused")
             value = json.loads(line, object_pairs_hook=_object_pairs, parse_constant=_nonfinite)
+            expected_reply = {**self.seed, "ready": True}
+            if self.attempt_overlay is not None:
+                # A v1 child echo must NOT accidentally qualify the new v2
+                # payload: require independent parsing/hashing by the child.
+                expected_reply["attempt_overlay_sha256"] = hashlib.sha256(
+                    json.dumps(self.attempt_overlay, sort_keys=True,
+                               separators=(",", ":"), ensure_ascii=True).encode()
+                ).hexdigest()
             if (json.dumps(value, sort_keys=True, separators=(",", ":"))
-                    != json.dumps({**self.seed, "ready": True}, sort_keys=True, separators=(",", ":"))
+                    != json.dumps(expected_reply, sort_keys=True, separators=(",", ":"))
                     or not identity_matches(ref)):
                 raise ValueError("ACP readiness identity refused")
             self.gate.verify_artifacts()

@@ -67,9 +67,9 @@ test('closed, correctly annotated catalog with no generic command tools',()=>{
  assert.deepEqual(api.FABRIC_TOOLS.map(t=>t.name).sort(),['fabric_accept','fabric_capabilities','fabric_controller_output','fabric_request','fabric_result','fabric_status','fabric_wait'].sort());
  for(const t of api.FABRIC_TOOLS){assert.equal(t.inputSchema.additionalProperties,false);assert.equal(t.annotations.readOnlyHint,!['fabric_request','fabric_accept'].includes(t.name));}
 });
-test('rejects unknown tool and caller-selected shell, provider, host, model, or cwd before engine access',async()=>{
+test('rejects unknown tool and caller-selected shell, host, unsupported model, or cwd before engine access',async()=>{
  const e=engine();const f=facade(e);
- for(const field of ['shell','host','pool','model','cwd','adapterPath']) { const out=unwrap(await f.call('fabric_request',{...packet,[field]:'attacker'})); assert.equal(out.error,'INVALID_ARGUMENT'); }
+ for(const field of ['shell','host','provider','model','cwd','adapterPath']) { const out=unwrap(await f.call('fabric_request',{...packet,[field]:'attacker'})); assert.equal(out.error,'INVALID_ARGUMENT'); }
  assert.equal(unwrap(await f.call('start_process',{command:'true'})).error,'UNKNOWN_TOOL');assert.equal(e.calls.length,0);
 });
 test('rejects malformed roots, bool timeout, NUL packets and unreasoned frontier promotion',async()=>{
@@ -137,14 +137,15 @@ test('provider text cannot fabricate a Desktop Commander controller process hand
  const observed=unwrap(await f.call('fabric_controller_output',{...id,controller_pid:424242}));assert.equal(observed.error,'CONTROLLER_NOT_BOUND');assert.equal(e.calls.length,2);
 });
 test('one globally keyed run ID cannot dispatch concurrently under different roots',async()=>{
- const calls=[];const waiting=[];let requestStarts=0;let nextPid=600;
+ const calls=[];let requestStarts=0;let nextPid=600;
  const e={calls,async callTool(req){calls.push(req);const command=req.arguments.command;
-  if(command.includes("'status' 'web-fabric-001'")) return await new Promise(resolve=>{waiting.push(resolve);if(waiting.length===2){for(const release of waiting) release(capturedJSON(absent));}});
+  if(command.includes("'status' 'web-fabric-001'")) return capturedJSON(absent);
   if(command.includes("'request' '--id' 'web-fabric-001'")){requestStarts+=1;return pending(++nextPid);}
   throw new Error('unexpected engine call');
  }};
  const f=facade(e);const other={...packet,root_id:'mission-002',parent_id:'mission-002'};
  const results=(await Promise.all([f.call('fabric_request',packet),f.call('fabric_request',other)])).map(unwrap);
+ assert.equal(calls.filter(x=>x.arguments.command.includes("'status' 'web-fabric-001'")).length,1);
  assert.equal(requestStarts,1);assert.equal(results.filter(x=>x.delivery==='CONTROLLER_CREATED').length,1);assert.equal(results.filter(x=>x.error==='REQUEST_ALREADY_ATTEMPTED').length,1);
 });
 test('an already accepted run is observed without modifying acceptance again',async()=>{
@@ -478,4 +479,94 @@ test('acceptance evidence codes are closed and consistent with review method',as
  const field=api.FABRIC_TOOLS.find(t=>t.name==='fabric_accept').inputSchema.properties.verification_summary;
  assert.deepEqual(field.enum,['deterministic_test_evidence','artifact_digest_comparison',
    'manual_result_review','independent_review_evidence']);
+});
+
+// PR #1692: manual provider/model requests only constrain the existing native
+// router; they never authenticate a root, grant quota, or prove model START.
+const manualPinned={...packet,task_class:'review',task_complexity:'C2_COMPLEX_BOUNDED',pool:'grok',model:'grok-4.7'};
+const manualPreview={state:'PREVIEW_ONLY',reserved:false,selection_rechecked_at_request:true,
+  strict_pin_enforced_at_request:true,run_id:id.run_id,pool:'grok',model:'grok-4.7',host:'ubuntu1',mode:'grok'};
+const manualHelp=captured('usage: request --strict-manual-pin --max-turns');
+
+test('manual request only permits closed pool and qualified model token shapes',async()=>{
+ const e=engine(),f=facade(e);
+ for(const change of [{pool:'grok;echo'},{pool:'codex-native'},{model:'grok-4.7 $(id)'},
+   {provider:'grok'},{host:'ubuntu1'},{cwd:'~/secret'},{model:45}]) {
+   assert.equal(unwrap(await f.call('fabric_request',{...manualPinned,...change})).error,'INVALID_ARGUMENT');
+ }
+ const noPool={...manualPinned};delete noPool.pool;
+ assert.equal(unwrap(await f.call('fabric_request',noPool)).error,'INVALID_ARGUMENT');
+ assert.equal(e.calls.length,0);
+});
+
+test('strict manual request cannot dispatch if native pin flag is unavailable',async()=>{
+ const e=engine([captured('usage: request --pool')]);
+ const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+ assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
+ assert.equal(e.calls.length,1);assert.match(e.calls[0].arguments.command,/'request' '--help'/);
+});
+
+test('native preview failure or mismatch refuses before controller creation',async()=>{
+ for(const value of [
+   'not-json',JSON.stringify({...manualPreview,model:'grok-4.6'}),
+   JSON.stringify({...manualPreview,pool:'glm'}),JSON.stringify({...manualPreview,reserved:true}),
+   JSON.stringify({...manualPreview,strict_pin_enforced_at_request:false}),
+   JSON.stringify({...manualPreview,selection_rechecked_at_request:false}),
+   JSON.stringify({...manualPreview,run_id:'another-run'}),
+ ]) {
+   const e=engine([manualHelp,capturedJSON(absent),captured(value)]);
+   const out=unwrap(await facade(e).call('fabric_request',manualPinned));
+   assert.equal(out.error,'MANUAL_ROUTE_UNAVAILABLE');assert.equal(out.retry_allowed,false);
+   assert.equal(e.calls.length,3);
+   assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+ }
+});
+
+test('explicit exact model uses strict native pool/model pin without cross-provider quota continuation',async()=>{
+ const e=engine([manualHelp,capturedJSON(absent),capturedJSON(manualPreview),pending()]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',manualPinned));
+ assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(out.worker_started,null);
+ assert.equal(out.requested_pool,'grok');assert.equal(out.requested_model,'grok-4.7');
+ assert.equal(out.strict_manual_pin,true);assert.equal(e.calls.length,4);
+ assert.match(e.calls[2].arguments.command,/'preview' '--id' 'web-fabric-001'/);
+ assert.match(e.calls[2].arguments.command,/'--pool' 'grok' '--model' 'grok-4.7'/);
+ assert.match(e.calls[3].arguments.command,/'--pool' 'grok' '--strict-manual-pin' '--model' 'grok-4.7'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
+test('pool-only pin and explicit model AUTO permit native qualified within-pool selection',async()=>{
+ for(const model of [undefined,'auto']) {
+   const e=engine([manualHelp,capturedJSON(absent),capturedJSON({...manualPreview,model:'grok-4.6'}),pending()]);
+   const request={...manualPinned};if(model===undefined) delete request.model;else request.model=model;
+   const out=unwrap(await facade(e).call('fabric_request',request));
+   assert.equal(out.delivery,'CONTROLLER_CREATED');assert.equal(e.calls.length,4);
+   assert.equal(out.requested_model,model??'auto');
+   assert.match(e.calls[3].arguments.command,/'--pool' 'grok' '--strict-manual-pin'/);
+   assert.doesNotMatch(e.calls[3].arguments.command,/'--model'/);
+   assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+ }
+});
+
+test('manual request preserves existing bounded max-turn ceiling and strict selection',async()=>{
+ const e=engine([manualHelp,capturedJSON(absent),capturedJSON(manualPreview),pending()]);
+ const out=unwrap(await continuingFacade(e).call('fabric_request',{...manualPinned,max_turns:12}));
+ assert.equal(out.requested_max_turns,12);assert.equal(e.calls.length,4);
+ assert.match(e.calls[3].arguments.command,/'--max-turns' '12'/);
+ assert.match(e.calls[3].arguments.command,/'--strict-manual-pin'/);
+ assert.doesNotMatch(e.calls[3].arguments.command,/'--quota-fallback'/);
+});
+
+test('advertise manual routing only with native preview AND strict request support',async()=>{
+ for(const [top,help,available] of [
+   ['usage: preview request status result accept','usage: request --strict-manual-pin',true],
+   ['usage: preview request status result accept','usage: request --pool only',false],
+   ['usage: request status result accept','',false],
+ ]) {
+   const responses=[captured(top)];if(top.includes('preview')) responses.push(captured(help));
+   const e=engine(responses),out=unwrap(await facade(e).call('fabric_capabilities',{}));
+   assert.equal(out.manual_routing.available,available);
+   assert.equal(out.manual_routing.default,'AUTO');
+   assert.equal(out.manual_routing.cross_provider_fallback,false);
+   assert.equal(e.calls.length,top.includes('preview')?2:1);
+ }
 });
