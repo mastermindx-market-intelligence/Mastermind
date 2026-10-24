@@ -182,3 +182,37 @@ def test_factory_rechecks_discovery_owner_after_source_work(hosted, monkeypatch,
             await host.close()
 
     asyncio.run(exercise())
+
+
+def test_trusted_factory_wires_one_cross_plane_read_through_original_private_frame(hosted):
+    from control_plane.workspace_control_room_presenter import CrossPlaneOwnerContext
+    from tests.test_executive_cross_plane_live import Owners, _scope, NOW
+    host, baseline = hosted
+    witnesses = Owners()
+    selected = []
+
+    def cross_plane(member, owner_source):
+        selected.append((member["client_ref"], owner_source is host.config))
+        return CrossPlaneOwnerContext(
+            scope=_scope(), ports=witnesses.ports(), observation_clock=lambda: NOW,
+            stale_after_seconds=600,
+        )
+
+    service = provider(host, cross_plane_context=cross_plane)(object())
+
+    async def exercise():
+        await host.start()
+        try:
+            read_result = await service.handle_frame(frame("state"))
+            assert read_result["ok"] is True
+            assert read_result["result"]["control_room"] == baseline
+            evidence = read_result["result"]["cross_plane"]
+            assert evidence["state"] == "AVAILABLE"
+            assert evidence["document"]["state"] == "DEGRADED"
+            assert evidence["document"]["cards"][0]["workstream"] == "WS:TARGET"
+            assert (await service.handle_frame(frame("discover")))["status"] == 403
+        finally:
+            await host.close()
+    asyncio.run(exercise())
+    assert selected == [("fixture-web", True)]
+    assert sorted(witnesses.calls) == ["base", "executive", "github", "identities", "linear", "slack"]

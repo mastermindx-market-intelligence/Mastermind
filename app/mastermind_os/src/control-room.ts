@@ -4,6 +4,7 @@
  */
 import { programsFromControlRoom, type ProgramCard } from "./mission";
 import { decodeControlRoomNavigation, type ControlRoomNavigation } from "./control-room-navigation";
+import { decodeCrossPlaneRead, type CrossPlaneRead } from "./control-room-cross-plane";
 
 const FIELDS = [
   "control_room",
@@ -24,6 +25,7 @@ export type ControlRoomRead = {
   /** No projection-wide live/expiry inference from unrelated per-card proofs. */
   readonly freshness: "OWNER_QUALIFIED" | "UNKNOWN";
   readonly publicationSeq: number | null;
+  readonly crossPlane: CrossPlaneRead;
 };
 export type ControlRoomState = (
   | { state: "PENDING" }
@@ -46,7 +48,7 @@ const timestamp = (value: unknown): value is string =>
 export function decodeControlRoomRead(raw: unknown): ControlRoomRead {
   if (
     !record(raw) ||
-    Object.keys(raw).length !== FIELDS.length ||
+    Object.keys(raw).length !== FIELDS.length + (Object.hasOwn(raw, "cross_plane") ? 1 : 0) ||
     FIELDS.some((k) => !Object.hasOwn(raw, k)) ||
     typeof raw.live_builds_active !== "boolean" ||
     typeof raw.refresh_in_flight !== "boolean" ||
@@ -91,6 +93,7 @@ export function decodeControlRoomRead(raw: unknown): ControlRoomRead {
     refreshInFlight: raw.refresh_in_flight,
     freshness: qualified ? "OWNER_QUALIFIED" : "UNKNOWN",
     publicationSeq: qualified ? (validity.publication_seq as number) : null,
+    crossPlane: decodeCrossPlaneRead(Object.hasOwn(raw, "cross_plane") ? raw.cross_plane : undefined),
   });
 }
 

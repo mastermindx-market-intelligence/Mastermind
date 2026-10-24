@@ -127,3 +127,107 @@ def test_bounded_discovery_never_returns_unbounded_local_data(tmp_path, monkeypa
                                      authorize_discovery=owner({"fixture-web"}))
     result = read(p, operation="discover")
     assert result["status"] == 503 and "raw" not in str(result)
+
+
+def test_authenticated_state_composes_one_live_receipt_with_existing_owner(tmp_path, monkeypatch):
+    from control_plane.workspace_control_room_presenter import CrossPlaneOwnerContext
+    from tests.test_executive_cross_plane_live import Owners, _scope, NOW
+    source_owners, _, cache = cache_fixture(tmp_path)
+    monkeypatch.setattr(ccr.capability, "census", lambda **kw: {"test-only": True})
+    ports = Owners()
+    selected = []
+
+    def select(member, source):
+        selected.append((member["client_ref"], source is source_owners[0]))
+        return CrossPlaneOwnerContext(
+            scope=_scope(), ports=ports.ports(), observation_clock=lambda: NOW,
+            stale_after_seconds=600,
+        )
+
+    presenter = ExistingControlRoomPresenter(cache, authorize=owner({"fixture-web"}),
+                                              cross_plane_context=select)
+    result = read(presenter)
+    assert result["ok"] is True
+    assert selected == [("fixture-web", True)]
+    evidence = result["result"]["cross_plane"]
+    assert evidence["schema"] == "mastermind.control_room_cross_plane_read.v1"
+    assert evidence["state"] == "AVAILABLE" and evidence["reason_code"] is None
+    assert evidence["document"]["state"] == "DEGRADED"
+    assert evidence["document"]["capability"] == {"effect": "NONE", "read_only": True}
+    assert [x["workstream"] for x in evidence["document"]["cards"]] == ["WS:TARGET"]
+    assert sorted(ports.calls) == ["base", "executive", "github", "identities", "linear", "slack"]
+    assert result["result"]["control_room"] == source_owners[0].state_cache["doc"]
+
+
+def test_live_cross_plane_source_error_is_explicit_and_private(tmp_path, monkeypatch):
+    import dataclasses
+    from control_plane.workspace_control_room_presenter import CrossPlaneOwnerContext
+    from tests.test_executive_cross_plane_live import Owners, _scope, NOW
+    _, _, cache = cache_fixture(tmp_path)
+    monkeypatch.setattr(ccr.capability, "census", lambda **kw: {})
+    owners = Owners()
+
+    async def fail(_scope):
+        raise RuntimeError("private API token should never appear")
+
+    ports = dataclasses.replace(owners.ports(), github=fail)
+    presenter = ExistingControlRoomPresenter(
+        cache, authorize=owner({"fixture-web"}),
+        cross_plane_context=lambda *_: CrossPlaneOwnerContext(_scope(), ports, lambda: NOW),
+    )
+    result = read(presenter)
+    assert result["ok"] is True
+    assert result["result"]["cross_plane"] == {
+        "schema": "mastermind.control_room_cross_plane_read.v1",
+        "state": "UNAVAILABLE", "reason_code": "source_unavailable", "document": None,
+    }
+    assert "private API token" not in str(result)
+
+
+def test_live_acquisition_rechecks_revocation_and_publication(tmp_path, monkeypatch):
+    import dataclasses
+    from control_plane.workspace_control_room_presenter import CrossPlaneOwnerContext
+    from tests.test_executive_cross_plane_live import Owners, _scope, NOW
+    source_owners, _, cache = cache_fixture(tmp_path)
+    monkeypatch.setattr(ccr.capability, "census", lambda **kw: {})
+    allowed = {"fixture-web"}
+    owners = Owners()
+    original = owners.ports()
+
+    async def revoked(scope):
+        result = await original.github(scope)
+        allowed.clear()
+        return result
+
+    presenter = ExistingControlRoomPresenter(
+        cache, authorize=owner(allowed),
+        cross_plane_context=lambda *_: CrossPlaneOwnerContext(
+            _scope(), dataclasses.replace(original, github=revoked), lambda: NOW),
+    )
+    result = read(presenter)
+    assert result["status"] == 403 and "cross_plane" not in str(result)
+    allowed.add("fixture-web")
+
+    async def republished(scope):
+        result = await original.github(scope)
+        source_owners[0].state_published_seq += 1
+        return result
+
+    presenter = ExistingControlRoomPresenter(
+        cache, authorize=owner(allowed),
+        cross_plane_context=lambda *_: CrossPlaneOwnerContext(
+            _scope(), dataclasses.replace(original, github=republished), lambda: NOW),
+    )
+    result = read(presenter)
+    assert result["status"] == 503 and "cross_plane" not in str(result)
+
+
+def test_legacy_seven_field_read_remains_exact(tmp_path, monkeypatch):
+    _, _, cache = cache_fixture(tmp_path)
+    monkeypatch.setattr(ccr.capability, "census", lambda **kw: {})
+    result = read(ExistingControlRoomPresenter(cache, authorize=owner({"fixture-web"})))
+    assert result["ok"] is True
+    assert set(result["result"]) == {
+        "control_room", "capabilities", "live_builds_active", "composed_at",
+        "refresh_in_flight", "state_refresh_error", "source_validity",
+    }

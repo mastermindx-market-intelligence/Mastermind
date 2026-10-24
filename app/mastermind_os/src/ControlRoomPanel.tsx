@@ -143,6 +143,53 @@ export function ControlRoomPanel({
               <small>Blocked or missing a clear root</small>
             </div>
           </div>
+          <section className="ccr-cross-plane" aria-label="Cross-plane source evidence">
+            <div className="ccr-cross-plane-head">
+              <div>
+                <h3>Cross-plane source evidence</h3>
+                <p>Read-only source attribution. A merge or green check is not completion proof.</p>
+              </div>
+              <span>Execution not projected</span>
+            </div>
+            {state.crossPlane.state === "UNAVAILABLE" ? (
+              <p role="status" className="ccr-cross-plane-unavailable">
+                {state.crossPlane.reason === "NOT_INSTALLED"
+                  ? "Session Truth is not connected to this installed Control Room."
+                  : "Session Truth owner sources are unavailable; no healthy result was inferred."}
+              </p>
+            ) : (
+              <>
+                <p className="ccr-cross-plane-meta">
+                  {state.crossPlane.viewState === "DEGRADED" ? "Incomplete source evidence" : "Source evidence composed"}
+                  {" · "}{state.crossPlane.unknownCount} unknowns
+                  {" · "}{state.crossPlane.unavailableCount} unavailable sources
+                  {" · "}{state.crossPlane.digestVerified ? "Receipt digest verified" : "Receipt digest unverified"}
+                </p>
+                {state.crossPlane.cards.length === 0 ? (
+                  <p className="ccr-cross-plane-unavailable">No source-authorized workstream attribution was established.</p>
+                ) : state.crossPlane.cards.map((card) => (
+                  <div className="ccr-cross-plane-card" key={card.workstream}>
+                    <h4>{card.workstream}</h4>
+                    {card.pullRequests.map((pr) => (
+                      <p key={`${pr.repository}#${pr.number}`}>
+                        <code>{pr.repository}#{pr.number}</code>
+                        {" · "}Delivery: {pr.delivery}; CI: {pr.ci}
+                        {" · "}Declared completion: {pr.declaredCompletion ?? "not established"}
+                        {" · "}Proof state: {pr.proofState ?? "not established"}
+                        {" · "}Native Linear link: {pr.linkedIssue ?? "not established"}
+                      </p>
+                    ))}
+                    {card.issues.map((issue) => (
+                      <p key={issue.issueId}>{issue.issueId}: {issue.status} (projection, not execution)</p>
+                    ))}
+                    {!card.pullRequests.length && !card.issues.length && (
+                      <p>Neither an exact PR nor an exact Linear relationship was established.</p>
+                    )}
+                  </div>
+                ))}
+              </>
+            )}
+          </section>
           <div className="ccr-toolbar">
             <div
               className="ccr-filters"

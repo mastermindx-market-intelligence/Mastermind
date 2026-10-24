@@ -205,3 +205,30 @@ def test_source_failure_does_not_become_empty_healthy_document():
         _render(owners, ports=ports)
     assert "secret provider detail" not in str(err.value)
     assert "linear" not in owners.calls
+
+
+def test_live_caller_clock_samples_end_after_one_owner_acquisition():
+    owners = Owners()
+    stamps = iter([NOW, "2026-08-27T08:00:01Z"])
+    sampled = []
+
+    def clock():
+        sampled.append(tuple(owners.calls))
+        return next(stamps)
+
+    document = asyncio.run(acquire_live_cross_plane_view(
+        scope=_scope(), ports=owners.ports(), observation_clock=clock,
+        stale_after_seconds=600,
+    ))
+    assert len(sampled) == 2 and sampled[0] == ()
+    assert set(sampled[1]) == {"base", "github", "linear", "slack", "executive", "identities"}
+    assert document["evaluated_at"] == "2026-08-27T08:00:01Z"
+    assert document["source_receipt"]["observation"]["ended_at"] == "2026-08-27T08:00:01Z"
+
+
+def test_caller_clock_and_eager_times_cannot_be_mixed():
+    with pytest.raises(ValueError, match="one observation clock"):
+        asyncio.run(acquire_live_cross_plane_view(
+            scope=_scope(), ports=Owners().ports(),
+            observed_started_at=NOW, observation_clock=lambda: NOW,
+        ))

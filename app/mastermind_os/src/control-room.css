@@ -552,3 +552,20 @@
     margin: 9px 0 8px;
   }
 }
+
+/* Read-only Session Truth evidence; never a product-wide health/liveness badge. */
+.ccr-cross-plane {
+  margin: 16px 0;
+  padding: 18px;
+  border: 1px solid var(--border, rgba(120, 135, 160, 0.26));
+  border-radius: 14px;
+  overflow-wrap: anywhere;
+}
+.ccr-cross-plane-head { display: flex; justify-content: space-between; gap: 15px; align-items: baseline; }
+.ccr-cross-plane h3 { margin: 0 0 5px; font-size: 16px; }
+.ccr-cross-plane h4 { margin: 10px 0 6px; font-size: 13px; }
+.ccr-cross-plane p { margin: 5px 0; font-size: 12px; line-height: 1.6; }
+.ccr-cross-plane-head > span, .ccr-cross-plane-meta { color: var(--muted); font-size: 11px; }
+.ccr-cross-plane-card { padding: 9px 0; border-top: 1px solid var(--border, rgba(120, 135, 160, 0.2)); }
+.ccr-cross-plane-unavailable { color: var(--muted); }
+@media (max-width: 700px) { .ccr-cross-plane-head { flex-direction: column; gap: 4px; } }

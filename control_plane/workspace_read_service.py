@@ -1545,7 +1545,8 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
                                authorize_discovery=None, authorize_actions=None, action_now=None,
                                product_acceptance_basis_reader=None, product_acceptance_owner_target=None,
                                product_acceptance_owner_guard=None, product_acceptance_read=None,
-                               product_acceptance_observe=None, activity_membership=None):
+                               product_acceptance_observe=None, activity_membership=None,
+                               cross_plane_context=None):
     """Compose a sibling factory from the existing hosted owner and permissions.
 
     Installers pass this to CeoIngressAppBinding.workspace_read_provider_factory.
@@ -1570,6 +1571,7 @@ def workspace_provider_factory(*, control_room, authorize, armed, runtime_identi
     from control_plane.workspace_control_room_presenter import ExistingControlRoomPresenter
     presenter = ExistingControlRoomPresenter(
         cache, authorize=authorize, authorize_discovery=authorize_discovery,
+        cross_plane_context=cross_plane_context,
     )
     actions = None
     if authorize_actions is not None:

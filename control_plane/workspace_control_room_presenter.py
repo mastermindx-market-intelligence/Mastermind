@@ -13,6 +13,9 @@ from __future__ import annotations
 import asyncio
 import copy
 from collections.abc import Callable
+from dataclasses import dataclass
+
+from control_plane.session_truth_live_acquire import LiveOwnerPorts, LiveScope
 
 from common.executive_workspace_contract import (
     MAX_RESPONSE_BYTES, PRINCIPAL_KEYS, SCOPE, bounded_canonical, permission_stamp,
@@ -24,6 +27,29 @@ from control_plane.workspace_read_service import ExistingControlRoomCache
 def _refuse(code: str, status: int) -> dict:
     return {"ok": False, "status": status,
             "error": {"code": code, "message": "control room unavailable"}}
+
+
+CROSS_PLANE_READ_SCHEMA = "mastermind.control_room_cross_plane_read.v1"
+
+
+@dataclass(frozen=True)
+class CrossPlaneOwnerContext:
+    """Trusted host's scoped READ capability, never constructed by HTTP input."""
+
+    scope: LiveScope
+    ports: LiveOwnerPorts
+    observation_clock: Callable[[], str]
+    stale_after_seconds: float | None = None
+
+    def __post_init__(self):
+        if (type(self.scope) is not LiveScope or type(self.ports) is not LiveOwnerPorts
+                or not callable(self.observation_clock)):
+            raise ValueError("exact trusted cross-plane owner context required")
+
+
+def _cross_plane_unavailable():
+    return {"schema": CROSS_PLANE_READ_SCHEMA, "state": "UNAVAILABLE",
+            "reason_code": "source_unavailable", "document": None}
 
 
 class ExistingControlRoomPresenter:
@@ -40,14 +66,42 @@ class ExistingControlRoomPresenter:
 
     def __init__(self, cache: ExistingControlRoomCache, *,
                  authorize: Callable[[dict], bool],
-                 authorize_discovery: Callable[[dict], bool] | None = None):
+                 authorize_discovery: Callable[[dict], bool] | None = None,
+                 cross_plane_context: Callable[[dict, object], CrossPlaneOwnerContext] | None = None):
         if type(cache) is not ExistingControlRoomCache or not callable(authorize):
             raise ValueError("existing workspace owner required")
         if authorize_discovery is not None and not callable(authorize_discovery):
             raise ValueError("discovery authority must be a callback")
+        if cross_plane_context is not None and not callable(cross_plane_context):
+            raise ValueError("cross-plane owner context must be a trusted callback")
         self._cache = cache
         self._authorize = authorize
         self._authorize_discovery = authorize_discovery
+        self._cross_plane_context = cross_plane_context
+
+    async def _read_cross_plane(self, principal: dict, source: object) -> dict:
+        """One canonical live-owner read; no extra clients, polling or local cache."""
+        try:
+            context = self._cross_plane_context(principal, source)
+            if type(context) is not CrossPlaneOwnerContext:
+                raise ValueError("invalid trusted cross-plane context")
+            from control_plane.executive_cross_plane_live import acquire_live_cross_plane_view
+            from control_plane.executive_cross_plane_view import SCHEMA, OUTPUT_KEYS
+            document = await await_owned(asyncio.create_task(acquire_live_cross_plane_view(
+                scope=context.scope, ports=context.ports,
+                observation_clock=context.observation_clock,
+                stale_after_seconds=context.stale_after_seconds,
+            )))
+            if (type(document) is not dict or set(document) != OUTPUT_KEYS
+                    or document.get("schema") != SCHEMA
+                    or document.get("state") not in {"CONSUMED", "DEGRADED"}
+                    or document.get("capability") != {"read_only": True, "effect": "NONE"}):
+                raise ValueError("unqualified cross-plane result")
+            return {"schema": CROSS_PLANE_READ_SCHEMA, "state": "AVAILABLE",
+                    "reason_code": None, "document": document}
+        except Exception:
+            # Never release source exceptions or substitute an empty green card.
+            return _cross_plane_unavailable()
 
     @staticmethod
     def _shape(principal: object) -> bool:
@@ -100,6 +154,10 @@ class ExistingControlRoomPresenter:
                 body = copy.deepcopy(_cached_state_snapshot(source))
                 body["control_room"] = body.pop("doc")
                 body["live_builds_active"] = source.live_cache.get("active_builds") is not None
+                if self._cross_plane_context is not None:
+                    # This is within the same owner/permission snapshot as the
+                    # incumbent READ. Only a trusted installed host can arm it.
+                    body["cross_plane"] = await self._read_cross_plane(principal, source)
             else:
                 from scripts.chairman_control_room import _discover_document
                 body = await await_owned(asyncio.create_task(asyncio.to_thread(
