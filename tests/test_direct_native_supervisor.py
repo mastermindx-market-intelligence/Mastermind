@@ -276,3 +276,18 @@ def test_current_access_is_rechecked_after_preparation_before_adapter_start(fixt
 def test_direct_missing_profile_cannot_take_legacy_unprofiled_path(fixture):
     with pytest.raises(s.SupervisorError, match='requires its sealed execution profile'):
         fixture.supervisor._validate_execution_profile(fixture.job, fixture.lease, fixture.grant)
+
+
+def test_direct_unknown_commission_objects_never_fetch_remotely(fixture,monkeypatch):
+    f=fixture
+    source=SimpleNamespace(commission_ref=SimpleNamespace(
+        repository='mastermindx-market-intelligence/Mastermind',commit='a'*40,path='commission.md',content_sha256='b'*64))
+    monkeypatch.setattr(s,'_dialogue_source_from_root_creation',lambda *a,**k:source)
+    monkeypatch.setattr(s,'_verify_commission_workspace',lambda *a:None)
+    monkeypatch.setattr(s,'_commission_local_resolution',lambda *a,**k:
+        s._CommissionLocalResolution(state=s._CommissionLocalState.UNAVAILABLE,blob_oid=None))
+    def never(**kwargs):
+        raise AssertionError('direct localUNKNOWN reached remote fetch')
+    monkeypatch.setattr(s,'_fetch_remote_commission',never)
+    with pytest.raises(s.SupervisorError,match='prepared local objects'):
+        s.verify_commission_for_job(f.runtime,f.job,f.root)

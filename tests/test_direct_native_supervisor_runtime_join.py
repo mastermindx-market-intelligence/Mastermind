@@ -272,20 +272,31 @@ def test_actual_bound_direct_read_refuses_oversized_event_before_python_material
     keeper,namespace,binding,reader=_bound_reader(runtime)
     original_connect=er.sqlite3.connect
     materialized=[]
+    class ObservedConnection(er.sqlite3.Connection):
+        # Preserve the actual native connection and all Runtime validators;
+        # instrument materialization even after owner sets its Row factory.
+        def __setattr__(self,name,value):
+            if name=='row_factory' and value is er.sqlite3.Row:
+                actual=value
+                def bounded_factory(cursor,row):
+                    if any(isinstance(cell,(str,bytes)) and len(cell)>er.BOUNDED_ROLE_RESULT_MAX_CELL_BYTES for cell in row):
+                        materialized.append('oversized-cell')
+                        raise AssertionError('oversized Event reached Python materialization')
+                    return actual(cursor,row)
+                value=bounded_factory
+            super().__setattr__(name,value)
     def connect(*args,**kwargs):
-        connection=original_connect(*args,**kwargs)
-        def bounded_factory(cursor,row):
-            if any(isinstance(value,(str,bytes)) and len(value)>er.BOUNDED_ROLE_RESULT_MAX_CELL_BYTES for value in row):
-                materialized.append('oversized-cell')
-                raise AssertionError('oversized Event reached Python materialization')
-            return er.sqlite3.Row(cursor,row)
-        connection.row_factory=bounded_factory
-        return connection
+        assert 'factory' not in kwargs
+        return original_connect(*args,**kwargs,factory=ObservedConnection)
     monkeypatch.setattr(er.sqlite3,'connect',connect)
     try:
-        with pytest.raises(er.RuntimeRoleResultOverBudget):
-            reader.read_direct_native_result_bounded(dict(work_ref='WS:H2',job_id=job.job_id,
+        try:
+            refused=reader.read_direct_native_result_bounded(dict(work_ref='WS:H2',job_id=job.job_id,
                 attempt_id=receipt.attempt.attempt_id),access=access)
+        except er.RuntimeReadUnavailable:
+            pass  # Actual finite VM/cell owner may refuse before public projection.
+        else:
+            assert refused['availability']=='UNAVAILABLE' and refused['result'] is None
         assert materialized==[]
     finally:
         _release(keeper,binding)

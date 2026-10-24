@@ -1076,6 +1076,8 @@ def verify_commission_for_job(
             raise SupervisorError("commission local blob identity is unavailable")
         content = _read_local_commission_blob(workspace, local.blob_oid)
     else:
+        if direct:
+            raise SupervisorError("direct native commission requires complete prepared local objects")
         content = _fetch_remote_commission(
             repository=ref.repository,
             commit=commit,
