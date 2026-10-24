@@ -29,12 +29,17 @@ import hashlib
 import json
 import os
 import posixpath
+import pwd
 import stat
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath, PurePath
 from typing import Callable, NoReturn
 
-from control_plane.fs_security import FilesystemSecurityError, has_macos_acl
+from control_plane.fs_security import (
+    FilesystemSecurityError,
+    has_macos_acl,
+    has_macos_everyone_deny_delete_only_acl,
+)
 
 __all__ = [
     "FIXED_OBSERVED_UID",
@@ -213,6 +218,49 @@ def _check_manifest_path(value: object) -> tuple[str, ...]:
     return tuple(parts)
 
 
+def _pwd_home_components(observed_uid: int, gid: int) -> tuple[str, ...] | None:
+    """Resolve the sole ACL-exception home from the fixed uid's pwd record.
+
+    The reader's single ACL exception exists only when the account database
+    itself names a home directory for the observed uid whose gid matches the
+    caller-qualified gid. The record's home string is consumed as pure
+    component data — absolute, already normalized, flat safe names — with no
+    symlink resolution and no reopening through the absolute path. A missing
+    record, a gid or uid mismatch, or any malformed home string returns
+    ``None``, which leaves the reader with no exception at all so every ACL
+    observation refuses exactly as before.
+    """
+
+    try:
+        record = pwd.getpwuid(observed_uid)
+    except (KeyError, OSError, ValueError):
+        return None
+    raw = getattr(record, "pw_dir", None)
+    record_uid = getattr(record, "pw_uid", None)
+    record_gid = getattr(record, "pw_gid", None)
+    if not isinstance(raw, str) or not raw or "\0" in raw:
+        return None
+    if isinstance(record_uid, bool) or not isinstance(record_uid, int):
+        return None
+    if isinstance(record_gid, bool) or not isinstance(record_gid, int):
+        return None
+    if record_uid != observed_uid or record_gid != gid:
+        return None
+    if not posixpath.isabs(raw) or posixpath.normpath(raw) != raw:
+        return None
+    parts = tuple(
+        part for part in PurePosixPath(raw).parts if part not in ("/", "")
+    )
+    if not parts:
+        return None
+    try:
+        for part in parts:
+            _check_plain_name(part)
+    except StudioObservationError:
+        return None
+    return parts
+
+
 class _TreeBudget:
     """Running dependency-tree counters shared by both hashing passes."""
 
@@ -356,14 +404,79 @@ def _make_dispatch_dir_policy(
 
 
 class _Walk:
-    """Holds every descriptor opened during one observation; closes all."""
+    """Holds every descriptor opened during one observation; closes all.
 
-    def __init__(self) -> None:
+    The walk carries only the qualified exact home component tuple (or
+    ``None``) plus a revalidation callable for the pwd binding behind it.
+    That is location data for the single ACL exception, never a global
+    allow flag: every object refuses any ACL except the pwd-qualified home
+    directory observed at exactly those components.
+    """
+
+    def __init__(
+        self,
+        home_exception_parts: tuple[str, ...] | None,
+        revalidate_home_exception: Callable[[], None],
+    ) -> None:
         self._fds: list[int] = []
         self._bindings: dict[int, tuple[int, str, os.stat_result]] = {}
         self._paths: dict[int, tuple[str, ...]] = {}
         self._links: dict[tuple[str, ...], tuple[os.stat_result, str]] = {}
         self._records: dict[tuple[str, ...], tuple[os.stat_result, bool, Callable]] = {}
+        self._home_exception_parts = home_exception_parts
+        self._revalidate_home_exception = revalidate_home_exception
+        self._exception_used = False
+
+    def exception_was_used(self) -> bool:
+        """Whether the single home ACL exception was applied at least once."""
+
+        return self._exception_used
+
+    def _observe_object_acl(
+        self,
+        name: str,
+        fd: int,
+        pre: os.stat_result,
+        path: tuple[str, ...] | None,
+    ) -> None:
+        """Apply the ACL rule to one anchored object before any payload.
+
+        Objects away from the qualified home keep the original rule: any ACL
+        refuses. Only an object whose anchored component path equals the
+        qualified home components exactly may carry an ACL, and even then the
+        pwd binding is revalidated first and the descriptor-bound native
+        classifier must accept the exact single noninherited
+        group:everyone deny delete-only entry. Anything else refuses.
+        """
+
+        if (
+            path is None
+            or self._home_exception_parts is None
+            or path != self._home_exception_parts
+        ):
+            _observe_acl(name, fd, pre)
+            return
+        try:
+            present = has_macos_acl(name, descriptor=fd, expected_identity=pre)
+        except FilesystemSecurityError:
+            _refuse()
+        if present is False:
+            return
+        if present is not True:
+            _refuse()
+        self._revalidate_home_exception()
+        try:
+            permitted = (
+                has_macos_everyone_deny_delete_only_acl(
+                    descriptor=fd, expected_identity=pre
+                )
+                is True
+            )
+        except FilesystemSecurityError:
+            _refuse()
+        if not permitted:
+            _refuse()
+        self._exception_used = True
 
     def adopt(self, fd: int) -> int:
         self._fds.append(fd)
@@ -408,7 +521,7 @@ class _Walk:
             post = os.fstat(fd)
             _require_same_object(pre, post)
             _policy_root_prefix_dir(post)
-            _observe_acl("/", fd, pre)
+            self._observe_object_acl("/", fd, pre, ())
         except BaseException:
             self.close(fd)
             raise
@@ -451,16 +564,16 @@ class _Walk:
         except OSError:
             _refuse()
         self.adopt(fd)
+        path = self._paths[parent_fd] + (name,)
         try:
             post = os.fstat(fd)
             _require_same_object(pre, post)
             policy(post)
-            _observe_acl(name, fd, pre)
+            self._observe_object_acl(name, fd, pre, path)
         except BaseException:
             self.close(fd)
             raise
         self._bindings[fd] = (parent_fd, name, post)
-        path = self._paths[parent_fd] + (name,)
         self._paths[fd] = path
         previous = self._records.get(path)
         if previous is not None:
@@ -502,7 +615,7 @@ class _Walk:
                 try:
                     _require_same_object(expected, os.fstat(fd))
                     policy(os.fstat(fd))
-                    _observe_acl(path[-1], fd, expected)
+                    self._observe_object_acl(path[-1], fd, expected, path)
                     if directory:
                         visit(fd, path)
                     _require_same_object(expected, os.fstat(fd))
@@ -548,7 +661,7 @@ class _Walk:
         while True:
             self._recheck_binding(fd)
             _require_same_object(expected, os.fstat(fd))
-            _observe_acl("held-leaf", fd, expected)
+            self._observe_object_acl("held-leaf", fd, expected, self._paths.get(fd))
             try:
                 chunk = os.read(fd, _READ_CHUNK)
             except OSError:
@@ -593,7 +706,7 @@ class _Walk:
         while True:
             self._recheck_binding(fd)
             _require_same_object(expected, os.fstat(fd))
-            _observe_acl("held-leaf", fd, expected)
+            self._observe_object_acl("held-leaf", fd, expected, self._paths.get(fd))
             try:
                 chunk = os.read(fd, _READ_CHUNK)
             except OSError:
@@ -972,7 +1085,18 @@ def observe_studio_files(
         STUDIO_INSTANCE_KEY,
     )
 
-    walk = _Walk()
+    # The single ACL exception binds to the fixed uid's pwd home, resolved
+    # independently here, and only when it is exactly the qualified caller
+    # home at the same absolute components with the same qualified gid.
+    exception_parts = _pwd_home_components(observed_uid, gid_value)
+    if exception_parts is not None and exception_parts != home_parts:
+        exception_parts = None
+
+    def _revalidate_home_exception() -> None:
+        if _pwd_home_components(observed_uid, gid_value) != exception_parts:
+            _refuse()
+
+    walk = _Walk(exception_parts, _revalidate_home_exception)
     try:
         root_fd, _root_info = walk.open_root()
 
@@ -1059,6 +1183,10 @@ def observe_studio_files(
             walk.close(dep_fd)
 
         walk.recheck_all()
+        if walk.exception_was_used():
+            # Final pwd revalidation after the last re-observation so a stale
+            # record cannot carry the exception past the final checks.
+            _revalidate_home_exception()
         return StudioFilesObservation(
             manifest_bytes=manifest_bytes,
             config_bytes=config_bytes,

@@ -17,6 +17,12 @@ const ID_RE = new RegExp(ID_PATTERN);
 const MAX_RESPONSE_BYTES = 65536;
 const MAX_PACKET_BYTES = 32768;
 const MAX_CONTROLLERS = 512;
+// Internal exact-ID history, not provider/task admission: at most 2 MiB of
+// UTF-16 identity payload (8192 * 128 * 2), plus bounded Set overhead.
+// Never evict an identity. A new process generation does not inherit this
+// memory; the incumbent adapter remains the durable run/result owner.
+const MAX_ATTEMPT_IDENTITIES = 8192;
+const MAX_RETENTION_CANDIDATES = 4;
 // Capture and hash the actual adapter stdout on M2, before a process transport can
 // normalize text or paginate it. This is a fixed program; no caller code is used.
 const CAPTURE_PROGRAM = `import base64,hashlib,json,subprocess,sys,tempfile
@@ -183,7 +189,91 @@ export function createFabricFacade(engine, options={}) {
   // This index only fences returned incumbent process handles. It has no run state,
   // admission, scheduling or retry authority and is never persisted or reconstructed.
   const controllers=new Map();
-  const attempted=new Set(); // bounded frontend anti-replay, not a run ledger
+  const attempted=new Set(); // exact generation-local replay fence, never delete
+  const reservations=new Map(); // preflight + dispatched/UNKNOWN slots, <=512
+  let retentionCursor=0;
+  function loseControllerBinding(pid) {
+    const prior=controllers.get(pid);
+    if(prior) {
+      controllers.delete(pid);
+      prior.pid=null; prior.terminalObserved=false;
+    }
+  }
+  function terminal(s, binding) {
+    return s.root_id===binding.root_id && ['TERMINAL','TERMINAL_FAILURE'].includes(s.state)
+      && Number.isSafeInteger(s.rc) && s.rc>=0 && s.rc<=255
+      && typeof s.signal==='string' && s.signal!=='effect_unknown'
+      && s.continuation?.controller_return!=='UNCONFIRMED';
+  }
+  function observeTerminal(s, args) {
+    const binding=reservations.get(args.run_id);
+    if(binding?.dispatched && binding.root_id===args.root_id)
+      binding.terminalObserved=terminal(s,binding);
+  }
+  function activePids(raw) {
+    if(raw?.isError || raw?.content?.length!==1 || raw.content[0].type!=='text') return null;
+    const text=raw.content[0].text;
+    if(typeof text!=='string' || Buffer.byteLength(text)>MAX_RESPONSE_BYTES) return null;
+    if(text==='No active sessions') return new Set();
+    const pids=new Set();
+    for(const line of text.split('\n')) {
+      const match=/^PID: ([1-9][0-9]*), Blocked: (?:true|false), Runtime: [0-9]+s(?:, RemoteCall: [A-Za-z0-9_.:-]{1,128})?$/.exec(line);
+      if(!match) return null;
+      const pid=Number(match[1]);
+      if(!Number.isSafeInteger(pid) || pid>2147483647 || pids.has(pid)) return null;
+      pids.add(pid);
+    }
+    return pids;
+  }
+  function retentionExpired(raw, pid) {
+    return raw?.isError===true && raw.content?.length===1
+      && raw.content[0].type==='text'
+      && raw.content[0].text===`No session found for PID ${pid}`;
+  }
+  async function reclaimOne() {
+    // A terminal observation only nominates a candidate. It is never enough
+    // to discard a live handle or retained output. No timers or background GC.
+    const candidates=[...reservations.values()].filter(x=>x.dispatched && x.pid && x.terminalObserved);
+    if(!candidates.length) return;
+    const begin=retentionCursor%candidates.length;
+    retentionCursor=(begin+MAX_RETENTION_CANDIDATES)%candidates.length;
+    try {
+      const active=activePids(await engine.callTool({name:'list_sessions',arguments:{}}));
+      if(active===null) return;
+      for(let n=0;n<Math.min(MAX_RETENTION_CANDIDATES,candidates.length);n++) {
+        const binding=candidates[(begin+n)%candidates.length];
+        if(!binding.pid || reservations.get(binding.run_id)!==binding
+            || controllers.get(binding.pid)!==binding || active.has(binding.pid)) continue;
+        const expired=await engine.callTool({name:'read_process_output',arguments:{
+          pid:binding.pid,timeout_ms:0,offset:1,length:1}});
+        if(!retentionExpired(expired,binding.pid)) continue;
+        // At most ONE fresh adapter observation in this capacity guard.
+        const current=await status({run_id:binding.run_id,root_id:binding.root_id});
+        if(terminal(current,binding) && reservations.get(binding.run_id)===binding
+            && controllers.get(binding.pid)===binding) {
+          controllers.delete(binding.pid);
+          reservations.delete(binding.run_id);
+        }
+        return;
+      }
+    } catch { /* Unavailable/malformed owner evidence preserves capacity. */ }
+  }
+  async function reserve(args) {
+    const key=Buffer.from(args.run_id,'utf8').toString('utf8');
+    const check=()=>{
+      if(attempted.has(key) || reservations.has(key)) fail('REQUEST_ALREADY_ATTEMPTED');
+      if(attempted.size>=MAX_ATTEMPT_IDENTITIES) fail('GENERATION_TRACKING_CAPACITY');
+    };
+    check();
+    if(reservations.size>=MAX_CONTROLLERS) { await reclaimOne(); check(); }
+    if(reservations.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
+    // No await between this size check and reservation. The ID is fenced
+    // permanently only at actual dispatch; proved preflight failure refunds
+    // this temporary slot, never a dispatched/no-PID/UNKNOWN reservation.
+    const binding={run_id:key,root_id:args.root_id,pid:null,dispatched:false,terminalObserved:false};
+    reservations.set(key,binding);
+    return binding;
+  }
   function command(argv, packet, capture=false) {
     const prefix=capture?[cfg.python,'-c',CAPTURE_PROGRAM,cfg.python,cfg.adapterPath]:[cfg.python,cfg.adapterPath];
     let c=[...prefix,...argv].map(shellQuote).join(' ');
@@ -196,6 +286,9 @@ export function createFabricFacade(engine, options={}) {
   async function runShort(argv, timeoutMs=10000, capture=false) {
     const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,undefined,capture),timeout_ms:timeoutMs}});
     let text=engineText(raw), parsed=completedOutput(text); const pid=processPid(text);
+    // Every start_process is a new process, including short observations.
+    // A reused native PID cannot retain an older root's output authority.
+    if(pid) loseControllerBinding(pid);
     if(!parsed && pid) {
       // One bounded read of the same incumbent handle, never another command.
       const read=await engine.callTool({name:'read_process_output',arguments:{pid,timeout_ms:1000,offset:0,length:200}});
@@ -226,7 +319,7 @@ export function createFabricFacade(engine, options={}) {
   }
   async function status(args,follow=cfg.quotaFallback) {
     const s=statusJSON(await runCapturedShort(['status',args.run_id,...(follow?['--follow']:[])]),args.run_id,follow);
-    checkRoot(s,args);return s;
+    checkRoot(s,args);observeTerminal(s,args);return s;
   }
   async function retained(args,s) {
     if(s.continuation?.controller_return==='UNCONFIRMED') fail('CONTROLLER_RETURN_UNCONFIRMED',{effective_run_id:s.run_id});
@@ -242,6 +335,7 @@ export function createFabricFacade(engine, options={}) {
   }
   return { async call(name,args={}) {
     let effectStarted=false;
+    let reservation=null;
     try {
       validate(name,args);
       if(name==='fabric_capabilities') {
@@ -250,6 +344,7 @@ export function createFabricFacade(engine, options={}) {
         return response({action:'capabilities',adapter_available:h.exit_code===0 && ['request','status','result','accept'].every(x=>h.stdout.includes(x)),
           quota_continuity:{enabled:cfg.quotaFallback,adapter_available:continuity,max_attempts:3,
             replay_basis:'pre_task_capacity_rejection',mid_task_replay:false,native_parent_wake:false,background_execution:false},
+          controller_tracking:{max_unresolved:MAX_CONTROLLERS,max_generation_identities:MAX_ATTEMPT_IDENTITIES,scope:'backend_process_generation_only',restart_persistent:false},
           worker_admission:'UNPROBED',worker_start:'UNPROBED',backend:'existing Desktop Commander process owner',
           tools:FABRIC_TOOLS.map(t=>t.name),caller_identity:'trusted enrolled channel; not individual ChatGPT identity',root_metadata_is_authentication:false});
       }
@@ -257,12 +352,12 @@ export function createFabricFacade(engine, options={}) {
         const binding=controllers.get(args.controller_pid);
         if(!binding || binding.run_id!==args.run_id || binding.root_id!==args.root_id) fail('CONTROLLER_NOT_BOUND');
         const raw=await engine.callTool({name:'read_process_output',arguments:{pid:args.controller_pid,timeout_ms:1000,offset:args.offset??0,length:args.max_lines??60}});
+        if(controllers.get(args.controller_pid)!==binding) fail('CONTROLLER_NOT_BOUND');
         return response({action:name,...args,process_output:raw,execution_absence_proven:false});
       }
       if(name==='fabric_request') {
-        const requestKey=args.run_id;
-        if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
-        if(attempted.size>=MAX_CONTROLLERS) fail('CONTROLLER_TRACKING_CAPACITY');
+        reservation=await reserve(args);
+        const requestKey=reservation.run_id;
         let requestHelp=null;
         if(args.max_turns!==undefined) {
           requestHelp=await runCapturedShort(['request','--help']);
@@ -277,12 +372,19 @@ export function createFabricFacade(engine, options={}) {
         if(args.escalation_reason) argv.push('--escalation-reason',args.escalation_reason);
         if(args.subject_pool) argv.push('--subject-pool',args.subject_pool);
         if(attempted.has(requestKey)) fail('REQUEST_ALREADY_ATTEMPTED');
+        if(attempted.size>=MAX_ATTEMPT_IDENTITIES) fail('GENERATION_TRACKING_CAPACITY');
         attempted.add(requestKey);
+        reservation.dispatched=true;
         effectStarted=true;
         const raw=await engine.callTool({name:'start_process',arguments:{command:command(argv,args.work_packet),timeout_ms:1000}});
         const text=engineText(raw),pid=processPid(text);
         if(!pid) fail('EFFECT_UNKNOWN');
-        controllers.set(pid,{run_id:args.run_id,root_id:args.root_id});
+        if(controllers.has(pid)) {
+          loseControllerBinding(pid);
+          fail('CONTROLLER_PID_COLLISION');
+        }
+        reservation.pid=pid;
+        controllers.set(pid,reservation);
         const settled=completedOutput(text);
         return response({action:name,run_id:args.run_id,root_id:args.root_id,parent_id:args.parent_id,controller_pid:pid,
           delivery:'CONTROLLER_CREATED',worker_started:null,worker_start_proven:false,
@@ -295,7 +397,7 @@ export function createFabricFacade(engine, options={}) {
       if(name==='fabric_wait') {
         const seconds=args.timeout_seconds??5;
         const waited=statusJSON(await runCapturedShort(['wait',args.run_id,'--timeout',String(seconds),'--interval','2',...(cfg.quotaFallback?['--follow']:[])],Math.min(12000,(seconds+2)*1000)),args.run_id,cfg.quotaFallback);
-        checkRoot(waited,args);
+        checkRoot(waited,args);observeTerminal(waited,args);
         return response({action:name,run_id:args.run_id,effective_run_id:waited.run_id,status:waited,root_verified:waited.root_id===args.root_id,execution_absence_proven:false});
       }
       if(name==='fabric_accept' && s.accepted===true) fail('ALREADY_ACCEPTED');
@@ -313,6 +415,9 @@ export function createFabricFacade(engine, options={}) {
         reviewed_response_sha256:data.response_sha256,verification_summary:args.verification_summary,
         legacy_acceptance_not_atomic_attestation:true});
     } catch(error) {
+      if(reservation && !effectStarted && !reservation.dispatched
+          && reservations.get(reservation.run_id)===reservation)
+        reservations.delete(reservation.run_id);
       const code=effectStarted ? 'EFFECT_UNKNOWN' : (error instanceof Refusal?error.code:'ADAPTER_OBSERVATION_UNAVAILABLE');
       return response({action:name,...(args && typeof args==='object'?{run_id:args.run_id,root_id:args.root_id}:{}),error:code,
         ...(error instanceof Refusal?error.details:{}),execution_absence_proven:false},true);

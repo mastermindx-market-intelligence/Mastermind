@@ -123,8 +123,72 @@ def test_archived_builder_is_sealed_and_normal_release_qualifier_consumes_it(arc
     monkeypatch.setattr(owner, "CONTROL_PLIST", control)
     monkeypatch.setattr(owner, "WORKER_PLIST", worker)
     monkeypatch.setattr(owner, "_read_root_file", local_fixture_read)
+    manifest_path = root / seal.MANIFEST_NAME
+    actual_reader = owner._release_manifest_bytes
+    actual_open, actual_fstat = os.open, os.fstat
+    actual_close, actual_lstat = os.close, Path.lstat
+
+    def root_fixture_identity(info):
+        # Only ownership DATA is remapped. All actual type, mode, link, size,
+        # dev/inode and nanosecond identity fields stay on the real descriptor.
+        fields = list(info)
+        fields[4:6] = (0, 0)
+        return os.stat_result(fields, {
+            "st_atime_ns": info.st_atime_ns, "st_mtime_ns": info.st_mtime_ns,
+            "st_ctime_ns": info.st_ctime_ns,
+        })
+
+    def local_fixture_manifest_bytes(expected_sha):
+        # Run the REAL bounded reader with a narrowly scoped Root ownership
+        # fixture. Restore physical metadata before the actual seal verifier,
+        # whose independent local-owner fixture above must still be exercised.
+        if type(expected_sha) is not str or expected_sha != commit:
+            raise owner.HostControlError("installed_identity_mismatch")
+        assert manifest_path == (
+            owner.SYSTEM_ROOT / "releases" / expected_sha / seal.MANIFEST_NAME
+        )
+        held = set()
+
+        def mapped_open(path, flags, *args, **kwargs):
+            descriptor = actual_open(path, flags, *args, **kwargs)
+            if Path(path) == manifest_path:
+                assert flags & os.O_NOFOLLOW
+                held.add(descriptor)
+            return descriptor
+
+        def mapped_fstat(descriptor):
+            info = actual_fstat(descriptor)
+            return root_fixture_identity(info) if descriptor in held else info
+
+        def mapped_lstat(path, *args, **kwargs):
+            info = actual_lstat(path, *args, **kwargs)
+            return root_fixture_identity(info) if path == manifest_path else info
+
+        def mapped_close(descriptor):
+            held.discard(descriptor)
+            return actual_close(descriptor)
+
+        with monkeypatch.context() as context:
+            context.setattr(os, "open", mapped_open)
+            context.setattr(os, "fstat", mapped_fstat)
+            context.setattr(os, "close", mapped_close)
+            context.setattr(Path, "lstat", mapped_lstat)
+            raw = actual_reader(expected_sha)
+        assert not held
+        return raw
+
+    monkeypatch.setattr(owner, "_release_manifest_bytes", local_fixture_manifest_bytes)
     host = owner.ProductionStatusHost()
     assert host._release_identity(commit) == commit
+    # The collaborator is narrow: any other requested SHA refuses.
+    with pytest.raises(owner.HostControlError):
+        local_fixture_manifest_bytes("f" * 40)
+    # Discriminate real reader use: a byte-return substitute ignores this ACL
+    # refusal, whereas the actual manifest guard must stop before seal verify.
+    with monkeypatch.context() as context:
+        context.setattr(owner, "has_macos_acl", lambda *a, **kw: True)
+        with pytest.raises(owner.HostControlError, match="config_identity_unavailable"):
+            host._release_identity(commit)
     target = rollout / "native-code-stage/ext/paid_glm_model_client.py"
     target.write_bytes(target.read_bytes() + b"\n# changed after seal\n")
     with pytest.raises(owner.HostControlError):

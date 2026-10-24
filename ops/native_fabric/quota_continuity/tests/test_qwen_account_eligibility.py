@@ -70,7 +70,12 @@ import lease_broker  # noqa: E402
 import pick  # noqa: E402
 
 DATA_KEYS = {"state", "parked", "observed_at", "reset_at"}
-NOW_DT = datetime(2026, 10, 22, 12, 0, 0, tzinfo=timezone.utc)
+# One real-time anchor per test-process import. Pure eligibility boundary
+# assertions use NOW explicitly, while integration paths use the production
+# real-time read. A fixed historical instant made "fresh" parked accounts stale
+# once CI moved beyond the 24-hour eligibility horizon (7 false failures).
+# Keep the source's real clock and all expiry assertions unchanged.
+NOW_DT = datetime.now(timezone.utc).replace(microsecond=0)
 NOW = NOW_DT.timestamp()
 
 
@@ -301,7 +306,7 @@ class RouterUsableNames(unittest.TestCase):
         with open(self.usage_path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
 
-    def _router(self, names, cooldowns, doc):
+    def _router(self, names, cooldowns, doc, *, now=NOW):
         self._write(doc)
         with mock.patch.object(bailian_keys, "HERE", self.tmp), mock.patch.object(
             bailian_keys, "key_names", return_value=list(names)
@@ -311,7 +316,8 @@ class RouterUsableNames(unittest.TestCase):
                                    (2 if cooldowns[n][1] == "http_429" else 3))
         ), mock.patch.object(
             bailian_keys, "current_per_key_cap", return_value=10
-        ):
+        ), mock.patch.object(bailian_keys.time, "time", return_value=now):
+            # Match the implicit production clock to this synthetic usage row.
             return bailian_keys.usable_names()
 
     def test_fresh_park_excludes_account_from_routing(self):
@@ -321,6 +327,15 @@ class RouterUsableNames(unittest.TestCase):
             {"keys": {"freshpark": fresh_row(parked=True), "ok": fresh_row(parked=False)}},
         )
         self.assertEqual(got, ["ok"])
+
+    def test_same_row_default_clock_preserves_exact_freshness_boundary(self):
+        row = fresh_row(parked=True)
+        observed = datetime.fromisoformat(row["observed_at"]).timestamp()
+        document = {"keys": {"k": row}}
+        self.assertEqual(self._router(["k"], {"k": None}, document,
+                                      now=observed + 86400), [])
+        self.assertEqual(self._router(["k"], {"k": None}, document,
+                                      now=observed + 86401), ["k"])
 
     def test_stale_park_does_not_exclude(self):
         stale = fresh_row(parked=True, observed_dt=NOW_DT - timedelta(days=2))
@@ -400,15 +415,27 @@ class PickParkedKeys(unittest.TestCase):
         self.tmp = tempfile.mkdtemp(prefix="qwen-elig-pick-")
         self.usage_path = os.path.join(self.tmp, "bailian_usage.json")
 
-    def _parked_with(self, doc):
+    def _parked_with(self, doc, *, now=NOW):
         with open(self.usage_path, "w", encoding="utf-8") as fh:
             json.dump(doc, fh)
-        with mock.patch.object(pick, "BAILIAN_USAGE", self.usage_path):
+        with mock.patch.object(pick, "BAILIAN_USAGE", self.usage_path), \
+             mock.patch.object(bailian_keys.time, "time", return_value=now):
             return pick._parked_bailian_keys()
 
     def test_fresh_park_is_parked(self):
         got = self._parked_with({"keys": {"k": fresh_row(parked=True)}})
         self.assertEqual(got, {"k"})
+
+    def test_same_row_default_clock_preserves_exact_freshness_boundary(self):
+        row = fresh_row(parked=True)
+        observed = datetime.fromisoformat(row["observed_at"]).timestamp()
+        document = {"keys": {"k": row}}
+        self.assertEqual(self._parked_with(document, now=observed + 86400), {"k"})
+        self.assertEqual(self._parked_with(document, now=observed + 86401), set())
+        with mock.patch.object(bailian_keys.time, "time", return_value=observed + 86401):
+            info = bailian_keys.read_usage_eligibility("k", path=self.usage_path)
+        self.assertEqual(info["state"], "UNKNOWN")
+        self.assertIsNone(info["parked"])
 
     def test_fresh_not_parked_and_stale_are_not_parked(self):
         stale = fresh_row(parked=True, observed_dt=NOW_DT - timedelta(days=2))
@@ -626,7 +653,7 @@ class FakeUsageCannotMutatePolicyOrStores(unittest.TestCase):
             bailian_keys, "_read_soft_cap", return_value=5
         ), mock.patch.object(
             pick, "BAILIAN_USAGE", usage
-        ):
+        ), mock.patch.object(bailian_keys.time, "time", return_value=NOW):
             info = bailian_keys.read_usage_eligibility("k", now=NOW)
             self.assertEqual(info["state"], "CURRENT")
             self.assertIs(info["parked"], True)
@@ -658,7 +685,7 @@ class FakeUsageCannotMutatePolicyOrStores(unittest.TestCase):
             bailian_keys, "key_names", return_value=["broken", "real"]
         ), mock.patch.object(bailian_keys, "cooldown_rank_readonly", return_value=0), mock.patch.object(
             pick, "BAILIAN_USAGE", usage
-        ):
+        ), mock.patch.object(bailian_keys.time, "time", return_value=NOW):
             self.assertEqual(bailian_keys.usable_names(), ["broken"])
             self.assertEqual(pick._parked_bailian_keys(), {"real", "ghost"})
 

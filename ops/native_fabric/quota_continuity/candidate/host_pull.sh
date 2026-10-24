@@ -3,6 +3,8 @@
 # ext/state/hosts/<host>.json (read by pool_status.py's HOST table).
 # usage: bash host_pull.sh --once    one pass over all hosts, then exit
 #        bash host_pull.sh           daemon: lanes + local seat every 60 s
+#        bash host_pull.sh --diagnose-physical ubuntu0
+#          detached physical DATA only; no shared state/readiness/admission
 # The local host (hosts.json "local": true) is probed in-process; every remote
 # host via ONE  perl -e 'alarm 25; exec @ARGV' ssh -o BatchMode=yes
 # -o ConnectTimeout=8 <alias> '<probe>'  call per pass. The probe is a
@@ -22,6 +24,18 @@ ONCE=0
 SELECTED=""
 PAID_HOST=""
 PAID_REQUESTED=0
+INSPECT_HOST=""
+PHYSICAL_HOST=""
+if [ "$#" -gt 0 ] && [ "$1" = "--diagnose-physical" ]; then
+  [ "$#" -eq 2 ] && [ "$2" = "ubuntu0" ] || { echo "host_pull: fixed physical diagnostic arguments refused" >&2; exit 78; }
+  PHYSICAL_HOST="$2"
+  shift 2
+fi
+if [ "$#" -gt 0 ] && [ "$1" = "--inspect-host-env" ]; then
+  [ "$#" -eq 2 ] && [ "$2" = "ubuntu0" ] || { echo "host_pull: fixed inspection arguments refused" >&2; exit 78; }
+  INSPECT_HOST="$2"
+  shift 2
+fi
 if [ "$#" -gt 0 ] && [ "$1" = "--paid-qualification" ]; then
   [ "$#" -eq 2 ] || { echo "host_pull: paid qualification arguments refused" >&2; exit 78; }
   PAID_REQUESTED=1
@@ -81,15 +95,49 @@ write_state() { # $1 host, $2 probe rc, $3 probe stdout
 # Both modes use this one incumbent authenticated transport. Qualification
 # never enters the telemetry writer, daemon, account-readiness or fleet loop.
 run_probe() {
-  local is_local="$1" alias="$2" probe="$3"
+  local is_local="$1" alias="$2" probe="$3" key_guard="${4:-}"
+  local key_options=()
+  if [ "$key_guard" = "fixed-hook-inspection" ] || [ "$key_guard" = "fixed-physical-diagnostic" ]; then
+    # This read-only inspection must never enroll/update a host key. Normal
+    # telemetry retains its existing inherited transport policy unchanged.
+    key_options=(-o StrictHostKeyChecking=yes -o UpdateHostKeys=no)
+  elif [ -n "$key_guard" ]; then
+    return 78
+  fi
   if [ "$is_local" = "1" ]; then
     sh -c "$probe" 2>/dev/null
   elif [ -z "$alias" ]; then
     return 255
   else
-    perl -e 'alarm 25; exec @ARGV' ssh -o BatchMode=yes -o ConnectTimeout=8 "$alias" "$probe" 2>/dev/null </dev/null
+    perl -e 'alarm 25; exec @ARGV' ssh -o BatchMode=yes -o ConnectTimeout=8 "${key_options[@]}" "$alias" "$probe" 2>/dev/null </dev/null
   fi
 }
+
+if [ -n "$PHYSICAL_HOST" ]; then
+  # Diagnostic return only: never publish shared telemetry, load account
+  # config, source HOST_ENV, start a daemon, or call the readiness builder.
+  PREPARED=$(python3 -B "$BACKEND_FILE" physical-diagnostic-prepare "$HOSTS_JSON" "$PHYSICAL_HOST") || exit 78
+  case "$PREPARED" in *$'\n'*) ;; *) exit 78 ;; esac
+  PHYSICAL_ALIAS="${PREPARED%%$'\n'*}"
+  PHYSICAL_PROBE="${PREPARED#*$'\n'}"
+  OUT=$(run_probe 0 "$PHYSICAL_ALIAS" "$PHYSICAL_PROBE" fixed-physical-diagnostic)
+  PHYSICAL_RC=$?
+  printf '%s' "$OUT" | python3 -B "$BACKEND_FILE" physical-diagnostic-result "$PHYSICAL_RC"
+  exit $?
+fi
+
+if [ -n "$INSPECT_HOST" ]; then
+  # This separate read-only mode never builds/sources a readiness block and
+  # never enters pass_once, shared telemetry writes, or daemon startup.
+  PREPARED=$(python3 -B "$BACKEND_FILE" inspect-host-env-prepare "$HOSTS_JSON" "$INSPECT_HOST") || exit 78
+  case "$PREPARED" in *$'\n'*) ;; *) exit 78 ;; esac
+  INSPECT_ALIAS="${PREPARED%%$'\n'*}"
+  INSPECT_PROBE="${PREPARED#*$'\n'}"
+  OUT=$(run_probe 0 "$INSPECT_ALIAS" "$INSPECT_PROBE" fixed-hook-inspection)
+  INSPECT_RC=$?
+  printf '%s' "$OUT" | python3 -B "$BACKEND_FILE" inspect-host-env-result "$INSPECT_RC"
+  exit $?
+fi
 
 if [ "$PAID_REQUESTED" -eq 1 ]; then
   # Only DATA exits this CLI. The actual installer-owned parent child handle,
@@ -123,8 +171,17 @@ pass_once() {
     if [ "$glm_admitted" = "1" ]; then
       glm_probe=$(python3 -B "$GLM_PROBE_FILE" "$host" "$alias" "$ACCOUNTS_POLICY" 2>/dev/null) || glm_probe=":"
     fi
-    probe="$probe
-$glm_probe"
+    # Diagnostics are closed DATA, not admission. Keep the original shell
+    # context and final readiness-block status; never salvage a failed probe.
+    probe="printf '%s\n' 'HOST_PULL_STAGE_V1 PHYSICAL_BEGIN'
+$probe
+HOST_PULL_DIAG_PHYSICAL_RC=\$?
+printf 'HOST_PULL_STAGE_V1 PHYSICAL_EXIT %s\n' \"\$HOST_PULL_DIAG_PHYSICAL_RC\"
+printf '%s\n' 'HOST_PULL_STAGE_V1 READINESS_BEGIN'
+$glm_probe
+HOST_PULL_DIAG_READINESS_RC=\$?
+printf 'HOST_PULL_STAGE_V1 READINESS_EXIT %s\n' \"\$HOST_PULL_DIAG_READINESS_RC\"
+exit \"\$HOST_PULL_DIAG_READINESS_RC\""
     OUT=$(run_probe "$is_local" "$alias" "$probe")
     rc=$?
     summary=$(write_state "$host" "$rc" "$OUT" "$alias") || return $?

@@ -279,11 +279,20 @@ REVIEWED_FILES['ops/native_fabric/quota_continuity/source/glm_host_account_readi
 # _PREPROOF_RECEIPT_KEYS comments were replaced by qualified producer names);
 # token sites are unchanged in kind, spelling, and count.
 # Re-pinned for PR 1637 hardening (preproof file recheck, optional lstat, AWAITING_CANARY); sites unchanged.
+# Re-pinned for the explicit unstarted PREPROOF successor mode; same three
+# guarded literal tokens, unchanged scanner and no new identity exemption.
 REVIEWED_FILES['ops/executive_os/acceptance_maintenance.py'] = {
-    "sha256": "3c45fc1c851576e5260f4544c3329915b4b3ce0efdaadf8d3ad002546acd4bc6",
-    "sites": ((73, 31, 56, "str", 'r"_mastermind_[a-z0-9_]+"'),
-              (903, 46, 49, "int", "400"),
-              (903, 66, 69, "int", "500")),
+    "sha256": '6dd17929930db909a6797218c4fc7252aa076527bbcc4cca3b1836d3fa11d7a2',
+    "sites": ((91, 31, 56, 'str', 'r"_mastermind_[a-z0-9_]+"'), (1715, 46, 49, 'int', '400'), (1715, 66, 69, 'int', '500')),
+}
+
+
+# PR #1813: unchanged independently reviewed migration-evidence helper 8c7f1584.
+# This exact token is the Root config-directory permission mode, not a UID.
+# Source, path, AST location and complete token must all match; scanner unchanged.
+REVIEWED_FILES['ops/executive_os/schema_upgrade_evidence.py'] = {
+    "sha256": 'c046490d1d4f5932863d5f0c30609809714e89c794bd0ea61b94b27e4e93a91e',
+    "sites": ((347, 46, 51, 'int', '0o755'),),
 }
 
 
@@ -309,7 +318,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                 'sites': ((60, 33, 36, 'int', '512'),)},
  'ops/executive_os/canonical_paid_actions.py': {'sha256': '957b4a04432ca5ebbb954f4fa76ab74e4d383f233a58449ffc3cf6c1294212c9',
                                                 'sites': ((56, 71, 74, 'int', '501'),)},
- 'ops/executive_os/canonical_paid_definition.py': {'sha256': '47103c495dcd6cc8393c55d066286d7dbc732be95762b592ed2780815be384e1',
+ 'ops/executive_os/canonical_paid_definition.py': {'sha256': 'a2009ce6c555d7de9bd6a9497871a33f1edb7d2bffe19f38ffbf91790f64349f',
                                                    'sites': ((17, 45, 57, 'str', '_mastermind_'),
                                                              (91, 18, 21, 'int', '501'),
                                                              (158, 49, 54, 'int', '0o755'),
@@ -326,16 +335,16 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                              (166, 32, 46, 'str', "'_mastermind_'"),
                                                              (252, 13, 25, 'str', '_mastermind_'),
                                                              (335, 58, 63, 'int', '0o660'),
-                                                             (747, 54, 59, 'int', '0o700'),
-                                                             (747, 61, 66, 'int', '0o755'),
-                                                             (774, 45, 50, 'int', '0o755'),
-                                                             (827, 29, 34, 'int', '0o700'),
-                                                             (833, 28, 33, 'int', '0o700'),
-                                                             (836, 88, 93, 'int', '0o700'),
-                                                             (889, 71, 76, 'int', '0o700'),
-                                                             (898, 28, 33, 'int', '0o755'),
-                                                             (906, 75, 80, 'int', '0o755'),
-                                                             (918, 60, 65, 'int', '0o700'))},
+                                                             (745, 54, 59, 'int', '0o700'),
+                                                             (745, 61, 66, 'int', '0o755'),
+                                                             (772, 45, 50, 'int', '0o755'),
+                                                             (825, 29, 34, 'int', '0o700'),
+                                                             (831, 28, 33, 'int', '0o700'),
+                                                             (834, 88, 93, 'int', '0o700'),
+                                                             (887, 71, 76, 'int', '0o700'),
+                                                             (896, 28, 33, 'int', '0o755'),
+                                                             (904, 75, 80, 'int', '0o755'),
+                                                             (916, 60, 65, 'int', '0o700'))},
  'ops/executive_os/canonical_paid_lifecycle.py': {'sha256': '94be5849ac3b87d3ba1eeec382529869b72fd9a1e4e2b920db09e49f753b0236',
                                                   'sites': ((56, 13, 16, 'int', '501'),
                                                             (57, 14, 17, 'int', '450'),
@@ -343,11 +352,11 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                             (546, 48, 53, 'int', '0o660'),
                                                             (752, 53, 58, 'int', '0o755'),
                                                             (790, 84, 89, 'int', '0o755'))},
- 'ops/executive_os/canonical_paid_qualification.py': {'sha256': 'c228bea84a56466f4c7694535f5de5acce005e45fc9207780162bec7067c77e2',
+ 'ops/executive_os/canonical_paid_qualification.py': {'sha256': 'fedc7c3f892bcbbe4c8335641c83a7037d233ea69b44605a614bf310ce3e52b8',
                                                       'sites': ((161, 48, 53, 'int', '0o755'),
-                                                                (612, 22, 27, 'int', '0o700'),
-                                                                (617, 22, 27, 'int', '0o755'),
-                                                                (626, 82, 87, 'int', '0o755'))},
+                                                                (610, 22, 27, 'int', '0o700'),
+                                                                (615, 22, 27, 'int', '0o755'),
+                                                                (624, 82, 87, 'int', '0o755'))},
  'ops/native_fabric/paid_canonical_glm/candidate/glm_shim.py': {'sha256': '93267de79c92231f853fc16e03f939e8d52d3322d19a828a568ffcb5d7a7f867',
                                                                 'sites': ((1280,
                                                                            46,
@@ -433,20 +442,31 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
  'scripts/executive_paid_fabric_shim.py': {'sha256': 'e80b95a09ce31153e7bff2ea7b85dd1eb8d8850d4d6029ec27250cd8f13228f1',
                                            'sites': ((43, 81, 84, 'int', '450'),)}})
 
-# Gateway candidate-only fixed Studio UID and incumbent config/plist mode.
+# Gateway fixed Studio UID, incumbent config/plist mode, and the normal
+# installer's exact /Library/Application Support 0:80:0755 ancestor.
 # Exact source and Constant-token sites are frozen for the final changed-risk
 # review; this does not authorize publication, runtime admission or release.
 # No generic numeric exception is added: source/path/site drift exposes all
 # literals again through the existing D8 scanner.
 REVIEWED_FILES['ops/executive_os/autonomy_control.py'] = {
-    'sha256': '1c58fd0f62163994c881ab92caab82e38a744ff0b6b927f8bc2b4f6ae76d710c',
-    'sites': ((322, 24, 27, 'int', '501'),
-              (6965, 41, 46, 'int', '0o644')),
+    'sha256': 'e68f6df4d70ca6bc68260bfbd9b64d95a0209926ca70fb9dda9872915739093a',
+    'sites': ((335, 24, 27, 'int', '501'),
+              (6535, 35, 37, 'int', '80'),
+              (6536, 50, 55, 'int', '0o755'),
+              (7073, 41, 46, 'int', '0o644')),
 }
 
 # The same closed Studio reader's fixed observed UID. Frozen corrected helper
 # bytes are subject to the integrated G1-G3 review, not an activation grant.
 REVIEWED_FILES['ops/executive_os/os_gateway_studio_reader.py'] = {
-    'sha256': '76807b96d831a86ff315e545aa59e966dac100662d0de7f428310645019db5a1',
-    'sites': ((50, 21, 24, 'int', '501'),),
+    'sha256': 'aea09940df9475c571002309fa70eae88d19d2b2034b9f1a4700a3e86619534d',
+    'sites': ((55, 21, 24, 'int', '501'),),
+}
+
+
+# Fixed pre-census ancestor permission modes; not account UIDs. Only the
+# exact reviewed source, AST Constant and complete token qualify.
+REVIEWED_FILES['control_plane/executive_backup.py'] = {
+    'sha256': '058965ae78b61f072ba3720f877bac7b54538a6e06f296db7135217cf05721cd',
+    'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
 }

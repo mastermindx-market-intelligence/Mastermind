@@ -2490,6 +2490,31 @@ def test_actual_normal_qualifier_rechecks_after_receipt_before_completion(gatewa
     assert control.AUTONOMY_TRANSACTION.exists()
 
 
+def _install_testdata_manifest_bytes(monkeypatch, staged_manifest):
+    """Keep the real reader and FD ACL observer on the physical host API.
+
+    The existing mixed-identity fixture already maps this disposable manifest's
+    named/held UID and GID. Only sys.platform is simulated by the origin test;
+    Darwin's native ACL API cannot be invoked on a Linux runner. This wrapper
+    restores the captured physical platform solely during the actual observer,
+    never replaces the manifest reader or claims installed custody.
+    """
+    staged_manifest = Path(staged_manifest)
+    assert staged_manifest == (control.SYSTEM_ROOT / "releases" / SHA
+                               / control.release_manifest.MANIFEST_NAME)
+    actual_acl = control.has_macos_acl
+
+    def physical_acl(path, **kwargs):
+        assert Path(path) == staged_manifest
+        assert kwargs["descriptor"] >= 0
+        with monkeypatch.context() as context:
+            context.setattr(sys, "platform", _TRUE_PLATFORM)
+            return actual_acl(path, **kwargs)
+
+    monkeypatch.setattr(control, "has_macos_acl", physical_acl)
+    return control._release_manifest_bytes
+
+
 def test_origin_joins_actual_release_verifier_before_protected_state(gateway, monkeypatch):
     s = gateway
     host = control.ProductionGatewayPublicationHost()
@@ -2501,6 +2526,9 @@ def test_origin_joins_actual_release_verifier_before_protected_state(gateway, mo
     # this positive routing observation is not actual installed authority.
     monkeypatch.setattr(host, "_sealed_origin_chain", lambda release: None)
     monkeypatch.setattr(host, "_sealed_origin_file", lambda path: None)
+    manifest_reader = _install_testdata_manifest_bytes(
+        monkeypatch, s.release / control.release_manifest.MANIFEST_NAME
+    )
     seen = []
     def changed_bytes(root, commit, tree):
         seen.append((root, commit, tree))
@@ -2509,6 +2537,19 @@ def test_origin_joins_actual_release_verifier_before_protected_state(gateway, mo
     with pytest.raises(control.GatewayPublicationError):
         host.require_gateway_module_origin(SHA)
     assert seen == [(s.release, SHA, TREE_SHA)]
+    # The real fixed-SHA reader still refuses invalid identity before IO.
+    with pytest.raises(control.HostControlError) as excinfo:
+        manifest_reader("../invalid")
+    assert excinfo.value.code == "installed_identity_mismatch"
+    assert seen == [(s.release, SHA, TREE_SHA)]
+    # A real-reader ACL refusal must happen BEFORE the content verifier. A
+    # fixture returning raw bytes in place of the reader would fail this check.
+    seen.clear()
+    with monkeypatch.context() as context:
+        context.setattr(control, "has_macos_acl", lambda *a, **kw: True)
+        with pytest.raises(control.GatewayPublicationError):
+            host.require_gateway_module_origin(SHA)
+    assert seen == []
     assert not control.AUTONOMY_TRANSACTION.exists()
     assert not control.OS_GATEWAY_RECEIPT.exists()
 
@@ -2546,7 +2587,7 @@ def test_studio_os_principal_is_distinct_from_instance_key(gateway, monkeypatch)
 
 
 @pytest.mark.parametrize("name,expected_count", [
-    ("ops/executive_os/autonomy_control.py", 2),
+    ("ops/executive_os/autonomy_control.py", 4),
     ("ops/executive_os/os_gateway_studio_reader.py", 1),
 ])
 def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(
@@ -2572,7 +2613,7 @@ def test_gateway_identity_review_pins_exact_constant_tokens_and_refuses_drift(
     drifted_sources = [source + "\n# unrelated source drift\n"]
     for line, start, end, _kind, spelling in entry["sites"]:
         lines = source.splitlines(keepends=True)
-        replacement = {"501": "502", "0o644": "0o666"}[spelling]
+        replacement = {"501": "502", "80": "81", "0o755": "0o775", "0o644": "0o666"}[spelling]
         lines[line - 1] = lines[line - 1][:start] + replacement + lines[line - 1][end:]
         drifted_sources.append("".join(lines))
     for drifted in drifted_sources:

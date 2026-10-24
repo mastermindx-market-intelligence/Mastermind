@@ -94,6 +94,12 @@ _COEXISTENCE_MANIFEST_FIELDS = frozenset({
     "prior_ceo_receipt_present", "prior_ceo_receipt_sha256",
     "target_ceo_receipt_sha256",
 })
+_A2_RESTORE_RECEIPT_ARCHIVE = "prior-a2-control-restore-disarmed-receipt.json"
+_A2_RESTORE_RECEIPT_FIELDS = frozenset({
+    "a2_prior_receipt_present", "a2_prior_receipt_sha256",
+    "a2_target_receipt_sha256",
+})
+
 _FINITE_RECEIPT_ARCHIVE = "prior-finite-disarmed-receipt.json"
 _FINITE_RECEIPT_FIELDS = frozenset({
     "finite_prior_receipt_present", "finite_prior_receipt_sha256",
@@ -207,6 +213,13 @@ _TRANSACTION_OPERATIONS = frozenset({"ARM", "DISARM", "A2_DISABLE_PREPARATION", 
 # One manifest name for the canonical marker and for the private generation it
 # is published from, so a renamed generation is always readable in place.
 _TRANSACTION_MANIFEST_NAME = "transaction.json"
+# Extend the incumbent operation set without replacing its expression:
+# protected source may admit unrelated operations (for example OS Gateway).
+A2_CONTROL_RESTORATION_COMMANDS = frozenset({
+    "a2-restore-controller-socket", "a2-restore-controller-socket-reconcile",
+    "a2-restored-readside-preflight",
+})
+_TRANSACTION_OPERATIONS |= frozenset({"A2_RETURN_SOCKET_RESTORE"})
 _CEO_SUBMIT_ADMISSION_CODES = frozenset(
     {
         "release_identity_mismatch",
@@ -944,6 +957,12 @@ def _absolute_path(value: str) -> Path:
     return path
 
 
+def _a2_restore_digest(value: str) -> str:
+    if re.fullmatch(r"[0-9a-f]{64}", value) is None:
+        raise argparse.ArgumentTypeError("exact lower-case SHA-256 witness required")
+    return value
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="Operate the receipt-gated Executive autonomy boundary."
@@ -1034,6 +1053,15 @@ def _parser() -> argparse.ArgumentParser:
     for command in sorted(A2_DISABLE_COMMANDS):
         a2 = sub.add_parser(command, help="Prepare or reconcile the fixed unloaded A2 disable.")
         a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+    for command in sorted(A2_CONTROL_RESTORATION_COMMANDS):
+        a2 = sub.add_parser(command, help="Restore one already-reversed A2 return socket while disarmed.")
+        a2.add_argument("--expected-sha", type=_exact_sha, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-control-sha256", type=_a2_restore_digest, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-release-sha", type=_exact_sha, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-tree-sha", type=_exact_sha, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-config-sha256", type=_a2_restore_digest, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-previous-plist-sha256", type=_a2_restore_digest, action=_StoreOnce, required=True)
+        a2.add_argument("--expected-bot-user-id", action=_StoreOnce, required=True)
     finite_stage = sub.add_parser('finite-control-stage', help='Stage the fixed finite definition while stopped and disarmed.')
     finite_stage.add_argument('--expected-sha', type=_exact_sha, action=_StoreOnce, required=True)
     finite_stage.add_argument('--expected-control-sha256', action=_StoreOnce, required=True)
@@ -2582,6 +2610,74 @@ def _root_json(
     return value, raw
 
 
+def _release_manifest_bytes(expected_sha: str) -> bytes:
+    """Capture only the fixed whole-release manifest, within its 4 MiB budget.
+
+    The normal source inventory is larger than a configuration document.  This
+    separate fixed-path reader does not enlarge the generic config JSON limit
+    or replace the caller's subsequent full release_manifest.verify operation.
+    """
+    if type(expected_sha) is not str or _SHA_RE.fullmatch(expected_sha) is None:
+        raise HostControlError("installed_identity_mismatch")
+    path = SYSTEM_ROOT / "releases" / expected_sha / release_manifest.MANIFEST_NAME
+    descriptor = -1
+    identity = lambda info: (
+        info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+        info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns,
+    )
+    try:
+        descriptor = os.open(
+            path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK | os.O_CLOEXEC
+        )
+        before = os.fstat(descriptor)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or before.st_uid != 0 or before.st_gid != 0
+            or stat.S_IMODE(before.st_mode) != 0o444 or before.st_nlink != 1
+            or not 0 < before.st_size <= _GATEWAY_ROOT_FILE_MAX_BYTES
+            or has_macos_acl(path, expected_identity=before, descriptor=descriptor)
+        ):
+            raise HostControlError("config_identity_unavailable")
+        chunks, size = [], 0
+        while size <= _GATEWAY_ROOT_FILE_MAX_BYTES:
+            part = os.read(
+                descriptor, min(65536, _GATEWAY_ROOT_FILE_MAX_BYTES + 1 - size)
+            )
+            if not part:
+                break
+            chunks.append(part)
+            size += len(part)
+        after = os.fstat(descriptor)
+        if (
+            size != before.st_size or size > _GATEWAY_ROOT_FILE_MAX_BYTES
+            or identity(before) != identity(after)
+            or identity(after) != identity(path.lstat())
+            or has_macos_acl(path, expected_identity=after, descriptor=descriptor)
+            or identity(after) != identity(os.fstat(descriptor))
+            or identity(after) != identity(path.lstat())
+        ):
+            raise HostControlError("config_identity_unavailable")
+        raw = b"".join(chunks)
+    except (OSError, FilesystemSecurityError) as exc:
+        raise HostControlError("config_identity_unavailable") from exc
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
+    return raw
+
+
+def _release_manifest_json(expected_sha: str) -> dict[str, Any]:
+    """Decode the same bounded original bytes without changing their identity."""
+    raw = _release_manifest_bytes(expected_sha)
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise HostControlError("config_schema_drift") from exc
+    if not isinstance(value, dict):
+        raise HostControlError("config_schema_drift")
+    return value
+
+
 def _receipt_metadata(path: Path) -> ReceiptMetadata:
     try:
         info = path.lstat()
@@ -2619,11 +2715,7 @@ class ProductionStatusHost:
     def _release_identity(self, expected_sha: str) -> str:
         root = SYSTEM_ROOT / "releases" / expected_sha
         try:
-            manifest_value, _raw = _root_json(
-                root / release_manifest.MANIFEST_NAME,
-                modes=frozenset({0o444}),
-                gid=0,
-            )
+            manifest_value = _release_manifest_json(expected_sha)
             if manifest_value.get("commit_sha") != expected_sha:
                 raise HostControlError("installed_identity_mismatch")
             tree_sha = manifest_value.get("tree_sha")
@@ -3391,6 +3483,15 @@ class ProductionTransactionHost(ProductionArmHost):
                            for field in _COEXISTENCE_MANIFEST_FIELDS - {"prior_ceo_receipt_present"})):
                 raise TransactionEffectUnknown()
             required |= _COEXISTENCE_MANIFEST_FIELDS
+        if set(value) & _A2_RESTORE_RECEIPT_FIELDS:
+            if (value.get("operation") != "A2_RETURN_SOCKET_RESTORE"
+                    or type(value.get("a2_prior_receipt_present")) is not bool
+                    or any(re.fullmatch(r"[0-9a-f]{64}", str(value.get(field, ""))) is None
+                           for field in _A2_RESTORE_RECEIPT_FIELDS - {"a2_prior_receipt_present"})):
+                raise TransactionEffectUnknown()
+            required |= _A2_RESTORE_RECEIPT_FIELDS
+        elif value.get("operation") == "A2_RETURN_SOCKET_RESTORE":
+            raise TransactionEffectUnknown()
         if set(value) & _FINITE_RECEIPT_FIELDS:
             if (value.get("operation") != "FINITE_CONTROL_STAGE"
                     or type(value.get("finite_prior_receipt_present")) is not bool
@@ -3515,6 +3616,8 @@ class ProductionTransactionHost(ProductionArmHost):
             value.update({key: current[key] for key in _CANARY_MANIFEST_FIELDS})
         if current is not None and set(current) & _COEXISTENCE_MANIFEST_FIELDS:
             value.update({key: current[key] for key in _COEXISTENCE_MANIFEST_FIELDS})
+        if current is not None and set(current) & _A2_RESTORE_RECEIPT_FIELDS:
+            value.update({key: current[key] for key in _A2_RESTORE_RECEIPT_FIELDS})
         if current is not None and set(current) & _FINITE_RECEIPT_FIELDS:
             value.update({key: current[key] for key in _FINITE_RECEIPT_FIELDS})
         if current is not None and set(current) & _PAID_RECEIPT_FIELDS:
@@ -4179,6 +4282,9 @@ class ProductionTransactionHost(ProductionArmHost):
         if set(manifest) & _COEXISTENCE_MANIFEST_FIELDS:
             expected.update(_COEXISTENCE_ARCHIVES)
             archives.extend(AUTONOMY_TRANSACTION / name for name in _COEXISTENCE_ARCHIVES)
+        if set(manifest) & _A2_RESTORE_RECEIPT_FIELDS:
+            expected.add(_A2_RESTORE_RECEIPT_ARCHIVE)
+            archives.append(AUTONOMY_TRANSACTION / _A2_RESTORE_RECEIPT_ARCHIVE)
         if set(manifest) & _FINITE_RECEIPT_FIELDS:
             expected.add(_FINITE_RECEIPT_ARCHIVE)
             archives.append(AUTONOMY_TRANSACTION / _FINITE_RECEIPT_ARCHIVE)
@@ -5702,13 +5808,8 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
     # ------------------------------------------------------------------
 
     def _gateway_release_tree(self, expected_sha: str) -> str:
-        root = SYSTEM_ROOT / "releases" / expected_sha
         try:
-            value, _raw = _root_json(
-                root / release_manifest.MANIFEST_NAME,
-                modes=frozenset({0o444}),
-                gid=0,
-            )
+            value = _release_manifest_json(expected_sha)
         except HostControlError as exc:
             raise GatewayPublicationError("gateway_release_tree_invalid") from exc
         tree = value.get("tree_sha")
@@ -6427,11 +6528,18 @@ class ProductionGatewayPublicationHost(ProductionCeoSubmitHost):
         current = release
         while True:
             info = current.lstat()
+            # Match the normal installer's exact canonical macOS ancestor.
+            # No other admin-group directory acquires release custody.
+            group_valid = info.st_gid == 0 or (
+                current == Path("/Library/Application Support")
+                and info.st_gid == 80
+                and stat.S_IMODE(info.st_mode) == 0o755
+            )
             if (
                 stat.S_ISLNK(info.st_mode)
                 or not stat.S_ISDIR(info.st_mode)
                 or info.st_uid != 0
-                or info.st_gid != 0
+                or not group_valid
                 or stat.S_IMODE(info.st_mode) & 0o022
                 or _has_acl(current)
             ):
@@ -7843,6 +7951,10 @@ def main(
 
     if args.command in A2_DISABLE_COMMANDS:
         from ops.executive_os.a2_disable_preparation_control import run_command
+        return run_command(args, host=host)
+
+    if args.command in A2_CONTROL_RESTORATION_COMMANDS:
+        from ops.executive_os.a2_control_restoration import run_command
         return run_command(args, host=host)
 
     if args.command in {'finite-control-stage', 'finite-control-stage-reconcile'}:

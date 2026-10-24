@@ -4,6 +4,354 @@ here-document pipes. No new scheduler, credential authority or lease logic.
 """
 import sys
 
+_STAGE_PREFIX = "HOST_PULL_STAGE_V1"
+
+
+def probe_diagnostic(output, returncode):
+    """Closed secret-free projection; it cannot authorize observation success."""
+    import re
+    if type(returncode) is not int or not 0 <= returncode <= 255:
+        returncode = None
+    stages = [("PHYSICAL_BEGIN", None), ("PHYSICAL_EXIT", "physical"),
+              ("READINESS_BEGIN", None), ("READINESS_EXIT", "optional_readiness")]
+    result = {"schema": "mastermind.host_pull_probe_diagnostic.v1",
+              "transport": {"state": "RETURNED_ZERO" if returncode == 0 else
+                            "RETURNED_NONZERO" if type(returncode) is int and 0 <= returncode <= 255
+                            else "UNKNOWN", "exit_status": returncode},
+              "framing": "MISSING", "physical": {"state": "NOT_OBSERVED", "exit_status": None},
+              "optional_readiness": {"state": "NOT_OBSERVED", "exit_status": None}}
+    index = 0
+    for line in output.splitlines():
+        if not line.startswith(_STAGE_PREFIX):
+            continue
+        if index >= len(stages):
+            result["framing"] = "INVALID"
+            return result
+        name, target = stages[index]
+        expected = _STAGE_PREFIX + " " + name
+        if target is None:
+            valid = line == expected
+        else:
+            match = re.fullmatch(re.escape(expected) + r" ([0-9]|[1-9][0-9]{1,2})", line)
+            valid = match is not None and int(match[1]) <= 255
+        if not valid:
+            result["framing"] = "INVALID"
+            return result
+        if target is None:
+            key = "physical" if index == 0 else "optional_readiness"
+            result[key]["state"] = "STARTED_UNCONFIRMED"
+        else:
+            code = int(match[1])
+            result[target] = {"state": "RETURNED_ZERO" if code == 0 else "RETURNED_NONZERO",
+                              "exit_status": code}
+        index += 1
+    result["framing"] = "COMPLETE" if index == 4 else "INCOMPLETE" if index else "MISSING"
+    # A zero transport result must agree with the final command's status.
+    # A transport failure can happen after complete remote output; it remains
+    # unavailable regardless of framing and is never converted into success.
+    if index == 4 and returncode == 0 and result["optional_readiness"]["exit_status"] != 0:
+        result["framing"] = "INVALID"
+    return result
+
+
+def classify_host_env(raw):
+    """Tiny literal grammar, never a shell evaluator or permission decision."""
+    import re
+    try:
+        text = raw.decode("ascii")
+    except (UnicodeError, AttributeError):
+        return "UNKNOWN"
+    seen = False
+    for line in text.split("\n"):
+        if not line.strip() or line.lstrip(" \t").startswith("#"):
+            continue
+        # Only this config selector is actually consumed by the pinned GLM
+        # validator. Qwen's config path is fixed; no other env name is needed.
+        if seen or not re.fullmatch(
+                r"[ \t]*(?:export )?GLM_CONFIG=(?:/home/ubuntu0/\.glm/config\.json|"
+                r"'/home/ubuntu0/\.glm/config\.json'|\"/home/ubuntu0/\.glm/config\.json\")[ \t]*", line):
+            return "UNKNOWN"
+        seen = True
+    return "LITERAL_CONFIG_ONLY"
+
+
+def inspect_host_env():
+    """Read exactly one fixed hook. Only digest/finite states leave this call."""
+    import hashlib
+    import os
+    import stat
+    result = {"schema": "mastermind.host_env_inspection.v1", "status": "UNAVAILABLE",
+              "custody": "UNKNOWN", "syntax": "UNKNOWN", "sha256": None}
+    fds = []
+    edges = []
+    try:
+        uid = os.geteuid()
+        if uid == 0:
+            raise ValueError()
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        def identity(info):
+            return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                    info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+        fd = os.open("/", flags | os.O_DIRECTORY)
+        fds.append(fd)
+        for name in ("home", "ubuntu0", "lanes", "ext"):
+            child = os.open(name, flags | os.O_DIRECTORY, dir_fd=fd)
+            fds.append(child)
+            info = os.fstat(child)
+            if info.st_uid not in (0, uid) or info.st_mode & 0o022:
+                raise ValueError()
+            edges.append((fd, name, child, identity(info)))
+            fd = child
+        leaf = os.open("HOST_ENV.sh", flags, dir_fd=fd)
+        fds.append(leaf)
+        before = os.fstat(leaf)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != uid
+                or before.st_mode & 0o022 or before.st_nlink != 1
+                or not 0 <= before.st_size <= 65536):
+            raise ValueError()
+        chunks = []
+        length = 0
+        while length <= 65536:
+            chunk = os.read(leaf, min(4096, 65537-length))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            length += len(chunk)
+        raw = b"".join(chunks)
+        if (len(raw) != before.st_size or len(raw) > 65536
+                or identity(before) != identity(os.fstat(leaf))
+                or identity(before) != identity(os.stat("HOST_ENV.sh", dir_fd=fd, follow_symlinks=False))):
+            raise ValueError()
+        for parent, name, child, expected in edges:
+            if (identity(os.fstat(child)) != expected
+                    or identity(os.stat(name, dir_fd=parent, follow_symlinks=False)) != expected):
+                raise ValueError()
+        result.update(status="OBSERVED", custody="QUALIFIED",
+                      syntax=classify_host_env(raw), sha256=hashlib.sha256(raw).hexdigest())
+    except (OSError, ValueError):
+        result.update(status="UNQUALIFIED", custody="UNQUALIFIED")
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+    return result
+
+
+def prepare_host_env_inspection(registry_path, host):
+    """Fixed selected owner, no caller command/path or normal observation."""
+    import inspect
+    import json
+    import shlex
+    from glm_host_account_source import owned_bytes
+    def pairs(items):
+        result = {}
+        for key, value in items:
+            if key in result:
+                raise ValueError()
+            result[key] = value
+        return result
+    if host != "ubuntu0":
+        raise ValueError()
+    registry = json.loads(owned_bytes(registry_path), object_pairs_hook=pairs)
+    entry = registry.get(host) if type(registry) is dict else None
+    if (type(entry) is not dict or entry.get("ssh_alias") != "mmx-ubuntu0"
+            or entry.get("local") is not None and entry.get("local") is not False
+            or entry.get("platform") != "linux"
+            or entry.get("worktree_root") != "/home/ubuntu0/.mastermind/worktrees"
+            or type(entry.get("roles")) is not list or "lanes" not in entry["roles"]):
+        raise ValueError()
+    program = (inspect.getsource(classify_host_env) + "\n" + inspect.getsource(inspect_host_env)
+               + "\nimport json\nprint(json.dumps(inspect_host_env(),sort_keys=True,separators=(',',':')))\n")
+    return "mmx-ubuntu0", "/usr/bin/python3 -I -S -B -c " + shlex.quote(program)
+
+
+def host_env_inspection_result(output, returncode):
+    """Reject arbitrary/duplicate/mixed output; no raw transport data retained."""
+    import json
+    import re
+    result = {"schema": "mastermind.host_env_inspection.v1", "status": "UNAVAILABLE",
+              "custody": "UNKNOWN", "syntax": "UNKNOWN", "sha256": None}
+    if type(returncode) is not int or returncode != 0 or len(output) > 1024:
+        return result
+    def pairs(items):
+        value = {}
+        for key, item in items:
+            if key in value:
+                raise ValueError()
+            value[key] = item
+        return value
+    try:
+        value = json.loads(output, object_pairs_hook=pairs)
+        if type(value) is not dict or set(value) != set(result) or value["schema"] != result["schema"]:
+            raise ValueError()
+        if value["status"] == "OBSERVED":
+            if (value["custody"] != "QUALIFIED" or value["syntax"] not in ("UNKNOWN", "LITERAL_CONFIG_ONLY")
+                    or type(value["sha256"]) is not str or not re.fullmatch(r"[0-9a-f]{64}", value["sha256"])):
+                raise ValueError()
+        elif value != dict(result, status="UNQUALIFIED", custody="UNQUALIFIED"):
+            raise ValueError()
+        return value
+    except (ValueError, TypeError):
+        return result
+
+
+def physical_occupancy(expected_sha256):
+    """Run only held, selected-release-identical incumbent occupancy bytes."""
+    import hashlib
+    import os
+    import stat
+    import sys
+    fds, edges = [], []
+    def identity(info):
+        return (info.st_dev, info.st_ino, info.st_mode, info.st_uid, info.st_gid,
+                info.st_nlink, info.st_size, info.st_mtime_ns, info.st_ctime_ns)
+    try:
+        uid = os.geteuid()
+        if uid == 0:
+            raise ValueError()
+        flags = os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW | os.O_NONBLOCK
+        parent = os.open('/', flags | os.O_DIRECTORY)
+        fds.append(parent)
+        for name in ('home', 'ubuntu0', 'lanes', 'ext'):
+            child = os.open(name, flags | os.O_DIRECTORY, dir_fd=parent)
+            fds.append(child)
+            info = os.fstat(child)
+            if info.st_uid not in (0, uid) or info.st_mode & 0o022:
+                raise ValueError()
+            edges.append((parent, name, child, identity(info)))
+            parent = child
+        leaf = os.open('lane_runtime.py', flags, dir_fd=parent)
+        fds.append(leaf)
+        before = os.fstat(leaf)
+        if (not stat.S_ISREG(before.st_mode) or before.st_uid != uid
+                or before.st_mode & 0o022 or before.st_nlink != 1
+                or not 0 < before.st_size <= 1048576):
+            raise ValueError()
+        raw = bytearray()
+        while len(raw) <= 1048576:
+            chunk = os.read(leaf, min(65536, 1048577 - len(raw)))
+            if not chunk:
+                break
+            raw.extend(chunk)
+        if (len(raw) != before.st_size or hashlib.sha256(raw).hexdigest() != expected_sha256
+                or identity(before) != identity(os.fstat(leaf))
+                or identity(before) != identity(os.stat('lane_runtime.py', dir_fd=parent, follow_symlinks=False))):
+            raise ValueError()
+        for parent_fd, name, child, info in edges:
+            if info != identity(os.fstat(child)) or info != identity(os.stat(name, dir_fd=parent_fd, follow_symlinks=False)):
+                raise ValueError()
+        # Same incumbent CLI and active directory; execute the qualified held
+        # bytes, never reopen the pathname or import a host-local replacement.
+        sys.argv = ['/home/ubuntu0/lanes/ext/lane_runtime.py', '--occupancy']
+        namespace = sys.modules['__main__'].__dict__
+        namespace['__file__'] = sys.argv[0]
+        print('occupancy_source_sha256=' + expected_sha256)
+        exec(compile(bytes(raw), sys.argv[0], 'exec'), namespace)
+    except (OSError, ValueError):
+        raise SystemExit(78) from None
+    finally:
+        for fd in reversed(fds):
+            os.close(fd)
+
+
+def prepare_physical_diagnostic(registry_path, host):
+    """Fixed hook-free diagnostic, no account configuration or state writer."""
+    import hashlib
+    import inspect
+    from pathlib import Path
+    import shlex
+    from glm_host_account_source import owned_bytes
+    # Reuse the existing exact selected target/custody qualification. The
+    # returned inspection program is discarded; no hook is opened or run.
+    alias, _ = prepare_host_env_inspection(registry_path, host)
+    here = Path(__file__).resolve().parent
+    template = owned_bytes(here / 'host_pull_probe.template').decode('utf-8')
+    digest = hashlib.sha256(owned_bytes(here / 'lane_runtime.py')).hexdigest()
+    original = 'occupancy=$(python3 -B @@LR@@ --occupancy 2>/dev/null) || occupancy=""'
+    if template.count(original) != 1 or template.count('@@WR@@') != 2:
+        raise ValueError()
+    program = inspect.getsource(physical_occupancy) + '\nphysical_occupancy(' + repr(digest) + ')\n'
+    command = '/usr/bin/python3 -I -S -B -c ' + shlex.quote(program)
+    template = template.replace(original, 'occupancy=$(' + command + ' 2>/dev/null) || exit 78')
+    template = template.replace('@@WR@@', '/home/ubuntu0/.mastermind/worktrees')
+    if '@@LR@@' in template:
+        raise ValueError()
+    return alias, ("printf '%s\\n' 'HOST_PULL_PHYSICAL_V1 BEGIN'\n" + template
+                   + "\nphysical_rc=$?\nprintf 'HOST_PULL_PHYSICAL_V1 EXIT %s\\n' \"$physical_rc\"\nexit \"$physical_rc\"")
+
+
+def physical_diagnostic_result(output, returncode, expected_occupancy_sha256):
+    """Bounded DATA only. Never publish state or infer readiness/admission."""
+    import math
+    import re
+    result = {'schema': 'mastermind.host_physical_diagnostic.v1', 'host': 'ubuntu0',
+              'status': 'UNAVAILABLE', 'scope': 'DIAGNOSTIC_ONLY',
+              'readiness': 'NOT_REQUESTED', 'published': False,
+              'transport_exit': returncode if type(returncode) is int and 0 <= returncode <= 255 else None,
+              'occupancy_source': 'UNQUALIFIED', 'physical': {}}
+    if returncode != 0 or type(returncode) is not int or len(output) > 65536:
+        return result
+    try:
+        lines = output.splitlines()
+        if (lines.count('HOST_PULL_PHYSICAL_V1 BEGIN') != 1
+                or lines.count('HOST_PULL_PHYSICAL_V1 EXIT 0') != 1
+                or lines[0] != 'HOST_PULL_PHYSICAL_V1 BEGIN'
+                or lines[-1] != 'HOST_PULL_PHYSICAL_V1 EXIT 0'):
+            raise ValueError()
+        values = {}
+        for line in lines[1:-1]:
+            if line.startswith('HOST_PULL_PHYSICAL_V1'):
+                raise ValueError()
+            if '=' not in line:
+                continue
+            key, value = line.split('=', 1)
+            if key in values:
+                raise ValueError()
+            values[key] = value
+        if (not re.fullmatch('[0-9a-f]{64}', expected_occupancy_sha256)
+                or values.get('occupancy_source_sha256') != expected_occupancy_sha256):
+            raise ValueError()
+        physical = {}
+        for key in ('ts', 'load1', 'load5', 'ncpu', 'mem_free_gb', 'disk_free_gb',
+                    'process_active_lanes', 'active_lanes', 'lease_active_lanes',
+                    'lease_locked_lanes', 'lease_legacy_lanes', 'lease_unlocked_lanes'):
+            raw = values.get(key, '')
+            if key in ('active_lanes', 'lease_active_lanes') and values.get('active_lanes_status') != 'known' and raw == '':
+                physical[key] = None
+                continue
+            fractional = key in ('load1', 'load5', 'mem_free_gb', 'disk_free_gb')
+            if not re.fullmatch(r'[0-9]+(?:\.[0-9]+)?' if fractional else r'[0-9]+', raw):
+                raise ValueError()
+            number = float(raw)
+            if not math.isfinite(number) or number > 10**15:
+                raise ValueError()
+            physical[key] = number if fractional else int(raw)
+        if physical['ts'] <= 0 or physical['ncpu'] <= 0:
+            raise ValueError()
+        status = values.get('active_lanes_status')
+        if status not in ('known', 'held', 'unknown'):
+            raise ValueError()
+        physical['active_lanes_status'] = status
+        tools = values.get('tools', '').split(',')
+        if (len(tools) != len(set(tools)) or not set(tools) <=
+                {'gh', 'codex', 'claude', 'node', 'python3', 'cursor-agent', 'grok', 'opencode'}):
+            raise ValueError()
+        physical['tools'] = tools
+        # Physical gate inputs remain observations; no scoring/threshold or
+        # account envelope is created, and missing readings stay absent.
+        for key, raw in values.items():
+            if key in ('therm_psi_io_some10', 'therm_psi_memory_some10', 'therm_cpu_tctl_mc',
+                       'therm_nvme_margin_crit_mc'):
+                if re.fullmatch(r'-?[0-9]+(?:\.[0-9]+)?', raw):
+                    number = float(raw)
+                    if math.isfinite(number) and abs(number) <= 10**15:
+                        physical[key] = number
+        physical['on_ac'] = values.get('on_ac') if values.get('on_ac') in ('true', 'false', 'unknown') else 'unknown'
+        result.update(status='OBSERVED', occupancy_source='QUALIFIED', physical=physical)
+    except (ValueError, TypeError, IndexError, OverflowError):
+        pass
+    return result
+
+
 def read_hosts():
     import json, re, sys
     try:
@@ -55,9 +403,16 @@ def read_hosts():
 
 def write_state():
     import json, os, sys, time, tempfile, stat, math, re
-    state_dir, host, rc, out = sys.argv[1], sys.argv[2], int(sys.argv[3]), sys.argv[4]
+    state_dir, host, out = sys.argv[1], sys.argv[2], sys.argv[4]
+    raw_rc = sys.argv[3]
+    rc = int(raw_rc) if re.fullmatch(r"[0-9]|[1-9][0-9]{1,2}", raw_rc) else None
+    if rc is not None and rc > 255:
+        rc = None
     transport_alias = sys.argv[5] if len(sys.argv) > 5 else None
-    doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None}
+    diagnostic = probe_diagnostic(out, rc)
+    framing_valid = diagnostic["framing"] == "COMPLETE"
+    doc = {"host": host, "ts": int(time.time()), "reachable": False, "error": None,
+           "probe_diagnostic": diagnostic}
 
     def num(s):
         try:
@@ -67,7 +422,7 @@ def write_state():
 
     kv = {}
     duplicate = set()
-    if rc == 0:
+    if rc == 0 and framing_valid:
         for line in out.splitlines():
             line = line.strip()
             if line.startswith("#") or "=" not in line:
@@ -77,7 +432,7 @@ def write_state():
             if k and all(c.isalnum() or c == "_" for c in k):
                 if k in kv: duplicate.add(k)
                 kv[k] = v.strip()
-    if rc == 0 and kv.get("load1") not in (None, "") and kv.get("ncpu") not in (None, ""):
+    if rc == 0 and framing_valid and kv.get("load1") not in (None, "") and kv.get("ncpu") not in (None, ""):
         doc["reachable"] = True
         ts = num(kv.get("ts"))
         if ts and ts > 0:
@@ -334,6 +689,12 @@ def write_state():
                 summary += " sampled_top_cpu=" + ",".join(
                     f"{p['comm']}:{p['cpu_pct']:g}%/pid{p['pid']}"
                     for p in top[:3])
+    elif rc is None:
+        doc["error"] = "probe_status_invalid"
+        summary = "reachable=false error=probe_status_invalid"
+    elif rc == 0 and not framing_valid:
+        doc["error"] = "probe_diagnostic_invalid"
+        summary = "reachable=false error=probe_diagnostic_invalid"
     elif rc == 255:
         doc["error"] = "ssh_unreachable"
         summary = "reachable=false error=ssh_unreachable"
@@ -372,13 +733,40 @@ def write_state():
     finally:
         if os.path.exists(tmp):
             os.unlink(tmp)
-    print(summary)
+    # Retain this invocation's closed diagnostic in the existing collector
+    # return/log as well as state: another normal producer may atomically
+    # replace the shared host snapshot before its caller reads it.
+    print(summary + " probe_diagnostic=" + json.dumps(diagnostic, sort_keys=True, separators=(",", ":")))
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
         raise SystemExit(2)
     command = sys.argv.pop(1)
-    if command == "read-hosts":
+    if command == "physical-diagnostic-prepare":
+        try:
+            if len(sys.argv) != 3:
+                raise ValueError()
+            alias, probe = prepare_physical_diagnostic(sys.argv[1], sys.argv[2])
+            print(alias)
+            print(probe)
+        except (OSError, ValueError, TypeError, KeyError):
+            sys.stderr.write('host_pull: physical diagnostic refused\n')
+            raise SystemExit(78)
+    elif command == "physical-diagnostic-result":
+        import hashlib
+        import json
+        from pathlib import Path
+        from glm_host_account_source import owned_bytes
+        raw_code = sys.argv[1] if len(sys.argv) == 2 else ''
+        code = int(raw_code) if raw_code.isascii() and raw_code.isdecimal() and len(raw_code) <= 3 else None
+        try:
+            digest = hashlib.sha256(owned_bytes(Path(__file__).resolve().parent / 'lane_runtime.py')).hexdigest()
+            result = physical_diagnostic_result(sys.stdin.read(65537), code, digest)
+        except (OSError, ValueError, TypeError):
+            result = physical_diagnostic_result('', None, '')
+        print(json.dumps(result, sort_keys=True, separators=(',', ':')))
+        raise SystemExit(0 if result['status'] == 'OBSERVED' else 78)
+    elif command == "read-hosts":
         read_hosts()
     elif command == "paid-qualification":
         try:
@@ -398,6 +786,23 @@ if __name__ == "__main__":
         except (OSError, ValueError, TypeError, KeyError):
             sys.stderr.write("host_pull: paid qualification refused\n")
             raise SystemExit(78)
+    elif command == "inspect-host-env-prepare":
+        try:
+            if len(sys.argv) != 3:
+                raise ValueError()
+            alias, probe = prepare_host_env_inspection(sys.argv[1], sys.argv[2])
+            print(alias)
+            print(probe)
+        except (OSError, ValueError, TypeError, KeyError):
+            sys.stderr.write("host_pull: fixed inspection refused\n")
+            raise SystemExit(78)
+    elif command == "inspect-host-env-result":
+        import json
+        raw_code = sys.argv[1] if len(sys.argv) == 2 else ""
+        code = int(raw_code) if raw_code.isascii() and raw_code.isdecimal() and len(raw_code) <= 3 else None
+        result = host_env_inspection_result(sys.stdin.read(1025), code)
+        print(json.dumps(result, sort_keys=True, separators=(",", ":")))
+        raise SystemExit(0 if result["status"] == "OBSERVED" else 78)
     elif command == "write-state":
         write_state()
     else:

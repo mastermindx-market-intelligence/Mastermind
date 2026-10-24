@@ -75,10 +75,69 @@ class PairedLauncherUpgrade(unittest.TestCase):
             with mock.patch.object(sys, 'argv', ['builder', '--output', str(cls.built)]), \
                     contextlib.redirect_stdout(io.StringIO()):
                 builder.main()
-            cls.manifest = json.loads((cls.built / 'native-manifest.json').read_bytes())
-            if (len(cls.manifest) != 95 or
-                    g.digest((cls.built / 'native-manifest.json').read_bytes()) != installer.UPGRADE_MANIFEST):
-                raise AssertionError('actual protected composition differs from upgrade pin')
+            current_manifest = (cls.built / 'native-manifest.json').read_bytes()
+            if current_manifest != (Path(builder.__file__).parent / 'native-manifest.json').read_bytes():
+                raise AssertionError('current builder differs from protected manifest')
+            cls.manifest = json.loads(current_manifest)
+            # This suite tests the historical 8bc -> d044 paired transition,
+            # not a later ordinary generation selection through d044. Recreate
+            # only its exact two-line controller preimage in this disposable
+            # fixture; both the whole controller and whole old manifest bind it.
+            controller = cls.built / 'native-code-stage/ext/remote_sub.sh'
+            current = controller.read_bytes()
+            if g.digest(current) != '09e000db51b2eca4fadd2e3d1a201f4027b4ea725359d1b42ef4d3baf92fe5d7':
+                raise AssertionError('historical fixture current controller differs')
+            fixed = (b'      ECONOMIC_SOURCE_DIR="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"\n'
+                     b'      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$ECONOMIC_SOURCE_DIR/pick.py" launch-policy')
+            prior = (b'      POLICY_SOURCE="$(cd "$(dirname "$SCRIPT_SOURCE")" && pwd)"\n'
+                     b'      if ! ECONOMIC_DECISION=$(commission_run launch-policy "$REMOTE_SUB_PYTHON" "$POLICY_SOURCE/pick.py" launch-policy')
+            if current.count(fixed) != 1:
+                raise AssertionError('historical fixture inverse is not exact')
+            original = current.replace(fixed, prior)
+            original_sha = 'ccd49590f1a8e8b5b337c6581aabd1671791f4e7b339b041112c8aadd99b5351'
+            if g.digest(original) != original_sha:
+                raise AssertionError('historical fixture controller preimage differs')
+            controller.write_bytes(original)
+            cls.manifest['ext/remote_sub.sh'] = original_sha
+            # Restore the *historical* fabric_task bytes as well; this suite
+            # qualifies the original 8bc -> d044 pair, not the current CLI.
+            task = cls.built / 'native-code-stage/ext/fabric_task.py'
+            current_task = task.read_bytes()
+            current_line = (
+                b'    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), '
+                b'help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")\n'
+            )
+            original_line = (
+                b'    p_request.add_argument("--qualification-host", choices=("mb", "m1"), '
+                b'help="Explicit first Grok worker on a pending qualified Mac; no enrollment")\n'
+            )
+            if current_task.count(current_line) != 1:
+                raise AssertionError('historical task fixture new CLI preimage differs')
+            prior_task = current_task.replace(current_line, original_line)
+            prior_task_sha = '0ed7b286dc1d51ecd6349d34d9342fa144097ec3a74257bce6186aa15b8b65de'
+            if g.digest(prior_task) != prior_task_sha:
+                raise AssertionError('historical task fixture reverse transform differs')
+            task.write_bytes(prior_task)
+            cls.manifest['ext/fabric_task.py'] = prior_task_sha
+            # This is the historical paired upgrade, not later diagnostic
+            # publication. Restore exact retained pre-diagnostic payloads only
+            # inside this disposable stage, with closed names and whole hashes.
+            import base64, zlib
+            fixture = Path(__file__).resolve().parents[4] / 'tests/fixtures/host-pull-prediagnostic-968e.json'
+            retained = json.loads(fixture.read_bytes())
+            if retained['source'] != '968e1a62842927dd763ac6041cf7312f4433ebb7' or set(retained['files']) != {'host_pull.sh', 'host_pull_backend.py'}:
+                raise AssertionError('historical collector fixture identity differs')
+            expected = {'host_pull.sh': '4671e6e3094ad4fdafa77f373648de66fabc866a8e6ec2f76da17215cdedb7cc',
+                        'host_pull_backend.py': 'b8629cee082334319391bf48285668c727150a7d20d5ae831497cbb10336b073'}
+            for name, digest in expected.items():
+                raw = zlib.decompress(base64.b64decode(retained['files'][name]['zlib_base64'], validate=True))
+                if retained['files'][name]['sha256'] != digest or g.digest(raw) != digest:
+                    raise AssertionError('historical collector preimage differs')
+                (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
+                cls.manifest['ext/' + name] = digest
+            historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
+            if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
+                raise AssertionError('historical paired-upgrade manifest differs')
         finally:
             _active = False
 

@@ -1232,7 +1232,7 @@ def main(argv: list[str] | None = None) -> int:
     packet_group.add_argument("--packet")
     packet_group.add_argument("--stdin", action="store_true")
     p_request.add_argument("--pool")
-    p_request.add_argument("--qualification-host", choices=("mb", "m1"), help="Explicit first Grok worker on a pending qualified Mac; no enrollment")
+    p_request.add_argument("--qualification-host", choices=("mb", "m1", "ubuntu4"), help="Explicit pending-host first worker (Grok on Mac, MiniMax on M1 or Ubuntu4); no provider enrollment")
     p_request.add_argument("--prefer")
     p_request.add_argument("--subject-pool", help="Author pool for canonical reviewer independence rules")
     p_request.add_argument("--root")
