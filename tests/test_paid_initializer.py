@@ -38,7 +38,7 @@ def _linux_completion(request,profile=None):
                 +(' launch_fixture='+profile if profile else ''))
 
 
-def _system_fixture_launch():
+def _system_fixture_launch(*,no_site=False):
     """Select only an existing fixed Root/ACL-free CPython3.12 distribution.
 
     This test precondition cannot grant production trust. The actual owner and
@@ -66,40 +66,52 @@ def _system_fixture_launch():
         # Qualify its image/startup metadata before executing getpath.
         for prefix in ('/usr',):
             library=Path(prefix)/'lib/python3.12';guarded(library)
-            for parent,dirs,files in os.walk(library,followlinks=False):
-                dirs[:]=[v for v in dirs if v not in ('site-packages','dist-packages')]
-                for leaf in dirs+files:
+            if no_site:
+                for name,info in m._no_site_startup_entries(str(library)):
                     count+=1
                     if count>20000:raise ValueError()
-                    guarded(Path(parent)/leaf)
+                    if name==str(library/'sitecustomize.py') and stat.S_ISLNK(info.st_mode):
+                        directory=os.open(library,os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW)
+                        try:
+                            with m._IgnoredNoSiteNode(directory):pass
+                        finally:os.close(directory)
+                    else:guarded(Path(name))
+            else:
+                for parent,dirs,files in os.walk(library,followlinks=False):
+                    dirs[:]=[v for v in dirs if v not in ('site-packages','dist-packages')]
+                    for leaf in dirs+files:
+                        count+=1
+                        if count>20000:raise ValueError()
+                        guarded(Path(parent)/leaf)
             optional=Path(prefix)/'lib/python312.zip'
             if optional.exists():guarded(optional)
         for directory in (logical.parent,logical.parent.parent):
             if (directory/'pyvenv.cfg').exists() or any(v.name.endswith('._pth') for v in directory.iterdir()):return None
-        data=json.loads(subprocess.check_output([str(logical),'-I','-S','-B','-c',
-            'import json,sys;print(json.dumps(dict(version=list(sys.version_info[:2]),prefixes=[sys.prefix,sys.exec_prefix,sys.base_prefix,sys.base_exec_prefix])))'],stderr=subprocess.DEVNULL,timeout=5))
+        code='import json,sys;print(json.dumps(dict(version=list(sys.version_info[:2]),prefixes=[sys.prefix,sys.exec_prefix,sys.base_prefix,sys.base_exec_prefix])))'
+        if no_site:code=m.NO_SITE_PREAMBLE+code+'\n_paid_no_site_check()'
+        data=json.loads(subprocess.check_output([str(logical),'-I','-S','-B','-c',code],stderr=subprocess.DEVNULL,timeout=5))
         if data['version']!=[3,12]:return None
         if data['prefixes']!=['/usr']*4:return None
         return logical
     except (OSError,ValueError,subprocess.SubprocessError):return None
 
 
-def _observer_metadata_fixture(probe,*,exact,prefixes,root_directories=()):
+def _observer_metadata_fixture(probe,*,exact,prefixes,root_directories=(),root_files=()):
     """Fallback ONLY: finite ACL and enumerated directory metadata premise.
 
     The real observer body/read/identity validators remain. No production source,
     actual host ACL, environment or output record is changed by this fixture.
     """
     exact=sorted(set(map(str,exact)));prefixes=sorted(set(map(str,prefixes)))
-    root_directories=sorted(set(map(str,root_directories)))
+    root_directories=sorted(set(map(str,root_directories)));root_files=sorted(set(map(str,root_files)))
     return ("import os,errno,stat\n_fixture_raw_getxattr=os.getxattr\n"
-        +"_fixture_root_directories="+repr(root_directories)+"\n"
+        +"_fixture_root_directories="+repr(root_directories)+"\n_fixture_root_files="+repr(root_files)+"\n"
         +"_fixture_raw_stat=os.stat;_fixture_raw_fstat=os.fstat\n"
-        +"class _FixtureDirectoryMetadata:\n"
+        +"class _FixtureRootMetadata:\n"
         +"    def __init__(self,value):self._value=value;self.st_uid=0;self.st_mode=value.st_mode&~0o022\n"
         +"    def __getattr__(self,key):return getattr(self._value,key)\n"
         +"def _fixture_directory_metadata(value,name):\n"
-        +"    return _FixtureDirectoryMetadata(value) if stat.S_ISDIR(value.st_mode) and name in _fixture_root_directories else value\n"
+        +"    return _FixtureRootMetadata(value) if (stat.S_ISDIR(value.st_mode) and name in _fixture_root_directories) or (stat.S_ISREG(value.st_mode) and name in _fixture_root_files) else value\n"
         +"def _fixture_fstat(fd):\n"
         +"    return _fixture_directory_metadata(_fixture_raw_fstat(fd),os.path.realpath('/proc/self/fd/'+str(fd)))\n"
         +"def _fixture_stat(name,*args,**kwargs):\n"
@@ -361,7 +373,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors)
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch],root_directories=ancestors,root_files=[real])
         result=json.loads(_inert_bootstrap(req,probe,diagnostic_request=request))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
@@ -548,7 +560,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         # validators are the genuine existing owner, not stubbed success DTOs.
         monkeypatch.setattr(qualifier.m,'_initializer_module',lambda expected:(owner,sources['paid_initializer.py']) if expected==hashes['paid_initializer.py'] else m.refuse())
         req=qualifier.m._request(req)
-        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[str(lane)],root_directories=ancestors)
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[str(lane)],root_directories=ancestors,root_files=[real])
         raw=_inert_bootstrap(req,probe,owner=owner,diagnostic_request=request)
         result=qualifier.m._observation(raw,req)
         assert private_token.encode() not in raw
@@ -588,11 +600,36 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             faults.setattr(owner,'_capture_environment',changed_capture);faults.setattr(owner,'_bounded_child',counted_child)
             with pytest.raises(ValueError):owner.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
         assert not starts
+        # New profile: the actual compiler/isolated bootstrap/private package,
+        # getpath child and final observer, using only the existing system image.
+        # Source ownership is a declared fixture; platform metadata here is real.
+        import shlex
+        with monkeypatch.context() as current:
+            current.setattr(os,'stat',rawstat);current.setattr(os,'fstat',rawfstat)
+            current.setattr(os,'lstat',rawlstat);current.setattr(os,'getxattr',rawxattr)
+            system=_system_fixture_launch(no_site=True)
+            assert system is not None,'required Root system fixture cannot establish native no-site custody'
+            image=system.resolve();logical.unlink();logical.symlink_to(image)
+            c['startup'].update(profile=owner.NO_SITE_PROFILE,prefix='/usr',exec_prefix='/usr',base_prefix='/usr',base_exec_prefix='/usr')
+            c['bootstrap_python']=dict(path=str(system),real_path=str(image),sha256=hashlib.sha256(image.read_bytes()).hexdigest())
+            c['launch_python']=dict(path=str(logical),real_path=str(image),sha256=c['bootstrap_python']['sha256'])
+            req['initializer_commitment_sha256']=hashlib.sha256(owner.canonical(c)).hexdigest()
+            current.setattr(qualifier.m,'_initializer_bundle',lambda expected:(owner,sources) if all(expected[name]==hashes[name] for name in sources) else owner.refuse())
+            alias,command=qualifier.m.build_paid_probe(req);argv=shlex.split(command)
+            assert alias==req['transport_alias'] and argv[5].startswith(owner.NO_SITE_PREAMBLE)
+            assert len(command.encode('utf-8'))+1<=qualifier.m.MAX_REMOTE_COMMAND_BYTES
+            execution=subprocess.run(argv,env=dict(HOME=account.pw_dir,PATH='/usr/bin:/bin'),stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=30)
+            assert execution.returncode==0,'compiled no-site journey refused'
+            assert private_token.encode() not in execution.stdout
+            actual=qualifier.m._observation(execution.stdout,req)
+            assert actual['binary']['real_path']==str(image)
+            assert actual['pre_execution']['snapshot_sha256']==owner._NESTED_DATA.TRANSFORMED_SHA256
     finally:
         current=lane.lstat()
         assert (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino)
         shutil.rmtree(lane)
-    _linux_completion(request,'system-root-launch' if system_launch else 'finite-metadata-simulation')
+    _linux_completion(request,'old-profile-finite-premise+real-system-nosite')
 
 
 def test_observer_metadata_fixture_is_finite_and_does_not_hide_other_errors():
@@ -755,8 +792,16 @@ for key in ('modeled','private','unmodeled'):
     else:
         os.close(fd);assert key=='modeled'
 '''
+    child_probe+='''
+raw,info=read_file(p['image'],os.getuid(),4096)
+assert raw==b'inert-image' and info.st_uid==0 and not info.st_mode&0o022
+try:read_file(p['file'],os.getuid(),4096)
+except ValueError:pass
+else:raise AssertionError('unmodeled writable file admitted')
+'''
     regular=tmp_path/'regular';regular.write_bytes(b'inert');regular.chmod(0o666)
-    data=dict(modeled=str(modeled),private=str(private),unmodeled=str(unmodeled),file=str(regular))
-    source='import sys\n'+_observer_metadata_fixture(definitions+'\n'+child_probe,exact=[*modeled.parents,modeled],prefixes=[],root_directories=[*modeled.parents,modeled,regular])
+    image=tmp_path/'image';image.write_bytes(b'inert-image');image.chmod(0o666)
+    data=dict(modeled=str(modeled),private=str(private),unmodeled=str(unmodeled),file=str(regular),image=str(image))
+    source='import sys\n'+_observer_metadata_fixture(definitions+'\n'+child_probe,exact=[*modeled.parents,modeled],prefixes=[],root_directories=[*modeled.parents,modeled,regular],root_files=[image])
     child=subprocess.run([sys.executable,'-I','-S','-B','-c',source,json.dumps(data)],capture_output=True,timeout=5)
     assert child.returncode==0 and not child.stdout and not child.stderr

@@ -14,6 +14,17 @@ import re
 SCHEMA = 'mastermind.paid_initializer_commitment/v1'
 CONTRACT = 'paid-host-env-held-fd.v1'
 NESTED_CONTRACT = 'paid-host-env-held-fd-token-data.v1'
+NO_SITE_PROFILE = 'cpython-3.12-linux-root-prefix-nosite.v1'
+# Finite normal-import refusal under closed pinned code, not a sandbox.
+NO_SITE_PREAMBLE = """import sys
+if sys.version_info[:2]!=(3,12) or not (sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode):raise SystemExit(78)
+_paid_site_names=('site','sitecustomize','usercustomize')
+if any(name in sys.modules for name in _paid_site_names):raise SystemExit(78)
+for name in _paid_site_names:sys.modules[name]=None
+def _paid_no_site_check():
+    if not (sys.flags.isolated and sys.flags.no_site and sys.dont_write_bytecode) or any(name not in sys.modules or sys.modules[name] is not None for name in _paid_site_names):raise SystemExit(78)
+_paid_no_site_check()
+"""
 NESTED_OUTER_SHA256 = 'c7fc8be292b3f231317c3cc9e5b64c990a34a495cf0fa095048a37df0379b2f6'
 NESTED_OUTER_SIZE = 587
 _TOKEN_DATA = _NESTED_DATA = None  # qualified private-package producer only
@@ -30,6 +41,78 @@ class InitializerCommitmentRefused(ValueError):
 
 def refuse():
     raise InitializerCommitmentRefused('paid_initializer_commitment_refused')
+
+
+def require_no_site_policy():
+    """Check existing early policy; never install/backfill it in a caller."""
+    import sys
+    if (sys.version_info[:2]!=(3,12) or not sys.flags.isolated or not sys.flags.no_site
+            or not sys.dont_write_bytecode
+            or any(name not in sys.modules or sys.modules[name] is not None
+                   for name in ('site','sitecustomize','usercustomize'))):refuse()
+
+
+class _IgnoredNoSiteNode:
+    """Hold the exact no-follow link node, never its target; require native ACL."""
+    def __init__(self,directory):
+        import stat
+        self.directory=directory;self.fd=None
+        try:
+            info=os.fstat(directory)
+            if not stat.S_ISDIR(info.st_mode) or info.st_uid!=0 or info.st_mode&0o022:refuse()
+            self.directory_before=self._identity(info)
+            self.fd=os.open('sitecustomize.py',os.O_PATH|os.O_NOFOLLOW,dir_fd=directory)
+            self.before=self._identity(os.fstat(self.fd));self.check()
+        except BaseException:
+            if self.fd is not None:os.close(self.fd);self.fd=None
+            raise
+    @staticmethod
+    def _identity(info):
+        return (info.st_dev,info.st_ino,info.st_mode,info.st_uid,info.st_gid,info.st_nlink,info.st_size,info.st_mtime_ns,info.st_ctime_ns)
+    def check(self):
+        import errno,stat
+        if self.fd is None or self._identity(os.fstat(self.directory))!=self.directory_before:refuse()
+        info=os.fstat(self.fd)
+        if (not stat.S_ISLNK(info.st_mode) or info.st_uid!=0 or info.st_nlink!=1
+                or stat.S_IMODE(info.st_mode)!=0o777 or not 0<info.st_size<=4096 or self._identity(info)!=self.before
+                or self._identity(os.stat('sitecustomize.py',dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
+        # The last node is not followed. Its alias uses the held directory FD.
+        alias='/proc/self/fd/'+str(self.directory)+'/sitecustomize.py'
+        for key in ('system.posix_acl_access','system.posix_acl_default'):
+            try:os.getxattr(alias,key,follow_symlinks=False)
+            except OSError as error:
+                if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):refuse()
+            else:refuse()
+        if (self._identity(os.fstat(self.fd))!=self.before
+                or self._identity(os.stat('sitecustomize.py',dir_fd=self.directory,follow_symlinks=False))!=self.before):refuse()
+    def __enter__(self):self.check();return self
+    def __exit__(self,*ignored):
+        try:self.check()
+        finally:
+            if self.fd is not None:os.close(self.fd);self.fd=None
+
+
+
+def _require_startup_entry(info,count):
+    """The unchanged Root/type/mode/count predicate, shared by both profiles."""
+    import stat
+    if (count>20000 or info.st_uid!=0 or info.st_mode&0o022
+            or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))):refuse()
+
+
+def _no_site_startup_entries(library):
+    """No-follow classification under the existing Root namespace premise."""
+    import stat
+    pending=[library]
+    while pending:
+        parent=pending.pop();directories=[]
+        with os.scandir(parent) as entries:
+            for entry in entries:
+                info=entry.stat(follow_symlinks=False)
+                if stat.S_ISDIR(info.st_mode) and entry.name in ('site-packages','dist-packages'):continue
+                yield entry.path,info
+                if stat.S_ISDIR(info.st_mode):directories.append(entry.path)
+        pending.extend(reversed(directories))
 
 
 def canonical(value):
@@ -79,7 +162,7 @@ def validate_commitment(value, *, host_ref, transport_alias, python_path, captur
         if value['launch_python']['path']!=path(python_path):refuse()
         if not re.fullmatch(r'python3(?:\.12)?',PurePosixPath(python_path).name):refuse()
         startup=closed(value['startup'],('profile','prefix','exec_prefix','base_prefix','base_exec_prefix'))
-        if startup['profile']!='cpython-3.12-linux-root-prefix.v1':refuse()
+        if startup['profile']!='cpython-3.12-linux-root-prefix.v1' and not (nested and startup['profile']==NO_SITE_PROFILE):refuse()
         for key in ('prefix','exec_prefix','base_prefix','base_exec_prefix'):
             path(startup[key])
         hook=closed(value['host_env'],('path','sha256','size','uid','gid','mode'))
@@ -241,13 +324,17 @@ def run_bootstrap(request, probe_source):
         host_ref=request['host_ref'],transport_alias=request['transport_alias'],
         python_path=request['python_path'],capture_root=request['capture_root'])
     if hashlib.sha256(canonical(commitment)).hexdigest()!=request['initializer_commitment_sha256']:refuse()
+    no_site=commitment['startup']['profile']==NO_SITE_PROFILE
+    if no_site:
+        require_no_site_policy()
+        if type(probe_source)is not str or hashlib.sha256(probe_source.encode()).hexdigest()!=request['probe_sha256']:refuse()
     account=commitment['account'];uid=account['uid'];gid=account['gid']
     if (os.getuid()!=uid or os.geteuid()!=uid or os.getgid()!=gid or os.getegid()!=gid
             or pwd.getpwuid(uid).pw_name!=account['user']
             or pwd.getpwnam(account['user']).pw_uid!=uid
             or pwd.getpwuid(uid).pw_dir!=account['home']
             or os.environ.get('HOME')!=account['home']):refuse()
-    held=[]; roots=[]; contexts=ExitStack()
+    held=[]; roots=[]; contexts=ExitStack();ignored_nodes=[]
     def identity(s):
         return (s.st_dev,s.st_ino,s.st_mode,s.st_uid,s.st_gid,s.st_nlink,s.st_size,s.st_mtime_ns,s.st_ctime_ns)
     def no_acl(fd):
@@ -288,6 +375,8 @@ def run_bootstrap(request, probe_source):
         except BaseException:
             raise
     def check():
+        if no_site:require_no_site_policy()
+        for node in ignored_nodes:node.check()
         for fd,parent,name,before in held:
             no_acl(fd)
             if identity(os.fstat(fd))!=before or identity(os.stat(name,dir_fd=parent,follow_symlinks=False))!=before:refuse()
@@ -325,21 +414,33 @@ def run_bootstrap(request, probe_source):
         for prefix in set(commitment['startup'][key] for key in
                           ('prefix','exec_prefix','base_prefix','base_exec_prefix')):
             library=prefix+'/lib/python3.12'
-            pin(library,directory=True,owners={0})
+            library_fd,_=pin(library,directory=True,owners={0})
             count=0
-            # Fixed distribution tree only; no caller-selected traversal or
-            # credential read. Root ownership of every entry excludes writes by
-            # the transport account. Concurrent external Root remains outside
-            # the existing trusted-platform premise; no custody is invented.
-            for parent,dirs,files in os.walk(library,followlinks=False):
-                # -S excludes these two distribution site roots; no other
-                # subtree is excluded from startup protection.
-                dirs[:]=[leaf for leaf in dirs if leaf not in ('site-packages','dist-packages')]
-                for leaf in dirs+files:
-                    name=os.path.join(parent,leaf);info=os.lstat(name);count+=1
-                    if (count>20000 or info.st_uid!=0 or info.st_mode&0o022
-                            or not (stat.S_ISDIR(info.st_mode) or stat.S_ISREG(info.st_mode))):refuse()
+            if no_site:
+                # os.walk may follow links to classify them, even with
+                # followlinks=False. This finite variant never does so.
+                for name,info in _no_site_startup_entries(library):
+                    count+=1
+                    if count>20000:refuse()
+                    if name==library+'/sitecustomize.py' and stat.S_ISLNK(info.st_mode):
+                        node=contexts.enter_context(_IgnoredNoSiteNode(library_fd))
+                        if node.before!=identity(info):refuse()
+                        ignored_nodes.append(node);continue
+                    _require_startup_entry(info,count)
                     no_acl(name)
+            else:
+                # Fixed distribution tree only; no caller-selected traversal or
+                # credential read. Root ownership of every entry excludes writes by
+                # the transport account. Concurrent external Root remains outside
+                # the existing trusted-platform premise; no custody is invented.
+                for parent,dirs,files in os.walk(library,followlinks=False):
+                    # -S excludes these two distribution site roots; no other
+                    # subtree is excluded from startup protection.
+                    dirs[:]=[leaf for leaf in dirs if leaf not in ('site-packages','dist-packages')]
+                    for leaf in dirs+files:
+                        name=os.path.join(parent,leaf);info=os.lstat(name);count+=1
+                        _require_startup_entry(info,count)
+                        no_acl(name)
             # An optional root-owned zip on sys.path is still startup code.
             zip_path=prefix+'/lib/python312.zip'
             if os.path.lexists(zip_path):pin(zip_path,owners={0})
@@ -371,6 +472,7 @@ def run_bootstrap(request, probe_source):
         # Test actual CPython getpath before the initializer, through the held
         # kernel image. argv0 is compared as DATA; it is never image authority.
         startup_code="import json,sys;print(json.dumps({k:getattr(sys,k) for k in ('executable','prefix','exec_prefix','base_prefix','base_exec_prefix')}))"
+        if no_site:startup_code=NO_SITE_PREAMBLE+startup_code+'\n_paid_no_site_check()'
         startup_child=subprocess.run([logical,'-I','-S','-B','-c',startup_code],
             executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
             stdin=subprocess.DEVNULL,stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,timeout=5)
@@ -421,6 +523,7 @@ def run_bootstrap(request, probe_source):
         initialized=_initialized_environment(environment_raw,commitment)
         if prepared is not None:prepared.check_environment(initialized)
         check()
+        if no_site:probe_source=NO_SITE_PREAMBLE+probe_source+'\n_paid_no_site_check()'
         child=_bounded_child([logical,'-I','-S','-B','-c',probe_source,encoded],
             executable='/proc/self/fd/'+str(launch_fd),pass_fds=(launch_fd,),
             env=initialized,timeout=10)

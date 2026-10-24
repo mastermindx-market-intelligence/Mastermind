@@ -419,8 +419,7 @@ REVIEWED_FILES.update({'control_plane/paid_fabric_backend.py': {'sha256': '049fe
                                                                         35,
                                                                         'int',
                                                                         '502'))},
- 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': '239cdaaa97a4dbc5ec0ae873548045c75f95a762e896ba93eedd76ad5e5453fd',
- 'sites': ((34, 17, 20, 'int', '501'), (450, 85, 90, 'int', '0o700'))},
+ 'ops/native_fabric/quota_continuity/candidate/paid_host_qualification.py': {'sha256': 'e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0', 'sites': ((34, 17, 20, 'int', '501'), (452, 85, 90, 'int', '0o700'))},
  'ops/native_fabric/quota_continuity/candidate/paid_model_owner.py': {'sha256': 'a0bc9df6070ab23e555df5432ea0ca1b5dd859f8366b6656630e241588de216c',
                                                                       'sites': ((138,
                                                                                  32,
@@ -464,6 +463,5 @@ REVIEWED_FILES['control_plane/executive_backup.py'] = {
     'sites': ((3505, 39, 44, 'int', '0o711'), (3507, 43, 48, 'int', '0o700'), (3509, 39, 44, 'int', '0o755')),
 }
 
-# Immutable input-mode mask only; not a new UID or execution grant.
-REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '14df9c41fd14125fa2407d4dc5ed2ff42ca3a6a69ffa34b005de45f458150559',
- 'sites': ((90, 36, 41, 'int', '0o777'), (100, 48, 53, 'int', '0o777'))}
+# Input-mode bounds and exact ignored Linux symlink mode, never target authority.
+REVIEWED_FILES['ops/native_fabric/quota_continuity/candidate/paid_initializer.py'] = {'sha256': '2d34fa0ef1353c991783574e6a7af4f3011ecbea1f07caed3e967c5f1e6b2f7c', 'sites': ((77, 47, 52, 'int', '0o777'), (173, 36, 41, 'int', '0o777'), (183, 48, 53, 'int', '0o777'))}

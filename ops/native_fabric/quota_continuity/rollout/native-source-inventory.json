@@ -438,9 +438,9 @@
       "source": "candidate/paid_glm_model_client.py"
     },
     "ext/paid_host_qualification.py": {
-      "bytes": 32911,
+      "bytes": 33073,
       "installed_preimage_sha256": null,
-      "sha256": "239cdaaa97a4dbc5ec0ae873548045c75f95a762e896ba93eedd76ad5e5453fd",
+      "sha256": "e4cb143b13324bd5ce4d96af5396054b3c63e1b82c831edae4516f37e495a1b0",
       "source": "candidate/paid_host_qualification.py"
     },
     "ext/paid_incumbent_state.py": {
@@ -450,9 +450,9 @@
       "source": "candidate/paid_incumbent_state.py"
     },
     "ext/paid_initializer.py": {
-      "bytes": 24463,
+      "bytes": 29956,
       "installed_preimage_sha256": null,
-      "sha256": "14df9c41fd14125fa2407d4dc5ed2ff42ca3a6a69ffa34b005de45f458150559",
+      "sha256": "2d34fa0ef1353c991783574e6a7af4f3011ecbea1f07caed3e967c5f1e6b2f7c",
       "source": "candidate/paid_initializer.py"
     },
     "ext/paid_initializer_nested_data.py": {

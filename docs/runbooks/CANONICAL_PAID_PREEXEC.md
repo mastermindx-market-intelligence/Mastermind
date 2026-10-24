@@ -211,3 +211,46 @@ These diagnostic cases do not qualify an actual host namespace or approve an
 initializer, and a passing fast preflight alone is not protected acceptance.
 
 The hosted fallback fixture explicitly models only the enumerated image-selector directory ancestry in its fresh observer, matching its parent premise. Metadata for unmodeled/private sibling directories and regular files remains real and adverse checks use the actual observer walk guard. This is a finite test premise, not qualification of the hosted or deployed distribution.
+
+### Explicit nested no-site startup profile
+
+`cpython-3.12-linux-root-prefix-nosite.v1` is accepted only with
+`paid-host-env-held-fd-token-data.v1`. The old startup profile and old initializer
+contract retain their strict namespace/type checks. Selecting the new profile is
+an explicit commitment, not discovery of platform trust or approval of an unknown
+`sitecustomize.py` target.
+
+The fixed compiler places the exact `NO_SITE_PREAMBLE` before standard-library or
+qualified-package imports in the bootstrap, held-image getpath child and final
+observer. It requires real CPython 3.12 `-I -S -B`, rejects any preloaded `site`,
+`sitecustomize` or `usercustomize` key, and installs exactly those three normal-import
+tombstones. `require_no_site_policy()` checks existing state without installing or
+repairing it. Launch/return checks preserve that policy. Administrative packet
+assembly must not execute this preamble in the administrator's interpreter; the
+separate acquisition packet must place it before its own base64/wrapper imports.
+
+Only an immediate `lib/python3.12/sitecustomize.py` symlink can be excluded from
+executable startup closure. It still counts toward the unchanged 20,000-entry
+bound. New-profile traversal uses no-follow `scandir` classification. The existing
+Root-owned, nonwritable, ACL-qualified library directory and ancestors stay held;
+`O_PATH|O_NOFOLLOW` pins the link node, and native no-follow ACL queries address
+`/proc/self/fd/<held-library-directory>/sitecustomize.py`, never the link descriptor
+itself or its target. Full named/FD identities are rechecked around these queries
+and handoffs. Missing native metadata, unsupported ACL behavior, changed node,
+foreign owner, other symlink/type, writable namespace or excess count refuses.
+All image, zip, `._pth`, pyvenv, getpath, immutable snapshot and source guards remain.
+
+These tombstones are normal-import controls under exact pinned code, not a Python
+sandbox. An arbitrary alias/file loader could execute another file; no such loader
+or caller-supplied Python is admitted. The canonical request still binds the fixed
+probe hash and eight-source closure, and the new profile additionally checks the
+probe bytes before initialization. Token/config/request data never becomes Python
+code. No daemon, policy registry or new approval store is introduced.
+
+Synthetic/local proofs do not establish the complete deployed distribution, unknown
+symlink target, actual initializer approval, helper input, readiness or live H1.
+Actual Linux no-follow custody and the real compiled nested journey require current
+hosted execution. The Linux fixture distinguishes its old-profile finite ownership
+premise from its added actual Root-system-image no-site segment; unsupported native
+proof fails rather than qualifying a simulation. The final quoted UTF-8 paid command
+including its NUL remains bounded at 100,000 bytes before SSH.

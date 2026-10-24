@@ -399,6 +399,8 @@ def build_paid_probe(value):
             +"    module=_load_qualified_package(sources,{name:request['sources_sha256'][name] for name in sources})\n"
             +"    sys.stdout.buffer.write(module.run_bootstrap(request,base64.b64decode(sys.argv[2],validate=True).decode()))\n"
             +"except Exception:sys.exit(78)\n")
+    if request['initializer_commitment']['startup']['profile']==_module.NO_SITE_PROFILE:
+        entry=_module.NO_SITE_PREAMBLE+entry+'\n_paid_no_site_check()\n'
     command = shlex.quote(request["initializer_commitment"]["bootstrap_python"]["path"])+" -I -S -B -c "+shlex.quote(entry)+" "+shlex.quote(encoded)+" "+shlex.quote(probe)
     if len(command.encode("utf-8"))+1>MAX_REMOTE_COMMAND_BYTES:_refuse()
     return request["transport_alias"], command
