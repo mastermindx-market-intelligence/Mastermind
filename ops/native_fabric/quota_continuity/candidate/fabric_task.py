@@ -820,7 +820,7 @@ def request(
                             raise
             except jev_advisory.JevUnavailable as exc:
                 print("JEV_UNAVAILABLE=" + exc.code, file=sys.stderr, flush=True)
-            except (OSError, ValueError, UnicodeError):
+            except (OSError, ValueError, UnicodeError, TypeError):
                 # A provider or input failure must not redirect workers or
                 # authorize another attempt/account on the same packet.
                 print("JEV_UNAVAILABLE=INPUT_OR_TRANSPORT",
