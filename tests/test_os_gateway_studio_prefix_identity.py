@@ -236,6 +236,14 @@ class NativeObservationTests(acl_fixture.HomeAclReaderTestCase):
         subprocess.run(['/bin/chmod','+a','everyone deny delete',str(path)],check=True,capture_output=True)
         result=self.observe_native(lambda:self.churn(path))
         self.assertTrue(result.plist_bytes)
+    def test_native_non_timestamp_prefix_change_stays_strict(self):
+        def change():
+            before=self.fx.home.stat()
+            (self.fx.home/'persistent-owned-entry').write_bytes(b'INERT')
+            after=self.fx.home.stat()
+            self.assertTrue(any(getattr(before,k)!=getattr(after,k)
+                                for k in reader._DIRECTORY_CUSTODY_FIELDS))
+        with self.assertRaises(reader.StudioObservationError):self.observe_native(change)
     def test_native_launchagents_namespace_stays_strict(self):
         with self.assertRaises(reader.StudioObservationError):
             self.observe_native(lambda:self.churn(self.fx.home/'Library'/'LaunchAgents'))
