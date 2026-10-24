@@ -1,0 +1,25 @@
+{
+  "account_login_changed": false,
+  "additional_tests_sha256": "58bd9d3e7d610668b51cc3469994ab713babf64bbe7a118940d9b2a2b6bf8879",
+  "admission_granted": false,
+  "business_tests_sha256": "95297172ec5fbccf32206c1f1e62070a273848b820d020d0df94c0cc951041ce",
+  "patch_sha256": "79e295cf440e77bb97a349b8aaf1effe3041262bd82b4be3e1a58d4884b4ecf1",
+  "postimages_sha256": {
+    "codex_pool_policy.py": "3350e532050fdf2130521c3fcdf0dc8c267f165004e587b0635537a2032367e3",
+    "tests/test_codex_native_profile.py": "c74d2974847d8e14dcb02345de52c73a7b8a3f0187f8389726cc1cff2221d520"
+  },
+  "preimages_sha256": {
+    "codex_pool_policy.py": "f3764a23694fe0437598221e4b95aa27adb31633f2b2e38903ce29c446269224",
+    "tests/test_codex_native_profile.py": "1b8141f7c4335fa8bdb3705b4c2dd03866e51bc6d5ee97b0012faec18e007b23"
+  },
+  "schema": "mastermind.native_codex_six_seat_source/v1",
+  "source_owner": "existing installed M2 Fabric kit and original Fabric selector/admission owners",
+  "status": "source_candidate_not_installed",
+  "test_source_paths": [
+    "codex_pool_policy.py",
+    "codex_native_profile.py",
+    "tests/test_codex_pool_policy.py",
+    "tests/test_codex_native_profile.py"
+  ],
+  "worker_started": false
+}
