@@ -1,8 +1,8 @@
-"""Signed test HTTP and Unix export of one associated Mission/Result read.
+"""Signed mounted Executive HTTP and Unix export of one associated Mission/Result read.
 
-The Executive MCP path fence is outside this slice's writable ceiling, so these
-tests drive the workspace app and the existing Unix client directly. They do
-not qualify installed namespace custody or an Auth0 registration.
+GET /workspace/mission-result/current is dispatched by build_executive_mcp_app
+through AuditedWorkspaceApp and the same WorkspaceApp. These tests do not
+qualify installed namespace custody or an Auth0 registration.
 """
 import asyncio
 import hashlib
@@ -18,6 +18,14 @@ import pytest
 from control_plane import executive_runtime as er
 from control_plane import fabric_result_projection as frp
 from control_plane.workspace_read_service import WorkspaceReadService
+from integrations.business_mcp_auth.mcp_adapter import MastermindTokenVerifier
+from integrations.executive_mcp.server import (
+    AuditedWorkspaceApp,
+    _mounted_lifespan,
+    build_executive_mcp_app,
+)
+from integrations.mastermind_executive_app.app import AppSettings
+from integrations.mastermind_executive_app.gateway import AppPolicies
 from integrations.mastermind_workspace_app.app import WorkspaceAppConfig, create_workspace_app
 from integrations.mastermind_workspace_app.contract import (
     BINDINGS_SCHEMA,
@@ -28,6 +36,7 @@ from integrations.mastermind_workspace_app.contract import (
     workspace_authorizers,
 )
 from integrations.mastermind_workspace_app.installed import CeoIngressWorkspaceClient
+from tests.test_mastermind_executive_app_asgi import _FakeJwksCache, _read_policy, _submit_policy
 from tests.test_workspace_read_app import NOW, _authenticator, _workspace_token, rsa_key
 from tests.test_workspace_read_socket import control, short_socket_root
 from tests.test_workspace_result_service import result_owner
@@ -80,12 +89,35 @@ async def app_transport(owner, rsa_key, tmp_path, socket_root, *, after_control=
     workspace = create_workspace_app(WorkspaceAppConfig(
         authenticator=auth, now=lambda: NOW, authorize_principal=app_auth, client=AppClient(),
     ))
+
+    class Sink:
+        def __init__(self):
+            self.events = []
+
+        def emit(self, event):
+            self.events.append(event)
+
+    sink = Sink()
+    verifier = MastermindTokenVerifier(
+        authenticator=auth, policy=auth.policy, now=lambda: NOW, audit_sink=sink,
+    )
+    mounted = build_executive_mcp_app(
+        AppSettings(
+            policies=AppPolicies(read=_read_policy(), submit=_submit_policy()),
+            mastermind_root=tmp_path, macro_root_flag=None, environ={},
+            ceo_ingress_socket_path=service.ceo_ingress_socket_path,
+            read_from_ceo_ingress=True, jwks_cache=_FakeJwksCache(rsa_key), clock=lambda: NOW,
+        ),
+        audit_sink=sink,
+        workspace_app=AuditedWorkspaceApp(workspace, verifier),
+    )
     try:
-        async with httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=workspace),
-            base_url="https://mcp.mastermind-x.com",
-        ) as http:
-            yield http, token, slots, seen, client, principal, workspace
+        async with _mounted_lifespan(mounted):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=mounted),
+                base_url="https://mcp.mastermind-x.com",
+            ) as http:
+                yield http, token, slots, seen, client, principal, mounted, sink
     finally:
         await service.close()
 
@@ -140,7 +172,7 @@ def test_signed_export_is_the_associated_compound_body(
 
     async def run():
         async with app_transport(owner, rsa_key, tmp_path, short_socket_root) as (
-            http, token, _slots, seen, client, principal, _workspace,
+            http, token, _slots, seen, client, principal, _mounted, sink,
         ):
             headers = {"Authorization": "Bearer " + token}
             traces = []
@@ -180,6 +212,7 @@ def test_signed_export_is_the_associated_compound_body(
                 != body["role_result"]["source_observation"]["runtime"]["source_identity"]
             )
             assert seen["factory"] >= 1
+            assert any(event.accepted for event in sink.events)
             if CAPTURE:
                 destination = Path(CAPTURE)
                 destination.mkdir(parents=True, exist_ok=True)
@@ -205,10 +238,15 @@ def test_signed_export_is_the_associated_compound_body(
                     "execution_status": body["role_result"]["result"]["execution_status"],
                     "acceptance": body["role_result"]["result"]["acceptance"],
                     "mission_acceptance": body["mission"]["acceptance"]["state"],
+                    "transport": "build_executive_mcp_app+AuditedWorkspaceApp+WorkspaceApp",
+                    "content_fallback": "not_captured",
                     "note": (
-                        "http_body_sha256 is the whole HTTP response body. "
-                        "Nested mission and role_result are fields of that body, "
-                        "not separate raw HTTP responses."
+                        "http_body_sha256 is the whole HTTP response body from the mounted "
+                        "Executive path. build_executive_mcp_app routes this GET through "
+                        "AuditedWorkspaceApp and the same WorkspaceApp. Nested mission and "
+                        "role_result are fields of that body, not separate raw HTTP responses. "
+                        "The TypeScript content-fallback case is a synthetic mutation of the "
+                        "decoded observation, not a second captured HTTP body."
                     ),
                 }
                 (destination / "fixture-provenance.json").write_text(
@@ -225,7 +263,7 @@ def test_deny_and_malformed_digest_stop_before_runtime(
 
     async def run():
         async with app_transport(owner, rsa_key, tmp_path, short_socket_root) as (
-            http, token, slots, seen, _client, _principal, workspace,
+            http, token, slots, seen, _client, _principal, mounted, sink,
         ):
             owner["cache"].snapshot = lambda: pytest.fail("cache before permission")
             before = owner["namespace"].entries
@@ -255,27 +293,89 @@ def test_deny_and_malformed_digest_stop_before_runtime(
             assert malformed.status_code == 400, malformed.text
             assert seen["factory"] == 0
             assert owner["namespace"].entries == before
-            sent = []
+            base = urlencode(owner["selection"]).encode()
+            queries = [
+                base + b"&extra=x",
+                base + b"&work_ref=WS:OTHER",
+                base + b"#frag",
+                base.replace(b"work_ref=", b"%77ork_ref="),
+                base.replace(b"work_ref=", b"work_ref=%GG"),
+                base.replace(b"work_ref=", b"work_ref=+"),
+                base.replace(b"&", b";", 1),
+                base + b"&bad",
+                b"work_ref=WS:ONE",
+            ]
+            for query in queries:
+                sent = []
 
-            async def receive():
-                return {"type": "http.request", "body": b"", "more_body": False}
+                async def receive():
+                    return {"type": "http.request", "body": b"{}", "more_body": False}
 
-            async def send(event):
-                sent.append(event)
+                async def send(event):
+                    sent.append(event)
 
-            query = urlencode(owner["selection"]).encode() + b"&extra=x"
-            await workspace({
-                "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
-                "scheme": "https", "method": "GET", "path": ROUTE,
-                "raw_path": ROUTE.encode(), "root_path": "", "query_string": query,
-                "headers": [
-                    (b"host", b"mcp.mastermind-x.com"),
-                    (b"authorization", ("Bearer " + token).encode()),
-                ],
-                "client": ("127.0.0.1", 1), "server": ("mcp.mastermind-x.com", 443),
-            }, receive, send)
-            assert next(event["status"] for event in sent if event["type"] == "http.response.start") == 400
+                await mounted({
+                    "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                    "scheme": "https", "method": "GET", "path": ROUTE,
+                    "raw_path": ROUTE.encode(), "root_path": "", "query_string": query,
+                    "headers": [
+                        (b"host", b"mcp.mastermind-x.com"),
+                        (b"authorization", ("Bearer " + token).encode()),
+                    ],
+                    "client": ("127.0.0.1", 1), "server": ("mcp.mastermind-x.com", 443),
+                }, receive, send)
+                assert next(event["status"] for event in sent if event["type"] == "http.response.start") == 400
+                assert seen["factory"] == 0
+            for method, path, raw_path, scheme, headers, status in (
+                ("POST", ROUTE, ROUTE.encode(), "https",
+                 [(b"host", b"mcp.mastermind-x.com"), (b"authorization", ("Bearer " + token).encode())], 404),
+                ("GET", ROUTE + "/", (ROUTE + "/").encode(), "https",
+                 [(b"host", b"mcp.mastermind-x.com"), (b"authorization", ("Bearer " + token).encode())], 404),
+                ("GET", ROUTE, b"/workspace%2Fmission-result/current", "https",
+                 [(b"host", b"mcp.mastermind-x.com"), (b"authorization", ("Bearer " + token).encode())], 404),
+                ("HEAD", ROUTE, ROUTE.encode(), "https",
+                 [(b"host", b"mcp.mastermind-x.com"), (b"authorization", ("Bearer " + token).encode())], 404),
+                ("GET", ROUTE, ROUTE.encode(), "http",
+                 [(b"host", b"mcp.mastermind-x.com"), (b"authorization", ("Bearer " + token).encode())], 403),
+                ("GET", ROUTE, ROUTE.encode(), "https",
+                 [(b"host", b"invalid.example"), (b"authorization", ("Bearer " + token).encode())], 403),
+                ("GET", ROUTE, ROUTE.encode(), "https",
+                 [(b"host", b"mcp.mastermind-x.com"), (b"origin", b"https://invalid.example"),
+                  (b"authorization", ("Bearer " + token).encode())], 403),
+                ("GET", ROUTE, ROUTE.encode(), "https",
+                 [(b"host", b"mcp.mastermind-x.com"),
+                  (b"authorization", ("Bearer " + token).encode()),
+                  (b"authorization", ("Bearer " + token).encode())], 401),
+            ):
+                sent = []
+
+                async def receive():
+                    return {"type": "http.request", "body": b"", "more_body": False}
+
+                async def send(event):
+                    sent.append(event)
+
+                await mounted({
+                    "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1",
+                    "scheme": scheme, "method": method, "path": path,
+                    "raw_path": raw_path, "root_path": "", "query_string": base,
+                    "headers": headers,
+                    "client": ("127.0.0.1", 1), "server": ("mcp.mastermind-x.com", 443),
+                }, receive, send)
+                assert next(event["status"] for event in sent if event["type"] == "http.response.start") == status
+                assert seen["factory"] == 0
+                assert owner["namespace"].entries == before
+
+            def fail(_event):
+                raise OSError("fixture audit unavailable")
+
+            sink.emit = fail
+            audited = await http.get(
+                ROUTE, params=owner["selection"], headers={"Authorization": "Bearer " + token},
+            )
+            assert audited.status_code == 401, audited.text
             assert seen["factory"] == 0
+            assert owner["namespace"].entries == before
 
     asyncio.run(run())
 

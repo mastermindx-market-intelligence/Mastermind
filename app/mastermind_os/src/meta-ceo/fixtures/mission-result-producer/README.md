@@ -1,10 +1,17 @@
 # Associated Mission/Result producer export
 
 `actual-pair.json` is one unchanged HTTP response body from
-`GET /workspace/mission-result/current`. Its sha256 and byte length are
+`GET /workspace/mission-result/current` on the mounted Executive path.
+`build_executive_mcp_app` registers that literal route on the same
+`WorkspaceApp`, wrapped by `AuditedWorkspaceApp`. The bytes are not a direct
+`WorkspaceApp` client capture. Their sha256 and byte length are
 `fixture-provenance.json` `http_body_sha256` and `http_body_bytes`. Nested
 `mission` and `role_result` are fields of that body. They are not separate
 raw HTTP responses.
+
+The TypeScript content-fallback case mutates the decoded role result in
+memory. It is consumer projection coverage. It is not a second captured HTTP
+response, and the captured `role_result.availability` stays `AVAILABLE`.
 
 The proof ceiling is `SOURCE_ASSOCIATED_READ_QUALIFIED`. This export uses a
 test-owned Runtime, namespace, and signed bearer. It does not prove an

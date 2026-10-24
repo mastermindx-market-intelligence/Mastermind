@@ -47,13 +47,21 @@ import {
 
 const FRESH_ENV_KEY = "MISSION_RESULT_FIXTURE_DIR";
 const FILE_NAMES = ["actual-pair.json", "fixture-provenance.json"] as const;
+const COMPOUND_KEYS = [
+  "schema",
+  "selection",
+  "availability",
+  "reason_codes",
+  "mission",
+  "role_result",
+] as const;
 const PINNED_SHA256 = {
   "actual-pair.json":
-    "027faefc46fb4def6f304330f20799ed886c42d72a8aa88ddbd95b7885c91dda",
+    "9ca1a0a5522ce549950d5ea542ad6acd7345e298119dbebe2625676dce67a9f2",
   "fixture-provenance.json":
-    "69464454738e15a2b058395d7690fd7bea1c9db539aa1a1d2add546fd96e9719",
+    "aacd587b9c45f62f1ea4d3ff80e68aee405d28bd624e2665454c9aab001d08b1",
 } as const;
-const REPLAY_RUNTIME_SOURCE_IDENTITY = "d870e55698a78c2749750632bcf1b395";
+const REPLAY_RUNTIME_SOURCE_IDENTITY = "c62fa75478a1fa12f8976b36c05b6588";
 const ATTEMPT_OWNED_NEGATIVE_ROOT =
   /^\/tmp\/mission-result-producer-negative-[A-Za-z0-9]{6,}$/;
 const LOCAL_ACQUIRED_AT = "2026-10-24T21:40:00Z";
@@ -153,6 +161,31 @@ function parseJson(name: string, bytes: Uint8Array): unknown {
 
 function record(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function closedPositiveCompound(value: unknown): Record<string, unknown> {
+  if (!record(value)) {
+    throw new Error("actual-pair.json is not the compound Mission/Result body");
+  }
+  const keys = Object.keys(value);
+  if (
+    keys.length !== COMPOUND_KEYS.length ||
+    COMPOUND_KEYS.some((key) => !Object.prototype.hasOwnProperty.call(value, key))
+  ) {
+    throw new Error(
+      "compound wrapper is not the closed six-key set schema, selection, availability, reason_codes, mission, role_result",
+    );
+  }
+  if (value.schema !== "mastermind.workspace_mission_result.v1") {
+    throw new Error("actual-pair.json is not the compound Mission/Result body");
+  }
+  if (value.availability !== "AVAILABLE") {
+    throw new Error("positive compound availability is not AVAILABLE");
+  }
+  if (!Array.isArray(value.reason_codes) || value.reason_codes.length !== 0) {
+    throw new Error("positive compound reason_codes are not empty");
+  }
+  return value;
 }
 
 function exportedSelection(value: unknown, label: string): ExportedSelection {
@@ -291,10 +324,9 @@ async function consumeExport(
     throw new Error("provenance http_body_bytes does not match this directory's actual-pair.json");
   }
   const selection = exportedSelection(provenance.selection, "fixture-provenance.json");
-  const compound = parseJson("actual-pair.json", bytes["actual-pair.json"]);
-  if (!record(compound) || compound.schema !== "mastermind.workspace_mission_result.v1") {
-    throw new Error("actual-pair.json is not the compound Mission/Result body");
-  }
+  const compound = closedPositiveCompound(
+    parseJson("actual-pair.json", bytes["actual-pair.json"]),
+  );
   const bodySelection = exportedSelection(compound.selection, "actual-pair.json");
   if (JSON.stringify(bodySelection) !== JSON.stringify(selection)) {
     throw new Error("compound selection differs from fixture-provenance.json; refusing to choose one");
@@ -445,6 +477,10 @@ function contentFallback(consumed: ConsumedExport): ResultEnvelopeDigestShape {
 }
 
 function expectContentFallback(consumed: ConsumedExport): void {
+  // Synthetic consumer projection only. The captured HTTP body stays AVAILABLE;
+  // this mutation is not a second mounted response.
+  expect(consumed.result.availability).toBe("AVAILABLE");
+  expect(consumed.result.reason_codes).toEqual([]);
   const decoded = contentFallback(consumed);
   const projected = projectOffice(
     {
@@ -552,7 +588,7 @@ function registerConsumer(get: () => ConsumedExport): void {
   it("decodes the compound HTTP body and associates the nested pair", () => {
     expectAssociated(get());
   });
-  it("keeps a nested content fallback associated with incomplete coverage", () => {
+  it("projects a synthetic content-fallback mutation; the captured export stays AVAILABLE", () => {
     expectContentFallback(get());
   });
   it("refuses a noncurrent mission, a crossed tuple, and a changed observation", () => {
@@ -604,6 +640,75 @@ describe("mission-result producer consumer", () => {
     });
 
     registerConsumer(() => consumed);
+
+    it("rejects a malformed wrapper even when the nested documents stay valid", async () => {
+      const fs = await realFs();
+      const root = await fs.mkdtemp("/tmp/mission-result-producer-negative-");
+      try {
+        const committed = await readExportBytes(COMMITTED_DIR);
+        const compound = parseJson("actual-pair.json", committed["actual-pair.json"]);
+        if (!record(compound) || !record(compound.selection)) {
+          throw new Error("committed pair is not a compound object");
+        }
+        const selection = exportedSelection(compound.selection, "committed");
+        const mission = decodeMissionv3(compound.mission, {
+          workRef: selection.work_ref,
+          rootJobId: selection.root_job_id,
+        });
+        const role = decodeResultEnvelope(compound.role_result, resultSelection(selection));
+        if (!mission || !role) throw new Error("committed nested documents are not valid");
+        const cases: Array<{ body: Record<string, unknown>; message: RegExp }> = [
+          { body: { ...compound, extra: true }, message: /closed six-key/ },
+          {
+            body: {
+              schema: compound.schema,
+              selection: compound.selection,
+              availability: compound.availability,
+              mission: compound.mission,
+              role_result: compound.role_result,
+            },
+            message: /closed six-key/,
+          },
+          { body: { ...compound, availability: "UNAVAILABLE" }, message: /not AVAILABLE/ },
+          {
+            body: { ...compound, reason_codes: ["SOURCE_UNAVAILABLE"] },
+            message: /reason_codes are not empty/,
+          },
+          {
+            body: {
+              ...compound,
+              selection: { ...compound.selection, work_ref: "WS:OTHER" },
+            },
+            message: /selection differs/,
+          },
+        ];
+        for (const item of cases) {
+          expect(
+            decodeMissionv3(item.body.mission, {
+              workRef: selection.work_ref,
+              rootJobId: selection.root_job_id,
+            }),
+          ).not.toBeNull();
+          expect(
+            decodeResultEnvelope(item.body.role_result, resultSelection(selection)),
+          ).not.toBeNull();
+          const dir = await fs.mkdtemp(`${root}/wrap-`);
+          const encoded = new TextEncoder().encode(JSON.stringify(item.body));
+          const provenance = JSON.stringify({
+            http_body_sha256: await sha256Hex(encoded),
+            http_body_bytes: encoded.byteLength,
+            selection: compound.selection,
+            mission_runtime_source_identity: "b".repeat(32),
+            role_result_runtime_source_identity: "b".repeat(32),
+          });
+          await fs.writeFile(joinPath(dir, "actual-pair.json"), encoded);
+          await fs.writeFile(joinPath(dir, "fixture-provenance.json"), provenance);
+          await expect(consumeExport(dir, "fresh")).rejects.toThrow(item.message);
+        }
+      } finally {
+        await removeAttemptOwnedRoot(fs, root);
+      }
+    });
 
     it("keeps the mode contract: an absent key replays and an empty key fails", () => {
       expect(resolveFreshGate(undefined)).toEqual({ mode: "replay" });

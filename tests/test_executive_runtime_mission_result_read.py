@@ -185,6 +185,53 @@ def test_cumulative_statement_budget_is_not_reset_between_phases(joint, monkeypa
     assert not joint["namespace"].active
 
 
+def test_maximum_chain_joint_read_matches_canonical_completion(tmp_path, monkeypatch):
+    """Six completed nodes plus the root page stay inside the unchanged ceilings."""
+    from tests.test_executive_runtime_bounded_role_result import complete_maximum_chain
+
+    writer, root, nodes = complete_maximum_chain(tmp_path / "max-chain")
+    assert len(nodes) == 6
+    job_id, attempt_id, _seal = nodes[-1]
+    expected = writer.validated_role_completion(job_id, expected_attempt_id=attempt_id)
+    keeper, namespace, binding, reader = _bound_reader(writer)
+    measured = {"statements": 0}
+    original_count = er._BoundedRoleResultLoader._count_statement
+
+    def count(self):
+        try:
+            original_count(self)
+        finally:
+            measured["statements"] = self._statements
+
+    monkeypatch.setattr(er._BoundedRoleResultLoader, "_count_statement", count)
+    before = namespace.entries
+    try:
+        try:
+            material, receipt = _select(
+                reader, root.job_id, job_id, attempt_id, expected.result_digest,
+            )
+        except er.RuntimeRoleResultOverBudget:
+            assert not namespace.active
+            assert namespace.entries == namespace.exits
+            pytest.fail(
+                "maximum-chain joint read refused by the unchanged cumulative ceiling; "
+                f"measured_statements={measured['statements']} "
+                f"ceiling={er.BOUNDED_ROLE_RESULT_MAX_STATEMENTS}"
+            )
+        assert receipt.state == "SAME"
+        assert receipt.source_identity == material.observation_source_identity
+        assert material.role_result.result_envelope_digest == expected.result_digest
+        assert material.role_result.job_id == job_id
+        assert material.role_result.attempt_id == attempt_id
+        assert any(job.job_id == job_id for job in material.root.jobs)
+        assert 0 < measured["statements"] <= er.BOUNDED_ROLE_RESULT_MAX_STATEMENTS
+        assert er.BOUNDED_ROLE_RESULT_MAX_STATEMENTS == 256
+        assert namespace.entries == before + 1 == namespace.exits
+        assert not namespace.active
+    finally:
+        _release(keeper, binding)
+
+
 def test_uncertain_close_refuses_receipt(joint, monkeypatch):
     original = er.RuntimeStore._close_read_connection
 

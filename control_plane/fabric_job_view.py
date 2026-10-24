@@ -1435,9 +1435,11 @@ def read_fabric_view_v2_from_runtime(
 
 
 def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_reader, notes, runtime):
-    """Project one already-acquired root snapshot. ``notes`` is mutated in place.
+    """Project one already-acquired root snapshot.
 
-    No Runtime observation is opened here. The caller supplies the creation
+    ``notes`` is composed locally and returned. Callers must consume that
+    returned list; this function does not mutate the caller's list. No
+    Runtime observation is opened here. The caller supplies the creation
     event reader, which for a joint selection is the already-accounted event.
     """
 
@@ -1469,7 +1471,9 @@ def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_rea
         root_validated = True
     else:
         unjoined = unjoined + [root_job.job_id]
-        notes.append(f"provenance not projected: {root_job.job_id}: {warning or 'workstream unavailable'}")
+        notes = notes + [
+            f"provenance not projected: {root_job.job_id}: {warning or 'workstream unavailable'}"
+        ]
     # Validate retained ancestry without reopening admission: completed
     # coordinators and their terminal descendants remain visible.
     from control_plane.executive_coo_hierarchy import (
@@ -1519,10 +1523,10 @@ def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_rea
                 joined.add(candidate.job_id)
                 continue
         unjoined = unjoined + [job.job_id]
-        notes.append(
+        notes = notes + [
             f"provenance not projected: {job.job_id}: "
             f"{warning or 'workstream unavailable'}"
-        )
+        ]
     # Planner identity is local to its coordinator. Truncation cannot
     # establish uniqueness, including for an otherwise valid subtree.
     for coordinator_id, candidates in sorted(planner_candidates.items()):
@@ -1532,13 +1536,15 @@ def _project_retained_root_snapshot(snapshot, root_job_id, *, creation_event_rea
         reason = ("bounded Runtime Job snapshot truncated: planner uniqueness unavailable"
                   if snapshot.jobs_truncated else "ambiguous eligible plan children")
         unjoined = unjoined + [candidate.job_id for candidate in candidates]
-        notes.append("planner join refused: " + reason + ": "
-                     + coordinator_id + ": "
-                     + ", ".join(sorted(row.job_id for row in candidates)))
+        notes = notes + [
+            "planner join refused: " + reason + ": "
+            + coordinator_id + ": "
+            + ", ".join(sorted(row.job_id for row in candidates))
+        ]
     if snapshot.jobs_truncated:
-        notes.append("bounded Runtime Job snapshot truncated")
+        notes = notes + ["bounded Runtime Job snapshot truncated"]
     if snapshot.attempts_truncated_job_ids:
-        notes.append("bounded Runtime Attempt snapshot truncated")
+        notes = notes + ["bounded Runtime Attempt snapshot truncated"]
     return {
         "snapshot": snapshot,
         "jobs": jobs,
@@ -1571,6 +1577,7 @@ def _observe_bounded_root(runtime, root_job_id, *, notes, present):
                 attempts_by_job = projected["attempts_by_job"]
                 joined = projected["joined"]
                 unjoined = projected["unjoined"]
+                notes = projected["notes"]
             generation = read.receipt.to_dict()
     except (executive_runtime.RuntimeProofError, OSError, ValueError, KeyError, AttributeError):
         notes = notes + [_BOUNDED_UNAVAILABLE_NOTE]
