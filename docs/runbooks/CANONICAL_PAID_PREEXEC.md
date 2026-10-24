@@ -162,3 +162,14 @@ held-image child, effective default config, observation codec, and helper
 metadata/ACL-before-read and token-survival refusals. Darwin skips of that case
 and the component's sealing cases must be replaced by actual Linux CI evidence
 before protected delivery.
+
+The inert tests prefer the existing fixed /usr/bin/python3 resolving to a
+Root-owned CPython3.12 image only after the actual ACL/startup namespace meets
+the finite profile. That branch leaves the fresh observer's checks unchanged.
+The pytest/toolcache bootstrap premise remains explicitly simulated. If the
+system layout is absent or unsupported, a fixed test-only ACL metadata model
+is also installed in the fresh observer for only the declared distribution and
+disposable private namespace. Its real read/identity/codec body stays intact;
+outside paths and unrelated xattrs retain their errors. Completion notices name
+which fixture profile ran. A simulated branch proves mechanics and refusal
+composition, never current Linux platform custody or initializer approval.

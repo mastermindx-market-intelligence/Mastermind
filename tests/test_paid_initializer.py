@@ -26,7 +26,7 @@ def commitment():
 def selectors():return dict(host_ref='ubuntu2',transport_alias='ubuntu2',python_path='/usr/bin/python3',capture_root='/home/worker/lanes/ext/lanes')
 
 
-def _linux_completion(request):
+def _linux_completion(request,profile=None):
     # Structured Actions notice only after the real assertions complete. This
     # gives the retained safe annotation API exact-case evidence; no XML or
     # raw terminal escape rendering is required or claimed.
@@ -34,7 +34,71 @@ def _linux_completion(request):
     if reporter is not None:
         with request.getfixturevalue('capsys').disabled():
             reporter.write_line('\n::notice file=tests/test_paid_initializer.py,title=H1 Linux case executed::'
-                +request.node.name+' ASSERTIONS_COMPLETED Python '+'.'.join(map(str,sys.version_info[:3])))
+                +request.node.name+' ASSERTIONS_COMPLETED Python '+'.'.join(map(str,sys.version_info[:3]))
+                +(' launch_fixture='+profile if profile else ''))
+
+
+def _system_fixture_launch():
+    """Select only an existing fixed Root/ACL-free CPython3.12 distribution.
+
+    This test precondition cannot grant production trust. The actual owner and
+    child still recheck it. No install/chmod/ACL change or alternate lookup.
+    """
+    import errno
+    import stat
+    logical=Path('/usr/bin/python3')
+    try:
+        real=logical.resolve(strict=True)
+        if real.name!='python3.12':return None
+        def guarded(path,allow_link=False):
+            info=path.lstat()
+            if info.st_uid!=0 or info.st_mode&0o022 or (path.is_symlink() and not allow_link):raise ValueError()
+            for key in ('system.posix_acl_access','system.posix_acl_default'):
+                try:os.getxattr(path,key,follow_symlinks=False)
+                except OSError as error:
+                    if error.errno not in (errno.ENODATA,getattr(errno,'ENOATTR',errno.ENODATA)):raise
+                else:raise ValueError()
+        for path in (logical,real):
+            guarded(path,allow_link=path==logical)
+            for ancestor in path.parents:guarded(ancestor)
+        count=0
+        # The fixed system fixture supports only the existing /usr layout.
+        # Qualify its image/startup metadata before executing getpath.
+        for prefix in ('/usr',):
+            library=Path(prefix)/'lib/python3.12';guarded(library)
+            for parent,dirs,files in os.walk(library,followlinks=False):
+                dirs[:]=[v for v in dirs if v not in ('site-packages','dist-packages')]
+                for leaf in dirs+files:
+                    count+=1
+                    if count>20000:raise ValueError()
+                    guarded(Path(parent)/leaf)
+            optional=Path(prefix)/'lib/python312.zip'
+            if optional.exists():guarded(optional)
+        for directory in (logical.parent,logical.parent.parent):
+            if (directory/'pyvenv.cfg').exists() or any(v.name.endswith('._pth') for v in directory.iterdir()):return None
+        data=json.loads(subprocess.check_output([str(logical),'-I','-S','-B','-c',
+            'import json,sys;print(json.dumps(dict(version=list(sys.version_info[:2]),prefixes=[sys.prefix,sys.exec_prefix,sys.base_prefix,sys.base_exec_prefix])))'],stderr=subprocess.DEVNULL,timeout=5))
+        if data['version']!=[3,12]:return None
+        if data['prefixes']!=['/usr']*4:return None
+        return logical
+    except (OSError,ValueError,subprocess.SubprocessError):return None
+
+
+def _observer_metadata_fixture(probe,*,exact,prefixes):
+    """Fallback ONLY: explicit finite ACL metadata premise in fresh observer.
+
+    The real observer body/read/identity validators remain. No production source,
+    actual host ACL, environment or output record is changed by this fixture.
+    """
+    exact=sorted(set(map(str,exact)));prefixes=sorted(set(map(str,prefixes)))
+    return ("import os,errno\n_fixture_raw_getxattr=os.getxattr\n"
+        +"_fixture_exact="+repr(exact)+"\n_fixture_prefixes="+repr(prefixes)+"\n"
+        +"def _fixture_getxattr(name,key,*args,**kwargs):\n"
+        +"    actual=os.path.realpath('/proc/self/fd/'+str(name)) if isinstance(name,int) else str(name)\n"
+        +"    if key in ('system.posix_acl_access','system.posix_acl_default') and (actual in _fixture_exact or any(actual==p or actual.startswith(p+'/') for p in _fixture_prefixes)):\n"
+        +"        raise OSError(errno.ENODATA,'inert trusted metadata has no ACL')\n"
+        +"    return _fixture_raw_getxattr(name,key,*args,**kwargs)\n"
+        +"os.getxattr=_fixture_getxattr\n"+probe)
 
 
 def _inert_bootstrap(request,probe,*,owner=m):
@@ -138,14 +202,18 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
     for key in tuple(os.environ):
         if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__'):
             monkeypatch.delenv(key)
-    logical=Path(sys.executable).with_name('python3')
+    bootstrap=Path(sys.executable).with_name('python3')
+    system_launch=_system_fixture_launch()
+    logical=system_launch or bootstrap
+    monkeypatch.setenv('PATH',str(logical.parent)+':/usr/bin:/bin')
     assert logical.exists()
     real=logical.resolve()
     observed=json.loads(subprocess.check_output([str(logical),'-I','-S','-B','-c',
         'import json,sys;print(json.dumps({k:getattr(sys,k) for k in ("prefix","exec_prefix","base_prefix","base_exec_prefix")}))']))
     rawstat=os.stat;rawfstat=os.fstat;rawlstat=os.lstat;rawxattr=os.getxattr
-    protected=[str(real),str(logical.parent),*set(observed.values())]
-    ancestors={str(v) for p in (real,logical,*map(Path,observed.values())) for v in p.parents}
+    protected=([str(bootstrap.resolve()),str(bootstrap.parent)] if system_launch else [str(real),str(logical.parent),*set(observed.values())])
+    ancestry=(bootstrap.resolve(),bootstrap) if system_launch else (real,logical,*map(Path,observed.values()))
+    ancestors={str(v) for p in ancestry for v in p.parents}
     private=[];fault_acl=False
     def distribution(name):
         return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
@@ -181,7 +249,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         hook=lane/'ext/HOST_ENV.sh';config=Path(scratch)/'not-read.json'
         hook.write_text('export GLM_CONFIG='+str(config)+'\n');hook.chmod(0o600)
         c=commitment();c.update(lane_root=str(lane),account=dict(uid=os.getuid(),gid=os.getgid(),user=account.pw_name,home=account.pw_dir),
-            bootstrap_python=dict(path=str(logical),real_path=str(real),sha256=hashlib.sha256(real.read_bytes()).hexdigest()),
+            bootstrap_python=dict(path=str(bootstrap),real_path=str(bootstrap.resolve()),sha256=hashlib.sha256(bootstrap.resolve().read_bytes()).hexdigest()),
             launch_python=dict(path=str(logical),real_path=str(real),sha256=hashlib.sha256(real.read_bytes()).hexdigest()),
             startup=dict(profile='cpython-3.12-linux-root-prefix.v1',**observed),
             host_env=dict(path=str(hook),sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size,uid=os.getuid(),gid=os.getgid(),mode=0o600),
@@ -192,7 +260,8 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         # image/getpath/Bash/immutable FD and protocol validators stay real.
         monkeypatch.setattr(os,'fstat',owned_fstat);monkeypatch.setattr(os,'stat',owned_stat);monkeypatch.setattr(os,'lstat',owned_lstat);monkeypatch.setattr(os,'getxattr',modeled_xattr)
         monkeypatch.setenv('HOME',account.pw_dir)
-        result=json.loads(_inert_bootstrap(req,qualifier.m._REMOTE_PROBE))
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[scratch])
+        result=json.loads(_inert_bootstrap(req,probe))
         assert result['binary']['real_path']==str(real)
         assert result['pre_execution']['snapshot_sealed'] is True
         assert result['context_identity']['host_env_sha256']==c['host_env']['sha256']
@@ -205,7 +274,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
             +'command() { printf /forged/python3; }; exec() { echo forged > '+str(forged)+'; printf "{}"; }; export -n -f command exec\n')
         c['host_env'].update(sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size)
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
-        actual=json.loads(_inert_bootstrap(req,qualifier.m._REMOTE_PROBE))
+        actual=json.loads(_inert_bootstrap(req,probe))
         assert actual['binary']['real_path']==str(real) and not forged.exists()
         # Unsupported startup projection refuses before the approved hook body.
         marker=Path(scratch)/'must-not-exist'
@@ -227,7 +296,7 @@ def test_actual_linux_initializer_exec_and_selector_drift_before_hook(tmp_path,m
         req['initializer_commitment_sha256']=hashlib.sha256(m.canonical(c)).hexdigest()
         with pytest.raises(m.InitializerCommitmentRefused):m.run_bootstrap(req,qualifier.m._REMOTE_PROBE)
         assert not marker.exists()
-    _linux_completion(request)
+    _linux_completion(request,'system-root-launch' if system_launch else 'finite-metadata-simulation')
 
 
 @pytest.mark.parametrize('raw',[b'HOME=x',b'HOME=x\0HOME=y\0',b'BASH_FUNC_exec%%=x\0',
@@ -306,7 +375,9 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
     try:
         (lane/'ext/lanes').mkdir(parents=True,mode=0o700)
         (lane/'venv/bin').mkdir(parents=True,mode=0o700)
-        bootstrap=Path(sys.executable).with_name('python3');real=bootstrap.resolve()
+        bootstrap=Path(sys.executable).with_name('python3')
+        system_launch=_system_fixture_launch();real=(system_launch or bootstrap).resolve()
+        monkeypatch.setenv('PATH','/usr/bin:/bin')
         logical=lane/'venv/bin/python3';logical.symlink_to(real)
         for key in tuple(os.environ):
             if key.startswith(('LD_','BASH_FUNC_')) or key in ('BASH_ENV','ENV','PYTHONHOME','PYTHONEXECUTABLE','__PYVENV_LAUNCHER__','GLM_CONFIG','GLM_SHIM_TOKEN'):
@@ -327,7 +398,7 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         helper.write_text('export GLM_SHIM_TOKEN="'+private_token+'"\n');helper.chmod(0o600)
         c=commitment();c.update(initialization_contract=owner.NESTED_CONTRACT,lane_root=str(lane),
             account=dict(uid=os.getuid(),gid=os.getgid(),user=account.pw_name,home=account.pw_dir),
-            bootstrap_python=dict(path=str(bootstrap),real_path=str(real),sha256=hashlib.sha256(real.read_bytes()).hexdigest()),
+            bootstrap_python=dict(path=str(bootstrap),real_path=str(bootstrap.resolve()),sha256=hashlib.sha256(bootstrap.resolve().read_bytes()).hexdigest()),
             launch_python=dict(path=str(logical),real_path=str(real),sha256=hashlib.sha256(real.read_bytes()).hexdigest()),
             host_env=dict(path=str(hook),sha256=hashlib.sha256(hook.read_bytes()).hexdigest(),size=hook.stat().st_size,uid=os.getuid(),gid=os.getgid(),mode=0o600),
             nested_helper=dict(path=str(helper),sha256=hashlib.sha256(helper.read_bytes()).hexdigest(),size=helper.stat().st_size,uid=os.getuid(),gid=os.getgid(),mode=0o600),
@@ -337,8 +408,9 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
             initializer_commitment_sha256=hashlib.sha256(m.canonical(c)).hexdigest())
         req['sources_sha256'].update(hashes)
         rawstat=os.stat;rawfstat=os.fstat;rawlstat=os.lstat;rawxattr=os.getxattr
-        protected=[str(real),str(logical.parent),*set(observed.values())]
-        ancestors={str(v) for p in (real,logical,*map(Path,observed.values())) for v in p.parents}
+        protected=([str(bootstrap.resolve()),str(bootstrap.parent),str(logical.parent)] if system_launch else [str(real),str(logical.parent),*set(observed.values())])
+        ancestry=(bootstrap.resolve(),bootstrap,logical) if system_launch else (real,logical,*map(Path,observed.values()))
+        ancestors={str(v) for p in ancestry for v in p.parents}
         private=[];fault_acl=False
         def distribution(name):
             return str(name) in ancestors or any(str(name)==p or str(name).startswith(p+'/') for p in protected)
@@ -375,7 +447,8 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         # validators are the genuine existing owner, not stubbed success DTOs.
         monkeypatch.setattr(qualifier.m,'_initializer_module',lambda expected:(owner,sources['paid_initializer.py']) if expected==hashes['paid_initializer.py'] else m.refuse())
         req=qualifier.m._request(req)
-        raw=_inert_bootstrap(req,qualifier.m._REMOTE_PROBE,owner=owner)
+        probe=qualifier.m._REMOTE_PROBE if system_launch else _observer_metadata_fixture(qualifier.m._REMOTE_PROBE,exact=ancestors|set(private),prefixes=protected+[str(lane)])
+        raw=_inert_bootstrap(req,probe,owner=owner)
         result=qualifier.m._observation(raw,req)
         assert private_token.encode() not in raw
         assert result['binary']['path']==str(logical)!=str(bootstrap)
@@ -418,4 +491,21 @@ def test_actual_nested_initializer_private_package_context_and_wire(tmp_path,mon
         current=lane.lstat()
         assert (current.st_dev,current.st_ino)==(owned.st_dev,owned.st_ino)
         shutil.rmtree(lane)
-    _linux_completion(request)
+    _linux_completion(request,'system-root-launch' if system_launch else 'finite-metadata-simulation')
+
+
+def test_observer_metadata_fixture_is_finite_and_does_not_hide_other_errors():
+    # This is a test-fixture discriminator, not a Linux/ACL/platform receipt.
+    source="import os\ndef denied(*args,**kwargs):raise PermissionError('inert underlying refusal')\nos.getxattr=denied\n"
+    body="""
+for name in ('/modeled/fixed','/modeled/private/child'):
+    try:os.getxattr(name,'system.posix_acl_access')
+    except OSError as error:assert error.errno==errno.ENODATA
+    else:raise AssertionError('modeled metadata did not execute')
+for name,key in (('/outside','system.posix_acl_access'),('/modeled/fixed','user.unmodeled')):
+    try:os.getxattr(name,key)
+    except PermissionError:pass
+    else:raise AssertionError('unmodeled refusal was hidden')
+"""
+    child=subprocess.run([sys.executable,'-I','-S','-B','-c',source+_observer_metadata_fixture(body,exact=['/modeled/fixed'],prefixes=['/modeled/private'])],capture_output=True,timeout=5)
+    assert child.returncode==0 and not child.stdout and not child.stderr
