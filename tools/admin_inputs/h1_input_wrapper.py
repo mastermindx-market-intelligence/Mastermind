@@ -112,7 +112,10 @@ class Custody:
         if type(path) is not str or not path.startswith('/') or str(PurePosixPath(path))!=path or any(p in ('','.','..') for p in path.split('/')[1:]):refuse()
         parent=os.open('/',os.O_RDONLY|os.O_DIRECTORY|os.O_NOFOLLOW|os.O_CLOEXEC)
         self.held.append((parent,None,None,None))
-        self.held[-1]=(parent,None,None,identity(os.fstat(parent)))
+        anchor=os.fstat(parent)
+        self.held[-1]=(parent,None,None,identity(anchor))
+        self.acl(parent)
+        if anchor.st_uid!=0 or not stat.S_ISDIR(anchor.st_mode) or anchor.st_mode&0o022:refuse()
         parts=path.split('/')[1:]
         for i,part in enumerate(parts):
             is_dir=i<len(parts)-1 or directory

@@ -246,3 +246,18 @@ def test_refusal_stream_failure_cannot_format_primary_canary(monkeypatch):
     monkeypatch.setattr(w,'acquire',lambda:(_ for _ in ()).throw(ValueError(CANARY.decode())))
     monkeypatch.setattr(sys,'stderr',Broken())
     assert w.main(['--acquire'])==78
+
+
+@pytest.mark.parametrize('change',[{'st_uid':1000},{'st_mode':stat.S_IFDIR|0o775},{'st_mode':stat.S_IFDIR|0o757},{'st_mode':stat.S_IFREG|0o755}])
+def test_root_anchor_predicate_before_leaf_private_read(monkeypatch,change):
+    from types import SimpleNamespace
+    fields=dict(zip(w.IDENTITY,[1,2,stat.S_IFDIR|0o755,0,0,1,4096,3,4]));fields.update(change)
+    opened=[];closed=[]
+    monkeypatch.setattr(w.os,'open',lambda *a,**k:opened.append(a[0]) or 90)
+    monkeypatch.setattr(w.os,'fstat',lambda _:SimpleNamespace(**fields))
+    monkeypatch.setattr(w.os,'close',lambda fd:closed.append(fd))
+    monkeypatch.setattr(w.os,'pread',lambda *a:pytest.fail('private read before anchor qualification'))
+    monkeypatch.setattr(w.Custody,'acl',staticmethod(lambda _:None))
+    with pytest.raises(w.Refused):
+        with w.Custody() as c:c.open(w.HELPER,owners={0,w.UID})
+    assert opened==['/'] and closed==[90]
