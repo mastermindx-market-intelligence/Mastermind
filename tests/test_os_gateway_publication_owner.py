@@ -695,6 +695,11 @@ def gateway(monkeypatch, gateway_tmp_path):
         (control, "_GATEWAY_AUDIT_DIRECTORY", audit_leaf),
     ):
         monkeypatch.setattr(target, name, value)
+    if _TRUE_PLATFORM != "darwin":
+        # Existing synthetic Root/Studio identity harness, not vnode proof.
+        from ops.executive_os import os_gateway_studio_reader as studio_reader
+        from test_os_gateway_studio_prefix_identity import MechanicalPrefixGuard
+        monkeypatch.setattr(studio_reader, "_PrefixMutationGuard", MechanicalPrefixGuard)
     bound_lstat, bound_stat, bound_fstat = _mixed_identity(home, audit_leaf)
     monkeypatch.setattr(Path, "lstat", bound_lstat)
     monkeypatch.setattr(control.os, "stat", bound_stat)
