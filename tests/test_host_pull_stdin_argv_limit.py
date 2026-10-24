@@ -3,6 +3,7 @@
 Never contacts SSH, provider accounts, or a live host-pull collector.
 """
 from pathlib import Path
+import signal
 import subprocess
 
 SOURCE = (Path(__file__).resolve().parents[1] /
@@ -45,6 +46,32 @@ def test_oversized_probe_executes_via_stdin_and_propagates_status(tmp_path):
         assert result.stdout == "PHYSICAL_OK\n"
         assert list(tmp_path.glob("host_pull_probe.*")) == []
 
+
+
+def test_interrupts_fail_closed_and_remove_private_spool(tmp_path):
+    wrapper = _fixed_remote_wrapper(tmp_path)
+    env = {"HOME": str(tmp_path), "PATH": ""}
+    for sig, expected in ((signal.SIGHUP, 129), (signal.SIGINT, 130),
+                          (signal.SIGTERM, 143)):
+        child = subprocess.Popen(
+            ["/bin/sh", "-c", 'export TMPDIR="$HOME"; ' + wrapper],
+            env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE, text=True, start_new_session=True)
+        try:
+            child.stdin.write("echo CHILD_STARTED\n/bin/sleep 2\necho CHILD_COMPLETED\n")
+            child.stdin.close()
+            assert child.stdout.readline() == "CHILD_STARTED\n"
+            child.send_signal(sig)
+            assert child.wait(timeout=5) == expected, child.stderr.read()
+            assert "CHILD_COMPLETED" not in child.stdout.read()
+            assert list(tmp_path.glob("host_pull_probe.*")) == []
+        finally:
+            if child.poll() is None:
+                child.kill()
+                child.wait(timeout=5)
+            for stream in (child.stdin, child.stdout, child.stderr):
+                if stream and not stream.closed:
+                    stream.close()
 
 def test_local_execution_and_strict_diagnostic_ssh_policy_unchanged():
     source = SOURCE.read_text()

@@ -97,10 +97,10 @@ write_state() { # $1 host, $2 probe rc, $3 probe stdout
 # A fixed, short SSH command receives the full generated probe on stdin. On
 # Linux the original single remote argv reached ~140.5 KB (MAX_ARG_STRLEN
 # 131072 bytes), masking healthy hosts as probe_exit_1. A private 0600 remote
-# spool separates the script from child stdin, preserves shell status, and
-# removes the spool on normal exit or catchable signals. Keep the existing
+# spool separates script from child stdin. Signal traps forward TERM,
+# exit with failure statuses and unlink the private spool. Keep the existing
 # fixed host, SSH policy, probe, and single collector unchanged.
-HOST_PULL_REMOTE_STDIN_EXEC='umask 077; t=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/host_pull_probe.XXXXXXXX") || exit 70; trap '"'"'/bin/rm -f -- "$t"'"'"' EXIT HUP INT TERM; /bin/cat >"$t" || exit 70; "${SHELL:-/bin/sh}" "$t" </dev/null'
+HOST_PULL_REMOTE_STDIN_EXEC='umask 077; t=$(/usr/bin/mktemp "${TMPDIR:-/tmp}/host_pull_probe.XXXXXXXX") || exit 70; p=; trap '"'"'/bin/rm -f -- "$t"'"'"' EXIT; trap '"'"'test -z "$p" || kill -TERM "$p" 2>/dev/null || :; exit 129'"'"' HUP; trap '"'"'test -z "$p" || kill -TERM "$p" 2>/dev/null || :; exit 130'"'"' INT; trap '"'"'test -z "$p" || kill -TERM "$p" 2>/dev/null || :; exit 143'"'"' TERM; /bin/cat >"$t" || exit 70; "${SHELL:-/bin/sh}" "$t" </dev/null & p=$!; wait "$p"'
 run_probe() {
   local is_local="$1" alias="$2" probe="$3" key_guard="${4:-}"
   local key_options=()
