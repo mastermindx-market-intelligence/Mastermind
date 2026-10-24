@@ -1550,10 +1550,18 @@ def _d7_reviewed_installed_event_loop(path, source, tree, node):
     # Keep a pinned full-source digest. Never derive it during this test.
     # Exact source review of the canonical installed wrapper. This does not
     # exempt other run calls or imports, even inside the same function.
+    # Return plus attention composition changes the module; the installed entry
+    # AST below remains identical to protected d65414e. This static literal
+    # freezes the combined candidate, not independent review or release authority.
     from tests.executive_identity_review import _reviewed_ast_dump
+    reviewed_source_sha = hashlib.sha256(source.encode()).hexdigest()
     if (path != 'scripts/executive_os_phase1c.py'
             or hashlib.sha256(source.encode()).hexdigest() !=
-            '12bb1b83c98107b7f2141a1055f66463f613fb5baf15e7f6fd9eb29495d4de71'):
+            # Exact static hash of the composed Bridge (attention, authorized
+            # policies, reference cursor) on the current readside socket
+            # selector. The reviewed serve_installed_control AST above
+            # remains byte-identical and is independently checked below.
+            'c4b87d037656f10a05b2fef9da0df7f752b9ce4b5ceb608930ba6e2a61d953f0'):
         return False
     anchors = [n for n in tree.body if isinstance(n, ast.FunctionDef)
                and n.name == 'serve_installed_control']

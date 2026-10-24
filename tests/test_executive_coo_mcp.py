@@ -194,3 +194,98 @@ def test_metadata_cannot_shadow_static_coo_route(rsa_key, tmp_path):
     selected = dataclasses.replace(settings, executive=base, policy=dataclasses.replace(settings.policy, resource_metadata_url=path))
     with pytest.raises(ValueError, match="metadata"):
         server.build_web_ceo_v2_with_coo_mcp_app(base, coo_settings=selected, audit_sink=fixture.Sink())
+
+
+def _event_composition(settings, reply_reader, event_rpc):
+    """Test-only composition; no durable store, callback, or installation."""
+    import dataclasses
+    from types import SimpleNamespace
+
+    async def unused(**_kwargs):
+        raise AssertionError("event discovery must not call MDM")
+
+    installed = dataclasses.replace(settings.executive, read_from_ceo_ingress=True)
+    return server.build_web_ceo_v3_with_coo_mcp_app(
+        installed,
+        coo_settings=dataclasses.replace(settings, executive=installed),
+        audit_sink=fixture.Sink(),
+        mdm_reader=SimpleNamespace(list_macos_devices=unused, device=unused),
+        session_target_projector=lambda *_args: [],
+        session_reply_handler=lambda *_args: {},
+        session_summon_handler=lambda *_args: {},
+        session_reply_read_tool=reply_reader,
+        reply_event_rpc=event_rpc,
+    )
+
+
+def test_combined_host_events_keep_ceo_and_coo_authorities_separate(rsa_key, tmp_path):
+    from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+    from test_session_bridge_return_tools import tool as canonical_read_tool
+
+    _, coo_token, _, settings = fixture.setup(rsa_key, tmp_path)
+    calls = []
+
+    class DiscoveryOwner:
+        async def can_discover(self, principal):
+            calls.append(principal.subject_digest)
+            return True
+
+        async def subscribe(self, principal, requested):
+            raise AssertionError("discovery must not create a subscription")
+
+        async def unsubscribe(self, principal, requested):
+            raise AssertionError("discovery must not remove a subscription")
+
+    reader, _ = canonical_read_tool()
+    event_rpc = WebReplyEventRpc(DiscoveryOwner(), clock=settings.executive.clock)
+    app = _event_composition(settings, reader, event_rpc)
+
+    async def exercise():
+        async with app._app.router.lifespan_context(app._app):
+            async with httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app), base_url="http://127.0.0.1"
+            ) as client:
+                reader_token = fixture.fixture._read_token(rsa_key)
+
+                async def events(token, path):
+                    return await client.post(path, headers={
+                        "authorization": "Bearer " + token,
+                        "accept": "application/json, text/event-stream",
+                        "mcp-protocol-version": "2026-07-28",
+                    }, json={"jsonrpc": "2.0", "id": 1, "method": "events/list", "params": {}})
+
+                listed = await events(reader_token, "/mcp")
+                assert listed.status_code == 200, listed.text
+                assert listed.json()["result"]["events"][0]["name"] == "session.reply_committed"
+                assert len(calls) == 1
+                denied = await events(coo_token, "/mcp")
+                assert denied.status_code in (401, 403)
+                assert len(calls) == 1
+                assert (await events(reader_token, "/mcp/coo")).status_code in (401, 403)
+                coo = await rpc(client, coo_token, "/mcp/coo")
+                assert coo.status_code == 200, coo.text
+                assert tuple(tool["name"] for tool in coo.json()["result"]["tools"]) == COO_TOOL_NAMES
+                ceo = await rpc(client, reader_token, "/mcp")
+                assert ceo.status_code == 200, ceo.text
+                assert "session_reply_read" in {tool["name"] for tool in ceo.json()["result"]["tools"]}
+
+    asyncio.run(exercise())
+
+
+def test_combined_host_events_require_canonical_reply_reader(rsa_key, tmp_path):
+    from integrations.session_bridge.web_reply_event_rpc import WebReplyEventRpc
+    import test_session_bridge_web_reply_event_asgi as event_fixture
+
+    _, _, _, settings = fixture.setup(rsa_key, tmp_path)
+    event_rpc = WebReplyEventRpc(event_fixture.Owner(), clock=settings.executive.clock)
+    with pytest.raises(ValueError, match="installed original-reply reader"):
+        _event_composition(settings, None, event_rpc)
+
+
+def test_combined_host_events_refuse_noncanonical_rpc(rsa_key, tmp_path):
+    from test_session_bridge_return_tools import tool as canonical_read_tool
+
+    _, _, _, settings = fixture.setup(rsa_key, tmp_path)
+    reader, _ = canonical_read_tool()
+    with pytest.raises(ValueError, match="exact authenticated v3 reply-read composition"):
+        _event_composition(settings, reader, object())

@@ -162,10 +162,12 @@ def stored_continuation_request(runtime, read_ref: str):
             or (event.job_id, event.attempt_id, event.worker_id) != (
                 value["job_id"], value["attempt_id"], value["worker_id"])):
         raise ValueError("request binding changed")
-    roots = [e for e in runtime.events.list_events(job_id=value["root_job_id"])
-             if e.event_type == "JOB_CREATED"]
-    if (len(roots) != 1 or roots[0].event_id != value["root_event_id"]
-            or _digest(roots[0].to_dict()) != value["root_event_sha256"]):
+    try:
+        root = runtime.store.unique_root_created_event(value["root_job_id"])
+    except ValueError:
+        raise ValueError("original root changed") from None
+    if (root.event_id != value["root_event_id"]
+            or _digest(root.to_dict()) != value["root_event_sha256"]):
         raise ValueError("original root changed")
     return event, value
 

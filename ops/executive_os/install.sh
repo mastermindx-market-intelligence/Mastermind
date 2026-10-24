@@ -27,6 +27,7 @@ STAGE_RELEASE_ONLY="0"
 ARM_PRIVILEGED_BROKER="0"
 PRIVILEGED_BROKER_LIVE="0"
 CONTROL_CONFIG_SOURCE=""
+CONTROL_AEAD_BUNDLE=""
 OS_WEB_ASSETS=""
 OS_WEB_ASSETS_DIGEST=""
 OPERATOR_USER=""
@@ -395,6 +396,7 @@ while [ "$#" -gt 0 ]; do
     --arm-privileged-broker) ARM_PRIVILEGED_BROKER="1"; shift ;;
     --operator-user) OPERATOR_USER="${2:-}"; shift 2 ;;
     --control-config) CONTROL_CONFIG_SOURCE="${2:-}"; shift 2 ;;
+    --control-aead-bundle) CONTROL_AEAD_BUNDLE="${2:-}"; shift 2 ;;
     --os-web-assets) OS_WEB_ASSETS="${2:-}"; shift 2 ;;
     --python-binary) PYTHON_BINARY="${2:-}"; shift 2 ;;
     --python-runtime-root) PYTHON_RUNTIME_ROOT="${2:-}"; shift 2 ;;
@@ -459,6 +461,9 @@ if [ -n "$CONTROL_CONFIG_SOURCE" ]; then
 fi
 if [ -n "$OS_WEB_ASSETS" ]; then
   case "$OS_WEB_ASSETS" in /*) ;; *) /bin/echo "OS web asset path must be absolute" >&2; exit 65 ;; esac
+fi
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  case "$CONTROL_AEAD_BUNDLE" in /*) ;; *) /bin/echo "control AEAD bundle path must be absolute" >&2; exit 65 ;; esac
 fi
 [ -x "$PYTHON_BINARY" ] && [ ! -L "$PYTHON_BINARY" ] || {
   /bin/echo "Python binary must be a direct executable file" >&2
@@ -1244,6 +1249,16 @@ if [ -n "$OS_WEB_ASSETS" ]; then
       exit 65
     }
 fi
+# Optional event-only dependency artifact is qualified against committed lock
+# bytes before maintenance/service stop. It never reuses the MCP network runtime.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$SCRIPT_DIR/control_aead_profile.py" check-bundle \
+    --release-root "$SOURCE_REPO" --expected-sha "$EXPECTED_SHA" \
+    --bundle "$CONTROL_AEAD_BUNDLE" --operator-uid "$OPERATOR_UID" >/dev/null || {
+      /bin/echo "control AEAD bundle preflight refused before maintenance" >&2
+      exit 65
+    }
+fi
 CONTROL_CONFIG="$SYSTEM_ROOT/config/control.json"
 WORKER_CONFIG="$SYSTEM_ROOT/config/worker-codex.json"
 PRIVILEGED_CONFIG="$SYSTEM_ROOT/config/privileged-broker.json"
@@ -1528,6 +1543,13 @@ wait_for_launchd_absent "$PRIVILEGED_LABEL" privileged || exit 65
 
 stage_sealed_release || exit 65
 
+# This remains a substep of the existing serialized installer publication.
+# Same-profile occupants verify exactly; missing/changed occupants are not reset.
+if [ -n "$CONTROL_AEAD_BUNDLE" ]; then
+  "$PYTHON_BINARY" -I -S -B "$RELEASE_ROOT/ops/executive_os/control_aead_profile.py" materialize \
+    --release-root "$RELEASE_ROOT" --bundle "$CONTROL_AEAD_BUNDLE" \
+    --operator-uid "$OPERATOR_UID" >/dev/null || exit 65
+fi
 INSTALLED_CODEX="$SYSTEM_ROOT/bin/codex-$CODEX_VERSION"
 if [ ! -f "$INSTALLED_CODEX" ]; then
   CODEX_TEMP="$(/usr/bin/mktemp "$SYSTEM_ROOT/bin/.codex-$CODEX_VERSION.XXXXXX")"
@@ -2327,7 +2349,7 @@ done
     HOME="$CONTROL_HOME" PATH=/usr/bin:/bin:/usr/sbin:/sbin \
     LANG=C.UTF-8 LC_ALL=C.UTF-8 \
     PYTHONDONTWRITEBYTECODE=1 "$PYTHON_BINARY" -I -S -B -c \
-      'import sys; sys.path.insert(0,sys.argv[1]); from scripts.executive_os_phase1c import load_control_config; load_control_config(sys.argv[2])' \
+      'import sys; sys.path.insert(0,sys.argv[1]); from scripts.executive_os_phase1c import load_control_config; from ops.executive_os.control_aead_profile import activate_if_enrolled; raw=load_control_config(sys.argv[2]); activate_if_enrolled(raw,sys.argv[1])' \
       "$RELEASE_ROOT" "$CONTROL_CONFIG"
 )
 

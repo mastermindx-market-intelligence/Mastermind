@@ -9041,9 +9041,14 @@ def test_production_arm_requires_optional_maintenance_carry_pass(tmp_path,monkey
     root=tmp_path/"control/acceptance"/SHA
     root.mkdir(parents=True)
     root.chmod(0o700)
+    # POSIX directories can inherit the parent's group rather than the
+    # process's primary group (for example /private/tmp on macOS). Bind the
+    # fixture account to the actual fixture directory; production still checks
+    # the exact configured owner/group and mode without an exemption.
+    fixture_identity=root.lstat()
     monkeypatch.setattr(control,"RUNTIME_ROOT",tmp_path)
-    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=os.getuid()))
-    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=os.getgid()))
+    monkeypatch.setattr(control.pwd,"getpwnam",lambda name:types.SimpleNamespace(pw_uid=fixture_identity.st_uid))
+    monkeypatch.setattr(control.grp,"getgrnam",lambda name:types.SimpleNamespace(gr_gid=fixture_identity.st_gid))
     monkeypatch.setattr(control,"_has_acl",lambda path:False)
     raw=b"existing full acceptance receipt"
     monkeypatch.setattr(control,"_root_json",lambda *args,**kwargs:({},raw))

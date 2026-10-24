@@ -8,6 +8,11 @@ permission modes and the 512 MiB inventory bound, not new runtime authority.
 A source change requires review; tests never learn replacement pins from source.
 Only exact reviewed Constant tokens are suppressed; identifiers and alias/call
 structure remain visible to the generic D8 scanner.
+
+The R2 AEAD projection candidate retains the same two identity literal sites.
+Its body fingerprint is frozen below; a matching candidate is not independent
+review acceptance or release authority. Its per-connection snapshot also checks
+the existing root-owned lock's 0644 mode at one new exact candidate site.
 """
 from __future__ import annotations
 
@@ -18,7 +23,7 @@ from tests.executive_fabric_release_identity_review import REVIEWED_FILES
 from tests.executive_incident_identity_review import REVIEWED_FILES as INCIDENT_REVIEWED_FILES
 
 REVIEWED_PATH = "control_plane/executive_installed_peer.py"
-REVIEWED_LITERAL_COUNT = 33
+REVIEWED_LITERAL_COUNT = 34
 
 # Source-only, fixed-mode review. These are directory chmod/inspection modes,
 # not user/group IDs or process identities. Original installed bytes remain
@@ -178,8 +183,11 @@ REVIEWED_ANCHORS = {'_LAUNCHD_ROLES': {'node_type': 'Assign',
  '_verify_role_plist': {'node_type': 'FunctionDef',
                         'ast_sha256': 'b6ae4e618fbd7a678ff7cc558882de291e9420c75661613f1b1d270fba4cebf3',
                         'sites': ((('body', 4, 'value', 'keywords', 2, 'value'), 'int', 420, '0o644'),)},
+ '_control_aead_snapshot': {'node_type': 'FunctionDef',
+                           'ast_sha256': '65f40889db00e058f8c302c3ef65f42a7549402374302766f9b0101761e68593',
+                           'sites': ((('body', 4, 'value', 'keywords', 2, 'value'), 'int', 420, '0o644'),)},
  '_verify_control_projection': {'node_type': 'FunctionDef',
-                                'ast_sha256': '3a834919a6a967ef9bb612b9d57502cbe524b8052639b583cb703f0934310b52',
+                                'ast_sha256': 'ca1061ed65db72073402f1d05660484580e34327932adcdace0866d50ec59ec4',
                                 'sites': ((('body', 2, 'value', 'keywords', 3, 'value'), 'int', 450, '450'),
                                           (('body', 5, 'test', 'comparators', 0), 'int', 450, '450'))},
  '_verify_role_config': {'node_type': 'FunctionDef',
