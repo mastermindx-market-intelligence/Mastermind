@@ -258,9 +258,9 @@
       "source": "source/host_pick.py"
     },
     "ext/host_pull.sh": {
-      "bytes": 11854,
+      "bytes": 12148,
       "installed_preimage_sha256": "65b294a5ea2d17a9d7832307372bdb07262da62b5106a1ecad9ffa6c2b5cd9ad",
-      "sha256": "d15cdb7c9a9bbf0adc9626d3269371eeec00afed5b60b8a83e20f70c448d9d3e",
+      "sha256": "53156165c211599e47df95b465cf6257231adaed6a93f7a092b493e4f51f2858",
       "source": "candidate/host_pull.sh"
     },
     "ext/host_pull_backend.py": {
@@ -268,6 +268,18 @@
       "installed_preimage_sha256": "6af1bc15c84d5d22d8ee4b295206a9e5f8698b9df8f4bff6dbe3be04e481ef71",
       "sha256": "742f0bf4f90d1ad4bd10851e3acec6564b9172d2c8185b013b58946071955659",
       "source": "candidate/host_pull_backend.py"
+    },
+    "ext/host_pull_daemon.sh": {
+      "bytes": 78584,
+      "installed_preimage_sha256": null,
+      "sha256": "586eb69d9c957e825925be6dae326a6157510ff72c8888e2c9a55c5a66a4e231",
+      "source": "candidate/host_pull_daemon.sh"
+    },
+    "ext/host_pull_launchd.plist.template": {
+      "bytes": 1385,
+      "installed_preimage_sha256": null,
+      "sha256": "31a7108382df97357e8173b6edd7a5612178a042ecbc165591d89e9152846d9f",
+      "source": "candidate/host_pull_launchd.plist.template"
     },
     "ext/host_pull_probe.template": {
       "bytes": 10919,
@@ -594,12 +606,14 @@
       "source": "candidate/pool_launcher.sh"
     }
   },
-  "native_code_files": 95,
+  "native_code_files": 97,
   "new_code_files": [
     "capacity_preflight.py",
     "commission_deadline.py",
     "current_source_observation.py",
     "fabric_continuation.py",
+    "host_pull_daemon.sh",
+    "host_pull_launchd.plist.template",
     "linux_process_identity.py",
     "native_plain_packet_check.py",
     "native_plain_packet_reconcile.py",
