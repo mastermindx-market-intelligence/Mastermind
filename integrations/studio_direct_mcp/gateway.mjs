@@ -69,7 +69,7 @@
  */
 
 import { TextOutputPager, OUTPUT_PAGE_TOOL, projectOutputSafely } from './output-budget.mjs';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -469,6 +469,29 @@ function log(level, event, fields = {}) {
     logSink(JSON.stringify({ ts: new Date().toISOString(), level, event, ...fields }));
   } catch {
     /* logging must never break the request path */
+  }
+}
+
+// Correlation-only metadata: no packet bytes, credential values, or full hashes
+// enter gateway logs. This is not a security scanner, admission check or proof.
+export function fabricRequestLogFields(name, args) {
+  if (name !== 'fabric_request' || !args || typeof args !== 'object' || Array.isArray(args)) return {};
+  try {
+    // The Fabric request schema is flat. Sort names so client JSON property
+    // ordering cannot change the fingerprint of an otherwise identical call.
+    const canonical = JSON.stringify(Object.fromEntries(
+      Object.keys(args).sort().map(key => [key, args[key]])));
+    const fields = {
+      request_fingerprint: createHash('sha256').update(canonical).digest('hex').slice(0, 12),
+    };
+    if (typeof args.run_id === 'string' && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$/.test(args.run_id))
+      fields.run_id = args.run_id;
+    if (['mechanical', 'fix_build', 'review', 'census', 'audit'].includes(args.task_class))
+      fields.task_class = args.task_class;
+    return fields;
+  } catch {
+    // Logging must never reject or alter a request.
+    return {};
   }
 }
 
@@ -1119,6 +1142,7 @@ class GatewaySession {
 
   async callTool(request, extra) {
     const name = request?.params?.name;
+    const requestLog = fabricRequestLogFields(name, request?.params?.arguments);
     const started = Date.now();
 
     if (name === OUTPUT_PAGE_TOOL.name) {
@@ -1249,7 +1273,7 @@ class GatewaySession {
           ? CLASSIFICATION.TOOL_ERROR
           : CLASSIFICATION.OK;
         log('info', 'tool_call', {
-          sid: this.tag, tool: name, durationMs: Date.now() - started, classification,
+          sid: this.tag, tool: name, ...requestLog, durationMs: Date.now() - started, classification,
         });
         // Retain only catalogued, untyped text results under the existing owner.
         // Paging never dispatches the backend or changes the original effect.
@@ -1258,7 +1282,7 @@ class GatewaySession {
           hasOutputSchema: this.outputToolSchemas.get(name) !== false,
         });
       } catch (err) {
-        return this.handleToolFailure(err, name, started);
+        return this.handleToolFailure(err, name, started, requestLog);
       }
     }, { kind: 'tools/call', tool: name, started });
   }
@@ -1276,7 +1300,7 @@ class GatewaySession {
    * arguments) is deterministic — the tool provably did not run — so it is
    * forwarded as an `isError` result without tainting the session.
    */
-  handleToolFailure(err, toolName, started) {
+  handleToolFailure(err, toolName, started, requestLog = {}) {
     const durationMs = Date.now() - started;
     const message = String(err?.message ?? '');
     const timedOut = err?.code === ErrorCode.RequestTimeout || err?.code === 'RequestTimeout' || /timed?\s*out/i.test(message);
@@ -1291,7 +1315,7 @@ class GatewaySession {
     if (timedOut && !backendGone && this.isTimeoutSafeReadTool(toolName)) {
       this.stats.requests.timeouts += 1;
       log('warn', 'tool_call_read_timeout', {
-        sid: this.tag, tool: toolName, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
+        sid: this.tag, tool: toolName, ...requestLog, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
       });
       return {
         content: [{ type: 'text', text: 'READ_TIMEOUT: backend read exceeded the gateway deadline; no retry was performed.' }],
@@ -1304,7 +1328,7 @@ class GatewaySession {
       this.taint(reason);
       if (timedOut) this.stats.requests.timeouts += 1;
       log('warn', 'tool_call_effect_unknown', {
-        sid: this.tag, tool: toolName, durationMs,
+        sid: this.tag, tool: toolName, ...requestLog, durationMs,
         reason: timedOut ? 'timeout' : 'backend_lost',
       });
       throw new McpError(
@@ -1321,7 +1345,7 @@ class GatewaySession {
 
     // Deterministic failure from a live backend: no taint, no retry.
     log('info', 'tool_call', {
-      sid: this.tag, tool: toolName, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
+      sid: this.tag, tool: toolName, ...requestLog, durationMs, classification: CLASSIFICATION.TOOL_ERROR,
     });
     return {
       content: [{ type: 'text', text: `Error: ${message || 'backend tool call failed'}` }],

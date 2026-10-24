@@ -6,7 +6,7 @@ import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/cli
 import { Client as LegacyClient } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport as LegacyTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { PROTOCOL_VERSION_META_KEY, CLIENT_INFO_META_KEY, CLIENT_CAPABILITIES_META_KEY } from '@modelcontextprotocol/server';
-import { startGateway, resolveConfig } from './gateway.mjs';
+import { startGateway, resolveConfig, setLogSink, fabricRequestLogFields } from './gateway.mjs';
 import { startPrivateGateway } from './private-tunnel-gateway.mjs';
 
 const profile = { host: '127.0.0.1', port: 0, accountLabel: 'fabric-test',
@@ -84,6 +84,44 @@ test('pinned modern client lists/calls through real HTTP and retains the existin
     assert.equal(value(await legacy.callTool({ name: 'fabric_status', arguments: {} })).pid, requested.pid);
     assert.equal(gw.stats().backend.spawns, 1);
   } finally { await first?.close(); await second?.close(); await legacy?.close(); await gw.close(); }
+});
+
+test('real Fabric tool logs include run, class and stable 12-hex request fingerprint without packet disclosure', async () => {
+  const logged = [];
+  setLogSink(line => logged.push(JSON.parse(line)));
+  let gw, client;
+  const args = {
+    run_id: 'fingerprint-fixture-001', root_id: 'fixture-root', parent_id: 'fixture-root',
+    task_class: 'review', task_complexity: 'C1_ROUTINE_BOUNDED',
+    work_packet: `Prose SHA ${'a'.repeat(12)}; machine_sha256=${'a'.repeat(64)}
+fixture_key=example-not-a-real-secret`,
+  };
+  try {
+    gw = await startPrivateGateway(profile);
+    client = await connect(gw);
+    const response = value(await client.callTool({ name: 'fabric_request', arguments: args }));
+    assert.equal(response.effects, 1);
+    const entry = logged.find(row => row.event === 'tool_call' && row.tool === 'fabric_request');
+    assert.ok(entry, 'real gateway tool_call log is present');
+    assert.equal(entry.run_id, args.run_id);
+    assert.equal(entry.task_class, args.task_class);
+    assert.match(entry.request_fingerprint, /^[0-9a-f]{12}$/);
+    const expected = createHash('sha256').update(JSON.stringify(
+      Object.fromEntries(Object.keys(args).sort().map(key => [key, args[key]])),
+    )).digest('hex').slice(0, 12);
+    assert.equal(entry.request_fingerprint, expected);
+    assert.equal(fabricRequestLogFields('fabric_request',
+      Object.fromEntries(Object.entries(args).reverse())).request_fingerprint, expected);
+    assert.notEqual(fabricRequestLogFields('fabric_request',
+      { ...args, work_packet: args.work_packet + ' changed' }).request_fingerprint, expected);
+    assert.equal(JSON.stringify(entry).includes('fixture_key'), false);
+    assert.equal(JSON.stringify(entry).includes('a'.repeat(64)), false);
+    assert.deepEqual(fabricRequestLogFields('fabric_status', args), {});
+  } finally {
+    await client?.close();
+    await gw?.close();
+    setLogSink(line => process.stderr.write(line + '\n'));
+  }
 });
 
 test('malformed modern claims are rejected before backend acquisition; metadata cannot grant identity', async () => {
