@@ -135,6 +135,25 @@ class PairedLauncherUpgrade(unittest.TestCase):
                     raise AssertionError('historical collector preimage differs')
                 (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
                 cls.manifest['ext/' + name] = digest
+            # Preserve the fixed original paired-upgrade target. Later ordinary
+            # paid qualification added one helper and changed one producer;
+            # those current bytes are qualified above, not historical payloads.
+            fixture = Path(__file__).resolve().parents[4] / 'tests/fixtures/paid-host-preinitializer-f608.json'
+            retained = json.loads(fixture.read_bytes())
+            name = 'paid_host_qualification.py'
+            digest = 'd2f5be14f345cf00b4bd4357d705713a24e373a7d1675229aab6202f0d500cad'
+            if retained['source'] != 'f608f52f35384dcfa8e4305dc594f1fbe823d5ec' or set(retained['files']) != {name}:
+                raise AssertionError('historical paid qualifier fixture identity differs')
+            raw = zlib.decompress(base64.b64decode(retained['files'][name]['zlib_base64'], validate=True))
+            if retained['files'][name]['sha256'] != digest or g.digest(raw) != digest:
+                raise AssertionError('historical paid qualifier preimage differs')
+            (cls.built / 'native-code-stage/ext' / name).write_bytes(raw)
+            cls.manifest['ext/' + name] = digest
+            added = cls.built / 'native-code-stage/ext/paid_initializer.py'
+            if g.digest(added.read_bytes()) != cls.manifest['ext/paid_initializer.py']:
+                raise AssertionError('current initializer differs before historical inverse')
+            added.unlink()
+            del cls.manifest['ext/paid_initializer.py']
             historical_manifest = (json.dumps(cls.manifest, sort_keys=True, indent=2) + '\n').encode()
             if len(cls.manifest) != 95 or g.digest(historical_manifest) != installer.UPGRADE_MANIFEST:
                 raise AssertionError('historical paired-upgrade manifest differs')
