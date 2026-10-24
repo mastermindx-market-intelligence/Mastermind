@@ -47,7 +47,7 @@ assert HERE.parent.parent.name == "native-code-releases"
 assert stat.S_IMODE(HERE.stat().st_mode) == 0o555
 assert stat.S_IMODE(HERE.parent.stat().st_mode) == 0o555
 assert stat.S_IMODE((HERE.parent / "RELEASE.json").stat().st_mode) == 0o444
-assert len(json.loads((HERE.parent / "RELEASE.json").read_bytes())["files"]) == 95
+assert len(json.loads((HERE.parent / "RELEASE.json").read_bytes())["files"]) == 96
 assert (HERE / "lanes").is_symlink()
 assert bindings.owner_path(HERE / "lanes", HERE) == OWNER / "lanes"
 with delivery.DirectoryChain(HERE / "lanes") as chain:
@@ -259,8 +259,8 @@ class MacroResultPublication(unittest.TestCase):
             raise AssertionError("actual current-source stage failed:\n" + build.stderr)
         cls.source = staged / "native-code-stage"
         cls.manifest = json.loads((staged / "native-manifest.json").read_bytes())
-        if len(cls.manifest) != 95:
-            raise AssertionError("Paid source integration changed the reviewed 95-file closure")
+        if len(cls.manifest) != 96:
+            raise AssertionError("Native source closure differs from the explicit 96-member candidate")
         spec = importlib.util.spec_from_file_location("macro_fixture_native_generation",
             ROOT / "rollout/native_generation.py")
         cls.generation = importlib.util.module_from_spec(spec)
@@ -275,7 +275,7 @@ class MacroResultPublication(unittest.TestCase):
         self.release = self.generation.publish(self.source, self.owner, self.manifest)
         verified, meta = self.generation.verify(self.release.parent, self.release.name)
         self.assertEqual(verified, self.release)
-        self.assertEqual(len(meta["files"]), 95)
+        self.assertEqual(len(meta["files"]), 96)
 
     def child(self, program):
         result = subprocess.run([sys.executable, "-B", "-c",
@@ -692,7 +692,7 @@ class MacroResultPublication(unittest.TestCase):
         original_inode = (canonical.stat().st_dev, canonical.stat().st_ino)
         first_release = self.release
 
-        # Reuse the entire actual 95-file source closure, changing only an
+        # Reuse the entire actual 96-file source closure, changing only an
         # unrelated comment to mint a distinct fixture generation identity.
         next_source = self.base / "next-generation-source"
         shutil.copytree(self.source, next_source)
@@ -702,7 +702,7 @@ class MacroResultPublication(unittest.TestCase):
             b"\n# Offline Macro result fixture: distinct generation identity only.\n")
         next_manifest = dict(self.manifest)
         next_manifest[changed_name] = hashlib.sha256(changed_path.read_bytes()).hexdigest()
-        self.assertEqual(len(next_manifest), 95)
+        self.assertEqual(len(next_manifest), 96)
         self.assertEqual({name for name in next_manifest
             if next_manifest[name] != self.manifest[name]}, {changed_name})
 
@@ -713,7 +713,7 @@ class MacroResultPublication(unittest.TestCase):
 
         # child() starts a fresh interpreter, so task.HERE, delivery.HERE, and
         # owner_path all originate from B. Its existing prelude also proves B's
-        # sealed metadata, exact 95-file closure, and original state aliases.
+        # sealed metadata, exact 96-file closure, and original state aliases.
         self.release = second_release
         try:
             self.child(r'''

@@ -44,8 +44,8 @@ QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
 # The Grok delta's source risk was independently reviewed at 3d864/25efd; this
 # comment records that review and invents no fresh approval.
 # Executor/donor/preimage pins stay exact.
-EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "6e139a3af51b89038e3e0f5109eceee522547e6237c38daee7dc8c3c6f634ad8"
+EXPECTED_NATIVE_FILES = 96
+NATIVE_MANIFEST_SHA = "4fdda035fe029d44f2e07121e7614661eeba02116d05b0b104a6c2973b3120b9"
 
 
 def _sha(raw):
