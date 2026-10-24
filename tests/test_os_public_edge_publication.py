@@ -20,7 +20,7 @@ from ops.executive_os import executive_mcp_entry as entry
 from ops.executive_os import os_public_edge_publication as m
 from ops.executive_os import os_release_assets as assets
 from ops.executive_os import release_manifest as seals
-from ops.executive_os.os_public_edge import HOST, GET_ROUTES, POST_ROUTES, asset_routes
+from ops.executive_os.os_public_edge import HOST, LEGACY_GET_ROUTES, LEGACY_POST_ROUTES, GET_ROUTES, POST_ROUTES, asset_routes
 
 
 def git(repo, *args):
@@ -95,7 +95,9 @@ def inputs(tmp_path, monkeypatch, request):
     git(repo, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "source")
     sha, tree = git(repo, "rev-parse", "HEAD"), git(repo, "rev-parse", "HEAD^{tree}")
     git(repo, "update-ref", "refs/remotes/origin/master", sha)
-    old_notices, new_notices = getattr(request, "param", (False, False))
+    settings = getattr(request, "param", (False, False))
+    old_notices, new_notices = settings[:2]
+    retired_edge_profile = len(settings) == 3 and settings[2] is True
     monkeypatch.setattr(assets, "_build", lambda app, **kw: make_dist(
         app, "new", noir_notices=new_notices))
     bundle = tmp_path / "bundle"
@@ -108,7 +110,13 @@ def inputs(tmp_path, monkeypatch, request):
     (old / assets.DIST / "asset-manifest.json").write_bytes(m.canonical(manifest))
     seals.create(old, "a" * 40, "b" * 40)
     live = tmp_path / "live.json"
-    live.write_bytes(m.canonical(fullconfig(manifest)))
+    config = fullconfig(manifest)
+    if retired_edge_profile:
+        # Current production edge initially has no Control Room routes.
+        branches = config["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+        branches[0]["match"][0]["path"] = sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(manifest)))
+        branches[1]["match"][0]["path"] = list(LEGACY_POST_ROUTES)
+    live.write_bytes(m.canonical(config))
     return dict(old_root=old, old_sha="a" * 40, old_tree="b" * 40,
                 new_bundle=bundle, source_repo=repo, new_sha=sha, new_tree=tree,
                 new_digest=qualified.digest, live_config=live, relay_port=49152,
@@ -186,6 +194,25 @@ def ready(staged, **changes):
     i, r, _ = staged
     return m.verify_cutover(**{**dict(stage_path=i["out"], stage_digest=r["stage_digest"],
                                      new_sha=i["new_sha"], new_digest=i["new_digest"]), **changes})
+
+
+@pytest.mark.parametrize("inputs", [(False, False, True)], indirect=True)
+def test_legacy_edge_publication_adds_closed_control_room_routes_before_switch(staged):
+    i, r, relay = staged
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert route[0]["match"][0]["path"] == sorted(set(LEGACY_GET_ROUTES) | set(asset_routes(entry.build_os_asset_manifest(i["old_root"]))))
+    assert route[1]["match"][0]["path"] == list(LEGACY_POST_ROUTES)
+    assert publish(staged)["state"] == "PREPARED"
+    route = relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"]
+    assert set(GET_ROUTES) <= set(route[0]["match"][0]["path"])
+    assert route[1]["match"][0]["path"] == list(POST_ROUTES)
+    assert route[1]["handle"][0]["max_size"] == 64000
+    assert ready(staged)["state"] == "CUTOVER_READY"
+    relay.selected = "new"
+    assert publish(staged, "finalize")["state"] == "FINAL"
+    assert route[1]["match"][0]["path"] == list(POST_ROUTES)
+    assert relay.current["apps"]["http"]["servers"]["srv0"]["routes"][0]["handle"][0]["routes"][2] == {
+        "handle": [{"handler": "static_response", "abort": True}]}
 
 
 def test_real_consumer_two_phase_order_and_single_selected_release(staged):

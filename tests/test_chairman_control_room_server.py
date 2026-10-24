@@ -1623,9 +1623,13 @@ def test_superseded_background_refresh_never_overwrites_newer_explicit_recomposi
     entered_A = threading.Event()
     release_A = threading.Event()
 
-    def fake_compose(config, *, timeout=60.0):
+    def fake_compose(config, *, timeout=60.0, active_builds_snapshot=None):
         calls["n"] += 1
         n = calls["n"]
+        if n < 3:
+            assert active_builds_snapshot is None
+        else:
+            assert active_builds_snapshot == _STUB_FIXTURE_DOC
         if n == 1:
             return {"marker": "startup-doc"}
         if n == 2:
@@ -1702,9 +1706,13 @@ def test_superseded_background_failure_does_not_mask_newer_explicit_success(tmp_
     entered_A = threading.Event()
     release_A = threading.Event()
 
-    def fake_compose(config, *, timeout=60.0):
+    def fake_compose(config, *, timeout=60.0, active_builds_snapshot=None):
         calls["n"] += 1
         n = calls["n"]
+        if n < 3:
+            assert active_builds_snapshot is None
+        else:
+            assert active_builds_snapshot == _STUB_FIXTURE_DOC
         if n == 1:
             return {"marker": "startup-doc"}
         if n == 2:

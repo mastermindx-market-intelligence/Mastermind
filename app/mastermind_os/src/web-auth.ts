@@ -27,6 +27,12 @@ import { DIRECT_RESULT_BYTES, decodeDirectNativeResult, normalizeDirectSelection
 import { validActivitySelection } from "./planning/retained-activity";
 import type { ExecutiveSessionTransport } from "./orchestration/executive-session-command-port";
 import type { AuthState, RawClient } from "./host";
+import {
+  CONTROL_ROOM_REQUEST_BYTES, CONTROL_ROOM_RESPONSE_BYTES,
+  decodeControlRoomActionPayload, decodeControlRoomActionJson,
+  ControlRoomActionTransportError,
+  type ControlRoomOperation, type ControlRoomActionResult,
+} from "./control-room-actions";
 import { evidenceUrl, EVIDENCE_BODY_BYTES } from "./research/evidence-contract";
 export type { AuthState } from "./host";
 export interface WebPopup {
@@ -603,6 +609,128 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
       researchRequests.delete(controller);
     }
   }
+  /**
+   * One acquisition-authenticated attempt at a fixed Control Room route.
+   * The server owns each action grant. A post-dispatch auth change cannot
+   * turn an original result into a claim that the request was never sent.
+   */
+  function controlRoomAction(
+    operation: ControlRoomOperation,
+    input: unknown,
+    signal: AbortSignal,
+  ): Promise<ControlRoomActionResult> {
+    const ticket = generation, token = tokens.acquisition;
+    const controller = new AbortController();
+    const byteBrand = Object.getOwnPropertyDescriptor(
+      Object.getPrototypeOf(Uint8Array.prototype), Symbol.toStringTag,
+    )?.get;
+    let dispatched = false, settled = false;
+    let response: Response | null = null;
+    let reader: ReadableStreamDefaultReader<Uint8Array> | null = null;
+    let readerReleased = false, bodyReleased = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    return new Promise((resolve, reject) => {
+      const releaseBody = () => {
+        if (reader && !readerReleased) {
+          readerReleased = true;
+          try { void Promise.resolve(reader.cancel()).catch(() => {}); } catch { /* lost cleanup */ }
+          try { reader.releaseLock(); } catch { /* a pending read may retain the lock */ }
+        } else if (!reader && response && !bodyReleased) {
+          bodyReleased = true;
+          try { void Promise.resolve(response.body?.cancel()).catch(() => {}); } catch { /* lost cleanup */ }
+        }
+      };
+      const finish = (result?: ControlRoomActionResult) => {
+        if (settled) return;
+        settled = true;
+        // Settle before any cleanup callback can move auth or abort again.
+        if (result) resolve(result);
+        else reject(new ControlRoomActionTransportError(
+          operation, dispatched ? "EFFECT_UNKNOWN" : "NOT_DISPATCHED",
+        ));
+        try { if (timer !== undefined) clear(timer); } catch { /* cleanup only */ }
+        try { signal.removeEventListener("abort", onAbort); } catch { /* invalid signal */ }
+        try { controller.abort(); } catch { /* cleanup only */ }
+        releaseBody();
+      };
+      const onAbort = () => finish();
+      void (async () => {
+        try {
+          const started = now();
+          if (!Number.isFinite(started)) throw new Error("ACTION_CLOCK_INVALID");
+          const deadline = started + 490_000;
+          // One total deadline, installed before payload preflight; never reset
+          // at response headers or while consuming the body.
+          timer = later(onAbort, 490_000);
+          signal.addEventListener("abort", onAbort, { once: true });
+          if (signal.aborted) { finish(); return; }
+          const payload = decodeControlRoomActionPayload(input, operation);
+          const body = JSON.stringify(payload) + "\n";
+          if (new TextEncoder().encode(body).length > CONTROL_ROOM_REQUEST_BYTES)
+            throw new Error("ACTION_INPUT_TOO_LARGE");
+          const options: RequestInit = {
+            method: "POST", redirect: "error", credentials: "omit", cache: "no-store",
+            headers: {
+              Accept: "application/json", "Content-Type": "application/json",
+              Authorization: "Bearer " + (token?.value ?? ""),
+            },
+            body, signal: controller.signal,
+          };
+          const aborted = signal.aborted || controller.signal.aborted;
+          const current = now();
+          if (!configured || !token || aborted || settled
+              || !Number.isFinite(current) || current >= deadline || token.expires <= current
+              || ticket !== generation || tokens.acquisition !== token)
+            throw new Error("ACTION_NOT_ADMITTED");
+          dispatched = true;
+          response = await fetchFn(ORIGIN + "/workspace/control-room/" + operation, options);
+          if (settled) { releaseBody(); return; }
+          const withinDeadline = () => {
+            const observed = now();
+            return Number.isFinite(observed) && observed < deadline;
+          };
+          if (!withinDeadline()) { finish(); return; }
+          const contentType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
+          const declared = response.headers.get("content-length");
+          if (contentType !== "application/json"
+              || (declared !== null && (!/^[0-9]+$/.test(declared)
+                || Number(declared) > CONTROL_ROOM_RESPONSE_BYTES))
+              || !response.body)
+            throw new Error("ACTION_RESPONSE_INVALID");
+          if (settled) { releaseBody(); return; }
+          reader = response.body.getReader();
+          const chunks: Uint8Array[] = [];
+          let size = 0;
+          while (true) {
+            const part = await reader.read();
+            if (settled) return;
+            if (!withinDeadline()) { finish(); return; }
+            if (part.done) break;
+            if (!ArrayBuffer.isView(part.value) || byteBrand?.call(part.value) !== "Uint8Array"
+                || part.value.byteLength > CONTROL_ROOM_RESPONSE_BYTES - size)
+              throw new Error("ACTION_RESPONSE_TOO_LARGE");
+            // The source reader may reuse its buffer on the following read.
+            const owned = new Uint8Array(part.value);
+            size += owned.byteLength;
+            chunks.push(owned);
+          }
+          const bytes = new Uint8Array(size);
+          let offset = 0;
+          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+          if (settled) return;
+          if (!withinDeadline()) { finish(); return; }
+          const result = decodeControlRoomActionJson(bytes, operation, response.status);
+          // A qualified result is settled immediately, before any clock or cleanup
+          // callback can overwrite it. No post-dispatch READ/auth rewrite.
+          finish(result);
+        } catch {
+          // Never trust a dependency's claimed operation or NOT_DISPATCHED error.
+          // Only a decoded original-owner envelope can supply that proof here.
+          finish();
+        }
+      })();
+    });
+  }
   async function executivePost(
     route: "context" | "submit" | "status" | "session/context" | "session/send" | "session/reply" | "direct-native/result" | "direct-native/consume",
     arguments_: unknown,
@@ -723,6 +851,14 @@ export function createWebAuth(deps: WebAuthDeps = {}): RawClient {
     signOut,
     readPrograms: ({ signal }) =>
       read("acquisition", `${ORIGIN}/workspace/programs/current`, signal),
+    readControlRoomState: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/control-room/state/current`, signal),
+    readControlRoomDiscovery: ({ signal }) =>
+      read("acquisition", `${ORIGIN}/workspace/control-room/discover/current`, signal),
+    openControlRoomSurface: ({ payload, signal }) => controlRoomAction("open", payload, signal),
+    bindControlRoomSurface: ({ payload, signal }) => controlRoomAction("bind", payload, signal),
+    unbindControlRoomSurface: ({ payload, signal }) => controlRoomAction("unbind", payload, signal),
+    refreshControlRoomBuilds: ({ signal }) => controlRoomAction("refresh-builds", {}, signal),
     readWork: ({ signal }) =>
       read(
         "acquisition",
