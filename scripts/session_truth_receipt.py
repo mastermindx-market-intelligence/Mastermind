@@ -3,8 +3,9 @@
 
 The CLI composes existing R1 acquisition, normalization, validation, finding,
 admission and rendering contracts. It owns no network client, persistence,
-retry/failover, projection, lifecycle, queue, identity inference, or source
-mutation behavior.
+retry/failover, lifecycle, queue, identity inference, or source mutation.
+Optional cross-plane JSON output delegates to the existing read-only Executive
+cockpit projector using the same acquired receipt; it creates no new authority.
 """
 from __future__ import annotations
 
