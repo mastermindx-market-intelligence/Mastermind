@@ -106,20 +106,26 @@ def deadline_command():
 def support_meta():
     import hashlib, json, pathlib, sys
     root, target = pathlib.Path(sys.argv[1]), pathlib.Path(sys.argv[2])
+    policy = root.parent / "orch/fabric/pools.yaml"
+    policy_raw = None
+    import os
+    if os.environ.get('FABRIC_CANONICAL_PAID_MODE') is not None:
+        from paid_incumbent_state import policy_source, read_policy
+        policy = policy_source(root)
+        policy_raw = read_policy()
     files = {}
     for name in sys.argv[3:]:
-        path = root.parent / "orch/fabric/pools.yaml" if name == "pools.yaml" else root / name
+        path = policy if name == "pools.yaml" else root / name
         if not path.is_file() or path.is_symlink():
             raise SystemExit("SUPPORT_SOURCE_NOT_REGULAR " + name)
-        files[name] = hashlib.sha256(path.read_bytes()).hexdigest()
+        files[name] = hashlib.sha256(policy_raw if name == "pools.yaml" and policy_raw is not None else path.read_bytes()).hexdigest()
     manifest = {"schema": "remote-support-code.v1", "files": files}
     code_digest = hashlib.sha256(json.dumps(manifest, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
-    policy = root.parent / "orch/fabric/pools.yaml"
     if not policy.is_file() or policy.is_symlink():
         raise SystemExit("SUPPORT_POLICY_NOT_REGULAR")
     import provider_outcome
     provider_outcome.write_new(target,files)
-    print(code_digest, hashlib.sha256(policy.read_bytes()).hexdigest())
+    print(code_digest, hashlib.sha256(policy_raw if policy_raw is not None else policy.read_bytes()).hexdigest())
 
 
 def controller_source_sha():
@@ -150,7 +156,7 @@ def glm_cap_sha():
 
 def routing_env():
     import os, shlex
-    names = ("POOL_CAPACITY_PREFLIGHT", "POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS", "POOL_TASK_COMPLEXITY", "POOL_ESCALATION_REASON", "POOL_MAX_CONTEXT_TOKENS", "POOL_AUTO_COMPACT_WINDOW_TOKENS", "POOL_MAX_TURNS")
+    names = ("POOL_CAPACITY_PREFLIGHT", "POOL_ORCHESTRATOR_ID", "POOL_PARENT_RUN_ID", "POOL_TASK_CLASS", "POOL_TASK_COMPLEXITY", "POOL_ESCALATION_REASON", "POOL_MAX_CONTEXT_TOKENS", "POOL_AUTO_COMPACT_WINDOW_TOKENS", "POOL_MAX_TURNS", "POOL_REQUEST_MAX_TURNS")
     print(" ".join(shlex.quote(name + "=" + os.environ.get(name, "")) for name in names))
 
 

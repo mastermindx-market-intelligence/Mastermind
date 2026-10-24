@@ -243,6 +243,19 @@ service, authorizes a Runtime writer or proves native delivery. The same file
 CAS, rollback and uncertain-effect rules apply. Do not reenroll or modify the
 pair manually to enable W3C.
 
+The separate reviewed **reverse-rebind-release** is a post-success
+recovery contract for the historical A2 volatile-socket enrollment only.
+It requires a sealed attested previous release, exact previous config/plist
+SHA-256 witnesses saved before cutover, the same shared bot and scope set,
+W3C=false and terminal-return disarmed, and A2 stopped/disabled. It publishes
+through the same metadata-only credential lock and two-file CAS owner as
+forward rebind-release. It is not a token/config backup copier, generic
+release rollback, feature-arm toggle, service launcher or new transport plane.
+Verify original controller/C1/A2 restoration separately and freeze an
+uncertain or mixed generation rather than force-copying an older installed
+pair. This recovery command must itself be in the accepted installed release
+before production use; source tests alone do not qualify an installed caller.
+
 After a successful rebind, use the installed `verify` with the expected bot.
 Supply `--enable-w3c` when the rebound enrollment has W3C enabled; an ordinary
 no-flag rebind of a false enrollment remains false. The verification requalifies the existing

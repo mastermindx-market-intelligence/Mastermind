@@ -25,7 +25,12 @@ NATIVE = ROOT / "ops/native_fabric/quota_continuity"
 PRE_PAID_MODEL_COMPOSED_SHA = "5f01655f9066d4cb5c9daf7260867efa839ef5526a83578d7ca11e3c0e681fef"
 PAID_MODEL_PATCH = ROOT / "tests/fixtures/fabric-native-paid-model-20261022.patch"
 PAID_MODEL_PATCH_SHA = "e0d937b9afdcc864592a7ba44a65ed121fa9c983f53de7109b1628e2141314f1"
-COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7"
+# Prior paid-model endpoint: kept pinned as the preimage of the Grok forward
+# delta; the historical transformation chain is never repinned.
+PRE_GROK_COMPOSED_SHA = "c14ec82af144a3c47599d628ef614c033e4c3f04852953d8c3b3699c602e2ee7"
+GROK_FORWARD_PATCH = ROOT / "tests/fixtures/fabric-native-grok-forward-20261023.patch"
+GROK_FORWARD_PATCH_SHA = "d0ae2b5337f7235695316d4148f2e4764aa0c75af6a239257ed13c830269b736"
+COMPOSED_SHA = "6be6830dcd9c00dc46cf613a610ad0dc574ca13f50aa1cd5fbffb7e65e1649c1"
 PRE_PHYSICAL_ROOT_COMPOSED_SHA = "82057bbcca163bdd4399aaaa9d2ab61548eb1656276167c98f1da40b90d7a4dc"
 PHYSICAL_ROOT_PATCH = ROOT / "tests/fixtures/fabric-native-physical-root-20261021.patch"
 PHYSICAL_ROOT_PATCH_SHA = "5582372f4de471f534838c2ea2a2c3928b698318a2cdde4a27cc53367addc26c"
@@ -33,11 +38,14 @@ PRE_DEADLINE_COMPOSED_SHA = "8fc268d94c66227dac66c259343c137da8256d7b4545b4f7759
 DEADLINE_PATCH = ROOT / "tests/fixtures/fabric-native-commission-deadline-20261018.patch"
 DEADLINE_PATCH_SHA = "bed370872724e52363b7fb361fbb92841e12f3fb8608830b9353eeac8cef7447"
 QUOTA_SHA = "f5ec893143e5bf43c37cc1d98ff1b67c0b36d9cc8674d4bf0b12ab6da0f7a29c"
-# The95-file closure composes protected #1720/#1729 with Qwen source feedback
-# and request UTC narrowing. This candidate pin is a changed-risk review input,
-# not reuse of an earlier review. Executor/donor/preimage pins stay exact.
+# The 95-file closure composes protected #1720/#1729 with Qwen source feedback
+# and request UTC narrowing, extended by the reviewed Grok forward delta. This
+# candidate pin is a changed-risk review input, not reuse of an earlier review.
+# The Grok delta's source risk was independently reviewed at 3d864/25efd; this
+# comment records that review and invents no fresh approval.
+# Executor/donor/preimage pins stay exact.
 EXPECTED_NATIVE_FILES = 95
-NATIVE_MANIFEST_SHA = "6a098fdd26c1a98376ba85d17be92cdf47c02afedb2b9d9d1a74e1e36807de16"
+NATIVE_MANIFEST_SHA = "09c02639efadb966edbc4534049d722d42dc6e59aaa8549dc38b0594a1314f2e"
 
 
 def _sha(raw):
@@ -80,6 +88,12 @@ def _composition(directory):
     assert _sha(PAID_MODEL_PATCH.read_bytes()) == PAID_MODEL_PATCH_SHA
     donor_contract._git(directory, "apply", "--check", str(PAID_MODEL_PATCH))
     donor_contract._git(directory, "apply", str(PAID_MODEL_PATCH))
+    assert _sha(target.read_bytes()) == PRE_GROK_COMPOSED_SHA
+    # Extend the exact paid-model executor with the independently reviewed Grok
+    # forward change; do not repin the historical transformations.
+    assert _sha(GROK_FORWARD_PATCH.read_bytes()) == GROK_FORWARD_PATCH_SHA
+    donor_contract._git(directory, "apply", "--check", str(GROK_FORWARD_PATCH))
+    donor_contract._git(directory, "apply", str(GROK_FORWARD_PATCH))
     composed = (NATIVE / "candidate/remote_sub_exec.py").read_bytes()
     assert _sha(composed) == COMPOSED_SHA
     assert target.read_bytes() == composed

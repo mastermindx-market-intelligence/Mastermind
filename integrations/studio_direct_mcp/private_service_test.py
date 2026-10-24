@@ -2202,6 +2202,163 @@ class TestFleetV10PublisherCompatibility(unittest.TestCase):
             svc._verify_staged_install(
                 "chatgpt1", _label_for("chatgpt1"), roots)
 
+    @contextmanager
+    def _installed_merge_predecessor_fixture(self, account="chatgpt1"):
+        with self._installed_fleet_fixture(account) as (args, roots, cfg):
+            cfg["gitPublish"] = svc._typed_git_config(
+                Path(os.environ["HOME"]), closed_repositories=True)
+            # Deliberately noncanonical whitespace: a closed-to-closed update
+            # must retain the exact previously sealed configuration bytes.
+            roots["config"].write_text(json.dumps(cfg, indent=1) + "\n", encoding="utf-8")
+            prior = json.loads(roots["manifest"].read_text())
+            prior["configHash"] = svc._sha256_file(roots["config"])
+            roots["manifest"].write_text(json.dumps(prior, indent=2, sort_keys=True))
+            args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+            predecessor = {
+                name: svc._sha256_file(roots["base"] / name)
+                for name in ("git-publish.mjs", "workspace-access.mjs")
+            }
+            target = {
+                name: svc._sha256_file(Path(args.source) / name)
+                for name in predecessor
+            }
+            with mock.patch.object(
+                svc, "FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256", predecessor, create=True
+            ), mock.patch.object(
+                svc, "FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256", target, create=True
+            ):
+                yield args, roots, cfg
+
+    def test_merge_target_hashes_bind_real_reviewed_sources(self):
+        expected_names = {"git-publish.mjs", "workspace-access.mjs"}
+        self.assertEqual(set(svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256), expected_names)
+        self.assertEqual(svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256, {
+            "git-publish.mjs": "d8f7f7712129094ce0ffac2eaeb66d15dd3f063a3ade9fa354de7af0d412477a",
+            "workspace-access.mjs": "9c4c20dd4edbc426c8561801708ee205e19bb47b48134ec8f5654a10f1cb7cf3",
+        })
+        for name in expected_names:
+            self.assertEqual(
+                svc._sha256_file(Path(svc.__file__).parent / name),
+                svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name],
+                "real incoming module must match the installed-owner target pin")
+            self.assertNotEqual(
+                svc.FLEET_V10_MERGE_PUBLISHER_PREDECESSOR_SHA256[name],
+                svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name])
+
+    def test_merge_transition_preflight_and_stopped_apply_preserve_exact_config(self):
+        for account in ("chatgpt1", "chatgpt3"):
+            with self.subTest(account=account), self._installed_merge_predecessor_fixture(account) as (args, roots, _cfg):
+                before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                          self._all_files(roots), roots["plist"].read_bytes())
+                live = CmdRecorder(handler=lambda c: FakeResult(
+                    0, _print_running(str(roots["plist"]), _label_for(account)), "")
+                    if c[:2] == ["launchctl", "print"] else None)
+                args.publisher_preflight_only = True
+                with mock.patch.object(svc, "_run", live):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "NOT_APPLIED")
+                self.assertEqual(before, (
+                    roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                    self._all_files(roots), roots["plist"].read_bytes()))
+                args.publisher_preflight_only = False
+                with mock.patch.object(svc, "_run", live):
+                    with self.assertRaisesRegex(SystemExit, "while service is loaded"):
+                        svc.cmd_upgrade(args)
+                with mock.patch.object(svc, "_run", CmdRecorder()):
+                    code, receipt = _capture_stdout(lambda: svc.cmd_upgrade(args))
+                self.assertEqual(code, 0)
+                self.assertEqual(json.loads(receipt)["effect"], "APPLIED")
+                self.assertEqual(before[1], roots["config"].read_bytes())
+                self.assertEqual(before[3], roots["plist"].read_bytes())
+                old, new = json.loads(before[0]), json.loads(roots["manifest"].read_text())
+                self.assertEqual({k: v for k, v in old.items() if k != "files"},
+                                 {k: v for k, v in new.items() if k != "files"})
+                self.assertEqual(set(old["files"]), set(new["files"]))
+                changed = {n for n, data in before[2].items()
+                           if data != (roots["base"] / n).read_bytes()}
+                self.assertEqual(changed, {"git-publish.mjs", "workspace-access.mjs"})
+                for name in changed:
+                    self.assertEqual(new["files"][name],
+                                     svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256[name])
+                svc._verify_staged_install(account, _label_for(account), roots,
+                                           require_runtime_seal=True)
+
+    def test_merge_transition_rejects_resealed_foreign_or_mixed_predecessor_pair(self):
+        for name in ("git-publish.mjs", "workspace-access.mjs"):
+            for replacement in ("foreign", "target"):
+                with self.subTest(name=name, replacement=replacement), self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+                    data = (b"unreviewed publisher bytes\n" if replacement == "foreign"
+                            else (Path(args.source) / name).read_bytes())
+                    (roots["base"] / name).write_bytes(data)
+                    prior = json.loads(roots["manifest"].read_text())
+                    prior["files"][name] = svc._sha256_file(roots["base"] / name)
+                    roots["manifest"].write_text(json.dumps(prior, indent=2, sort_keys=True))
+                    args.publisher_expected_manifest_sha256 = svc._sha256_file(roots["manifest"])
+                    before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                              self._all_files(roots))
+                    with mock.patch.object(svc, "_atomic_write_bytes") as write:
+                        with self.assertRaisesRegex(SystemExit, "unrecognized prior publisher identity"):
+                            svc.cmd_upgrade(args)
+                    write.assert_not_called()
+                    self.assertEqual(before, (roots["manifest"].read_bytes(),
+                                             roots["config"].read_bytes(), self._all_files(roots)))
+
+    def test_merge_transition_atomic_failure_restores_exact_predecessor(self):
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            before = (roots["manifest"].read_bytes(), roots["config"].read_bytes(),
+                      self._all_files(roots))
+            real, fired = svc._atomic_write_bytes, []
+            def fail_after_replace(path, data, mode=svc.FILE_MODE):
+                real(path, data, mode)
+                if Path(path).name == "workspace-access.mjs" and not fired:
+                    fired.append(True)
+                    raise OSError("failure after successor module rename")
+            with mock.patch.object(svc, "_run", CmdRecorder()), \
+                 mock.patch.object(svc, "_atomic_write_bytes", fail_after_replace):
+                with self.assertRaisesRegex(SystemExit, "NOT_APPLIED"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(fired)
+            self.assertEqual(before, (roots["manifest"].read_bytes(),
+                                     roots["config"].read_bytes(), self._all_files(roots)))
+
+    def test_merge_transition_failure_after_manifest_commit_preserves_uncertainty(self):
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            verify = svc._verify_staged_install
+            def fail_after_commit(*values, **options):
+                if svc._sha256_file(roots["manifest"]) != args.publisher_expected_manifest_sha256:
+                    raise OSError("post-commit installed verification unavailable")
+                return verify(*values, **options)
+            with mock.patch.object(svc, "_run", CmdRecorder()), \
+                 mock.patch.object(svc, "_verify_staged_install", fail_after_commit):
+                with self.assertRaisesRegex(SystemExit, "EFFECT_UNKNOWN after manifest commit"):
+                    svc.cmd_upgrade(args)
+            self.assertNotEqual(svc._sha256_file(roots["manifest"]),
+                                args.publisher_expected_manifest_sha256)
+            for name, digest in svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256.items():
+                self.assertEqual(svc._sha256_file(roots["base"] / name), digest)
+
+    def test_merge_transition_late_manifest_cas_refuses_before_first_write(self):
+        with self._installed_merge_predecessor_fixture() as (args, roots, _cfg):
+            before = (roots["config"].read_bytes(), self._all_files(roots))
+            valid, changed = svc._valid_manifest, []
+            def race_manifest(candidate, *values, **options):
+                result = valid(candidate, *values, **options)
+                if (not changed and all(
+                        candidate.get("files", {}).get(n) == d
+                        for n, d in svc.FLEET_V10_MERGE_PUBLISHER_PATCH_SHA256.items())):
+                    roots["manifest"].write_bytes(roots["manifest"].read_bytes() + b"\n")
+                    changed.append(True)
+                return result
+            with mock.patch.object(svc, "_valid_manifest", race_manifest), \
+                 mock.patch.object(svc, "_atomic_write_bytes") as write:
+                with self.assertRaisesRegex(SystemExit, "installed state changed during planning"):
+                    svc.cmd_upgrade(args)
+            self.assertTrue(changed)
+            write.assert_not_called()
+            self.assertEqual(before, (roots["config"].read_bytes(), self._all_files(roots)))
+
+
 class TestC2PaperRuntimeCompatibility(unittest.TestCase):
     """Real installer checks over isolated, sealed data fixtures; no live effects."""
 

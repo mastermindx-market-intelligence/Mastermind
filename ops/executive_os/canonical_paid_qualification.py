@@ -570,9 +570,7 @@ def _recheck_held_context(host, *, expected_release_sha, control_sha256,
         _require_staging_absent()
     _require_paid_label_absent(host)
     try:
-        raw_manifest, _info = owner._read_root_file(
-            Path(owner.SYSTEM_ROOT) / 'releases' / expected_release_sha / base._MANIFEST_NAME,
-            modes=frozenset({0o444}), uid=0, gid=0)
+        raw_manifest = owner._release_manifest_bytes(expected_release_sha)
     except Exception as exc:
         _refuse('installed release manifest is unavailable', exc)
     if base.sha256(raw_manifest) != manifest_sha256:
@@ -768,8 +766,7 @@ def qualify_and_publish(expected_release_sha: str,
         if any(profile[key] != principal[key] for key in _BRIDGE_PRINCIPAL_FIELDS):
             _refuse('actual bridge principal differs from the sealed profile')
         release = Path(owner.SYSTEM_ROOT) / 'releases' / expected_release_sha
-        manifest_raw, _info = owner._read_root_file(
-            release / base._MANIFEST_NAME, modes=frozenset({0o444}), uid=0, gid=0)
+        manifest_raw = owner._release_manifest_bytes(expected_release_sha)
         manifest = base._document(manifest_raw)
         if type(manifest) is not dict or manifest.get('commit_sha') != expected_release_sha:
             _refuse('installed release manifest differs')

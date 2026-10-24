@@ -211,10 +211,25 @@ def _publish_for_transaction(host, transaction):
                 transaction.transaction_id, transaction.expected_sha)
     restored = (getattr(host, '_control_observation_rollback_proven', None) is transaction
                 and manifest.get('phase') in {'ROLLBACK_CONTROL_PROVEN', 'CONTROL_OVERRIDE_RESTORED'})
-    fresh = (getattr(host, '_control_observation_fresh_transaction', None) is transaction
-             and (getattr(host, '_control_observation_origin', None) == identity
-                  or (restored and getattr(host, '_control_observation_recovery_owner', None) == identity))
-             and manifest.get('phase') not in {PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE})
+    # A2 return-route restoration may reclaim its ORIGINAL global marker
+    # after a proven complete Config + DISARMED receipt pair, but ONLY before
+    # any earlier observation publication was attempted. The original marker
+    # and exact recovered process/held-inode identity fence this one effect.
+    # Publication-attempt phase is durable BEFORE _publish can be invoked.
+    a2_restore_admitted = (
+        manifest.get('operation') == 'A2_RETURN_SOCKET_RESTORE'
+        and manifest.get('phase') == 'A2_CONTROL_RESTORED'
+        and getattr(host, '_a2_restore_observation_recovery_proven', None) is transaction
+        and getattr(host, '_control_observation_recovery_owner', None) == identity
+        and getattr(host, '_control_observation_fresh_transaction', None) is not transaction
+    )
+    fresh = (
+        (getattr(host, '_control_observation_fresh_transaction', None) is transaction
+         and (getattr(host, '_control_observation_origin', None) == identity
+              or (restored and getattr(host, '_control_observation_recovery_owner', None) == identity))
+         and manifest.get('phase') not in {PUBLICATION_PHASE, ROLLBACK_PUBLICATION_PHASE})
+        or a2_restore_admitted
+    )
     if fresh:
         phase = ROLLBACK_PUBLICATION_PHASE if restored else PUBLICATION_PHASE
         host._persist_phase(transaction, phase)

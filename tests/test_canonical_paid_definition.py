@@ -144,6 +144,7 @@ class FakeRelease:
         self.serve_overrides = {}       # bytes served instead of the file
         self.verify_error = None
         self.no_entries = False
+        self.manifest_raw = None
         self.reads = []
 
     def entry(self, relative, mutations=None):
@@ -180,14 +181,16 @@ class FakeRelease:
             relative = str(Path(path).relative_to(paid._RELEASES_ROOT / SHA))
             release.reads.append(relative)
             assert uid == 0 and gid == 0
-            if relative == paid._MANIFEST_NAME:
-                assert modes == frozenset({0o444})
-                return (paid._json(release.document()),
-                        SimpleNamespace(st_mode=stat.S_IFREG | 0o444))
             assert relative in paid.RELEASE_SOURCE_PATHS, relative
             assert modes == paid._RELEASE_SOURCE_MODES
             return (release.serve_overrides.get(relative, release.files[relative]),
                     SimpleNamespace(st_mode=stat.S_IFREG | release.default_mode))
+
+        def read_release_manifest(expected_sha):
+            assert expected_sha == SHA
+            release.reads.append(paid._MANIFEST_NAME)
+            return (release.manifest_raw if release.manifest_raw is not None
+                    else paid._json(release.document()))
 
         def verify(root, commit_sha, tree_sha):
             if release.verify_error is not None:
@@ -197,6 +200,7 @@ class FakeRelease:
             return release.document(scope='verified')
 
         monkeypatch.setattr(paid.owner, '_read_root_file', read_root_file)
+        monkeypatch.setattr(paid.owner, '_release_manifest_bytes', read_release_manifest)
         from ops.executive_os import release_manifest as manifest_owner
         monkeypatch.setattr(manifest_owner, 'verify', verify)
 
@@ -723,14 +727,12 @@ def test_renderer_requires_root_disarmed_prior_and_exact_release(harness, monkey
     with pytest.raises(paid.CanonicalPaidPublicationRefused, match='Capacity identity'):
         harness.render(capability='../escape')
     drifted = paid._json({'commit_sha': 'd' * 40, 'tree_sha': TREE})
-    monkeypatch.setattr(paid.owner, '_read_root_file',
-                        lambda path, *, modes, uid=0, gid=None: (drifted, None))
+    monkeypatch.setattr(paid.owner, '_release_manifest_bytes', lambda sha: drifted)
     with pytest.raises(paid.CanonicalPaidPublicationRefused, match='manifest differs'):
         attempt()
     from ops.executive_os import release_manifest as manifest_owner
-    monkeypatch.setattr(paid.owner, '_read_root_file',
-                        lambda path, *, modes, uid=0, gid=None: (
-                            paid._json(harness.release.document()), None))
+    monkeypatch.setattr(paid.owner, '_release_manifest_bytes',
+                        lambda sha: paid._json(harness.release.document()))
     monkeypatch.setattr(manifest_owner, 'verify',
                         lambda *args: (_ for _ in ()).throw(ValueError('tree drift')))
     with pytest.raises(paid.CanonicalPaidPublicationRefused, match='release tree'):
@@ -1256,3 +1258,27 @@ def test_actual_prepare_action_derives_overlay_from_selected_policy_and_renders(
     monkeypatch.setattr(paid,'publish_definition',publish)
     assert actions.prepare_paid(SHA,CONTROL_SHA,transport_host='raw',capacity_id=CAPABILITY)=={'source_only':True}
     assert len(published)==1
+
+
+def test_large_manifest_profile_hash_binds_original_bytes_not_reserialization(harness):
+    canonical = paid._json(harness.release.document())
+    original = canonical + b" " * (1059792 - len(canonical))
+    assert paid.owner._MAX_JSON_BYTES < len(original) < paid.owner._GATEWAY_ROOT_FILE_MAX_BYTES
+    assert paid.sha256(original) != paid.sha256(canonical)
+    harness.release.manifest_raw = original
+    profile = _document(harness.render()['profile.json'])
+    assert profile['release_manifest_sha256'] == paid.sha256(original)
+    assert profile['release_manifest_sha256'] != paid.sha256(paid._json(_document(original)))
+    assert harness.release.reads.count(paid._MANIFEST_NAME) == 1
+
+
+def test_manifest_capture_refusal_does_not_fall_back_to_generic_or_reserialize(harness, monkeypatch):
+    calls = []
+    def refused(expected_sha):
+        calls.append(expected_sha)
+        raise paid.owner.HostControlError('config_identity_unavailable')
+    monkeypatch.setattr(paid.owner, '_release_manifest_bytes', refused)
+    with pytest.raises(paid.CanonicalPaidPublicationRefused, match='manifest is unavailable'):
+        harness.render()
+    assert calls == [SHA]
+    assert harness.release.reads == []

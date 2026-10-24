@@ -130,7 +130,20 @@ def project_byteplus_plan_readback(
         refuse("personal Pro subscription not reported Running")
     if measurement.get("subscribed") is not True:
         refuse("measurement must report active subscription")
-    timestamp = usage.get("updated_at")
+    # BytePlus Ark CLI v1.0.42 reports updated_at on the *matched usage item*,
+    # not at the root. Keep the earlier root-only shape for existing callers
+    # without accepting contradictory measurements from one readback.
+    item_has_timestamp = "updated_at" in measurement
+    root_has_timestamp = "updated_at" in usage
+    item_timestamp = measurement.get("updated_at")
+    root_timestamp = usage.get("updated_at")
+    if item_has_timestamp and (type(item_timestamp) is not int or item_timestamp <= 0):
+        refuse("provider measurement timestamp required")
+    if root_has_timestamp and (type(root_timestamp) is not int or root_timestamp <= 0):
+        refuse("provider measurement timestamp required")
+    if item_has_timestamp and root_has_timestamp and item_timestamp != root_timestamp:
+        refuse("conflicting provider measurement timestamps")
+    timestamp = item_timestamp if item_has_timestamp else root_timestamp
     if type(timestamp) is not int or timestamp <= 0:
         refuse("provider measurement timestamp required")
     periods = measurement.get("periods")

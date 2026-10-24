@@ -1038,10 +1038,32 @@ def test_executive_job_consumes_exact_aggregate_bounding_receipts():
     replacement, receipt = _bounded_replacement(
         "attempts[0].launch_metadata", encoded, preview_chars=512
     )
+    # The MCP producer projects the same Attempt twice, with independently
+    # path-bound receipts.  The two canonical previews must describe the
+    # identical original launch metadata; bounding only one projection while
+    # leaving the other as unrelated metadata is a forged read document.
+    latest_replacement, latest_receipt = _bounded_replacement(
+        "latest_attempt.launch_metadata", encoded, preview_chars=512
+    )
     canonical["attempts"][0]["launch_metadata"] = replacement
+    canonical["latest_attempt"]["launch_metadata"] = latest_replacement
     assert WebCeoV2CeoIngressReadGateway._valid_job_data(
-        canonical, arguments=arguments, bounded=[receipt]
+        canonical, arguments=arguments, bounded=[receipt, latest_receipt]
     ) is True
+
+    asymmetric = copy.deepcopy(canonical)
+    asymmetric["latest_attempt"]["launch_metadata"] = {}
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        asymmetric, arguments=arguments, bounded=[receipt]
+    ) is False
+
+    divergent = copy.deepcopy(canonical)
+    divergent["latest_attempt"]["launch_metadata"]["preview"] = (
+        "z" + latest_replacement["preview"][1:]
+    )
+    assert WebCeoV2CeoIngressReadGateway._valid_job_data(
+        divergent, arguments=arguments, bounded=[receipt, latest_receipt]
+    ) is False
 
     orphan = _canonical_executive_job_data(requested, with_attempt=True)
     assert WebCeoV2CeoIngressReadGateway._valid_job_data(
