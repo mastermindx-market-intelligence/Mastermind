@@ -148,3 +148,20 @@ acceptance across two SDK sessions, with gateway backend spawn count one.
 Real `node --test fabric-http-qualification.mjs` on M2: **1/1 PASS**.
 This is a fixture/serialization proof only, not a live enrolled ChatGPT seat,
 qualified provider worker start or native immutable production selection.
+
+## 2026-10-23 successful exact-model HTTP/MCP fixture acceptance
+
+New explicitly synthetic `integrations/studio_direct_mcp/fixtures/fabric-adapter-manual.py`
+shares no provider credentials, native Fabric ledger or real host/admission code.
+Opt-in `fabric-http-manual-qualification.mjs` runs the actual private HTTP gateway,
+authenticated SDK tools/list, maintained Desktop Commander engine transport and
+actual integrated `fabric-backend.mjs`. In the fixture, `fabric_capabilities`
+correctly reports strict model selection, and Web `fabric_request` with
+`pool=glm`, `model=glm-5.3`, `subject_pool=openai`, `max_turns=12` triggers a
+no-effect native preview, then one strict CLI request (no quota fallback).
+The synthetic model/host route is captured and checked for exact original root,
+parent, model and constraints. The second SDK session successfully retrieves the
+bounded result and calls the existing original acceptance interface. Node opt-in
+local HTTP test: **1/1 PASS** (M2 qualified engine). This is **provider-free
+integration validation**, not independently reviewed source, production-installed
+Web/native selection, or a real GLM provider-start receipt.

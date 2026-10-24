@@ -190,6 +190,18 @@ node fabric-preflight.mjs YOUR_UNUSED_CHECK_ID YOUR_VERIFIED_ROOT
 
 The tests use an isolated local CLI fixture, never real provider credentials or the production ledger. They cover strict inputs, literal packet transport, same-ID rejection, uncertain effects, root mismatch, byte capture, changed-result rejection, acceptance separation, original PID binding, and preservation of the restricted installation across restage/upgrade.
 
+The optional `fabric-http-manual-qualification.mjs` invokes a real authenticated
+HTTP gateway/SDK plus the maintained Desktop Commander process engine, but binds
+only the separately marked **synthetic** `fixtures/fabric-adapter-manual.py`.
+It verifies a successful exact GLM-5.3 model-pin preview, strictly constrained
+native request with the original root, no cross-provider fallback, cross-session
+result retrieval and deterministic acceptance. All fixture host/model/return data
+are synthetic and no provider key, quota, actual worker or live Fabric ledger is
+accessed. Run it only on the qualified host with `MMX_FABRIC_ENGINE_ENTRY` bound
+to its installed maintained engine; it is intentionally not a GitHub hosted test.
+The existing `fabric-http-qualification.mjs` retains the negative test for older
+native adapters that cannot enforce strict pins.
+
 `fabric-preflight.mjs` is a read-only real SDK/engine/adapter probe. `fabric-console.mjs` is an attended developer acceptance client: it issues one MCP call per input line, does not retry, and does not automatically accept a worker. Neither is an unattended orchestrator or proof of native ChatGPT installation.
 
 ## Restricted installation and connection
