@@ -65,3 +65,23 @@ def test_direct_discriminator_alone_cannot_reach_runtime():
             raise AssertionError('pure discriminator reached Runtime: ' + name)
     with pytest.raises(ceo_intent.CeoIntentError, match='host admission is not composed'):
         ceo_intent.submit_intent(NoRuntime(), direct_intent(), workspace_root='/tmp/control-workspaces')
+
+
+@pytest.mark.parametrize("surface", ["legacy", "web_v2", "coo"])
+def test_app_only_native_profile_cannot_enter_frozen_legacy_tools(surface):
+    from integrations.executive_mcp.schemas import GatewayError, validate_tool_arguments
+    from integrations.executive_mcp.web_ceo import validate_web_ceo_v2_tool_arguments
+    from integrations.executive_mcp.coo import validate_coo_tool_arguments
+    validator, tool = {
+        "legacy": (validate_tool_arguments, "submit_ceo_intent"),
+        "web_v2": (validate_web_ceo_v2_tool_arguments, "submit_ceo_intent"),
+        "coo": (validate_coo_tool_arguments, "submit_principal_intent"),
+    }[surface]
+    with pytest.raises(GatewayError) as error:
+        validator(tool, request())
+    assert error.value.code == "invalid_input"
+
+
+def test_authenticated_app_native_shape_uses_same_canonical_law():
+    from integrations.mastermind_executive_app.admission import _validate_five_tool_shape
+    assert _validate_five_tool_shape(request()) == ceo_request.normalize_high_level_request(request())

@@ -137,14 +137,21 @@ class AdmissionRequest:
 
 
 def _validate_five_tool_shape(payload: Any) -> dict[str, Any]:
-    """Step 1 — reuse the EXISTING public ``submit_ceo_intent`` validator.
+    """Validate the authenticated App shape through the canonical request law.
+
+    Legacy profiles reuse the frozen MCP adapter. The explicit native profile
+    is App-only; accepting its shape does not issue an execution capability.
 
     Raises :class:`AdmissionError` (never a bare ``GatewayError``) so this
     module owns one closed vocabulary end to end.
     """
 
     try:
+        if isinstance(payload, Mapping) and payload.get("execution_profile") == "native_research_only":
+            return ceo_request.normalize_high_level_request(payload)
         return validate_tool_arguments(MODIFYING_TOOL, payload)
+    except ceo_request.CeoRequestError as exc:
+        raise AdmissionError("invalid_input", exc.message) from exc
     except GatewayError as exc:
         raise AdmissionError("invalid_input", exc.message) from exc
 

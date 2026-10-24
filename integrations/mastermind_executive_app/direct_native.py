@@ -7,6 +7,7 @@ and current direct admission; principal_scope is not a public grant DTO.
 """
 from __future__ import annotations
 
+from http import HTTPStatus
 from pathlib import Path
 
 from starlette.responses import JSONResponse
@@ -48,14 +49,14 @@ async def dispatch_direct_native(owner, scope, body, principal, *, consume):
         arguments = contract.validate_request(body, consume=consume)
     except contract.DirectResultContractError:
         return JSONResponse({"ok": False, "error": {"code": "invalid_input",
-            "message": "fixed direct-native selection required"}}, status_code=400, headers=_OS_HTTP_HEADERS)
+            "message": "fixed direct-native selection required"}}, status_code=HTTPStatus.BAD_REQUEST, headers=_OS_HTTP_HEADERS)
     selection = {key: arguments[key] for key in contract.SELECTION_KEYS}
 
-    def unavailable(reason, status=503):
+    def unavailable(reason, status=HTTPStatus.SERVICE_UNAVAILABLE):
         return JSONResponse(contract.unavailable(selection, reason), status_code=status, headers=_OS_HTTP_HEADERS)
 
     if not await owner._still_current(scope, principal):
-        return unavailable("AUTHORITY_UNAVAILABLE", 401)
+        return unavailable("AUTHORITY_UNAVAILABLE", HTTPStatus.UNAUTHORIZED)
     client = owner._direct_result_client
     if type(client) is not DirectNativeResultClient:
         return unavailable("SOURCE_UNAVAILABLE")
@@ -64,13 +65,13 @@ async def dispatch_direct_native(owner, scope, body, principal, *, consume):
     except Exception:
         # Once the one private call begins an unexpected failure is not proof
         # of no mutation. Read/consume never dispatch a Job or provider turn.
-        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", 202 if consume else 503)
+        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", HTTPStatus.ACCEPTED if consume else HTTPStatus.SERVICE_UNAVAILABLE)
     if not await owner._still_current(scope, principal):
-        return unavailable("EFFECT_UNKNOWN" if consume else "AUTHORITY_UNAVAILABLE", 202 if consume else 401)
+        return unavailable("EFFECT_UNKNOWN" if consume else "AUTHORITY_UNAVAILABLE", HTTPStatus.ACCEPTED if consume else HTTPStatus.UNAUTHORIZED)
     if response.transport == TRANSPORT_NOT_SENT:
         return unavailable("SOURCE_UNAVAILABLE")
     if response.transport != TRANSPORT_SENT_OK:
-        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", 202 if consume else 503)
+        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", HTTPStatus.ACCEPTED if consume else HTTPStatus.SERVICE_UNAVAILABLE)
     if response.ok is not True:
         code = response.error.get("code") if isinstance(response.error, dict) else None
         if code in {"authority_refused", "authentication_required"}:
@@ -81,7 +82,7 @@ async def dispatch_direct_native(owner, scope, body, principal, *, consume):
         # not a receipt proving the acknowledgment absent; retain the original
         # selection for read-only reconciliation, never another mutation send.
         return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE",
-                           202 if consume else 503)
+                           HTTPStatus.ACCEPTED if consume else HTTPStatus.SERVICE_UNAVAILABLE)
     try:
         value = contract.validate_response(response.result)
         if (any(value["selection"][k] != selection[k] for k in ("work_ref", "job_id"))
@@ -93,5 +94,5 @@ async def dispatch_direct_native(owner, scope, body, principal, *, consume):
         ):
             raise contract.DirectResultContractError("consumption changed")
     except (contract.DirectResultContractError, TypeError, KeyError):
-        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", 202 if consume else 503)
+        return unavailable("EFFECT_UNKNOWN" if consume else "SOURCE_UNAVAILABLE", HTTPStatus.ACCEPTED if consume else HTTPStatus.SERVICE_UNAVAILABLE)
     return JSONResponse(value, headers=_OS_HTTP_HEADERS)

@@ -579,9 +579,7 @@ class OsExecutiveTransportApp:
         principal: VerifiedPrincipal,
     ) -> Response:
         from control_plane.ceo_request import app_request_ref, automated_intent_id
-        from integrations.executive_mcp.schemas import (
-            ERROR_CODES, GatewayError, validate_tool_arguments,
-        )
+        from integrations.executive_mcp.schemas import ERROR_CODES
 
         arguments = body_obj.get("arguments")
         if not isinstance(arguments, dict):
@@ -591,9 +589,12 @@ class OsExecutiveTransportApp:
                 status_code=HTTPStatus.BAD_REQUEST,
                 headers=_OS_HTTP_HEADERS,
             )
+        from integrations.mastermind_executive_app.admission import (
+            AdmissionError, _validate_five_tool_shape,
+        )
         try:
-            validated = validate_tool_arguments("submit_ceo_intent", arguments)
-        except GatewayError as exc:
+            validated = _validate_five_tool_shape(arguments)
+        except AdmissionError as exc:
             if exc.code not in ERROR_CODES:
                 return JSONResponse(
                     {"ok": False, "error": {"code": "invalid_input",

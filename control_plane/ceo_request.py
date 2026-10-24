@@ -192,7 +192,8 @@ AUTOMATED_REQUIRED_FIELDS = frozenset(
 AUTOMATED_OPTIONAL_FIELDS = OPTIONAL_FIELDS
 VALIDATION_KEYS = frozenset({"pytest_targets", "compileall_paths", "git_diff_check"})
 
-#: §4.3 — exactly these two execution profiles.  Nothing here may ever grow
+#: Shared profile law, including the explicit authenticated App native choice.
+#: The legacy MCP adapter projects only its original two names. Nothing may grow
 #: ``OPEN_PR``, ``PUSH_BRANCH``, ``MERGE``, ``DEPLOY``, ``SERVICE_CONTROL``, or
 #: ``CROSS_REPO_PUBLISH``.
 EXECUTION_PROFILES: dict[str, tuple[str, ...]] = {
